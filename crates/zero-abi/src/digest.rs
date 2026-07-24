@@ -5,11 +5,16 @@ use sha2::{Digest, Sha256};
 
 use crate::schema::canonical_json;
 
-/// SHA-256 of arbitrary bytes as lowercase hex.
-pub fn sha256_hex(bytes: &[u8]) -> String {
+/// SHA-256 of arbitrary bytes.
+pub fn sha256(bytes: &[u8]) -> [u8; 32] {
     let mut hasher = Sha256::new();
     hasher.update(bytes);
-    let digest: [u8; 32] = hasher.finalize().into();
+    hasher.finalize().into()
+}
+
+/// SHA-256 of arbitrary bytes as lowercase hex.
+pub fn sha256_hex(bytes: &[u8]) -> String {
+    let digest = sha256(bytes);
     let mut out = String::with_capacity(64);
     for b in digest {
         out.push(char::from_digit(u32::from(b >> 4), 16).unwrap());
@@ -26,6 +31,11 @@ pub fn sha256_hex(bytes: &[u8]) -> String {
 /// encoding.
 pub fn contract_digest_hex(manifest: &Value) -> String {
     sha256_hex(canonical_json(manifest).as_bytes())
+}
+
+/// Raw digest bytes of a contract manifest (SHA-256 over canonical JSON).
+pub fn contract_digest(manifest: &Value) -> [u8; 32] {
+    sha256(canonical_json(manifest).as_bytes())
 }
 
 #[cfg(test)]
