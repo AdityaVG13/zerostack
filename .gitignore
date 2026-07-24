@@ -64,3 +64,9 @@ archive/research/
 
 # Internal historical material (local only)
 archive/
+
+# Beads / Dolt files (added by bd init)
+.dolt/
+*.db
+.beads-credential-key
+.beads/proxieddb/

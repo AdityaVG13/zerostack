@@ -1,0 +1,7 @@
+# Beads Project Configuration
+issue-prefix: zerostack
+# default_priority: 2
+# default_type: task
+
+sync:
+    remote: "git+https://github.com/AdityaVG13/zerostack.git"
