@@ -1,0 +1,12 @@
+[package]
+name = "zero-ref"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+description = "ZeroRef v1: the portable cross-engine blob ref subset for ZeroStack"
+
+[dependencies]
+sha2 = { workspace = true }
+
+[dev-dependencies]
+serde_json = { workspace = true }
