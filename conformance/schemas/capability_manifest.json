@@ -1,0 +1,40 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "zerostack-codemode/capability_manifest/v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["contract_version", "ns", "mutation", "plan_forms", "limits"],
+  "properties": {
+    "contract_version": { "const": "1.0" },
+    "ns": { "enum": ["fz", "tz", "gz"] },
+    "mutation": { "enum": ["allowed", "denied", "readonly"] },
+    "plan_forms": {
+      "type": "array",
+      "items": { "enum": ["recipe", "json", "js"] },
+      "uniqueItems": true,
+      "minItems": 3,
+      "allOf": [
+        { "contains": { "const": "recipe" } },
+        { "contains": { "const": "json" } },
+        { "contains": { "const": "js" } }
+      ]
+    },
+    "limits": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "max_logical_ops": { "type": "integer", "minimum": 1 },
+        "max_physical_ops": { "type": "integer", "minimum": 1 },
+        "max_wall_ms": { "type": "integer", "minimum": 1 },
+        "hard_max_wall_ms": { "type": "integer", "minimum": 1 },
+        "max_microtasks": { "type": "integer", "minimum": 1 },
+        "max_memory_bytes": { "type": "integer", "minimum": 1 },
+        "max_output_bytes": { "type": "integer", "minimum": 1 },
+        "max_result_ref_bytes": { "type": "integer", "minimum": 1 },
+        "max_refs_emitted": { "type": "integer", "minimum": 1 },
+        "max_parallel_width": { "type": "integer", "minimum": 1 },
+        "max_code_bytes": { "type": "integer", "minimum": 1 }
+      }
+    }
+  }
+}

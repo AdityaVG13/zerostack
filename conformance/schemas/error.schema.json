@@ -1,0 +1,13 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://zerostack.local/schemas/error.schema.json",
+  "title": "ZeroStack CodeMode Error v1.0",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["kind", "message", "retryable"],
+  "properties": {
+    "kind": { "enum": ["validation", "sandbox", "runtime", "substrate", "policy"] },
+    "message": { "type": "string", "minLength": 1 },
+    "retryable": { "type": "boolean" }
+  }
+}

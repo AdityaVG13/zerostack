@@ -1,0 +1,73 @@
+{
+  "schema": "zerostack.claim.9pb.v1",
+  "bead": "tokenzero-9pb",
+  "generated_at": "2026-07-14T06:08:12.340Z",
+  "claims": {
+    "typed_ref_piping": true,
+    "fragment_preserved": true,
+    "capability_preserved": true,
+    "no_payload_in_plans_or_logs": true,
+    "deterministic_identical_conditions": true,
+    "constant_ref_variable_payload": {
+      "ref_stable": true,
+      "gz_encoded_flat": true,
+      "tz_encoded_flat": true,
+      "materialization_grows": true
+    }
+  },
+  "samples": {
+    "a": {
+      "payloadSize": 1000,
+      "ref": "fz://blob/deadbeefcafebabe",
+      "fragment": "lines-1-10",
+      "capability": "store-only",
+      "fragments": [
+        "lines-1-10"
+      ],
+      "telemetry": {
+        "transport_bytes": 239,
+        "store_bytes": 0,
+        "materialization_bytes": 1000,
+        "encoded_bytes": 239,
+        "refs": 3,
+        "errors": 0,
+        "retries": 0
+      },
+      "hop_encoded": {
+        "fz": 71,
+        "gz": 97,
+        "tz": 71
+      },
+      "materialization_bytes": 1000,
+      "log_ok": true
+    },
+    "b": {
+      "payloadSize": 1000,
+      "ref": "fz://blob/deadbeefcafebabe",
+      "fragment": "lines-1-10",
+      "capability": "store-only",
+      "fragments": [
+        "lines-1-10"
+      ],
+      "telemetry": {
+        "transport_bytes": 239,
+        "store_bytes": 0,
+        "materialization_bytes": 1000,
+        "encoded_bytes": 239,
+        "refs": 3,
+        "errors": 0,
+        "retries": 0
+      },
+      "hop_encoded": {
+        "fz": 71,
+        "gz": 97,
+        "tz": 71
+      },
+      "materialization_bytes": 1000,
+      "log_ok": true
+    },
+    "c_size": 50000,
+    "c_mat": 50000
+  },
+  "pass": true
+}

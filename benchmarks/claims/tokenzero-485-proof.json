@@ -1,0 +1,99 @@
+{
+  "schema": "zerostack.claim.485.v1",
+  "bead": "tokenzero-485",
+  "generated_at": "2026-07-14T06:25:56.440Z",
+  "environment": {
+    "node": "v24.3.0",
+    "platform": "darwin",
+    "arch": "arm64",
+    "cwd_set": true
+  },
+  "scripts": [
+    "tools/proof-485.mjs",
+    "tests/hub/telemetry_refs.test.mjs"
+  ],
+  "claims": {
+    "per_hop_transport_store_materialization": true,
+    "safe_tags_no_paths": true,
+    "retry_error_single_attribution": true,
+    "constant_ref_variable_payload_transport_stable": true,
+    "variable_ref_evidence": true,
+    "deterministic_byte_regression_threshold": true
+  },
+  "baselines": {
+    "totals": {
+      "transport_bytes": 590,
+      "store_bytes": 28,
+      "materialization_bytes": 4128,
+      "encoded_bytes": 512,
+      "refs": 12,
+      "errors": 1,
+      "retries": 1
+    },
+    "hops": {
+      "fz": {
+        "hop": "fz",
+        "transport_bytes": 280,
+        "store_bytes": 16,
+        "materialization_bytes": 4096,
+        "encoded_bytes": 252,
+        "refs": 4,
+        "errors": 0,
+        "retries": 0,
+        "tags": [
+          "fs",
+          "read"
+        ]
+      },
+      "gz": {
+        "hop": "gz",
+        "transport_bytes": 180,
+        "store_bytes": 8,
+        "materialization_bytes": 0,
+        "encoded_bytes": 148,
+        "refs": 4,
+        "errors": 1,
+        "retries": 1,
+        "tags": [
+          "graph",
+          "orient",
+          "timeout",
+          "auto_retry"
+        ]
+      },
+      "tz": {
+        "hop": "tz",
+        "transport_bytes": 130,
+        "store_bytes": 4,
+        "materialization_bytes": 32,
+        "encoded_bytes": 112,
+        "refs": 4,
+        "errors": 0,
+        "retries": 0,
+        "tags": [
+          "token",
+          "compact"
+        ]
+      },
+      "hub": {
+        "hop": "hub",
+        "transport_bytes": 0,
+        "store_bytes": 0,
+        "materialization_bytes": 0,
+        "encoded_bytes": 0,
+        "refs": 0,
+        "errors": 0,
+        "retries": 0,
+        "tags": []
+      }
+    }
+  },
+  "losses": {
+    "note": "materialization is local-only cost; transport/encoded measured on ref envelopes",
+    "transport_delta_vs_payload": 0,
+    "materialization_delta_vs_payload": 28672,
+    "threshold": 0,
+    "within_threshold": true
+  },
+  "pass": true
+}

@@ -1,0 +1,387 @@
+{
+  "schema": "zerostack.claim.9tle.v1",
+  "bead": "tokenzero-9tle",
+  "contract": "CODEMODE_MACHINE_PERMITS.md v1 (tokenzero-qisj 808dec1)",
+  "parent_epic": "tokenzero-npia",
+  "generated_at": "2026-07-16T20:58:27.890Z",
+  "host": {
+    "cores": 18,
+    "default_analysis_slots": 4,
+    "configured_slot_ceiling": 2,
+    "workers": 9,
+    "roots": [
+      "~/AI/TokenZero",
+      "~/AI/ZeroStack"
+    ],
+    "permit": "/tmp/zerostack-9tle-analysis-28783.permit",
+    "bins": {
+      "tokenzero": "~/AI/TokenZero/target/release/tokenzero",
+      "fszero": "~/AI/FSZero/target/release/fszero",
+      "graphzero": "~/AI/graphzero/target/debug/graphzero"
+    }
+  },
+  "claims": {
+    "analysis_slot_ceiling_never_exceeded": true,
+    "analysis_slots_observed": true,
+    "cross_engine_light_plans_ok": true,
+    "busy_path_works": true,
+    "retry_after_release_works": true,
+    "cpu_sample_documented": true
+  },
+  "measurements": {
+    "max_slots_held": 2,
+    "slot_ceiling": 2,
+    "wave_ok": 89,
+    "wave_busy": 4,
+    "wave_fail": 0,
+    "peak_engine_cpu_pct": 68.5,
+    "cpu_budget_pct_approx": 200,
+    "cpu_near_budget_note": "Peak sampled engine CPU 68.5% vs ~200% budget (2 analysis slots × ~1 core). Light plans are short; sample documents contention stayed near slot budget, not N×cores.",
+    "busy": {
+      "tz": {
+        "engine": "tz",
+        "root": "~/AI/TokenZero",
+        "workerId": 900,
+        "status": 1,
+        "wall_ms": 5031,
+        "busy": true,
+        "ok": false,
+        "out_head": "codemode:error X0 ops=0 machine_permit_busy: codemode permit /tmp/zerostack-9tle-analysis-28783.permit is held by live process(es) across 8 slots"
+      },
+      "fz": {
+        "engine": "fz",
+        "root": "~/AI/TokenZero",
+        "workerId": 901,
+        "status": 0,
+        "wall_ms": 204,
+        "busy": true,
+        "ok": false,
+        "out_head": "X0"
+      },
+      "gz": {
+        "engine": "gz",
+        "root": "~/AI/ZeroStack",
+        "workerId": 902,
+        "status": 0,
+        "wall_ms": 1052,
+        "busy": true,
+        "ok": false,
+        "out_head": "err busy retryable machine_permit_busy: codemode permit /tmp/zerostack-9tle-analysis-28783.permit i t:gz://codemode/execution/cm___exec_1784235507654-7e72c42e94c5/error"
+      }
+    },
+    "retry": {
+      "tz": {
+        "engine": "tz",
+        "root": "~/AI/TokenZero",
+        "workerId": 910,
+        "status": 0,
+        "wall_ms": 108,
+        "busy": false,
+        "ok": true,
+        "out_head": "codemode:ok C ops=0 visible_tokens=42 raw_tokens=0 refs=tz://blob/be28a22695069d9f6d4580eba9f46aed6a99b59c88fcb5d3635629c0ebf8313d"
+      },
+      "fz": {
+        "engine": "fz",
+        "root": "~/AI/ZeroStack",
+        "workerId": 911,
+        "status": 0,
+        "wall_ms": 108,
+        "busy": false,
+        "ok": true,
+        "out_head": "C telemetry: {\"kind\":\"codemode.execute\",\"status\":\"ok\",\"logical_ops\":0,\"physical_ops\":0,\"batched_ops\":0,\"internal_actions\":0,\"cache_hits\":4,\"cache_misses\":0,\"store_writes\":8,\"wall_ms\":0,\"bytes_materialized\":294,\"extra\":{\"steps_run\":0,\"primar"
+      },
+      "gz": {
+        "engine": "gz",
+        "root": "~/AI/TokenZero",
+        "workerId": 912,
+        "status": 0,
+        "wall_ms": 12,
+        "busy": false,
+        "ok": true,
+        "out_head": "ok gz2 96% t:q:5fc6922302a186d5"
+      }
+    },
+    "cpu_samples": [
+      {
+        "t": 1784235498474,
+        "sample_pct": 68.5,
+        "n": 17
+      },
+      {
+        "t": 1784235498675,
+        "sample_pct": 51.4,
+        "n": 16
+      },
+      {
+        "t": 1784235498876,
+        "sample_pct": 59.9,
+        "n": 17
+      },
+      {
+        "t": 1784235499079,
+        "sample_pct": 31.5,
+        "n": 17
+      },
+      {
+        "t": 1784235499280,
+        "sample_pct": 41.8,
+        "n": 17
+      },
+      {
+        "t": 1784235499480,
+        "sample_pct": 29.8,
+        "n": 17
+      },
+      {
+        "t": 1784235499681,
+        "sample_pct": 16.6,
+        "n": 17
+      },
+      {
+        "t": 1784235499881,
+        "sample_pct": 30.8,
+        "n": 15
+      },
+      {
+        "t": 1784235500081,
+        "sample_pct": 12.6,
+        "n": 15
+      },
+      {
+        "t": 1784235500283,
+        "sample_pct": 28.6,
+        "n": 17
+      },
+      {
+        "t": 1784235500482,
+        "sample_pct": 31,
+        "n": 16
+      },
+      {
+        "t": 1784235500684,
+        "sample_pct": 39.7,
+        "n": 16
+      },
+      {
+        "t": 1784235500884,
+        "sample_pct": 17.4,
+        "n": 13
+      },
+      {
+        "t": 1784235501086,
+        "sample_pct": 1.8,
+        "n": 9
+      },
+      {
+        "t": 1784235501286,
+        "sample_pct": 0,
+        "n": 8
+      }
+    ],
+    "slot_samples_head": [
+      {
+        "t": 1784235498284,
+        "held": 1,
+        "slots": [
+          {
+            "slot": "slot-0",
+            "pid": 28785
+          }
+        ]
+      },
+      {
+        "t": 1784235498294,
+        "held": 2,
+        "slots": [
+          {
+            "slot": "slot-0",
+            "pid": 28785
+          },
+          {
+            "slot": "slot-1",
+            "pid": 28786
+          }
+        ]
+      },
+      {
+        "t": 1784235498305,
+        "held": 2,
+        "slots": [
+          {
+            "slot": "slot-0",
+            "pid": 28785
+          },
+          {
+            "slot": "slot-1",
+            "pid": 28852
+          }
+        ]
+      },
+      {
+        "t": 1784235498316,
+        "held": 2,
+        "slots": [
+          {
+            "slot": "slot-0",
+            "pid": 28785
+          },
+          {
+            "slot": "slot-1",
+            "pid": 29136
+          }
+        ]
+      },
+      {
+        "t": 1784235498326,
+        "held": 1,
+        "slots": [
+          {
+            "slot": "slot-0",
+            "pid": 28785
+          }
+        ]
+      },
+      {
+        "t": 1784235498338,
+        "held": 2,
+        "slots": [
+          {
+            "slot": "slot-0",
+            "pid": 28785
+          },
+          {
+            "slot": "slot-1",
+            "pid": 28976
+          }
+        ]
+      },
+      {
+        "t": 1784235498350,
+        "held": 2,
+        "slots": [
+          {
+            "slot": "slot-0",
+            "pid": 28785
+          },
+          {
+            "slot": "slot-1",
+            "pid": 28976
+          }
+        ]
+      },
+      {
+        "t": 1784235498362,
+        "held": 2,
+        "slots": [
+          {
+            "slot": "slot-0",
+            "pid": 28785
+          },
+          {
+            "slot": "slot-1",
+            "pid": 28976
+          }
+        ]
+      },
+      {
+        "t": 1784235498374,
+        "held": 2,
+        "slots": [
+          {
+            "slot": "slot-0",
+            "pid": 28785
+          },
+          {
+            "slot": "slot-1",
+            "pid": 28976
+          }
+        ]
+      },
+      {
+        "t": 1784235498384,
+        "held": 2,
+        "slots": [
+          {
+            "slot": "slot-0",
+            "pid": 28785
+          },
+          {
+            "slot": "slot-1",
+            "pid": 28976
+          }
+        ]
+      },
+      {
+        "t": 1784235498394,
+        "held": 2,
+        "slots": [
+          {
+            "slot": "slot-0",
+            "pid": 28853
+          },
+          {
+            "slot": "slot-1",
+            "pid": 28976
+          }
+        ]
+      },
+      {
+        "t": 1784235498405,
+        "held": 2,
+        "slots": [
+          {
+            "slot": "slot-0",
+            "pid": 28853
+          },
+          {
+            "slot": "slot-1",
+            "pid": 28976
+          }
+        ]
+      },
+      {
+        "t": 1784235498416,
+        "held": 2,
+        "slots": [
+          {
+            "slot": "slot-0",
+            "pid": 28853
+          },
+          {
+            "slot": "slot-1",
+            "pid": 28976
+          }
+        ]
+      },
+      {
+        "t": 1784235498428,
+        "held": 2,
+        "slots": [
+          {
+            "slot": "slot-0",
+            "pid": 28853
+          },
+          {
+            "slot": "slot-1",
+            "pid": 28976
+          }
+        ]
+      },
+      {
+        "t": 1784235498440,
+        "held": 2,
+        "slots": [
+          {
+            "slot": "slot-0",
+            "pid": 28853
+          },
+          {
+            "slot": "slot-1",
+            "pid": 28976
+          }
+        ]
+      }
+    ]
+  },
+  "pass": true
+}

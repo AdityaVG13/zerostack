@@ -1,0 +1,139 @@
+{
+  "baseline": {
+    "tel": {
+      "schema": "zerostack.telemetry.v1",
+      "hops": {
+        "fz": {
+          "hop": "fz",
+          "transport_bytes": 280,
+          "store_bytes": 16,
+          "materialization_bytes": 4096,
+          "encoded_bytes": 252,
+          "refs": 4,
+          "errors": 0,
+          "retries": 0,
+          "tags": [
+            "fs",
+            "read"
+          ]
+        },
+        "gz": {
+          "hop": "gz",
+          "transport_bytes": 180,
+          "store_bytes": 8,
+          "materialization_bytes": 0,
+          "encoded_bytes": 148,
+          "refs": 4,
+          "errors": 1,
+          "retries": 1,
+          "tags": [
+            "graph",
+            "orient",
+            "timeout",
+            "auto_retry"
+          ]
+        },
+        "tz": {
+          "hop": "tz",
+          "transport_bytes": 130,
+          "store_bytes": 4,
+          "materialization_bytes": 32,
+          "encoded_bytes": 112,
+          "refs": 4,
+          "errors": 0,
+          "retries": 0,
+          "tags": [
+            "token",
+            "compact"
+          ]
+        },
+        "hub": {
+          "hop": "hub",
+          "transport_bytes": 0,
+          "store_bytes": 0,
+          "materialization_bytes": 0,
+          "encoded_bytes": 0,
+          "refs": 0,
+          "errors": 0,
+          "retries": 0,
+          "tags": []
+        }
+      },
+      "totals": {
+        "transport_bytes": 590,
+        "store_bytes": 28,
+        "materialization_bytes": 4128,
+        "encoded_bytes": 512,
+        "refs": 12,
+        "errors": 1,
+        "retries": 1
+      },
+      "attributions": [
+        {
+          "kind": "error",
+          "hop": "gz",
+          "code": "timeout",
+          "once": true
+        },
+        {
+          "kind": "retry",
+          "hop": "gz",
+          "code": "auto_retry",
+          "once": true
+        }
+      ],
+      "safe_tags": [
+        "fs",
+        "read",
+        "graph",
+        "orient",
+        "token",
+        "compact",
+        "timeout",
+        "auto_retry"
+      ]
+    },
+    "refs": [
+      "fz://blob/00000000",
+      "fz://blob/00000001",
+      "fz://blob/00000002",
+      "fz://blob/00000003"
+    ],
+    "payloadBytes": 4096
+  },
+  "largerPayload": {
+    "totals": {
+      "transport_bytes": 590,
+      "store_bytes": 28,
+      "materialization_bytes": 32800,
+      "encoded_bytes": 512,
+      "refs": 12,
+      "errors": 1,
+      "retries": 1
+    }
+  },
+  "moreRefs": {
+    "totals": {
+      "transport_bytes": 1130,
+      "store_bytes": 28,
+      "materialization_bytes": 4128,
+      "encoded_bytes": 968,
+      "refs": 48,
+      "errors": 1,
+      "retries": 1
+    }
+  },
+  "environment": {
+    "node": "v24.14.1",
+    "platform": "darwin",
+    "arch": "arm64",
+    "cwd_set": true
+  },
+  "losses": {
+    "note": "materialization is local-only cost; transport/encoded measured on ref envelopes",
+    "transport_delta_vs_payload": 0,
+    "materialization_delta_vs_payload": 28672,
+    "threshold": 0,
+    "within_threshold": true
+  }
+}

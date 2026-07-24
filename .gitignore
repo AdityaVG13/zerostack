@@ -1,0 +1,66 @@
+# Generated ZeroStack state
+.zerostack/
+.fszero/
+.graphzero/
+.tokenzero/
+.asgrep/
+blobs/
+**/plan-journals/
+**/*.journal
+**/*.lock
+**/ledger.jsonl*
+**/recovery-cache.json*
+**/boot-manifest.json
+**/boot-session-delta.json
+**/codemode-recovery.json
+**/tool-metrics.json
+**/session-memory.json
+
+# Build and test output
+node_modules/
+target/
+dist/
+build/
+coverage/
+*.log
+*.samply
+tmp/
+.tmp/
+conformance/reports/
+**/Cargo.lock
+
+# Secrets
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+credentials*
+secrets*
+.secrets/
+
+# Editors, harnesses, and OS files
+.DS_Store
+**/.DS_Store
+.idea/
+.vscode/
+.cursor/
+.pi-subagents/
+slate.json
+videos/
+
+# Historical local-only archive collections
+archive/2026-06-27-codedb-snapshot
+archive/2026-06-28-test-codemode-prompt.txt
+archive/2026-06-28-tmp-tokenzero-smoke/
+archive/2026-07-02-skill-loop-progress-DONE.md
+archive/audits/
+archive/benchmarks/
+archive/docs-research/
+archive/pilots/
+archive/profiling-2026-07/
+archive/prompts/
+archive/research/
+
+# Internal historical material (local only)
+archive/
