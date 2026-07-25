@@ -46,7 +46,8 @@ Known surface constraints, confirmed by use:
 Run documentation privacy checks, then the conformance suite when its Rust toolchain is available:
 
 ~~~sh
-rg -n '/Users/|/home/|BEGIN .*PRIVATE KEY|api[_-]?key|password' README.md docs AGENTS.md
+rg -n '/Users/|/home/|BEGIN .*PRIVATE KEY|api[_-]?key|password' README.md docs AGENTS.md benchmarks conformance
+python3 scripts/check_no_host_paths.py
 cargo test --manifest-path conformance/Cargo.toml
 ~~~
 
