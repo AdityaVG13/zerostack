@@ -1,0 +1,70 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  # The conformance reports attest to engine revisions that this repo does not
+  # control, so freshness has to be checked on a clock as well as on a push.
+  schedule:
+    - cron: "17 6 * * *"
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+
+jobs:
+  lint:
+    name: fmt + clippy
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo fmt --all --check
+      # Lints are errors here on purpose. zerostack-0ne recorded two
+      # clippy ERRORS sitting in the tree undetected because nothing ran
+      # clippy at all; a warning-level gate would not have caught them.
+      - run: cargo clippy --workspace --all-targets -- -D warnings
+
+  test:
+    name: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo test --workspace --all-targets --no-fail-fast
+
+  conformance-freshness:
+    name: conformance reports are not stale
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      # The suite itself must keep building: the hub is edition 2021 while all
+      # three engines are edition 2024 on nightly, and the harness is the only
+      # thing that spans both.
+      - run: cargo build -p zerostack-codemode-conformance
+      # A report that silently rots is worse than no report, because it reads
+      # as evidence. Fail when the committed attestations age out.
+      - run: python3 conformance/scripts/check_freshness.py
+
+  drift-guards:
+    name: cross-engine drift guards
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # Canonical JSON feeds the contract digest, and it has already drifted
+      # once without anything failing. The guard needs the engine checkouts to
+      # have anything to scan, so it is a no-op-with-warning when they are
+      # absent rather than a false pass.
+      - run: |
+          if [ -d ../GraphZero ] || [ -d ../TokenZero ] || [ -d ../FSZero ]; then
+            python3 conformance/scripts/check_canonical_json_impls.py
+          else
+            echo "::warning::engine checkouts absent; canonical-JSON guard did not run"
+          fi

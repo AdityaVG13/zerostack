@@ -13,9 +13,20 @@ struct Args {
     #[arg(long)]
     ns: Option<String>,
 
-    /// Substrate MCP server binary path.
+    /// Substrate binary serving BOTH surfaces via --mode=. Only the harness's
+    /// own fake substrate is like this; every real engine ships one artifact
+    /// per surface and rejects --mode= on the wrong one. Prefer
+    /// --codemode-bin plus --mcp-bin.
     #[arg(long)]
     bin: Option<PathBuf>,
+
+    /// Artifact hosting the CodeMode surface, e.g. tokenzero-codemode.
+    #[arg(long)]
+    codemode_bin: Option<PathBuf>,
+
+    /// Artifact hosting the plain MCP surface, e.g. tokenzero-mcp.
+    #[arg(long)]
+    mcp_bin: Option<PathBuf>,
 
     /// Directory for JSON reports. Defaults to conformance/reports relative to cwd.
     #[arg(long, default_value = "reports")]
@@ -57,12 +68,32 @@ fn main() -> Result<()> {
     }
 
     let ns = Ns::parse(args.ns.as_deref().context("--ns fz|tz|gz is required")?)?;
-    let bin = args.bin.context("--bin <substrate-binary> is required")?;
-    if !bin.is_file() {
-        bail!("substrate binary is not a file: {}", bin.display());
-    }
-
-    let mut config = RunConfig::new(ns, bin, args.reports_dir);
+    // Surface selection is immutable per artifact in all three engines, so the
+    // normal invocation names two files. --bin stays supported for the fake
+    // substrate and for any future dual-surface build.
+    let mut config = match (args.codemode_bin, args.mcp_bin, args.bin) {
+        (Some(codemode), Some(mcp), _) => {
+            for (label, path) in [("--codemode-bin", &codemode), ("--mcp-bin", &mcp)] {
+                if !path.is_file() {
+                    bail!("{label} is not a file: {}", path.display());
+                }
+            }
+            RunConfig::new(ns, codemode, mcp, args.reports_dir)
+        }
+        (Some(_), None, _) | (None, Some(_), _) => {
+            bail!("--codemode-bin and --mcp-bin must be given together")
+        }
+        (None, None, Some(bin)) => {
+            if !bin.is_file() {
+                bail!("substrate binary is not a file: {}", bin.display());
+            }
+            RunConfig::new_single_artifact(ns, bin, args.reports_dir)
+        }
+        (None, None, None) => bail!(
+            "give --codemode-bin <path> --mcp-bin <path>, or --bin <path> for a \
+             single dual-surface artifact"
+        ),
+    };
     config.timeout = Duration::from_secs(args.timeout_seconds);
     let report = run_conformance(&config);
     let path = report.write_to_reports_dir(&config.reports_dir)?;

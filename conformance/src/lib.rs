@@ -398,19 +398,40 @@ fn validate_object_keys(
 #[derive(Debug, Clone)]
 pub struct RunConfig {
     pub ns: Ns,
-    pub bin: PathBuf,
+    /// Artifact hosting the CodeMode surface.
+    pub codemode_bin: PathBuf,
+    /// Artifact hosting the plain MCP surface. Under single-surface packaging
+    /// this is a *different* file from `codemode_bin`.
+    pub mcp_bin: PathBuf,
     pub reports_dir: PathBuf,
     pub timeout: Duration,
 }
 
 impl RunConfig {
-    pub fn new(ns: Ns, bin: PathBuf, reports_dir: PathBuf) -> Self {
+    /// Two artifacts, one per surface. This is the shape all three engines
+    /// actually ship: surface selection is immutable per artifact, and
+    /// TokenZero enforces it at compile time via `compile_error!`, so a
+    /// dual-surface binary cannot be built at all. See zerostack-hix.
+    pub fn new(ns: Ns, codemode_bin: PathBuf, mcp_bin: PathBuf, reports_dir: PathBuf) -> Self {
         Self {
             ns,
-            bin,
+            codemode_bin,
+            mcp_bin,
             reports_dir,
             timeout: Duration::from_secs(5),
         }
+    }
+
+    /// One artifact serving both surfaces via `--mode=`. Only the harness's own
+    /// fake substrate is like this now; every real engine rejects it.
+    pub fn new_single_artifact(ns: Ns, bin: PathBuf, reports_dir: PathBuf) -> Self {
+        Self::new(ns, bin.clone(), bin, reports_dir)
+    }
+
+    /// True when both surfaces resolve to the same file, i.e. the legacy
+    /// dual-surface shape.
+    pub fn is_single_artifact(&self) -> bool {
+        self.codemode_bin == self.mcp_bin
     }
 }
 
@@ -421,7 +442,7 @@ pub fn run_conformance(config: &RunConfig) -> ConformanceReport {
         Err(err) => CheckResult::fail("G1", "exposure", err.to_string()),
     });
 
-    let codemode = match McpClient::spawn(&config.bin, "codemode", config.timeout) {
+    let codemode = match McpClient::spawn(&config.codemode_bin, "codemode", config.timeout) {
         Ok(mut client) => {
             let init = client.initialize();
             if let Err(err) = init {
@@ -467,14 +488,40 @@ pub fn run_conformance(config: &RunConfig) -> ConformanceReport {
         }
     }
 
-    ConformanceReport::new(config.ns, config.bin.display().to_string(), checks)
+    // Basename only: an absolute path from the authoring machine is a local
+    // layout leak, not evidence. See conformance/reports/ATTESTATION.md.
+    ConformanceReport::new(config.ns, substrate_label(config), checks)
 }
 
+/// Surface label for the report. Records basenames, never the authoring
+/// machine's absolute paths.
+fn substrate_label(config: &RunConfig) -> String {
+    let name = |p: &PathBuf| {
+        p.file_name()
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_else(|| p.display().to_string())
+    };
+    if config.is_single_artifact() {
+        name(&config.codemode_bin)
+    } else {
+        format!("{} + {}", name(&config.codemode_bin), name(&config.mcp_bin))
+    }
+}
+
+/// G1 exposure: the CodeMode surface exposes exactly the CodeMode tool set,
+/// and the MCP surface exposes none of it.
+///
+/// This is a cross-*artifact* check now. It used to spawn one binary twice
+/// with different `--mode=` flags, which every engine rejects today: surface
+/// selection is immutable per artifact and TokenZero refuses to even compile a
+/// dual-surface build. The invariant being asserted is unchanged; only the
+/// process model is. If anything it is stronger, because separation is now
+/// enforced by packaging rather than by a runtime flag.
 fn check_exposure(config: &RunConfig) -> Result<CheckResult> {
     let mut details = Vec::new();
     let expected: BTreeSet<String> = config.ns.tool_names().into_iter().collect();
 
-    let mut codemode = McpClient::spawn(&config.bin, "codemode", config.timeout)?;
+    let mut codemode = McpClient::spawn(&config.codemode_bin, "codemode", config.timeout)?;
     codemode.initialize()?;
     let codemode_tools = codemode.list_tools()?;
     let codemode_set: BTreeSet<String> = codemode_tools.into_iter().collect();
@@ -484,7 +531,7 @@ fn check_exposure(config: &RunConfig) -> Result<CheckResult> {
         ));
     }
 
-    let mut mcp = McpClient::spawn(&config.bin, "mcp", config.timeout)?;
+    let mut mcp = McpClient::spawn(&config.mcp_bin, "mcp", config.timeout)?;
     mcp.initialize()?;
     let mcp_tools = mcp.list_tools()?;
     let codemode_in_mcp: Vec<String> = mcp_tools
