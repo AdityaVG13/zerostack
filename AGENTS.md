@@ -83,6 +83,45 @@ br stats                # Database overview
 
 The same rule applies to the TokenZero, FSZero, and GraphZero repositories: all four use `br`.
 
+## Git: these working trees are SHARED between concurrent sessions
+
+Several agent sessions work the same checkout of ZeroStack, TokenZero, FSZero
+and GraphZero at once, and peers routinely hold large amounts of uncommitted
+work. Assume anything you did not just write belongs to someone else.
+
+**Never run destructive git on files you did not create.** No `git clean`, no
+`git reset --hard`, no `git checkout -f`, and no bare or `-u` `git stash`.
+`git stash push -u` sweeps up peers' untracked files, and `git rebase`
+autostashes their dirty tree. Both have already come close to stranding another
+session's work here.
+
+If you need a clean tree, do not clean the shared one:
+
+```bash
+git worktree add --detach /tmp/<yourname> origin/main
+```
+
+That is the supported way to build or test against pristine `main`, and it
+costs nothing. If you must stash, scope it to your own explicit paths rather
+than stashing the whole tree.
+
+**An open bead does not mean the work is undone.** Before claiming, search the
+history as well as the tracker:
+
+```bash
+git log --oneline -20 --all --grep=<keyword>
+```
+
+Work has already been duplicated because a fix landed on `main` while its bead
+stayed open. If you fix something that has no bead, file it and close it in the
+same push so the tracker matches reality.
+
+**Push small, often, and rebased onto `main`.** Commits parked on a private
+branch are invisible to every other session, which is precisely what causes
+duplicate effort. Pull before you start an item, not just before you push, and
+keep one logical change per commit. Announce pushes to peers over Agent Mail:
+repo, sha, one line. Do not rewrite pushed history without saying so first.
+
 ## Session Completion
 
 This protocol is subordinate to explicit user, repository, and orchestrator instructions.
