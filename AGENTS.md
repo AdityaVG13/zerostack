@@ -18,6 +18,29 @@ This repository is the canonical public aggregation point for ZeroStack. Keep en
 - Use repository-relative examples. Do not add machine-specific absolute paths, credentials, personal data, or private URLs.
 - Treat benchmark claims as evidence-backed only when their artifacts are committed.
 
+## Tool routing: use the zero surface, not native file tools
+
+This repository is served by the ZeroStack CodeMode wrapper. Agents must route work through `zero_execute` instead of native read/grep/list/shell tools, because the native tools bypass compression and return full payloads into context.
+
+Check the wrapper first with `zerostack_status`, then route:
+
+| Instead of | Use |
+| --- | --- |
+| shell / bash | `zero.token.shell(cmd)`, or `{background:true}` then `zero.token.job(id)` |
+| read file | `zero.fs.compound('read', { path })` |
+| grep / search | `zero.fs.compound('search', { query, path })` |
+| list dir | `zero.fs.compound('list', { path })` |
+| write file | `zero.fs.compound('write', { path, content })` |
+| find callers, deps, impact | `zero.graph.query(surface, target)`, `zero.graph.blast(symbol)` |
+| shrink a large intermediate | `zero.token.compact(data)` |
+
+Known surface constraints, confirmed by use:
+
+- `zero.fs.compound('search', ...)` matches **literal strings only**. Regex alternation such as `a|b` silently returns zero hits, so issue one call per term.
+- `zero.fs.compound('read', ...)` has no line-range parameter. `lines` is ignored and a `#L<a>-<b>` fragment in `path` is rejected. To read part of a large file, slice it to a temp file inside the workspace first.
+- Read payloads are truncated to a visible budget and the remainder is left in the result ref. Keep single reads under roughly 2 KB of expected output, or the useful lines will be hidden.
+- Paths must resolve under the session root. Absolute paths outside it are refused.
+
 ## Validation
 
 Run documentation privacy checks, then the conformance suite when its Rust toolchain is available:
@@ -27,82 +50,52 @@ rg -n '/Users/|/home/|BEGIN .*PRIVATE KEY|api[_-]?key|password' README.md docs A
 cargo test --manifest-path conformance/Cargo.toml
 ~~~
 
-<!-- BEGIN BEADS INTEGRATION v:1 profile:minimal hash:970c3bf2 -->
-## Beads Issue Tracker
+<!-- BEGIN BEADS INTEGRATION v:2 tracker:br -->
+## Issue Tracking with br (beads_rust)
 
-This project uses **bd (beads)** for issue tracking. Run `bd prime` to see full workflow context and commands.
+**Note:** `br` is non-invasive and never executes git commands. After `br sync --flush-only`, you must manually run `git add .beads/ && git commit`.
 
 ### Quick Reference
 
 ```bash
-bd ready              # Find available work
-bd show <id>          # View issue details
-bd update <id> --claim  # Claim work
-bd close <id>         # Complete work
+br ready                # Find available work
+br show <id>            # View issue details
+br update <id> --claim  # Claim work
+br close <id>           # Complete work
+br stats                # Database overview
 ```
 
 ### Rules
 
-- Use `bd` for ALL task tracking — do NOT use TodoWrite, TaskCreate, or markdown TODO lists
-- Run `bd prime` for detailed command reference and session close protocol
-- Use `bd remember` for persistent knowledge — do NOT use MEMORY.md files
+- Use `br` for ALL task tracking. Do not use TodoWrite, TaskCreate, or markdown TODO lists.
+- `br ready` is the single work-discovery entrypoint. Do not hand-roll status filters like `br list -s open`.
+- Read-only inspection goes through `bv --robot-*`. Avoid bare `bv` in automated sessions.
+- Use `RUST_LOG=error` for routine `br` runs to suppress dependency logs.
 
-**Architecture in one line:** issues live in a local Dolt DB; sync uses `refs/dolt/data` on your git remote; `.beads/issues.jsonl` is a passive export. See https://github.com/gastownhall/beads/blob/main/docs/SYNC_CONCEPTS.md for details and anti-patterns.
+**Architecture in one line:** issues live in a local SQLite DB at `.beads/beads.db`; `.beads/issues.jsonl` is the git-friendly export written by `br sync --flush-only`.
 
-## Agent Context Profiles
+**`bd` is retired in this project.** Its issues were merged into `br`, and `.beads/embeddeddolt` is legacy data. Do not run `bd`: it writes a second, divergent store that `br` cannot import, because `bd` emits `comments[].id` as a string where `br` requires an integer. The one-time reconcile lives at `scripts/reconcile_bd_to_br.py`.
 
-The managed Beads block is task-tracking guidance, not permission to override repository, user, or orchestrator instructions.
-
-- **Conservative (default)**: Use `bd` for task tracking. Do not run git commits, git pushes, or Dolt remote sync unless explicitly asked. At handoff, report changed files, validation, and suggested next commands.
-- **Minimal**: Keep tool instruction files as pointers to `bd prime`; use the same conservative git policy unless active instructions say otherwise.
-- **Team-maintainer**: Only when the repository explicitly opts in, agents may close beads, run quality gates, commit, and push as part of session close. A current "do not commit" or "do not push" instruction still wins.
+The same rule applies to the TokenZero, FSZero, and GraphZero repositories: all four use `br`.
 
 ## Session Completion
 
-This protocol applies when ending a Beads implementation workflow. It is subordinate to explicit user, repository, and orchestrator instructions.
+This protocol is subordinate to explicit user, repository, and orchestrator instructions.
 
-1. **File issues for remaining work** - Create beads for anything that needs follow-up
-2. **Run quality gates** (if code changed) - Tests, linters, builds
-3. **Update issue status** - Close finished work, update in-progress items
-4. **Handle git/sync by active profile**:
+1. **File issues for remaining work** - `br create` anything that needs follow-up
+2. **Run quality gates** (if code changed) - tests, linters, builds
+3. **Update issue status** - close finished work, update in-progress items
+4. **Export and stage:**
    ```bash
-   # Conservative/minimal/default: report status and proposed commands; wait for approval.
-   git status
-
-   # Team-maintainer opt-in only, unless current instructions forbid it:
-   git pull --rebase
-   bd dolt push
-   git push
-   git status
+   br sync --flush-only
+   git add .beads/
+   git commit -m "sync beads"
    ```
-5. **Hand off** - Summarize changes, validation, issue status, and any blocked sync/commit/push step
+   Do not push without an explicit request.
+5. **Hand off** - summarize changes, validation, issue status, and any blocked step
 
 **Critical rules:**
-- Explicit user or orchestrator instructions override this Beads block.
-- Do not commit or push without clear authority from the active profile or the current user request.
-- If a required sync or push is blocked, stop and report the exact command and error.
+- Explicit user or orchestrator instructions override this block.
+- Do not commit or push without clear authority or a current user request.
+- If a required sync is blocked, stop and report the exact command and error.
 <!-- END BEADS INTEGRATION -->
-
-<!-- BEGIN BEADS CODEX SETUP: generated by bd setup codex -->
-## Beads Issue Tracker
-
-Use Beads (`bd`) for durable task tracking in repositories that include it. Use the `beads` skill at `.agents/skills/beads/SKILL.md` (project install) or `~/.agents/skills/beads/SKILL.md` (global install) for Beads workflow guidance, then use the `bd` CLI for issue operations.
-
-### Quick Reference
-
-```bash
-bd ready                # Find available work
-bd show <id>            # View issue details
-bd update <id> --claim  # Claim work
-bd close <id>           # Complete work
-bd prime                # Refresh Beads context
-```
-
-### Rules
-
-- Use `bd` for all task tracking; do not create markdown TODO lists.
-- Run `bd prime` when Beads context is missing or stale. Codex 0.129.0+ can load Beads context automatically through native hooks; use `/hooks` to inspect or toggle them.
-- Keep persistent project memory in Beads via `bd remember`; do not create ad hoc memory files.
-
-**Architecture in one line:** issues live in a local Dolt DB; sync uses `refs/dolt/data` on your git remote; `.beads/issues.jsonl` is a passive export. See https://github.com/gastownhall/beads/blob/main/docs/SYNC_CONCEPTS.md for details and anti-patterns.
-<!-- END BEADS CODEX SETUP -->
