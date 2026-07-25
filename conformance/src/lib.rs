@@ -395,43 +395,69 @@ fn validate_object_keys(
     errors
 }
 
-#[derive(Debug, Clone)]
+/// The one surface an installed artifact serves.
+///
+/// Not a mode you pass at runtime. You install EITHER the CodeMode artifact
+/// OR the MCP artifact, never both, and the choice is baked into the binary.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Surface {
+    Codemode,
+    Mcp,
+}
+
+impl Surface {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Codemode => "codemode",
+            Self::Mcp => "mcp",
+        }
+    }
+
+    /// The surface this artifact must NOT serve.
+    pub fn opposite(self) -> Self {
+        match self {
+            Self::Codemode => Self::Mcp,
+            Self::Mcp => Self::Codemode,
+        }
+    }
+
+    pub fn parse(value: &str) -> Result<Self> {
+        match value {
+            "codemode" | "code-mode" | "code_mode" => Ok(Self::Codemode),
+            "mcp" => Ok(Self::Mcp),
+            other => bail!("unknown surface {other:?}; expected 'codemode' or 'mcp'"),
+        }
+    }
+}
+
 pub struct RunConfig {
     pub ns: Ns,
-    /// Artifact hosting the CodeMode surface.
-    pub codemode_bin: PathBuf,
-    /// Artifact hosting the plain MCP surface. Under single-surface packaging
-    /// this is a *different* file from `codemode_bin`.
-    pub mcp_bin: PathBuf,
+    /// The single installed artifact under test.
+    pub bin: PathBuf,
+    /// The surface that artifact is built to serve.
+    pub surface: Surface,
     pub reports_dir: PathBuf,
     pub timeout: Duration,
 }
 
 impl RunConfig {
-    /// Two artifacts, one per surface. This is the shape all three engines
-    /// actually ship: surface selection is immutable per artifact, and
-    /// TokenZero enforces it at compile time via `compile_error!`, so a
-    /// dual-surface binary cannot be built at all. See zerostack-hix.
-    pub fn new(ns: Ns, codemode_bin: PathBuf, mcp_bin: PathBuf, reports_dir: PathBuf) -> Self {
+    /// One artifact, one surface.
+    ///
+    /// Surfaces are mutually exclusive by product rule: you install either
+    /// `<engine>-codemode` or `<engine>-mcp`, from the same revision and
+    /// shared core, and the installer replaces any prior surface. Dual catalog
+    /// startup fails closed, and TokenZero makes a dual build a
+    /// `compile_error!`. So conformance runs against whichever artifact is
+    /// actually installed; asking for both at once describes a system that is
+    /// not allowed to exist. See zerostack-hix.
+    pub fn new(ns: Ns, bin: PathBuf, surface: Surface, reports_dir: PathBuf) -> Self {
         Self {
             ns,
-            codemode_bin,
-            mcp_bin,
+            bin,
+            surface,
             reports_dir,
             timeout: Duration::from_secs(5),
         }
-    }
-
-    /// One artifact serving both surfaces via `--mode=`. Only the harness's own
-    /// fake substrate is like this now; every real engine rejects it.
-    pub fn new_single_artifact(ns: Ns, bin: PathBuf, reports_dir: PathBuf) -> Self {
-        Self::new(ns, bin.clone(), bin, reports_dir)
-    }
-
-    /// True when both surfaces resolve to the same file, i.e. the legacy
-    /// dual-surface shape.
-    pub fn is_single_artifact(&self) -> bool {
-        self.codemode_bin == self.mcp_bin
     }
 }
 
@@ -442,7 +468,14 @@ pub fn run_conformance(config: &RunConfig) -> ConformanceReport {
         Err(err) => CheckResult::fail("G1", "exposure", err.to_string()),
     });
 
-    let codemode = match McpClient::spawn(&config.codemode_bin, "codemode", config.timeout) {
+    // G2-G10 exercise CodeMode execution semantics, so they only apply to a
+    // CodeMode artifact. Against an MCP artifact there is no execute_code to
+    // drive, and reporting them as failures would be a category error.
+    if config.surface == Surface::Mcp {
+        return ConformanceReport::new(config.ns, substrate_label(config), checks);
+    }
+
+    let codemode = match McpClient::spawn(&config.bin, "codemode", config.timeout) {
         Ok(mut client) => {
             let init = client.initialize();
             if let Err(err) = init {
@@ -496,52 +529,70 @@ pub fn run_conformance(config: &RunConfig) -> ConformanceReport {
 /// Surface label for the report. Records basenames, never the authoring
 /// machine's absolute paths.
 fn substrate_label(config: &RunConfig) -> String {
-    let name = |p: &PathBuf| {
-        p.file_name()
-            .map(|n| n.to_string_lossy().into_owned())
-            .unwrap_or_else(|| p.display().to_string())
-    };
-    if config.is_single_artifact() {
-        name(&config.codemode_bin)
-    } else {
-        format!("{} + {}", name(&config.codemode_bin), name(&config.mcp_bin))
-    }
+    config
+        .bin
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_else(|| config.bin.display().to_string())
 }
 
-/// G1 exposure: the CodeMode surface exposes exactly the CodeMode tool set,
-/// and the MCP surface exposes none of it.
+/// G1 exposure: this artifact serves its own surface and refuses the other.
 ///
-/// This is a cross-*artifact* check now. It used to spawn one binary twice
-/// with different `--mode=` flags, which every engine rejects today: surface
-/// selection is immutable per artifact and TokenZero refuses to even compile a
-/// dual-surface build. The invariant being asserted is unchanged; only the
-/// process model is. If anything it is stronger, because separation is now
-/// enforced by packaging rather than by a runtime flag.
+/// Surfaces are mutually exclusive: you install either the CodeMode artifact
+/// or the MCP artifact, never both. So exposure is a property of ONE artifact,
+/// checked two ways:
+///
+/// 1. It serves the tool set its surface implies. A CodeMode artifact exposes
+///    exactly the CodeMode tools; an MCP artifact exposes none of them.
+/// 2. It REFUSES the opposite surface. Asking a single-surface binary for the
+///    other surface must fail closed rather than quietly serve a second
+///    catalog, which is the invariant that actually protects the separation.
+///
+/// This previously spawned one binary twice with different `--mode=` flags,
+/// then briefly required two artifacts at once. Both describe a dual-surface
+/// system that is not allowed to exist.
 fn check_exposure(config: &RunConfig) -> Result<CheckResult> {
     let mut details = Vec::new();
-    let expected: BTreeSet<String> = config.ns.tool_names().into_iter().collect();
+    let codemode_tools: BTreeSet<String> = config.ns.tool_names().into_iter().collect();
 
-    let mut codemode = McpClient::spawn(&config.codemode_bin, "codemode", config.timeout)?;
-    codemode.initialize()?;
-    let codemode_tools = codemode.list_tools()?;
-    let codemode_set: BTreeSet<String> = codemode_tools.into_iter().collect();
-    if codemode_set != expected {
-        details.push(format!(
-            "--mode=codemode tools were {codemode_set:?}, expected exactly {expected:?}"
-        ));
+    let mut client = McpClient::spawn(&config.bin, config.surface.as_str(), config.timeout)?;
+    client.initialize()?;
+    let served: BTreeSet<String> = client.list_tools()?.into_iter().collect();
+
+    match config.surface {
+        Surface::Codemode => {
+            if served != codemode_tools {
+                details.push(format!(
+                    "codemode artifact served {served:?}, expected exactly {codemode_tools:?}"
+                ));
+            }
+        }
+        Surface::Mcp => {
+            let leaked: Vec<String> = served
+                .into_iter()
+                .filter(|name| name.contains("codemode") || codemode_tools.contains(name))
+                .collect();
+            if !leaked.is_empty() {
+                details.push(format!("mcp artifact exposed codemode tools: {leaked:?}"));
+            }
+        }
     }
 
-    let mut mcp = McpClient::spawn(&config.mcp_bin, "mcp", config.timeout)?;
-    mcp.initialize()?;
-    let mcp_tools = mcp.list_tools()?;
-    let codemode_in_mcp: Vec<String> = mcp_tools
-        .into_iter()
-        .filter(|name| name.contains("codemode") || expected.contains(name))
-        .collect();
-    if !codemode_in_mcp.is_empty() {
-        details.push(format!(
-            "--mode=mcp exposed codemode tools: {codemode_in_mcp:?}"
-        ));
+    // The other surface must fail closed. A single-surface artifact that also
+    // answers as its opposite is exactly the dual catalog the product rule
+    // forbids, so serving it is the failure, not refusing it.
+    let opposite = config.surface.opposite();
+    match McpClient::spawn(&config.bin, opposite.as_str(), config.timeout) {
+        Err(_) => {}
+        Ok(mut wrong) => {
+            if wrong.initialize().is_ok() && wrong.list_tools().is_ok() {
+                details.push(format!(
+                    "artifact is built for surface {} but also served {};                      surfaces must be mutually exclusive",
+                    config.surface.as_str(),
+                    opposite.as_str()
+                ));
+            }
+        }
     }
 
     Ok(CheckResult::with_details("G1", "exposure", details))

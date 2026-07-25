@@ -3,7 +3,24 @@ use clap::Parser;
 use std::path::PathBuf;
 use std::time::Duration;
 use zerostack_codemode_conformance::fake_substrate::fake_mcp_main;
-use zerostack_codemode_conformance::{run_conformance, Ns, RunConfig};
+use zerostack_codemode_conformance::{run_conformance, Ns, RunConfig, Surface};
+
+/// Infer the served surface from the artifact filename.
+///
+/// Engines ship `<name>-codemode` and `<name>-mcp`, so the filename carries the
+/// install-time choice. Returns None for anything else, including the bare
+/// compatibility shim, which is a selected symlink whose target we must not
+/// assume.
+fn infer_surface(bin: &std::path::Path) -> Option<Surface> {
+    let stem = bin.file_name()?.to_string_lossy().to_ascii_lowercase();
+    if stem.contains("codemode") || stem.contains("code-mode") {
+        return Some(Surface::Codemode);
+    }
+    if stem.contains("mcp") {
+        return Some(Surface::Mcp);
+    }
+    None
+}
 
 #[derive(Debug, Parser)]
 #[command(name = "zerostack-codemode-conformance")]
@@ -13,20 +30,16 @@ struct Args {
     #[arg(long)]
     ns: Option<String>,
 
-    /// Substrate binary serving BOTH surfaces via --mode=. Only the harness's
-    /// own fake substrate is like this; every real engine ships one artifact
-    /// per surface and rejects --mode= on the wrong one. Prefer
-    /// --codemode-bin plus --mcp-bin.
+    /// The installed substrate artifact under test.
     #[arg(long)]
     bin: Option<PathBuf>,
 
-    /// Artifact hosting the CodeMode surface, e.g. tokenzero-codemode.
+    /// Which surface that artifact serves: 'codemode' or 'mcp'.
+    ///
+    /// Surfaces are mutually exclusive; you install one or the other. Inferred
+    /// from the artifact filename when omitted.
     #[arg(long)]
-    codemode_bin: Option<PathBuf>,
-
-    /// Artifact hosting the plain MCP surface, e.g. tokenzero-mcp.
-    #[arg(long)]
-    mcp_bin: Option<PathBuf>,
+    surface: Option<String>,
 
     /// Directory for JSON reports. Defaults to conformance/reports relative to cwd.
     #[arg(long, default_value = "reports")]
@@ -68,32 +81,26 @@ fn main() -> Result<()> {
     }
 
     let ns = Ns::parse(args.ns.as_deref().context("--ns fz|tz|gz is required")?)?;
-    // Surface selection is immutable per artifact in all three engines, so the
-    // normal invocation names two files. --bin stays supported for the fake
-    // substrate and for any future dual-surface build.
-    let mut config = match (args.codemode_bin, args.mcp_bin, args.bin) {
-        (Some(codemode), Some(mcp), _) => {
-            for (label, path) in [("--codemode-bin", &codemode), ("--mcp-bin", &mcp)] {
-                if !path.is_file() {
-                    bail!("{label} is not a file: {}", path.display());
-                }
-            }
-            RunConfig::new(ns, codemode, mcp, args.reports_dir)
-        }
-        (Some(_), None, _) | (None, Some(_), _) => {
-            bail!("--codemode-bin and --mcp-bin must be given together")
-        }
-        (None, None, Some(bin)) => {
-            if !bin.is_file() {
-                bail!("substrate binary is not a file: {}", bin.display());
-            }
-            RunConfig::new_single_artifact(ns, bin, args.reports_dir)
-        }
-        (None, None, None) => bail!(
-            "give --codemode-bin <path> --mcp-bin <path>, or --bin <path> for a \
-             single dual-surface artifact"
-        ),
+    let bin = args.bin.context("--bin <substrate-binary> is required")?;
+    if !bin.is_file() {
+        bail!("substrate binary is not a file: {}", bin.display());
+    }
+
+    // One artifact serves exactly one surface, chosen at install time. Infer it
+    // from the filename so the common case needs no flag, but never guess
+    // silently: an unrecognizable name is an error, not a default, because
+    // running the wrong surface's checks would produce misleading evidence.
+    let surface = match args.surface.as_deref() {
+        Some(value) => Surface::parse(value)?,
+        None => infer_surface(&bin).with_context(|| {
+            format!(
+                "cannot tell which surface {:?} serves; pass --surface codemode or --surface mcp",
+                bin.file_name().unwrap_or_default()
+            )
+        })?,
     };
+
+    let mut config = RunConfig::new(ns, bin, surface, args.reports_dir);
     config.timeout = Duration::from_secs(args.timeout_seconds);
     let report = run_conformance(&config);
     let path = report.write_to_reports_dir(&config.reports_dir)?;
