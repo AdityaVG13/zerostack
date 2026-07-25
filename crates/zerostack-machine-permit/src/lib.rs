@@ -15,7 +15,6 @@ pub const PERMIT_POLL: Duration = Duration::from_millis(20);
 pub const PERMIT_POLL_MAX: Duration = Duration::from_millis(200);
 const INCOMPLETE_PERMIT_GRACE: Duration = Duration::from_millis(250);
 
-
 /// Repo-scoped permit base: `/tmp/zerostack-codemode-<class>-<hash16>.permit`.
 ///
 /// Scope comes from `ZEROSTACK_PERMIT_SCOPE_ROOT` or the per-child root envs
@@ -33,7 +32,9 @@ pub fn scoped_permit_base_for(class: &str, scope_root: Option<&Path>) -> PathBuf
     };
     let canonical = fs::canonicalize(root).unwrap_or_else(|_| root.to_path_buf());
     let scope = fnv1a64(canonical.to_string_lossy().as_bytes());
-    PathBuf::from(format!("/tmp/zerostack-codemode-{class}-{scope:016x}.permit"))
+    PathBuf::from(format!(
+        "/tmp/zerostack-codemode-{class}-{scope:016x}.permit"
+    ))
 }
 
 fn permit_scope_root() -> Option<PathBuf> {
@@ -129,11 +130,7 @@ impl MachinePermit {
 
     /// Legacy exclusive single-dir permit (pre-slot layout). Production paths
     /// use `acquire_slots`; this remains for reclaim interop tests.
-    pub fn acquire(
-        path: &Path,
-        deadline: Instant,
-        command: &str,
-    ) -> Result<Self, AcquireError> {
+    pub fn acquire(path: &Path, deadline: Instant, command: &str) -> Result<Self, AcquireError> {
         let mut attempt = 0u32;
         loop {
             match Self::try_create(path, command) {
@@ -222,7 +219,6 @@ impl WaiterIntent {
         })
     }
 
-
     fn has_preceding_competitor(&self) -> Result<bool, AcquireError> {
         let own_key = (self.started_at, self.owner.as_str());
         Ok(self
@@ -273,10 +269,7 @@ impl WaiterIntent {
                 if !process_alive(pid) && remove_waiter(&path) {
                     continue;
                 }
-                live.push((
-                    started_at,
-                    entry.file_name().to_string_lossy().into_owned(),
-                ));
+                live.push((started_at, entry.file_name().to_string_lossy().into_owned()));
                 continue;
             }
             if reclaim_dead(&path) {
@@ -362,9 +355,7 @@ fn waiter_key(path: &Path) -> Option<(u32, u128)> {
 fn remove_waiter(path: &Path) -> bool {
     match fs::remove_dir(path) {
         Ok(()) => true,
-        Err(error) if error.kind() == std::io::ErrorKind::DirectoryNotEmpty => {
-            remove_permit(path)
-        }
+        Err(error) if error.kind() == std::io::ErrorKind::DirectoryNotEmpty => remove_permit(path),
         Err(_) => false,
     }
 }
@@ -545,11 +536,7 @@ impl NativeWake {
                         // SAFETY: buffer is writable for its full length and fd
                         // is a live nonblocking inotify descriptor.
                         let read = unsafe {
-                            libc::read(
-                                self.fd,
-                                buffer.as_mut_ptr().cast(),
-                                buffer.len(),
-                            )
+                            libc::read(self.fd, buffer.as_mut_ptr().cast(), buffer.len())
                         };
                         if read > 0 {
                             continue;
@@ -642,16 +629,8 @@ impl NativeWake {
         // SAFETY: queue is live, event points to writable storage, and timespec
         // remains valid for the duration of kevent.
         let mut event: libc::kevent = unsafe { std::mem::zeroed() };
-        let ready = unsafe {
-            libc::kevent(
-                self.queue,
-                std::ptr::null(),
-                0,
-                &mut event,
-                1,
-                &timespec,
-            )
-        };
+        let ready =
+            unsafe { libc::kevent(self.queue, std::ptr::null(), 0, &mut event, 1, &timespec) };
         if ready >= 0 {
             Ok(ready > 0)
         } else {
@@ -732,10 +711,20 @@ impl Drop for NativeWake {
     }
 }
 
-#[cfg(not(any(target_os = "linux", target_os = "android", target_os = "macos", windows)))]
+#[cfg(not(any(
+    target_os = "linux",
+    target_os = "android",
+    target_os = "macos",
+    windows
+)))]
 struct NativeWake;
 
-#[cfg(not(any(target_os = "linux", target_os = "android", target_os = "macos", windows)))]
+#[cfg(not(any(
+    target_os = "linux",
+    target_os = "android",
+    target_os = "macos",
+    windows
+)))]
 impl NativeWake {
     fn new(_: &Path) -> std::io::Result<Self> {
         Err(std::io::Error::from(std::io::ErrorKind::Unsupported))
@@ -757,10 +746,7 @@ fn process_alive(pid: u32) -> bool {
     // SAFETY: kill(pid, 0) sends no signal and only queries whether the PID
     // exists and is signalable. `pid` is a validated positive process ID.
     let result = unsafe { libc::kill(pid, 0) };
-    unix_kill_result_is_alive(
-        result,
-        std::io::Error::last_os_error().raw_os_error(),
-    )
+    unix_kill_result_is_alive(result, std::io::Error::last_os_error().raw_os_error())
 }
 
 #[cfg(unix)]

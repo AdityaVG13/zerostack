@@ -1,6 +1,6 @@
 //! Golden JSON Schema validation (embedded at compile time).
 
-use anyhow::{Result, bail};
+use anyhow::{bail, Result};
 use jsonschema::Validator;
 use serde_json::Value;
 use std::sync::LazyLock;
@@ -60,19 +60,11 @@ fn compile(name: SchemaName) -> Validator {
 
 pub fn validate_document(name: SchemaName, doc: &Value) -> Result<()> {
     let v = validator(name);
-    let errors: Vec<String> = v
-        .iter_errors(doc)
-        .map(|e| e.to_string())
-        .take(8)
-        .collect();
+    let errors: Vec<String> = v.iter_errors(doc).map(|e| e.to_string()).take(8).collect();
     if errors.is_empty() {
         return Ok(());
     }
-    bail!(
-        "schema {} failed: {}",
-        name.file_stem(),
-        errors.join("; ")
-    );
+    bail!("schema {} failed: {}", name.file_stem(), errors.join("; "));
 }
 
 /// Alias used by integration tests.

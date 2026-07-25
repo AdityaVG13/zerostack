@@ -831,4 +831,79 @@ mod tests {
             );
         }
     }
+
+    /// The other half of the equality gate in zerostack-oh7: the unified reaper
+    /// must remove all three historical shapes when stale and none of them when
+    /// young. Without this, a reaper that simply deleted everything temp-shaped
+    /// would pass `all_engine_temp_shapes_are_reaped` while racing live writers
+    /// of the other two engines.
+    #[test]
+    fn no_engine_temp_shape_is_reaped_while_young() {
+        let dir = tempdir().unwrap();
+        let hash = content_hash_hex(b"x");
+        let shapes = [
+            format!(".tmp-{}-{}-0", &hash[..8], std::process::id()),
+            format!(".tmp-{hash}-1234567890-0.blob"),
+            format!("{hash}.{}.0.tmp", std::process::id()),
+        ];
+        for shape in &shapes {
+            fs::write(dir.path().join(shape), b"in flight").unwrap();
+        }
+        reap_stale_temps(dir.path(), CAS_TEMP_REAP_AGE);
+        for shape in &shapes {
+            assert!(
+                dir.path().join(shape).exists(),
+                "young temp of a concurrent publisher was reaped: {shape}"
+            );
+        }
+    }
+
+    /// zerostack-2x7 boundary vectors. The hub and GraphZero denied above
+    /// 256 MiB while TokenZero and FSZero had no policy at all, so an
+    /// oversized object published by one engine was permanently unreadable by
+    /// another. Pin all three sides of the boundary so no engine can drift.
+    #[test]
+    fn size_policy_boundary_is_exact() {
+        let dir = tempdir().unwrap();
+        let cas = SharedCas::open(dir.path());
+        let limit = 4096u64;
+
+        let under = vec![b'u'; limit as usize - 1];
+        let at = vec![b'a'; limit as usize];
+        let over = vec![b'o'; limit as usize + 1];
+
+        cas.put_with_limit(&under, limit)
+            .expect("limit minus one is accepted");
+        cas.put_with_limit(&at, limit)
+            .expect("exactly the limit is accepted");
+        let err = cas
+            .put_with_limit(&over, limit)
+            .expect_err("limit plus one is refused");
+        assert_eq!(err.class(), "policy_denied");
+    }
+
+    /// The shared constant itself is part of the cross-engine contract: an
+    /// engine that hardcodes a different cap reintroduces the asymmetry.
+    #[test]
+    fn size_policy_constant_is_256_mib() {
+        assert_eq!(CAS_MAX_OBJECT_BYTES, 256 * 1024 * 1024);
+    }
+
+    /// Short and non-hex identities must be refused, never sliced. The hub,
+    /// TokenZero, and GraphZero all built object paths via `hash[..2]` without
+    /// validating hex first, so a short input aborted the process.
+    #[test]
+    fn short_and_non_hex_identities_never_panic() {
+        let dir = tempdir().unwrap();
+        let cas = SharedCas::open(dir.path());
+        for bad in ["", "a", "ab", "ZZ", &"g".repeat(64), &"A".repeat(64)] {
+            assert_eq!(
+                cas.get_verified(bad).unwrap_err().class(),
+                "malformed",
+                "identity {bad:?} must be refused as malformed"
+            );
+            // Path construction must also be total, not panicking.
+            let _ = cas.object_path(bad);
+        }
+    }
 }

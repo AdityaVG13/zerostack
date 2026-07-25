@@ -122,15 +122,30 @@ pub struct CheckResult {
 
 impl CheckResult {
     pub fn pass(id: &str, name: &str) -> Self {
-        Self { id: id.into(), name: name.into(), passed: true, details: Vec::new() }
+        Self {
+            id: id.into(),
+            name: name.into(),
+            passed: true,
+            details: Vec::new(),
+        }
     }
 
     pub fn fail(id: &str, name: &str, detail: impl Into<String>) -> Self {
-        Self { id: id.into(), name: name.into(), passed: false, details: vec![detail.into()] }
+        Self {
+            id: id.into(),
+            name: name.into(),
+            passed: false,
+            details: vec![detail.into()],
+        }
     }
 
     pub fn with_details(id: &str, name: &str, details: Vec<String>) -> Self {
-        Self { id: id.into(), name: name.into(), passed: details.is_empty(), details }
+        Self {
+            id: id.into(),
+            name: name.into(),
+            passed: details.is_empty(),
+            details,
+        }
     }
 }
 
@@ -146,11 +161,18 @@ pub struct ConformanceReport {
 impl ConformanceReport {
     pub fn new(ns: Ns, bin: impl Into<String>, checks: Vec<CheckResult>) -> Self {
         let passed = checks.iter().all(|check| check.passed);
-        Self { ns: ns.as_str().into(), bin: bin.into(), contract_version: CONTRACT_VERSION.into(), passed, checks }
+        Self {
+            ns: ns.as_str().into(),
+            bin: bin.into(),
+            contract_version: CONTRACT_VERSION.into(),
+            passed,
+            checks,
+        }
     }
 
     pub fn write_to_reports_dir(&self, reports_dir: &Path) -> Result<PathBuf> {
-        fs::create_dir_all(reports_dir).with_context(|| format!("creating {}", reports_dir.display()))?;
+        fs::create_dir_all(reports_dir)
+            .with_context(|| format!("creating {}", reports_dir.display()))?;
         let stamp = chrono::Local::now().format("%Y-%m-%d-%H%M%S");
         let path = reports_dir.join(format!("{}-{stamp}.json", self.ns));
         let json = serde_json::to_string_pretty(self)?;
@@ -176,16 +198,30 @@ pub fn validate_capability_manifest(ns: Ns, value: &Value) -> Vec<String> {
     let mut errors = Vec::new();
     let manifest: CapabilityManifest = match serde_json::from_value(value.clone()) {
         Ok(manifest) => manifest,
-        Err(err) => return vec![format!("capabilities are not shaped like a manifest: {err}")],
+        Err(err) => {
+            return vec![format!(
+                "capabilities are not shaped like a manifest: {err}"
+            )]
+        }
     };
 
     if manifest.contract_version != CONTRACT_VERSION {
-        errors.push(format!("contract_version is {:?}, expected {CONTRACT_VERSION:?}", manifest.contract_version));
+        errors.push(format!(
+            "contract_version is {:?}, expected {CONTRACT_VERSION:?}",
+            manifest.contract_version
+        ));
     }
     if manifest.ns != ns.as_str() {
-        errors.push(format!("ns is {:?}, expected {:?}", manifest.ns, ns.as_str()));
+        errors.push(format!(
+            "ns is {:?}, expected {:?}",
+            manifest.ns,
+            ns.as_str()
+        ));
     }
-    if !matches!(manifest.mutation.as_str(), "allowed" | "denied" | "readonly") {
+    if !matches!(
+        manifest.mutation.as_str(),
+        "allowed" | "denied" | "readonly"
+    ) {
         errors.push(format!("invalid mutation {:?}", manifest.mutation));
     }
     for required in ["recipe", "json", "js"] {
@@ -236,7 +272,11 @@ pub fn validate_telemetry(value: &Value) -> Vec<String> {
     ]
     .into_iter()
     .collect();
-    let required: BTreeSet<&str> = allowed.iter().copied().filter(|key| *key != "extra").collect();
+    let required: BTreeSet<&str> = allowed
+        .iter()
+        .copied()
+        .filter(|key| *key != "extra")
+        .collect();
     validate_object_keys("telemetry", value, &required, &allowed)
 }
 
@@ -249,7 +289,11 @@ pub fn validate_error(value: &Value) -> Vec<String> {
         Some(other) => errors.push(format!("invalid error kind {other:?}")),
         None => {}
     }
-    if value.get("message").and_then(Value::as_str).is_some_and(str::is_empty) {
+    if value
+        .get("message")
+        .and_then(Value::as_str)
+        .is_some_and(str::is_empty)
+    {
         errors.push("error.message must be non-empty".into());
     }
     if value.get("retryable").is_some_and(|v| !v.is_boolean()) {
@@ -268,7 +312,11 @@ pub fn validate_execution_record(ns: Ns, value: &Value) -> Vec<String> {
         errors.push(format!("invalid execution_id {:?}", record.execution_id));
     }
     if record.ns != ns.as_str() {
-        errors.push(format!("record ns is {:?}, expected {:?}", record.ns, ns.as_str()));
+        errors.push(format!(
+            "record ns is {:?}, expected {:?}",
+            record.ns,
+            ns.as_str()
+        ));
     }
     if !matches!(record.status.as_str(), "ok" | "error") {
         errors.push(format!("invalid status {:?}", record.status));
@@ -279,9 +327,13 @@ pub fn validate_execution_record(ns: Ns, value: &Value) -> Vec<String> {
             errors.push(format!("invalid {part} ref {value:?}"));
         }
     }
-    errors.extend(validate_telemetry(&serde_json::to_value(&record.telemetry).expect("telemetry serializes")));
+    errors.extend(validate_telemetry(
+        &serde_json::to_value(&record.telemetry).expect("telemetry serializes"),
+    ));
     if let Some(error) = record.error {
-        errors.extend(validate_error(&serde_json::to_value(error).expect("error serializes")));
+        errors.extend(validate_error(
+            &serde_json::to_value(error).expect("error serializes"),
+        ));
     }
     errors
 }
@@ -307,13 +359,22 @@ fn collect_refs_inner(value: &Value, refs: &mut Vec<String>) {
                 refs.push(value.clone());
             }
         }
-        Value::Array(values) => values.iter().for_each(|value| collect_refs_inner(value, refs)),
-        Value::Object(map) => map.values().for_each(|value| collect_refs_inner(value, refs)),
+        Value::Array(values) => values
+            .iter()
+            .for_each(|value| collect_refs_inner(value, refs)),
+        Value::Object(map) => map
+            .values()
+            .for_each(|value| collect_refs_inner(value, refs)),
         Value::Null | Value::Bool(_) | Value::Number(_) => {}
     }
 }
 
-fn validate_object_keys(name: &str, value: &Value, required: &BTreeSet<&str>, allowed: &BTreeSet<&str>) -> Vec<String> {
+fn validate_object_keys(
+    name: &str,
+    value: &Value,
+    required: &BTreeSet<&str>,
+    allowed: &BTreeSet<&str>,
+) -> Vec<String> {
     let mut errors = Vec::new();
     let Some(object) = value.as_object() else {
         return vec![format!("{name} must be an object")];
@@ -344,7 +405,12 @@ pub struct RunConfig {
 
 impl RunConfig {
     pub fn new(ns: Ns, bin: PathBuf, reports_dir: PathBuf) -> Self {
-        Self { ns, bin, reports_dir, timeout: Duration::from_secs(5) }
+        Self {
+            ns,
+            bin,
+            reports_dir,
+            timeout: Duration::from_secs(5),
+        }
     }
 }
 
@@ -359,14 +425,22 @@ pub fn run_conformance(config: &RunConfig) -> ConformanceReport {
         Ok(mut client) => {
             let init = client.initialize();
             if let Err(err) = init {
-                checks.push(CheckResult::fail("G2", "refs", format!("codemode initialize failed: {err}")));
+                checks.push(CheckResult::fail(
+                    "G2",
+                    "refs",
+                    format!("codemode initialize failed: {err}"),
+                ));
                 None
             } else {
                 Some(client)
             }
         }
         Err(err) => {
-            checks.push(CheckResult::fail("G2", "refs", format!("could not spawn codemode server: {err}")));
+            checks.push(CheckResult::fail(
+                "G2",
+                "refs",
+                format!("could not spawn codemode server: {err}"),
+            ));
             None
         }
     };
@@ -385,7 +459,11 @@ pub fn run_conformance(config: &RunConfig) -> ConformanceReport {
             ("G9", "coalescing"),
             ("G10", "sandbox-denial"),
         ] {
-            checks.push(CheckResult::fail(id, name, "skipped because codemode server did not initialize"));
+            checks.push(CheckResult::fail(
+                id,
+                name,
+                "skipped because codemode server did not initialize",
+            ));
         }
     }
 
@@ -401,7 +479,9 @@ fn check_exposure(config: &RunConfig) -> Result<CheckResult> {
     let codemode_tools = codemode.list_tools()?;
     let codemode_set: BTreeSet<String> = codemode_tools.into_iter().collect();
     if codemode_set != expected {
-        details.push(format!("--mode=codemode tools were {codemode_set:?}, expected exactly {expected:?}"));
+        details.push(format!(
+            "--mode=codemode tools were {codemode_set:?}, expected exactly {expected:?}"
+        ));
     }
 
     let mut mcp = McpClient::spawn(&config.bin, "mcp", config.timeout)?;
@@ -412,7 +492,9 @@ fn check_exposure(config: &RunConfig) -> Result<CheckResult> {
         .filter(|name| name.contains("codemode") || expected.contains(name))
         .collect();
     if !codemode_in_mcp.is_empty() {
-        details.push(format!("--mode=mcp exposed codemode tools: {codemode_in_mcp:?}"));
+        details.push(format!(
+            "--mode=mcp exposed codemode tools: {codemode_in_mcp:?}"
+        ));
     }
 
     Ok(CheckResult::with_details("G1", "exposure", details))
@@ -440,10 +522,17 @@ fn run_live_checks(ns: Ns, client: &mut McpClient) -> Vec<CheckResult> {
                 checks.push(CheckResult::with_details("G7", "limits", details));
             }
         }
-        None => checks.push(CheckResult::fail("G7", "limits", "could not read capabilities manifest")),
+        None => checks.push(CheckResult::fail(
+            "G7",
+            "limits",
+            "could not read capabilities manifest",
+        )),
     }
 
-    let basic = client.call_tool(&execute_tool, json!({ "plan": "return { ok: true };", "form": "js" }));
+    let basic = client.call_tool(
+        &execute_tool,
+        json!({ "plan": "return { ok: true };", "form": "js" }),
+    );
     let basic_value = basic.as_ref().ok().and_then(extract_json_payload);
     checks.push(check_refs(ns, basic_value.as_ref()));
     checks.push(check_telemetry(basic_value.as_ref()));
@@ -481,7 +570,11 @@ fn check_refs(ns: Ns, payload: Option<&Value>) -> CheckResult {
 
 fn check_telemetry(payload: Option<&Value>) -> CheckResult {
     let Some(payload) = payload else {
-        return CheckResult::fail("G3", "telemetry", "execute_code did not return JSON payload");
+        return CheckResult::fail(
+            "G3",
+            "telemetry",
+            "execute_code did not return JSON payload",
+        );
     };
     let Some(telemetry) = payload.get("telemetry") else {
         return CheckResult::fail("G3", "telemetry", "missing telemetry object");
@@ -498,7 +591,9 @@ fn check_leak_proof(ns: Ns, client: &mut McpClient, execute_tool: &str) -> Check
             let refs = collect_refs(&payload);
             let mut details = Vec::new();
             if visible > 65_536 {
-                details.push(format!("visible response is {visible} bytes, exceeds 64 KiB guard"));
+                details.push(format!(
+                    "visible response is {visible} bytes, exceeds 64 KiB guard"
+                ));
             }
             if !refs.iter().any(|value| valid_ref(ns, value)) {
                 details.push("oversize result did not return a valid result/blob ref".into());
@@ -511,18 +606,35 @@ fn check_leak_proof(ns: Ns, client: &mut McpClient, execute_tool: &str) -> Check
 
 fn check_errors(_ns: Ns, client: &mut McpClient, execute_tool: &str) -> CheckResult {
     let cases = [
-        ("validation", json!({ "plan": "{ definitely invalid json", "form": "json" })),
-        ("sandbox", json!({ "plan": "return fetch('https://example.com');", "form": "js" })),
-        ("runtime", json!({ "plan": "throw new Error('boom');", "form": "js" })),
-        ("substrate", json!({ "plan": "return zero.read('__zerostack_missing_target__');", "form": "js" })),
-        ("policy", json!({ "plan": "return zero.edit('x', 'y');", "form": "js" })),
+        (
+            "validation",
+            json!({ "plan": "{ definitely invalid json", "form": "json" }),
+        ),
+        (
+            "sandbox",
+            json!({ "plan": "return fetch('https://example.com');", "form": "js" }),
+        ),
+        (
+            "runtime",
+            json!({ "plan": "throw new Error('boom');", "form": "js" }),
+        ),
+        (
+            "substrate",
+            json!({ "plan": "return zero.read('__zerostack_missing_target__');", "form": "js" }),
+        ),
+        (
+            "policy",
+            json!({ "plan": "return zero.edit('x', 'y');", "form": "js" }),
+        ),
     ];
     let mut details = Vec::new();
     for (kind, args) in cases {
         match client.call_tool(execute_tool, args) {
             Ok(response) => {
                 let payload = extract_json_payload(&response).unwrap_or(response);
-                let error = payload.get("error").or_else(|| payload.get("content").and_then(|v| v.get("error")));
+                let error = payload
+                    .get("error")
+                    .or_else(|| payload.get("content").and_then(|v| v.get("error")));
                 match error {
                     Some(error) => {
                         let error_details = validate_error(error);
@@ -533,7 +645,9 @@ fn check_errors(_ns: Ns, client: &mut McpClient, execute_tool: &str) -> CheckRes
                             details.push(format!("{kind} case returned wrong kind: {error}"));
                         }
                     }
-                    None => details.push(format!("{kind} case did not return structured error: {payload}")),
+                    None => details.push(format!(
+                        "{kind} case did not return structured error: {payload}"
+                    )),
                 }
             }
             Err(err) => details.push(format!("{kind} case MCP call failed: {err}")),
@@ -558,7 +672,12 @@ fn check_ctx_step(ns: Ns, client: &mut McpClient, execute_tool: &str) -> CheckRe
     }
 }
 
-fn check_limits(_ns: Ns, client: &mut McpClient, execute_tool: &str, limits: &BTreeMap<String, u64>) -> CheckResult {
+fn check_limits(
+    _ns: Ns,
+    client: &mut McpClient,
+    execute_tool: &str,
+    limits: &BTreeMap<String, u64>,
+) -> CheckResult {
     let mut details = Vec::new();
     for name in limits.keys() {
         let plan = match name.as_str() {
@@ -576,7 +695,8 @@ fn check_limits(_ns: Ns, client: &mut McpClient, execute_tool: &str, limits: &BT
                     let payload = extract_json_payload(&response).unwrap_or(response);
                     let enforced = payload.get("ack").and_then(Value::as_str) == Some("X0")
                         || payload.get("error").is_some()
-                        || (name == "max_output_bytes" && payload.to_string().len() <= limits[name] as usize);
+                        || (name == "max_output_bytes"
+                            && payload.to_string().len() <= limits[name] as usize);
                     if !enforced {
                         details.push(format!("echoed limit {name} was not observably enforced"));
                     }
@@ -590,7 +710,12 @@ fn check_limits(_ns: Ns, client: &mut McpClient, execute_tool: &str, limits: &BT
     CheckResult::with_details("G7", "limits", details)
 }
 
-fn check_mutation(ns: Ns, client: &mut McpClient, execute_tool: &str, manifest: Option<&Value>) -> CheckResult {
+fn check_mutation(
+    ns: Ns,
+    client: &mut McpClient,
+    execute_tool: &str,
+    manifest: Option<&Value>,
+) -> CheckResult {
     let declared = manifest
         .and_then(|value| value.get("mutation"))
         .and_then(Value::as_str)
@@ -600,10 +725,18 @@ fn check_mutation(ns: Ns, client: &mut McpClient, execute_tool: &str, manifest: 
             Ns::Gz => "readonly",
         });
     let mut details = Vec::new();
-    if (ns == Ns::Fz && declared != "allowed") || (ns == Ns::Tz && declared != "denied") || (ns == Ns::Gz && declared != "readonly") {
-        details.push(format!("declared mutation {declared:?} does not match required namespace default"));
+    if (ns == Ns::Fz && declared != "allowed")
+        || (ns == Ns::Tz && declared != "denied")
+        || (ns == Ns::Gz && declared != "readonly")
+    {
+        details.push(format!(
+            "declared mutation {declared:?} does not match required namespace default"
+        ));
     }
-    match client.call_tool(execute_tool, json!({ "plan": "return zero.edit('x', 'y');", "form": "js" })) {
+    match client.call_tool(
+        execute_tool,
+        json!({ "plan": "return zero.edit('x', 'y');", "form": "js" }),
+    ) {
         Ok(response) => {
             let payload = extract_json_payload(&response).unwrap_or(response);
             let ack = payload.get("ack").and_then(Value::as_str);
@@ -611,12 +744,16 @@ fn check_mutation(ns: Ns, client: &mut McpClient, execute_tool: &str, manifest: 
             match declared {
                 "allowed" => {
                     if ack == Some("X0") && error_kind == Some("policy") {
-                        details.push("allowed mutation capability rejected mutation with policy".into());
+                        details.push(
+                            "allowed mutation capability rejected mutation with policy".into(),
+                        );
                     }
                 }
                 "denied" | "readonly" => {
                     if error_kind != Some("policy") {
-                        details.push(format!("{declared} mutation capability did not reject with policy: {payload}"));
+                        details.push(format!(
+                            "{declared} mutation capability did not reject with policy: {payload}"
+                        ));
                     }
                 }
                 _ => details.push(format!("unknown mutation capability {declared:?}")),
@@ -636,10 +773,20 @@ fn check_coalescing(client: &mut McpClient, execute_tool: &str) -> CheckResult {
             let mut details = Vec::new();
             match telemetry {
                 Some(telemetry) => {
-                    if telemetry.get("physical_ops").and_then(Value::as_u64).unwrap_or(100) >= 100 {
+                    if telemetry
+                        .get("physical_ops")
+                        .and_then(Value::as_u64)
+                        .unwrap_or(100)
+                        >= 100
+                    {
                         details.push(format!("physical_ops not coalesced below 100: {telemetry}"));
                     }
-                    if telemetry.get("batched_ops").and_then(Value::as_u64).unwrap_or(0) < 1 {
+                    if telemetry
+                        .get("batched_ops")
+                        .and_then(Value::as_u64)
+                        .unwrap_or(0)
+                        < 1
+                    {
                         details.push(format!("batched_ops < 1: {telemetry}"));
                     }
                 }
@@ -655,9 +802,18 @@ fn check_sandbox_denial(client: &mut McpClient, execute_tool: &str) -> CheckResu
     let cases = [
         ("network/fetch", "return fetch('https://example.com');"),
         ("env", "return process.env.HOME;"),
-        ("process/spawn", "return require('child_process').spawn('true');"),
-        ("raw host FS", "return require('fs').readFileSync('/etc/passwd', 'utf8');"),
-        ("direct DB/store", "return globalThis.db || globalThis.store || sqlite;"),
+        (
+            "process/spawn",
+            "return require('child_process').spawn('true');",
+        ),
+        (
+            "raw host FS",
+            "return require('fs').readFileSync('/etc/passwd', 'utf8');",
+        ),
+        (
+            "direct DB/store",
+            "return globalThis.db || globalThis.store || sqlite;",
+        ),
         ("native modules", "return require('node:fs');"),
         ("timers", "return setTimeout(() => 1, 1);"),
     ];
@@ -667,7 +823,9 @@ fn check_sandbox_denial(client: &mut McpClient, execute_tool: &str) -> CheckResu
             Ok(response) => {
                 let payload = extract_json_payload(&response).unwrap_or(response);
                 if payload.pointer("/error/kind").and_then(Value::as_str) != Some("sandbox") {
-                    details.push(format!("{name} was not denied with sandbox error: {payload}"));
+                    details.push(format!(
+                        "{name} was not denied with sandbox error: {payload}"
+                    ));
                 }
             }
             Err(err) => details.push(format!("{name} probe failed at MCP layer: {err}")),
@@ -677,7 +835,10 @@ fn check_sandbox_denial(client: &mut McpClient, execute_tool: &str) -> CheckResu
 }
 
 fn extract_json_payload(response: &Value) -> Option<Value> {
-    if response.get("ack").is_some() || response.get("contract_version").is_some() || response.get("telemetry").is_some() {
+    if response.get("ack").is_some()
+        || response.get("contract_version").is_some()
+        || response.get("telemetry").is_some()
+    {
         return Some(response.clone());
     }
     if let Some(result) = response.get("result") {
@@ -729,9 +890,23 @@ impl McpClient {
             .stderr(Stdio::null())
             .spawn()
             .with_context(|| format!("spawning {} --mode={mode}", bin.display()))?;
-        let stdin = child.stdin.take().ok_or_else(|| anyhow!("missing child stdin"))?;
-        let stdout = BufReader::new(child.stdout.take().ok_or_else(|| anyhow!("missing child stdout"))?);
-        Ok(Self { child, stdin, stdout, next_id: 1, timeout })
+        let stdin = child
+            .stdin
+            .take()
+            .ok_or_else(|| anyhow!("missing child stdin"))?;
+        let stdout = BufReader::new(
+            child
+                .stdout
+                .take()
+                .ok_or_else(|| anyhow!("missing child stdout"))?,
+        );
+        Ok(Self {
+            child,
+            stdin,
+            stdout,
+            next_id: 1,
+            timeout,
+        })
     }
 
     fn initialize(&mut self) -> Result<Value> {
@@ -759,7 +934,10 @@ impl McpClient {
     }
 
     fn call_tool(&mut self, name: &str, arguments: Value) -> Result<Value> {
-        self.request("tools/call", json!({ "name": name, "arguments": arguments }))
+        self.request(
+            "tools/call",
+            json!({ "name": name, "arguments": arguments }),
+        )
     }
 
     fn request(&mut self, method: &str, params: Value) -> Result<Value> {
@@ -782,7 +960,8 @@ impl McpClient {
             if line.is_empty() {
                 continue;
             }
-            let response: Value = serde_json::from_str(line).with_context(|| format!("parsing MCP line {line:?}"))?;
+            let response: Value =
+                serde_json::from_str(line).with_context(|| format!("parsing MCP line {line:?}"))?;
             if response.get("id").and_then(Value::as_u64) == Some(id) {
                 if let Some(error) = response.get("error") {
                     bail!("MCP error for {method}: {error}");
@@ -824,9 +1003,18 @@ mod tests {
     fn ref_and_execution_id_regexes_accept_contract_shapes() {
         assert!(valid_execution_id("cm://exec/1782920000000-012345abcdef"));
         assert!(!valid_execution_id("1782920000000-012345abcdef"));
-        assert!(valid_ref(Ns::Gz, "gz://blob/0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"));
-        assert!(valid_ref(Ns::Gz, "gz://codemode/execution/1782920000000-012345abcdef/result"));
-        assert!(!valid_ref(Ns::Gz, "codemode/execution/1782920000000-012345abcdef/result"));
+        assert!(valid_ref(
+            Ns::Gz,
+            "gz://blob/0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+        ));
+        assert!(valid_ref(
+            Ns::Gz,
+            "gz://codemode/execution/1782920000000-012345abcdef/result"
+        ));
+        assert!(!valid_ref(
+            Ns::Gz,
+            "codemode/execution/1782920000000-012345abcdef/result"
+        ));
     }
 
     #[test]
@@ -835,7 +1023,10 @@ mod tests {
         assert!(validate_telemetry(&good).is_empty());
         good["raw_leak"] = json!(false);
         let errors = validate_telemetry(&good);
-        assert!(errors.iter().any(|error| error.contains("raw_leak")), "{errors:?}");
+        assert!(
+            errors.iter().any(|error| error.contains("raw_leak")),
+            "{errors:?}"
+        );
     }
 
     #[test]
@@ -856,9 +1047,20 @@ mod tests {
             "limits": { "dead_limit": 1 }
         });
         let errors = validate_capability_manifest(Ns::Fz, &bad);
-        assert!(errors.iter().any(|error| error.contains("contract_version")), "{errors:?}");
-        assert!(errors.iter().any(|error| error.contains("plan_forms")), "{errors:?}");
-        assert!(errors.iter().any(|error| error.contains("dead_limit")), "{errors:?}");
+        assert!(
+            errors
+                .iter()
+                .any(|error| error.contains("contract_version")),
+            "{errors:?}"
+        );
+        assert!(
+            errors.iter().any(|error| error.contains("plan_forms")),
+            "{errors:?}"
+        );
+        assert!(
+            errors.iter().any(|error| error.contains("dead_limit")),
+            "{errors:?}"
+        );
     }
 
     #[test]
@@ -879,7 +1081,12 @@ mod tests {
         let mut bad = record;
         bad["refs"]["result"] = json!("codemode/execution/1782920000000-012345abcdef/result");
         let errors = validate_execution_record(Ns::Gz, &bad);
-        assert!(errors.iter().any(|error| error.contains("invalid result ref")), "{errors:?}");
+        assert!(
+            errors
+                .iter()
+                .any(|error| error.contains("invalid result ref")),
+            "{errors:?}"
+        );
     }
 
     #[test]
@@ -887,7 +1094,10 @@ mod tests {
         let report = ConformanceReport::new(
             Ns::Tz,
             "/tmp/tokenzero",
-            vec![CheckResult::pass("G1", "exposure"), CheckResult::fail("G2", "refs", "bad ref")],
+            vec![
+                CheckResult::pass("G1", "exposure"),
+                CheckResult::fail("G2", "refs", "bad ref"),
+            ],
         );
         assert!(!report.passed);
         let json = serde_json::to_value(report).unwrap();

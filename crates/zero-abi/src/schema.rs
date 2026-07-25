@@ -5,7 +5,7 @@
 //! sets. Description/title text is ignored so prose edits do not mask real
 //! drift.
 
-use serde_json::{Map, Value, json};
+use serde_json::{json, Map, Value};
 use std::collections::BTreeSet;
 
 use crate::digest::sha256_hex;
@@ -89,7 +89,10 @@ pub fn normalize_schema(value: &Value) -> Value {
                             normalize_schema(v)
                         }
                     }
-                    "additionalProperties" | "additionalItems" | "not" | "contains"
+                    "additionalProperties"
+                    | "additionalItems"
+                    | "not"
+                    | "contains"
                     | "propertyNames" => {
                         if v.is_boolean() {
                             v.clone()
@@ -160,10 +163,10 @@ fn diff_normalized(a: &Value, b: &Value, path: &str) -> Option<String> {
         (Value::Object(am), Value::Object(bm)) => {
             let ak: BTreeSet<_> = am.keys().collect();
             let bk: BTreeSet<_> = bm.keys().collect();
-            for k in ak.difference(&bk) {
+            if let Some(k) = ak.difference(&bk).next() {
                 return Some(format!("{path}: missing key in right: {k}"));
             }
-            for k in bk.difference(&ak) {
+            if let Some(k) = bk.difference(&ak).next() {
                 return Some(format!("{path}: extra key in right: {k}"));
             }
             for k in &ak {

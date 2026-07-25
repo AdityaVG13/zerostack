@@ -46,7 +46,10 @@ fn main() -> Result<()> {
 
     let args = Args::parse();
     if args.fake_codemode_mcp {
-        let mut fake_args = vec!["zerostack-codemode-conformance".to_string(), args.fake_ns.unwrap_or_else(|| "gz".to_string())];
+        let mut fake_args = vec![
+            "zerostack-codemode-conformance".to_string(),
+            args.fake_ns.unwrap_or_else(|| "gz".to_string()),
+        ];
         if args.bad_refs {
             fake_args.push("--bad-refs".to_string());
         }

@@ -2,9 +2,9 @@
 
 use crate::checks::{CheckId, CheckOutcome, CheckStatus, HarnessReport};
 use crate::patterns::validate_refs_in_response;
-use crate::schema::{SchemaName, validate_document};
-use anyhow::{Context, Result, bail};
-use serde_json::{Value, json};
+use crate::schema::{validate_document, SchemaName};
+use anyhow::{bail, Context, Result};
+use serde_json::{json, Value};
 use std::io::{BufRead, BufReader, Write};
 use std::process::{Child, ChildStdin, ChildStdout, Command, Stdio};
 
@@ -223,7 +223,7 @@ fn parse_tool_json_result(result: &Value) -> Result<Value> {
         .and_then(|x| x.get("text"))
         .and_then(|t| t.as_str())
         .context("tool result text")?;
-    Ok(serde_json::from_str(text).context("tool JSON")?)
+    serde_json::from_str(text).context("tool JSON")
 }
 
 fn tool_json_response(body: Value) -> Value {

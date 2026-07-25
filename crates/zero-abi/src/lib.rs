@@ -16,7 +16,6 @@ pub mod schema;
 
 pub use digest::{contract_digest, contract_digest_hex, sha256, sha256_hex};
 pub use schema::{
-    canonical_json, canonical_schema_json, normalize_schema, schema_diff,
-    schema_fingerprint_hex, schema_property_keys, schema_required_keys,
-    schemas_structurally_equal,
+    canonical_json, canonical_schema_json, normalize_schema, schema_diff, schema_fingerprint_hex,
+    schema_property_keys, schema_required_keys, schemas_structurally_equal,
 };
