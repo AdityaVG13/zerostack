@@ -6,11 +6,12 @@
 use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
-use std::time::Duration;
+use std::time::{Duration, SystemTime};
 
 use sha2::{Digest, Sha256};
 
 use crate::fs_replace::replace_file;
+use crate::gc_lock::{StoreLock, LOCK_DEADLINE};
 
 /// Size policy for CAS objects: reads and writes above this are refused as
 /// policy_denied so one runaway object cannot wedge shared storage.
@@ -27,6 +28,31 @@ pub const CAS_LAYOUT_VERSION: u64 = 1;
 pub const CAS_TEMP_REAP_AGE: Duration = Duration::from_secs(3600);
 
 const TEMP_PREFIX: &str = ".tmp-";
+
+/// Directory holding objects swept out of the CAS, relative to the store root.
+/// Bodies are moved here rather than unlinked so a wrong collection verdict
+/// stays recoverable.
+pub const CAS_QUARANTINE_DIR: &str = "quarantine";
+
+/// Historical temp-file shapes from the three engines, all reaped by this
+/// crate's reaper.
+///
+/// Each engine used to reap only its own shape: the prefix form was cleaned by
+/// the hub and GraphZero, the suffix form by FSZero, and TokenZero had no
+/// reaper at all. On a shared store root that meant abandoned temps from a
+/// crashed publisher of one engine were never cleaned by another, so the leak
+/// was permanent.
+fn is_temp_name(name: &str) -> bool {
+    name.starts_with(TEMP_PREFIX) || name.ends_with(".tmp")
+}
+
+/// Outcome of a publish. `created` distinguishes a fresh object from dedup, so
+/// callers can report writes without a second existence check.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PutOutcome {
+    pub hash: String,
+    pub created: bool,
+}
 
 /// Engine-neutral CAS error aligned with the ZeroRef v1 error classes.
 #[derive(Debug)]
@@ -124,12 +150,22 @@ impl SharedCas {
         self.label
     }
 
+    /// The store root: the directory holding both `blobs/` and `gc/`. This is
+    /// what the coordination lock is scoped to.
+    pub fn store_root(&self) -> &Path {
+        &self.root
+    }
+
     /// Canonical object path for a full lowercase 64-hex identity.
+    ///
+    /// Deliberately non-panicking on short input, so a malformed identity
+    /// produces a path that simply does not exist and callers report
+    /// `missing` or `malformed` rather than aborting the process.
     pub fn object_path(&self, sha256: &str) -> PathBuf {
         self.root
             .join("blobs")
             .join("sha256")
-            .join(&sha256[..2])
+            .join(sha256.get(..2).unwrap_or(sha256))
             .join(sha256)
     }
 
@@ -143,16 +179,82 @@ impl SharedCas {
     /// preexisting object with different bytes is a loud corruption error and
     /// is never overwritten.
     pub fn put(&self, bytes: &[u8]) -> Result<String, CasError> {
-        self.put_with_limit(bytes, CAS_MAX_OBJECT_BYTES)
+        self.put_outcome(bytes, CAS_MAX_OBJECT_BYTES)
+            .map(|o| o.hash)
     }
 
     /// Publish with an explicit size policy, for hosts enforcing a stricter
     /// cap than [CAS_MAX_OBJECT_BYTES].
     pub fn put_limited(&self, bytes: &[u8], limit: u64) -> Result<String, CasError> {
+        self.put_outcome(bytes, limit).map(|o| o.hash)
+    }
+
+    /// Publish and report whether the object was newly created.
+    ///
+    /// Runs under the shared store coordination lock, which is what makes a
+    /// publish safe against a concurrent sweep: the sweeper cannot be between
+    /// its liveness recheck and its unlink while this call is in flight.
+    pub fn put_outcome(&self, bytes: &[u8], limit: u64) -> Result<PutOutcome, CasError> {
+        let guard = self.lock_for_publish()?;
+        self.put_in_lock(bytes, limit, &guard)
+    }
+
+    /// Publish bytes whose digest the caller already computed. The digest is
+    /// always re-derived and compared, so a wrong hash writes nothing.
+    pub fn put_prehashed(&self, sha256: &str, bytes: &[u8]) -> Result<PutOutcome, CasError> {
+        if !is_full_lower_hex(sha256) {
+            return Err(CasError::Malformed(format!(
+                "identity must be full lowercase 64-hex SHA-256, got '{sha256}'"
+            )));
+        }
+        let actual = content_hash_hex(bytes);
+        if actual != sha256 {
+            return Err(CasError::DigestMismatch {
+                expected: sha256.to_string(),
+                actual,
+            });
+        }
+        self.put_outcome(bytes, CAS_MAX_OBJECT_BYTES)
+    }
+
+    /// Publish while already holding a publish guard, for callers batching
+    /// several objects under one acquisition.
+    ///
+    /// Panics in debug builds if handed a sweep guard, which would mean the
+    /// caller is publishing from inside a collection.
+    pub fn put_in_lock(
+        &self,
+        bytes: &[u8],
+        limit: u64,
+        guard: &StoreLock,
+    ) -> Result<PutOutcome, CasError> {
+        debug_assert!(
+            !guard.is_exclusive(),
+            "publishing under a sweep guard inverts the protocol"
+        );
         self.put_with_limit(bytes, limit.min(CAS_MAX_OBJECT_BYTES))
     }
 
-    fn put_with_limit(&self, bytes: &[u8], limit: u64) -> Result<String, CasError> {
+    /// Acquire the shared publish guard for this store.
+    pub fn lock_for_publish(&self) -> Result<StoreLock, CasError> {
+        StoreLock::publish(&self.root, LOCK_DEADLINE)
+            .map_err(|e| io_err("acquire store publish lock", e))
+    }
+
+    /// Acquire the exclusive sweep guard for this store. Required by
+    /// [SharedCas::remove_object] and [SharedCas::quarantine_object].
+    pub fn lock_for_sweep(&self) -> Result<StoreLock, CasError> {
+        StoreLock::sweep(&self.root, LOCK_DEADLINE)
+            .map_err(|e| io_err("acquire store sweep lock", e))
+    }
+
+    /// Non-blocking variant of [SharedCas::lock_for_sweep]; `None` means
+    /// another holder is active.
+    pub fn try_lock_for_sweep(&self) -> Result<Option<StoreLock>, CasError> {
+        StoreLock::try_sweep(&self.root).map_err(|e| io_err("acquire store sweep lock", e))
+    }
+
+    fn put_with_limit(&self, bytes: &[u8], limit: u64) -> Result<PutOutcome, CasError> {
         if bytes.len() as u64 > limit {
             return Err(CasError::PolicyDenied(format!(
                 "object of {} bytes exceeds the CAS size policy ({limit} bytes)",
@@ -169,7 +271,14 @@ impl SharedCas {
                 self.check_regular(&meta, &hash)?;
                 let existing = self.read_verified_at(&dest, &hash, limit)?;
                 debug_assert_eq!(existing.len(), bytes.len());
-                return Ok(hash);
+                // Refresh the mtime: a dedup is a fresh reference, and an
+                // age-based retention policy that never sees it will collect a
+                // still-referenced object.
+                let _ = touch_path(&dest);
+                return Ok(PutOutcome {
+                    hash,
+                    created: false,
+                });
             }
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
             Err(e) => return Err(io_err("stat existing object", e)),
@@ -229,7 +338,109 @@ impl SharedCas {
         }
         // Converged-on-existing leaves our temp behind; clean it up.
         let _ = fs::remove_file(&tmp);
-        Ok(hash)
+        Ok(PutOutcome {
+            hash,
+            created: true,
+        })
+    }
+
+    /// Refresh an object's modification time without reading it, so an
+    /// age-based retention policy observes a reference. Absent objects are
+    /// [CasError::NotFound].
+    pub fn touch(&self, sha256: &str) -> Result<(), CasError> {
+        if !is_full_lower_hex(sha256) {
+            return Err(CasError::Malformed(format!(
+                "identity must be full lowercase 64-hex SHA-256, got '{sha256}'"
+            )));
+        }
+        let path = self.object_path(sha256);
+        if !path.is_file() {
+            return Err(CasError::NotFound);
+        }
+        touch_path(&path).map_err(|e| io_err("touch object", e))
+    }
+
+    /// Every published object: exact 64-lowercase-hex regular files under the
+    /// fan-out, skipping symlinks, temps, and dotfiles.
+    pub fn list_objects(&self) -> Result<Vec<String>, CasError> {
+        let sha_root = self.root.join("blobs").join("sha256");
+        let mut out = Vec::new();
+        let shards = match fs::read_dir(&sha_root) {
+            Ok(entries) => entries,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(out),
+            Err(e) => return Err(io_err("read CAS root", e)),
+        };
+        for shard in shards {
+            let shard = shard.map_err(|e| io_err("read CAS shard entry", e))?;
+            if !shard.file_type().map(|t| t.is_dir()).unwrap_or(false) {
+                continue;
+            }
+            let objects = fs::read_dir(shard.path()).map_err(|e| io_err("read CAS shard", e))?;
+            for object in objects {
+                let object = object.map_err(|e| io_err("read CAS object entry", e))?;
+                let name = object.file_name().to_string_lossy().to_string();
+                if !is_full_lower_hex(&name) || is_temp_name(&name) {
+                    continue;
+                }
+                // Symlinks are not objects; file_type here does not follow.
+                if object.file_type().map(|t| t.is_file()).unwrap_or(false) {
+                    out.push(name);
+                }
+            }
+        }
+        out.sort();
+        Ok(out)
+    }
+
+    /// Unlink one object. The exclusive guard is passed in rather than
+    /// acquired, so the recheck a sweeper performs and the removal it then
+    /// applies are inside one held lock and cannot be split by a publisher.
+    pub fn remove_object(&self, sha256: &str, guard: &StoreLock) -> Result<(), CasError> {
+        let path = self.sweep_target(sha256, guard)?;
+        fs::remove_file(&path).map_err(|e| io_err("remove object", e))
+    }
+
+    /// Move one object into `<store_root>/gc/quarantine/<hash>` instead of
+    /// unlinking it, so a wrong collection verdict remains recoverable.
+    pub fn quarantine_object(&self, sha256: &str, guard: &StoreLock) -> Result<(), CasError> {
+        let path = self.sweep_target(sha256, guard)?;
+        let dir = self
+            .root
+            .join(crate::gc_lock::GC_DIR)
+            .join(CAS_QUARANTINE_DIR);
+        fs::create_dir_all(&dir).map_err(|e| io_err("create quarantine directory", e))?;
+        let dest = dir.join(sha256);
+        replace_file(&path, &dest).map_err(|e| io_err("quarantine object", e))?;
+        sync_dir(&dir);
+        Ok(())
+    }
+
+    /// Shared preconditions for any sweep mutation: an exclusive guard, a
+    /// well-formed identity, and a real regular file re-stated under the lock
+    /// so a symlink cannot be substituted after the decision was made.
+    fn sweep_target(&self, sha256: &str, guard: &StoreLock) -> Result<PathBuf, CasError> {
+        if !guard.is_exclusive() {
+            return Err(CasError::PolicyDenied(
+                "removing objects requires the exclusive store sweep lock".to_string(),
+            ));
+        }
+        if !is_full_lower_hex(sha256) {
+            return Err(CasError::Malformed(format!(
+                "identity must be full lowercase 64-hex SHA-256, got '{sha256}'"
+            )));
+        }
+        let path = self.object_path(sha256);
+        let meta = match fs::symlink_metadata(&path) {
+            Ok(meta) => meta,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Err(CasError::NotFound),
+            Err(e) => return Err(io_err("stat object", e)),
+        };
+        if !meta.file_type().is_file() {
+            return Err(CasError::Malformed(
+                "sweep target is not a regular file (symlink substitution refused)".to_string(),
+            ));
+        }
+        Ok(path)
     }
 
     /// Open by full digest, enforce the regular-file/size policy, hash the
@@ -294,9 +505,20 @@ impl SharedCas {
     }
 }
 
-/// Bounded temp cleanup rule: only files named .tmp-* inside the given
-/// fan-out directory, and only when older than max_age. Best-effort; never
-/// errors, never touches younger files, so it cannot race active writers.
+/// Refresh a path's modification time in place. Opened without truncation, so
+/// object content is never altered.
+fn touch_path(path: &Path) -> std::io::Result<()> {
+    let file = fs::OpenOptions::new()
+        .write(true)
+        .truncate(false)
+        .open(path)?;
+    file.set_times(fs::FileTimes::new().set_modified(SystemTime::now()))
+}
+
+/// Bounded temp cleanup rule: only temp-shaped files inside the given fan-out
+/// directory, and only when older than max_age. Best-effort; never errors,
+/// never touches younger files, so it cannot race active writers. All three
+/// engines' historical temp shapes are recognized (see [is_temp_name]).
 fn reap_stale_temps(dir: &Path, max_age: Duration) {
     let Ok(entries) = fs::read_dir(dir) else {
         return;
@@ -304,7 +526,7 @@ fn reap_stale_temps(dir: &Path, max_age: Duration) {
     let now = std::time::SystemTime::now();
     for entry in entries.flatten() {
         let name = entry.file_name();
-        if !name.to_string_lossy().starts_with(TEMP_PREFIX) {
+        if !is_temp_name(&name.to_string_lossy()) {
             continue;
         }
         let stale = entry
@@ -350,7 +572,10 @@ mod tests {
         let cas = SharedCas::open("/store");
         let h = "4fdbc441ea7b546100e086ac1e4fc5ae6749b7314311c99db05be450eca12996";
         let p = cas.object_path(h);
-        assert!(p.ends_with(format!("blobs/sha256/4f/{h}")), "{p:?} vs {CAS_LAYOUT}");
+        assert!(
+            p.ends_with(format!("blobs/sha256/4f/{h}")),
+            "{p:?} vs {CAS_LAYOUT}"
+        );
     }
 
     #[test]
@@ -398,5 +623,212 @@ mod tests {
         std::fs::write(&active, b"active").unwrap();
         reap_stale_temps(dir.path(), CAS_TEMP_REAP_AGE);
         assert!(active.exists(), "young temps are never raced");
+    }
+
+    /// Publish reports whether it created the object or deduped onto one.
+    #[test]
+    fn put_outcome_distinguishes_create_from_dedup() {
+        let root = tempdir().unwrap();
+        let cas = SharedCas::open(root.path());
+        let first = cas.put_outcome(b"payload", CAS_MAX_OBJECT_BYTES).unwrap();
+        assert!(first.created);
+        let second = cas.put_outcome(b"payload", CAS_MAX_OBJECT_BYTES).unwrap();
+        assert!(!second.created);
+        assert_eq!(first.hash, second.hash);
+    }
+
+    /// A wrong caller-supplied digest writes nothing at all.
+    #[test]
+    fn put_prehashed_rejects_a_wrong_digest_without_writing() {
+        let root = tempdir().unwrap();
+        let cas = SharedCas::open(root.path());
+        let real = content_hash_hex(b"payload");
+        let wrong = content_hash_hex(b"other");
+        let err = cas.put_prehashed(&wrong, b"payload").unwrap_err();
+        assert_eq!(err.class(), "digest_mismatch");
+        assert!(!cas.contains(&wrong));
+        assert!(!cas.contains(&real), "nothing is published on mismatch");
+        assert!(cas.put_prehashed(&real, b"payload").unwrap().created);
+    }
+
+    /// Deduping refreshes the mtime, because a dedup is a fresh reference and
+    /// an age-based retention policy that never sees it collects a live object.
+    #[test]
+    fn dedup_refreshes_the_modification_time() {
+        let root = tempdir().unwrap();
+        let cas = SharedCas::open(root.path());
+        let hash = cas.put(b"payload").unwrap();
+        let path = cas.object_path(&hash);
+        let old = std::time::SystemTime::now() - Duration::from_secs(7 * 24 * 3600);
+        fs::OpenOptions::new()
+            .write(true)
+            .truncate(false)
+            .open(&path)
+            .unwrap()
+            .set_times(fs::FileTimes::new().set_modified(old))
+            .unwrap();
+        let before = fs::metadata(&path).unwrap().modified().unwrap();
+        cas.put(b"payload").unwrap();
+        let after = fs::metadata(&path).unwrap().modified().unwrap();
+        assert!(after > before, "dedup must refresh mtime");
+    }
+
+    #[test]
+    fn touch_refreshes_only_existing_objects() {
+        let root = tempdir().unwrap();
+        let cas = SharedCas::open(root.path());
+        let hash = cas.put(b"payload").unwrap();
+        assert!(cas.touch(&hash).is_ok());
+        let absent = content_hash_hex(b"absent");
+        assert_eq!(cas.touch(&absent).unwrap_err().class(), "missing");
+        assert_eq!(cas.touch("nope").unwrap_err().class(), "malformed");
+    }
+
+    #[test]
+    fn list_objects_reports_objects_and_ignores_debris() {
+        let root = tempdir().unwrap();
+        let cas = SharedCas::open(root.path());
+        let a = cas.put(b"a").unwrap();
+        let b = cas.put(b"bb").unwrap();
+        let shard = cas.object_path(&a).parent().unwrap().to_path_buf();
+        fs::write(shard.join(".tmp-deadbeef-1-0"), b"debris").unwrap();
+        fs::write(shard.join("not-a-hash"), b"debris").unwrap();
+        let mut expected = vec![a, b];
+        expected.sort();
+        assert_eq!(cas.list_objects().unwrap(), expected);
+    }
+
+    #[test]
+    fn list_objects_is_empty_for_a_fresh_store() {
+        let root = tempdir().unwrap();
+        assert!(SharedCas::open(root.path())
+            .list_objects()
+            .unwrap()
+            .is_empty());
+    }
+
+    /// Removal is refused without the exclusive guard, so no caller can sweep
+    /// while publishers are free to run.
+    #[test]
+    fn removal_requires_the_exclusive_guard() {
+        let root = tempdir().unwrap();
+        let cas = SharedCas::open(root.path());
+        let hash = cas.put(b"payload").unwrap();
+        let publish_guard = cas.lock_for_publish().unwrap();
+        let err = cas.remove_object(&hash, &publish_guard).unwrap_err();
+        assert_eq!(err.class(), "policy_denied");
+        assert!(
+            cas.contains(&hash),
+            "the object must survive a refused sweep"
+        );
+        let err = cas.quarantine_object(&hash, &publish_guard).unwrap_err();
+        assert_eq!(err.class(), "policy_denied");
+        assert!(cas.contains(&hash));
+    }
+
+    #[test]
+    fn sweeping_under_the_exclusive_guard_removes_and_quarantines() {
+        let root = tempdir().unwrap();
+        let cas = SharedCas::open(root.path());
+        let doomed = cas.put(b"doomed").unwrap();
+        let kept = cas.put(b"kept").unwrap();
+        let guard = cas.lock_for_sweep().unwrap();
+        cas.remove_object(&doomed, &guard).unwrap();
+        assert!(!cas.contains(&doomed));
+        cas.quarantine_object(&kept, &guard).unwrap();
+        assert!(!cas.contains(&kept));
+        let quarantined = root
+            .path()
+            .join(crate::gc_lock::GC_DIR)
+            .join(CAS_QUARANTINE_DIR)
+            .join(&kept);
+        assert_eq!(
+            content_hash_hex(&fs::read(&quarantined).unwrap()),
+            kept,
+            "a quarantined body stays verifiable, so a wrong verdict is recoverable"
+        );
+        assert_eq!(
+            cas.remove_object(&doomed, &guard).unwrap_err().class(),
+            "missing"
+        );
+    }
+
+    /// The publish/GC race, made deterministic with channel rendezvous rather
+    /// than timing.
+    ///
+    /// A sweeper parks between its liveness decision and its unlink. Before the
+    /// coordination lock existed, a publisher could complete inside that window
+    /// and have its object deleted immediately afterwards, so publish returned
+    /// Ok for an object that no longer existed. Now the publisher is excluded
+    /// until the sweep releases, and the republished object survives.
+    #[test]
+    fn a_publisher_cannot_slip_between_a_sweep_decision_and_its_unlink() {
+        use std::sync::mpsc;
+
+        let root = tempdir().unwrap();
+        let cas = SharedCas::open(root.path());
+        let hash = cas.put(b"contested").unwrap();
+        let expected = hash.clone();
+
+        let (parked_tx, parked_rx) = mpsc::channel::<()>();
+        let (release_tx, release_rx) = mpsc::channel::<()>();
+        let sweep_root = root.path().to_path_buf();
+        let sweep_hash = hash.clone();
+
+        let sweeper = std::thread::spawn(move || {
+            let cas = SharedCas::open(&sweep_root);
+            let guard = cas.lock_for_sweep().unwrap();
+            parked_tx.send(()).unwrap();
+            release_rx.recv().unwrap();
+            cas.remove_object(&sweep_hash, &guard).unwrap();
+        });
+
+        parked_rx.recv().unwrap();
+        assert!(
+            StoreLock::try_publish(root.path()).unwrap().is_none(),
+            "a publish must not proceed while a sweep holds the guard"
+        );
+        release_tx.send(()).unwrap();
+        sweeper.join().unwrap();
+
+        assert!(!cas.contains(&hash), "the sweep completed its removal");
+        let republished = cas.put(b"contested").unwrap();
+        assert_eq!(republished, expected);
+        assert_eq!(
+            cas.get_verified(&republished).unwrap(),
+            b"contested",
+            "a publish that returns Ok must leave a readable object behind"
+        );
+    }
+
+    /// Every historical engine temp shape is reaped, not just this crate's.
+    #[test]
+    fn all_engine_temp_shapes_are_reaped() {
+        let dir = tempdir().unwrap();
+        let hash = content_hash_hex(b"x");
+        let shapes = [
+            format!(".tmp-{}-{}-0", &hash[..8], std::process::id()),
+            format!(".tmp-{hash}-1234567890-0.blob"),
+            format!("{hash}.{}.0.tmp", std::process::id()),
+        ];
+        let stale = std::time::SystemTime::now() - CAS_TEMP_REAP_AGE - Duration::from_secs(60);
+        for shape in &shapes {
+            let path = dir.path().join(shape);
+            fs::write(&path, b"debris").unwrap();
+            fs::OpenOptions::new()
+                .write(true)
+                .truncate(false)
+                .open(&path)
+                .unwrap()
+                .set_times(fs::FileTimes::new().set_modified(stale))
+                .unwrap();
+        }
+        reap_stale_temps(dir.path(), CAS_TEMP_REAP_AGE);
+        for shape in &shapes {
+            assert!(
+                !dir.path().join(shape).exists(),
+                "stale temp left behind: {shape}"
+            );
+        }
     }
 }
