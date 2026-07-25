@@ -137,9 +137,23 @@ Work has already been duplicated because a fix landed on `main` while its bead
 stayed open. If you fix something that has no bead, file it and close it in the
 same push so the tracker matches reality.
 
-**Claim the FILE, not just the bead.** Beads claim work items, but two agents
-holding different beads can still land in the same file, which is exactly how
-the collisions in zerostack-xyk happened. Announce the file before you edit it:
+**Claim the bead atomically, and check who else is claiming.** `br` has this
+built in; use it rather than a bare `--status` edit, which can race:
+
+```bash
+br update <id> --claim               # atomic: assignee=actor + in_progress
+br coordination status               # every in-progress claim, with stale evidence
+```
+
+`br coordination status` classifies each claim as fresh/stale/abandoned
+(thresholds 120m/480m) and tells you whether reclaiming is allowed by policy.
+Read it before assuming an in-progress bead is abandoned.
+
+**Then claim the FILE, which is a separate problem.** `br` claims ISSUES and has
+no concept of paths, so two agents holding two different, correctly claimed beads
+can still land in the same file. That is exactly how the collisions in
+zerostack-xyk happened, and no amount of bead hygiene prevents it. Announce the
+file before you edit it:
 
 ```bash
 python3 scripts/agent_lock.py list                     # what is everyone in?
