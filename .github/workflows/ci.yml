@@ -1,13 +1,16 @@
 name: ci
 
+# MANUAL ONLY (workflow_dispatch). Per repo policy, no automatic triggers on
+# push, pull_request, or schedule: this repo receives many small commits and
+# automatic runs burn the GitHub Actions budget. Run from the Actions tab.
+#
+# The conformance-freshness job previously justified a daily cron, because the
+# reports attest to engine revisions this repo does not control and can go
+# stale with no commit here. That tradeoff no longer holds: freshness is
+# checked when this workflow is dispatched, and staleness is tracked as work
+# rather than as a nightly billed run.
 on:
-  push:
-    branches: [main]
-  pull_request:
-  # The conformance reports attest to engine revisions that this repo does not
-  # control, so freshness has to be checked on a clock as well as on a push.
-  schedule:
-    - cron: "17 6 * * *"
+  workflow_dispatch:
 
 env:
   CARGO_TERM_COLOR: always
