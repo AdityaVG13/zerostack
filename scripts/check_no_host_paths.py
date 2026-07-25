@@ -9,9 +9,12 @@ make evidence artifacts needlessly machine-specific.
 Allowlist:
   AGENTS.md, CLAUDE.md  - the privacy-check pattern itself names /Users/
                           and /home/ as the strings it scans for.
-  .beads/issues.jsonl   - br stamps source_repo_path with an absolute
-                          path; tracked separately in zerostack-sg3 until
-                          br is configured or a pre-sync scrub lands.
+
+The beads exports are NO LONGER allowlisted. br stamps source_repo_path with
+an absolute path and has no config knob to stop it, so scripts/scrub_beads_export.py
+rewrites it before the export is staged (zerostack-sg3). Blanket-allowlisting
+the file meant the gate could not see a real leak in a bead description either,
+which is the more sensitive content of the two.
 
 Run: python3 scripts/check_no_host_paths.py
 """
@@ -32,8 +35,8 @@ HOST_PATH = re.compile(r'/Users/[A-Za-z]|/home/[A-Za-z]|C:[\\/]Users[\\/]')
 ALLOWLIST: dict[str, str] = {
     "AGENTS.md": "names /Users/ and /home/ as the strings the privacy check scans for",
     "CLAUDE.md": "same privacy-check pattern as AGENTS.md",
-    ".beads/issues.jsonl": "br stamps source_repo_path; tracked in zerostack-sg3",
-    ".beads/interactions.jsonl": "same br source_repo_path stamp as issues.jsonl",
+    "scripts/check_no_host_paths.py": "defines the host-path pattern it scans for",
+    "scripts/scrub_beads_export.py": "documents the host-path shapes it rewrites",
 }
 
 

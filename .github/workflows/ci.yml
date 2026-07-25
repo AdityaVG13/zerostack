@@ -53,6 +53,20 @@ jobs:
       # as evidence. Fail when the committed attestations age out.
       - run: python3 conformance/scripts/check_freshness.py
 
+  privacy:
+    name: no host paths in tracked files
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # The hub is public. Nothing ran this gate in CI, so the only thing
+      # stopping a leak was an agent remembering to run it by hand
+      # (zerostack-9g4, zerostack-sg3).
+      - run: python3 scripts/check_no_host_paths.py
+      # br has no knob to stop stamping source_repo_path, so the export must be
+      # scrubbed before it is staged. --check fails rather than rewriting, so CI
+      # reports an unscrubbed export instead of silently fixing it and passing.
+      - run: python3 scripts/scrub_beads_export.py --check
+
   drift-guards:
     name: cross-engine drift guards
     runs-on: ubuntu-latest

@@ -48,8 +48,12 @@ Run documentation privacy checks, then the conformance suite when its Rust toolc
 ~~~sh
 rg -n '/Users/|/home/|BEGIN .*PRIVATE KEY|api[_-]?key|password' README.md docs AGENTS.md benchmarks conformance
 python3 scripts/check_no_host_paths.py
+python3 scripts/scrub_beads_export.py --check
 cargo test --manifest-path conformance/Cargo.toml
 ~~~
+
+Both privacy gates now run in CI, so a leak fails the build rather than relying
+on an agent remembering to run them.
 
 <!-- BEGIN BEADS INTEGRATION v:2 tracker:br -->
 ## Issue Tracking with br (beads_rust)
@@ -86,13 +90,22 @@ This protocol is subordinate to explicit user, repository, and orchestrator inst
 1. **File issues for remaining work** - `br create` anything that needs follow-up
 2. **Run quality gates** (if code changed) - tests, linters, builds
 3. **Update issue status** - close finished work, update in-progress items
-4. **Export and stage:**
+4. **Export, scrub, and stage:**
    ```bash
    br sync --flush-only
+   python3 scripts/scrub_beads_export.py
    git add .beads/
    git commit -m "sync beads"
    ```
    Do not push without an explicit request.
+
+   The scrub is required, not optional. `br` stamps every issue record with
+   `source_repo_path`, an absolute host path, and 0.2.16 has no config knob to
+   omit or relativize it. `.beads/issues.jsonl` is tracked in this public repo,
+   so an unscrubbed export publishes the author's username and directory layout
+   on every issue. The scrub rewrites that field to the repo name and relativizes
+   host paths in descriptions and comments; it is idempotent and safe to re-run.
+   The other three repos use the same script from here.
 5. **Hand off** - summarize changes, validation, issue status, and any blocked step
 
 **Critical rules:**
