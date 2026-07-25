@@ -105,6 +105,27 @@ That is the supported way to build or test against pristine `main`, and it
 costs nothing. If you must stash, scope it to your own explicit paths rather
 than stashing the whole tree.
 
+**Claim atomically, and hold the claim only while you are working.** The
+tracker is the lock:
+
+```bash
+br update <id> --claim          # atomic: assignee=you + status=in_progress
+br coordination status          # who holds what, and how stale it is
+```
+
+`br update --claim` is a single atomic operation; setting `--status` and
+`--assignee` in separate calls is not, and races another session claiming the
+same bead. Run `br coordination status` before picking up work: it lists every
+in-progress claim with its holder and age, and flags stale ones (`fresh` under
+120 minutes, abandoned after 480).
+
+A claim you are not actively working is worse than no claim, because it hides
+the bead from `br ready` while nobody advances it. If you stop, release it:
+
+```bash
+br update <id> --status open --assignee ""
+```
+
 **An open bead does not mean the work is undone.** Before claiming, search the
 history as well as the tracker:
 
