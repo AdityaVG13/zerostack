@@ -881,7 +881,32 @@ fn check_sandbox_denial(client: &mut McpClient, execute_tool: &str) -> CheckResu
     CheckResult::with_details("G10", "sandbox-denial", details)
 }
 
+/// Pull the substrate's JSON payload out of an MCP tool response.
+///
+/// MCP lets a server return its structured payload in several places, and the
+/// engines genuinely use different ones. This missed every GraphZero error
+/// envelope until `structuredContent` was handled: GraphZero puts the payload
+/// in a `content[]` entry of type `structuredContent` and repeats it at the
+/// top level, while `content[0].text` holds a human-readable ack line that is
+/// deliberately not JSON. The harness parsed only `json` and `text`, so it
+/// reported "did not return structured error" for responses that were
+/// correctly structured all along. That is a harness bug, not an engine bug,
+/// and it was scoring conformance failures against compliant engines.
 fn extract_json_payload(response: &Value) -> Option<Value> {
+    // A tool result may carry the payload top-level under structuredContent.
+    if let Some(structured) = response.get("structuredContent") {
+        if structured.is_object() {
+            return Some(structured.clone());
+        }
+    }
+    if let Some(structured) = response
+        .get("result")
+        .and_then(|r| r.get("structuredContent"))
+    {
+        if structured.is_object() {
+            return Some(structured.clone());
+        }
+    }
     if response.get("ack").is_some()
         || response.get("contract_version").is_some()
         || response.get("telemetry").is_some()
@@ -889,29 +914,44 @@ fn extract_json_payload(response: &Value) -> Option<Value> {
         return Some(response.clone());
     }
     if let Some(result) = response.get("result") {
-        if let Some(content) = result.get("content").and_then(Value::as_array) {
-            for item in content {
-                if let Some(json) = item.get("json") {
-                    return Some(json.clone());
-                }
-                if let Some(text) = item.get("text").and_then(Value::as_str) {
-                    if let Ok(parsed) = serde_json::from_str(text) {
-                        return Some(parsed);
-                    }
-                }
-            }
+        if let Some(payload) = result
+            .get("content")
+            .and_then(Value::as_array)
+            .and_then(|c| payload_from_content(c))
+        {
+            return Some(payload);
         }
         if result.is_object() {
             return Some(result.clone());
         }
     }
-    if let Some(content) = response.get("content").and_then(Value::as_array) {
-        for item in content {
-            if let Some(json) = item.get("json") {
-                return Some(json.clone());
+    if let Some(payload) = response
+        .get("content")
+        .and_then(Value::as_array)
+        .and_then(|c| payload_from_content(c))
+    {
+        return Some(payload);
+    }
+    None
+}
+
+/// Scan one `content[]` array for a structured payload, preferring explicitly
+/// structured entries over text that merely happens to parse as JSON.
+fn payload_from_content(content: &[Value]) -> Option<Value> {
+    for item in content {
+        if let Some(structured) = item.get("structuredContent") {
+            if structured.is_object() {
+                return Some(structured.clone());
             }
-            if let Some(text) = item.get("text").and_then(Value::as_str) {
-                if let Ok(parsed) = serde_json::from_str(text) {
+        }
+        if let Some(json) = item.get("json") {
+            return Some(json.clone());
+        }
+    }
+    for item in content {
+        if let Some(text) = item.get("text").and_then(Value::as_str) {
+            if let Ok(parsed) = serde_json::from_str::<Value>(text) {
+                if parsed.is_object() || parsed.is_array() {
                     return Some(parsed);
                 }
             }
