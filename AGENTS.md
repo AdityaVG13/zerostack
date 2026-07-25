@@ -137,6 +137,32 @@ Work has already been duplicated because a fix landed on `main` while its bead
 stayed open. If you fix something that has no bead, file it and close it in the
 same push so the tracker matches reality.
 
+**Claim the FILE, not just the bead.** Beads claim work items, but two agents
+holding different beads can still land in the same file, which is exactly how
+the collisions in zerostack-xyk happened. Announce the file before you edit it:
+
+```bash
+python3 scripts/agent_lock.py list                     # what is everyone in?
+python3 scripts/agent_lock.py check  <repo>/<path> --who <you>   # exit 1 if held
+python3 scripts/agent_lock.py claim  <repo>/<path> --who <you> --why "<bead id>"
+python3 scripts/agent_lock.py release <repo>/<path> --who <you>  # or --all-mine
+```
+
+Paths are `Repo/relative/path`, so one namespace covers all four repos from the
+hub. State is `.agent-locks.json` at the hub root, gitignored, never committed.
+Set `AGENT_NAME` and `--who` can be omitted.
+
+The lock is **advisory**: it cannot stop a write, and it is not trying to. Its
+job is to make an intention visible *before* the edit so a peer can pick
+different work. Locks expire after 2h (`--ttl`) so a dead session cannot wedge a
+file forever; a stale lock is reported `[STALE, breakable]` and can be taken
+without `--force`. Release when you are done, and prefer
+`release --all-mine` at the end of a work item over leaving locks lying around.
+
+If a file you need is held, do not just wait or barge in: mail the holder. The
+common case is that they are elsewhere in the file and a quick split is cheaper
+than either of you blocking.
+
 **Push small, often, and rebased onto `main`.** Commits parked on a private
 branch are invisible to every other session, which is precisely what causes
 duplicate effort. Pull before you start an item, not just before you push, and

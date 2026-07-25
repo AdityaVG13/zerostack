@@ -65,6 +65,12 @@ archive/research/
 # Internal historical material (local only)
 archive/
 
+# Advisory cross-session file locks (scripts/agent_lock.py). Local coordination
+# state between concurrent agent sessions sharing this checkout, not project
+# content. Committing it would publish agent names and churn on every claim.
+.agent-locks.json
+.agent-locks.json.tmp
+
 # Beads / Dolt files (added by bd init)
 .dolt/
 *.db
