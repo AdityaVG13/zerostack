@@ -159,7 +159,10 @@ impl ZeroScheme {
 
     /// Scheme lookup against [ZeroScheme::ALL].
     pub fn parse(s: &str) -> Option<Self> {
-        Self::ALL.iter().copied().find(|scheme| scheme.as_str() == s)
+        Self::ALL
+            .iter()
+            .copied()
+            .find(|scheme| scheme.as_str() == s)
     }
 }
 
@@ -168,10 +171,16 @@ pub enum ZeroFragment {
     None,
     /// Zero-based half-open byte span. start == end is an allowed empty
     /// selection; start > end never parses.
-    Bytes { start: u64, end: u64 },
+    Bytes {
+        start: u64,
+        end: u64,
+    },
     /// One-based inclusive line span. start >= 1 and start <= end are
     /// enforced at parse time; the real line count is checked at selection.
-    Lines { start: u64, end: u64 },
+    Lines {
+        start: u64,
+        end: u64,
+    },
 }
 
 /// A parsed canonical ZeroRef v1 portable blob ref.
@@ -264,15 +273,33 @@ impl ZeroRefV1 {
         })
     }
 
-    /// Apply the fragment to already-verified blob bytes with strict v1
-    /// bounds: out-of-range spans error, they never clamp.
+    /// Apply the fragment using the canonical v1 bounds policy.
     pub fn select<'a>(&self, bytes: &'a [u8]) -> Result<&'a [u8], ZeroRefError> {
         select_fragment(bytes, &self.fragment, &self.to_string())
     }
 
+    /// Apply the fragment with an explicit line-end policy. This is for
+    /// compatibility checks and strict validation, not engine defaults.
+    pub fn select_with_policy<'a>(
+        &self,
+        bytes: &'a [u8],
+        policy: LineEndPolicy,
+    ) -> Result<&'a [u8], ZeroRefError> {
+        select_fragment_with_policy(bytes, &self.fragment, &self.to_string(), policy)
+    }
+
     /// Verify the complete unfragmented bytes against the ref identity, then
-    /// select the fragment. Verification always precedes selection.
+    /// select the fragment with the canonical v1 policy.
     pub fn verify_and_select<'a>(&self, bytes: &'a [u8]) -> Result<&'a [u8], ZeroRefError> {
+        self.verify_and_select_with_policy(bytes, CANONICAL_LINE_END_POLICY)
+    }
+
+    /// Verify the complete bytes, then select with an explicit line-end policy.
+    pub fn verify_and_select_with_policy<'a>(
+        &self,
+        bytes: &'a [u8],
+        policy: LineEndPolicy,
+    ) -> Result<&'a [u8], ZeroRefError> {
         let actual = content_hash_hex(bytes);
         if actual != self.hash {
             return Err(ZeroRefError::new(
@@ -280,7 +307,7 @@ impl ZeroRefV1 {
                 format!("bytes hash to {actual}, ref claims {}", self.hash),
             ));
         }
-        self.select(bytes)
+        self.select_with_policy(bytes, policy)
     }
 }
 
@@ -325,24 +352,26 @@ fn parse_fragment(f: &str, input: &str) -> Result<ZeroFragment, ZeroRefError> {
 
 /// How line spans whose end runs past EOF are treated at selection time.
 ///
-/// Strict is the v1 contract default (golden vectors). ClampEnd is the
-/// FSZero read-surface behavior (fszero-00vq): a system-generated window
-/// like L1-200 over a shorter file succeeds by clamping end to the last
-/// line, while a start past EOF still errors with a corrective message.
+/// The canonical v1 policy is LineEndPolicy::ClampEnd. Strict remains
+/// available for compatibility checks and callers that validate exact bounds.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum LineEndPolicy {
     Strict,
     ClampEnd,
 }
 
-/// Shared strict fragment selector: bounds are exact and never clamp.
+/// Canonical ZeroRef v1 line-end policy. Byte bounds and line starts remain strict.
+pub const CANONICAL_LINE_END_POLICY: LineEndPolicy = LineEndPolicy::ClampEnd;
+
+/// Shared canonical fragment selector: byte bounds and line starts are strict;
+/// a line end past EOF clamps to the final line.
 /// Callers must digest-verify the complete object bytes first.
 pub fn select_fragment<'a>(
     bytes: &'a [u8],
     fragment: &ZeroFragment,
     context: &str,
 ) -> Result<&'a [u8], ZeroRefError> {
-    select_fragment_with_policy(bytes, fragment, context, LineEndPolicy::Strict)
+    select_fragment_with_policy(bytes, fragment, context, CANONICAL_LINE_END_POLICY)
 }
 
 /// Fragment selector with an explicit line-end policy. Byte spans are always

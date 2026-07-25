@@ -4,7 +4,7 @@
 //! decision that bumps fixture_version everywhere atomically.
 
 use serde_json::Value;
-use zero_ref::{ZeroRefV1, content_hash_hex};
+use zero_ref::{content_hash_hex, LineEndPolicy, ZeroRefV1};
 
 fn fixture() -> Value {
     let raw = include_str!("../fixtures/zeroref_v1_vectors.json");
@@ -22,7 +22,10 @@ fn hex_decode(s: &str) -> Vec<u8> {
 fn fixture_metadata_matches_crate() {
     let f = fixture();
     assert_eq!(f["zeroref_version"], zero_ref::ZEROREF_VERSION);
-    assert_eq!(f["fixture_version"], 1);
+    assert_eq!(f["fixture_version"], 2);
+    assert_eq!(f["selection_policy"]["byte"], "strict");
+    assert_eq!(f["selection_policy"]["line_start"], "strict");
+    assert_eq!(f["selection_policy"]["line_end"], "clamp");
     let classes: Vec<&str> = f["error_classes"]
         .as_array()
         .unwrap()
@@ -33,7 +36,10 @@ fn fixture_metadata_matches_crate() {
         .iter()
         .map(|c| c.as_str())
         .collect();
-    assert_eq!(classes, ours, "error classes must match the fixture verbatim");
+    assert_eq!(
+        classes, ours,
+        "error classes must match the fixture verbatim"
+    );
 }
 
 #[test]
@@ -47,6 +53,28 @@ fn fixture_blobs_hash_to_their_identities() {
             "blob '{name}' identity"
         );
     }
+}
+
+#[test]
+fn canonical_default_clamps_line_end_at_eof() {
+    let f = fixture();
+    let v = f["vectors"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|v| v["name"] == "lines_end_past_count")
+        .unwrap();
+    let bytes = hex_decode(
+        f["blobs"][v["blob"].as_str().unwrap()]["bytes_hex"]
+            .as_str()
+            .unwrap(),
+    );
+    let r = ZeroRefV1::parse(v["input"].as_str().unwrap()).unwrap();
+    let selected = r.verify_and_select(&bytes).unwrap();
+    assert_eq!(
+        selected,
+        &hex_decode(v["selected_hex"].as_str().unwrap())[..]
+    );
 }
 
 #[test]
@@ -66,18 +94,24 @@ fn all_vectors_conform() {
                     "vector '{name}' canonical form"
                 );
                 if let Some(blob_name) = v.get("blob").and_then(|b| b.as_str()) {
-                    let bytes =
-                        hex_decode(blobs[blob_name]["bytes_hex"].as_str().unwrap());
-                    match r.verify_and_select(&bytes) {
+                    let bytes = hex_decode(blobs[blob_name]["bytes_hex"].as_str().unwrap());
+                    let policy = match v.get("line_end_policy").and_then(|p| p.as_str()) {
+                        None | Some("canonical") => LineEndPolicy::ClampEnd,
+                        Some("strict") => LineEndPolicy::Strict,
+                        Some(other) => {
+                            panic!("vector '{name}' has unknown line_end_policy '{other}'")
+                        }
+                    };
+                    match r.verify_and_select_with_policy(&bytes, policy) {
                         Ok(selected) => {
-                            let expected =
-                                hex_decode(v["selected_hex"].as_str().unwrap());
+                            let expected = hex_decode(v["selected_hex"].as_str().unwrap());
                             assert_eq!(selected, &expected[..], "vector '{name}' selection");
                         }
                         Err(e) => {
-                            let expected_class = v["selection_error"]
-                                .as_str()
-                                .unwrap_or_else(|| panic!("vector '{name}' selected unexpectedly failed: {e}"));
+                            let expected_class =
+                                v["selection_error"].as_str().unwrap_or_else(|| {
+                                    panic!("vector '{name}' selected unexpectedly failed: {e}")
+                                });
                             assert_eq!(
                                 e.class.as_str(),
                                 expected_class,
@@ -88,7 +122,9 @@ fn all_vectors_conform() {
                 }
             }
             "error" => {
-                let e = parsed.err().unwrap_or_else(|| panic!("vector '{name}' must fail"));
+                let e = parsed
+                    .err()
+                    .unwrap_or_else(|| panic!("vector '{name}' must fail"));
                 assert_eq!(
                     e.class.as_str(),
                     v["error_class"].as_str().unwrap(),

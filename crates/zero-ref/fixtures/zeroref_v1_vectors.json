@@ -1,7 +1,7 @@
 {
   "schema": "zeroref-golden-vectors",
   "zeroref_version": "v1",
-  "fixture_version": 1,
+  "fixture_version": 2,
   "canonical_owner": "GraphZero docs/adr/002-zeroref-v1.md (bead graphzero-zeroref-v1-shared-cas-1ghi.1)",
   "notes": "Shared verbatim across GraphZero, FSZero, and TokenZero. Any change is a reviewed cross-repo decision that bumps fixture_version in all three repos atomically.",
   "error_classes": [
@@ -412,8 +412,18 @@
       "parse": "ok",
       "canonical": "gz://blob/4fdbc441ea7b546100e086ac1e4fc5ae6749b7314311c99db05be450eca12996#L1-4",
       "blob": "alpha",
+      "notes": "canonical line_end=clamp selects through the final available line",
+      "selected_hex": "616c7068610a626574610a67616d6d610a"
+    },
+    {
+      "name": "lines_end_past_count_strict_override",
+      "input": "gz://blob/4fdbc441ea7b546100e086ac1e4fc5ae6749b7314311c99db05be450eca12996#L1-4",
+      "parse": "ok",
+      "canonical": "gz://blob/4fdbc441ea7b546100e086ac1e4fc5ae6749b7314311c99db05be450eca12996#L1-4",
+      "blob": "alpha",
+      "notes": "explicit strict validation rejects a line end past EOF",
       "selection_error": "range_out_of_bounds",
-      "notes": "alpha has exactly 3 lines; never clamp"
+      "line_end_policy": "strict"
     },
     {
       "name": "lines_start_past_count",
@@ -450,5 +460,10 @@
       "selection_error": "digest_mismatch",
       "notes": "verification of the complete unfragmented bytes precedes fragment selection"
     }
-  ]
+  ],
+  "selection_policy": {
+    "byte": "strict",
+    "line_start": "strict",
+    "line_end": "clamp"
+  }
 }
