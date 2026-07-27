@@ -6,10 +6,14 @@ gate (zerostack-9g4). Host paths in committed artifacts are cosmetic
 leakage, not a functional defect, but they are noise in a public repo and
 make evidence artifacts needlessly machine-specific.
 
-Allowlist:
-  AGENTS.md - the privacy-check pattern itself names /Users/ and /home/
-              as the strings it scans for. CLAUDE.md is NOT allowlisted:
-              real host paths there must fail the gate.
+Allowlist policy (line-scoped for docs):
+
+- Whole-file allowlist ONLY for scripts that *define* the host-path patterns
+  they scan/rewrite (this file and scrub_beads_export.py).
+- AGENTS.md is NOT whole-file allowlisted. Only lines that document the
+  privacy-check recipe (the rg pattern strings themselves) are skipped.
+  A real `/Users/<name>/...` path elsewhere in AGENTS.md fails the gate.
+- CLAUDE.md is not allowlisted at all.
 
 The beads exports are NO LONGER allowlisted. br stamps source_repo_path with
 an absolute path and has no config knob to stop it, so scripts/scrub_beads_export.py
@@ -30,13 +34,24 @@ REPO = Path(__file__).resolve().parent.parent
 
 # Absolute host path shapes. Windows C:\Users\ is covered by the Users
 # pattern after forward-slash normalization in json.
-HOST_PATH = re.compile(r'/Users/[A-Za-z]|/home/[A-Za-z]|C:[\\/]Users[\\/]')
+HOST_PATH = re.compile(r"/Users/[A-Za-z]|/home/[A-Za-z]|C:[\\/]Users[\\/]")
 
-# file:reason pairs that are legitimate and must not be flagged.
-ALLOWLIST: dict[str, str] = {
-    "AGENTS.md": "names /Users/ and /home/ as the strings the privacy check scans for",
+# Whole-file allowlist: only files that define the scan/rewrite patterns.
+ALLOWLIST_FILES: dict[str, str] = {
     "scripts/check_no_host_paths.py": "defines the host-path pattern it scans for",
     "scripts/scrub_beads_export.py": "documents the host-path shapes it rewrites",
+}
+
+# Line-scoped allowlist: host-path lines are OK only when they match a doc pattern.
+# Real username paths (e.g. /Users/aditya/...) must not match these.
+ALLOWLIST_LINE_RES: dict[str, list[re.Pattern[str]]] = {
+    "AGENTS.md": [
+        # Privacy check recipe listing scan strings (not a personal path).
+        re.compile(r"rg -n ['\"].*/Users/\|/home/\|"),
+        # Prose that names the scan strings without a username segment.
+        re.compile(r"/Users/\|/home/\|BEGIN"),
+        re.compile(r"names /Users/ and /home/ as the strings"),
+    ],
 }
 
 
@@ -47,10 +62,16 @@ def tracked_files() -> list[str]:
     return [line for line in out.stdout.splitlines() if line.strip()]
 
 
+def line_allowlisted(rel: str, line: str) -> bool:
+    patterns = ALLOWLIST_LINE_RES.get(rel)
+    if not patterns:
+        return False
+    return any(p.search(line) for p in patterns)
+
+
 def main() -> int:
     offenders: list[str] = []
     for rel in tracked_files():
-        reason = ALLOWLIST.get(rel)
         path = REPO / rel
         if not path.is_file():
             continue
@@ -60,20 +81,24 @@ def main() -> int:
             continue
         if not HOST_PATH.search(text):
             continue
-        if reason is not None:
+        if rel in ALLOWLIST_FILES:
             continue
         for i, line in enumerate(text.splitlines(), 1):
-            if HOST_PATH.search(line):
-                offenders.append(f"{rel}:{i}: {line.strip()[:120]}")
-                break
+            if not HOST_PATH.search(line):
+                continue
+            if line_allowlisted(rel, line):
+                continue
+            offenders.append(f"{rel}:{i}: {line.strip()[:120]}")
+            break
 
     if offenders:
         print("host paths found in tracked files:", file=sys.stderr)
         for o in offenders:
             print(f"  {o}", file=sys.stderr)
         print(
-            "\nIf a path is legitimate, add the file to ALLOWLIST in "
-            "scripts/check_no_host_paths.py with a reason.",
+            "\nIf a path is legitimate documentation of the scan pattern, add a "
+            "line regex under ALLOWLIST_LINE_RES in scripts/check_no_host_paths.py. "
+            "Do not whole-file allowlist agent docs.",
             file=sys.stderr,
         )
         return 1

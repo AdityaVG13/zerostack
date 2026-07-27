@@ -16,9 +16,11 @@ So this is a scrub, run before the export is staged. Two transformations:
    allows string) without carrying host detail. Fleet routing that needs a real
    local path can recompute it from the checkout it is standing in.
 
-2. Absolute host paths appearing in free-text descriptions and comments are
-   rewritten to `~/`-relative form. This is lossless for a human reader and
-   preserves meaning, unlike deleting the path.
+2. Absolute host paths appearing in **any** string field of an issue record
+   (recursive walk of dict/list values) are rewritten to `~/`-relative form.
+   This is lossless for a human reader and preserves meaning, unlike deleting
+   the path. Nested structures (labels metadata, agent_context blobs, etc.)
+   are covered — not only a fixed top-level field list.
 
 Idempotent: running it twice is a no-op, which matters because it runs on every
 sync and must not fight br.
@@ -33,6 +35,7 @@ import json
 import re
 import sys
 from pathlib import Path
+from typing import Any
 
 # Any absolute home-directory path, capturing what follows the user segment so
 # it can be re-expressed as ~/... rather than dropped.
@@ -48,36 +51,47 @@ def relativize(text: str) -> str:
     return WIN_HOME_PATH.sub("~", text)
 
 
+def scrub_value(value: Any, *, key: str | None = None, source_repo: str | None = None) -> tuple[Any, bool]:
+    """Recursively scrub strings in JSON-compatible values. Returns (value, changed)."""
+    if isinstance(value, str):
+        if key == "source_repo_path" and value:
+            replacement = source_repo or Path(value).name
+            if value != replacement:
+                return replacement, True
+            return value, False
+        scrubbed = relativize(value)
+        return scrubbed, scrubbed != value
+
+    if isinstance(value, dict):
+        nested_source = value.get("source_repo") if isinstance(value.get("source_repo"), str) else source_repo
+        changed = False
+        out: dict[str, Any] = {}
+        for k, v in value.items():
+            nv, c = scrub_value(v, key=k if isinstance(k, str) else None, source_repo=nested_source)
+            out[k] = nv
+            changed = changed or c
+        # Mutate in place when caller passed a dict we own (record)
+        if changed:
+            value.clear()
+            value.update(out)
+        return value, changed
+
+    if isinstance(value, list):
+        changed = False
+        for i, item in enumerate(value):
+            nv, c = scrub_value(item, key=None, source_repo=source_repo)
+            if c:
+                value[i] = nv
+                changed = True
+        return value, changed
+
+    return value, False
+
+
 def scrub_record(record: dict) -> bool:
-    """Scrub one issue record in place. Returns True if anything changed."""
-    changed = False
-
-    # The systemic case: br writes this on every record.
-    path_value = record.get("source_repo_path")
-    if isinstance(path_value, str) and path_value:
-        replacement = record.get("source_repo") or Path(path_value).name
-        if path_value != replacement:
-            record["source_repo_path"] = replacement
-            changed = True
-
-    for field in ("title", "description", "design", "acceptance_criteria", "notes", "close_reason"):
-        value = record.get(field)
-        if isinstance(value, str) and value:
-            scrubbed = relativize(value)
-            if scrubbed != value:
-                record[field] = scrubbed
-                changed = True
-
-    for comment in record.get("comments") or []:
-        if not isinstance(comment, dict):
-            continue
-        body = comment.get("text")
-        if isinstance(body, str) and body:
-            scrubbed = relativize(body)
-            if scrubbed != body:
-                comment["text"] = scrubbed
-                changed = True
-
+    """Scrub one issue record in place via recursive walk. Returns True if changed."""
+    source_repo = record.get("source_repo") if isinstance(record.get("source_repo"), str) else None
+    _, changed = scrub_value(record, source_repo=source_repo)
     return changed
 
 
