@@ -1,0 +1,39 @@
+[
+  {
+    "kind": "handshake",
+    "request": {
+      "protocol_version": "zerostack.raw_worker.v2",
+      "root": "/fixture/repo",
+      "session_id": "session-1",
+      "expected_engine": "fszero",
+      "expected_worker_revision": "fixture-revision",
+      "expected_contract_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "expected_registry_digest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+    }
+  },
+  {
+    "kind": "call",
+    "request": {
+      "request_id": "request-1",
+      "op": "read",
+      "args": { "path": "README.md" },
+      "deadline_unix_ms": 4102444800000,
+      "trace": {
+        "runtime_id": "runtime-1",
+        "cell_id": "cell-1",
+        "request_id": "request-1",
+        "trace_id": "trace-1",
+        "worker_revision": "fixture-revision",
+        "contract_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      }
+    }
+  },
+  {
+    "kind": "cancel",
+    "request": { "request_id": "request-1", "reason": "fixture cancellation" }
+  },
+  {
+    "kind": "shutdown",
+    "request": { "reason": "fixture complete" }
+  }
+]

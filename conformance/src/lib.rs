@@ -188,6 +188,7 @@ pub fn schema_paths() -> Vec<PathBuf> {
         "schemas/error.schema.json",
         "schemas/execution-record.schema.json",
         "schemas/limits.schema.json",
+        "schemas/raw-worker-v2.schema.json",
     ]
     .into_iter()
     .map(PathBuf::from)
