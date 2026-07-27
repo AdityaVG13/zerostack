@@ -12,9 +12,18 @@
 //! assertions, so adopting this crate changes no digests and no behavior.
 
 pub mod digest;
+pub mod raw_worker;
 pub mod schema;
 
 pub use digest::{contract_digest, contract_digest_hex, sha256, sha256_hex};
+pub use raw_worker::{
+    decode_request_frame, encode_frame, raw_worker_protocol_digest_hex,
+    raw_worker_protocol_manifest, validate_handshake_request, ApprovalMetadata, ApprovalState,
+    CallRequest, CancelRequest, EffectClass, FrameCodecError, HandshakeAck, HandshakeRequest,
+    ProtocolLimits, RefOwnership, RevertMetadata, ShutdownRequest, SnapshotIdentity, WorkerBinding,
+    WorkerCapabilities, WorkerError, WorkerRequestFrame, WorkerResponseFrame, WorkerResult,
+    WorkerResultMetadata, WorkerTrace, DEFAULT_MAX_FRAME_BYTES, RAW_WORKER_PROTOCOL_VERSION,
+};
 pub use schema::{
     canonical_json, canonical_schema_json, normalize_schema, schema_diff, schema_fingerprint_hex,
     schema_property_keys, schema_required_keys, schemas_structurally_equal,

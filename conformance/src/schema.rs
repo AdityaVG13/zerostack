@@ -12,6 +12,7 @@ pub enum SchemaName {
     Error,
     ExecutionRecord,
     LimitsEcho,
+    RawWorkerV2,
 }
 
 impl SchemaName {
@@ -22,6 +23,7 @@ impl SchemaName {
             Self::Error => "error",
             Self::ExecutionRecord => "execution_record",
             Self::LimitsEcho => "limits_echo",
+            Self::RawWorkerV2 => "raw_worker_v2",
         }
     }
 
@@ -32,6 +34,7 @@ impl SchemaName {
             Self::Error => include_str!("../schemas/error.json"),
             Self::ExecutionRecord => include_str!("../schemas/execution_record.json"),
             Self::LimitsEcho => include_str!("../schemas/limits_echo.json"),
+            Self::RawWorkerV2 => include_str!("../schemas/raw-worker-v2.schema.json"),
         }
     }
 }
@@ -42,6 +45,7 @@ fn validator(name: SchemaName) -> &'static Validator {
     static ERR: LazyLock<Validator> = LazyLock::new(|| compile(SchemaName::Error));
     static EXE: LazyLock<Validator> = LazyLock::new(|| compile(SchemaName::ExecutionRecord));
     static LIM: LazyLock<Validator> = LazyLock::new(|| compile(SchemaName::LimitsEcho));
+    static RAW: LazyLock<Validator> = LazyLock::new(|| compile(SchemaName::RawWorkerV2));
 
     match name {
         SchemaName::CapabilityManifest => &CAP,
@@ -49,6 +53,7 @@ fn validator(name: SchemaName) -> &'static Validator {
         SchemaName::Error => &ERR,
         SchemaName::ExecutionRecord => &EXE,
         SchemaName::LimitsEcho => &LIM,
+        SchemaName::RawWorkerV2 => &RAW,
     }
 }
 
