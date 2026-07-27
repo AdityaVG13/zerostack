@@ -553,16 +553,33 @@ fn substrate_label(config: &RunConfig) -> String {
 /// then briefly required two artifacts at once. Both describe a dual-surface
 /// system that is not allowed to exist.
 fn check_exposure(config: &RunConfig) -> Result<CheckResult> {
-    let mut details = Vec::new();
     let codemode_tools: BTreeSet<String> = config.ns.tool_names().into_iter().collect();
 
     let mut client = McpClient::spawn(&config.bin, config.surface.as_str(), config.timeout)?;
     client.initialize()?;
     let served: BTreeSet<String> = client.list_tools()?.into_iter().collect();
 
-    match config.surface {
+    let mut details = check_own_tool_catalog(config.surface, served, &codemode_tools);
+    // Opposite spawn Err is a pass: fail-closed refusal of the other surface.
+    details.extend(check_opposite_surface_refused(
+        &config.bin,
+        config.surface,
+        config.timeout,
+    ));
+
+    Ok(CheckResult::with_details("G1", "exposure", details))
+}
+
+/// Probe A: own catalog matches the surface contract (exact set vs leak filter).
+fn check_own_tool_catalog(
+    surface: Surface,
+    served: BTreeSet<String>,
+    codemode_tools: &BTreeSet<String>,
+) -> Vec<String> {
+    let mut details = Vec::new();
+    match surface {
         Surface::Codemode => {
-            if served != codemode_tools {
+            if &served != codemode_tools {
                 details.push(format!(
                     "codemode artifact served {served:?}, expected exactly {codemode_tools:?}"
                 ));
@@ -578,25 +595,33 @@ fn check_exposure(config: &RunConfig) -> Result<CheckResult> {
             }
         }
     }
+    details
+}
 
-    // The other surface must fail closed. A single-surface artifact that also
-    // answers as its opposite is exactly the dual catalog the product rule
-    // forbids, so serving it is the failure, not refusing it.
-    let opposite = config.surface.opposite();
-    match McpClient::spawn(&config.bin, opposite.as_str(), config.timeout) {
-        Err(_) => {}
+/// Probe B: opposite surface must fail closed.
+///
+/// Spawn `Err` or incomplete serve (init/list not both Ok) is intentional pass.
+/// Fully serving the opposite surface is the dual-catalog failure.
+fn check_opposite_surface_refused(
+    bin: &Path,
+    own_surface: Surface,
+    timeout: Duration,
+) -> Vec<String> {
+    let opposite = own_surface.opposite();
+    match McpClient::spawn(bin, opposite.as_str(), timeout) {
+        Err(_) => Vec::new(),
         Ok(mut wrong) => {
             if wrong.initialize().is_ok() && wrong.list_tools().is_ok() {
-                details.push(format!(
+                vec![format!(
                     "artifact is built for surface {} but also served {};                      surfaces must be mutually exclusive",
-                    config.surface.as_str(),
+                    own_surface.as_str(),
                     opposite.as_str()
-                ));
+                )]
+            } else {
+                Vec::new()
             }
         }
     }
-
-    Ok(CheckResult::with_details("G1", "exposure", details))
 }
 
 fn run_live_checks(ns: Ns, client: &mut McpClient) -> Vec<CheckResult> {
@@ -809,25 +834,58 @@ fn check_limits(
     CheckResult::with_details("G7", "limits", details)
 }
 
+/// Namespace default for G8 mutation capability (lookup table, not match arms in check).
+fn expected_mutation(ns: Ns) -> &'static str {
+    match ns {
+        Ns::Fz => "allowed",
+        Ns::Tz => "denied",
+        Ns::Gz => "readonly",
+    }
+}
+
+/// Pure interpret of a mutation probe response: `(declared × ack × error_kind)`.
+///
+/// Extracted so a unit matrix can pin accept/reject cells without an MCP client.
+fn interpret_mutation_probe(
+    declared: &str,
+    ack: Option<&str>,
+    error_kind: Option<&str>,
+    payload: &Value,
+) -> Vec<String> {
+    let mut details = Vec::new();
+    match declared {
+        "allowed" => {
+            if ack == Some("X0") && error_kind == Some("policy") {
+                details.push(
+                    "allowed mutation capability rejected mutation with policy".into(),
+                );
+            }
+        }
+        "denied" | "readonly" => {
+            if error_kind != Some("policy") {
+                details.push(format!(
+                    "{declared} mutation capability did not reject with policy: {payload}"
+                ));
+            }
+        }
+        _ => details.push(format!("unknown mutation capability {declared:?}")),
+    }
+    details
+}
+
 fn check_mutation(
     ns: Ns,
     client: &mut McpClient,
     execute_tool: &str,
     manifest: Option<&Value>,
 ) -> CheckResult {
+    let expected = expected_mutation(ns);
     let declared = manifest
         .and_then(|value| value.get("mutation"))
         .and_then(Value::as_str)
-        .unwrap_or(match ns {
-            Ns::Fz => "allowed",
-            Ns::Tz => "denied",
-            Ns::Gz => "readonly",
-        });
+        .unwrap_or(expected);
     let mut details = Vec::new();
-    if (ns == Ns::Fz && declared != "allowed")
-        || (ns == Ns::Tz && declared != "denied")
-        || (ns == Ns::Gz && declared != "readonly")
-    {
+    if declared != expected {
         details.push(format!(
             "declared mutation {declared:?} does not match required namespace default"
         ));
@@ -840,23 +898,7 @@ fn check_mutation(
             let payload = extract_json_payload(&response).unwrap_or(response);
             let ack = payload.get("ack").and_then(Value::as_str);
             let error_kind = payload.pointer("/error/kind").and_then(Value::as_str);
-            match declared {
-                "allowed" => {
-                    if ack == Some("X0") && error_kind == Some("policy") {
-                        details.push(
-                            "allowed mutation capability rejected mutation with policy".into(),
-                        );
-                    }
-                }
-                "denied" | "readonly" => {
-                    if error_kind != Some("policy") {
-                        details.push(format!(
-                            "{declared} mutation capability did not reject with policy: {payload}"
-                        ));
-                    }
-                }
-                _ => details.push(format!("unknown mutation capability {declared:?}")),
-            }
+            details.extend(interpret_mutation_probe(declared, ack, error_kind, &payload));
         }
         Err(err) => details.push(format!("mutation probe failed at MCP layer: {err}")),
     }
@@ -944,47 +986,82 @@ fn check_sandbox_denial(client: &mut McpClient, execute_tool: &str) -> CheckResu
 /// reported "did not return structured error" for responses that were
 /// correctly structured all along. That is a harness bug, not an engine bug,
 /// and it was scoring conformance failures against compliant engines.
+///
+/// # Payload priority (load-bearing — do not reorder)
+///
+/// 1. top-level `structuredContent` (object)
+/// 2. `result.structuredContent` (object)
+/// 3. whole-body markers: `ack` | `contract_version` | `telemetry`
+/// 4. `result.content[]` via [`payload_from_content`] (structured/json before text)
+/// 5. bare `result` object
+/// 6. top-level `content[]` via [`payload_from_content`]
+///
+/// GraphZero class: structuredContent must win over human-readable text ack.
 fn extract_json_payload(response: &Value) -> Option<Value> {
-    // A tool result may carry the payload top-level under structuredContent.
-    if let Some(structured) = response.get("structuredContent") {
-        if structured.is_object() {
-            return Some(structured.clone());
+    for extractor in JSON_PAYLOAD_EXTRACTORS {
+        if let Some(payload) = extractor(response) {
+            return Some(payload);
         }
     }
-    if let Some(structured) = response
+    None
+}
+
+/// Ordered MCP envelope extractors. Index order IS priority (see module docs above).
+const JSON_PAYLOAD_EXTRACTORS: &[fn(&Value) -> Option<Value>] = &[
+    payload_top_level_structured,
+    payload_result_structured,
+    payload_whole_body_markers,
+    payload_result_content,
+    payload_bare_result,
+    payload_top_level_content,
+];
+
+fn payload_top_level_structured(response: &Value) -> Option<Value> {
+    response
+        .get("structuredContent")
+        .filter(|structured| structured.is_object())
+        .cloned()
+}
+
+fn payload_result_structured(response: &Value) -> Option<Value> {
+    response
         .get("result")
         .and_then(|r| r.get("structuredContent"))
-    {
-        if structured.is_object() {
-            return Some(structured.clone());
-        }
-    }
+        .filter(|structured| structured.is_object())
+        .cloned()
+}
+
+fn payload_whole_body_markers(response: &Value) -> Option<Value> {
     if response.get("ack").is_some()
         || response.get("contract_version").is_some()
         || response.get("telemetry").is_some()
     {
-        return Some(response.clone());
+        Some(response.clone())
+    } else {
+        None
     }
-    if let Some(result) = response.get("result") {
-        if let Some(payload) = result
-            .get("content")
-            .and_then(Value::as_array)
-            .and_then(|c| payload_from_content(c))
-        {
-            return Some(payload);
-        }
-        if result.is_object() {
-            return Some(result.clone());
-        }
-    }
-    if let Some(payload) = response
+}
+
+fn payload_result_content(response: &Value) -> Option<Value> {
+    response
+        .get("result")
+        .and_then(|result| result.get("content"))
+        .and_then(Value::as_array)
+        .and_then(|c| payload_from_content(c))
+}
+
+fn payload_bare_result(response: &Value) -> Option<Value> {
+    response
+        .get("result")
+        .filter(|result| result.is_object())
+        .cloned()
+}
+
+fn payload_top_level_content(response: &Value) -> Option<Value> {
+    response
         .get("content")
         .and_then(Value::as_array)
         .and_then(|c| payload_from_content(c))
-    {
-        return Some(payload);
-    }
-    None
 }
 
 /// Scan one `content[]` array for a structured payload, preferring explicitly
@@ -1085,6 +1162,13 @@ impl McpClient {
         let request = json!({ "jsonrpc": "2.0", "id": id, "method": method, "params": params });
         writeln!(self.stdin, "{}", serde_json::to_string(&request)?)?;
         self.stdin.flush()?;
+        self.wait_for_matching_response(id, method)
+    }
+
+    /// Poll stdout lines until a JSON-RPC response with `id` arrives (or timeout/EOF).
+    ///
+    /// Non-matching ids (notifications / out-of-order) are ignored; empty lines skipped.
+    fn wait_for_matching_response(&mut self, id: u64, method: &str) -> Result<Value> {
         let start = Instant::now();
         loop {
             if start.elapsed() > self.timeout {
