@@ -1,4 +1,7 @@
 {
+  "product": "ast-sgrep",
+  "not_zerostack": true,
+  "note_identity": "This aggregate file measures ast-sgrep, not ZeroStack engines. Kept under benchmarks/ for historical bakeoff context only.",
   "date": "2026-07-06",
   "hardware": "Apple M5 Max (18 cores, arm64), 48 GiB, macOS, APFS SSD",
   "commit": "f8e3969 plus release prep working tree",

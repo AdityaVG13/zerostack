@@ -29,7 +29,21 @@ while [ $# -gt 0 ]; do
   esac
 done
 
-REPOS=(/Users/aditya/AI/ZeroStack /Users/aditya/AI/TokenZero /Users/aditya/AI/FSZero /Users/aditya/AI/GraphZero)
+# Portable roots: hub = this repo; siblings TokenZero/FSZero/GraphZero next to hub.
+# Override with ZEROSTACK_FAMILY_ROOTS (newline- or colon-separated absolute paths).
+HUB="$(cd "$(dirname "$0")/.." && pwd)"
+if [ -n "${ZEROSTACK_FAMILY_ROOTS:-}" ]; then
+  # shellcheck disable=SC2206
+  IFS=$'\n': read -r -a REPOS <<< "$(printf '%s' "$ZEROSTACK_FAMILY_ROOTS" | tr ':' '\n')"
+else
+  PARENT="$(cd "$HUB/.." && pwd)"
+  REPOS=("$HUB")
+  for name in TokenZero FSZero GraphZero; do
+    if [ -d "$PARENT/$name" ]; then
+      REPOS+=("$PARENT/$name")
+    fi
+  done
+fi
 
 human() { du -sh "$1" 2>/dev/null | cut -f1; }
 

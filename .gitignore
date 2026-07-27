@@ -76,3 +76,25 @@ archive/
 *.db
 .beads-credential-key
 .beads/proxieddb/
+
+# bv (beads viewer) local config and caches
+.bv/
+
+# Private rust-unsafe-code-exorcist audit artifacts
+.unsafe-audit/
+
+# UBS private scan artifacts (local audit only)
+.ubs/
+
+# cut-branches (cyclomatic-reduction) local campaign books
+.cut-branches/
+
+# Local UB-exorcist audit workspaces (private)
+.ub-exorcism/
+
+# Adversarial review / prosecution run books (local only)
+.prosecution/
+
+# Python bytecode
+__pycache__/
+*.py[cod]

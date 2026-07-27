@@ -64,7 +64,7 @@ The result is a context pipeline, not three unrelated tools.
 | --- | --- |
 | [crates/](crates/) | Shared foundation crates used by all three engines |
 | [docs/](docs/) | Public architecture, RACC, CodeMode, and component guides |
-| [benchmarks/](benchmarks/) | Reproducible claim artifacts and aggregate results |
+| [benchmarks/](benchmarks/) | Claim artifacts; `results.json` is labeled `product: ast-sgrep` (not ZeroStack engines) |
 | [conformance/](conformance/) | Shared schemas, contract, fixtures, and checks |
 
 Engine source belongs in the three engine repositories, not here. Other harnesses and CLIs should build engine backends from each repository's `origin/main`; this hub is the canonical aggregation and documentation point.

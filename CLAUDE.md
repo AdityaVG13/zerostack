@@ -2,8 +2,8 @@
 
 Read and follow @AGENTS.md. It is the operating manual for this repo: tool
 routing, validation, the shared-working-tree git protocol, beads, and session
-completion all live there. Global conventions are in
-@/Users/aditya/.config/agents/AGENTS.md.
+completion all live there. Global conventions live in the operator's personal
+agents manual (outside this repository); do not embed machine-absolute paths here.
 
 This file adds only what those two do not cover.
 
