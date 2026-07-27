@@ -738,3 +738,35 @@ fn acquire_slots_returns_fatal_when_parent_is_not_a_directory() {
         }
     }
 }
+
+
+#[test]
+fn sanitize_permit_class_accepts_safe_tokens() {
+    assert_eq!(sanitize_permit_class("analysis"), "analysis");
+    assert_eq!(sanitize_permit_class("index"), "index");
+    assert_eq!(sanitize_permit_class("heavy"), "heavy");
+    assert_eq!(sanitize_permit_class("a.B_0-z"), "a.B_0-z");
+}
+
+#[test]
+fn sanitize_permit_class_rejects_path_metacharacters() {
+    assert_eq!(sanitize_permit_class(".."), "invalid");
+    assert_eq!(sanitize_permit_class("../evil"), "invalid");
+    assert_eq!(sanitize_permit_class("a/b"), "invalid");
+    assert_eq!(sanitize_permit_class(r"a\b"), "invalid");
+    assert_eq!(sanitize_permit_class(""), "invalid");
+    assert_eq!(sanitize_permit_class("has space"), "invalid");
+
+    let poisoned = scoped_permit_base_for("../evil", None);
+    assert_eq!(
+        poisoned,
+        PathBuf::from("/tmp/zerostack-codemode-invalid.permit")
+    );
+    let slash = scoped_permit_base_for("a/b", Some(Path::new("/tmp")));
+    let name = slash.file_name().and_then(|n| n.to_str()).unwrap();
+    assert!(
+        name.starts_with("zerostack-codemode-invalid-") && name.ends_with(".permit"),
+        "slash class must not appear in basename: {name}"
+    );
+    assert!(!name.contains('/') && !name.contains(".."));
+}

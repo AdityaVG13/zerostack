@@ -27,6 +27,8 @@ pub fn scoped_permit_base(class: &str) -> PathBuf {
 }
 
 pub fn scoped_permit_base_for(class: &str, scope_root: Option<&Path>) -> PathBuf {
+    // Untrusted class must not introduce path separators or `..` into /tmp.
+    let class = sanitize_permit_class(class);
     let Some(root) = scope_root else {
         return PathBuf::from(format!("/tmp/zerostack-codemode-{class}.permit"));
     };
@@ -35,6 +37,32 @@ pub fn scoped_permit_base_for(class: &str, scope_root: Option<&Path>) -> PathBuf
     PathBuf::from(format!(
         "/tmp/zerostack-codemode-{class}-{scope:016x}.permit"
     ))
+}
+
+/// Permit class path segment: non-empty `[A-Za-z0-9._-]+`, else `"invalid"`.
+///
+/// Used only as a single filename component under `/tmp/zerostack-codemode-…`.
+/// Rejects empty input, path separators, `..`, and any other char outside the
+/// safe charset so untrusted class strings cannot escape the /tmp basename.
+pub(crate) fn sanitize_permit_class(class: &str) -> &str {
+    if is_safe_permit_class(class) {
+        class
+    } else {
+        "invalid"
+    }
+}
+
+fn is_safe_permit_class(class: &str) -> bool {
+    // Charset alone still allows "." / ".." as a bare path segment.
+    if class.is_empty() || class == "." || class == ".." {
+        return false;
+    }
+    class.bytes().all(|b| {
+        matches!(
+            b,
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'.' | b'_' | b'-'
+        )
+    })
 }
 
 fn permit_scope_root() -> Option<PathBuf> {
