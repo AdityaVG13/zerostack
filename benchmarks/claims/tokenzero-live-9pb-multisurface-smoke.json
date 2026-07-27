@@ -1,7 +1,7 @@
 {
-  "schema": "zerostack.claim.live-9pb-18x.v1",
+  "schema": "zerostack.claim.live-9pb-multisurface-smoke.v1",
   "bead": [
-    "tokenzero-zerostack-meta-repo-18x",
+    "tokenzero-zerostack-meta-repo-smoke",
     "tokenzero-9pb"
   ],
   "generated_at": "2026-07-14T06:25:56.423Z",
@@ -74,5 +74,12 @@
     "hub_ack_ok": true,
     "telemetry_no_errors": true
   },
-  "pass": true
+  "pass": true,
+  "claim_kind": "multisurface_smoke",
+  "measured_speedup_ratio": null,
+  "note": "Smoke/plumbing proof only. Pass reflects status_bins_ok / surface ack success, not a measured speedup ratio. measured_speedup_ratio is null. Former filenames that implied a numeric speedup were renamed to *multisurface-smoke*.",
+  "historical_bead_ids": [
+    "tokenzero-zerostack-meta-repo-18x",
+    "tokenzero-9pb"
+  ]
 }

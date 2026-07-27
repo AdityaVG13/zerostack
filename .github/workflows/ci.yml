@@ -12,6 +12,10 @@ name: ci
 on:
   workflow_dispatch:
 
+# Least privilege: no write tokens, no id-token, no packages (AR-013).
+permissions:
+  contents: read
+
 env:
   CARGO_TERM_COLOR: always
   RUST_BACKTRACE: 1
@@ -21,11 +25,12 @@ jobs:
     name: fmt + clippy
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
+      # Pins: full SHAs for third-party actions (AR-013). Tags in comments for humans.
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # branch stable @ 2026-ish
         with:
           components: rustfmt, clippy
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
       - run: cargo fmt --all --check
       # Lints are errors here on purpose. zerostack-0ne recorded two
       # clippy ERRORS sitting in the tree undetected because nothing ran
@@ -36,18 +41,18 @@ jobs:
     name: test
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # branch stable
+      - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
       - run: cargo test --workspace --all-targets --no-fail-fast
 
   conformance-freshness:
     name: conformance reports are not stale
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # branch stable
+      - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
       # The suite itself must keep building: the hub is edition 2021 while all
       # three engines are edition 2024 on nightly, and the harness is the only
       # thing that spans both.
@@ -60,7 +65,7 @@ jobs:
     name: no host paths in tracked files
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       # The hub is public. Nothing ran this gate in CI, so the only thing
       # stopping a leak was an agent remembering to run it by hand
       # (zerostack-9g4, zerostack-sg3).
@@ -74,7 +79,7 @@ jobs:
     name: cross-engine drift guards
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       # Canonical JSON feeds the contract digest, and it has already drifted
       # once without anything failing. The guard needs the engine checkouts to
       # have anything to scan, so it is a no-op-with-warning when they are
