@@ -1,0 +1,9 @@
+[package]
+name = "zero-testkit"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+description = "Shared, transport-neutral ZeroStack engine promise suites"
+
+[dependencies]
+serde.workspace = true
