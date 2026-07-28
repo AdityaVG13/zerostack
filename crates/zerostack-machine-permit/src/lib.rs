@@ -1041,15 +1041,19 @@ impl NativeWake {
             }
             return Err(error);
         }
-        // SAFETY: zero is a valid initial representation for kevent before all
-        // required fields are assigned below.
-        let mut change: libc::kevent = unsafe { std::mem::zeroed() };
-        change.ident = directory as libc::uintptr_t;
-        change.filter = libc::EVFILT_VNODE;
-        change.flags = libc::EV_ADD | libc::EV_CLEAR;
-        change.fflags =
-            libc::NOTE_WRITE | libc::NOTE_DELETE | libc::NOTE_RENAME | libc::NOTE_ATTRIB;
-        // SAFETY: queue/directory are live and change points to one event.
+        let change = libc::kevent {
+            ident: directory as libc::uintptr_t,
+            filter: libc::EVFILT_VNODE,
+            flags: libc::EV_ADD | libc::EV_CLEAR,
+            fflags: libc::NOTE_WRITE
+                | libc::NOTE_DELETE
+                | libc::NOTE_RENAME
+                | libc::NOTE_ATTRIB,
+            data: 0,
+            udata: std::ptr::null_mut(),
+        };
+        // SAFETY: queue/directory are live, change is fully initialized and points to one
+        // registration event, and the null output/timeout pointers are paired with nevents=0.
         let registered =
             unsafe { libc::kevent(queue, &change, 1, std::ptr::null_mut(), 0, std::ptr::null()) };
         if registered < 0 {
@@ -1073,11 +1077,20 @@ impl NativeWake {
             tv_sec: seconds,
             tv_nsec: nanos,
         };
-        // SAFETY: queue is live, event points to writable storage, and timespec
-        // remains valid for the duration of kevent.
-        let mut event: libc::kevent = unsafe { std::mem::zeroed() };
-        let ready =
-            unsafe { libc::kevent(self.queue, std::ptr::null(), 0, &mut event, 1, &timespec) };
+        let mut event = std::mem::MaybeUninit::<libc::kevent>::uninit();
+        // SAFETY: queue is live; the null change pointer is paired with nchanges=0; event
+        // provides writable storage for one kernel output; and timespec remains valid.
+        // The output is never read, including when kevent returns zero or an error.
+        let ready = unsafe {
+            libc::kevent(
+                self.queue,
+                std::ptr::null(),
+                0,
+                event.as_mut_ptr(),
+                1,
+                &timespec,
+            )
+        };
         if ready >= 0 {
             Ok(ready > 0)
         } else {
