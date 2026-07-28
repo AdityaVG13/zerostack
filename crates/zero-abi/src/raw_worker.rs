@@ -161,7 +161,6 @@ pub struct HandshakeAck {
 pub struct CallRequest {
     pub request_id: String,
     pub op: String,
-    #[serde(default)]
     pub args: Value,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub deadline_unix_ms: Option<u64>,
@@ -284,12 +283,36 @@ impl fmt::Display for FrameCodecError {
 
 impl std::error::Error for FrameCodecError {}
 
+fn trim_frame(bytes: &[u8]) -> &[u8] {
+    let line = bytes.strip_suffix(b"\n").unwrap_or(bytes);
+    line.strip_suffix(b"\r").unwrap_or(line)
+}
+
 pub fn decode_request_frame(
     bytes: &[u8],
     max_frame_bytes: usize,
 ) -> Result<WorkerRequestFrame, FrameCodecError> {
-    let line = bytes.strip_suffix(b"\n").unwrap_or(bytes);
-    let line = line.strip_suffix(b"\r").unwrap_or(line);
+    let line = trim_frame(bytes);
+    if line.is_empty() {
+        return Err(FrameCodecError::Empty);
+    }
+    if line.len() > max_frame_bytes {
+        return Err(FrameCodecError::TooLarge {
+            actual: line.len(),
+            maximum: max_frame_bytes,
+        });
+    }
+    let frame: WorkerRequestFrame = serde_json::from_slice(line)
+        .map_err(|error| FrameCodecError::InvalidJson(error.to_string()))?;
+    validate_request_frame(&frame)?;
+    Ok(frame)
+}
+
+pub fn decode_response_frame(
+    bytes: &[u8],
+    max_frame_bytes: usize,
+) -> Result<WorkerResponseFrame, FrameCodecError> {
+    let line = trim_frame(bytes);
     if line.is_empty() {
         return Err(FrameCodecError::Empty);
     }
@@ -300,6 +323,82 @@ pub fn decode_request_frame(
         });
     }
     serde_json::from_slice(line).map_err(|error| FrameCodecError::InvalidJson(error.to_string()))
+}
+
+fn require_nonempty(field: &str, value: &str) -> Result<(), FrameCodecError> {
+    if value.is_empty() {
+        return Err(FrameCodecError::InvalidContract(format!(
+            "{field} must be non-empty"
+        )));
+    }
+    Ok(())
+}
+
+fn require_hex_digest(field: &str, value: &str) -> Result<(), FrameCodecError> {
+    let is_hex = value.len() == 64
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte));
+    if !is_hex {
+        return Err(FrameCodecError::InvalidContract(format!(
+            "{field} must be a 64-character lowercase hex digest"
+        )));
+    }
+    Ok(())
+}
+
+fn validate_trace(trace: &WorkerTrace) -> Result<(), FrameCodecError> {
+    require_nonempty("trace.runtime_id", &trace.runtime_id)?;
+    require_nonempty("trace.cell_id", &trace.cell_id)?;
+    require_nonempty("trace.request_id", &trace.request_id)?;
+    require_nonempty("trace.trace_id", &trace.trace_id)?;
+    require_nonempty("trace.worker_revision", &trace.worker_revision)?;
+    require_hex_digest("trace.contract_digest", &trace.contract_digest)
+}
+
+/// Structural rules from raw-worker-v2.schema.json that serde alone cannot express.
+pub fn validate_request_frame(frame: &WorkerRequestFrame) -> Result<(), FrameCodecError> {
+    match frame {
+        WorkerRequestFrame::Handshake { request } => {
+            if request.protocol_version != RAW_WORKER_PROTOCOL_VERSION {
+                return Err(handshake_field_mismatch(
+                    "protocol_version",
+                    RAW_WORKER_PROTOCOL_VERSION,
+                    &request.protocol_version,
+                ));
+            }
+            require_nonempty("handshake.root", &request.root)?;
+            require_nonempty("handshake.session_id", &request.session_id)?;
+            require_nonempty("handshake.expected_engine", &request.expected_engine)?;
+            require_hex_digest(
+                "handshake.expected_contract_digest",
+                &request.expected_contract_digest,
+            )?;
+            if let Some(revision) = request.expected_worker_revision.as_deref() {
+                require_nonempty("handshake.expected_worker_revision", revision)?;
+            }
+            if let Some(digest) = request.expected_registry_digest.as_deref() {
+                require_hex_digest("handshake.expected_registry_digest", digest)?;
+            }
+            Ok(())
+        }
+        WorkerRequestFrame::Call { request } => {
+            require_nonempty("call.request_id", &request.request_id)?;
+            require_nonempty("call.op", &request.op)?;
+            if request.deadline_unix_ms == Some(0) {
+                return Err(FrameCodecError::InvalidContract(
+                    "call.deadline_unix_ms must be at least 1".into(),
+                ));
+            }
+            validate_trace(&request.trace)
+        }
+        WorkerRequestFrame::Cancel { request } => {
+            require_nonempty("cancel.request_id", &request.request_id)
+        }
+        WorkerRequestFrame::Shutdown { request } => {
+            require_nonempty("shutdown.reason", &request.reason)
+        }
+    }
 }
 
 pub fn encode_frame<T: Serialize>(
@@ -365,11 +464,10 @@ pub fn validate_handshake_request(
 ) -> Result<(), FrameCodecError> {
     // Field-specific messages are intentional; do not fold distinct fields into one bool.
     if request.protocol_version != RAW_WORKER_PROTOCOL_VERSION {
-        // Argument order matches historical messages (request value as expected=).
         return Err(handshake_field_mismatch(
             "protocol_version",
-            &request.protocol_version,
             RAW_WORKER_PROTOCOL_VERSION,
+            &request.protocol_version,
         ));
     }
     require_nonempty_handshake_ids(request)?;
@@ -403,15 +501,100 @@ pub fn validate_handshake_request(
     Ok(())
 }
 
+/// Serialized field names of an exemplar value, in declaration order.
+fn field_names<T: Serialize>(exemplar: &T) -> Vec<String> {
+    match serde_json::to_value(exemplar) {
+        Ok(Value::Object(map)) => map.keys().cloned().collect(),
+        _ => Vec::new(),
+    }
+}
+
+/// Exemplar with every optional field populated, so the manifest reflects the
+/// full type-level surface rather than a hand-maintained list.
+fn manifest_trace() -> WorkerTrace {
+    WorkerTrace {
+        runtime_id: String::new(),
+        cell_id: String::new(),
+        request_id: String::new(),
+        trace_id: String::new(),
+        parent_span_id: Some(String::new()),
+        worker_revision: String::new(),
+        contract_digest: String::new(),
+    }
+}
+
 pub fn raw_worker_protocol_manifest() -> Value {
+    let binding = WorkerBinding {
+        engine: String::new(),
+        root: String::new(),
+        session_id: String::new(),
+        worker_revision: String::new(),
+        semantic_contract_version: String::new(),
+        semantic_contract_digest: String::new(),
+        operation_registry_digest: String::new(),
+        ref_scheme: String::new(),
+    };
+    let call = CallRequest {
+        request_id: String::new(),
+        op: String::new(),
+        args: Value::Null,
+        deadline_unix_ms: Some(0),
+        trace: manifest_trace(),
+    };
+    let result_metadata = WorkerResultMetadata {
+        effect: EffectClass::ReadOnly,
+        approval: ApprovalMetadata {
+            state: ApprovalState::NotRequired,
+            approval_id: Some(String::new()),
+            policy: Some(String::new()),
+        },
+        revert: RevertMetadata {
+            supported: false,
+            journal_id: Some(String::new()),
+            rollback_op: Some(String::new()),
+        },
+        ownership: RefOwnership {
+            engine: String::new(),
+            session_id: String::new(),
+            refs: Vec::new(),
+            snapshot: Some(SnapshotIdentity {
+                kind: String::new(),
+                id: String::new(),
+                digest: Some(String::new()),
+            }),
+        },
+        trace: manifest_trace(),
+    };
+    let handshake = HandshakeRequest {
+        protocol_version: String::new(),
+        root: String::new(),
+        session_id: String::new(),
+        expected_engine: String::new(),
+        expected_worker_revision: Some(String::new()),
+        expected_contract_digest: String::new(),
+        expected_registry_digest: Some(String::new()),
+    };
+    let capabilities = WorkerCapabilities {
+        cancellation: false,
+        deadlines: false,
+        approvals: false,
+        revert: false,
+        snapshots: false,
+    };
+
     json!({
         "protocol_version": RAW_WORKER_PROTOCOL_VERSION,
         "framing": "bounded_ndjson",
+        "default_max_frame_bytes": DEFAULT_MAX_FRAME_BYTES,
         "request_frames": ["handshake", "call", "cancel", "shutdown"],
         "response_frames": ["handshake_ack", "result", "error", "cancel_ack", "shutdown_ack"],
-        "binding": ["engine", "root", "session_id", "worker_revision", "semantic_contract_digest", "operation_registry_digest"],
-        "call": ["request_id", "op", "args", "deadline_unix_ms", "trace"],
-        "result_metadata": ["effect", "approval", "revert", "ownership", "trace"],
+        "binding": field_names(&binding),
+        "handshake_request": field_names(&handshake),
+        "capabilities": field_names(&capabilities),
+        "limits": field_names(&ProtocolLimits::default()),
+        "call": field_names(&call),
+        "trace": field_names(&manifest_trace()),
+        "result_metadata": field_names(&result_metadata),
         "negative_space": ["planner", "javascript_runtime", "mcp_catalog", "nested_codemode"],
     })
 }
@@ -464,6 +647,154 @@ mod tests {
             decode_request_frame(&encoded, DEFAULT_MAX_FRAME_BYTES).unwrap(),
             cancel
         );
+    }
+
+    fn call_frame_bytes(op: &str, deadline: Option<u64>) -> Vec<u8> {
+        encode_frame(
+            &WorkerRequestFrame::Call {
+                request: CallRequest {
+                    request_id: "request-1".into(),
+                    op: op.into(),
+                    args: json!({}),
+                    deadline_unix_ms: deadline,
+                    trace: trace(),
+                },
+            },
+            DEFAULT_MAX_FRAME_BYTES,
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn decode_request_frame_rejects_schema_violations() {
+        for bytes in [
+            call_frame_bytes("", None),
+            call_frame_bytes("read", Some(0)),
+        ] {
+            assert!(matches!(
+                decode_request_frame(&bytes, DEFAULT_MAX_FRAME_BYTES),
+                Err(FrameCodecError::InvalidContract(_))
+            ));
+        }
+
+        let missing_args = br#"{"kind":"call","request":{"request_id":"r","op":"read","trace":{"runtime_id":"r","cell_id":"c","request_id":"r","trace_id":"t","worker_revision":"w","contract_digest":"dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"}}}"#;
+        assert!(matches!(
+            decode_request_frame(missing_args, DEFAULT_MAX_FRAME_BYTES),
+            Err(FrameCodecError::InvalidJson(_))
+        ));
+
+        let bad_digest = encode_frame(
+            &WorkerRequestFrame::Handshake {
+                request: HandshakeRequest {
+                    protocol_version: RAW_WORKER_PROTOCOL_VERSION.into(),
+                    root: "/repo".into(),
+                    session_id: "session-1".into(),
+                    expected_engine: "fszero".into(),
+                    expected_worker_revision: None,
+                    expected_contract_digest: "NOTHEX".into(),
+                    expected_registry_digest: None,
+                },
+            },
+            DEFAULT_MAX_FRAME_BYTES,
+        )
+        .unwrap();
+        assert_eq!(
+            decode_request_frame(&bad_digest, DEFAULT_MAX_FRAME_BYTES)
+                .unwrap_err()
+                .kind(),
+            "contract_mismatch"
+        );
+
+        let empty_reason = encode_frame(
+            &WorkerRequestFrame::Shutdown {
+                request: ShutdownRequest {
+                    reason: String::new(),
+                },
+            },
+            DEFAULT_MAX_FRAME_BYTES,
+        )
+        .unwrap();
+        assert!(matches!(
+            decode_request_frame(&empty_reason, DEFAULT_MAX_FRAME_BYTES),
+            Err(FrameCodecError::InvalidContract(_))
+        ));
+    }
+
+    #[test]
+    fn protocol_version_mismatch_reports_expected_canonical_version() {
+        let request = HandshakeRequest {
+            protocol_version: "zerostack.raw_worker.v1".into(),
+            root: "/repo".into(),
+            session_id: "session-1".into(),
+            expected_engine: "fszero".into(),
+            expected_worker_revision: None,
+            expected_contract_digest: "d".repeat(64),
+            expected_registry_digest: None,
+        };
+        let message = validate_request_frame(&WorkerRequestFrame::Handshake { request })
+            .unwrap_err()
+            .to_string();
+        assert_eq!(
+            message,
+            "protocol_version mismatch: expected=zerostack.raw_worker.v2 actual=zerostack.raw_worker.v1"
+        );
+    }
+
+    #[test]
+    fn frame_size_boundary_is_inclusive_at_max() {
+        let at_max = vec![b'x'; DEFAULT_MAX_FRAME_BYTES];
+        assert!(matches!(
+            decode_request_frame(&at_max, DEFAULT_MAX_FRAME_BYTES),
+            Err(FrameCodecError::InvalidJson(_))
+        ));
+
+        let over_max = vec![b'x'; DEFAULT_MAX_FRAME_BYTES + 1];
+        assert_eq!(
+            decode_request_frame(&over_max, DEFAULT_MAX_FRAME_BYTES).unwrap_err(),
+            FrameCodecError::TooLarge {
+                actual: DEFAULT_MAX_FRAME_BYTES + 1,
+                maximum: DEFAULT_MAX_FRAME_BYTES,
+            }
+        );
+        assert!(matches!(
+            decode_response_frame(&over_max, DEFAULT_MAX_FRAME_BYTES),
+            Err(FrameCodecError::TooLarge { .. })
+        ));
+    }
+
+    #[test]
+    fn decode_response_frame_round_trips_and_is_size_bounded() {
+        let ack = WorkerResponseFrame::CancelAck {
+            request_id: "request-1".into(),
+            cancelled: true,
+        };
+        let encoded = encode_frame(&ack, DEFAULT_MAX_FRAME_BYTES).unwrap();
+        assert_eq!(
+            decode_response_frame(&encoded, DEFAULT_MAX_FRAME_BYTES).unwrap(),
+            ack
+        );
+        assert!(matches!(
+            decode_response_frame(&encoded, 8),
+            Err(FrameCodecError::TooLarge { .. })
+        ));
+        assert!(matches!(
+            decode_response_frame(b"\n", DEFAULT_MAX_FRAME_BYTES),
+            Err(FrameCodecError::Empty)
+        ));
+    }
+
+    #[test]
+    fn protocol_manifest_covers_type_level_binding_surface() {
+        let manifest = raw_worker_protocol_manifest();
+        let binding = manifest["binding"].as_array().unwrap();
+        for field in ["semantic_contract_version", "ref_scheme"] {
+            assert!(binding.iter().any(|value| value == field), "{field}");
+        }
+        assert!(manifest["trace"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|value| value == "parent_span_id"));
     }
 
     #[test]
@@ -526,7 +857,7 @@ mod tests {
         assert_eq!(digest.len(), 64);
         assert_eq!(
             digest,
-            "074a9df08b5f9e27484d71f30af78fb95632984275c8a973e8f28f6b2cdbe4d7"
+            "5c887d5b3443ec572b153cbd635b205d3e68f54308a3815d5878b59842e9fd38"
         );
         assert_eq!(digest, raw_worker_protocol_digest_hex());
     }
