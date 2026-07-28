@@ -9,6 +9,7 @@ use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime};
 
 use sha2::{Digest, Sha256};
+use zero_ref::{content_hash_hex, is_full_lower_hex};
 
 use crate::fs_replace::replace_file;
 use crate::gc_lock::{StoreLock, LOCK_DEADLINE};
@@ -137,18 +138,6 @@ impl std::error::Error for CasError {}
 
 fn io_err(context: &str, e: impl std::fmt::Display) -> CasError {
     CasError::Io(format!("{context}: {e}"))
-}
-
-fn content_hash_hex(bytes: &[u8]) -> String {
-    let mut h = Sha256::new();
-    h.update(bytes);
-    format!("{:x}", h.finalize())
-}
-
-fn is_full_lower_hex(s: &str) -> bool {
-    s.len() == 64
-        && s.bytes()
-            .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
 }
 
 /// Handle to one CAS root. Cheap to construct; does no I/O until used.
