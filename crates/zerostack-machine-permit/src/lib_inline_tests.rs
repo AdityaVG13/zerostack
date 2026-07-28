@@ -34,7 +34,7 @@ fn permit_fence_replaced_cookie_survives_old_guard_drop() {
     fs::remove_dir_all(&path).expect("simulate external replacement");
     fs::create_dir(&path).expect("create replacement");
     let foreign_cookie = "fedcba9876543210fedcba9876543210";
-    publish_identity(&path, foreign_cookie, std::process::id(), "foreign").unwrap();
+    publish_identity(&path, foreign_cookie, std::process::id(), "foreign", epoch_millis()).unwrap();
 
     drop(permit);
 
@@ -47,12 +47,12 @@ fn permit_fence_stale_reclaim_snapshot_cannot_delete_new_owner() {
     let path = fencing_test_path("reclaim-foreign");
     fs::create_dir(&path).expect("create stale slot");
     let stale_cookie = "11111111111111111111111111111111";
-    publish_identity(&path, stale_cookie, 1, "stale").expect("publish stale identity");
+    publish_identity(&path, stale_cookie, 1, "stale", epoch_millis()).expect("publish stale identity");
     let stale_snapshot = fs::read(path.join("identity")).expect("snapshot stale identity");
     fs::remove_dir_all(&path).expect("replace stale slot");
     fs::create_dir(&path).expect("create new slot");
     let new_cookie = "22222222222222222222222222222222";
-    publish_identity(&path, new_cookie, std::process::id(), "new").unwrap();
+    publish_identity(&path, new_cookie, std::process::id(), "new", epoch_millis()).unwrap();
 
     assert!(!quarantine_exact(&path, Some(&stale_snapshot)));
     assert_eq!(read_identity(&path).unwrap().cookie, new_cookie);
@@ -102,7 +102,7 @@ fn reclaims_incomplete_machine_permit_after_grace() {
     assert!(!path.exists());
 }
 
-#[cfg(unix)]
+#[cfg(all(unix, not(any(target_os = "linux", target_os = "android"))))]
 #[test]
 fn native_pid_liveness_handles_alive_dead_and_conservative_errors() {
     assert!(
@@ -138,6 +138,45 @@ fn stale_malformed_pid_is_reclaimed_after_grace() {
 
     assert!(reclaim_dead(&path));
     assert!(!path.exists());
+}
+
+fn permit_liveness_identity(pid: u32) -> PermitIdentity {
+    PermitIdentity {
+        cookie: "0123456789abcdef0123456789abcdef".into(), pid, owner: "test-owner".into(),
+        started_at: Some(1_000),
+        process: Some(ProcessIdentity { boot_id: "boot-a".into(), starttime: 77 }),
+    }
+}
+
+#[test]
+fn permit_liveness_proc_stat_parses_parenthesized_comm_with_spaces_and_parens() {
+    let stat = "42 (worker name) with parens) S 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 4242 20";
+    assert_eq!(parse_proc_stat_starttime(stat), Some(4242));
+}
+
+#[test]
+fn permit_liveness_classifier_cases_cover_reuse_boot_pid_zero_age_and_fresh_holder() {
+    let classify = |identity: &PermitIdentity, observed, now, cap| {
+        classify_identity_snapshot(identity, observed, now, cap, true)
+    };
+    let mut identity = permit_liveness_identity(42);
+    let observed = ProcessObservation::Exists(identity.process.clone().unwrap());
+    assert_eq!(classify(&identity, observed, 1_001, OWNER_IDENTITY_MAX_AGE), IdentityLiveness::Live);
+
+    let mut reused = identity.process.clone().unwrap();
+    reused.starttime += 1;
+    assert_eq!(classify(&identity, ProcessObservation::Exists(reused), 1_001, OWNER_IDENTITY_MAX_AGE), IdentityLiveness::Dead);
+    let mut rebooted = identity.process.clone().unwrap();
+    rebooted.boot_id = "boot-b".into();
+    assert_eq!(classify(&identity, ProcessObservation::Exists(rebooted), 1_001, OWNER_IDENTITY_MAX_AGE), IdentityLiveness::Dead);
+
+    identity.pid = 0;
+    assert_eq!(classify(&identity, ProcessObservation::Missing, 1_001, OWNER_IDENTITY_MAX_AGE), IdentityLiveness::Incomplete);
+    identity.pid = 42;
+    let observed = ProcessObservation::Exists(identity.process.clone().unwrap());
+    assert_eq!(classify(&identity, observed, 1_000 + WAITER_IDENTITY_MAX_AGE.as_millis() + 1, WAITER_IDENTITY_MAX_AGE), IdentityLiveness::Dead);
+    let observed = ProcessObservation::Exists(identity.process.clone().unwrap());
+    assert_eq!(classify(&identity, observed, 1_000 + OWNER_IDENTITY_MAX_AGE.as_millis() - 1, OWNER_IDENTITY_MAX_AGE), IdentityLiveness::Live);
 }
 
 #[test]

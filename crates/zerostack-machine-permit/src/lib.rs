@@ -17,6 +17,9 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 pub const PERMIT_POLL: Duration = Duration::from_millis(20);
 pub const PERMIT_POLL_MAX: Duration = Duration::from_millis(200);
 const INCOMPLETE_PERMIT_GRACE: Duration = Duration::from_millis(250);
+const WAITER_IDENTITY_MAX_AGE: Duration = Duration::from_secs(24 * 60 * 60);
+// Seven days is deliberately generous, but prevents unverifiable non-Linux holders wedging forever.
+const OWNER_IDENTITY_MAX_AGE: Duration = Duration::from_secs(7 * 24 * 60 * 60);
 
 /// Repo-scoped permit base below the current user's private runtime directory.
 pub fn scoped_permit_base(class: &str) -> PathBuf {
@@ -385,7 +388,13 @@ impl WaiterIntent {
                 path.display()
             ))
         })?;
-        if let Err(e) = publish_identity(&path, &cookie, std::process::id(), &owner) {
+        if let Err(e) = publish_identity(
+            &path,
+            &cookie,
+            std::process::id(),
+            &owner,
+            started_at,
+        ) {
             quarantine_exact(&path, None);
             return Err(AcquireError::Fatal(format!(
                 "write codemode permit waiter metadata: {e}"
@@ -436,8 +445,8 @@ impl WaiterIntent {
 
 /// Classify one peer waiter directory for ranking.
 ///
-/// Reclaim short-circuit is load-bearing: a structured waiter is dropped only
-/// when `!process_alive(pid) && remove_waiter(path)` both hold. Alive processes
+/// Reclaim fencing is load-bearing: a stale structured waiter is dropped only
+/// after identity classification and cookie-fenced cleanup. Live processes must
 /// must never lose their waiter slot here; failed removes stay visible.
 fn classify_waiter_entry(
     entry: &fs::DirEntry,
@@ -469,8 +478,17 @@ fn classify_waiter_entry(
             }
             return Ok(Some((started_at, entry.file_name().to_string_lossy().into_owned())));
         };
-        // SAFETY: short-circuit requires dead process AND cookie-fenced remove.
-        if identity.pid == pid && !process_alive(pid) && cleanup_owned(&path, &identity.cookie) {
+        let reclaimable = if identity.pid == pid {
+            match identity_liveness(&identity, epoch_millis(), WAITER_IDENTITY_MAX_AGE) {
+                IdentityLiveness::Live => false,
+                IdentityLiveness::Dead => true,
+                IdentityLiveness::Incomplete => incomplete_identity_stale(&path),
+            }
+        } else {
+            incomplete_identity_stale(&path)
+        };
+        // Cookie publication and cleanup fencing remain load-bearing here.
+        if reclaimable && cleanup_owned(&path, &identity.cookie) {
             return Ok(None);
         }
         return Ok(Some((
@@ -530,13 +548,36 @@ impl Drop for MachinePermit {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
+struct ProcessIdentity {
+    boot_id: String,
+    starttime: u64,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
 struct PermitIdentity {
     cookie: String,
     pid: u32,
     owner: String,
+    started_at: Option<u128>,
+    process: Option<ProcessIdentity>,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum IdentityLiveness {
+    Live,
+    Dead,
+    Incomplete,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+enum ProcessObservation {
+    Exists(ProcessIdentity),
+    Missing,
+    Unknown,
 }
 
 fn write_metadata(path: &Path, cookie: &str, owner: &str, command: &str) -> io::Result<()> {
+    let started_at = epoch_millis();
     write_file_sync(&path.join("owner"), owner)?;
     write_file_sync(&path.join("pid"), &std::process::id().to_string())?;
     write_file_sync(
@@ -549,8 +590,8 @@ fn write_metadata(path: &Path, cookie: &str, owner: &str, command: &str) -> io::
             .collect::<String>(),
     )?;
     write_file_sync(&path.join("command"), command)?;
-    write_file_sync(&path.join("started_at"), &epoch_millis().to_string())?;
-    publish_identity(path, cookie, std::process::id(), owner)
+    write_file_sync(&path.join("started_at"), &started_at.to_string())?;
+    publish_identity(path, cookie, std::process::id(), owner, started_at)
 }
 
 fn write_file_sync(path: &Path, value: &str) -> io::Result<()> {
@@ -559,9 +600,27 @@ fn write_file_sync(path: &Path, value: &str) -> io::Result<()> {
     file.sync_all()
 }
 
-fn publish_identity(path: &Path, cookie: &str, pid: u32, owner: &str) -> io::Result<()> {
+fn publish_identity(
+    path: &Path,
+    cookie: &str,
+    pid: u32,
+    owner: &str,
+    started_at: u128,
+) -> io::Result<()> {
+    #[cfg(any(target_os = "linux", target_os = "android"))]
+    let process = Some(read_linux_process_identity(pid)?.ok_or_else(|| {
+        io::Error::new(io::ErrorKind::InvalidData, "current process identity unavailable")
+    })?);
+    #[cfg(not(any(target_os = "linux", target_os = "android")))]
+    let process: Option<ProcessIdentity> = None;
+    let (boot_id, starttime) = process
+        .map(|value| (value.boot_id, value.starttime.to_string()))
+        .unwrap_or_else(|| ("-".to_owned(), "-".to_owned()));
     let temporary = path.join(format!(".identity-{cookie}.tmp"));
-    write_file_sync(&temporary, &format!("{cookie}\n{pid}\n{owner}\n"))?;
+    write_file_sync(
+        &temporary,
+        &format!("{cookie}\n{pid}\n{owner}\n{started_at}\n{boot_id}\n{starttime}\n"),
+    )?;
     fs::rename(&temporary, path.join("identity"))?;
     // Directory sync is unavailable on some supported platforms. The identity
     // file itself is durable before the atomic publication rename.
@@ -575,18 +634,124 @@ fn read_identity(path: &Path) -> Option<PermitIdentity> {
 
 fn parse_identity(value: &[u8]) -> Option<PermitIdentity> {
     let value = std::str::from_utf8(value).ok()?;
-    let mut lines = value.lines();
-    let cookie = lines.next()?.to_owned();
-    let pid = lines.next()?.parse().ok()?;
-    let owner = lines.next()?.to_owned();
+    let lines = value.lines().collect::<Vec<_>>();
+    if lines.len() != 3 && lines.len() != 6 {
+        return None;
+    }
+    let cookie = lines[0].to_owned();
+    let pid = lines[1].parse().ok()?;
+    let owner = lines[2].to_owned();
     if cookie.len() != 32
         || !cookie.bytes().all(|byte| byte.is_ascii_hexdigit())
         || owner.is_empty()
-        || lines.next().is_some()
     {
         return None;
     }
-    Some(PermitIdentity { cookie, pid, owner })
+    let (started_at, process) = if lines.len() == 6 {
+        let started_at = lines[3].parse().ok()?;
+        let process = match (lines[4], lines[5]) {
+            ("-", "-") => None,
+            (boot_id, starttime) if !boot_id.is_empty() => Some(ProcessIdentity {
+                boot_id: boot_id.to_owned(),
+                starttime: starttime.parse().ok()?,
+            }),
+            _ => return None,
+        };
+        (Some(started_at), process)
+    } else {
+        (None, None)
+    };
+    Some(PermitIdentity { cookie, pid, owner, started_at, process })
+}
+
+fn parse_proc_stat_starttime(value: &str) -> Option<u64> {
+    let close = value.rfind(')')?;
+    let after_comm = value.get(close + 1..)?.trim_start();
+    // After the parenthesized comm, field 3 is first; starttime is field 22.
+    after_comm.split_whitespace().nth(19)?.parse().ok()
+}
+
+#[cfg(any(target_os = "linux", target_os = "android"))]
+fn read_linux_process_identity(pid: u32) -> io::Result<Option<ProcessIdentity>> {
+    if pid == 0 { return Ok(None); }
+    if libc::pid_t::try_from(pid).is_err() {
+        return Err(io::ErrorKind::InvalidInput.into());
+    }
+    let boot_id = fs::read_to_string("/proc/sys/kernel/random/boot_id")?
+        .trim()
+        .to_owned();
+    if boot_id.is_empty() {
+        return Ok(None);
+    }
+    let stat = match fs::read_to_string(format!("/proc/{pid}/stat")) {
+        Ok(value) => value,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => return Err(error),
+    };
+    Ok(parse_proc_stat_starttime(&stat).map(|starttime| ProcessIdentity {
+        boot_id,
+        starttime,
+    }))
+}
+
+fn classify_identity_snapshot(
+    identity: &PermitIdentity,
+    observation: ProcessObservation,
+    now: u128,
+    max_age: Duration,
+    require_process_identity: bool,
+) -> IdentityLiveness {
+    let Some(started_at) = identity.started_at else {
+        return IdentityLiveness::Incomplete;
+    };
+    if identity.pid == 0 || now < started_at {
+        return IdentityLiveness::Incomplete;
+    }
+    if now - started_at > max_age.as_millis() {
+        return IdentityLiveness::Dead;
+    }
+    if require_process_identity && identity.process.is_none() {
+        return IdentityLiveness::Incomplete;
+    }
+    match observation {
+        ProcessObservation::Missing => IdentityLiveness::Dead,
+        ProcessObservation::Unknown => IdentityLiveness::Incomplete,
+        ProcessObservation::Exists(observed) => match identity.process.as_ref() {
+            Some(expected) if expected == &observed => IdentityLiveness::Live,
+            Some(_) => IdentityLiveness::Dead,
+            None => IdentityLiveness::Live,
+        },
+    }
+}
+
+fn identity_liveness(
+    identity: &PermitIdentity,
+    now: u128,
+    max_age: Duration,
+) -> IdentityLiveness {
+    #[cfg(any(target_os = "linux", target_os = "android"))]
+    {
+        let observation = match read_linux_process_identity(identity.pid) {
+            Ok(Some(value)) => ProcessObservation::Exists(value),
+            Ok(None) => ProcessObservation::Missing,
+            Err(_) => ProcessObservation::Unknown,
+        };
+        classify_identity_snapshot(identity, observation, now, max_age, true)
+    }
+    #[cfg(not(any(target_os = "linux", target_os = "android")))]
+    {
+        let observation = if identity.pid == 0 {
+            ProcessObservation::Unknown
+        } else if process_alive(identity.pid) {
+            ProcessObservation::Exists(ProcessIdentity {
+                boot_id: String::new(),
+                starttime: 0,
+            })
+        } else {
+            ProcessObservation::Missing
+        };
+        classify_identity_snapshot(identity, observation, now, max_age, false)
+    }
 }
 
 fn waiter_key(path: &Path) -> Option<(u32, u128)> {
@@ -625,24 +790,27 @@ fn quarantine_exact(path: &Path, observed_identity: Option<&[u8]>) -> bool {
     fs::remove_dir_all(&quarantine).is_ok()
 }
 
-fn reclaim_dead(path: &Path) -> bool {
-    let observed = fs::read(path.join("identity")).ok();
-    if let Some(identity) = observed.as_deref().and_then(parse_identity) {
-        if identity.pid != 0 && !process_alive(identity.pid) {
-            return quarantine_exact(path, observed.as_deref());
-        }
-        return false;
-    }
-
-    // A process can die after create_dir() but before atomically publishing its
-    // identity. Grace avoids racing that live writer; the snapshot fence below
-    // refuses deletion if publication or replacement wins before quarantine.
-    let stale = fs::metadata(path)
+fn incomplete_identity_stale(path: &Path) -> bool {
+    fs::metadata(path)
         .and_then(|metadata| metadata.modified())
         .ok()
         .and_then(|modified| modified.elapsed().ok())
-        .is_some_and(|age| age >= INCOMPLETE_PERMIT_GRACE);
-    stale && quarantine_exact(path, observed.as_deref())
+        .is_some_and(|age| age >= INCOMPLETE_PERMIT_GRACE)
+}
+
+fn reclaim_dead(path: &Path) -> bool {
+    let observed = fs::read(path.join("identity")).ok();
+    if let Some(identity) = observed.as_deref().and_then(parse_identity) {
+        match identity_liveness(&identity, epoch_millis(), OWNER_IDENTITY_MAX_AGE) {
+            IdentityLiveness::Live => return false,
+            IdentityLiveness::Dead => return quarantine_exact(path, observed.as_deref()),
+            IdentityLiveness::Incomplete => {}
+        }
+    }
+
+    // Grace avoids racing create_dir() with atomic identity publication. The
+    // snapshot fence refuses deletion if publication or replacement wins.
+    incomplete_identity_stale(path) && quarantine_exact(path, observed.as_deref())
 }
 
 static COOKIE_SEQUENCE: AtomicU64 = AtomicU64::new(0);
@@ -1018,7 +1186,7 @@ impl NativeWake {
     }
 }
 
-#[cfg(unix)]
+#[cfg(all(unix, not(any(target_os = "linux", target_os = "android"))))]
 fn process_alive(pid: u32) -> bool {
     if pid == 0 {
         return true;
@@ -1037,7 +1205,7 @@ fn process_alive(pid: u32) -> bool {
     unix_kill_result_is_alive(result, std::io::Error::last_os_error().raw_os_error())
 }
 
-#[cfg(unix)]
+#[cfg(all(unix, not(any(target_os = "linux", target_os = "android"))))]
 fn unix_kill_result_is_alive(result: libc::c_int, errno: Option<i32>) -> bool {
     result == 0 || errno != Some(libc::ESRCH)
 }
