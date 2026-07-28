@@ -12,10 +12,17 @@
 //! assertions, so adopting this crate changes no digests and no behavior.
 
 pub mod digest;
+pub mod dispatch;
 pub mod raw_worker;
 pub mod schema;
 
 pub use digest::{contract_digest, contract_digest_hex, sha256, sha256_hex};
+pub use dispatch::{
+    ApprovalGrant, ApprovalRequirement, CanonicalOperation, CanonicalRegistry,
+    DispatchContractError, DispatchErrorClass, DispatchMachine, DispatchStage, EffectGrant,
+    EffectPolicy, PermitGrant, PermitRequirement, RegistryEngine, SourceDiagnostic, SourceForm,
+    ALL_DISPATCH_ERROR_CLASSES, CANONICAL_DISPATCH_VERSION,
+};
 pub use raw_worker::{
     decode_request_frame, encode_frame, raw_worker_protocol_digest_hex,
     raw_worker_protocol_manifest, validate_handshake_request, ApprovalMetadata, ApprovalState,

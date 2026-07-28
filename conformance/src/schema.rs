@@ -5,8 +5,12 @@ use jsonschema::Validator;
 use serde_json::Value;
 use std::sync::LazyLock;
 
+pub const CANONICAL_DISPATCH_SCHEMA: &str =
+    include_str!("../schemas/canonical-dispatch.schema.json");
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SchemaName {
+    CanonicalDispatch,
     CapabilityManifest,
     Telemetry,
     Error,
@@ -18,6 +22,7 @@ pub enum SchemaName {
 impl SchemaName {
     pub fn file_stem(self) -> &'static str {
         match self {
+            Self::CanonicalDispatch => "canonical_dispatch",
             Self::CapabilityManifest => "capability_manifest",
             Self::Telemetry => "telemetry",
             Self::Error => "error",
@@ -29,6 +34,7 @@ impl SchemaName {
 
     fn schema_json(self) -> &'static str {
         match self {
+            Self::CanonicalDispatch => CANONICAL_DISPATCH_SCHEMA,
             Self::CapabilityManifest => include_str!("../schemas/capability_manifest.json"),
             Self::Telemetry => include_str!("../schemas/telemetry.json"),
             Self::Error => include_str!("../schemas/error.json"),
@@ -40,6 +46,7 @@ impl SchemaName {
 }
 
 fn validator(name: SchemaName) -> &'static Validator {
+    static DISPATCH: LazyLock<Validator> = LazyLock::new(|| compile(SchemaName::CanonicalDispatch));
     static CAP: LazyLock<Validator> = LazyLock::new(|| compile(SchemaName::CapabilityManifest));
     static TEL: LazyLock<Validator> = LazyLock::new(|| compile(SchemaName::Telemetry));
     static ERR: LazyLock<Validator> = LazyLock::new(|| compile(SchemaName::Error));
@@ -48,6 +55,7 @@ fn validator(name: SchemaName) -> &'static Validator {
     static RAW: LazyLock<Validator> = LazyLock::new(|| compile(SchemaName::RawWorkerV2));
 
     match name {
+        SchemaName::CanonicalDispatch => &DISPATCH,
         SchemaName::CapabilityManifest => &CAP,
         SchemaName::Telemetry => &TEL,
         SchemaName::Error => &ERR,

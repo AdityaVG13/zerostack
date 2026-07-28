@@ -1,0 +1,146 @@
+{
+  "effect_class_vectors": [
+    {
+      "effect_policy": { "effect_class": "read_only", "permit": "not_required", "approval": "not_required" },
+      "grant": "read_only",
+      "permit": null,
+      "approval": null
+    },
+    {
+      "effect_policy": { "effect_class": "reversible_mutation", "permit": "required", "approval": "not_required" },
+      "grant": "reversible_mutation",
+      "permit": { "permit_id": "permit-reversible", "canonical_operation_id": "fixture.operation", "effect_class": "reversible_mutation" },
+      "approval": null
+    },
+    {
+      "effect_policy": { "effect_class": "approval_required_mutation", "permit": "required", "approval": "required" },
+      "grant": "approval_required_mutation",
+      "permit": { "permit_id": "permit-approved", "canonical_operation_id": "fixture.operation", "effect_class": "approval_required_mutation" },
+      "approval": { "approval_id": "approval-mutation", "canonical_operation_id": "fixture.operation", "effect_class": "approval_required_mutation" }
+    },
+    {
+      "effect_policy": { "effect_class": "irreversible", "permit": "required", "approval": "required" },
+      "grant": "irreversible",
+      "permit": { "permit_id": "permit-irreversible", "canonical_operation_id": "fixture.operation", "effect_class": "irreversible" },
+      "approval": { "approval_id": "approval-irreversible", "canonical_operation_id": "fixture.operation", "effect_class": "irreversible" }
+    }
+  ],
+  "authority_binding_failure_vectors": [
+    {
+      "kind": "permit_wrong_operation",
+      "permit": { "permit_id": "permit-wrong-operation", "canonical_operation_id": "other.operation", "effect_class": "irreversible" },
+      "approval": { "approval_id": "approval-valid", "canonical_operation_id": "fixture.operation", "effect_class": "irreversible" },
+      "expected_error": "permit_required"
+    },
+    {
+      "kind": "permit_wrong_effect",
+      "permit": { "permit_id": "permit-wrong-effect", "canonical_operation_id": "fixture.operation", "effect_class": "read_only" },
+      "approval": { "approval_id": "approval-valid", "canonical_operation_id": "fixture.operation", "effect_class": "irreversible" },
+      "expected_error": "permit_required"
+    },
+    {
+      "kind": "approval_wrong_operation",
+      "permit": { "permit_id": "permit-valid", "canonical_operation_id": "fixture.operation", "effect_class": "irreversible" },
+      "approval": { "approval_id": "approval-wrong-operation", "canonical_operation_id": "other.operation", "effect_class": "irreversible" },
+      "expected_error": "approval_required"
+    },
+    {
+      "kind": "approval_wrong_effect",
+      "permit": { "permit_id": "permit-valid", "canonical_operation_id": "fixture.operation", "effect_class": "irreversible" },
+      "approval": { "approval_id": "approval-wrong-effect", "canonical_operation_id": "fixture.operation", "effect_class": "read_only" },
+      "expected_error": "approval_required"
+    }
+  ],
+  "error_class_vectors": [
+    "missing_metadata",
+    "unknown_metadata",
+    "invalid_registry",
+    "unknown_operation",
+    "invalid_arguments",
+    "unauthorized_effect",
+    "permit_required",
+    "approval_required",
+    "dispatch_failed",
+    "journal_failed",
+    "invalid_stage_transition"
+  ],
+  "source_diagnostics": [
+    {
+      "form": "direct_alias",
+      "source_text": "zero.token.shell({ command: 'printf ok' })",
+      "invoked_name": "shell",
+      "canonical_id": "token.shell",
+      "grant": "irreversible"
+    },
+    {
+      "form": "computed_property",
+      "source_text": "zero['token']['shell']({ command: 'printf ok' })",
+      "invoked_name": "shell",
+      "canonical_id": "token.shell",
+      "grant": "irreversible"
+    },
+    {
+      "form": "obfuscated_comma",
+      "source_text": "(0, zero.token['sh' + 'ell'])({ command: 'printf ok' })",
+      "invoked_name": "shell",
+      "canonical_id": "token.shell",
+      "grant": "irreversible"
+    }
+  ],
+  "registry_projections": [
+    {
+      "version": "zerostack.canonical_dispatch.v1",
+      "engine": "token_zero",
+      "operations": [
+        {
+          "canonical_id": "token.shell",
+          "aliases": ["shell", "exec", "zero.token.shell"],
+          "args_schema": {
+            "type": "object",
+            "properties": { "command": { "type": "string" } },
+            "required": ["command"],
+            "additionalProperties": false
+          },
+          "effect_policy": { "effect_class": "irreversible", "permit": "required", "approval": "required" },
+          "errors": ["missing_metadata", "unknown_metadata", "invalid_registry", "unknown_operation", "invalid_arguments", "unauthorized_effect", "permit_required", "approval_required", "dispatch_failed", "journal_failed", "invalid_stage_transition"]
+        }
+      ]
+    },
+    {
+      "version": "zerostack.canonical_dispatch.v1",
+      "engine": "fs_zero",
+      "operations": [
+        {
+          "canonical_id": "fs.read",
+          "aliases": ["read", "cat", "zero.fs.read"],
+          "args_schema": {
+            "type": "object",
+            "properties": { "path": { "type": "string" } },
+            "required": ["path"],
+            "additionalProperties": false
+          },
+          "effect_policy": { "effect_class": "read_only", "permit": "not_required", "approval": "not_required" },
+          "errors": ["missing_metadata", "unknown_metadata", "invalid_registry", "unknown_operation", "invalid_arguments", "unauthorized_effect", "permit_required", "approval_required", "dispatch_failed", "journal_failed", "invalid_stage_transition"]
+        }
+      ]
+    },
+    {
+      "version": "zerostack.canonical_dispatch.v1",
+      "engine": "graph_zero",
+      "operations": [
+        {
+          "canonical_id": "graph.remember",
+          "aliases": ["remember", "store_fact", "zero.graph.remember"],
+          "args_schema": {
+            "type": "object",
+            "properties": { "fact": { "type": "string" } },
+            "required": ["fact"],
+            "additionalProperties": false
+          },
+          "effect_policy": { "effect_class": "reversible_mutation", "permit": "required", "approval": "not_required" },
+          "errors": ["missing_metadata", "unknown_metadata", "invalid_registry", "unknown_operation", "invalid_arguments", "unauthorized_effect", "permit_required", "approval_required", "dispatch_failed", "journal_failed", "invalid_stage_transition"]
+        }
+      ]
+    }
+  ]
+}
