@@ -1,3 +1,5 @@
+#![forbid(unsafe_code)]
+
 //! Engine-agnostic operation ABI contract machinery shared by ZeroStack engines.
 //!
 //! Each engine (TokenZero, FSZero, GraphZero) keeps its own operation

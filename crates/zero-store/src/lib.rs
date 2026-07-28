@@ -1,3 +1,5 @@
+#![forbid(unsafe_code)]
+
 //! Canonical ZeroRef v1 content-addressed store layout, publish protocol,
 //! store-root resolution, and collection coordination.
 //!
