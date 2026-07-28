@@ -4,6 +4,7 @@ members = [
     "crates/zero-abi",
     "crates/zero-cert",
     "crates/zero-gate",
+    "crates/zero-gauge",
     "crates/zero-ledger",
     "crates/zero-ref",
     "crates/zero-store",

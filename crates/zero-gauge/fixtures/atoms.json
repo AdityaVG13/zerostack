@@ -1,0 +1,13 @@
+{
+  "schema": "zerostack.zero_gauge.complete_atoms.v1",
+  "provider_lock": {
+    "provider": "runtime",
+    "model": "caller-supplied",
+    "tokenizer_revision_digest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  "instances": [
+    { "rendered": "fz://o/1/1", "expected_token_count": null },
+    { "rendered": "gz://o/1/1", "expected_token_count": null },
+    { "rendered": "tz://o/1/1", "expected_token_count": null }
+  ]
+}
