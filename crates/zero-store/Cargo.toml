@@ -6,8 +6,9 @@ license.workspace = true
 description = "Canonical ZeroRef v1 content-addressed store layout and publish protocol"
 
 [dependencies]
+serde = { workspace = true }
+serde_json = { workspace = true }
 sha2 = { workspace = true }
 
 [dev-dependencies]
 tempfile = "3"
-serde_json = { workspace = true }

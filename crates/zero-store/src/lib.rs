@@ -19,6 +19,7 @@
 mod cas;
 mod fs_replace;
 mod gc_lock;
+mod metadata;
 mod store_root;
 
 pub use cas::{
@@ -29,6 +30,8 @@ pub use fs_replace::{atomic_write_file, replace_file};
 pub use gc_lock::{
     coordinator_lock_path, LockMode, StoreLock, COORDINATOR_LOCK, GC_DIR, LOCK_DEADLINE,
 };
+pub use metadata::ObservationMetadata;
+
 pub use store_root::{
     absolutize, ensure_layout, project_key, store_is_under_project_root, Engine, ResolvedStore,
     StoreEnv, StoreMode, StoreResolutionReport, BLOBS_DIR, LOCAL_STORE_DIR, PROJECTS_DIR,
