@@ -20,6 +20,7 @@ use std::process::{Child, ChildStdin, Command, Stdio};
 use std::time::{Duration, Instant};
 
 pub const CONTRACT_VERSION: &str = "1.0";
+/// Stable compatibility projection of the authoritative GATE_MAPPINGS table.
 pub const CHECK_IDS: [&str; 10] = ["G1", "G2", "G3", "G4", "G5", "G6", "G7", "G8", "G9", "G10"];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -109,13 +110,22 @@ pub struct ExecutionRecord {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
-pub enum GateStatus { Pass, Fail, Skipped }
+pub enum GateStatus {
+    Pass,
+    Fail,
+    Skipped,
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
-pub enum CompletionStatus { Complete, Partial, Failed }
+pub enum CompletionStatus {
+    Complete,
+    Partial,
+    Failed,
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct CheckResult {
     pub id: String,
     pub name: String,
@@ -127,17 +137,64 @@ pub struct CheckResult {
 }
 
 impl CheckResult {
-    pub fn pass(id: &str, name: &str) -> Self { Self { id: id.into(), name: name.into(), passed: true, status: GateStatus::Pass, skip_reason: None, details: Vec::new() } }
-    pub fn fail(id: &str, name: &str, detail: impl Into<String>) -> Self { Self { id: id.into(), name: name.into(), passed: false, status: GateStatus::Fail, skip_reason: None, details: vec![detail.into()] } }
-    pub fn skip(id: &str, name: &str, reason: impl Into<String>) -> Self { Self { id: id.into(), name: name.into(), passed: false, status: GateStatus::Skipped, skip_reason: Some(reason.into()), details: Vec::new() } }
-    pub fn with_details(id: &str, name: &str, details: Vec<String>) -> Self { if details.is_empty() { Self::pass(id, name) } else { Self { id: id.into(), name: name.into(), passed: false, status: GateStatus::Fail, skip_reason: None, details } } }
+    pub fn pass(id: &str, name: &str) -> Self {
+        Self {
+            id: id.into(),
+            name: name.into(),
+            passed: true,
+            status: GateStatus::Pass,
+            skip_reason: None,
+            details: Vec::new(),
+        }
+    }
+    pub fn fail(id: &str, name: &str, detail: impl Into<String>) -> Self {
+        Self {
+            id: id.into(),
+            name: name.into(),
+            passed: false,
+            status: GateStatus::Fail,
+            skip_reason: None,
+            details: vec![detail.into()],
+        }
+    }
+    pub fn skip(id: &str, name: &str, reason: impl Into<String>) -> Self {
+        Self {
+            id: id.into(),
+            name: name.into(),
+            passed: false,
+            status: GateStatus::Skipped,
+            skip_reason: Some(reason.into()),
+            details: Vec::new(),
+        }
+    }
+    pub fn with_details(id: &str, name: &str, details: Vec<String>) -> Self {
+        if details.is_empty() {
+            Self::pass(id, name)
+        } else {
+            Self {
+                id: id.into(),
+                name: name.into(),
+                passed: false,
+                status: GateStatus::Fail,
+                skip_reason: None,
+                details,
+            }
+        }
+    }
 }
 
-pub fn required_gate_ids(surface: Surface) -> &'static [&'static str] {
-    match surface { Surface::Codemode => &CHECK_IDS, Surface::Mcp => &["G1"] }
+pub fn required_gate_ids(surface: Surface) -> Vec<&'static str> {
+    match surface {
+        Surface::Codemode => checks::GATE_MAPPINGS
+            .iter()
+            .map(|mapping| mapping.id.as_str())
+            .collect(),
+        Surface::Mcp => vec!["G1"],
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct ConformanceReport {
     pub ns: String,
     pub bin: String,
@@ -151,12 +208,36 @@ pub struct ConformanceReport {
 impl ConformanceReport {
     pub fn new(ns: Ns, bin: impl Into<String>, surface: Surface, checks: Vec<CheckResult>) -> Self {
         let required = required_gate_ids(surface);
-        let required_failed = checks.iter().any(|c| required.contains(&c.id.as_str()) && c.status == GateStatus::Fail);
-        let required_passed = required.iter().all(|id| checks.iter().any(|c| c.id == *id && c.status == GateStatus::Pass));
-        let full_scope = CHECK_IDS.iter().all(|id| checks.iter().any(|c| c.id == *id && c.status != GateStatus::Skipped));
-        let completion_status = if required_failed { CompletionStatus::Failed } else if required_passed && full_scope { CompletionStatus::Complete } else { CompletionStatus::Partial };
+        let required_failed = checks
+            .iter()
+            .any(|c| required.contains(&c.id.as_str()) && c.status == GateStatus::Fail);
+        let required_passed = required.iter().all(|id| {
+            checks
+                .iter()
+                .any(|c| c.id == *id && c.status == GateStatus::Pass)
+        });
+        let full_scope = checks::GATE_MAPPINGS.iter().all(|mapping| {
+            checks
+                .iter()
+                .any(|check| check.id == mapping.id.as_str() && check.status != GateStatus::Skipped)
+        });
+        let completion_status = if required_failed {
+            CompletionStatus::Failed
+        } else if required_passed && full_scope {
+            CompletionStatus::Complete
+        } else {
+            CompletionStatus::Partial
+        };
         let passed = completion_status == CompletionStatus::Complete && required_passed;
-        Self { ns: ns.as_str().into(), bin: bin.into(), contract_version: CONTRACT_VERSION.into(), surface: surface.as_str().into(), completion_status, passed, checks }
+        Self {
+            ns: ns.as_str().into(),
+            bin: bin.into(),
+            contract_version: CONTRACT_VERSION.into(),
+            surface: surface.as_str().into(),
+            completion_status,
+            passed,
+            checks,
+        }
     }
 
     pub fn write_to_reports_dir(&self, reports_dir: &Path) -> Result<PathBuf> {
@@ -469,8 +550,22 @@ pub fn run_conformance(config: &RunConfig) -> ConformanceReport {
     // CodeMode artifact. Against an MCP artifact there is no execute_code to
     // drive, and reporting them as failures would be a category error.
     if config.surface == Surface::Mcp {
-        for (id, name) in [("G2", "refs"), ("G3", "telemetry"), ("G4", "leak-proof"), ("G5", "errors"), ("G6", "ctx.step"), ("G7", "limits"), ("G8", "mutation"), ("G9", "coalescing"), ("G10", "sandbox-denial")] {
-            checks.push(CheckResult::skip(id, name, "not applicable to MCP surface; requires CodeMode execution"));
+        for (id, name) in [
+            ("G2", "refs"),
+            ("G3", "telemetry"),
+            ("G4", "leak-proof"),
+            ("G5", "errors"),
+            ("G6", "ctx.step"),
+            ("G7", "limits"),
+            ("G8", "mutation"),
+            ("G9", "coalescing"),
+            ("G10", "sandbox-denial"),
+        ] {
+            checks.push(CheckResult::skip(
+                id,
+                name,
+                "not applicable to MCP surface; requires CodeMode execution",
+            ));
         }
         return ConformanceReport::new(config.ns, substrate_label(config), config.surface, checks);
     }

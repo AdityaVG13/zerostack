@@ -1,8 +1,9 @@
 //! Minimal stdio MCP fake substrate for harness self-tests (pass + fail paths).
 
-use crate::checks::{CheckId, CheckOutcome, CheckStatus, HarnessReport};
+use crate::checks::CheckId;
 use crate::patterns::validate_refs_in_response;
 use crate::schema::{validate_document, SchemaName};
+use crate::{CheckResult, ConformanceReport, GateStatus, Ns, Surface};
 use anyhow::{bail, Context, Result};
 use serde_json::{json, Value};
 use std::io::{BufRead, BufReader, Write};
@@ -36,108 +37,98 @@ fn count_codemode_tools(tools: &[Value]) -> usize {
         .count()
 }
 
-fn check_g1_exposure(tools_result: Result<Vec<Value>>) -> CheckOutcome {
+fn result(id: CheckId, status: GateStatus, details: Vec<String>) -> CheckResult {
+    CheckResult {
+        id: id.as_str().into(),
+        name: id.semantic_label().into(),
+        passed: status == GateStatus::Pass,
+        status,
+        skip_reason: None,
+        details,
+    }
+}
+
+fn check_g1_exposure(tools_result: Result<Vec<Value>>) -> CheckResult {
     match tools_result {
         Ok(tools) => {
             let codemode_count = count_codemode_tools(&tools);
-            CheckOutcome {
-                id: CheckId::G1Exposure,
-                status: if codemode_count == 3 {
-                    CheckStatus::Pass
-                } else {
-                    CheckStatus::Fail
-                },
-                detail: Some(format!("tool_count={codemode_count}")),
-            }
-        }
-        Err(e) => CheckOutcome {
-            id: CheckId::G1Exposure,
-            status: CheckStatus::Fail,
-            detail: Some(e.to_string()),
-        },
-    }
-}
-
-fn check_g3_capabilities(cap_result: Result<Value>) -> CheckOutcome {
-    match cap_result {
-        Ok(cap) => CheckOutcome {
-            id: CheckId::G3Telemetry,
-            status: if validate_document(SchemaName::CapabilityManifest, &cap).is_ok() {
-                CheckStatus::Pass
+            let status = if codemode_count == 3 {
+                GateStatus::Pass
             } else {
-                CheckStatus::Fail
-            },
-            detail: Some("capabilities schema".into()),
-        },
-        Err(e) => CheckOutcome {
-            id: CheckId::G3Telemetry,
-            status: CheckStatus::Fail,
-            detail: Some(e.to_string()),
-        },
+                GateStatus::Fail
+            };
+            result(
+                CheckId::G1Exposure,
+                status,
+                vec![format!("tool_count={codemode_count}")],
+            )
+        }
+        Err(error) => result(
+            CheckId::G1Exposure,
+            GateStatus::Fail,
+            vec![error.to_string()],
+        ),
     }
 }
 
-fn push_execute_checks(
-    checks: &mut Vec<CheckOutcome>,
-    ns: &str,
-    bad_refs: bool,
-    exec_result: Result<Value>,
-) {
-    match exec_result {
-        Ok(body) => {
-            checks.push(CheckOutcome {
-                id: CheckId::G2Refs,
-                status: if validate_refs_in_response(ns, &body).is_ok() {
-                    CheckStatus::Pass
-                } else {
-                    CheckStatus::Fail
-                },
-                detail: if bad_refs {
-                    Some("expected bad refs".into())
-                } else {
-                    None
-                },
-            });
-            if let Some(tel) = body.get("telemetry") {
-                checks.push(CheckOutcome {
-                    id: CheckId::G3Telemetry,
-                    status: if validate_document(SchemaName::Telemetry, tel).is_ok() {
-                        CheckStatus::Pass
-                    } else {
-                        CheckStatus::Fail
-                    },
-                    detail: Some("execute telemetry".into()),
-                });
+fn check_g3_capabilities(cap_result: Result<Value>) -> CheckResult {
+    match cap_result {
+        Ok(capabilities) => {
+            match validate_document(SchemaName::CapabilityManifest, &capabilities) {
+                Ok(()) => result(CheckId::G3Telemetry, GateStatus::Pass, Vec::new()),
+                Err(error) => result(
+                    CheckId::G3Telemetry,
+                    GateStatus::Fail,
+                    vec![error.to_string()],
+                ),
             }
         }
-        Err(e) => checks.push(CheckOutcome {
-            id: CheckId::G2Refs,
-            status: CheckStatus::Fail,
-            detail: Some(e.to_string()),
-        }),
+        Err(error) => result(
+            CheckId::G3Telemetry,
+            GateStatus::Fail,
+            vec![error.to_string()],
+        ),
     }
 }
 
-/// Shared G1 / caps / execute smoke pipeline for both MCP backends.
-fn run_smoke_pipeline(ns: &str, backend: &mut impl SmokeBackend) -> HarnessReport {
-    let mut checks = Vec::new();
-    checks.push(check_g1_exposure(backend.list_tools_after_init()));
+fn check_g2_refs(
+    ns: &str,
+    checks: &mut Vec<CheckResult>,
+    execution: Result<Value>,
+    bad_refs: bool,
+) {
+    match execution {
+        Ok(response) => {
+            let validation = validate_refs_in_response(ns, &response);
+            let (status, details) = match (bad_refs, validation) {
+                (false, Ok(())) => (GateStatus::Pass, Vec::new()),
+                (false, Err(error)) => (GateStatus::Fail, vec![error]),
+                (true, _) => (GateStatus::Fail, vec!["expected bad refs".into()]),
+            };
+            checks.push(result(CheckId::G2Refs, status, details));
+        }
+        Err(error) => checks.push(result(
+            CheckId::G2Refs,
+            GateStatus::Fail,
+            vec![error.to_string()],
+        )),
+    }
+}
+
+fn run_smoke_pipeline(ns: &str, backend: &mut impl SmokeBackend) -> ConformanceReport {
+    let mut checks = vec![check_g1_exposure(backend.list_tools_after_init())];
     checks.push(check_g3_capabilities(backend.describe_capabilities(ns)));
-    push_execute_checks(
-        &mut checks,
-        ns,
-        backend.bad_refs(),
-        backend.execute_noop(ns),
-    );
-    HarnessReport {
-        contract_version: "1.0".into(),
-        ns: ns.to_string(),
-        substrate_binary: "fake-in-process".into(),
-        checks,
-    }
+    let bad_refs = backend.bad_refs();
+    check_g2_refs(ns, &mut checks, backend.execute_noop(ns), bad_refs);
+    let namespace = match ns {
+        "fz" => Ns::Fz,
+        "tz" => Ns::Tz,
+        "gz" => Ns::Gz,
+        _ => panic!("unsupported fake namespace {ns:?}"),
+    };
+    ConformanceReport::new(namespace, "fake", Surface::Codemode, checks)
 }
 
-/// Scripted codemode MCP server subprocess (`current_exe --fake-codemode-mcp <ns>`).
 pub struct FakeCodemodeSubstrate {
     child: Child,
     stdin: ChildStdin,
@@ -176,7 +167,7 @@ impl FakeCodemodeSubstrate {
         })
     }
 
-    pub fn run_harness_smoke(&mut self, ns: &str) -> HarnessReport {
+    pub fn run_harness_smoke(&mut self, ns: &str) -> ConformanceReport {
         run_smoke_pipeline(ns, self)
     }
 
@@ -394,7 +385,7 @@ pub fn fake_mcp_main(args: &[String]) -> Result<()> {
 mod in_process {
     use super::*;
 
-    pub(crate) fn run_harness_smoke_in_process(ns: &str, bad_refs: bool) -> HarnessReport {
+    pub(crate) fn run_harness_smoke_in_process(ns: &str, bad_refs: bool) -> ConformanceReport {
         let mut state = InProcessFake {
             ns: ns.to_string(),
             bad_refs,
@@ -480,11 +471,11 @@ mod tests {
     use super::*;
     use in_process::run_harness_smoke_in_process;
 
-    fn status_vector(report: &HarnessReport) -> Vec<(CheckId, CheckStatus)> {
+    fn status_vector(report: &ConformanceReport) -> Vec<(String, GateStatus)> {
         report
             .checks
             .iter()
-            .map(|c| (c.id, c.status.clone()))
+            .map(|c| (c.id.clone(), c.status))
             .collect()
     }
 
@@ -495,14 +486,14 @@ mod tests {
             report
                 .checks
                 .iter()
-                .any(|c| c.id == CheckId::G1Exposure && c.status == CheckStatus::Pass),
+                .any(|c| c.id == CheckId::G1Exposure.as_str() && c.status == GateStatus::Pass),
             "{report:?}"
         );
         assert!(
             report
                 .checks
                 .iter()
-                .any(|c| c.id == CheckId::G2Refs && c.status == CheckStatus::Pass),
+                .any(|c| c.id == CheckId::G2Refs.as_str() && c.status == GateStatus::Pass),
             "{report:?}"
         );
     }
@@ -514,7 +505,7 @@ mod tests {
             report
                 .checks
                 .iter()
-                .any(|c| c.id == CheckId::G2Refs && c.status == CheckStatus::Fail),
+                .any(|c| c.id == CheckId::G2Refs.as_str() && c.status == GateStatus::Fail),
             "{report:?}"
         );
     }
@@ -556,18 +547,17 @@ mod tests {
         let pass = status_vector(&run_harness_smoke_in_process("gz", false));
         assert!(pass
             .iter()
-            .any(|(id, st)| *id == CheckId::G1Exposure && *st == CheckStatus::Pass));
+            .any(|(id, st)| id == CheckId::G1Exposure.as_str() && *st == GateStatus::Pass));
         assert!(pass
             .iter()
-            .any(|(id, st)| *id == CheckId::G2Refs && *st == CheckStatus::Pass));
+            .any(|(id, st)| id == CheckId::G2Refs.as_str() && *st == GateStatus::Pass));
 
         let bad = status_vector(&run_harness_smoke_in_process("gz", true));
         assert!(bad
             .iter()
-            .any(|(id, st)| *id == CheckId::G2Refs && *st == CheckStatus::Fail));
+            .any(|(id, st)| id == CheckId::G2Refs.as_str() && *st == GateStatus::Fail));
     }
 }
-
 
 /// Deterministic in-process RACC substrate used only by hub conformance tests.
 #[derive(Clone, Debug)]
@@ -597,58 +587,187 @@ impl Default for RaccFakeSubstrate {
 
 fn fake_provenance() -> crate::racc::Provenance {
     crate::racc::Provenance {
-        parser_id: "fixture-parser".into(), parser_version: "1".into(),
-        index_id: "fixture-index".into(), index_version: "4".into(),
-        operator_id: "fixture-operator".into(), operator_version: "2".into(),
+        parser_id: "fixture-parser".into(),
+        parser_version: "1".into(),
+        index_id: "fixture-index".into(),
+        index_version: "4".into(),
+        operator_id: "fixture-operator".into(),
+        operator_version: "2".into(),
     }
 }
 
 fn fake_count(source: &[u8], pattern: &[u8]) -> u64 {
-    if pattern.is_empty() { return 0; }
-    source.windows(pattern.len()).filter(|window| *window == pattern).count() as u64
+    if pattern.is_empty() {
+        return 0;
+    }
+    source
+        .windows(pattern.len())
+        .filter(|window| *window == pattern)
+        .count() as u64
 }
 
 fn fake_certificate(fixture: &crate::racc::QueryFixture) -> crate::racc::RaccCertificate {
     use crate::racc::{CompletenessWitness as W, TypedQuery as Q};
     let query = fixture.query.clone();
     let (payload, completeness) = match &query {
-        Q::ReadSpan { start, end, .. } => (vec![fixture.source[*start as usize..*end as usize].to_vec()], W::ReadSpan),
+        Q::ReadSpan { start, end, .. } => (
+            vec![fixture.source[*start as usize..*end as usize].to_vec()],
+            W::ReadSpan,
+        ),
         Q::ExactSearch { scope, pattern } => {
             let count = fake_count(fixture.source, pattern);
-            (vec![pattern.clone(); count as usize], W::ExactSearch { scope: scope.clone(), pattern: pattern.clone(), scope_len: fixture.source.len() as u64, match_count: count })
+            (
+                vec![pattern.clone(); count as usize],
+                W::ExactSearch {
+                    scope: scope.clone(),
+                    pattern: pattern.clone(),
+                    scope_len: fixture.source.len() as u64,
+                    match_count: count,
+                },
+            )
         }
-        Q::Definition { symbol } => (vec![b"fn target".to_vec()], W::Definition { symbol: *symbol, index_id: "fixture-index".into(), index_version: "4".into() }),
-        Q::References { symbol } => (vec![b"target()".to_vec(), b"target".to_vec()], W::References { symbol: *symbol, index_id: "fixture-index".into(), index_version: "4".into(), match_count: 2 }),
-        Q::AstClosure { seeds, relations, radius } => (vec![b"1,2,3,4".to_vec()], W::AstClosure { seeds: seeds.clone(), relations: *relations, radius: *radius, parser_id: "fixture-parser".into(), parser_version: "1".into(), visited_nodes: 4 }),
-        Q::CallPath { source, target } => (vec![b"7>8>9".to_vec()], W::CallPath { source: *source, target: *target, edge_count: 2 }),
-        Q::DataflowSlice { sink } => (vec![b"1>3>4".to_vec()], W::DataflowSlice { sink: *sink, visited_nodes: 3 }),
-        Q::Diff { old, new } => (vec![b"+ target".to_vec()], W::Diff { old: old.clone(), new: new.clone() }),
-        Q::BuildReceipt { command } => (vec![b"exit=0".to_vec()], W::BuildReceipt { command: *command, exit_code: 0, stdout_digest: crate::racc::digest_hex(b"built"), stderr_digest: crate::racc::digest_hex(b"") }),
-        Q::TestTrace { test } => (vec![b"pass".to_vec()], W::TestTrace { test: *test, exit_code: 0, trace_digest: crate::racc::digest_hex(b"trace-13") }),
+        Q::Definition { symbol } => (
+            vec![b"fn target".to_vec()],
+            W::Definition {
+                symbol: *symbol,
+                index_id: "fixture-index".into(),
+                index_version: "4".into(),
+            },
+        ),
+        Q::References { symbol } => (
+            vec![b"target()".to_vec(), b"target".to_vec()],
+            W::References {
+                symbol: *symbol,
+                index_id: "fixture-index".into(),
+                index_version: "4".into(),
+                match_count: 2,
+            },
+        ),
+        Q::AstClosure {
+            seeds,
+            relations,
+            radius,
+        } => (
+            vec![b"1,2,3,4".to_vec()],
+            W::AstClosure {
+                seeds: seeds.clone(),
+                relations: *relations,
+                radius: *radius,
+                parser_id: "fixture-parser".into(),
+                parser_version: "1".into(),
+                visited_nodes: 4,
+            },
+        ),
+        Q::CallPath { source, target } => (
+            vec![b"7>8>9".to_vec()],
+            W::CallPath {
+                source: *source,
+                target: *target,
+                edge_count: 2,
+            },
+        ),
+        Q::DataflowSlice { sink } => (
+            vec![b"1>3>4".to_vec()],
+            W::DataflowSlice {
+                sink: *sink,
+                visited_nodes: 3,
+            },
+        ),
+        Q::Diff { old, new } => (
+            vec![b"+ target".to_vec()],
+            W::Diff {
+                old: old.clone(),
+                new: new.clone(),
+            },
+        ),
+        Q::BuildReceipt { command } => (
+            vec![b"exit=0".to_vec()],
+            W::BuildReceipt {
+                command: *command,
+                exit_code: 0,
+                stdout_digest: crate::racc::digest_hex(b"built"),
+                stderr_digest: crate::racc::digest_hex(b""),
+            },
+        ),
+        Q::TestTrace { test } => (
+            vec![b"pass".to_vec()],
+            W::TestTrace {
+                test: *test,
+                exit_code: 0,
+                trace_digest: crate::racc::digest_hex(b"trace-13"),
+            },
+        ),
     };
-    crate::racc::RaccCertificate { schema_version: 1, domain: "zerostack.racc.typed-query.v1".into(), query, payload, provenance: fake_provenance(), completeness }
+    crate::racc::RaccCertificate {
+        schema_version: 1,
+        domain: "zerostack.racc.typed-query.v1".into(),
+        query,
+        payload,
+        provenance: fake_provenance(),
+        completeness,
+    }
 }
 
 fn honest_receipt() -> crate::racc::DominanceReceipt {
     use crate::racc::{Charges, DominanceReceipt, PhaseArithmetic};
     let mut phases = vec![
-        PhaseArithmetic { phase: "explore".into(), charges: Charges { successful_trials: 2, failed_trials: 1, retries: 1, verification_calls: 2, recovery_calls: 1, expansions: 2, failed_expansions: 1, fallback_charges: 1 }, reported_total: 0 },
-        PhaseArithmetic { phase: "verify".into(), charges: Charges { successful_trials: 1, failed_trials: 1, retries: 1, verification_calls: 3, recovery_calls: 1, expansions: 1, failed_expansions: 1, fallback_charges: 2 }, reported_total: 0 },
+        PhaseArithmetic {
+            phase: "explore".into(),
+            charges: Charges {
+                successful_trials: 2,
+                failed_trials: 1,
+                retries: 1,
+                verification_calls: 2,
+                recovery_calls: 1,
+                expansions: 2,
+                failed_expansions: 1,
+                fallback_charges: 1,
+            },
+            reported_total: 0,
+        },
+        PhaseArithmetic {
+            phase: "verify".into(),
+            charges: Charges {
+                successful_trials: 1,
+                failed_trials: 1,
+                retries: 1,
+                verification_calls: 3,
+                recovery_calls: 1,
+                expansions: 1,
+                failed_expansions: 1,
+                fallback_charges: 2,
+            },
+            reported_total: 0,
+        },
     ];
-    for phase in &mut phases { phase.reported_total = phase.charges.total(); }
+    for phase in &mut phases {
+        phase.reported_total = phase.charges.total();
+    }
     let target_identity = "fixture-target".to_string();
     let target_digest = crate::racc::digest_hex(b"fixture-target-v1");
-    let replay_identity = crate::racc::canonical_replay_identity(&target_identity, &target_digest, &phases);
-    DominanceReceipt { schema_version: 1, target_identity, target_digest, phases, replay_identity }
+    let replay_identity =
+        crate::racc::canonical_replay_identity(&target_identity, &target_digest, &phases);
+    DominanceReceipt {
+        schema_version: 1,
+        target_identity,
+        target_digest,
+        phases,
+        replay_identity,
+    }
 }
 
 impl crate::racc::RaccSubstrate for RaccFakeSubstrate {
-    fn certified_query(&mut self, fixture: &crate::racc::QueryFixture) -> crate::racc::RaccCertificate {
+    fn certified_query(
+        &mut self,
+        fixture: &crate::racc::QueryFixture,
+    ) -> crate::racc::RaccCertificate {
         use crate::racc::{CertificateMutation as M, CompletenessWitness as W, TypedQuery as Q};
         let mut certificate = fake_certificate(fixture);
         match self.certificate_mutation {
             M::None => {}
-            M::OmitPayload => { certificate.payload.pop(); }
+            M::OmitPayload => {
+                certificate.payload.pop();
+            }
             M::ExtraPayload => certificate.payload.push(b"extra".to_vec()),
             M::StaleIndex => certificate.provenance.index_version = "stale".into(),
             M::StaleParser => certificate.provenance.parser_version = "stale".into(),
@@ -675,46 +794,101 @@ impl crate::racc::RaccSubstrate for RaccFakeSubstrate {
             M::OmitFailedExpansions => receipt.phases[0].charges.failed_expansions = 0,
             M::OmitFallbackCharges => receipt.phases[0].charges.fallback_charges = 0,
         }
-        if !matches!(self.receipt_mutation, M::ReplayIdentity | M::PhaseArithmetic) {
+        if !matches!(
+            self.receipt_mutation,
+            M::ReplayIdentity | M::PhaseArithmetic
+        ) {
             receipt.phases[0].reported_total = receipt.phases[0].charges.total();
-            receipt.replay_identity = crate::racc::canonical_replay_identity(&receipt.target_identity, &receipt.target_digest, &receipt.phases);
+            receipt.replay_identity = crate::racc::canonical_replay_identity(
+                &receipt.target_identity,
+                &receipt.target_digest,
+                &receipt.phases,
+            );
         }
         receipt
     }
 
     fn irreversible_without_evidence(&mut self) -> crate::racc::IrreversibleDecision {
-        if self.skip_irreversible_gate { crate::racc::IrreversibleDecision::CommittedCompressed } else { crate::racc::IrreversibleDecision::RawFallback }
+        if self.skip_irreversible_gate {
+            crate::racc::IrreversibleDecision::CommittedCompressed
+        } else {
+            crate::racc::IrreversibleDecision::RawFallback
+        }
     }
 
     fn expansion_budget(&mut self) -> crate::racc::BudgetObservation {
         use crate::racc::BudgetMutation as M;
         match self.budget_mutation {
-            M::None => crate::racc::BudgetObservation { requested: vec![2, 4, 8, 16], measured_costs: vec![2, 4, 7, 12], reported_costs: vec![2, 4, 7, 12] },
-            M::Nonnested => crate::racc::BudgetObservation { requested: vec![2, 5, 8, 16], measured_costs: vec![2, 4, 7, 12], reported_costs: vec![2, 4, 7, 12] },
-            M::UnderreportedCost => crate::racc::BudgetObservation { requested: vec![2, 4, 8, 16], measured_costs: vec![2, 4, 7, 20], reported_costs: vec![2, 4, 7, 12] },
+            M::None => crate::racc::BudgetObservation {
+                requested: vec![2, 4, 8, 16],
+                measured_costs: vec![2, 4, 7, 12],
+                reported_costs: vec![2, 4, 7, 12],
+            },
+            M::Nonnested => crate::racc::BudgetObservation {
+                requested: vec![2, 5, 8, 16],
+                measured_costs: vec![2, 4, 7, 12],
+                reported_costs: vec![2, 4, 7, 12],
+            },
+            M::UnderreportedCost => crate::racc::BudgetObservation {
+                requested: vec![2, 4, 8, 16],
+                measured_costs: vec![2, 4, 7, 20],
+                reported_costs: vec![2, 4, 7, 12],
+            },
         }
     }
 
-    fn inline_fetch(&mut self, fixture: &crate::racc::QueryFixture) -> crate::racc::InlineObservation {
+    fn inline_fetch(
+        &mut self,
+        fixture: &crate::racc::QueryFixture,
+    ) -> crate::racc::InlineObservation {
         let certificate = fake_certificate(fixture);
-        crate::racc::InlineObservation { payload: certificate.payload.concat(), certificate, round_trips: if self.second_certificate_fetch { 2 } else { 1 } }
+        crate::racc::InlineObservation {
+            payload: certificate.payload.concat(),
+            certificate,
+            round_trips: if self.second_certificate_fetch { 2 } else { 1 },
+        }
     }
 
-    fn residency_round_trip(&mut self, objects: &[crate::racc::StoredFixture]) -> Vec<(crate::racc::StoreLookup, crate::racc::StoreLookup)> {
+    fn residency_round_trip(
+        &mut self,
+        objects: &[crate::racc::StoredFixture],
+    ) -> Vec<(crate::racc::StoreLookup, crate::racc::StoreLookup)> {
         use crate::racc::{ResidencyMutation as M, StoreLookup};
-        objects.iter().enumerate().map(|(index, object)| {
-            let mut bytes = object.bytes.clone();
-            if self.residency_mutation == M::Corruption && index == 0 { bytes[0] ^= 0xff; }
-            let resident = StoreLookup::Hit { bytes, metadata: object.metadata.clone() };
-            let removed = if self.residency_mutation == M::SilentMiss && index == 0 {
-                StoreLookup::Hit { bytes: Vec::new(), metadata: Default::default() }
-            } else { StoreLookup::Miss { id: object.id.clone() } };
-            (resident, removed)
-        }).collect()
+        objects
+            .iter()
+            .enumerate()
+            .map(|(index, object)| {
+                let mut bytes = object.bytes.clone();
+                if self.residency_mutation == M::Corruption && index == 0 {
+                    bytes[0] ^= 0xff;
+                }
+                let resident = StoreLookup::Hit {
+                    bytes,
+                    metadata: object.metadata.clone(),
+                };
+                let removed = if self.residency_mutation == M::SilentMiss && index == 0 {
+                    StoreLookup::Hit {
+                        bytes: Vec::new(),
+                        metadata: Default::default(),
+                    }
+                } else {
+                    StoreLookup::Miss {
+                        id: object.id.clone(),
+                    }
+                };
+                (resident, removed)
+            })
+            .collect()
     }
 
-    fn task_attempt(&mut self, case: crate::racc::TaskAttemptCase) -> crate::racc::TaskAttemptObservation {
-        use crate::racc::{TaskAcceptanceReceiptDocument as Receipt, TaskAttemptCase as C, TaskAttemptDisposition as D, TaskEffectClass as E, TaskTransactionMutation as M};
+    fn task_attempt(
+        &mut self,
+        case: crate::racc::TaskAttemptCase,
+    ) -> crate::racc::TaskAttemptObservation {
+        use crate::racc::{
+            TaskAcceptanceReceiptDocument as Receipt, TaskAttemptCase as C,
+            TaskAttemptDisposition as D, TaskEffectClass as E, TaskTransactionMutation as M,
+        };
         let artifact = crate::racc::digest_hex(b"fixture-artifact");
         let journal = crate::racc::digest_hex(b"fixture-journal");
         let cost = 13;
@@ -740,7 +914,11 @@ impl crate::racc::RaccSubstrate for RaccFakeSubstrate {
                     journal_id: journal,
                     attempt_cost: cost,
                     charged_attempt_cost: cost,
-                    receipt: if self.task_transaction_mutation == M::MissingReceiptCommit { None } else { Some(receipt) },
+                    receipt: if self.task_transaction_mutation == M::MissingReceiptCommit {
+                        None
+                    } else {
+                        Some(receipt)
+                    },
                     disposition: D::Committed,
                 }
             }
@@ -751,18 +929,33 @@ impl crate::racc::RaccSubstrate for RaccFakeSubstrate {
                 observed_artifact_digests: vec![artifact],
                 journal_id: journal,
                 attempt_cost: cost,
-                charged_attempt_cost: if self.task_transaction_mutation == M::MissingCharge { 0 } else { cost },
+                charged_attempt_cost: if self.task_transaction_mutation == M::MissingCharge {
+                    0
+                } else {
+                    cost
+                },
                 receipt: None,
                 disposition: D::RawRollback,
             },
             C::Irreversible => crate::racc::TaskAttemptObservation {
                 effect_class: E::Irreversible,
-                exit_code: if self.task_transaction_mutation == M::AllowIrreversible { Some(0) } else { None },
-                expected_artifact_digests: Vec::new(), observed_artifact_digests: Vec::new(), journal_id: journal,
-                attempt_cost: 0, charged_attempt_cost: 0, receipt: None,
-                disposition: if self.task_transaction_mutation == M::AllowIrreversible { D::Committed } else { D::RejectedIrreversible },
+                exit_code: if self.task_transaction_mutation == M::AllowIrreversible {
+                    Some(0)
+                } else {
+                    None
+                },
+                expected_artifact_digests: Vec::new(),
+                observed_artifact_digests: Vec::new(),
+                journal_id: journal,
+                attempt_cost: 0,
+                charged_attempt_cost: 0,
+                receipt: None,
+                disposition: if self.task_transaction_mutation == M::AllowIrreversible {
+                    D::Committed
+                } else {
+                    D::RejectedIrreversible
+                },
             },
         }
     }
-
 }

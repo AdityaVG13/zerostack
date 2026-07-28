@@ -4,6 +4,8 @@
 
 Each gate reports a machine-readable status of pass, fail, or skipped; a skipped gate MUST include a stable skip_reason. The authoritative required set is G1-G10 for CodeMode and G1 for MCP. Report completion is failed when a required gate fails, partial when required evidence is missing/skipped or the full G1-G10 evidence scope was not run, and complete only when the full scope ran and every required gate passed. The backward-compatible passed field is true only for a complete pass. In particular, an MCP G1-only run is partial with passed=false; skipped non-required gates do not make it failed. The CLI exits 0 for a complete pass, 1 for failed, and 2 for partial.
 
+The canonical harness report shape is defined by `schemas/harness-report.schema.json`; `schemas/harness_report.schema.json` is its deterministic resolved snapshot. Gate IDs serialize exactly as `G1` through `G10`, while each check carries its semantic label separately in `name`. The sole retained legacy compatibility spelling, `G4LEAKPROOF`, is deserialize-only and MUST NOT be emitted. A report MUST reject unknown fields, unknown gate IDs, and duplicate gate IDs. RACC gate names are a separate namespace and are not remapped by this table.
+
 Status: normative. This document supersedes prior prose specs for conformance purposes. Durable step-log/replay is explicitly deferred and is not part of v1.0.
 
 ## 1. Scope

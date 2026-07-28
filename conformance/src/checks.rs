@@ -1,21 +1,80 @@
-//! Named G1–G10 check identifiers and harness aggregation.
+//! Named G1-G10 gate identifiers and their authoritative semantic mapping.
 
+use crate::{CheckResult, GateStatus};
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
-#[serde(rename_all = "UPPERCASE")]
 pub enum CheckId {
+    #[serde(rename = "G1")]
     G1Exposure,
+    #[serde(rename = "G2")]
     G2Refs,
+    #[serde(rename = "G3")]
     G3Telemetry,
+    #[serde(rename = "G4", alias = "G4LEAKPROOF")]
     G4LeakProof,
+    #[serde(rename = "G5")]
     G5Errors,
+    #[serde(rename = "G6")]
     G6CtxStep,
+    #[serde(rename = "G7")]
     G7Limits,
+    #[serde(rename = "G8")]
     G8Mutation,
+    #[serde(rename = "G9")]
     G9Coalescing,
+    #[serde(rename = "G10")]
     G10Sandbox,
 }
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct GateMapping {
+    pub id: CheckId,
+    pub semantic_label: &'static str,
+}
+
+pub const GATE_MAPPINGS: [GateMapping; 10] = [
+    GateMapping {
+        id: CheckId::G1Exposure,
+        semantic_label: "exposure",
+    },
+    GateMapping {
+        id: CheckId::G2Refs,
+        semantic_label: "refs",
+    },
+    GateMapping {
+        id: CheckId::G3Telemetry,
+        semantic_label: "telemetry",
+    },
+    GateMapping {
+        id: CheckId::G4LeakProof,
+        semantic_label: "leak_proof",
+    },
+    GateMapping {
+        id: CheckId::G5Errors,
+        semantic_label: "errors",
+    },
+    GateMapping {
+        id: CheckId::G6CtxStep,
+        semantic_label: "ctx_step",
+    },
+    GateMapping {
+        id: CheckId::G7Limits,
+        semantic_label: "limits",
+    },
+    GateMapping {
+        id: CheckId::G8Mutation,
+        semantic_label: "mutation",
+    },
+    GateMapping {
+        id: CheckId::G9Coalescing,
+        semantic_label: "coalescing",
+    },
+    GateMapping {
+        id: CheckId::G10Sandbox,
+        semantic_label: "sandbox",
+    },
+];
 
 impl CheckId {
     pub const ALL: [CheckId; 10] = [
@@ -31,87 +90,37 @@ impl CheckId {
         Self::G10Sandbox,
     ];
 
-    pub fn as_str(self) -> &'static str {
+    pub const fn as_str(self) -> &'static str {
         match self {
-            Self::G1Exposure => "G1_exposure",
-            Self::G2Refs => "G2_refs",
-            Self::G3Telemetry => "G3_telemetry",
-            Self::G4LeakProof => "G4_leak_proof",
-            Self::G5Errors => "G5_errors",
-            Self::G6CtxStep => "G6_ctx_step",
-            Self::G7Limits => "G7_limits",
-            Self::G8Mutation => "G8_mutation",
-            Self::G9Coalescing => "G9_coalescing",
-            Self::G10Sandbox => "G10_sandbox",
+            Self::G1Exposure => "G1",
+            Self::G2Refs => "G2",
+            Self::G3Telemetry => "G3",
+            Self::G4LeakProof => "G4",
+            Self::G5Errors => "G5",
+            Self::G6CtxStep => "G6",
+            Self::G7Limits => "G7",
+            Self::G8Mutation => "G8",
+            Self::G9Coalescing => "G9",
+            Self::G10Sandbox => "G10",
         }
     }
-}
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
-pub enum CheckStatus {
-    Pass,
-    Fail,
-    Skip,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct CheckOutcome {
-    pub id: CheckId,
-    pub status: CheckStatus,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub detail: Option<String>,
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct HarnessReport {
-    pub contract_version: String,
-    pub ns: String,
-    pub substrate_binary: String,
-    pub checks: Vec<CheckOutcome>,
-}
-
-impl HarnessReport {
-    pub fn passed(&self) -> usize {
-        self.checks
+    pub fn semantic_label(self) -> &'static str {
+        GATE_MAPPINGS
             .iter()
-            .filter(|c| c.status == CheckStatus::Pass)
-            .count()
-    }
-
-    pub fn failed(&self) -> usize {
-        self.checks
-            .iter()
-            .filter(|c| c.status == CheckStatus::Fail)
-            .count()
-    }
-
-    pub fn skipped(&self) -> usize {
-        self.checks
-            .iter()
-            .filter(|c| c.status == CheckStatus::Skip)
-            .count()
+            .find(|mapping| mapping.id == self)
+            .expect("every CheckId has a mapping")
+            .semantic_label
     }
 }
+
+/// Compatibility name used by the independent RACC gate results.
+pub type CheckStatus = GateStatus;
 
 /// In-crate self-checks (no external substrate binary).
-pub fn run_self_checks() -> Vec<CheckOutcome> {
-    vec![CheckOutcome {
-        id: CheckId::G2Refs,
-        status: CheckStatus::Pass,
-        detail: Some("patterns + schema unit tests".into()),
-    }]
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn check_id_serializes_to_stable_g_names() {
-        let id = CheckId::G4LeakProof;
-        let json = serde_json::to_string(&id).unwrap();
-        assert_eq!(json, "\"G4LEAKPROOF\"");
-        assert_eq!(CheckId::ALL.len(), 10);
-    }
+pub fn run_self_checks() -> Vec<CheckResult> {
+    vec![CheckResult::pass(
+        CheckId::G2Refs.as_str(),
+        CheckId::G2Refs.semantic_label(),
+    )]
 }
