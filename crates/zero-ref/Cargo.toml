@@ -9,4 +9,9 @@ description = "ZeroRef v1: the portable cross-engine blob ref subset for ZeroSta
 sha2 = { workspace = true }
 
 [dev-dependencies]
+criterion = "0.5"
 serde_json = { workspace = true }
+
+[[bench]]
+name = "parse"
+harness = false
