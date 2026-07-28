@@ -21,6 +21,16 @@
 //! Engine-internal ref grammars (fz://seq/, gz node/query refs, compact
 //! g:/q: forms, tz session keys) are wider and stay engine-owned; this crate
 //! is the strict v1 layer only.
+//!
+//! Parse refs and use [ZeroRefV1::verify_and_select] for normal access:
+//!
+//!     use zero_ref::{content_hash_hex, ZeroRefV1};
+//!     let bytes = b"hello";
+//!     let reference = ZeroRefV1::parse(&format!(
+//!         "fz://blob/{}#B0-5", content_hash_hex(bytes)
+//!     ))?;
+//!     assert_eq!(reference.verify_and_select(bytes)?, bytes);
+//!     # Ok::<(), zero_ref::ZeroRefError>(())
 
 use std::fmt;
 
@@ -400,9 +410,18 @@ impl ZeroRefV1 {
         })
     }
 
-    /// Apply the fragment using the canonical v1 bounds policy.
-    pub fn select<'a>(&self, bytes: &'a [u8]) -> Result<&'a [u8], ZeroRefError> {
+    /// Apply the fragment using the canonical v1 bounds policy without
+    /// verifying the ref digest.
+    ///
+    /// This is safe only after the bytes have been independently authenticated.
+    pub fn unchecked_select<'a>(&self, bytes: &'a [u8]) -> Result<&'a [u8], ZeroRefError> {
         select_fragment(bytes, &self.fragment, &self.to_string())
+    }
+
+    /// Apply the fragment without verifying the ref digest.
+    #[deprecated(note = "use verify_and_select, or unchecked_select after authentication")]
+    pub fn select<'a>(&self, bytes: &'a [u8]) -> Result<&'a [u8], ZeroRefError> {
+        self.unchecked_select(bytes)
     }
 
     /// Apply the fragment with an explicit line-end policy. This is for
@@ -418,7 +437,14 @@ impl ZeroRefV1 {
     /// Verify the complete unfragmented bytes against the ref identity, then
     /// select the fragment with the canonical v1 policy.
     pub fn verify_and_select<'a>(&self, bytes: &'a [u8]) -> Result<&'a [u8], ZeroRefError> {
-        self.verify_and_select_with_policy(bytes, CANONICAL_LINE_END_POLICY)
+        let actual = content_hash_hex(bytes);
+        if actual != self.hash {
+            return Err(ZeroRefError::new(
+                ZeroRefErrorClass::DigestMismatch,
+                format!("bytes hash to {actual}, ref claims {}", self.hash),
+            ));
+        }
+        self.unchecked_select(bytes)
     }
 
     /// Verify the complete bytes, then select with an explicit line-end policy.
@@ -635,5 +661,25 @@ impl fmt::Display for ZeroRefV1 {
             ZeroFragment::Bytes { start, end } => write!(f, "#B{start}-{end}"),
             ZeroFragment::Lines { start, end } => write!(f, "#L{start}-{end}"),
         }
+    }
+}
+
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn select_auth_unchecked_slices_tampered_bytes_but_verified_rejects() {
+        let authenticated = b"abcdef";
+        let reference = ZeroRefV1::parse(&format!(
+            "fz://blob/{}#B1-4",
+            content_hash_hex(authenticated),
+        ))
+        .unwrap();
+        let tampered = b"aXYZef";
+
+        assert_eq!(reference.unchecked_select(tampered).unwrap(), b"XYZ");
+        assert!(reference.verify_and_select(tampered).is_err());
     }
 }
