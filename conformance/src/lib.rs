@@ -1,3 +1,5 @@
+#![forbid(unsafe_code)]
+
 pub mod checks;
 pub mod fake_substrate;
 pub mod patterns;
