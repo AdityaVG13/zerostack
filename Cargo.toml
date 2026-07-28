@@ -3,6 +3,7 @@ resolver = "2"
 members = [
     "crates/zero-abi",
     "crates/zero-cert",
+    "crates/zero-codemode",
     "crates/zero-gate",
     "crates/zero-gauge",
     "crates/zero-ledger",
