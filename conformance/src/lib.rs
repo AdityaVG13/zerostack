@@ -265,6 +265,12 @@ pub fn schema_paths() -> Vec<PathBuf> {
     .collect()
 }
 
+fn push_manifest_error(errors: &mut Vec<String>, invalid: bool, message: String) {
+    if invalid {
+        errors.push(message);
+    }
+}
+
 pub fn validate_capability_manifest(ns: Ns, value: &Value) -> Vec<String> {
     let mut errors = Vec::new();
     let manifest: CapabilityManifest = match serde_json::from_value(value.clone()) {
@@ -276,19 +282,19 @@ pub fn validate_capability_manifest(ns: Ns, value: &Value) -> Vec<String> {
         }
     };
 
-    if manifest.contract_version != CONTRACT_VERSION {
-        errors.push(format!(
+    push_manifest_error(
+        &mut errors,
+        manifest.contract_version != CONTRACT_VERSION,
+        format!(
             "contract_version is {:?}, expected {CONTRACT_VERSION:?}",
             manifest.contract_version
-        ));
-    }
-    if manifest.ns != ns.as_str() {
-        errors.push(format!(
-            "ns is {:?}, expected {:?}",
-            manifest.ns,
-            ns.as_str()
-        ));
-    }
+        ),
+    );
+    push_manifest_error(
+        &mut errors,
+        manifest.ns != ns.as_str(),
+        format!("ns is {:?}, expected {:?}", manifest.ns, ns.as_str()),
+    );
     if !matches!(
         manifest.mutation.as_str(),
         "allowed" | "denied" | "readonly"
@@ -1186,21 +1192,25 @@ fn payload_top_level_content(response: &Value) -> Option<Value> {
 
 /// Scan one `content[]` array for a structured payload, preferring explicitly
 /// structured entries over text that merely happens to parse as JSON.
+fn explicit_content_payload(item: &Value) -> Option<Value> {
+    match item.get("structuredContent") {
+        Some(structured) if structured.is_object() => Some(structured.clone()),
+        _ => item.get("json").cloned(),
+    }
+}
+
+/// Scan one content array for a structured payload, preferring explicitly
+/// structured entries over text that merely happens to parse as JSON.
 fn payload_from_content(content: &[Value]) -> Option<Value> {
     for item in content {
-        if let Some(structured) = item.get("structuredContent") {
-            if structured.is_object() {
-                return Some(structured.clone());
-            }
-        }
-        if let Some(json) = item.get("json") {
-            return Some(json.clone());
+        if let Some(payload) = explicit_content_payload(item) {
+            return Some(payload);
         }
     }
     for item in content {
         if let Some(text) = item.get("text").and_then(Value::as_str) {
             if let Ok(parsed) = serde_json::from_str::<Value>(text) {
-                if parsed.is_object() || parsed.is_array() {
+                if matches!(parsed, Value::Object(_) | Value::Array(_)) {
                     return Some(parsed);
                 }
             }
