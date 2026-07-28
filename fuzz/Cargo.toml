@@ -1,0 +1,25 @@
+[package]
+name = "zerostack-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2021"
+
+[package.metadata]
+cargo-fuzz = true
+
+[package.metadata.zerostack]
+fuzz-command = "cargo fuzz run raw_worker_v2"
+
+[dependencies]
+libfuzzer-sys = "0.4"
+zero-abi = { path = "../crates/zero-abi" }
+
+[[bin]]
+name = "raw_worker_v2"
+path = "fuzz_targets/raw_worker_v2.rs"
+test = false
+doc = false
+bench = false
+
+[workspace]
+members = ["."]
