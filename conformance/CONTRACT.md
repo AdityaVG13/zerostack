@@ -353,3 +353,22 @@ A conformance run MUST emit a JSON report at `conformance/reports/<ns>-<date>.js
 ```
 
 A red report is useful output for Wave 1 substrate sessions. The conformance harness MUST prefer actionable diffs over only pass/fail booleans.
+
+## 12. RACC conformance gates
+
+The deterministic hub suite publishes six machine-readable gate IDs. It owns immutable fixtures, derives expected results independently, and MUST NOT accept a substrate verifier or self-reported arithmetic as proof.
+
+| Gate | Normative invariant | Reference |
+|---|---|---|
+| `RACC-CERT` | Every supported typed query returns the exact payload, locked parser/index/operator provenance, query-bound completeness witness, and no omissions or extras. | T2 |
+| `RACC-RECEIPT` | Replay identity and exact per-phase arithmetic include successful and failed trials, retries, verification/recovery calls, expansions, and fallback charges. | T8, 12.2 |
+| `RACC-GATE-IRREV` | An irreversible effect without verified evidence routes to `RawFallback` rather than committing a compressed decision. | T2, T8 |
+| `RACC-BUDGET` | Expansion budgets are nested monotone doublings and independently satisfy the cumulative factor-4 bound. | T10 |
+| `RACC-INLINE` | A certified payload and its certificate arrive in one substrate round trip. | 12.2 |
+| `RACC-RESIDENCY` | Resident objects recover byte-identically with metadata; guarded removal produces a typed miss. | T8 |
+
+### Release aggregate
+
+Paper 12.2 release evidence MUST fix the preregistered target identity and digest before evaluation and report each task's raw cost `R`, compressed cost `C`, and ratio `C/R`. Every task MUST show no statistically or transactionally demonstrated regression through powered paired evidence or a valid T13 no-regret receipt. Accounting MUST include all fallback, retry, failed-trial, verification, recovery, and failed-expansion charges. A green run against the deterministic fake substrate validates the hub harness only; it is explicitly **not** a production release pass.
+
+These gates make no universal compression-percentage claim (T5) and no semantic-sufficiency claim (T6). They establish only the listed machine-checkable invariants.

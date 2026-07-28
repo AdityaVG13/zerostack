@@ -567,3 +567,147 @@ mod tests {
             .any(|(id, st)| *id == CheckId::G2Refs && *st == CheckStatus::Fail));
     }
 }
+
+
+/// Deterministic in-process RACC substrate used only by hub conformance tests.
+#[derive(Clone, Debug)]
+pub struct RaccFakeSubstrate {
+    pub certificate_mutation: crate::racc::CertificateMutation,
+    pub receipt_mutation: crate::racc::ReceiptMutation,
+    pub skip_irreversible_gate: bool,
+    pub budget_mutation: crate::racc::BudgetMutation,
+    pub second_certificate_fetch: bool,
+    pub residency_mutation: crate::racc::ResidencyMutation,
+}
+
+impl Default for RaccFakeSubstrate {
+    fn default() -> Self {
+        Self {
+            certificate_mutation: crate::racc::CertificateMutation::None,
+            receipt_mutation: crate::racc::ReceiptMutation::None,
+            skip_irreversible_gate: false,
+            budget_mutation: crate::racc::BudgetMutation::None,
+            second_certificate_fetch: false,
+            residency_mutation: crate::racc::ResidencyMutation::None,
+        }
+    }
+}
+
+fn fake_provenance() -> crate::racc::Provenance {
+    crate::racc::Provenance {
+        parser_id: "fixture-parser".into(), parser_version: "1".into(),
+        index_id: "fixture-index".into(), index_version: "4".into(),
+        operator_id: "fixture-operator".into(), operator_version: "2".into(),
+    }
+}
+
+fn fake_count(source: &[u8], pattern: &[u8]) -> u64 {
+    if pattern.is_empty() { return 0; }
+    source.windows(pattern.len()).filter(|window| *window == pattern).count() as u64
+}
+
+fn fake_certificate(fixture: &crate::racc::QueryFixture) -> crate::racc::RaccCertificate {
+    use crate::racc::{CompletenessWitness as W, TypedQuery as Q};
+    let query = fixture.query.clone();
+    let (payload, completeness) = match &query {
+        Q::ReadSpan { start, end, .. } => (vec![fixture.source[*start as usize..*end as usize].to_vec()], W::ReadSpan),
+        Q::ExactSearch { scope, pattern } => {
+            let count = fake_count(fixture.source, pattern);
+            (vec![pattern.clone(); count as usize], W::ExactSearch { scope: scope.clone(), pattern: pattern.clone(), scope_len: fixture.source.len() as u64, match_count: count })
+        }
+        Q::Definition { symbol } => (vec![b"fn target".to_vec()], W::Definition { symbol: *symbol, index_id: "fixture-index".into(), index_version: "4".into() }),
+        Q::References { symbol } => (vec![b"target()".to_vec(), b"target".to_vec()], W::References { symbol: *symbol, index_id: "fixture-index".into(), index_version: "4".into(), match_count: 2 }),
+        Q::AstClosure { seeds, relations, radius } => (vec![b"1,2,3,4".to_vec()], W::AstClosure { seeds: seeds.clone(), relations: *relations, radius: *radius, parser_id: "fixture-parser".into(), parser_version: "1".into(), visited_nodes: 4 }),
+        Q::CallPath { source, target } => (vec![b"7>8>9".to_vec()], W::CallPath { source: *source, target: *target, edge_count: 2 }),
+        Q::DataflowSlice { sink } => (vec![b"1>3>4".to_vec()], W::DataflowSlice { sink: *sink, visited_nodes: 3 }),
+        Q::Diff { old, new } => (vec![b"+ target".to_vec()], W::Diff { old: old.clone(), new: new.clone() }),
+        Q::BuildReceipt { command } => (vec![b"exit=0".to_vec()], W::BuildReceipt { command: *command, exit_code: 0, stdout_digest: crate::racc::digest_hex(b"built"), stderr_digest: crate::racc::digest_hex(b"") }),
+        Q::TestTrace { test } => (vec![b"pass".to_vec()], W::TestTrace { test: *test, exit_code: 0, trace_digest: crate::racc::digest_hex(b"trace-13") }),
+    };
+    crate::racc::RaccCertificate { schema_version: 1, domain: "zerostack.racc.typed-query.v1".into(), query, payload, provenance: fake_provenance(), completeness }
+}
+
+fn honest_receipt() -> crate::racc::DominanceReceipt {
+    use crate::racc::{Charges, DominanceReceipt, PhaseArithmetic};
+    let mut phases = vec![
+        PhaseArithmetic { phase: "explore".into(), charges: Charges { successful_trials: 2, failed_trials: 1, retries: 1, verification_calls: 2, recovery_calls: 1, expansions: 2, failed_expansions: 1, fallback_charges: 1 }, reported_total: 0 },
+        PhaseArithmetic { phase: "verify".into(), charges: Charges { successful_trials: 1, failed_trials: 1, retries: 1, verification_calls: 3, recovery_calls: 1, expansions: 1, failed_expansions: 1, fallback_charges: 2 }, reported_total: 0 },
+    ];
+    for phase in &mut phases { phase.reported_total = phase.charges.total(); }
+    let target_identity = "fixture-target".to_string();
+    let target_digest = crate::racc::digest_hex(b"fixture-target-v1");
+    let replay_identity = crate::racc::canonical_replay_identity(&target_identity, &target_digest, &phases);
+    DominanceReceipt { schema_version: 1, target_identity, target_digest, phases, replay_identity }
+}
+
+impl crate::racc::RaccSubstrate for RaccFakeSubstrate {
+    fn certified_query(&mut self, fixture: &crate::racc::QueryFixture) -> crate::racc::RaccCertificate {
+        use crate::racc::{CertificateMutation as M, CompletenessWitness as W, TypedQuery as Q};
+        let mut certificate = fake_certificate(fixture);
+        match self.certificate_mutation {
+            M::None => {}
+            M::OmitPayload => { certificate.payload.pop(); }
+            M::ExtraPayload => certificate.payload.push(b"extra".to_vec()),
+            M::StaleIndex => certificate.provenance.index_version = "stale".into(),
+            M::StaleParser => certificate.provenance.parser_version = "stale".into(),
+            M::StaleOperator => certificate.provenance.operator_version = "stale".into(),
+            M::WrongDomain => certificate.domain = "wrong.domain".into(),
+            M::WrongQueryParameters => certificate.query = Q::Definition { symbol: 999 },
+            M::WrongWitnessKind => certificate.completeness = W::ReadSpan,
+        }
+        certificate
+    }
+
+    fn dominance_receipt(&mut self) -> crate::racc::DominanceReceipt {
+        use crate::racc::ReceiptMutation as M;
+        let mut receipt = honest_receipt();
+        match self.receipt_mutation {
+            M::None => return receipt,
+            M::ReplayIdentity => receipt.replay_identity = "forged".into(),
+            M::PhaseArithmetic => receipt.phases[0].reported_total += 1,
+            M::OmitFailedTrials => receipt.phases[0].charges.failed_trials = 0,
+            M::OmitRetries => receipt.phases[0].charges.retries = 0,
+            M::OmitVerificationCalls => receipt.phases[0].charges.verification_calls = 0,
+            M::OmitRecoveryCalls => receipt.phases[0].charges.recovery_calls = 0,
+            M::OmitExpansions => receipt.phases[0].charges.expansions = 0,
+            M::OmitFailedExpansions => receipt.phases[0].charges.failed_expansions = 0,
+            M::OmitFallbackCharges => receipt.phases[0].charges.fallback_charges = 0,
+        }
+        if !matches!(self.receipt_mutation, M::ReplayIdentity | M::PhaseArithmetic) {
+            receipt.phases[0].reported_total = receipt.phases[0].charges.total();
+            receipt.replay_identity = crate::racc::canonical_replay_identity(&receipt.target_identity, &receipt.target_digest, &receipt.phases);
+        }
+        receipt
+    }
+
+    fn irreversible_without_evidence(&mut self) -> crate::racc::IrreversibleDecision {
+        if self.skip_irreversible_gate { crate::racc::IrreversibleDecision::CommittedCompressed } else { crate::racc::IrreversibleDecision::RawFallback }
+    }
+
+    fn expansion_budget(&mut self) -> crate::racc::BudgetObservation {
+        use crate::racc::BudgetMutation as M;
+        match self.budget_mutation {
+            M::None => crate::racc::BudgetObservation { requested: vec![2, 4, 8, 16], measured_costs: vec![2, 4, 7, 12], reported_costs: vec![2, 4, 7, 12] },
+            M::Nonnested => crate::racc::BudgetObservation { requested: vec![2, 5, 8, 16], measured_costs: vec![2, 4, 7, 12], reported_costs: vec![2, 4, 7, 12] },
+            M::UnderreportedCost => crate::racc::BudgetObservation { requested: vec![2, 4, 8, 16], measured_costs: vec![2, 4, 7, 20], reported_costs: vec![2, 4, 7, 12] },
+        }
+    }
+
+    fn inline_fetch(&mut self, fixture: &crate::racc::QueryFixture) -> crate::racc::InlineObservation {
+        let certificate = fake_certificate(fixture);
+        crate::racc::InlineObservation { payload: certificate.payload.concat(), certificate, round_trips: if self.second_certificate_fetch { 2 } else { 1 } }
+    }
+
+    fn residency_round_trip(&mut self, objects: &[crate::racc::StoredFixture]) -> Vec<(crate::racc::StoreLookup, crate::racc::StoreLookup)> {
+        use crate::racc::{ResidencyMutation as M, StoreLookup};
+        objects.iter().enumerate().map(|(index, object)| {
+            let mut bytes = object.bytes.clone();
+            if self.residency_mutation == M::Corruption && index == 0 { bytes[0] ^= 0xff; }
+            let resident = StoreLookup::Hit { bytes, metadata: object.metadata.clone() };
+            let removed = if self.residency_mutation == M::SilentMiss && index == 0 {
+                StoreLookup::Hit { bytes: Vec::new(), metadata: Default::default() }
+            } else { StoreLookup::Miss { id: object.id.clone() } };
+            (resident, removed)
+        }).collect()
+    }
+}

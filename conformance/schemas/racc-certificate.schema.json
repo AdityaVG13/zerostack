@@ -1,0 +1,132 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://zerostack.dev/schemas/racc-certificate.schema.json",
+  "title": "RACC Evidence Certificate",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "domain",
+    "query",
+    "payload",
+    "provenance",
+    "completeness"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": 1
+    },
+    "domain": {
+      "const": "zerostack.racc.typed-query.v1"
+    },
+    "query": {
+      "$ref": "#/$defs/query"
+    },
+    "payload": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/bytes"
+      }
+    },
+    "provenance": {
+      "$ref": "#/$defs/provenance"
+    },
+    "completeness": {
+      "$ref": "#/$defs/witness"
+    }
+  },
+  "$defs": {
+    "bytes": {
+      "type": "array",
+      "items": {
+        "type": "integer",
+        "minimum": 0,
+        "maximum": 255
+      }
+    },
+    "provenance": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "parser_id",
+        "parser_version",
+        "index_id",
+        "index_version",
+        "operator_id",
+        "operator_version"
+      ],
+      "properties": {
+        "parser_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "parser_version": {
+          "type": "string",
+          "minLength": 1
+        },
+        "index_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "index_version": {
+          "type": "string",
+          "minLength": 1
+        },
+        "operator_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "operator_version": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "query": {
+      "type": "object",
+      "required": [
+        "kind"
+      ],
+      "properties": {
+        "kind": {
+          "enum": [
+            "read_span",
+            "exact_search",
+            "definition",
+            "references",
+            "ast_closure",
+            "call_path",
+            "dataflow_slice",
+            "diff",
+            "build_receipt",
+            "test_trace"
+          ]
+        }
+      },
+      "additionalProperties": true
+    },
+    "witness": {
+      "type": "object",
+      "required": [
+        "kind"
+      ],
+      "properties": {
+        "kind": {
+          "enum": [
+            "read_span",
+            "exact_search",
+            "definition",
+            "references",
+            "ast_closure",
+            "call_path",
+            "dataflow_slice",
+            "diff",
+            "build_receipt",
+            "test_trace"
+          ]
+        }
+      },
+      "additionalProperties": true
+    }
+  }
+}

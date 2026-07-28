@@ -86,3 +86,26 @@ fn execution_record_requires_cm_execution_id_and_refs_object() {
     });
     assert!(validate_against_schema(SchemaName::ExecutionRecord, &bad_id).is_err());
 }
+
+#[test]
+fn racc_certificate_schema_is_golden_pinned() {
+    use zerostack_codemode_conformance::fake_substrate::RaccFakeSubstrate;
+    use zerostack_codemode_conformance::racc::{immutable_query_fixtures, validate_racc_schema, RaccSubstrate, RACC_CERTIFICATE_SCHEMA};
+    let certificate = RaccFakeSubstrate::default().certified_query(&immutable_query_fixtures()[1]);
+    validate_racc_schema(RACC_CERTIFICATE_SCHEMA, &serde_json::to_value(certificate).unwrap()).unwrap();
+}
+
+#[test]
+fn racc_receipt_schema_is_golden_pinned() {
+    use zerostack_codemode_conformance::fake_substrate::RaccFakeSubstrate;
+    use zerostack_codemode_conformance::racc::{validate_racc_schema, RaccSubstrate, RACC_RECEIPT_SCHEMA};
+    let receipt = RaccFakeSubstrate::default().dominance_receipt();
+    validate_racc_schema(RACC_RECEIPT_SCHEMA, &serde_json::to_value(receipt).unwrap()).unwrap();
+}
+
+#[test]
+fn racc_golden_schemas_reject_shape_drift() {
+    use zerostack_codemode_conformance::racc::{validate_racc_schema, RACC_CERTIFICATE_SCHEMA, RACC_RECEIPT_SCHEMA};
+    assert!(validate_racc_schema(RACC_CERTIFICATE_SCHEMA, &json!({"schema_version": 1})).is_err());
+    assert!(validate_racc_schema(RACC_RECEIPT_SCHEMA, &json!({"schema_version": 1})).is_err());
+}
