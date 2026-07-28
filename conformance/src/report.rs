@@ -1,6 +1,7 @@
 //! Machine-readable conformance report (`conformance/reports/<ns>-<date>.json`).
 
 use crate::checks::{CheckOutcome, HarnessReport};
+use crate::CompletionStatus;
 use anyhow::{Context, Result};
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
@@ -13,6 +14,7 @@ pub struct ReportFile {
     pub generated_at: String,
     pub substrate_binary: String,
     pub checks: Vec<CheckOutcome>,
+    pub completion_status: CompletionStatus,
     pub passed: usize,
     pub failed: usize,
     pub skipped: usize,
@@ -25,6 +27,7 @@ impl ReportFile {
             ns: report.ns.clone(),
             generated_at: Utc::now().to_rfc3339(),
             substrate_binary: report.substrate_binary.clone(),
+            completion_status: if report.failed() > 0 { CompletionStatus::Failed } else if report.skipped() > 0 { CompletionStatus::Partial } else { CompletionStatus::Complete },
             passed: report.passed(),
             failed: report.failed(),
             skipped: report.skipped(),

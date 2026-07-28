@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 use zerostack_codemode_conformance::fake_substrate::fake_mcp_main;
 use zerostack_codemode_conformance::{
-    run_conformance, ConformanceReport, Ns, RunConfig, Surface,
+    run_conformance, CompletionStatus, ConformanceReport, Ns, RunConfig, Surface,
 };
 
 /// Infer the served surface from the artifact filename.
@@ -143,9 +143,11 @@ fn finish_with_report(report: &ConformanceReport, reports_dir: &Path) -> Result<
     println!("wrote {}", path.display());
     println!("{}", serde_json::to_string_pretty(report)?);
 
-    if report.passed {
-        Ok(())
-    } else {
-        std::process::exit(1);
+    eprintln!("completion status: {:?}", report.completion_status);
+    match report.completion_status {
+        CompletionStatus::Complete if report.passed => Ok(()),
+        CompletionStatus::Failed => std::process::exit(1),
+        CompletionStatus::Partial => std::process::exit(2),
+        CompletionStatus::Complete => std::process::exit(1),
     }
 }

@@ -1,5 +1,9 @@
 # zerostack-codemode-contract v1.0
 
+## Conformance report completion
+
+Each gate reports a machine-readable status of pass, fail, or skipped; a skipped gate MUST include a stable skip_reason. The authoritative required set is G1-G10 for CodeMode and G1 for MCP. Report completion is failed when a required gate fails, partial when required evidence is missing/skipped or the full G1-G10 evidence scope was not run, and complete only when the full scope ran and every required gate passed. The backward-compatible passed field is true only for a complete pass. In particular, an MCP G1-only run is partial with passed=false; skipped non-required gates do not make it failed. The CLI exits 0 for a complete pass, 1 for failed, and 2 for partial.
+
 Status: normative. This document supersedes prior prose specs for conformance purposes. Durable step-log/replay is explicitly deferred and is not part of v1.0.
 
 ## 1. Scope
