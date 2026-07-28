@@ -12,8 +12,20 @@
 //!   mixing identities is a typed error ([`LedgerError::TokenizerIdentityMismatch`]).
 //! - **Append-only monotone counters.** [`ResourceGauge`] exposes no API to
 //!   decrement or rewrite history; overflow is a typed error, never a wrap.
+//! - **Complete charge accounting.** Every model-visible call declares its
+//!   locked-tokenizer input once in [`TokenCharge::input_tokens`] and splits it
+//!   across the [`ChargeClass`] variants. Billed input, failed trials, retries,
+//!   verification/recovery, re-expansions and raw fallbacks are all summed into
+//!   the receipt exposure, so cost cannot hide in a side counter. Unclassified
+//!   and double-counted input are typed errors at charge time and again at
+//!   finalization ([`LedgerError::UnclassifiedInput`],
+//!   [`LedgerError::DoubleCountedInput`]).
 //! - **Integer-only arithmetic.** Retained fractions are parts-per-million
 //!   integers widened to u128; there are no floats and no percentage strings.
+//!   [`RetainedFractionPpm`] is range-validated at construction and on the wire.
+//! - **Unforgeable exactness gates.** [`ExactnessGates`] has no public boolean
+//!   setter: each gate is raised only by presenting a verified evidence handle
+//!   ([`ArchiveAttestation`], [`PolicyEvidence`], [`TaskAcceptanceReceipt`]).
 //! - **No I/O, sync only.** charge() is a handful of integer adds and performs
 //!   no allocation.
 
@@ -24,6 +36,13 @@ use serde::{Deserialize, Serialize, Serializer};
 
 /// Parts per million denominator used by every retained-fraction comparison.
 pub const PPM_ONE: u32 = 1_000_000;
+
+/// Canonical-JSON receipt schema version.
+///
+/// Version 2 adds schema_version, the per-class charge breakdown and the derived
+/// racc_input_tokens total; version 1 carried a single caller-supplied
+/// racc_input_tokens field inside the ledger.
+pub const RECEIPT_SCHEMA_VERSION: u32 = 2;
 
 /// A 32-byte content digest, wired as lowercase hex.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash, Default)]
@@ -47,7 +66,7 @@ impl Digest {
             return None;
         }
         let mut out = [0u8; 32];
-        for (i, chunk) in bytes.chunks(2).enumerate() {
+        for (i, chunk) in bytes.chunks_exact(2).enumerate() {
             let hi = unnibble(chunk[0])?;
             let lo = unnibble(chunk[1])?;
             out[i] = (hi << 4) | lo;
@@ -57,7 +76,10 @@ impl Digest {
 }
 
 fn nibble(value: u8) -> char {
-    char::from_digit(u32::from(value), 16).unwrap_or('0')
+    match value {
+        0..=9 => (b'0' + value) as char,
+        _ => (b'a' + value - 10) as char,
+    }
 }
 
 fn unnibble(byte: u8) -> Option<u8> {
@@ -109,11 +131,13 @@ pub struct NextBudget(pub u64);
 
 /// Retained input fraction expressed in parts per million.
 ///
-/// RetainedFractionPpm(30_000) means keep at most 3% of the raw input tokens.
-/// The value is never a float and never a percentage string (T5).
-#[derive(Clone, Copy, Debug, Eq, PartialEq, PartialOrd, Ord, Serialize, Deserialize)]
+/// RetainedFractionPpm::new(30_000) means keep at most 3% of the raw input
+/// tokens. The value is never a float and never a percentage string (T5). The
+/// inner value is private: the only ways to obtain one are [`Self::new`] and
+/// deserialization, and both reject anything above [`PPM_ONE`].
+#[derive(Clone, Copy, Debug, Eq, PartialEq, PartialOrd, Ord, Serialize)]
 #[serde(transparent)]
-pub struct RetainedFractionPpm(pub u32);
+pub struct RetainedFractionPpm(u32);
 
 impl RetainedFractionPpm {
     /// Constructs a retained fraction, rejecting values above 1_000_000 ppm.
@@ -122,6 +146,24 @@ impl RetainedFractionPpm {
             return Err(LedgerError::PpmOutOfRange { ppm });
         }
         Ok(Self(ppm))
+    }
+
+    /// The validated parts-per-million value.
+    pub fn ppm(self) -> u32 {
+        self.0
+    }
+}
+
+impl<'de> Deserialize<'de> for RetainedFractionPpm {
+    /// Range-validates the wire value: out-of-range ppm never survives decoding.
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let ppm = u32::deserialize(deserializer)?;
+        Self::new(ppm).map_err(|_| {
+            de::Error::invalid_value(
+                de::Unexpected::Unsigned(u64::from(ppm)),
+                &"a retained fraction in 0..=1000000 ppm",
+            )
+        })
     }
 }
 
@@ -161,6 +203,56 @@ impl LedgerConfig {
     }
 }
 
+/// The exhaustive set of input-token charge classes (T8, section 2.2).
+///
+/// Every model-visible call falls into exactly one class per token, and the
+/// receipt exposure is the sum over all of them.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
+pub enum ChargeClass {
+    /// Input tokens of an accepted, billed rendering.
+    Billed,
+    /// Input tokens of a trial rendering that was not accepted.
+    FailedTrial,
+    /// Input tokens re-sent by a retry of a failed call.
+    Retry,
+    /// Input tokens spent verifying or recovering evidence.
+    Recovery,
+    /// Input tokens spent re-expanding previously compressed spans.
+    Reexpansion,
+    /// Input tokens of a raw fallback view.
+    Fallback,
+}
+
+impl ChargeClass {
+    /// Every charge class, in canonical order.
+    pub const ALL: [ChargeClass; 6] = [
+        ChargeClass::Billed,
+        ChargeClass::FailedTrial,
+        ChargeClass::Retry,
+        ChargeClass::Recovery,
+        ChargeClass::Reexpansion,
+        ChargeClass::Fallback,
+    ];
+
+    /// Name of the ledger counter this class accumulates into.
+    pub fn counter_name(self) -> &'static str {
+        match self {
+            Self::Billed => "billed_tokens",
+            Self::FailedTrial => "failed_trial_tokens",
+            Self::Retry => "retry_tokens",
+            Self::Recovery => "recovery_tokens",
+            Self::Reexpansion => "reexpansion_tokens",
+            Self::Fallback => "fallback_tokens",
+        }
+    }
+}
+
+impl fmt::Display for ChargeClass {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.counter_name())
+    }
+}
+
 /// Cumulative, append-only token counters, tagged with the locked gauge.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct TokenLedger {
@@ -168,18 +260,24 @@ pub struct TokenLedger {
     pub tokenizer: TokenizerIdentity,
     /// Input tokens a raw (uncompressed) replay of the history would cost.
     pub raw_input_tokens: u64,
-    /// Input tokens actually billed under RACC.
-    pub racc_input_tokens: u64,
+    /// Every model-visible input token rendered under RACC, declared once.
+    pub declared_input_tokens: u64,
+    /// Class Billed: input tokens of accepted renderings.
+    pub billed_tokens: u64,
+    /// Class FailedTrial: input tokens of trials that were not accepted.
+    pub failed_trial_tokens: u64,
+    /// Class Retry: input tokens re-sent by retries.
+    pub retry_tokens: u64,
+    /// Class Recovery: input tokens spent verifying or recovering evidence.
+    pub recovery_tokens: u64,
+    /// Class Reexpansion: input tokens spent re-expanding compressed spans.
+    pub reexpansion_tokens: u64,
+    /// Class Fallback: input tokens spent on raw fallback views.
+    pub fallback_tokens: u64,
     /// Model output tokens.
     pub model_output_tokens: u64,
     /// Number of model calls.
     pub model_calls: u64,
-    /// Input tokens spent on raw fallback views.
-    pub fallback_tokens: u64,
-    /// Input tokens spent recovering evidence (certificate fetch, expansion).
-    pub recovery_tokens: u64,
-    /// Input tokens spent re-expanding previously compressed spans.
-    pub reexpansion_tokens: u64,
     /// Number of retried calls.
     pub retries: u64,
 }
@@ -190,55 +288,136 @@ impl TokenLedger {
         Self {
             tokenizer,
             raw_input_tokens: 0,
-            racc_input_tokens: 0,
-            model_output_tokens: 0,
-            model_calls: 0,
-            fallback_tokens: 0,
+            declared_input_tokens: 0,
+            billed_tokens: 0,
+            failed_trial_tokens: 0,
+            retry_tokens: 0,
             recovery_tokens: 0,
             reexpansion_tokens: 0,
+            fallback_tokens: 0,
+            model_output_tokens: 0,
+            model_calls: 0,
             retries: 0,
         }
     }
 
-    /// Total RACC-side input exposure: billed input plus recovery, re-expansion
-    /// and raw fallback surcharges.
-    pub fn total_racc_exposure(&self) -> Result<u64, LedgerError> {
-        let mut total = self.racc_input_tokens;
-        for (name, value) in [
-            ("recovery_tokens", self.recovery_tokens),
-            ("reexpansion_tokens", self.reexpansion_tokens),
-            ("fallback_tokens", self.fallback_tokens),
-        ] {
-            total = total
-                .checked_add(value)
-                .ok_or(LedgerError::CounterOverflow { counter: name })?;
+    /// Cumulative tokens recorded under one charge class.
+    pub fn class_tokens(&self, class: ChargeClass) -> u64 {
+        match class {
+            ChargeClass::Billed => self.billed_tokens,
+            ChargeClass::FailedTrial => self.failed_trial_tokens,
+            ChargeClass::Retry => self.retry_tokens,
+            ChargeClass::Recovery => self.recovery_tokens,
+            ChargeClass::Reexpansion => self.reexpansion_tokens,
+            ChargeClass::Fallback => self.fallback_tokens,
+        }
+    }
+
+    /// Total RACC input exposure: the sum over every charge class.
+    ///
+    /// This is the C of the exact-phase certificate. Nothing model-visible is
+    /// excluded, so hiding cost in a side counter cannot lower it.
+    pub fn racc_input_tokens(&self) -> Result<u64, LedgerError> {
+        let mut total = 0u64;
+        for class in ChargeClass::ALL {
+            total = add(total, self.class_tokens(class), class.counter_name())?;
         }
         Ok(total)
+    }
+
+    /// Verifies that every declared input token is classified exactly once.
+    ///
+    /// Returns the class total on success. Declared input above the classified
+    /// sum means a call was left unclassified; a classified sum above the
+    /// declared input means a call was counted twice.
+    pub fn check_accounting_complete(&self) -> Result<u64, LedgerError> {
+        let classified = self.racc_input_tokens()?;
+        if self.declared_input_tokens > classified {
+            return Err(LedgerError::UnclassifiedInput {
+                declared: self.declared_input_tokens,
+                classified,
+            });
+        }
+        if classified > self.declared_input_tokens {
+            return Err(LedgerError::DoubleCountedInput {
+                declared: self.declared_input_tokens,
+                classified,
+            });
+        }
+        Ok(classified)
     }
 }
 
 /// One append-only charge against a resource gauge.
 ///
-/// All fields default to zero, so a caller charges only the counters it
-/// observed.
+/// input_tokens is the total locked-tokenizer input this call made visible to
+/// the model, and must equal the sum of the per-class fields. All fields default
+/// to zero, so an empty charge is trivially reconciled.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub struct TokenCharge {
     /// Raw-replay input tokens attributable to this call.
     pub raw_input_tokens: u64,
-    /// Billed RACC input tokens for this call.
-    pub racc_input_tokens: u64,
+    /// Declared model-visible input tokens for this call.
+    pub input_tokens: u64,
+    /// Class Billed.
+    pub billed_tokens: u64,
+    /// Class FailedTrial.
+    pub failed_trial_tokens: u64,
+    /// Class Retry.
+    pub retry_tokens: u64,
+    /// Class Recovery.
+    pub recovery_tokens: u64,
+    /// Class Reexpansion.
+    pub reexpansion_tokens: u64,
+    /// Class Fallback.
+    pub fallback_tokens: u64,
     /// Output tokens produced by this call.
     pub model_output_tokens: u64,
     /// Model calls represented (normally 1).
     pub model_calls: u64,
-    /// Raw fallback input tokens.
-    pub fallback_tokens: u64,
-    /// Evidence recovery input tokens.
-    pub recovery_tokens: u64,
-    /// Re-expansion input tokens.
-    pub reexpansion_tokens: u64,
     /// Retries represented.
     pub retries: u64,
+}
+
+impl TokenCharge {
+    /// Tokens this charge attributes to one class.
+    pub fn class_tokens(&self, class: ChargeClass) -> u64 {
+        match class {
+            ChargeClass::Billed => self.billed_tokens,
+            ChargeClass::FailedTrial => self.failed_trial_tokens,
+            ChargeClass::Retry => self.retry_tokens,
+            ChargeClass::Recovery => self.recovery_tokens,
+            ChargeClass::Reexpansion => self.reexpansion_tokens,
+            ChargeClass::Fallback => self.fallback_tokens,
+        }
+    }
+
+    /// Sum of the per-class attributions.
+    pub fn classified_tokens(&self) -> Result<u64, LedgerError> {
+        let mut total = 0u64;
+        for class in ChargeClass::ALL {
+            total = add(total, self.class_tokens(class), class.counter_name())?;
+        }
+        Ok(total)
+    }
+
+    /// Verifies the declared input equals the per-class attribution.
+    pub fn check_classification(&self) -> Result<u64, LedgerError> {
+        let classified = self.classified_tokens()?;
+        if self.input_tokens > classified {
+            return Err(LedgerError::UnclassifiedInput {
+                declared: self.input_tokens,
+                classified,
+            });
+        }
+        if classified > self.input_tokens {
+            return Err(LedgerError::DoubleCountedInput {
+                declared: self.input_tokens,
+                classified,
+            });
+        }
+        Ok(classified)
+    }
 }
 
 /// The RACC resource gauge: a locked tokenizer plus monotone counters.
@@ -279,7 +458,8 @@ impl ResourceGauge {
 
     /// Applies one append-only charge.
     ///
-    /// Rejects counts measured with a different tokenizer identity and rejects
+    /// Rejects counts measured with a different tokenizer identity, rejects a
+    /// charge whose declared input is not classified exactly once, and rejects
     /// overflow rather than wrapping. On any error the ledger is unchanged, so
     /// the counters stay monotone. Performs no allocation and no I/O.
     pub fn charge(
@@ -295,27 +475,32 @@ impl ResourceGauge {
                 actual_digest: tokenizer.tokenizer_version_digest,
             });
         }
+        charge.check_classification()?;
 
         let raw_input_tokens = add(
             self.ledger.raw_input_tokens,
             charge.raw_input_tokens,
             "raw_input_tokens",
         )?;
-        let racc_input_tokens = add(
-            self.ledger.racc_input_tokens,
-            charge.racc_input_tokens,
-            "racc_input_tokens",
+        let declared_input_tokens = add(
+            self.ledger.declared_input_tokens,
+            charge.input_tokens,
+            "declared_input_tokens",
         )?;
-        let model_output_tokens = add(
-            self.ledger.model_output_tokens,
-            charge.model_output_tokens,
-            "model_output_tokens",
+        let billed_tokens = add(
+            self.ledger.billed_tokens,
+            charge.billed_tokens,
+            "billed_tokens",
         )?;
-        let model_calls = add(self.ledger.model_calls, charge.model_calls, "model_calls")?;
-        let fallback_tokens = add(
-            self.ledger.fallback_tokens,
-            charge.fallback_tokens,
-            "fallback_tokens",
+        let failed_trial_tokens = add(
+            self.ledger.failed_trial_tokens,
+            charge.failed_trial_tokens,
+            "failed_trial_tokens",
+        )?;
+        let retry_tokens = add(
+            self.ledger.retry_tokens,
+            charge.retry_tokens,
+            "retry_tokens",
         )?;
         let recovery_tokens = add(
             self.ledger.recovery_tokens,
@@ -327,16 +512,30 @@ impl ResourceGauge {
             charge.reexpansion_tokens,
             "reexpansion_tokens",
         )?;
+        let fallback_tokens = add(
+            self.ledger.fallback_tokens,
+            charge.fallback_tokens,
+            "fallback_tokens",
+        )?;
+        let model_output_tokens = add(
+            self.ledger.model_output_tokens,
+            charge.model_output_tokens,
+            "model_output_tokens",
+        )?;
+        let model_calls = add(self.ledger.model_calls, charge.model_calls, "model_calls")?;
         let retries = add(self.ledger.retries, charge.retries, "retries")?;
         let charges = add(self.charges, 1, "charges")?;
 
         self.ledger.raw_input_tokens = raw_input_tokens;
-        self.ledger.racc_input_tokens = racc_input_tokens;
-        self.ledger.model_output_tokens = model_output_tokens;
-        self.ledger.model_calls = model_calls;
-        self.ledger.fallback_tokens = fallback_tokens;
+        self.ledger.declared_input_tokens = declared_input_tokens;
+        self.ledger.billed_tokens = billed_tokens;
+        self.ledger.failed_trial_tokens = failed_trial_tokens;
+        self.ledger.retry_tokens = retry_tokens;
         self.ledger.recovery_tokens = recovery_tokens;
         self.ledger.reexpansion_tokens = reexpansion_tokens;
+        self.ledger.fallback_tokens = fallback_tokens;
+        self.ledger.model_output_tokens = model_output_tokens;
+        self.ledger.model_calls = model_calls;
         self.ledger.retries = retries;
         self.charges = charges;
         Ok(())
@@ -349,29 +548,211 @@ impl ResourceGauge {
         roots: ReceiptRoots,
         exactness: ExactnessGates,
     ) -> Result<DominanceReceipt, ReceiptError> {
-        if target_retained_ppm.0 > PPM_ONE {
-            return Err(ReceiptError::TargetOutOfRange {
-                ppm: target_retained_ppm.0,
-            });
-        }
-        if self.charges == 0 || self.ledger.raw_input_tokens == 0 {
+        if self.charges == 0 {
             return Err(ReceiptError::IncompleteLedger);
         }
-        Ok(DominanceReceipt {
-            ledger: self.ledger.clone(),
-            target_retained_ppm,
-            archive_root: roots.archive_root,
-            certificate_root: roots.certificate_root,
-            byte_exact: exactness.byte_exact,
-            policy_exact_or_fallback: exactness.policy_exact_or_fallback,
-            task_verified: exactness.task_verified,
-        })
+        DominanceReceipt::seal(self.ledger.clone(), target_retained_ppm, roots, exactness)
     }
 }
 
 fn add(lhs: u64, rhs: u64, counter: &'static str) -> Result<u64, LedgerError> {
     lhs.checked_add(rhs)
         .ok_or(LedgerError::CounterOverflow { counter })
+}
+
+fn fold_root(tag: &str, leaves: &[Digest]) -> Digest {
+    let mut buf = Vec::with_capacity(tag.len() + 1 + leaves.len() * 32);
+    buf.extend_from_slice(tag.as_bytes());
+    buf.push(0);
+    for leaf in leaves {
+        buf.extend_from_slice(&leaf.0);
+    }
+    Digest::from_hex(&zero_abi::sha256_hex(&buf)).expect("sha256_hex yields 64 lowercase hex")
+}
+
+/// Evidence that every retained span is byte-identical to the archived original.
+///
+/// The handle can only be built by presenting the span digests that fold to the
+/// declared archive root, so a caller cannot assert byte-exactness it cannot
+/// exhibit.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ArchiveAttestation {
+    archive_root: Digest,
+}
+
+impl ArchiveAttestation {
+    /// Canonical archive root over the retained span digests.
+    pub fn root_of(retained_span_digests: &[Digest]) -> Digest {
+        fold_root("racc.archive.v1", retained_span_digests)
+    }
+
+    /// Verifies the retained spans against the declared archive root.
+    pub fn verify(
+        archive_root: Digest,
+        retained_span_digests: &[Digest],
+    ) -> Result<Self, EvidenceError> {
+        if retained_span_digests.is_empty() {
+            return Err(EvidenceError::NoEvidence { kind: "archive" });
+        }
+        let actual = Self::root_of(retained_span_digests);
+        if actual != archive_root {
+            return Err(EvidenceError::RootMismatch {
+                kind: "archive",
+                declared: archive_root,
+                actual,
+            });
+        }
+        Ok(Self { archive_root })
+    }
+
+    /// The verified archive root.
+    pub fn archive_root(&self) -> Digest {
+        self.archive_root
+    }
+}
+
+/// One per-decision policy outcome behind the policy-exactness gate.
+///
+/// These are policy-sufficiency or raw-fallback receipts (paper 8.2). They are
+/// deliberately distinct from the T13 task-no-regret receipts of 8.3 / non-claim
+/// 14.9: proving policy sufficiency is not proving task acceptance.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum PolicyDecision {
+    /// Policy sufficiency was proven for this decision.
+    SufficiencyProven {
+        /// Digest of the sufficiency witness.
+        witness_digest: Digest,
+    },
+    /// No sufficiency proof was available, so a raw fallback view was served.
+    RawFallbackServed {
+        /// Digest of the raw view that was served.
+        view_digest: Digest,
+    },
+}
+
+impl PolicyDecision {
+    fn leaf(self) -> Digest {
+        match self {
+            Self::SufficiencyProven { witness_digest } => {
+                fold_root("racc.policy.proven.v1", &[witness_digest])
+            }
+            Self::RawFallbackServed { view_digest } => {
+                fold_root("racc.policy.fallback.v1", &[view_digest])
+            }
+        }
+    }
+}
+
+/// Evidence that every decision was policy-exact or served a raw fallback.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct PolicyEvidence {
+    certificate_root: Digest,
+}
+
+impl PolicyEvidence {
+    /// Canonical certificate root over the per-decision receipts.
+    pub fn root_of(decisions: &[PolicyDecision]) -> Digest {
+        let leaves: Vec<Digest> = decisions.iter().map(|d| d.leaf()).collect();
+        fold_root("racc.policy.v1", &leaves)
+    }
+
+    /// Verifies the per-decision receipts against the declared certificate root.
+    pub fn verify(
+        certificate_root: Digest,
+        decisions: &[PolicyDecision],
+    ) -> Result<Self, EvidenceError> {
+        if decisions.is_empty() {
+            return Err(EvidenceError::NoEvidence { kind: "policy" });
+        }
+        let actual = Self::root_of(decisions);
+        if actual != certificate_root {
+            return Err(EvidenceError::RootMismatch {
+                kind: "policy",
+                declared: certificate_root,
+                actual,
+            });
+        }
+        Ok(Self { certificate_root })
+    }
+
+    /// The verified certificate root.
+    pub fn certificate_root(&self) -> Digest {
+        self.certificate_root
+    }
+}
+
+/// Outcome of one downstream task acceptance check (T13).
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum TaskOutcome {
+    /// The task was accepted against its preregistered criterion.
+    Accepted {
+        /// Digest of the task acceptance record.
+        task_digest: Digest,
+    },
+    /// The task regressed; no acceptance receipt may be minted.
+    Regressed {
+        /// Digest of the task acceptance record.
+        task_digest: Digest,
+    },
+}
+
+impl TaskOutcome {
+    fn leaf(self) -> Digest {
+        match self {
+            Self::Accepted { task_digest } => fold_root("racc.task.accepted.v1", &[task_digest]),
+            Self::Regressed { task_digest } => fold_root("racc.task.regressed.v1", &[task_digest]),
+        }
+    }
+
+    fn is_accepted(self) -> bool {
+        matches!(self, Self::Accepted { .. })
+    }
+}
+
+/// T13 task-acceptance receipt: every checked task was accepted.
+///
+/// Trusted boundary: the outcomes are minted by the transactional T13 protocol
+/// (zero-gate). Until zero-gate lands, the caller that presents the outcomes is
+/// the trusted party; this type is the seam that will be narrowed to zero-gate.
+/// A task-acceptance receipt never substitutes for policy evidence (8.2/8.3).
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct TaskAcceptanceReceipt {
+    acceptance_root: Digest,
+}
+
+impl TaskAcceptanceReceipt {
+    /// Canonical acceptance root over the per-task outcomes.
+    pub fn root_of(outcomes: &[TaskOutcome]) -> Digest {
+        let leaves: Vec<Digest> = outcomes.iter().map(|o| o.leaf()).collect();
+        fold_root("racc.task.v1", &leaves)
+    }
+
+    /// Verifies the outcomes against the declared root and rejects regressions.
+    pub fn verify(
+        acceptance_root: Digest,
+        outcomes: &[TaskOutcome],
+    ) -> Result<Self, EvidenceError> {
+        if outcomes.is_empty() {
+            return Err(EvidenceError::NoEvidence { kind: "task" });
+        }
+        if !outcomes.iter().all(|o| o.is_accepted()) {
+            return Err(EvidenceError::TaskRegressed);
+        }
+        let actual = Self::root_of(outcomes);
+        if actual != acceptance_root {
+            return Err(EvidenceError::RootMismatch {
+                kind: "task",
+                declared: acceptance_root,
+                actual,
+            });
+        }
+        Ok(Self { acceptance_root })
+    }
+
+    /// The verified acceptance root.
+    pub fn acceptance_root(&self) -> Digest {
+        self.acceptance_root
+    }
 }
 
 /// Merkle roots a receipt is anchored to.
@@ -384,43 +765,159 @@ pub struct ReceiptRoots {
 }
 
 /// The three non-arithmetic exactness gates of the phase certificate.
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+///
+/// The booleans are private and there is no public setter: a gate is raised only
+/// by presenting the corresponding verified evidence handle. Default is all-false.
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct ExactnessGates {
-    /// Every retained span is byte-identical to the archived original.
-    pub byte_exact: bool,
-    /// Policy sufficiency was proven, or a raw fallback was served.
-    pub policy_exact_or_fallback: bool,
-    /// The downstream task acceptance check passed.
-    pub task_verified: bool,
+    byte_exact: Option<Digest>,
+    policy_exact_or_fallback: Option<Digest>,
+    task_verified: Option<Digest>,
+}
+
+impl ExactnessGates {
+    /// Raises the byte-exactness gate from a verified archive attestation.
+    pub fn with_byte_exact(mut self, attestation: &ArchiveAttestation) -> Self {
+        self.byte_exact = Some(attestation.archive_root());
+        self
+    }
+
+    /// Raises the policy-exactness gate from verified per-decision receipts.
+    pub fn with_policy_exact_or_fallback(mut self, evidence: &PolicyEvidence) -> Self {
+        self.policy_exact_or_fallback = Some(evidence.certificate_root());
+        self
+    }
+
+    /// Raises the task gate from a T13 task-acceptance receipt.
+    pub fn with_task_verified(mut self, receipt: &TaskAcceptanceReceipt) -> Self {
+        self.task_verified = Some(receipt.acceptance_root());
+        self
+    }
+
+    /// Whether the byte-exactness gate is backed by evidence.
+    pub fn byte_exact(&self) -> bool {
+        self.byte_exact.is_some()
+    }
+
+    /// Whether the policy-exactness gate is backed by evidence.
+    pub fn policy_exact_or_fallback(&self) -> bool {
+        self.policy_exact_or_fallback.is_some()
+    }
+
+    /// Whether the task gate is backed by evidence.
+    pub fn task_verified(&self) -> bool {
+        self.task_verified.is_some()
+    }
 }
 
 /// Ex-post exact-phase certificate: C <= epsilon * R plus exactness gates.
+///
+/// Constructed only by [`DominanceReceipt::seal`] or [`ResourceGauge::finalize_receipt`].
+/// A receipt decoded from the wire is a claim, not a proof: its gates are only
+/// meaningful once the archive and certificate roots are re-verified against
+/// evidence handles.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct DominanceReceipt {
+    /// Canonical-JSON schema version.
+    pub schema_version: u32,
     /// Cumulative counters, tagged with the locked tokenizer gauge.
     pub ledger: TokenLedger,
+    /// Total RACC input exposure, summed over every charge class.
+    pub racc_input_tokens: u64,
     /// Preregistered retained-fraction target, in ppm.
     pub target_retained_ppm: RetainedFractionPpm,
     /// Root of the byte-exact archive.
     pub archive_root: Digest,
     /// Root of the evidence certificate set.
     pub certificate_root: Digest,
-    /// Every retained span is byte-identical to the archived original.
-    pub byte_exact: bool,
-    /// Policy sufficiency was proven, or a raw fallback was served.
-    pub policy_exact_or_fallback: bool,
-    /// The downstream task acceptance check passed.
-    pub task_verified: bool,
+    byte_exact: bool,
+    policy_exact_or_fallback: bool,
+    task_verified: bool,
 }
 
 impl DominanceReceipt {
+    /// Seals a ledger into a receipt.
+    ///
+    /// Rejects a zero raw baseline (R = 0 certifies nothing), rejects a ledger
+    /// whose declared input is not classified exactly once, and rejects gates
+    /// whose evidence roots disagree with the receipt roots.
+    pub fn seal(
+        ledger: TokenLedger,
+        target_retained_ppm: RetainedFractionPpm,
+        roots: ReceiptRoots,
+        exactness: ExactnessGates,
+    ) -> Result<Self, ReceiptError> {
+        if ledger.raw_input_tokens == 0 {
+            return Err(ReceiptError::IncompleteLedger);
+        }
+        let racc_input_tokens = ledger
+            .check_accounting_complete()
+            .map_err(ReceiptError::Accounting)?;
+        if let Some(root) = exactness.byte_exact {
+            if root != roots.archive_root {
+                return Err(ReceiptError::EvidenceRootMismatch {
+                    kind: "archive",
+                    receipt: roots.archive_root,
+                    evidence: root,
+                });
+            }
+        }
+        if let Some(root) = exactness.policy_exact_or_fallback {
+            if root != roots.certificate_root {
+                return Err(ReceiptError::EvidenceRootMismatch {
+                    kind: "policy",
+                    receipt: roots.certificate_root,
+                    evidence: root,
+                });
+            }
+        }
+        Ok(Self {
+            schema_version: RECEIPT_SCHEMA_VERSION,
+            ledger,
+            racc_input_tokens,
+            target_retained_ppm,
+            archive_root: roots.archive_root,
+            certificate_root: roots.certificate_root,
+            byte_exact: exactness.byte_exact(),
+            policy_exact_or_fallback: exactness.policy_exact_or_fallback(),
+            task_verified: exactness.task_verified(),
+        })
+    }
+
+    /// Whether every retained span was attested byte-identical.
+    pub fn byte_exact(&self) -> bool {
+        self.byte_exact
+    }
+
+    /// Whether every decision was policy-exact or served a raw fallback.
+    pub fn policy_exact_or_fallback(&self) -> bool {
+        self.policy_exact_or_fallback
+    }
+
+    /// Whether the downstream T13 task acceptance check passed.
+    pub fn task_verified(&self) -> bool {
+        self.task_verified
+    }
+
     /// Pure arithmetic part of the ex-post phase certificate.
     ///
     /// Checks racc_input_tokens * 1_000_000 <= raw_input_tokens * target_ppm
-    /// with u128 widening, exactly as RACC_CONTRACT.rs specifies.
+    /// with u128 widening, exactly as RACC_CONTRACT.rs specifies. A zero raw
+    /// baseline is always false: with R = 0 there is no phase to certify.
     pub fn meets_token_target(&self) -> bool {
-        let lhs = u128::from(self.ledger.racc_input_tokens) * u128::from(PPM_ONE);
-        let rhs = u128::from(self.ledger.raw_input_tokens) * u128::from(self.target_retained_ppm.0);
+        if self.ledger.raw_input_tokens == 0 {
+            return false;
+        }
+        let exposure = match self.ledger.racc_input_tokens() {
+            Ok(exposure) => exposure,
+            Err(_) => return false,
+        };
+        if exposure != self.racc_input_tokens {
+            return false;
+        }
+        let lhs = u128::from(exposure) * u128::from(PPM_ONE);
+        let rhs =
+            u128::from(self.ledger.raw_input_tokens) * u128::from(self.target_retained_ppm.ppm());
         lhs <= rhs
     }
 
@@ -434,13 +931,15 @@ impl DominanceReceipt {
 
     /// Achieved retained fraction, rounded up to the next ppm.
     ///
-    /// Returns None when the raw baseline is zero (no ratio is defined).
+    /// Returns None when the raw baseline is zero (no ratio is defined) or the
+    /// exposure sum overflows.
     pub fn achieved_retained_ppm_ceil(&self) -> Option<u128> {
         let raw = u128::from(self.ledger.raw_input_tokens);
         if raw == 0 {
             return None;
         }
-        let numerator = u128::from(self.ledger.racc_input_tokens) * u128::from(PPM_ONE);
+        let exposure = self.ledger.racc_input_tokens().ok()?;
+        let numerator = u128::from(exposure) * u128::from(PPM_ONE);
         Some(numerator.div_ceil(raw))
     }
 
@@ -470,7 +969,11 @@ pub struct ExposureBlock {
     pub racc_exposures: u64,
 }
 
-/// Full exposure account behind a ledger: C = H + sum_i m_i b_i (T8).
+/// Full exposure account behind a ledger: C = H + sum_i m_i b_i (T8, eq 5.7).
+///
+/// Framing and boundary interactions (system preamble, tool schemas, block
+/// separators) are not blocks: they belong in the fixed overheads H_raw and
+/// H_tz, so that the per-block sums stay exact multiplicities.
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
 pub struct ExposureAccount {
     /// Raw-side fixed overhead, H_raw.
@@ -512,17 +1015,18 @@ impl ExposureAccount {
         self.blocks.iter().map(|b| u128::from(b.block_tokens)).sum()
     }
 
-    /// Verifies the T8 exact exposure/replay identity against a ledger.
+    /// Verifies the T8 exact exposure/replay identity (eq 5.7) against a ledger.
     ///
-    /// The ledger's raw_input_tokens must equal C_raw exactly and its total
-    /// RACC exposure (billed + recovery + re-expansion + fallback) must equal
-    /// C_tz exactly. Any drift means the ledger and the exposure account
-    /// disagree about history, which invalidates every downstream saving claim.
+    /// The ledger must account for its declared input exactly once, its
+    /// raw_input_tokens must equal C_raw exactly, and its RACC exposure summed
+    /// over every charge class must equal C_tz exactly. Any drift means the
+    /// ledger and the exposure account disagree about history, which invalidates
+    /// every downstream saving claim.
     pub fn check_replay_identity(&self, ledger: &TokenLedger) -> Result<(), LedgerError> {
+        let racc_actual = u128::from(ledger.check_accounting_complete()?);
         let raw_expected = self.raw_cost()?;
         let racc_expected = self.racc_cost()?;
         let raw_actual = u128::from(ledger.raw_input_tokens);
-        let racc_actual = u128::from(ledger.total_racc_exposure()?);
         if raw_actual != raw_expected {
             return Err(LedgerError::ReplayIdentityMismatch {
                 side: ExposureSide::Raw,
@@ -629,6 +1133,20 @@ pub enum LedgerError {
         /// The rejected value.
         ppm: u32,
     },
+    /// Declared model-visible input was left unattributed to a charge class.
+    UnclassifiedInput {
+        /// Declared model-visible input tokens.
+        declared: u64,
+        /// Sum over the charge classes.
+        classified: u64,
+    },
+    /// More tokens were attributed to charge classes than were declared.
+    DoubleCountedInput {
+        /// Declared model-visible input tokens.
+        declared: u64,
+        /// Sum over the charge classes.
+        classified: u64,
+    },
     /// The exposure account has no blocks, so no ratio is defined.
     EmptyExposureAccount,
     /// The T8 exposure/replay identity did not hold exactly.
@@ -660,8 +1178,26 @@ impl fmt::Display for LedgerError {
             Self::PpmOutOfRange { ppm } => {
                 write!(f, "retained fraction {ppm} ppm exceeds {PPM_ONE} ppm")
             }
+            Self::UnclassifiedInput {
+                declared,
+                classified,
+            } => write!(
+                f,
+                "{declared} declared input tokens but only {classified} classified: every model-visible call must be charged to a class"
+            ),
+            Self::DoubleCountedInput {
+                declared,
+                classified,
+            } => write!(
+                f,
+                "{classified} classified input tokens exceed the {declared} declared: a call was counted more than once"
+            ),
             Self::EmptyExposureAccount => f.write_str("exposure account has no blocks"),
-            Self::ReplayIdentityMismatch { side, expected, actual } => write!(
+            Self::ReplayIdentityMismatch {
+                side,
+                expected,
+                actual,
+            } => write!(
                 f,
                 "replay identity mismatch on {side} side: exposure account implies {expected}, ledger recorded {actual}"
             ),
@@ -671,15 +1207,63 @@ impl fmt::Display for LedgerError {
 
 impl std::error::Error for LedgerError {}
 
+/// Failures when verifying an exactness evidence handle.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum EvidenceError {
+    /// No evidence items were presented for the gate.
+    NoEvidence {
+        /// Which evidence kind was empty.
+        kind: &'static str,
+    },
+    /// The presented evidence does not fold to the declared root.
+    RootMismatch {
+        /// Which evidence kind mismatched.
+        kind: &'static str,
+        /// Root the caller declared.
+        declared: Digest,
+        /// Root the presented evidence actually folds to.
+        actual: Digest,
+    },
+    /// At least one task regressed, so no acceptance receipt exists.
+    TaskRegressed,
+}
+
+impl fmt::Display for EvidenceError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::NoEvidence { kind } => write!(f, "no {kind} evidence was presented"),
+            Self::RootMismatch {
+                kind,
+                declared,
+                actual,
+            } => write!(
+                f,
+                "{kind} evidence folds to {actual}, not the declared root {declared}"
+            ),
+            Self::TaskRegressed => {
+                f.write_str("a task regressed: no acceptance receipt can be minted")
+            }
+        }
+    }
+}
+
+impl std::error::Error for EvidenceError {}
+
 /// Failures when sealing a receipt.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum ReceiptError {
     /// No charges were recorded, or the raw baseline is zero.
     IncompleteLedger,
-    /// The requested target exceeded 1_000_000 ppm.
-    TargetOutOfRange {
-        /// The rejected value.
-        ppm: u32,
+    /// The ledger did not account for its declared input exactly once.
+    Accounting(LedgerError),
+    /// A gate was raised by evidence anchored to a different root.
+    EvidenceRootMismatch {
+        /// Which gate mismatched.
+        kind: &'static str,
+        /// Root recorded on the receipt.
+        receipt: Digest,
+        /// Root the evidence handle was verified against.
+        evidence: Digest,
     },
     /// Canonical JSON encoding failed.
     Encoding,
@@ -691,15 +1275,25 @@ impl fmt::Display for ReceiptError {
             Self::IncompleteLedger => {
                 f.write_str("ledger is incomplete: no charges or zero raw baseline")
             }
-            Self::TargetOutOfRange { ppm } => {
-                write!(
-                    f,
-                    "target retained fraction {ppm} ppm exceeds {PPM_ONE} ppm"
-                )
-            }
+            Self::Accounting(err) => write!(f, "incomplete charge accounting: {err}"),
+            Self::EvidenceRootMismatch {
+                kind,
+                receipt,
+                evidence,
+            } => write!(
+                f,
+                "{kind} gate evidence is anchored to {evidence}, but the receipt records {receipt}"
+            ),
             Self::Encoding => f.write_str("receipt could not be encoded as canonical JSON"),
         }
     }
 }
 
-impl std::error::Error for ReceiptError {}
+impl std::error::Error for ReceiptError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::Accounting(err) => Some(err),
+            _ => None,
+        }
+    }
+}
