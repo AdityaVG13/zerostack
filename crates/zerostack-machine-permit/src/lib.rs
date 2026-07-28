@@ -8,8 +8,10 @@
 //! Canonical policy: `tokenzero-mcp/CODEMODE_MACHINE_PERMITS.md`.
 
 use std::fs;
-use std::io;
+use std::hash::{BuildHasher, Hasher};
+use std::io::{self, Write};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 pub const PERMIT_POLL: Duration = Duration::from_millis(20);
@@ -321,19 +323,26 @@ impl MachinePermit {
     fn try_create(path: &Path, command: &str) -> Result<Self, TryPermit> {
         match fs::create_dir(path) {
             Ok(()) => {
+                let cookie = owner_cookie();
                 let owner = format!(
                     "{}-{}-{:?}",
                     std::process::id(),
                     epoch_millis(),
                     std::thread::current().id()
                 );
-                if let Err(e) = write_metadata(path, &owner, command) {
-                    cleanup_owned(path, &owner);
+                if let Err(e) = write_metadata(path, &cookie, &owner, command) {
+                    quarantine_exact(path, None);
                     return Err(TryPermit::Fatal(format!(
                         "write codemode permit metadata: {e}"
                     )));
                 }
-                Ok(Self(path.to_path_buf(), owner))
+                if read_identity(path).as_ref().map(|identity| identity.cookie.as_str())
+                    != Some(cookie.as_str())
+                {
+                    cleanup_owned(path, &cookie);
+                    return Err(TryPermit::Busy);
+                }
+                Ok(Self(path.to_path_buf(), cookie))
             }
             Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
                 if reclaim_dead(path) {
@@ -353,6 +362,7 @@ impl MachinePermit {
 struct WaiterIntent {
     path: PathBuf,
     owner: String,
+    cookie: String,
     started_at: u128,
 }
 
@@ -366,11 +376,8 @@ impl WaiterIntent {
             ))
         })?;
         let started_at = epoch_millis();
-        let owner = format!(
-            "{}-{started_at}-{:?}",
-            std::process::id(),
-            std::thread::current().id()
-        );
+        let cookie = owner_cookie();
+        let owner = format!("{}-{started_at}-{cookie}", std::process::id());
         let path = waiters.join(&owner);
         fs::create_dir(&path).map_err(|e| {
             AcquireError::Fatal(format!(
@@ -378,9 +385,16 @@ impl WaiterIntent {
                 path.display()
             ))
         })?;
+        if let Err(e) = publish_identity(&path, &cookie, std::process::id(), &owner) {
+            quarantine_exact(&path, None);
+            return Err(AcquireError::Fatal(format!(
+                "write codemode permit waiter metadata: {e}"
+            )));
+        }
         Ok(Self {
             path,
             owner,
+            cookie,
             started_at,
         })
     }
@@ -449,8 +463,14 @@ fn classify_waiter_entry(
         )));
     }
     if let Some((pid, started_at)) = waiter_key(&path) {
-        // SAFETY: short-circuit requires dead process AND successful remove.
-        if !process_alive(pid) && remove_waiter(&path) {
+        let Some(identity) = read_identity(&path) else {
+            if reclaim_dead(&path) {
+                return Ok(None);
+            }
+            return Ok(Some((started_at, entry.file_name().to_string_lossy().into_owned())));
+        };
+        // SAFETY: short-circuit requires dead process AND cookie-fenced remove.
+        if identity.pid == pid && !process_alive(pid) && cleanup_owned(&path, &identity.cookie) {
             return Ok(None);
         }
         return Ok(Some((
@@ -475,7 +495,7 @@ fn classify_waiter_entry(
 impl Drop for WaiterIntent {
     fn drop(&mut self) {
         if self.path.file_name().and_then(|name| name.to_str()) == Some(&self.owner) {
-            remove_waiter(&self.path);
+            cleanup_owned(&self.path, &self.cookie);
         }
     }
 }
@@ -509,72 +529,142 @@ impl Drop for MachinePermit {
     }
 }
 
-fn write_metadata(path: &Path, owner: &str, command: &str) -> std::io::Result<()> {
-    // Write ownership first so an error in any later metadata write remains
-    // removable by the acquiring RAII guard.
-    fs::write(path.join("owner"), owner)?;
-    fs::write(path.join("pid"), std::process::id().to_string())?;
-    fs::write(
-        path.join("repository"),
-        std::env::current_dir()
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct PermitIdentity {
+    cookie: String,
+    pid: u32,
+    owner: String,
+}
+
+fn write_metadata(path: &Path, cookie: &str, owner: &str, command: &str) -> io::Result<()> {
+    write_file_sync(&path.join("owner"), owner)?;
+    write_file_sync(&path.join("pid"), &std::process::id().to_string())?;
+    write_file_sync(
+        &path.join("repository"),
+        &std::env::current_dir()
             .unwrap_or_else(|_| PathBuf::from("."))
             .to_string_lossy()
             .chars()
             .take(1024)
             .collect::<String>(),
     )?;
-    fs::write(path.join("command"), command)?;
-    fs::write(path.join("started_at"), epoch_millis().to_string())
+    write_file_sync(&path.join("command"), command)?;
+    write_file_sync(&path.join("started_at"), &epoch_millis().to_string())?;
+    publish_identity(path, cookie, std::process::id(), owner)
+}
+
+fn write_file_sync(path: &Path, value: &str) -> io::Result<()> {
+    let mut file = fs::File::create(path)?;
+    file.write_all(value.as_bytes())?;
+    file.sync_all()
+}
+
+fn publish_identity(path: &Path, cookie: &str, pid: u32, owner: &str) -> io::Result<()> {
+    let temporary = path.join(format!(".identity-{cookie}.tmp"));
+    write_file_sync(&temporary, &format!("{cookie}\n{pid}\n{owner}\n"))?;
+    fs::rename(&temporary, path.join("identity"))?;
+    // Directory sync is unavailable on some supported platforms. The identity
+    // file itself is durable before the atomic publication rename.
+    let _ = fs::File::open(path).and_then(|directory| directory.sync_all());
+    Ok(())
+}
+
+fn read_identity(path: &Path) -> Option<PermitIdentity> {
+    parse_identity(&fs::read(path.join("identity")).ok()?)
+}
+
+fn parse_identity(value: &[u8]) -> Option<PermitIdentity> {
+    let value = std::str::from_utf8(value).ok()?;
+    let mut lines = value.lines();
+    let cookie = lines.next()?.to_owned();
+    let pid = lines.next()?.parse().ok()?;
+    let owner = lines.next()?.to_owned();
+    if cookie.len() != 32
+        || !cookie.bytes().all(|byte| byte.is_ascii_hexdigit())
+        || owner.is_empty()
+        || lines.next().is_some()
+    {
+        return None;
+    }
+    Some(PermitIdentity { cookie, pid, owner })
 }
 
 fn waiter_key(path: &Path) -> Option<(u32, u128)> {
     let mut parts = path.file_name()?.to_str()?.splitn(3, '-');
     let pid = parts.next()?.parse().ok()?;
     let started_at = parts.next()?.parse().ok()?;
-    parts.next()?;
-    Some((pid, started_at))
+    parts.next()?
+        .bytes()
+        .all(|byte| byte.is_ascii_hexdigit())
+        .then_some((pid, started_at))
 }
 
-fn remove_waiter(path: &Path) -> bool {
-    match fs::remove_dir(path) {
-        Ok(()) => true,
-        Err(error) if error.kind() == std::io::ErrorKind::DirectoryNotEmpty => remove_permit(path),
-        Err(_) => false,
+fn cleanup_owned(path: &Path, cookie: &str) -> bool {
+    let observed = match fs::read(path.join("identity")) {
+        Ok(observed) => observed,
+        Err(_) => return false,
+    };
+    if parse_identity(&observed).as_ref().map(|identity| identity.cookie.as_str()) != Some(cookie) {
+        return false;
     }
+    quarantine_exact(path, Some(&observed))
 }
 
-const PERMIT_METADATA: &[&str] = &["pid", "repository", "command", "started_at", "owner"];
-
-fn remove_permit(path: &Path) -> bool {
-    for name in PERMIT_METADATA {
-        let _ = fs::remove_file(path.join(name));
+fn quarantine_exact(path: &Path, observed_identity: Option<&[u8]>) -> bool {
+    let Some(parent) = path.parent() else { return false };
+    let name = path.file_name().and_then(|name| name.to_str()).unwrap_or("permit");
+    let quarantine = parent.join(format!(".{name}.reclaim-{}", owner_cookie()));
+    if fs::rename(path, &quarantine).is_err() {
+        return false;
     }
-    fs::remove_dir(path).is_ok()
-}
-
-fn cleanup_owned(path: &Path, owner: &str) {
-    if fs::read_to_string(path.join("owner")).ok().as_deref() == Some(owner) {
-        remove_permit(path);
+    let quarantined_identity = fs::read(quarantine.join("identity")).ok();
+    if quarantined_identity.as_deref() != observed_identity {
+        let _ = fs::rename(&quarantine, path);
+        return false;
     }
+    fs::remove_dir_all(&quarantine).is_ok()
 }
 
 fn reclaim_dead(path: &Path) -> bool {
-    let pid = fs::read_to_string(path.join("pid"))
-        .ok()
-        .and_then(|pid| pid.trim().parse::<u32>().ok());
-    if let Some(pid) = pid {
-        return !process_alive(pid) && remove_permit(path);
+    let observed = fs::read(path.join("identity")).ok();
+    if let Some(identity) = observed.as_deref().and_then(parse_identity) {
+        if identity.pid != 0 && !process_alive(identity.pid) {
+            return quarantine_exact(path, observed.as_deref());
+        }
+        return false;
     }
 
-    // A process can die after create_dir() but before writing pid. Without a
-    // bounded incomplete-state recovery, that empty permit blocks every
-    // CodeMode client forever. The grace period avoids racing a live writer.
+    // A process can die after create_dir() but before atomically publishing its
+    // identity. Grace avoids racing that live writer; the snapshot fence below
+    // refuses deletion if publication or replacement wins before quarantine.
     let stale = fs::metadata(path)
         .and_then(|metadata| metadata.modified())
         .ok()
         .and_then(|modified| modified.elapsed().ok())
         .is_some_and(|age| age >= INCOMPLETE_PERMIT_GRACE);
-    stale && remove_permit(path)
+    stale && quarantine_exact(path, observed.as_deref())
+}
+
+static COOKIE_SEQUENCE: AtomicU64 = AtomicU64::new(0);
+
+fn owner_cookie() -> String {
+    let sequence = COOKIE_SEQUENCE.fetch_add(1, Ordering::Relaxed);
+    let mut halves = [0u64; 2];
+    for (index, half) in halves.iter_mut().enumerate() {
+        let mut hasher = std::collections::hash_map::RandomState::new().build_hasher();
+        hasher.write_u64(sequence);
+        hasher.write_u32(std::process::id());
+        hasher.write_u128(epoch_nanos());
+        hasher.write_usize(index);
+        *half = hasher.finish();
+    }
+    format!("{:016x}{:016x}", halves[0], halves[1])
+}
+
+fn epoch_nanos() -> u128 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_or(0, |value| value.as_nanos())
 }
 
 /// Legacy exclusive layout put `pid`/`owner` directly under `base`. Slot layout

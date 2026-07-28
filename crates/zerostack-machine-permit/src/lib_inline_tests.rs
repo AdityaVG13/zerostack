@@ -17,6 +17,76 @@ fn wait_for_waiters(base: &Path, expected: usize) {
     }
 }
 
+fn fencing_test_path(label: &str) -> PathBuf {
+    std::env::temp_dir().join(format!(
+        "zerostack-fencing-{label}-{}-{}",
+        std::process::id(),
+        owner_cookie()
+    ))
+}
+
+#[test]
+fn permit_fence_replaced_cookie_survives_old_guard_drop() {
+    let path = fencing_test_path("drop-foreign");
+    let permit = MachinePermit::acquire(
+        &path, Instant::now() + Duration::from_secs(2), "old-owner",
+    ).expect("acquire old owner");
+    fs::remove_dir_all(&path).expect("simulate external replacement");
+    fs::create_dir(&path).expect("create replacement");
+    let foreign_cookie = "fedcba9876543210fedcba9876543210";
+    publish_identity(&path, foreign_cookie, std::process::id(), "foreign").unwrap();
+
+    drop(permit);
+
+    assert_eq!(read_identity(&path).unwrap().cookie, foreign_cookie);
+    fs::remove_dir_all(&path).expect("remove replacement");
+}
+
+#[test]
+fn permit_fence_stale_reclaim_snapshot_cannot_delete_new_owner() {
+    let path = fencing_test_path("reclaim-foreign");
+    fs::create_dir(&path).expect("create stale slot");
+    let stale_cookie = "11111111111111111111111111111111";
+    publish_identity(&path, stale_cookie, 1, "stale").expect("publish stale identity");
+    let stale_snapshot = fs::read(path.join("identity")).expect("snapshot stale identity");
+    fs::remove_dir_all(&path).expect("replace stale slot");
+    fs::create_dir(&path).expect("create new slot");
+    let new_cookie = "22222222222222222222222222222222";
+    publish_identity(&path, new_cookie, std::process::id(), "new").unwrap();
+
+    assert!(!quarantine_exact(&path, Some(&stale_snapshot)));
+    assert_eq!(read_identity(&path).unwrap().cookie, new_cookie);
+    fs::remove_dir_all(&path).expect("remove new slot");
+}
+
+#[test]
+fn permit_fence_incomplete_metadata_is_not_reclaimed_before_grace() {
+    let path = fencing_test_path("incomplete-grace");
+    fs::create_dir(&path).expect("create incomplete slot");
+    fs::write(path.join("pid"), "malformed").expect("write partial metadata");
+
+    assert!(!reclaim_dead(&path));
+    assert!(path.exists());
+    fs::remove_dir_all(&path).expect("remove incomplete slot");
+}
+
+#[test]
+fn permit_fence_normal_drop_removes_its_own_cookie() {
+    let path = fencing_test_path("normal-drop");
+    let permit = MachinePermit::acquire(
+        &path,
+        Instant::now() + Duration::from_secs(2),
+        "normal-owner",
+    )
+    .expect("acquire owner");
+    let cookie = read_identity(&path).expect("published identity").cookie;
+    assert_eq!(permit.1, cookie);
+
+    drop(permit);
+
+    assert!(!path.exists());
+}
+
 #[test]
 fn reclaims_incomplete_machine_permit_after_grace() {
     let path = std::env::temp_dir().join(format!(
