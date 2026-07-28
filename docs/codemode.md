@@ -21,6 +21,30 @@ return { files: files.ref, graph: graph.ref };
 
 This Cloudflare-style execution model reduces protocol round trips and keeps intermediate values inside the sandbox rather than exposing each one to model context.
 
+## Install the `zs` wrapper
+
+The tracked Python wrapper supports Linux and macOS and has no third-party dependencies.
+
+~~~sh
+python3 scripts/install_zs.py --dry-run
+python3 scripts/install_zs.py
+python3 scripts/install_zs.py --verify
+zs --version
+~~~
+
+The default destination is `~/.kimi-code/bin/zs`. Use `--prefix DIR` for another user bin directory. Installation uses a temporary sibling, fsync, executable-mode preservation, and atomic replacement.
+
+Smoke from any directory while preserving engine root isolation:
+
+~~~sh
+zs -C . --verbose fs 'return await zero.fs.compound("list", { path: "." });'
+printf '%s
+' 'return await zero.graph.orient("delta");' | zs -C . graph -
+zs -C . fs-search 'read a file'
+~~~
+
+`-C/--root` must precede the engine command. Plan paths stay relative to that validated root. `--verbose` reports wrapper and invoked engine version/revision. `--json` emits the complete engine result. Normal output preserves typed status and copyable scalar `fz://`, `gz://`, `tz://`, and `cm://` refs. Binary overrides are `ZS_FSZERO_BIN`, `ZS_GRAPHZERO_BIN`, and `ZS_TOKENZERO_BIN`; `ZS_TIMEOUT_MS` changes the 120000 ms default.
+
 ## Exclusive deployment rule
 
 Choose exactly one:

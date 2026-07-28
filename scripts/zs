@@ -1,0 +1,173 @@
+#!/usr/bin/env python3
+"""Versioned ZeroStack CodeMode CLI wrapper."""
+from __future__ import annotations
+import json
+import os
+from pathlib import Path
+import re
+import shlex
+import subprocess
+import sys
+from typing import Any, NoReturn
+
+VERSION = "1.1.0"
+BASE = Path.home() / ".pi/agent/zerostack-origin-main"
+SPECS = {
+    "fs": ("ZS_FSZERO_BIN", BASE / "fszero/target/release/fszero-codemode", "fz"),
+    "graph": ("ZS_GRAPHZERO_BIN", BASE / "graphzero/target/release/graphzero-codemode", "gz"),
+    "token": ("ZS_TOKENZERO_BIN", BASE / "TokenZero/target/release/tokenzero-codemode", "tz"),
+}
+REF = re.compile(r"^(?:fz|gz|tz|cm)://\S+$")
+STATUS = re.compile(r"^[A-Z][A-Z0-9_-]*\d+$")
+HELP = """zs -- ZeroStack CodeMode CLI
+Usage:
+  zs [--json] [--verbose] [-C ROOT] fs|graph|token '<js plan>'
+  zs [--json] [--verbose] [-C ROOT] <engine>-search '<intent>'
+  zs [--json] [--verbose] [-C ROOT] <engine>-describe '<method>'
+  zs --version
+Use '-' or omit plan/query arguments to read stdin. Environment overrides:
+ZS_FSZERO_BIN, ZS_GRAPHZERO_BIN, ZS_TOKENZERO_BIN, ZS_TIMEOUT_MS.
+"""
+
+def die(message: str, code: int = 2, root: Path | None = None, command: list[str] | None = None) -> NoReturn:
+    print(f"zs: {message}", file=sys.stderr)
+    if root is not None and command:
+        print(f"Rerun: {shlex.join(['zs', '-C', str(root), *command])}", file=sys.stderr)
+        print("Use paths relative to this root; engine root isolation remains enabled.", file=sys.stderr)
+    raise SystemExit(code)
+
+def parse(argv: list[str]) -> tuple[Path, bool, bool, str, list[str]]:
+    root, machine, verbose, i = Path.cwd(), False, False, 0
+    while i < len(argv):
+        arg = argv[i]
+        if arg in ("-C", "--root"):
+            if i + 1 == len(argv):
+                die(f"{arg} requires a directory")
+            candidate = Path(argv[i + 1]).expanduser()
+            try:
+                root = candidate.resolve(strict=True)
+            except OSError as exc:
+                die(f"invalid root {candidate}: {exc}", root=candidate.absolute(), command=argv[i + 2:] or ["--help"])
+            if not root.is_dir():
+                die(f"root is not a directory: {root}", root=root, command=argv[i + 2:] or ["--help"])
+            i += 2
+        elif arg == "--json":
+            machine, i = True, i + 1
+        elif arg in ("-v", "--verbose"):
+            verbose, i = True, i + 1
+        else:
+            break
+    if i == len(argv):
+        print(HELP.rstrip())
+        raise SystemExit(0)
+    return root, machine, verbose, argv[i], argv[i + 1:]
+
+def engine(name: str) -> dict[str, str]:
+    env, default, prefix = SPECS[name]
+    return {"bin": os.environ.get(env, str(default)), "execute": f"{prefix}_execute_code", "search": f"{prefix}_codemode_search", "describe": f"{prefix}_codemode_describe"}
+
+def invoke(spec: dict[str, str], method: str, arguments: dict[str, str], root: Path, command: list[str]) -> tuple[dict[str, Any], dict[str, Any]]:
+    try:
+        timeout = int(os.environ.get("ZS_TIMEOUT_MS", "120000"))
+        if timeout <= 0:
+            raise ValueError
+    except ValueError:
+        die("ZS_TIMEOUT_MS must be a positive integer", root=root, command=command)
+    init = {"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {"protocolVersion": "2024-11-05", "capabilities": {}, "clientInfo": {"name": "zs-cli", "version": VERSION}}}
+    call = {"jsonrpc": "2.0", "id": 2, "method": "tools/call", "params": {"name": method, "arguments": arguments}}
+    payload = "\n".join(json.dumps(x) for x in (init, {"jsonrpc": "2.0", "method": "notifications/initialized"}, call)) + "\n"
+    try:
+        proc = subprocess.run([spec["bin"]], input=payload, capture_output=True, text=True, timeout=timeout / 1000, cwd=root)
+    except FileNotFoundError:
+        die(f"engine binary missing: {spec['bin']}", 127, root, command)
+    except PermissionError:
+        die(f"engine binary is not executable: {spec['bin']}", 126, root, command)
+    except subprocess.TimeoutExpired:
+        die(f"engine timed out after {timeout}ms", 124, root, command)
+    responses: dict[int, dict[str, Any]] = {}
+    for line in proc.stdout.splitlines():
+        try:
+            message = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(message, dict) and message.get("id") in (1, 2):
+            responses[message["id"]] = message
+    response = responses.get(2)
+    if response is None:
+        die(f"no response from engine: {(proc.stderr or proc.stdout).strip()[:400]}", proc.returncode or 1, root, command)
+    if proc.returncode:
+        die(f"engine exited with status {proc.returncode}: {proc.stderr.strip()[:400]}", proc.returncode, root, command)
+    if "error" in response:
+        die(f"engine error: {json.dumps(response['error'], sort_keys=True)}", 1, root, command)
+    return response.get("result", {}), responses.get(1, {}).get("result", {})
+
+def text_items(result: dict[str, Any]) -> list[str]:
+    content = result.get("content")
+    return [x["text"] for x in content if isinstance(x, dict) and x.get("type") == "text" and isinstance(x.get("text"), str)] if isinstance(content, list) else []
+
+def find_refs(value: Any) -> list[str]:
+    found: list[str] = []
+    if isinstance(value, str) and REF.fullmatch(value):
+        found.append(value)
+    elif isinstance(value, dict):
+        for child in value.values():
+            found.extend(find_refs(child))
+    elif isinstance(value, list):
+        for child in value:
+            found.extend(find_refs(child))
+    return list(dict.fromkeys(found))
+
+def print_result(result: dict[str, Any], kind: str, machine: bool) -> None:
+    if machine:
+        print(json.dumps(result, indent=2, sort_keys=True))
+    else:
+        texts, structured = text_items(result), result.get("structuredContent")
+        for text in texts:
+            if text:
+                print(text)
+        if kind in ("search", "describe") and structured is not None:
+            print(json.dumps(structured, indent=2, sort_keys=True))
+        elif structured is not None:
+            for ref in find_refs(structured):
+                if not any(ref in text for text in texts):
+                    print(ref)
+        elif not texts:
+            print(json.dumps(result, indent=2, sort_keys=True))
+        if kind == "search" and texts and all(STATUS.fullmatch(x.strip()) for x in texts) and structured is None:
+            die("engine search returned only a status token; use --json to inspect the response", 1)
+    if result.get("isError"):
+        raise SystemExit(1)
+
+def main() -> None:
+    argv = sys.argv[1:]
+    if argv == ["--version"]:
+        print(f"zs {VERSION}")
+        return
+    if not argv or argv[0] in ("-h", "--help", "help"):
+        print(HELP.rstrip())
+        return
+    root, machine, verbose, verb, rest = parse(argv)
+    if verb in ("-h", "--help", "help"):
+        print(HELP.rstrip())
+        return
+    name, kind = verb, "execute"
+    for suffix in ("-search", "-describe"):
+        if verb.endswith(suffix):
+            name, kind = verb[:-len(suffix)], suffix[1:]
+            break
+    if name not in SPECS:
+        die(f"unknown engine '{name}' (want fs, graph, or token)", root=root, command=[verb, *rest])
+    text = (sys.stdin.read() if not rest or rest == ["-"] else " ".join(rest)).strip()
+    if not text:
+        die("empty plan/query", root=root, command=[verb, *rest])
+    arguments = {"plan": text, "form": "js"} if kind == "execute" else ({"query": text} if kind == "search" else {"name": text})
+    spec = engine(name)
+    result, initialized = invoke(spec, spec[kind], arguments, root, [verb, *rest])
+    if verbose:
+        server = initialized.get("serverInfo", {}) if isinstance(initialized, dict) else {}
+        revision = server.get("revision") or (initialized.get("revision", "unknown") if isinstance(initialized, dict) else "unknown")
+        print(f"zs {VERSION}; engine {server.get('name', name)} {server.get('version', 'unknown')}; revision {revision}", file=sys.stderr)
+    print_result(result, kind, machine)
+
+if __name__ == "__main__":
+    main()
