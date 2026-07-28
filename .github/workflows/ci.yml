@@ -21,6 +21,13 @@ env:
   RUST_BACKTRACE: 1
 
 jobs:
+  feature-universe:
+    name: feature universe
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - run: python3 scripts/check_feature_universe_weights.py
+
   lint:
     name: fmt + clippy
     runs-on: ubuntu-latest

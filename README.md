@@ -73,9 +73,10 @@ Engine source belongs in the three engine repositories, not here. Other harnesse
 
 The engines share contract-critical infrastructure through small foundation crates in [crates/](crates/):
 
-- **zero-abi** -- canonical JSON encoding, JSON Schema normalization and structural comparison, and the operation contract digest. One implementation means two engines can never disagree on how a contract is encoded or hashed.
+- **zero-abi** -- canonical JSON encoding, JSON Schema normalization and structural comparison, the operation contract digest, and raw-worker v2 as the shared canonical dispatch contract.
 - **zero-ref** -- the ZeroRef v1 portable blob ref: parser, canonical formatter, fragment selection, and the shared golden-vector fixture. One grammar, one selection algebra, byte-identical across engines.
 - **zero-store** -- the canonical content-addressed store layout (blobs/sha256/hh/hash) with the crash-safe, concurrency-safe publish protocol and digest-verified reads.
+- **zerostack-machine-permit** -- the shared machine-permit issue/verify surface and scoped permit-base contract for isolating permit roots.
 
 Each engine still ships as a single statically linked binary with no runtime dependency on the others. Foundation crates are consumed at build time via pinned git dependencies, and each engine adopts updates on its own schedule.
 
