@@ -33,3 +33,5 @@ Choose exactly one:
 Never register both for the same deployment. Duplicate surfaces waste context, create ambiguous routing, and can split state. The active ZeroStack deployment uses CodeMode only.
 
 CodeMode is not a fourth engine. It is an execution mode over TokenZero, FSZero, and GraphZero.
+
+See the [Release-N engine MCP compatibility policy](mcp-compatibility-policy.md) for defaults, maintenance scope, migration, and staged removal gates.
