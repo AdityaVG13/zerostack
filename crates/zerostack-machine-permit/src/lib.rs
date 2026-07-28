@@ -23,20 +23,43 @@ const INCOMPLETE_PERMIT_GRACE: Duration = Duration::from_millis(250);
 /// machine-global slot. Without a scope (bare CLI), fall back to the legacy
 /// machine-global base so unrelated processes keep excluding each other.
 pub fn scoped_permit_base(class: &str) -> PathBuf {
-    scoped_permit_base_for(class, permit_scope_root().as_deref())
+    try_scoped_permit_base(class)
+        .unwrap_or_else(|error| panic!("resolve configured permit scope root: {error}"))
+}
+
+/// Fallible repo-scoped permit base resolution for acquisition paths.
+pub fn try_scoped_permit_base(class: &str) -> std::io::Result<PathBuf> {
+    try_scoped_permit_base_for(class, permit_scope_root().as_deref())
 }
 
 pub fn scoped_permit_base_for(class: &str, scope_root: Option<&Path>) -> PathBuf {
+    try_scoped_permit_base_for(class, scope_root)
+        .unwrap_or_else(|error| panic!("resolve configured permit scope root: {error}"))
+}
+
+/// Resolve an explicit scope root without ever hashing an uncanonicalized path.
+pub fn try_scoped_permit_base_for(
+    class: &str,
+    scope_root: Option<&Path>,
+) -> std::io::Result<PathBuf> {
     // Untrusted class must not introduce path separators or `..` into /tmp.
     let class = sanitize_permit_class(class);
     let Some(root) = scope_root else {
-        return PathBuf::from(format!("/tmp/zerostack-codemode-{class}.permit"));
+        return Ok(PathBuf::from(format!(
+            "/tmp/zerostack-codemode-{class}.permit"
+        )));
     };
-    let canonical = fs::canonicalize(root).unwrap_or_else(|_| root.to_path_buf());
+    let canonical = fs::canonicalize(root)?;
+    if !canonical.is_dir() {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::NotADirectory,
+            format!("permit scope root is not a directory: {}", canonical.display()),
+        ));
+    }
     let scope = fnv1a64(canonical.to_string_lossy().as_bytes());
-    PathBuf::from(format!(
+    Ok(PathBuf::from(format!(
         "/tmp/zerostack-codemode-{class}-{scope:016x}.permit"
-    ))
+    )))
 }
 
 /// Permit class path segment: non-empty `[A-Za-z0-9._-]+`, else `"invalid"`.
@@ -865,6 +888,44 @@ pub fn permit_backoff(attempt: u32) -> Duration {
         .min(PERMIT_POLL_MAX.as_millis() as u64)
         .max(PERMIT_POLL.as_millis() as u64);
     Duration::from_millis(millis)
+}
+
+#[cfg(test)]
+mod canonical_scope_tests {
+    use super::*;
+
+    fn unique_temp_path(label: &str) -> PathBuf {
+        std::env::temp_dir().join(format!(
+            "zerostack-machine-permit-{label}-{}-{}",
+            std::process::id(),
+            epoch_millis()
+        ))
+    }
+
+    #[test]
+    fn canonical_scope_aliases_share_one_base() {
+        let root = unique_temp_path("canonical-alias");
+        fs::create_dir(&root).expect("create scope root");
+
+        let direct = try_scoped_permit_base_for("analysis", Some(&root))
+            .expect("canonicalize direct scope root");
+        let alias = try_scoped_permit_base_for("analysis", Some(&root.join(".")))
+            .expect("canonicalize aliased scope root");
+
+        assert_eq!(direct, alias);
+        fs::remove_dir(&root).expect("remove scope root");
+    }
+
+    #[test]
+    fn missing_scope_root_is_refused() {
+        let root = unique_temp_path("missing-root");
+        let _ = fs::remove_dir_all(&root);
+
+        let error = try_scoped_permit_base_for("analysis", Some(&root))
+            .expect_err("missing scope root must fail closed");
+
+        assert_eq!(error.kind(), std::io::ErrorKind::NotFound);
+    }
 }
 
 #[cfg(test)]
