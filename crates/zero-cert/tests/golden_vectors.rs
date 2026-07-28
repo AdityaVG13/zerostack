@@ -88,3 +88,163 @@ fn success_path_allocates_nothing() {
     let allocation = allocation_counter::measure(|| assert!(verify(&certificate, &resident).is_ok()));
     assert_eq!(allocation.count_total, 0, "verification allocated: {allocation:?}");
 }
+
+fn frontier_certificate(query: Query<'static>, completeness: CompletenessWitness<'static>, spans: Vec<SpanRef>, payload: Vec<u8>) -> EvidenceCertificate<'static> {
+    EvidenceCertificate { query, spans, payload: Cow::Owned(payload), provenance: common::provenance(), completeness, input_token_cost: 0, backend_work_units: 0 }
+}
+
+fn canonical_receipt<T: serde::Serialize>(receipt: &T) -> Vec<u8> {
+    zero_abi::canonical_json(&serde_json::to_value(receipt).unwrap()).into_bytes()
+}
+
+#[test]
+fn exact_search_domain_zero_hit_is_complete_only_for_the_bound_domain() {
+    let first = b"alpha".as_slice();
+    let second = b"beta".as_slice();
+    let objects = vec![common::object_id(first), common::object_id(second)];
+    let snapshot = domain_snapshot_digest(&objects, "zero-index", "2");
+    let query = Query::ExactSearchDomain { pattern: Cow::Borrowed(b"z"), objects: objects.clone(), snapshot_id: snapshot, index_id: "zero-index".into(), index_version: "2".into() };
+    let witness = CompletenessWitness::ExactSearchDomain { operator: lock(), pattern: Cow::Borrowed(b"z"), objects: objects.clone(), snapshot_id: snapshot, index_id: "zero-index".into(), index_version: "2".into(), match_count: 0 };
+    let certificate = frontier_certificate(query, witness, vec![], vec![]);
+    let residents = common::Residents { objects: vec![first, second], mutation_receipts: vec![], aggregate_receipts: vec![] };
+    assert!(verify(&certificate, &residents).is_ok());
+
+    let mut omitted = certificate.clone();
+    if let CompletenessWitness::ExactSearchDomain { objects, .. } = &mut omitted.completeness { objects.pop(); }
+    assert!(matches!(verify(&omitted, &residents), Err(VerificationError::WitnessQueryMismatch)));
+    let mut reordered = certificate.clone();
+    if let CompletenessWitness::ExactSearchDomain { objects, .. } = &mut reordered.completeness { objects.reverse(); }
+    assert!(matches!(verify(&reordered, &residents), Err(VerificationError::WitnessQueryMismatch)));
+    let mut stale_snapshot = certificate.clone();
+    if let Query::ExactSearchDomain { snapshot_id, .. } = &mut stale_snapshot.query { snapshot_id[0] ^= 1; }
+    if let CompletenessWitness::ExactSearchDomain { snapshot_id, .. } = &mut stale_snapshot.completeness { snapshot_id[0] ^= 1; }
+    assert!(matches!(verify(&stale_snapshot, &residents), Err(VerificationError::InvalidCompleteness)));
+    let mut stale_index = certificate.clone();
+    if let Query::ExactSearchDomain { index_version, .. } = &mut stale_index.query { *index_version = "1".into(); }
+    if let CompletenessWitness::ExactSearchDomain { index_version, .. } = &mut stale_index.completeness { *index_version = "1".into(); }
+    assert!(matches!(verify(&stale_index, &residents), Err(VerificationError::StaleIndex)));
+    let incomplete_residents = common::Residents { objects: vec![first], mutation_receipts: vec![], aggregate_receipts: vec![] };
+    assert!(matches!(verify(&certificate, &incomplete_residents), Err(VerificationError::MissingObject { .. })));
+}
+
+#[test]
+fn byte_exact_diff_binds_ranges_replacement_and_span() {
+    let old = b"abcXYZtail".as_slice();
+    let new = b"abcQtail".as_slice();
+    let old_id = common::object_id(old);
+    let new_id = common::object_id(new);
+    let query = Query::ByteExactDiff { old: old_id, new: new_id, start: 3, before_end: 6, after_end: 4 };
+    let witness = CompletenessWitness::ByteExactDiff { operator: lock(), old: old_id, new: new_id, start: 3, before_end: 6, after_end: 4, replacement_digest: zero_abi::sha256(b"Q") };
+    let certificate = frontier_certificate(query, witness, vec![common::span(new, 3, 1)], b"Q".to_vec());
+    let residents = common::Residents { objects: vec![old, new], mutation_receipts: vec![], aggregate_receipts: vec![] };
+    assert!(verify(&certificate, &residents).is_ok());
+    let deleted_old = b"abcXtail".as_slice();
+    let deleted_new = b"abctail".as_slice();
+    let deletion = frontier_certificate(
+        Query::ByteExactDiff { old: common::object_id(deleted_old), new: common::object_id(deleted_new), start: 3, before_end: 4, after_end: 3 },
+        CompletenessWitness::ByteExactDiff { operator: lock(), old: common::object_id(deleted_old), new: common::object_id(deleted_new), start: 3, before_end: 4, after_end: 3, replacement_digest: zero_abi::sha256(b"") },
+        vec![common::span(deleted_new, 3, 0)], vec![],
+    );
+    let deletion_residents = common::Residents { objects: vec![deleted_old, deleted_new], mutation_receipts: vec![], aggregate_receipts: vec![] };
+    assert!(verify(&deletion, &deletion_residents).is_ok());
+    let mut tampered = certificate.clone(); tampered.payload = Cow::Borrowed(b"R");
+    assert!(matches!(verify(&tampered, &residents), Err(VerificationError::PayloadMismatch { .. })));
+    let mut bad_range = certificate.clone();
+    if let Query::ByteExactDiff { before_end, .. } = &mut bad_range.query { *before_end = 99; }
+    if let CompletenessWitness::ByteExactDiff { before_end, .. } = &mut bad_range.completeness { *before_end = 99; }
+    assert!(matches!(verify(&bad_range, &residents), Err(VerificationError::InvalidCompleteness)));
+    let noop = frontier_certificate(
+        Query::ByteExactDiff { old: old_id, new: old_id, start: 3, before_end: 6, after_end: 6 },
+        CompletenessWitness::ByteExactDiff { operator: lock(), old: old_id, new: old_id, start: 3, before_end: 6, after_end: 6, replacement_digest: zero_abi::sha256(b"XYZ") },
+        vec![common::span(old, 3, 3)], b"XYZ".to_vec(),
+    );
+    let noop_residents = common::Residents { objects: vec![old], mutation_receipts: vec![], aggregate_receipts: vec![] };
+    assert!(matches!(verify(&noop, &noop_residents), Err(VerificationError::InvalidCompleteness)));
+}
+
+#[test]
+fn mutation_outcome_requires_an_independently_trusted_receipt() {
+    let old = b"old".as_slice();
+    let new = b"new".as_slice();
+    let old_id = common::object_id(old);
+    let new_id = common::object_id(new);
+    let receipt = MutationReceipt { journal_id: [7; 32], sequence: 1, old: old_id, new: new_id, applied: true };
+    let trusted = canonical_receipt(&receipt);
+    let digest = zero_abi::sha256(&trusted);
+    let query = Query::MutationOutcome { journal_id: [7; 32], sequence: 1, old: old_id, new: new_id, applied: true };
+    let witness = CompletenessWitness::MutationOutcome { operator: lock(), journal_id: [7; 32], sequence: 1, old: old_id, new: new_id, applied: true, receipt_digest: digest };
+    let certificate = frontier_certificate(query, witness, vec![], trusted.clone());
+    let residents = common::Residents { objects: vec![old, new], mutation_receipts: vec![([7; 32], 1, &trusted)], aggregate_receipts: vec![] };
+    assert!(verify(&certificate, &residents).is_ok());
+
+    let missing = common::Residents { objects: vec![old, new], mutation_receipts: vec![], aggregate_receipts: vec![] };
+    assert!(matches!(verify(&certificate, &missing), Err(VerificationError::MissingTrustedReceipt)));
+    let mut malformed_bytes = trusted.clone();
+    assert_eq!(malformed_bytes.pop(), Some(b'}'));
+    malformed_bytes.extend_from_slice(br#","unknown":true}"#);
+    let malformed = common::Residents { objects: vec![old, new], mutation_receipts: vec![([7; 32], 1, &malformed_bytes)], aggregate_receipts: vec![] };
+    let mut malformed_certificate = certificate.clone();
+    malformed_certificate.payload = Cow::Owned(malformed_bytes.clone());
+    if let CompletenessWitness::MutationOutcome { receipt_digest, .. } = &mut malformed_certificate.completeness { *receipt_digest = zero_abi::sha256(&malformed_bytes); }
+    assert!(matches!(verify(&malformed_certificate, &malformed), Err(VerificationError::MalformedTrustedReceipt)));
+    let mismatched_bytes = canonical_receipt(&MutationReceipt { sequence: 2, ..receipt.clone() });
+    let mismatched = common::Residents { objects: vec![old, new], mutation_receipts: vec![([7; 32], 1, &mismatched_bytes)], aggregate_receipts: vec![] };
+    let mut mismatched_certificate = certificate.clone();
+    mismatched_certificate.payload = Cow::Owned(mismatched_bytes.clone());
+    if let CompletenessWitness::MutationOutcome { receipt_digest, .. } = &mut mismatched_certificate.completeness { *receipt_digest = zero_abi::sha256(&mismatched_bytes); }
+    assert!(matches!(verify(&mismatched_certificate, &mismatched), Err(VerificationError::WitnessQueryMismatch)));
+    let mut tampered = certificate.clone();
+    tampered.payload.to_mut()[0] ^= 1;
+    assert!(matches!(verify(&tampered, &residents), Err(VerificationError::InvalidCompleteness)));
+
+    let noop_receipt = canonical_receipt(&MutationReceipt { journal_id: [7; 32], sequence: 1, old: old_id, new: old_id, applied: true });
+    let noop = frontier_certificate(
+        Query::MutationOutcome { journal_id: [7; 32], sequence: 1, old: old_id, new: old_id, applied: true },
+        CompletenessWitness::MutationOutcome { operator: lock(), journal_id: [7; 32], sequence: 1, old: old_id, new: old_id, applied: true, receipt_digest: zero_abi::sha256(&noop_receipt) },
+        vec![], noop_receipt.clone(),
+    );
+    let noop_residents = common::Residents { objects: vec![old], mutation_receipts: vec![([7; 32], 1, &noop_receipt)], aggregate_receipts: vec![] };
+    assert!(matches!(verify(&noop, &noop_residents), Err(VerificationError::InvalidCompleteness)));
+}
+
+#[test]
+fn aggregate_requires_an_independently_trusted_completion_receipt() {
+    let first = b"one".as_slice();
+    let second = b"two".as_slice();
+    let objects = vec![common::object_id(first), common::object_id(second)];
+    let snapshot = domain_snapshot_digest(&objects, "zero-index", "2");
+    let result = b"sum=3".to_vec();
+    let digest = zero_abi::sha256(&result);
+    let receipt = AggregateReceipt { snapshot_id: snapshot, objects: objects.clone(), requested: 2, emitted: 1, result_digest: digest };
+    let trusted = canonical_receipt(&receipt);
+    let query = Query::Aggregate { snapshot_id: snapshot, objects: objects.clone(), requested: 2, emitted: 1 };
+    let witness = CompletenessWitness::Aggregate { operator: lock(), snapshot_id: snapshot, objects: objects.clone(), requested: 2, emitted: 1, result_digest: digest };
+    let certificate = frontier_certificate(query, witness, vec![], result);
+    let residents = common::Residents { objects: vec![first, second], mutation_receipts: vec![], aggregate_receipts: vec![(snapshot, &trusted)] };
+    assert!(verify(&certificate, &residents).is_ok());
+
+    let missing = common::Residents { objects: vec![first, second], mutation_receipts: vec![], aggregate_receipts: vec![] };
+    assert!(matches!(verify(&certificate, &missing), Err(VerificationError::MissingTrustedReceipt)));
+    let mut malformed_bytes = trusted.clone();
+    assert_eq!(malformed_bytes.pop(), Some(b'}'));
+    malformed_bytes.extend_from_slice(br#","unknown":true}"#);
+    let malformed = common::Residents { objects: vec![first, second], mutation_receipts: vec![], aggregate_receipts: vec![(snapshot, &malformed_bytes)] };
+    assert!(matches!(verify(&certificate, &malformed), Err(VerificationError::MalformedTrustedReceipt)));
+    let mismatched_bytes = canonical_receipt(&AggregateReceipt { emitted: 2, ..receipt.clone() });
+    let mismatched = common::Residents { objects: vec![first, second], mutation_receipts: vec![], aggregate_receipts: vec![(snapshot, &mismatched_bytes)] };
+    assert!(matches!(verify(&certificate, &mismatched), Err(VerificationError::WitnessQueryMismatch)));
+
+    let mut omitted = certificate.clone();
+    if let CompletenessWitness::Aggregate { objects, .. } = &mut omitted.completeness { objects.pop(); }
+    assert!(matches!(verify(&omitted, &residents), Err(VerificationError::WitnessQueryMismatch)));
+    let mut reordered = certificate.clone();
+    if let CompletenessWitness::Aggregate { objects, .. } = &mut reordered.completeness { objects.reverse(); }
+    assert!(matches!(verify(&reordered, &residents), Err(VerificationError::WitnessQueryMismatch)));
+    let mut bad_count = certificate.clone();
+    if let Query::Aggregate { requested, .. } = &mut bad_count.query { *requested = 1; }
+    if let CompletenessWitness::Aggregate { requested, .. } = &mut bad_count.completeness { *requested = 1; }
+    assert!(matches!(verify(&bad_count, &residents), Err(VerificationError::InvalidCompleteness)));
+    let mut bad_digest = certificate.clone();
+    if let CompletenessWitness::Aggregate { result_digest, .. } = &mut bad_digest.completeness { result_digest[0] ^= 1; }
+    assert!(matches!(verify(&bad_digest, &residents), Err(VerificationError::WitnessQueryMismatch)));
+}

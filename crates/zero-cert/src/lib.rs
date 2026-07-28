@@ -31,10 +31,15 @@ pub use zero_ref::{
 pub enum Query<'a> {
     ReadSpan(SpanRef),
     ExactSearch { scope: ObjectId, #[serde(borrow)] pattern: Cow<'a, [u8]> },
+    ExactSearchDomain { #[serde(borrow)] pattern: Cow<'a, [u8]>, objects: Vec<ObjectId>, snapshot_id: Digest, index_id: String, index_version: String },
     Definition { symbol: SymbolId }, References { symbol: SymbolId },
     AstClosure { seeds: Vec<NodeId>, relations: u64, radius: u32 },
     CallPath { source: SymbolId, target: SymbolId }, DataflowSlice { sink: NodeId },
-    Diff { old: ObjectId, new: ObjectId }, BuildReceipt { command: CommandId },
+    Diff { old: ObjectId, new: ObjectId },
+    ByteExactDiff { old: ObjectId, new: ObjectId, start: u64, before_end: u64, after_end: u64 },
+    MutationOutcome { journal_id: Digest, sequence: u64, old: ObjectId, new: ObjectId, applied: bool },
+    Aggregate { snapshot_id: Digest, objects: Vec<ObjectId>, requested: u64, emitted: u64 },
+    BuildReceipt { command: CommandId },
     TestTrace { test: TestId },
 }
 
@@ -47,18 +52,51 @@ pub struct Provenance {
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct OperatorLock { pub operator_id: String, pub operator_version: String }
 
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct MutationReceipt {
+    pub journal_id: Digest,
+    pub sequence: u64,
+    pub old: ObjectId,
+    pub new: ObjectId,
+    pub applied: bool,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct AggregateReceipt {
+    pub snapshot_id: Digest,
+    pub objects: Vec<ObjectId>,
+    pub requested: u64,
+    pub emitted: u64,
+    pub result_digest: Digest,
+}
+
+pub fn domain_snapshot_digest(objects: &[ObjectId], index_id: &str, index_version: &str) -> Digest {
+    let value = serde_json::json!({
+        "index_id": index_id,
+        "index_version": index_version,
+        "objects": objects,
+    });
+    zero_abi::sha256(zero_abi::canonical_json(&value).as_bytes())
+}
+
 /// Query-bound proof shapes. Deliberately has no semantic-summary variant.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(bound(deserialize = "'de: 'a"))]
 pub enum CompletenessWitness<'a> {
     ReadSpan { operator: OperatorLock },
     ExactSearch { operator: OperatorLock, scope: ObjectId, #[serde(borrow)] pattern: Cow<'a, [u8]>, scope_len: u64, match_count: u64 },
+    ExactSearchDomain { operator: OperatorLock, #[serde(borrow)] pattern: Cow<'a, [u8]>, objects: Vec<ObjectId>, snapshot_id: Digest, index_id: String, index_version: String, match_count: u64 },
     Definition { operator: OperatorLock, symbol: SymbolId, index_id: String, index_version: String },
     References { operator: OperatorLock, symbol: SymbolId, index_id: String, index_version: String, match_count: u64 },
     AstClosure { operator: OperatorLock, seeds: Vec<NodeId>, relations: u64, radius: u32, parser_id: String, parser_version: String, visited_nodes: u64 },
     CallPath { operator: OperatorLock, source: SymbolId, target: SymbolId, edge_count: u64 },
     DataflowSlice { operator: OperatorLock, sink: NodeId, visited_nodes: u64 },
     Diff { operator: OperatorLock, old: ObjectId, new: ObjectId },
+    ByteExactDiff { operator: OperatorLock, old: ObjectId, new: ObjectId, start: u64, before_end: u64, after_end: u64, replacement_digest: Digest },
+    MutationOutcome { operator: OperatorLock, journal_id: Digest, sequence: u64, old: ObjectId, new: ObjectId, applied: bool, receipt_digest: Digest },
+    Aggregate { operator: OperatorLock, snapshot_id: Digest, objects: Vec<ObjectId>, requested: u64, emitted: u64, result_digest: Digest },
     BuildReceipt { operator: OperatorLock, command: CommandId, exit_code: i32, stdout_digest: Digest, stderr_digest: Digest },
     TestTrace { operator: OperatorLock, test: TestId, exit_code: i32, trace_digest: Digest },
 }
@@ -82,6 +120,8 @@ pub trait Resolver {
     fn trusted_operator_version<'a>(&'a self, operator_id: &str) -> Option<&'a str>;
     fn trusted_parser_version<'a>(&'a self, parser_id: &str) -> Option<&'a str>;
     fn trusted_index_version<'a>(&'a self, index_id: &str) -> Option<&'a str>;
+    fn resolve_mutation_receipt<'a>(&'a self, _journal_id: &Digest, _sequence: u64) -> Option<&'a [u8]> { None }
+    fn resolve_aggregate_receipt<'a>(&'a self, _snapshot_id: &Digest) -> Option<&'a [u8]> { None }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -91,6 +131,7 @@ pub enum VerificationError {
     ObjectDigestMismatch { span_index: usize }, SpanDigestMismatch { span_index: usize },
     PayloadLengthMismatch, PayloadMismatch { span_index: usize }, WitnessQueryMismatch,
     MissingTrustedOperator, MissingTrustedParser, MissingTrustedIndex,
+    MissingTrustedReceipt, MalformedTrustedReceipt,
     StaleOperator, StaleParser, StaleIndex, InvalidCompleteness,
 }
 impl fmt::Display for VerificationError { fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result { write!(f, "{:?}", self) } }
@@ -116,6 +157,9 @@ pub fn verify<'certificate, 'payload, R: Resolver + ?Sized>(certificate: &'certi
 }
 
 fn verify_spans<R: Resolver + ?Sized>(c: &EvidenceCertificate<'_>, resolver: &R) -> Result<(), VerificationError> {
+    if matches!(&c.query, Query::MutationOutcome { .. } | Query::Aggregate { .. }) {
+        return invalid_if(c.spans.is_empty());
+    }
     let mut payload_offset = 0usize;
     for (index, span) in c.spans.iter().enumerate() {
         payload_offset = verify_span(index, span, c.payload.as_ref(), payload_offset, resolver)?;
@@ -182,18 +226,22 @@ fn verify_completeness<R: Resolver + ?Sized>(c: &EvidenceCertificate<'_>, resolv
     match &c.query {
         Q::ReadSpan(_) => verify_read_span(c),
         Q::ExactSearch { .. } => verify_search_binding(c, resolver),
+        Q::ExactSearchDomain { .. } => verify_search_domain(c, resolver),
         Q::Definition { .. } => verify_definition(c),
         Q::References { .. } => verify_references(c),
         Q::AstClosure { .. } => verify_ast_closure(c),
-        _ => verify_graph_or_execution(c),
+        _ => verify_graph_or_execution(c, resolver),
     }
 }
 
-fn verify_graph_or_execution(c: &EvidenceCertificate<'_>) -> Result<(), VerificationError> {
+fn verify_graph_or_execution<R: Resolver + ?Sized>(c: &EvidenceCertificate<'_>, resolver: &R) -> Result<(), VerificationError> {
     match &c.query {
         Query::CallPath { .. } => verify_call_path(c),
         Query::DataflowSlice { .. } => verify_dataflow_slice(c),
         Query::Diff { .. } => verify_diff(c),
+        Query::ByteExactDiff { .. } => verify_byte_exact_diff(c, resolver),
+        Query::MutationOutcome { .. } => verify_mutation_outcome(c, resolver),
+        Query::Aggregate { .. } => verify_aggregate(c, resolver),
         Query::BuildReceipt { .. } => verify_build_receipt(c),
         Query::TestTrace { .. } => verify_test_trace(c),
         _ => Err(witness_mismatch()),
@@ -254,6 +302,116 @@ fn verify_dataflow_slice(c: &EvidenceCertificate<'_>) -> Result<(), Verification
     if sink != bound { return Err(witness_mismatch()); }
     check_operator(operator, &c.provenance)?;
     invalid_if(*visited_nodes > 0 && !c.spans.is_empty())
+}
+
+fn resolve_hashed<'a, R: Resolver + ?Sized>(object_id: &ObjectId, resolver: &'a R) -> Result<&'a [u8], VerificationError> {
+    let bytes = resolver.resolve(object_id).ok_or(VerificationError::MissingObject { object_id: *object_id })?;
+    if zero_abi::sha256(bytes) != object_id.0 { return Err(VerificationError::InvalidCompleteness); }
+    Ok(bytes)
+}
+
+fn verify_search_domain<R: Resolver + ?Sized>(c: &EvidenceCertificate<'_>, resolver: &R) -> Result<(), VerificationError> {
+    let (Query::ExactSearchDomain { pattern, objects, snapshot_id, index_id, index_version }, CompletenessWitness::ExactSearchDomain { operator, pattern: bound_pattern, objects: bound_objects, snapshot_id: bound_snapshot, index_id: bound_index, index_version: bound_version, match_count }) = (&c.query, &c.completeness) else { return Err(witness_mismatch()); };
+    if pattern != bound_pattern || objects != bound_objects || snapshot_id != bound_snapshot || index_id != bound_index || index_version != bound_version { return Err(witness_mismatch()); }
+    check_operator(operator, &c.provenance)?;
+    check_index(index_id, index_version, &c.provenance)?;
+    if pattern.is_empty() || objects.is_empty() || *snapshot_id != domain_snapshot_digest(objects, index_id, index_version) { return Err(VerificationError::InvalidCompleteness); }
+    let mut span_index = 0usize;
+    let mut matches = 0u64;
+    for object_id in objects {
+        let bytes = resolve_hashed(object_id, resolver)?;
+        verify_domain_matches(c, object_id, bytes, pattern.as_ref(), &mut span_index, &mut matches)?;
+    }
+    invalid_if(span_index == c.spans.len() && matches == *match_count)
+}
+
+fn verify_domain_matches(c: &EvidenceCertificate<'_>, object_id: &ObjectId, bytes: &[u8], pattern: &[u8], span_index: &mut usize, matches: &mut u64) -> Result<(), VerificationError> {
+    for start in 0..=bytes.len().saturating_sub(pattern.len()) {
+        if bytes.get(start..start + pattern.len()) == Some(pattern) {
+            let span = c.spans.get(*span_index).ok_or(VerificationError::InvalidCompleteness)?;
+            if !domain_span_matches(span, object_id, start, pattern) { return Err(VerificationError::InvalidCompleteness); }
+            *span_index += 1;
+            *matches = matches.checked_add(1).ok_or(VerificationError::InvalidCompleteness)?;
+        }
+    }
+    Ok(())
+}
+
+fn domain_span_matches(span: &SpanRef, object_id: &ObjectId, start: usize, pattern: &[u8]) -> bool {
+    span.object_id == *object_id
+        && span.object_digest == object_id.0
+        && span.byte_start == start as u64
+        && span.byte_len == pattern.len() as u64
+        && span.span_digest == zero_abi::sha256(pattern)
+}
+
+fn verify_byte_exact_diff<R: Resolver + ?Sized>(c: &EvidenceCertificate<'_>, resolver: &R) -> Result<(), VerificationError> {
+    let (Query::ByteExactDiff { old, new, start, before_end, after_end }, CompletenessWitness::ByteExactDiff { operator, old: bound_old, new: bound_new, start: bound_start, before_end: bound_before, after_end: bound_after, replacement_digest }) = (&c.query, &c.completeness) else { return Err(witness_mismatch()); };
+    if (old, new, start, before_end, after_end) != (bound_old, bound_new, bound_start, bound_before, bound_after) { return Err(witness_mismatch()); }
+    check_operator(operator, &c.provenance)?;
+    if old == new { return Err(VerificationError::InvalidCompleteness); }
+    let old_bytes = resolve_hashed(old, resolver)?;
+    let new_bytes = resolve_hashed(new, resolver)?;
+    let start = usize::try_from(*start).map_err(|_| VerificationError::InvalidCompleteness)?;
+    let before_end = usize::try_from(*before_end).map_err(|_| VerificationError::InvalidCompleteness)?;
+    let after_end = usize::try_from(*after_end).map_err(|_| VerificationError::InvalidCompleteness)?;
+    verify_diff_ranges(c, old_bytes, new_bytes, start, before_end, after_end, replacement_digest, new)
+}
+
+fn verify_diff_ranges(c: &EvidenceCertificate<'_>, old: &[u8], new: &[u8], start: usize, before_end: usize, after_end: usize, replacement_digest: &Digest, new_id: &ObjectId) -> Result<(), VerificationError> {
+    let selected = old.get(start..before_end).ok_or(VerificationError::InvalidCompleteness)?;
+    let replacement = new.get(start..after_end).ok_or(VerificationError::InvalidCompleteness)?;
+    if selected == replacement || old.get(..start) != new.get(..start) || old.get(before_end..) != new.get(after_end..) || zero_abi::sha256(replacement) != *replacement_digest { return Err(VerificationError::InvalidCompleteness); }
+    if c.payload.as_ref() != replacement { return Err(VerificationError::InvalidCompleteness); }
+    let span = c.spans.first().ok_or(VerificationError::InvalidCompleteness)?;
+    invalid_if(c.spans.len() == 1 && domain_span_matches(span, new_id, start, replacement))
+}
+
+fn verify_mutation_outcome<R: Resolver + ?Sized>(c: &EvidenceCertificate<'_>, resolver: &R) -> Result<(), VerificationError> {
+    let (Query::MutationOutcome { journal_id, sequence, old, new, applied }, CompletenessWitness::MutationOutcome { operator, journal_id: bound_journal, sequence: bound_sequence, old: bound_old, new: bound_new, applied: bound_applied, receipt_digest }) = (&c.query, &c.completeness) else { return Err(witness_mismatch()); };
+    if (journal_id, sequence, old, new, applied) != (bound_journal, bound_sequence, bound_old, bound_new, bound_applied) { return Err(witness_mismatch()); }
+    check_operator(operator, &c.provenance)?;
+    let _ = resolve_hashed(old, resolver)?;
+    let _ = resolve_hashed(new, resolver)?;
+    let trusted = resolver.resolve_mutation_receipt(journal_id, *sequence).ok_or(VerificationError::MissingTrustedReceipt)?;
+    if zero_abi::sha256(trusted) != *receipt_digest || c.payload.as_ref() != trusted { return Err(VerificationError::InvalidCompleteness); }
+    let receipt: MutationReceipt = serde_json::from_slice(trusted).map_err(|_| VerificationError::MalformedTrustedReceipt)?;
+    if !mutation_receipt_matches(&receipt, journal_id, *sequence, old, new, *applied) { return Err(witness_mismatch()); }
+    invalid_if(*sequence != 0 && !(*applied && old == new))
+}
+
+fn mutation_receipt_matches(receipt: &MutationReceipt, journal_id: &Digest, sequence: u64, old: &ObjectId, new: &ObjectId, applied: bool) -> bool {
+    receipt.journal_id == *journal_id
+        && receipt.sequence == sequence
+        && receipt.old == *old
+        && receipt.new == *new
+        && receipt.applied == applied
+}
+
+fn verify_aggregate<R: Resolver + ?Sized>(c: &EvidenceCertificate<'_>, resolver: &R) -> Result<(), VerificationError> {
+    let (Query::Aggregate { snapshot_id, objects, requested, emitted }, CompletenessWitness::Aggregate { operator, snapshot_id: bound_snapshot, objects: bound_objects, requested: bound_requested, emitted: bound_emitted, result_digest }) = (&c.query, &c.completeness) else { return Err(witness_mismatch()); };
+    if (snapshot_id, objects, requested, emitted) != (bound_snapshot, bound_objects, bound_requested, bound_emitted) { return Err(witness_mismatch()); }
+    check_operator(operator, &c.provenance)?;
+    let object_count = verify_aggregate_domain(snapshot_id, objects, &c.provenance, resolver)?;
+    invalid_if(*requested == object_count && *emitted <= *requested)?;
+    let trusted = resolver.resolve_aggregate_receipt(snapshot_id).ok_or(VerificationError::MissingTrustedReceipt)?;
+    let receipt: AggregateReceipt = serde_json::from_slice(trusted).map_err(|_| VerificationError::MalformedTrustedReceipt)?;
+    if !aggregate_receipt_matches(&receipt, snapshot_id, objects, *requested, *emitted, result_digest) { return Err(witness_mismatch()); }
+    invalid_if(zero_abi::sha256(c.payload.as_ref()) == *result_digest)
+}
+
+fn verify_aggregate_domain<R: Resolver + ?Sized>(snapshot_id: &Digest, objects: &[ObjectId], provenance: &Provenance, resolver: &R) -> Result<u64, VerificationError> {
+    if objects.is_empty() || *snapshot_id != domain_snapshot_digest(objects, &provenance.index_id, &provenance.index_version) { return Err(VerificationError::InvalidCompleteness); }
+    for object_id in objects { let _ = resolve_hashed(object_id, resolver)?; }
+    u64::try_from(objects.len()).map_err(|_| VerificationError::InvalidCompleteness)
+}
+
+fn aggregate_receipt_matches(receipt: &AggregateReceipt, snapshot_id: &Digest, objects: &[ObjectId], requested: u64, emitted: u64, result_digest: &Digest) -> bool {
+    receipt.snapshot_id == *snapshot_id
+        && receipt.objects.as_slice() == objects
+        && receipt.requested == requested
+        && receipt.emitted == emitted
+        && receipt.result_digest == *result_digest
 }
 
 fn verify_diff(c: &EvidenceCertificate<'_>) -> Result<(), VerificationError> {
