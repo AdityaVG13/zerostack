@@ -107,7 +107,7 @@ pub enum VerificationError {
 impl fmt::Display for VerificationError { fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result { write!(f, "{:?}", self) } }
 impl std::error::Error for VerificationError {}
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Debug)]
 pub struct VerifiedEvidence<'certificate, 'payload> { certificate: &'certificate EvidenceCertificate<'payload> }
 impl<'certificate, 'payload> VerifiedEvidence<'certificate, 'payload> {
     pub fn certificate(&self) -> &'certificate EvidenceCertificate<'payload> { self.certificate }
