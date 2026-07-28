@@ -856,9 +856,7 @@ fn interpret_mutation_probe(
     match declared {
         "allowed" => {
             if ack == Some("X0") && error_kind == Some("policy") {
-                details.push(
-                    "allowed mutation capability rejected mutation with policy".into(),
-                );
+                details.push("allowed mutation capability rejected mutation with policy".into());
             }
         }
         "denied" | "readonly" => {
@@ -898,7 +896,9 @@ fn check_mutation(
             let payload = extract_json_payload(&response).unwrap_or(response);
             let ack = payload.get("ack").and_then(Value::as_str);
             let error_kind = payload.pointer("/error/kind").and_then(Value::as_str);
-            details.extend(interpret_mutation_probe(declared, ack, error_kind, &payload));
+            details.extend(interpret_mutation_probe(
+                declared, ack, error_kind, &payload,
+            ));
         }
         Err(err) => details.push(format!("mutation probe failed at MCP layer: {err}")),
     }
@@ -1089,10 +1089,32 @@ fn payload_from_content(content: &[Value]) -> Option<Value> {
     None
 }
 
+#[derive(Debug, PartialEq, Eq)]
+enum ReceiveDeadlineError {
+    Timeout,
+    Disconnected,
+}
+
+fn recv_until_deadline<T>(
+    receiver: &std::sync::mpsc::Receiver<T>,
+    deadline: Instant,
+) -> std::result::Result<T, ReceiveDeadlineError> {
+    let remaining = deadline
+        .checked_duration_since(Instant::now())
+        .ok_or(ReceiveDeadlineError::Timeout)?;
+    receiver
+        .recv_timeout(remaining)
+        .map_err(|error| match error {
+            std::sync::mpsc::RecvTimeoutError::Timeout => ReceiveDeadlineError::Timeout,
+            std::sync::mpsc::RecvTimeoutError::Disconnected => ReceiveDeadlineError::Disconnected,
+        })
+}
+
 struct McpClient {
     child: Child,
     stdin: ChildStdin,
-    stdout: BufReader<std::process::ChildStdout>,
+    stdout_lines: std::sync::mpsc::Receiver<std::io::Result<String>>,
+    stdout_reader: Option<std::thread::JoinHandle<()>>,
     next_id: u64,
     timeout: Duration,
 }
@@ -1110,16 +1132,40 @@ impl McpClient {
             .stdin
             .take()
             .ok_or_else(|| anyhow!("missing child stdin"))?;
-        let stdout = BufReader::new(
-            child
-                .stdout
-                .take()
-                .ok_or_else(|| anyhow!("missing child stdout"))?,
-        );
+        let stdout = child
+            .stdout
+            .take()
+            .ok_or_else(|| anyhow!("missing child stdout"))?;
+        let (stdout_sender, stdout_lines) = std::sync::mpsc::channel();
+        let stdout_reader = std::thread::spawn(move || {
+            let mut stdout = BufReader::new(stdout);
+            loop {
+                let mut line = String::new();
+                match stdout.read_line(&mut line) {
+                    Ok(0) => {
+                        let _ = stdout_sender.send(Err(std::io::Error::new(
+                            std::io::ErrorKind::UnexpectedEof,
+                            "MCP server stdout closed",
+                        )));
+                        break;
+                    }
+                    Ok(_) => {
+                        if stdout_sender.send(Ok(line)).is_err() {
+                            break;
+                        }
+                    }
+                    Err(error) => {
+                        let _ = stdout_sender.send(Err(error));
+                        break;
+                    }
+                }
+            }
+        });
         Ok(Self {
             child,
             stdin,
-            stdout,
+            stdout_lines,
+            stdout_reader: Some(stdout_reader),
             next_id: 1,
             timeout,
         })
@@ -1169,16 +1215,28 @@ impl McpClient {
     ///
     /// Non-matching ids (notifications / out-of-order) are ignored; empty lines skipped.
     fn wait_for_matching_response(&mut self, id: u64, method: &str) -> Result<Value> {
-        let start = Instant::now();
+        let deadline = Instant::now()
+            .checked_add(self.timeout)
+            .ok_or_else(|| anyhow!("invalid timeout waiting for {method} response"))?;
         loop {
-            if start.elapsed() > self.timeout {
-                bail!("timeout waiting for {method} response");
-            }
-            let mut line = String::new();
-            let bytes = self.stdout.read_line(&mut line)?;
-            if bytes == 0 {
-                bail!("server exited while waiting for {method} response");
-            }
+            let received = recv_until_deadline(&self.stdout_lines, deadline);
+            let line = match received {
+                Ok(Ok(line)) => line,
+                Ok(Err(error)) => {
+                    self.terminate_child();
+                    return Err(error).with_context(|| {
+                        format!("reading MCP stdout while waiting for {method} response")
+                    });
+                }
+                Err(ReceiveDeadlineError::Timeout) => {
+                    self.terminate_child();
+                    bail!("timeout waiting for {method} response");
+                }
+                Err(ReceiveDeadlineError::Disconnected) => {
+                    self.terminate_child();
+                    bail!("MCP stdout reader disconnected while waiting for {method} response");
+                }
+            };
             let line = line.trim();
             if line.is_empty() {
                 continue;
@@ -1193,18 +1251,44 @@ impl McpClient {
             }
         }
     }
+
+    fn terminate_child(&mut self) {
+        let _ = self.child.kill();
+        let _ = self.child.wait();
+    }
 }
 
 impl Drop for McpClient {
     fn drop(&mut self) {
-        let _ = self.child.kill();
-        let _ = self.child.wait();
+        self.terminate_child();
+        if let Some(reader) = self.stdout_reader.take() {
+            let _ = reader.join();
+        }
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn receive_deadline_reports_expired_deadline_without_waiting() {
+        let (_sender, receiver) = std::sync::mpsc::channel::<()>();
+        assert_eq!(
+            recv_until_deadline(&receiver, Instant::now() - Duration::from_secs(1)),
+            Err(ReceiveDeadlineError::Timeout)
+        );
+    }
+
+    #[test]
+    fn receive_deadline_preserves_disconnect_evidence() {
+        let (sender, receiver) = std::sync::mpsc::channel::<()>();
+        drop(sender);
+        assert_eq!(
+            recv_until_deadline(&receiver, Instant::now() + Duration::from_secs(1)),
+            Err(ReceiveDeadlineError::Disconnected)
+        );
+    }
 
     fn sample_telemetry() -> Value {
         json!({
