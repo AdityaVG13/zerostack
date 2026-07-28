@@ -427,3 +427,22 @@ Approval-required calls fail with a typed rejection when a grant is missing,
 malformed, mismatched, expired, wrong-effect, or replayed. Policy orchestration
 stays in the host; fail-closed binding and replay enforcement stay at the worker
 boundary.
+
+
+## Public aggregate result envelope (zero-result/v1)
+
+Raw CodeMode worker envelopes are engine-internal and MAY differ. The public aggregate zero.* surface MUST normalize every zero.fs.compound/plan/structural, zero.graph.*, and zero.token.shell/compact/expand return before exposing it. The canonical wire form is {"ack":"...","content":{"kind":"inline","value":...}} or {"ack":"...","content":{"kind":"ref","ref":"<canonical ZeroRef>","preview":"<optional, at most 1024 characters>"}}. The kind discriminant and its payload are required and mutually exclusive. Unknown fields MUST fail closed. Writers emit only this nested tagged form. No legacy flat form is accepted because the audit found no single stable normalized predecessor shared by all surfaces.
+
+Consumers use exactly inline_value() for inline content and reference_value() for referenced content. Calling the wrong accessor MUST produce ZeroResultAccessError; hosts MUST NOT substitute empty strings, null, or JavaScript undefined. A ref payload uses an fz://, gz://, or tz:// canonical ref. Preview is bounded evidence only and never substitutes for expansion.
+
+### Read-only shape audit and adoption status
+
+| Family | Observed raw/current aggregate shape | v1 normalization | Adoption gap |
+|---|---|---|---|
+| zero.fs.compound | FS raw-worker response currently exposes operation/ok/ack/value/refs/mutated/error; value carries detail/ref/payload_utf8. Router code also handles an older execution envelope and inner ack/ref/detail/payload, adding text only for reads. | Inline value or canonical ref. | Not adopted; noncanonical aliases such as ls_manifest occur and missing text can still survive normalization. |
+| zero.fs.plan/structural | Declared by the typed wrapper, but aggregate raw workers currently reject both as planner-owned. | Same tagged result. | Not adopted and unavailable on the audited aggregate path. |
+| zero.graph.* | Router explicitly unwraps GraphZero's ack/ref/value blob envelope to the inner value. Read-only live probes required a snapshot and returned typed engine errors before a success payload. | Inline value or canonical gz:// ref. | No shared public result envelope is enforced. |
+| zero.token.shell | Rich CLI envelope with status/op/refs/visible/tool_response/accounting; the nested tool response has another ack/ref family. | Ref plus bounded preview when full output is stored; inline value only when complete and bounded. | Not adopted. |
+| zero.token.compact/expand | Compact currently returned the rich ingest envelope although the wrapper declaration says string; passing it to expand failed because expand expects a ref. Expand otherwise returns an untagged value. | Compact returns ref content; expand returns inline content or a new canonical ref. | Runtime and typed declaration diverge; not adopted. |
+
+The router's current null/undefined fallback synthesizes {ack, ref, refs}. That behavior is nonconforming: normalization must either produce zero-result/v1 or return a typed error. This hub contract and conformance fixture table define the target; they do not claim FSZero, GraphZero, TokenZero, or pi-stack already emit it.

@@ -17,6 +17,7 @@ pub mod capability;
 pub mod digest;
 pub mod dispatch;
 pub mod raw_worker;
+pub mod result;
 pub mod schema;
 pub mod telemetry;
 
@@ -39,6 +40,10 @@ pub use raw_worker::{
     SnapshotIdentity, WorkerBinding, WorkerCapabilities, WorkerError, WorkerRequestFrame,
     WorkerResponseFrame, WorkerResult, WorkerResultMetadata, WorkerTrace, DEFAULT_MAX_FRAME_BYTES,
     RAW_WORKER_PROTOCOL_VERSION,
+};
+pub use result::{
+    ZeroResultAccessError, ZeroResultBuildError, ZeroResultV1, MAX_ACK_CHARS,
+    MAX_PREVIEW_CHARS, ZERO_RESULT_V1,
 };
 pub use telemetry::{TelemetryCounter, TelemetryOverflow, TelemetrySchema, ZeroTelemetryV1};
 pub use schema::{
