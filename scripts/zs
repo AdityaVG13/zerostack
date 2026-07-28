@@ -10,7 +10,7 @@ import subprocess
 import sys
 from typing import Any, NoReturn
 
-VERSION = "1.2.0"
+VERSION = "1.2.1"
 BASE = Path.home() / ".pi/agent/zerostack-origin-main"
 SPECS = {
     "fs": ("ZS_FSZERO_BIN", BASE / "fszero/target/release/fszero-codemode", "fz"),
@@ -257,6 +257,18 @@ def main() -> None:
     texts, structured = text_items(result), result.get("structuredContent")
     useful_search = contains_method_entry(structured)
     if kind == "search" and texts and all(STATUS.fullmatch(item.strip()) for item in texts) and not useful_search:
+        if name == "fs":
+            expanded, _ = invoke(
+                spec,
+                spec["execute"],
+                {"plan": 'return await fs.expand({ref:"codemode/search"});', "form": "js", "envelope": "v1"},
+                root,
+                [verb, *rest],
+            )
+            value = inline_value(expanded.get("structuredContent"))
+            if isinstance(value, str) and value.strip():
+                print(value)
+                return
         print_catalog(catalog_methods(spec, name, text, root, [verb, *rest]), root, [verb, *rest])
         return
     if verbose:

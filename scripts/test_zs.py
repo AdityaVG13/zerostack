@@ -26,7 +26,8 @@ if name.endswith("_search"):
     result={"content":[{"type":"text","text":"S2"}],"structuredContent":structured}
 elif name.endswith("_describe"): result={"content":[{"type":"text","text":"fs.read(path): file contents"}]}
 elif call["params"]["arguments"].get("envelope") == "v1":
-    result={"content":[{"type":"text","text":"R2"}],"structuredContent":{"result":{"ack":"R2","ref":"fz://blob/deadbeef","result":{"payload":"expanded contents"},"more":["gz://node/1","tz://blob/2","cm://exec/3"]}}}
+    payload = "fs.read\tRead file or byte range\tfs.read(args: { path: string })\tscore=14" if "codemode/search" in call["params"]["arguments"].get("plan", "") else "expanded contents"
+    result={"content":[{"type":"text","text":"R2"}],"structuredContent":{"result":{"ack":"R2","ref":"fz://blob/deadbeef","result":{"payload":payload},"more":["gz://node/1","tz://blob/2","cm://exec/3"]}}}
 else: result={"content":[{"type":"text","text":"R2"}],"structuredContent":{"ack":"R2","ref":"fz://blob/deadbeef","more":["gz://node/1","tz://blob/2","cm://exec/3"]}}
 print(json.dumps({"jsonrpc":"2.0","id":2,"result":result}))
 '''
@@ -44,7 +45,7 @@ class ZsTests(unittest.TestCase):
         result=self.run_zs("-C",str(self.root),"fs","-",input_text="return 7;"); self.assertEqual(result.returncode,0,result.stderr)
         logged=json.loads(self.log.read_text()); self.assertEqual(logged["cwd"],str(self.root.resolve())); self.assertEqual(logged["call"]["params"]["arguments"]["plan"],"return 7;")
     def test_inline_discovery_and_scalar_ref(self)->None:
-        search=self.run_zs("fs-search","read file"); self.assertIn("fs.read",search.stdout); self.assertIn("Read file contents",search.stdout)
+        search=self.run_zs("fs-search","read file"); self.assertIn("fs.read",search.stdout); self.assertIn("Read file or byte range",search.stdout)
         self.assertIn("fs.read(path)",self.run_zs("fs-describe","fs.read").stdout)
         execute=self.run_zs("fs","return 1"); self.assertIn("R2",execute.stdout); self.assertIn("expanded contents",execute.stdout); self.assertIn("fz://blob/deadbeef",execute.stdout)
         self.assertEqual(json.loads(self.log.read_text())["call"]["params"]["arguments"]["envelope"], "v1")
@@ -52,14 +53,14 @@ class ZsTests(unittest.TestCase):
     def test_status_only_search_falls_back_to_ranked_catalog(self)->None:
         self.env["FAKE_STATUS_ONLY"]="1"
         result=self.run_zs("-C",str(self.root),"fs-search","read file")
-        self.assertEqual(result.returncode,0,result.stderr); self.assertIn("fs.read(path: string)",result.stdout); self.assertIn("Read file contents",result.stdout)
+        self.assertEqual(result.returncode,0,result.stderr); self.assertIn("fs.read(args: { path: string })",result.stdout); self.assertIn("Read file or byte range",result.stdout)
         self.assertNotIn("graph.read",result.stdout); self.assertNotEqual(result.stdout.strip(),"S2")
     def test_catalog_failure_preserves_exit_evidence(self)->None:
         self.env.update({"FAKE_STATUS_ONLY":"1","FAKE_CATALOG_EXIT":"19"})
-        result=self.run_zs("fs-search","read file")
+        result=self.run_zs("graph-search","read")
         self.assertEqual(result.returncode,19); self.assertIn("catalog exited with status 19: catalog failed",result.stderr)
     def test_json_and_verbose_metadata(self)->None:
-        result=self.run_zs("--json","--verbose","fs","return 1"); self.assertIn("structuredContent",result.stdout); self.assertIn("zs 1.2.0; engine fakezero 9.1; revision abc123",result.stderr)
+        result=self.run_zs("--json","--verbose","fs","return 1"); self.assertIn("structuredContent",result.stdout); self.assertIn("zs 1.2.1; engine fakezero 9.1; revision abc123",result.stderr)
         self.assertNotIn("envelope",json.loads(self.log.read_text())["call"]["params"]["arguments"])
     def test_error_has_copyable_root_guidance(self)->None:
         result=self.run_zs("-C",str(self.root),"bogus","x"); self.assertEqual(result.returncode,2); self.assertIn(f"Rerun: zs -C {self.root.resolve()} bogus x",result.stderr); self.assertIn("Use paths relative to this root",result.stderr)
