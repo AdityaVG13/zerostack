@@ -13,15 +13,10 @@ use std::fs;
 use std::io::{BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Child, ChildStdin, Command, Stdio};
-use std::sync::LazyLock;
 use std::time::{Duration, Instant};
 
 pub const CONTRACT_VERSION: &str = "1.0";
 pub const CHECK_IDS: [&str; 10] = ["G1", "G2", "G3", "G4", "G5", "G6", "G7", "G8", "G9", "G10"];
-
-static EXECUTION_ID_RE: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"^cm://exec/\d+-[0-9a-f]{12}$").expect("valid execution-id regex")
-});
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -59,11 +54,7 @@ impl Ns {
     }
 
     pub fn ref_regex(self) -> Regex {
-        let ns = regex::escape(self.as_str());
-        Regex::new(&format!(
-            r"^{ns}://(blob/[0-9a-f]{{64}}|codemode/execution/[^/]+/(code|steps|telemetry|result|error))$"
-        ))
-        .expect("valid namespace ref regex")
+        patterns::substrate_ref_re(self.as_str())
     }
 }
 
@@ -328,19 +319,23 @@ pub fn validate_execution_record(ns: Ns, value: &Value) -> Vec<String> {
             errors.push(format!("invalid {part} ref {value:?}"));
         }
     }
-    errors.extend(validate_telemetry(
-        &serde_json::to_value(&record.telemetry).expect("telemetry serializes"),
-    ));
+    match serde_json::to_value(&record.telemetry) {
+        Ok(telemetry) => errors.extend(validate_telemetry(&telemetry)),
+        Err(err) => errors.push(format!(
+            "could not serialize telemetry for validation: {err}"
+        )),
+    }
     if let Some(error) = record.error {
-        errors.extend(validate_error(
-            &serde_json::to_value(error).expect("error serializes"),
-        ));
+        match serde_json::to_value(error) {
+            Ok(error) => errors.extend(validate_error(&error)),
+            Err(err) => errors.push(format!("could not serialize error for validation: {err}")),
+        }
     }
     errors
 }
 
 pub fn valid_execution_id(value: &str) -> bool {
-    EXECUTION_ID_RE.is_match(value)
+    patterns::execution_id_re().is_match(value)
 }
 
 pub fn valid_ref(ns: Ns, value: &str) -> bool {
@@ -356,7 +351,10 @@ pub fn collect_refs(value: &Value) -> Vec<String> {
 fn collect_refs_inner(value: &Value, refs: &mut Vec<String>) {
     match value {
         Value::String(value) => {
-            if value.contains("://") || value.contains("codemode/execution/") {
+            if ["fz://", "gz://", "tz://", "cm://"]
+                .iter()
+                .any(|prefix| value.starts_with(prefix))
+            {
                 refs.push(value.clone());
             }
         }
@@ -630,27 +628,40 @@ fn run_live_checks(ns: Ns, client: &mut McpClient) -> Vec<CheckResult> {
     let execute_tool = format!("{}_execute_code", ns.as_str());
 
     let capabilities = client.call_tool(&describe_tool, json!({ "name": "capabilities" }));
-    let manifest = capabilities.as_ref().ok().and_then(extract_json_payload);
+    let manifest = match capabilities {
+        Ok(response) => match extract_json_payload(&response) {
+            Some(manifest) => Some(manifest),
+            None => {
+                checks.push(CheckResult::fail(
+                    "G7",
+                    "limits",
+                    "capabilities probe returned no JSON payload",
+                ));
+                None
+            }
+        },
+        Err(err) => {
+            checks.push(CheckResult::fail(
+                "G7",
+                "limits",
+                format!("capabilities probe failed at MCP layer: {err}"),
+            ));
+            None
+        }
+    };
     let mut g7_limits = BTreeMap::new();
-    match manifest.as_ref() {
-        Some(value) => {
-            let details = validate_capability_manifest(ns, value);
-            if let Some(limits) = value.get("limits").and_then(Value::as_object) {
-                for (name, value) in limits {
-                    if let Some(value) = value.as_u64() {
-                        g7_limits.insert(name.clone(), value);
-                    }
+    if let Some(value) = manifest.as_ref() {
+        let details = validate_capability_manifest(ns, value);
+        if let Some(limits) = value.get("limits").and_then(Value::as_object) {
+            for (name, value) in limits {
+                if let Some(value) = value.as_u64() {
+                    g7_limits.insert(name.clone(), value);
                 }
             }
-            if !details.is_empty() {
-                checks.push(CheckResult::with_details("G7", "limits", details));
-            }
         }
-        None => checks.push(CheckResult::fail(
-            "G7",
-            "limits",
-            "could not read capabilities manifest",
-        )),
+        if !details.is_empty() {
+            checks.push(CheckResult::with_details("G7", "limits", details));
+        }
     }
 
     let basic = client.call_tool(
@@ -796,6 +807,26 @@ fn check_ctx_step(ns: Ns, client: &mut McpClient, execute_tool: &str) -> CheckRe
     }
 }
 
+fn limit_probe_plan(name: &str, limit: u64) -> Option<String> {
+    let above = limit.checked_add(1)?;
+    match name {
+        "max_code_bytes" => usize::try_from(above).ok().map(|size| "x".repeat(size)),
+        "max_microtasks" => Some(format!(
+            "let p = Promise.resolve(); for (let i=0;i<{above};i++) p = p.then(() => 1); return p;"
+        )),
+        "max_output_bytes" => Some(format!("return 'x'.repeat({above});")),
+        "max_logical_ops" => Some(format!(
+            "for (let i=0;i<{above};i++) {{ ctx.ref(i); }} return 1;"
+        )),
+        "max_parallel_width" => Some(format!(
+            "return zero.queryMany ? zero.queryMany(Array.from({{length: {above}}}, (_, i) => String(i))) : 1;"
+        )),
+        "max_wall_ms" | "hard_max_wall_ms" | "max_memory_bytes" | "max_physical_ops"
+        | "max_result_ref_bytes" | "max_refs_emitted" => None,
+        _ => None,
+    }
+}
+
 fn check_limits(
     _ns: Ns,
     client: &mut McpClient,
@@ -803,29 +834,22 @@ fn check_limits(
     limits: &BTreeMap<String, u64>,
 ) -> CheckResult {
     let mut details = Vec::new();
-    for name in limits.keys() {
-        let plan = match name.as_str() {
-            "max_code_bytes" => Some("x".repeat(limits[name] as usize + 1)),
-            "max_microtasks" => Some("let p = Promise.resolve(); for (let i=0;i<5000;i++) p = p.then(() => 1); return p;".to_string()),
-            "max_output_bytes" => Some("return 'x'.repeat(70000);".to_string()),
-            "max_logical_ops" => Some("for (let i=0;i<1005;i++) { ctx.ref(i); } return 1;".to_string()),
-            "max_parallel_width" => Some("return zero.queryMany ? zero.queryMany(Array.from({length: 17}, (_, i) => String(i))) : 1;".to_string()),
-            "max_wall_ms" | "hard_max_wall_ms" | "max_memory_bytes" | "max_physical_ops" | "max_result_ref_bytes" | "max_refs_emitted" => None,
-            _ => None,
-        };
-        if let Some(plan) = plan {
+    for (name, limit) in limits {
+        if let Some(plan) = limit_probe_plan(name, *limit) {
             match client.call_tool(execute_tool, json!({ "plan": plan, "form": "js" })) {
                 Ok(response) => {
                     let payload = extract_json_payload(&response).unwrap_or(response);
                     let enforced = payload.get("ack").and_then(Value::as_str) == Some("X0")
                         || payload.get("error").is_some()
                         || (name == "max_output_bytes"
-                            && payload.to_string().len() <= limits[name] as usize);
+                            && payload.to_string().len() <= *limit as usize);
                     if !enforced {
                         details.push(format!("echoed limit {name} was not observably enforced"));
                     }
                 }
-                Err(_err) => {}
+                Err(err) => details.push(format!(
+                    "echoed limit {name} probe failed at MCP layer: {err}"
+                )),
             }
         } else {
             details.push(format!("echoed limit {name} has no generic violation probe; substrate must add one or omit the limit"));
@@ -1410,5 +1434,38 @@ mod tests {
         let json = serde_json::to_value(report).unwrap();
         assert_eq!(json["contract_version"], CONTRACT_VERSION);
         assert_eq!(json["checks"].as_array().unwrap().len(), 2);
+    }
+
+    #[test]
+    fn conformance_regression_collect_refs_rejects_unrelated_urls() {
+        let value = json!({
+            "valid": ["fz://blob/abc", "gz://x", "tz://y", "cm://exec/1-abcdefabcdef"],
+            "unrelated": ["https://example.com", "custom://value", "prefix fz://not-a-ref"]
+        });
+        assert_eq!(
+            collect_refs(&value),
+            vec![
+                "fz://blob/abc",
+                "gz://x",
+                "tz://y",
+                "cm://exec/1-abcdefabcdef"
+            ]
+        );
+    }
+
+    #[test]
+    fn conformance_regression_ref_validation_uses_canonical_pattern() {
+        let valid = format!("fz://blob/{}", "a".repeat(64));
+        assert!(valid_ref(Ns::Fz, &valid));
+        assert!(!valid_ref(Ns::Fz, "fz://blob/not-hex"));
+        assert!(valid_execution_id("cm://exec/123-abcdefabcdef"));
+    }
+
+    #[test]
+    fn conformance_regression_limit_probes_use_echoed_boundary() {
+        assert!(limit_probe_plan("max_parallel_width", 3)
+            .is_some_and(|plan| plan.contains("length: 4")));
+        assert!(limit_probe_plan("max_logical_ops", u64::MAX).is_none());
+        assert!(limit_probe_plan("max_wall_ms", 10).is_none());
     }
 }
