@@ -13,10 +13,11 @@ pub fn execution_id_re() -> &'static Regex {
 }
 
 pub fn substrate_ref_re(ns: &str) -> Regex {
+    let escaped_ns = regex::escape(ns);
     let pattern = format!(
-        r"^{ns}://(blob/[0-9a-f]{{64}}|codemode/execution/[^/]+/(code|steps|telemetry|result|error))$"
+        r"^{escaped_ns}://(blob/[0-9a-f]{{64}}|codemode/execution/[^/]+/(code|steps|telemetry|result|error))$"
     );
-    Regex::new(&pattern).unwrap_or_else(|e| panic!("invalid ns for ref regex: {e}"))
+    Regex::new(&pattern).expect("escaped namespace and static ref pattern must compile")
 }
 
 /// Walk JSON and collect every string that looks like a substrate ref or execution id.
@@ -79,6 +80,14 @@ mod tests {
         assert!(re.is_match("gz://codemode/execution/cm_exec_01/telemetry"));
         assert!(!re.is_match("gz://codemode/execution/cm_exec_01"));
         assert!(!re.is_match("gz://seq/foo/bar"));
+    }
+
+    #[test]
+    fn substrate_ref_re_treats_namespace_metacharacters_literally() {
+        let re = substrate_ref_re("f.z+");
+        let hash64 = "a".repeat(64);
+        assert!(re.is_match(&format!("f.z+://blob/{hash64}")));
+        assert!(!re.is_match(&format!("faxzz://blob/{hash64}")));
     }
 
     #[test]
