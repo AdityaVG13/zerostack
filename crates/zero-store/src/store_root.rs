@@ -19,6 +19,34 @@ use std::path::{Component, Path, PathBuf};
 
 use sha2::{Digest, Sha256};
 
+/// Invalid engine-local file name.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct EngineFileError {
+    name: String,
+}
+
+impl std::fmt::Display for EngineFileError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "engine file name must be exactly one normal basename component: {:?}",
+            self.name
+        )
+    }
+}
+impl std::error::Error for EngineFileError {}
+
+fn validate_engine_file_name(name: &str) -> Result<(), EngineFileError> {
+    let mut components = Path::new(name).components();
+    let valid = matches!(components.next(), Some(Component::Normal(component)) if component == OsStr::new(name))
+        && components.next().is_none()
+        && !name.contains(['/', '\\'])
+        && !matches!(name.as_bytes(), [drive, b':', ..] if drive.is_ascii_alphabetic());
+    valid.then_some(()).ok_or_else(|| EngineFileError {
+        name: name.to_owned(),
+    })
+}
+
 /// Store-root pin variables, in precedence order. First non-empty wins.
 pub const STORE_ROOT_ENVS: &[&str] = &["ZEROSTACK_STORE_ROOT", "ZERO_STACK_STORE_ROOT"];
 
@@ -307,8 +335,9 @@ impl ResolvedStore {
     }
 
     /// A named file inside [Self::engine_dir].
-    pub fn engine_file(&self, name: &str) -> PathBuf {
-        self.engine_dir.join(name)
+    pub fn engine_file(&self, name: &str) -> Result<PathBuf, EngineFileError> {
+        validate_engine_file_name(name)?;
+        Ok(self.engine_dir().join(name))
     }
 
     /// Machine-readable account of how this root was chosen.
@@ -854,7 +883,7 @@ mod tests {
         std::fs::create_dir(repo.path().join(LOCAL_STORE_DIR)).unwrap();
         let r = ResolvedStore::resolve(repo.path(), Engine::FsZero, &StoreEnv::default());
         assert_eq!(
-            r.engine_file("store.sqlite3"),
+            r.engine_file("store.sqlite3").unwrap(),
             r.repo_root()
                 .join(LOCAL_STORE_DIR)
                 .join("fszero")
@@ -874,5 +903,30 @@ mod tests {
         ));
         let outside = TempDir::new().unwrap();
         assert!(!store_is_under_project_root(outside.path(), repo.path()));
+    }
+
+    #[test]
+    fn engine_file_accepts_normal_and_dot_prefixed_basenames() {
+        assert!(validate_engine_file_name("store.sqlite3").is_ok());
+        assert!(validate_engine_file_name(".state.json").is_ok());
+    }
+
+    #[test]
+    fn engine_file_rejects_non_basename_paths() {
+        for name in [
+            "",
+            ".",
+            "..",
+            "/absolute",
+            "nested/file",
+            "nested\\file",
+            "C:\\absolute",
+            "C:relative",
+        ] {
+            assert!(
+                validate_engine_file_name(name).is_err(),
+                "accepted {name:?}"
+            );
+        }
     }
 }
