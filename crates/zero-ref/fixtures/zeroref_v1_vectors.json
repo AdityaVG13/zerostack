@@ -461,6 +461,16 @@
       "notes": "verification of the complete unfragmented bytes precedes fragment selection"
     }
   ],
+  "span_vectors": [
+    {"name":"valid_span","blob":"alpha","fragment":{"kind":"bytes","start":0,"end":5},"byte_start":0,"byte_len":5,"selected_hex":"616c706861","span_digest":"8ed3f6ad685b959ead7022518e1af76cd816f8e8ec7ccdda1ed4018e8f2223f8"},
+    {"name":"empty_span","blob":"alpha","fragment":{"kind":"bytes","start":3,"end":3},"byte_start":3,"byte_len":0,"selected_hex":"","span_digest":"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"},
+    {"name":"line_derived_span","blob":"alpha","fragment":{"kind":"lines","start":2,"end":3},"byte_start":6,"byte_len":11,"selected_hex":"626574610a67616d6d610a","span_digest":"aa5989aacb57830a365b63654addd2b3e7427ce3e8869f52e261ac98cc318734"}
+  ],
+  "span_tamper_cases": [
+    {"name":"tampered_payload","base":"valid_span","expected":"span_digest_mismatch"},
+    {"name":"tampered_range","base":"valid_span","expected":"range_out_of_bounds"},
+    {"name":"tampered_digest","base":"valid_span","expected":"span_digest_mismatch"}
+  ],
   "selection_policy": {
     "byte": "strict",
     "line_start": "strict",

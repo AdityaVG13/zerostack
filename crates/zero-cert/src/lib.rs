@@ -13,15 +13,10 @@
 use std::{borrow::Cow, fmt};
 use serde::{Deserialize, Serialize};
 
-pub type Digest = [u8; 32];
-/// Object identities are portable, lowercase SHA-256 hex when rendered.
-pub const OBJECT_ID_HASH_ALGORITHM: &str = "sha256";
-pub const OBJECT_ID_HEX_LENGTH: usize = 64;
-/// Non-hot-path portable rendering of the object identity convention.
-pub fn object_identity_hex(bytes: &[u8]) -> String { zero_ref::content_hash_hex(bytes) }
-
-#[derive(Clone, Copy, Debug, Deserialize, Eq, Hash, PartialEq, Serialize)]
-#[serde(transparent)] pub struct ObjectId(pub Digest);
+pub use zero_ref::{
+    object_identity_hex, Digest, ObjectId, SpanRef, OBJECT_ID_HASH_ALGORITHM,
+    OBJECT_ID_HEX_LENGTH,
+};
 #[derive(Clone, Copy, Debug, Deserialize, Eq, Hash, PartialEq, Serialize)]
 #[serde(transparent)] pub struct SymbolId(pub u64);
 #[derive(Clone, Copy, Debug, Deserialize, Eq, Hash, PartialEq, Serialize)]
@@ -30,12 +25,6 @@ pub fn object_identity_hex(bytes: &[u8]) -> String { zero_ref::content_hash_hex(
 #[serde(transparent)] pub struct CommandId(pub u64);
 #[derive(Clone, Copy, Debug, Deserialize, Eq, Hash, PartialEq, Serialize)]
 #[serde(transparent)] pub struct TestId(pub u64);
-
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
-pub struct SpanRef {
-    pub object_id: ObjectId, pub byte_start: u64, pub byte_len: u64,
-    pub object_digest: Digest, pub span_digest: Digest,
-}
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(bound(deserialize = "'de: 'a"))]

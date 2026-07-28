@@ -14,8 +14,8 @@ impl Resolver for Resident<'_> {
     fn trusted_index_version<'a>(&'a self, id: &str) -> Option<&'a str> { (id == "zero-index").then_some(self.index).flatten() }
 }
 pub fn fixture(bytes: &[u8]) -> (EvidenceCertificate<'_>, Resident<'_>) {
-    let digest = zero_abi::sha256(bytes);
-    let span = SpanRef { object_id: ObjectId(digest), byte_start: 0, byte_len: bytes.len() as u64, object_digest: digest, span_digest: digest };
+    let (span, selected) = SpanRef::from_fragment(bytes, &zero_ref::ZeroFragment::None, "fixture").unwrap();
+    assert_eq!(selected, bytes);
     let certificate = EvidenceCertificate {
         query: Query::ReadSpan(span.clone()), spans: vec![span], payload: Cow::Borrowed(bytes),
         provenance: Provenance { parser_id: "tree-sitter".into(), parser_version: "1".into(), index_id: "zero-index".into(), index_version: "2".into(), operator_id: "read-span".into(), operator_version: "1".into() },

@@ -6,6 +6,7 @@ license.workspace = true
 description = "ZeroRef v1: the portable cross-engine blob ref subset for ZeroStack"
 
 [dependencies]
+serde = { workspace = true }
 sha2 = { workspace = true }
 
 [dev-dependencies]

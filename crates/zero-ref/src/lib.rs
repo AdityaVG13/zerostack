@@ -1,3 +1,5 @@
+#![forbid(unsafe_code)]
+
 //! ZeroRef v1: the portable cross-engine blob ref subset.
 //!
 //! Canonical contract: GraphZero docs/adr/002-zeroref-v1.md, shared verbatim
@@ -22,7 +24,8 @@
 
 use std::fmt;
 
-use sha2::{Digest, Sha256};
+use serde::{Deserialize, Serialize};
+use sha2::{Digest as ShaDigest, Sha256};
 
 /// Version tag for capability negotiation and fixture manifests.
 pub const ZEROREF_VERSION: &str = "v1";
@@ -212,6 +215,130 @@ pub fn content_hash_hex(bytes: &[u8]) -> String {
     let mut h = Sha256::new();
     h.update(bytes);
     format!("{:x}", h.finalize())
+}
+
+/// Binary SHA-256 digest used by structured identities and span references.
+pub type Digest = [u8; 32];
+
+/// Canonical structured identity for a complete object.
+#[derive(Clone, Copy, Debug, Deserialize, Eq, Hash, PartialEq, Serialize)]
+#[serde(transparent)]
+pub struct ObjectId(pub Digest);
+
+/// Object identity metadata shared with structured certificate wires.
+pub const OBJECT_ID_HASH_ALGORITHM: &str = HASH_ALGORITHM;
+pub const OBJECT_ID_HEX_LENGTH: usize = HASH_HEX_LEN;
+
+/// Non-hot-path portable rendering of the object identity convention.
+pub fn object_identity_hex(bytes: &[u8]) -> String {
+    content_hash_hex(bytes)
+}
+
+/// A digest-bound byte selection. Its serde field names and digest arrays are
+/// the stable structured wire shape; it does not extend the v1 text grammar.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct SpanRef {
+    pub object_id: ObjectId,
+    pub byte_start: u64,
+    pub byte_len: u64,
+    pub object_digest: Digest,
+    pub span_digest: Digest,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum SpanRefError {
+    Selection(ZeroRefError),
+    RangeOverflow,
+    RangeOutOfBounds,
+    ObjectIdentityMismatch,
+    ObjectDigestMismatch,
+    SpanDigestMismatch,
+    PayloadLengthMismatch,
+}
+
+impl fmt::Display for SpanRefError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Selection(error) => write!(f, "selection failed: {error}"),
+            other => write!(f, "{other:?}"),
+        }
+    }
+}
+
+impl std::error::Error for SpanRefError {}
+
+impl From<ZeroRefError> for SpanRefError {
+    fn from(error: ZeroRefError) -> Self {
+        Self::Selection(error)
+    }
+}
+
+fn digest_bytes(bytes: &[u8]) -> Digest {
+    let mut hasher = Sha256::new();
+    hasher.update(bytes);
+    hasher.finalize().into()
+}
+
+impl SpanRef {
+    /// Construct a digest-bound span from one borrowed object buffer. Selection
+    /// delegates to the canonical ZeroRef selector and returns the selected
+    /// borrow with both digests in the SpanRef. No second read is required.
+    pub fn from_fragment<'a>(
+        object: &'a [u8],
+        fragment: &ZeroFragment,
+        context: &str,
+    ) -> Result<(Self, &'a [u8]), SpanRefError> {
+        let selected = select_fragment(object, fragment, context)?;
+        let byte_start = (selected.as_ptr() as usize)
+            .checked_sub(object.as_ptr() as usize)
+            .ok_or(SpanRefError::RangeOverflow)?;
+        let byte_start = u64::try_from(byte_start).map_err(|_| SpanRefError::RangeOverflow)?;
+        let byte_len = u64::try_from(selected.len()).map_err(|_| SpanRefError::RangeOverflow)?;
+        byte_start
+            .checked_add(byte_len)
+            .ok_or(SpanRefError::RangeOverflow)?;
+        let object_digest = digest_bytes(object);
+        let span = Self {
+            object_id: ObjectId(object_digest),
+            byte_start,
+            byte_len,
+            object_digest,
+            span_digest: digest_bytes(selected),
+        };
+        Ok((span, selected))
+    }
+
+    /// Verify only a supplied selected payload. The complete object is not needed.
+    pub fn verify_span(&self, payload: &[u8]) -> Result<(), SpanRefError> {
+        if u64::try_from(payload.len()).ok() != Some(self.byte_len) {
+            return Err(SpanRefError::PayloadLengthMismatch);
+        }
+        if digest_bytes(payload) != self.span_digest {
+            return Err(SpanRefError::SpanDigestMismatch);
+        }
+        Ok(())
+    }
+
+    /// Verify complete-object identity and digest, select the bound byte range,
+    /// then verify its independent span digest.
+    pub fn verify_and_select<'a>(&self, object: &'a [u8]) -> Result<&'a [u8], SpanRefError> {
+        let actual = digest_bytes(object);
+        if actual != self.object_id.0 {
+            return Err(SpanRefError::ObjectIdentityMismatch);
+        }
+        if actual != self.object_digest {
+            return Err(SpanRefError::ObjectDigestMismatch);
+        }
+        let end = self
+            .byte_start
+            .checked_add(self.byte_len)
+            .ok_or(SpanRefError::RangeOverflow)?;
+        let start = usize::try_from(self.byte_start).map_err(|_| SpanRefError::RangeOutOfBounds)?;
+        let end = usize::try_from(end).map_err(|_| SpanRefError::RangeOutOfBounds)?;
+        let selected = object.get(start..end).ok_or(SpanRefError::RangeOutOfBounds)?;
+        self.verify_span(selected)?;
+        Ok(selected)
+    }
 }
 
 fn parse_u64_strict(s: &str, input: &str) -> Result<u64, ZeroRefError> {
