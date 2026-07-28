@@ -10,7 +10,9 @@
 use std::fs;
 use std::hash::{BuildHasher, Hasher};
 use std::io::{self, Write};
+use std::marker::PhantomData;
 use std::path::{Path, PathBuf};
+use std::rc::Rc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
@@ -851,6 +853,9 @@ fn legacy_exclusive_busy(base: &Path) -> bool {
     looks_like_legacy_exclusive_permit(base)
 }
 
+// NativeWake is private, cached only in thread-local WAKE_CACHE, and never shared
+// across threads. The Rc marker mechanically fences future refactors; auto-trait
+// rejection is compile-time-only, so no runtime test is meaningful.
 thread_local! {
     static WAKE_CACHE: std::cell::RefCell<Option<(PathBuf, NativeWake)>> =
         const { std::cell::RefCell::new(None) };
@@ -926,6 +931,7 @@ impl Drop for PermitWake {
 #[cfg(any(target_os = "linux", target_os = "android"))]
 struct NativeWake {
     fd: libc::c_int,
+    _not_send_sync: PhantomData<Rc<()>>,
 }
 
 #[cfg(any(target_os = "linux", target_os = "android"))]
@@ -957,7 +963,10 @@ impl NativeWake {
             }
             return Err(error);
         }
-        Ok(Self { fd })
+        Ok(Self {
+            fd,
+            _not_send_sync: PhantomData,
+        })
     }
 
     fn wait(&mut self, timeout: Duration) -> std::io::Result<bool> {
@@ -1015,6 +1024,7 @@ impl Drop for NativeWake {
 struct NativeWake {
     queue: libc::c_int,
     directory: libc::c_int,
+    _not_send_sync: PhantomData<Rc<()>>,
 }
 
 #[cfg(target_os = "macos")]
@@ -1067,7 +1077,11 @@ impl NativeWake {
             }
             return Err(error);
         }
-        Ok(Self { queue, directory })
+        Ok(Self {
+            queue,
+            directory,
+            _not_send_sync: PhantomData,
+        })
     }
 
     fn wait(&mut self, timeout: Duration) -> std::io::Result<bool> {
@@ -1113,6 +1127,7 @@ impl Drop for NativeWake {
 #[cfg(windows)]
 struct NativeWake {
     handle: windows_sys::Win32::Foundation::HANDLE,
+    _not_send_sync: PhantomData<Rc<()>>,
 }
 
 #[cfg(windows)]
@@ -1137,7 +1152,10 @@ impl NativeWake {
         if handle == INVALID_HANDLE_VALUE {
             Err(std::io::Error::last_os_error())
         } else {
-            Ok(Self { handle })
+            Ok(Self {
+                handle,
+                _not_send_sync: PhantomData,
+            })
         }
     }
 
@@ -1181,7 +1199,9 @@ impl Drop for NativeWake {
     target_os = "macos",
     windows
 )))]
-struct NativeWake;
+struct NativeWake {
+    _not_send_sync: PhantomData<Rc<()>>,
+}
 
 #[cfg(not(any(
     target_os = "linux",
