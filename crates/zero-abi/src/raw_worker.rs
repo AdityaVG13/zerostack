@@ -318,64 +318,88 @@ pub fn encode_frame<T: Serialize>(
     Ok(bytes)
 }
 
-pub fn validate_handshake_request(
-    request: &HandshakeRequest,
-    binding: &WorkerBinding,
-) -> Result<(), FrameCodecError> {
-    let mismatch = |field: &str, expected: &str, actual: &str| {
-        FrameCodecError::InvalidContract(format!(
-            "{field} mismatch: expected={expected} actual={actual}"
-        ))
-    };
-    if request.protocol_version != RAW_WORKER_PROTOCOL_VERSION {
-        return Err(mismatch(
-            "protocol_version",
-            &request.protocol_version,
-            RAW_WORKER_PROTOCOL_VERSION,
-        ));
-    }
+fn handshake_field_mismatch(field: &str, expected: &str, actual: &str) -> FrameCodecError {
+    FrameCodecError::InvalidContract(format!(
+        "{field} mismatch: expected={expected} actual={actual}"
+    ))
+}
+
+fn require_nonempty_handshake_ids(request: &HandshakeRequest) -> Result<(), FrameCodecError> {
     if request.root.is_empty() || request.session_id.is_empty() {
         return Err(FrameCodecError::InvalidContract(
             "handshake requires non-empty root and session_id".into(),
         ));
     }
+    Ok(())
+}
+
+fn require_root_session_binding(
+    request: &HandshakeRequest,
+    binding: &WorkerBinding,
+) -> Result<(), FrameCodecError> {
     if request.root != binding.root || request.session_id != binding.session_id {
         return Err(FrameCodecError::InvalidContract(
             "worker root/session binding mismatch".into(),
         ));
     }
-    if request.expected_engine != binding.engine {
-        return Err(mismatch(
+    Ok(())
+}
+
+/// Optional client-supplied pin: absent means skip; present must equal binding.
+fn check_optional_eq(
+    field: &str,
+    expected: Option<&str>,
+    actual: &str,
+) -> Result<(), FrameCodecError> {
+    if let Some(expected) = expected {
+        if expected != actual {
+            return Err(handshake_field_mismatch(field, expected, actual));
+        }
+    }
+    Ok(())
+}
+
+pub fn validate_handshake_request(
+    request: &HandshakeRequest,
+    binding: &WorkerBinding,
+) -> Result<(), FrameCodecError> {
+    // Field-specific messages are intentional; do not fold distinct fields into one bool.
+    if request.protocol_version != RAW_WORKER_PROTOCOL_VERSION {
+        // Argument order matches historical messages (request value as expected=).
+        return Err(handshake_field_mismatch(
+            "protocol_version",
+            &request.protocol_version,
+            RAW_WORKER_PROTOCOL_VERSION,
+        ));
+    }
+    require_nonempty_handshake_ids(request)?;
+    require_root_session_binding(request, binding)?;
+    for (field, expected, actual) in [
+        (
             "engine",
-            &request.expected_engine,
-            &binding.engine,
-        ));
-    }
-    if request.expected_contract_digest != binding.semantic_contract_digest {
-        return Err(mismatch(
+            request.expected_engine.as_str(),
+            binding.engine.as_str(),
+        ),
+        (
             "semantic_contract_digest",
-            &request.expected_contract_digest,
-            &binding.semantic_contract_digest,
-        ));
-    }
-    if let Some(expected) = request.expected_registry_digest.as_deref() {
-        if expected != binding.operation_registry_digest {
-            return Err(mismatch(
-                "operation_registry_digest",
-                expected,
-                &binding.operation_registry_digest,
-            ));
+            request.expected_contract_digest.as_str(),
+            binding.semantic_contract_digest.as_str(),
+        ),
+    ] {
+        if expected != actual {
+            return Err(handshake_field_mismatch(field, expected, actual));
         }
     }
-    if let Some(expected) = request.expected_worker_revision.as_deref() {
-        if expected != binding.worker_revision {
-            return Err(mismatch(
-                "worker_revision",
-                expected,
-                &binding.worker_revision,
-            ));
-        }
-    }
+    check_optional_eq(
+        "operation_registry_digest",
+        request.expected_registry_digest.as_deref(),
+        &binding.operation_registry_digest,
+    )?;
+    check_optional_eq(
+        "worker_revision",
+        request.expected_worker_revision.as_deref(),
+        &binding.worker_revision,
+    )?;
     Ok(())
 }
 

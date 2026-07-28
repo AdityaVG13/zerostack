@@ -69,43 +69,39 @@ def line_allowlisted(rel: str, line: str) -> bool:
     return any(p.search(line) for p in patterns)
 
 
+def first_offender(rel: str) -> str | None:
+    """Return first host-path hit for a tracked path, or None if clean."""
+    path = REPO / rel
+    if not path.is_file():
+        return None
+    try:
+        text = path.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return None
+    if not HOST_PATH.search(text) or rel in ALLOWLIST_FILES:
+        return None
+    for i, line in enumerate(text.splitlines(), 1):
+        if HOST_PATH.search(line) and not line_allowlisted(rel, line):
+            return f"{rel}:{i}: {line.strip()[:120]}"
+    return None
+
+
 def main() -> int:
-    offenders: list[str] = []
-    for rel in tracked_files():
-        path = REPO / rel
-        if not path.is_file():
-            continue
-        try:
-            text = path.read_text(encoding="utf-8", errors="replace")
-        except OSError:
-            continue
-        if not HOST_PATH.search(text):
-            continue
-        if rel in ALLOWLIST_FILES:
-            continue
-        for i, line in enumerate(text.splitlines(), 1):
-            if not HOST_PATH.search(line):
-                continue
-            if line_allowlisted(rel, line):
-                continue
-            offenders.append(f"{rel}:{i}: {line.strip()[:120]}")
-            break
-
-    if offenders:
-        print("host paths found in tracked files:", file=sys.stderr)
-        for o in offenders:
-            print(f"  {o}", file=sys.stderr)
-        print(
-            "\nIf a path is legitimate documentation of the scan pattern, add a "
-            "line regex under ALLOWLIST_LINE_RES in scripts/check_no_host_paths.py. "
-            "Do not whole-file allowlist agent docs.",
-            file=sys.stderr,
-        )
-        return 1
-
-    count = len(tracked_files())
-    print(f"no host paths in {count} tracked file(s)")
-    return 0
+    offenders = [hit for rel in tracked_files() if (hit := first_offender(rel))]
+    if not offenders:
+        count = len(tracked_files())
+        print(f"no host paths in {count} tracked file(s)")
+        return 0
+    print("host paths found in tracked files:", file=sys.stderr)
+    for o in offenders:
+        print(f"  {o}", file=sys.stderr)
+    print(
+        "\nIf a path is legitimate documentation of the scan pattern, add a "
+        "line regex under ALLOWLIST_LINE_RES in scripts/check_no_host_paths.py. "
+        "Do not whole-file allowlist agent docs.",
+        file=sys.stderr,
+    )
+    return 1
 
 
 if __name__ == "__main__":

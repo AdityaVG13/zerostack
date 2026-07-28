@@ -46,6 +46,42 @@ fn is_temp_name(name: &str) -> bool {
     name.starts_with(TEMP_PREFIX) || name.ends_with(".tmp")
 }
 
+/// True when `name` is a published CAS identity: full lowercase 64-hex and not a temp.
+#[inline]
+fn is_listable_object_name(name: &str) -> bool {
+    is_full_lower_hex(name) && !is_temp_name(name)
+}
+
+/// Ensure fan-out parent dirs exist and are real directories (no symlink substitution).
+fn ensure_object_publish_dirs(parent: &Path) -> Result<(), CasError> {
+    fs::create_dir_all(parent).map_err(|e| io_err("create object directory", e))?;
+    for level in [parent, parent.parent().expect("sha256 level")] {
+        let meta = fs::symlink_metadata(level).map_err(|e| io_err("stat object directory", e))?;
+        if !meta.file_type().is_dir() {
+            return Err(CasError::Malformed(
+                "object directory is not a real directory (symlink substitution refused)"
+                    .to_string(),
+            ));
+        }
+    }
+    Ok(())
+}
+
+/// Collect listable regular-file object names from one fan-out shard directory.
+fn push_objects_from_shard(shard_path: &Path, out: &mut Vec<String>) -> Result<(), CasError> {
+    for object in fs::read_dir(shard_path).map_err(|e| io_err("read CAS shard", e))? {
+        let object = object.map_err(|e| io_err("read CAS object entry", e))?;
+        let name = object.file_name().to_string_lossy().into_owned();
+        // Combined name predicates + regular-file gate; file_type does not follow.
+        if is_listable_object_name(&name)
+            && object.file_type().map(|t| t.is_file()).unwrap_or(false)
+        {
+            out.push(name);
+        }
+    }
+    Ok(())
+}
+
 /// Outcome of a publish. `created` distinguishes a fresh object from dedup, so
 /// callers can report writes without a second existence check.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -265,43 +301,60 @@ impl SharedCas {
         let hash = content_hash_hex(bytes);
         let dest = self.object_path(&hash);
 
-        // Preexisting destination: verify, never overwrite.
-        match fs::symlink_metadata(&dest) {
-            Ok(meta) => {
-                self.check_regular(&meta, &hash)?;
-                let existing = self.read_verified_at(&dest, &hash, limit)?;
-                debug_assert_eq!(existing.len(), bytes.len());
-                // Refresh the mtime: a dedup is a fresh reference, and an
-                // age-based retention policy that never sees it will collect a
-                // still-referenced object.
-                let _ = touch_path(&dest);
-                return Ok(PutOutcome {
-                    hash,
-                    created: false,
-                });
-            }
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
-            Err(e) => return Err(io_err("stat existing object", e)),
+        if let Some(outcome) = self.try_return_existing_object(&dest, &hash, bytes.len(), limit)? {
+            return Ok(outcome);
         }
 
         let parent = dest.parent().expect("object path always has a parent");
-        fs::create_dir_all(parent).map_err(|e| io_err("create object directory", e))?;
-        // Refuse symlink substitutions on the directories we publish into.
-        for level in [parent, parent.parent().expect("sha256 level")] {
-            let meta =
-                fs::symlink_metadata(level).map_err(|e| io_err("stat object directory", e))?;
-            if !meta.file_type().is_dir() {
-                return Err(CasError::Malformed(
-                    "object directory is not a real directory (symlink substitution refused)"
-                        .to_string(),
-                ));
-            }
-        }
+        ensure_object_publish_dirs(parent)?;
         reap_stale_temps(parent, CAS_TEMP_REAP_AGE);
+        self.publish_new_object_via_temp(parent, &dest, &hash, bytes, limit)?;
+        Ok(PutOutcome {
+            hash,
+            created: true,
+        })
+    }
 
-        // Unique sibling temp file (pid + process-wide sequence, so
-        // concurrent writers in one process can never collide), then atomic
-        // publish. Only a temp we created ourselves is ever cleaned up.
+    /// Preexisting destination: verify, touch mtime, never overwrite.
+    /// `None` means NotFound — the normal create path.
+    fn try_return_existing_object(
+        &self,
+        dest: &Path,
+        hash: &str,
+        bytes_len: usize,
+        limit: u64,
+    ) -> Result<Option<PutOutcome>, CasError> {
+        match fs::symlink_metadata(dest) {
+            Ok(meta) => {
+                self.check_regular(&meta, hash)?;
+                let existing = self.read_verified_at(dest, hash, limit)?;
+                debug_assert_eq!(existing.len(), bytes_len);
+                // Refresh the mtime: a dedup is a fresh reference, and an
+                // age-based retention policy that never sees it will collect a
+                // still-referenced object.
+                let _ = touch_path(dest);
+                Ok(Some(PutOutcome {
+                    hash: hash.to_string(),
+                    created: false,
+                }))
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
+            Err(e) => Err(io_err("stat existing object", e)),
+        }
+    }
+
+    /// Unique sibling temp, write+fsync, atomic replace with race converge.
+    /// Only a temp we created ourselves is ever cleaned up.
+    fn publish_new_object_via_temp(
+        &self,
+        parent: &Path,
+        dest: &Path,
+        hash: &str,
+        bytes: &[u8],
+        limit: u64,
+    ) -> Result<(), CasError> {
+        // pid + process-wide sequence so concurrent writers in one process
+        // can never collide on the temp path.
         static TEMP_SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
         let tmp = parent.join(format!(
             "{TEMP_PREFIX}{}-{}-{}",
@@ -320,10 +373,11 @@ impl SharedCas {
             file.sync_all().map_err(|e| io_err("sync temp object", e))?;
             // Concurrent identical writers may rename over each other; both
             // orders leave one valid object with these exact bytes.
-            if let Err(e) = replace_file(&tmp, &dest) {
+            if let Err(e) = replace_file(&tmp, dest) {
                 // Destination contention: if a concurrent writer already
                 // published a verifying object, converge on it.
-                if dest.is_file() && self.read_verified_at(&dest, &hash, limit).is_ok() {
+                // Short-circuit order is load-bearing: is_file before verify.
+                if dest.is_file() && self.read_verified_at(dest, hash, limit).is_ok() {
                     return Ok(());
                 }
                 return Err(io_err("publish object", e));
@@ -338,10 +392,7 @@ impl SharedCas {
         }
         // Converged-on-existing leaves our temp behind; clean it up.
         let _ = fs::remove_file(&tmp);
-        Ok(PutOutcome {
-            hash,
-            created: true,
-        })
+        Ok(())
     }
 
     /// Refresh an object's modification time without reading it, so an
@@ -375,18 +426,7 @@ impl SharedCas {
             if !shard.file_type().map(|t| t.is_dir()).unwrap_or(false) {
                 continue;
             }
-            let objects = fs::read_dir(shard.path()).map_err(|e| io_err("read CAS shard", e))?;
-            for object in objects {
-                let object = object.map_err(|e| io_err("read CAS object entry", e))?;
-                let name = object.file_name().to_string_lossy().to_string();
-                if !is_full_lower_hex(&name) || is_temp_name(&name) {
-                    continue;
-                }
-                // Symlinks are not objects; file_type here does not follow.
-                if object.file_type().map(|t| t.is_file()).unwrap_or(false) {
-                    out.push(name);
-                }
-            }
+            push_objects_from_shard(&shard.path(), &mut out)?;
         }
         out.sort();
         Ok(out)

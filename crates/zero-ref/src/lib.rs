@@ -425,6 +425,14 @@ fn select_lines<'a>(
         ));
     }
     // line_starts[i] is the byte offset where line i+1 begins.
+    let line_starts = line_start_offsets(bytes);
+    let line_count = line_starts.len() as u64;
+    let end = resolve_policy_end(policy, start, end, line_count, context)?;
+    Ok(line_span_bytes(bytes, &line_starts, start, end))
+}
+
+/// Byte offsets where each 1-based line begins. Empty blob → empty vec.
+fn line_start_offsets(bytes: &[u8]) -> Vec<usize> {
     let mut line_starts: Vec<usize> = Vec::new();
     if !bytes.is_empty() {
         line_starts.push(0);
@@ -434,8 +442,19 @@ fn select_lines<'a>(
             }
         }
     }
-    let line_count = line_starts.len() as u64;
-    let end = match policy {
+    line_starts
+}
+
+/// Resolve inclusive end line under Strict or ClampEnd. Error messages stay
+/// policy-specific (user-facing #L hints); do not merge arms into one predicate.
+fn resolve_policy_end(
+    policy: LineEndPolicy,
+    start: u64,
+    end: u64,
+    line_count: u64,
+    context: &str,
+) -> Result<u64, ZeroRefError> {
+    match policy {
         LineEndPolicy::Strict => {
             if end > line_count {
                 return Err(ZeroRefError::new(
@@ -443,7 +462,7 @@ fn select_lines<'a>(
                     format!("line span {start}-{end} exceeds line count {line_count}: {context}"),
                 ));
             }
-            end
+            Ok(end)
         }
         LineEndPolicy::ClampEnd => {
             if line_count == 0 {
@@ -460,16 +479,25 @@ fn select_lines<'a>(
                     ),
                 ));
             }
-            end.min(line_count)
+            Ok(end.min(line_count))
         }
-    };
+    }
+}
+
+/// Slice bytes for 1-based inclusive line range [start, end] using precomputed starts.
+fn line_span_bytes<'a>(
+    bytes: &'a [u8],
+    line_starts: &[usize],
+    start: u64,
+    end: u64,
+) -> &'a [u8] {
     let start_byte = line_starts[(start - 1) as usize];
     let end_byte = if (end as usize) < line_starts.len() {
         line_starts[end as usize]
     } else {
         bytes.len()
     };
-    Ok(&bytes[start_byte..end_byte])
+    &bytes[start_byte..end_byte]
 }
 
 impl fmt::Display for ZeroRefV1 {

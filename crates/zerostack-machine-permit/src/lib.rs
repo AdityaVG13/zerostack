@@ -52,18 +52,17 @@ pub(crate) fn sanitize_permit_class(class: &str) -> &str {
     }
 }
 
+/// True when byte is allowed in a permit class path segment ([A-Za-z0-9._-]).
+const SAFE_PERMIT_BYTE: [bool; 256] = [false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,true,true,false,true,true,true,true,true,true,true,true,true,true,false,false,false,false,false,false,false,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,false,false,false,false,true,false,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false];
+
 fn is_safe_permit_class(class: &str) -> bool {
     // Charset alone still allows "." / ".." as a bare path segment.
-    if class.is_empty() || class == "." || class == ".." {
-        return false;
+    match class {
+        "" | "." | ".." => false,
+        _ => class.bytes().all(|b| SAFE_PERMIT_BYTE[b as usize]),
     }
-    class.bytes().all(|b| {
-        matches!(
-            b,
-            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'.' | b'_' | b'-'
-        )
-    })
 }
+
 
 fn permit_scope_root() -> Option<PathBuf> {
     for name in [
@@ -274,47 +273,64 @@ impl WaiterIntent {
                     waiters.display()
                 ))
             })?;
-            let path = entry.path();
-            if path == self.path {
-                continue;
+            if let Some(competitor) = classify_waiter_entry(&entry, &self.path)? {
+                live.push(competitor);
             }
-            if !entry
-                .file_type()
-                .map_err(|e| {
-                    AcquireError::Fatal(format!(
-                        "inspect codemode permit waiter {}: {e}",
-                        path.display()
-                    ))
-                })?
-                .is_dir()
-            {
-                return Err(AcquireError::Fatal(format!(
-                    "codemode permit waiter is not a directory: {}",
-                    path.display()
-                )));
-            }
-            if let Some((pid, started_at)) = waiter_key(&path) {
-                if !process_alive(pid) && remove_waiter(&path) {
-                    continue;
-                }
-                live.push((started_at, entry.file_name().to_string_lossy().into_owned()));
-                continue;
-            }
-            if reclaim_dead(&path) {
-                continue;
-            }
-            let owner = fs::read_to_string(path.join("owner"))
-                .ok()
-                .filter(|owner| !owner.is_empty())
-                .unwrap_or_else(|| entry.file_name().to_string_lossy().into_owned());
-            let started_at = fs::read_to_string(path.join("started_at"))
-                .ok()
-                .and_then(|value| value.trim().parse().ok())
-                .unwrap_or(0);
-            live.push((started_at, owner));
         }
         Ok(live)
     }
+}
+
+/// Classify one peer waiter directory for ranking.
+///
+/// Reclaim short-circuit is load-bearing: a structured waiter is dropped only
+/// when `!process_alive(pid) && remove_waiter(path)` both hold. Alive processes
+/// must never lose their waiter slot here; failed removes stay visible.
+fn classify_waiter_entry(
+    entry: &fs::DirEntry,
+    self_path: &Path,
+) -> Result<Option<(u128, String)>, AcquireError> {
+    let path = entry.path();
+    if path == self_path {
+        return Ok(None);
+    }
+    if !entry
+        .file_type()
+        .map_err(|e| {
+            AcquireError::Fatal(format!(
+                "inspect codemode permit waiter {}: {e}",
+                path.display()
+            ))
+        })?
+        .is_dir()
+    {
+        return Err(AcquireError::Fatal(format!(
+            "codemode permit waiter is not a directory: {}",
+            path.display()
+        )));
+    }
+    if let Some((pid, started_at)) = waiter_key(&path) {
+        // SAFETY: short-circuit requires dead process AND successful remove.
+        if !process_alive(pid) && remove_waiter(&path) {
+            return Ok(None);
+        }
+        return Ok(Some((
+            started_at,
+            entry.file_name().to_string_lossy().into_owned(),
+        )));
+    }
+    if reclaim_dead(&path) {
+        return Ok(None);
+    }
+    let owner = fs::read_to_string(path.join("owner"))
+        .ok()
+        .filter(|owner| !owner.is_empty())
+        .unwrap_or_else(|| entry.file_name().to_string_lossy().into_owned());
+    let started_at = fs::read_to_string(path.join("started_at"))
+        .ok()
+        .and_then(|value| value.trim().parse().ok())
+        .unwrap_or(0);
+    Ok(Some((started_at, owner)))
 }
 
 impl Drop for WaiterIntent {

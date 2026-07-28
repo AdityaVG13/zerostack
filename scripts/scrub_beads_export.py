@@ -51,40 +51,42 @@ def relativize(text: str) -> str:
     return WIN_HOME_PATH.sub("~", text)
 
 
+def _scrub_string(value: str, *, key: str | None, source_repo: str | None) -> tuple[str, bool]:
+    """source_repo_path → repo name; other strings → home paths to ~/."""
+    if key == "source_repo_path" and value:
+        replacement = source_repo or Path(value).name
+        return (replacement, True) if value != replacement else (value, False)
+    scrubbed = relativize(value)
+    return scrubbed, scrubbed != value
+
+
+def _scrub_list_items(value: list, *, source_repo: str | None) -> bool:
+    """Mutate list items in place; return whether any child changed."""
+    changed = False
+    for i, item in enumerate(value):
+        nv, c = scrub_value(item, key=None, source_repo=source_repo)
+        if c:
+            value[i] = nv
+            changed = True
+    return changed
+
+
 def scrub_value(value: Any, *, key: str | None = None, source_repo: str | None = None) -> tuple[Any, bool]:
     """Recursively scrub strings in JSON-compatible values. Returns (value, changed)."""
     if isinstance(value, str):
-        if key == "source_repo_path" and value:
-            replacement = source_repo or Path(value).name
-            if value != replacement:
-                return replacement, True
-            return value, False
-        scrubbed = relativize(value)
-        return scrubbed, scrubbed != value
-
+        return _scrub_string(value, key=key, source_repo=source_repo)
     if isinstance(value, dict):
-        nested_source = value.get("source_repo") if isinstance(value.get("source_repo"), str) else source_repo
+        nested = value.get("source_repo")
+        src = nested if isinstance(nested, str) else source_repo
         changed = False
-        out: dict[str, Any] = {}
         for k, v in value.items():
-            nv, c = scrub_value(v, key=k if isinstance(k, str) else None, source_repo=nested_source)
-            out[k] = nv
-            changed = changed or c
-        # Mutate in place when caller passed a dict we own (record)
-        if changed:
-            value.clear()
-            value.update(out)
-        return value, changed
-
-    if isinstance(value, list):
-        changed = False
-        for i, item in enumerate(value):
-            nv, c = scrub_value(item, key=None, source_repo=source_repo)
+            nv, c = scrub_value(v, key=k, source_repo=src)
             if c:
-                value[i] = nv
+                value[k] = nv
                 changed = True
         return value, changed
-
+    if isinstance(value, list):
+        return value, _scrub_list_items(value, source_repo=source_repo)
     return value, False
 
 

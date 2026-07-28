@@ -84,27 +84,11 @@ def known_exception(path: Path, fn: str):
     return None
 
 
-def main(argv):
-    if len(argv) > 1:
-        roots = [Path(a).resolve() for a in argv[1:]]
-    else:
-        # .../ZeroStack/conformance/scripts/this.py -> the directory holding
-        # all four checkouts.
-        siblings = Path(__file__).resolve().parents[3]
-        roots = []
-        for name in ("TokenZero", "FSZero", "GraphZero", "ZeroStack"):
-            candidate = siblings / name
-            if candidate.is_dir():
-                roots.append(candidate)
-
-    if not roots:
-        print("no engine roots to check", file=sys.stderr)
-        return 1
-
-    violations = []
-    excused = []
+def scan_roots(roots: list[Path]) -> tuple[list[str], list[str], int]:
+    """Walk all roots; return violations, excused, files checked."""
+    violations: list[str] = []
+    excused: list[str] = []
     checked = 0
-
     for root in roots:
         for path in iter_rust_files(root):
             checked += 1
@@ -125,32 +109,46 @@ def main(argv):
                     excused.append("%s  (known, tracked by %s)" % (where, bead))
                 else:
                     violations.append(where)
+    return violations, excused, checked
 
+
+def main(argv):
+    if len(argv) > 1:
+        roots = [Path(a).resolve() for a in argv[1:]]
+    else:
+        siblings = Path(__file__).resolve().parents[3]
+        roots = []
+        for name in ("TokenZero", "FSZero", "GraphZero", "ZeroStack"):
+            candidate = siblings / name
+            if candidate.is_dir():
+                roots.append(candidate)
+    if not roots:
+        print("no engine roots to check", file=sys.stderr)
+        return 1
+    violations, excused, checked = scan_roots(roots)
     for note in excused:
         print("known divergence: %s" % note)
-
-    if violations:
+    if not violations:
         print(
-            "\ncanonical-JSON guard: FAIL - implementation(s) outside zero-abi:",
-            file=sys.stderr,
+            "canonical-JSON guard: ok (%d files, %d tracked divergence(s), 0 new)"
+            % (checked, len(excused))
         )
-        for violation in violations:
-            print("  - %s" % violation, file=sys.stderr)
-        print(
-            "\nCanonical JSON feeds the contract digest. A second implementation\n"
-            "disagrees silently: both sides emit valid JSON and hash cleanly, so\n"
-            "nothing fails until two engines disagree about identity.\n"
-            "Call zero_abi::canonical_json, or add a KNOWN_EXCEPTIONS entry with a\n"
-            "bead that says when it will be removed.",
-            file=sys.stderr,
-        )
-        return 1
-
+        return 0
     print(
-        "canonical-JSON guard: ok (%d files, %d tracked divergence(s), 0 new)"
-        % (checked, len(excused))
+        "\ncanonical-JSON guard: FAIL - implementation(s) outside zero-abi:",
+        file=sys.stderr,
     )
-    return 0
+    for violation in violations:
+        print("  - %s" % violation, file=sys.stderr)
+    print(
+        "\nCanonical JSON feeds the contract digest. A second implementation\n"
+        "disagrees silently: both sides emit valid JSON and hash cleanly, so\n"
+        "nothing fails until two engines disagree about identity.\n"
+        "Call zero_abi::canonical_json, or add a KNOWN_EXCEPTIONS entry with a\n"
+        "bead that says when it will be removed.",
+        file=sys.stderr,
+    )
+    return 1
 
 
 if __name__ == "__main__":
