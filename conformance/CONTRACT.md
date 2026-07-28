@@ -408,3 +408,22 @@ No existing T13 pi-stack host bead ID was found in repository metadata. Do not i
 Engine reports and their index under conformance/reports/ are ignored, private, local-only runtime evidence. CI and clean clones do not contain or validate them. Run python3 conformance/scripts/check_freshness.py <explicit-index.json> only against an intentionally supplied local set. The validator creates no evidence and cross-checks indexed report identity, digests, revision, completion, timestamp, and basename-only binary identity.
 
 Durable attestations require a separate signed publication flow that scrubs host/private data, pins provenance and immutable revisions, reviews artifacts before committing them outside the ignored directory, and verifies signatures and freshness in CI.
+
+### Raw-worker v2 engine identity and approval grants
+
+Raw-worker v2 keeps its version for additive compatibility. Engine identity is a
+closed enum: canonical writers emit fszero, graphzero, or tokenzero. Workers may
+dual-read only the deliberately enumerated legacy aliases and must reject unknown
+spellings and unknown fields. The optional approval_grant is likewise a typed
+additive field. Its absence remains compatible only when the operation's declared
+effect is not approval_required_mutation.
+
+The aggregate host decides policy, obtains authority, supplies the expected
+effect and current time, and owns the per-session consumed-grant set. The worker
+must validate and consume the grant immediately before action: identity,
+root/session/request/operation/effect bindings, lower-hex authority and policy
+digests, issuance/expiry ordering and current validity must match exactly.
+Approval-required calls fail with a typed rejection when a grant is missing,
+malformed, mismatched, expired, wrong-effect, or replayed. Policy orchestration
+stays in the host; fail-closed binding and replay enforcement stay at the worker
+boundary.

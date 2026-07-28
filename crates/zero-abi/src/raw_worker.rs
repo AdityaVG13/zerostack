@@ -18,6 +18,29 @@ pub const RAW_WORKER_PROTOCOL_VERSION: &str = "zerostack.raw_worker.v2";
 /// Default maximum encoded NDJSON frame, excluding the trailing newline.
 pub const DEFAULT_MAX_FRAME_BYTES: usize = 1_048_576;
 
+/// Closed identity set shared by all raw-worker protocol frames.
+/// Canonical writes use stable names. Aliases are deliberate legacy reads;
+/// every other spelling fails closed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+pub enum EngineIdentity {
+    #[serde(rename = "fszero", alias = "fs_zero", alias = "fs")]
+    FsZero,
+    #[serde(rename = "graphzero", alias = "graph_zero", alias = "graph")]
+    GraphZero,
+    #[serde(rename = "tokenzero", alias = "token_zero", alias = "token")]
+    TokenZero,
+}
+
+impl EngineIdentity {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::FsZero => "fszero",
+            Self::GraphZero => "graphzero",
+            Self::TokenZero => "tokenzero",
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum EffectClass {
@@ -68,7 +91,7 @@ pub struct SnapshotIdentity {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct RefOwnership {
-    pub engine: String,
+    pub engine: EngineIdentity,
     pub session_id: String,
     #[serde(default)]
     pub refs: Vec<String>,
@@ -122,7 +145,7 @@ pub struct WorkerCapabilities {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct WorkerBinding {
-    pub engine: String,
+    pub engine: EngineIdentity,
     pub root: String,
     pub session_id: String,
     pub worker_revision: String,
@@ -138,7 +161,7 @@ pub struct HandshakeRequest {
     pub protocol_version: String,
     pub root: String,
     pub session_id: String,
-    pub expected_engine: String,
+    pub expected_engine: EngineIdentity,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub expected_worker_revision: Option<String>,
     pub expected_contract_digest: String,
@@ -165,6 +188,60 @@ pub struct CallRequest {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub deadline_unix_ms: Option<u64>,
     pub trace: WorkerTrace,
+    /// Additive v2 field: absent remains valid for non-approval operations.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub approval_grant: Option<ApprovalGrant>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ApprovalGrant {
+    pub grant_id: String,
+    pub engine: EngineIdentity,
+    pub root: String,
+    pub session_id: String,
+    pub request_id: String,
+    pub operation: String,
+    pub effect: EffectClass,
+    pub authority_digest: String,
+    pub policy_digest: String,
+    pub issued_at_unix_ms: u64,
+    pub expires_at_unix_ms: u64,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ApprovalGrantRejection { Missing, Malformed, BindingMismatch, WrongEffect, Expired, Replayed }
+
+impl CallRequest {
+    /// Validate and consume an approval grant immediately before its action.
+    pub fn validate_approval_grant(
+        &self, expected_engine: EngineIdentity, expected_root: &str,
+        expected_session_id: &str, expected_effect: EffectClass, now_unix_ms: u64,
+        consumed_grants: &mut std::collections::BTreeSet<String>,
+    ) -> Result<(), ApprovalGrantRejection> {
+        let required = expected_effect == EffectClass::ApprovalRequiredMutation;
+        let Some(grant) = &self.approval_grant else {
+            return if required { Err(ApprovalGrantRejection::Missing) } else { Ok(()) };
+        };
+        let lower_hex = |v: &str| v.len() == 64 && v.bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b));
+        if grant.grant_id.is_empty() || grant.root.is_empty() || grant.session_id.is_empty()
+            || grant.request_id.is_empty() || grant.operation.is_empty()
+            || !lower_hex(&grant.authority_digest) || !lower_hex(&grant.policy_digest)
+            || grant.issued_at_unix_ms >= grant.expires_at_unix_ms {
+            return Err(ApprovalGrantRejection::Malformed);
+        }
+        if grant.engine != expected_engine || grant.root != expected_root
+            || grant.session_id != expected_session_id || grant.request_id != self.request_id
+            || grant.operation != self.op { return Err(ApprovalGrantRejection::BindingMismatch); }
+        if grant.effect != EffectClass::ApprovalRequiredMutation || grant.effect != expected_effect {
+            return Err(ApprovalGrantRejection::WrongEffect);
+        }
+        if now_unix_ms < grant.issued_at_unix_ms || now_unix_ms >= grant.expires_at_unix_ms {
+            return Err(ApprovalGrantRejection::Expired);
+        }
+        if !consumed_grants.insert(grant.grant_id.clone()) { return Err(ApprovalGrantRejection::Replayed); }
+        Ok(())
+    }
 }
 
 impl CallRequest {
@@ -369,7 +446,6 @@ pub fn validate_request_frame(frame: &WorkerRequestFrame) -> Result<(), FrameCod
             }
             require_nonempty("handshake.root", &request.root)?;
             require_nonempty("handshake.session_id", &request.session_id)?;
-            require_nonempty("handshake.expected_engine", &request.expected_engine)?;
             require_hex_digest(
                 "handshake.expected_contract_digest",
                 &request.expected_contract_digest,
@@ -525,7 +601,7 @@ fn manifest_trace() -> WorkerTrace {
 
 pub fn raw_worker_protocol_manifest() -> Value {
     let binding = WorkerBinding {
-        engine: String::new(),
+        engine: EngineIdentity::FsZero,
         root: String::new(),
         session_id: String::new(),
         worker_revision: String::new(),
@@ -540,6 +616,7 @@ pub fn raw_worker_protocol_manifest() -> Value {
         args: Value::Null,
         deadline_unix_ms: Some(0),
         trace: manifest_trace(),
+            approval_grant: None,
     };
     let result_metadata = WorkerResultMetadata {
         effect: EffectClass::ReadOnly,
@@ -554,7 +631,7 @@ pub fn raw_worker_protocol_manifest() -> Value {
             rollback_op: Some(String::new()),
         },
         ownership: RefOwnership {
-            engine: String::new(),
+            engine: EngineIdentity::FsZero,
             session_id: String::new(),
             refs: Vec::new(),
             snapshot: Some(SnapshotIdentity {
@@ -569,7 +646,7 @@ pub fn raw_worker_protocol_manifest() -> Value {
         protocol_version: String::new(),
         root: String::new(),
         session_id: String::new(),
-        expected_engine: String::new(),
+        expected_engine: EngineIdentity::FsZero,
         expected_worker_revision: Some(String::new()),
         expected_contract_digest: String::new(),
         expected_registry_digest: Some(String::new()),
@@ -628,6 +705,7 @@ mod tests {
                 args: json!({"path": "README.md"}),
                 deadline_unix_ms: Some(100),
                 trace: trace(),
+            approval_grant: None,
             },
         };
         let encoded = encode_frame(&call, DEFAULT_MAX_FRAME_BYTES).unwrap();
@@ -658,6 +736,7 @@ mod tests {
                     args: json!({}),
                     deadline_unix_ms: deadline,
                     trace: trace(),
+            approval_grant: None,
                 },
             },
             DEFAULT_MAX_FRAME_BYTES,
@@ -689,7 +768,7 @@ mod tests {
                     protocol_version: RAW_WORKER_PROTOCOL_VERSION.into(),
                     root: "/repo".into(),
                     session_id: "session-1".into(),
-                    expected_engine: "fszero".into(),
+                    expected_engine: EngineIdentity::FsZero,
                     expected_worker_revision: None,
                     expected_contract_digest: "NOTHEX".into(),
                     expected_registry_digest: None,
@@ -726,7 +805,7 @@ mod tests {
             protocol_version: "zerostack.raw_worker.v1".into(),
             root: "/repo".into(),
             session_id: "session-1".into(),
-            expected_engine: "fszero".into(),
+            expected_engine: EngineIdentity::FsZero,
             expected_worker_revision: None,
             expected_contract_digest: "d".repeat(64),
             expected_registry_digest: None,
@@ -814,7 +893,7 @@ mod tests {
     #[test]
     fn handshake_rejects_skew_and_wrong_binding() {
         let binding = WorkerBinding {
-            engine: "fszero".into(),
+            engine: EngineIdentity::FsZero,
             root: "/repo".into(),
             session_id: "session-1".into(),
             worker_revision: "abc123".into(),
@@ -850,6 +929,7 @@ mod tests {
             args: Value::Null,
             deadline_unix_ms: Some(100),
             trace: trace(),
+            approval_grant: None,
         };
         assert!(!call.deadline_expired(99));
         assert!(call.deadline_expired(100));

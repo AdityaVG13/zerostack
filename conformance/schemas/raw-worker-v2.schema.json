@@ -15,6 +15,19 @@
   ],
   "$defs": {
     "hexDigest": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "engineIdentity": { "type": "string", "enum": ["fszero", "graphzero", "tokenzero", "fs_zero", "graph_zero", "token_zero", "fs", "graph", "token"] },
+    "approvalGrant": {
+      "type": "object", "additionalProperties": false,
+      "required": ["grant_id", "engine", "root", "session_id", "request_id", "operation", "effect", "authority_digest", "policy_digest", "issued_at_unix_ms", "expires_at_unix_ms"],
+      "properties": {
+        "grant_id": { "$ref": "#/$defs/nonEmpty" }, "engine": { "$ref": "#/$defs/engineIdentity" },
+        "root": { "$ref": "#/$defs/nonEmpty" }, "session_id": { "$ref": "#/$defs/nonEmpty" },
+        "request_id": { "$ref": "#/$defs/nonEmpty" }, "operation": { "$ref": "#/$defs/nonEmpty" },
+        "effect": { "const": "approval_required_mutation" },
+        "authority_digest": { "$ref": "#/$defs/hexDigest" }, "policy_digest": { "$ref": "#/$defs/hexDigest" },
+        "issued_at_unix_ms": { "type": "integer", "minimum": 0 }, "expires_at_unix_ms": { "type": "integer", "minimum": 1 }
+      }
+    },
     "nonEmpty": { "type": "string", "minLength": 1 },
     "trace": {
       "type": "object",
@@ -35,7 +48,7 @@
       "additionalProperties": false,
       "required": ["engine", "root", "session_id", "worker_revision", "semantic_contract_version", "semantic_contract_digest", "operation_registry_digest", "ref_scheme"],
       "properties": {
-        "engine": { "$ref": "#/$defs/nonEmpty" },
+        "engine": { "$ref": "#/$defs/engineIdentity" },
         "root": { "$ref": "#/$defs/nonEmpty" },
         "session_id": { "$ref": "#/$defs/nonEmpty" },
         "worker_revision": { "$ref": "#/$defs/nonEmpty" },
@@ -53,7 +66,7 @@
         "protocol_version": { "const": "zerostack.raw_worker.v2" },
         "root": { "$ref": "#/$defs/nonEmpty" },
         "session_id": { "$ref": "#/$defs/nonEmpty" },
-        "expected_engine": { "$ref": "#/$defs/nonEmpty" },
+        "expected_engine": { "$ref": "#/$defs/engineIdentity" },
         "expected_worker_revision": { "$ref": "#/$defs/nonEmpty" },
         "expected_contract_digest": { "$ref": "#/$defs/hexDigest" },
         "expected_registry_digest": { "$ref": "#/$defs/hexDigest" }
@@ -68,7 +81,8 @@
         "op": { "$ref": "#/$defs/nonEmpty" },
         "args": {},
         "deadline_unix_ms": { "type": "integer", "minimum": 1 },
-        "trace": { "$ref": "#/$defs/trace" }
+        "trace": { "$ref": "#/$defs/trace" },
+          "approval_grant": { "$ref": "#/$defs/approvalGrant" }
       }
     },
     "handshake": {
@@ -192,7 +206,7 @@
           "additionalProperties": false,
           "required": ["engine", "session_id", "refs"],
           "properties": {
-            "engine": { "$ref": "#/$defs/nonEmpty" },
+            "engine": { "$ref": "#/$defs/engineIdentity" },
             "session_id": { "$ref": "#/$defs/nonEmpty" },
             "refs": { "type": "array", "items": { "type": "string" } },
             "snapshot": {
