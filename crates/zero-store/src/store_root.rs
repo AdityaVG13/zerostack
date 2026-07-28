@@ -435,9 +435,14 @@ fn lexical_normalize(path: &Path) -> PathBuf {
     for component in path.components() {
         match component {
             Component::CurDir => {}
-            Component::ParentDir => {
-                out.pop();
-            }
+            Component::ParentDir => match out.components().next_back() {
+                Some(Component::Normal(_)) => {
+                    out.pop();
+                }
+                Some(Component::ParentDir) | None => out.push(Component::ParentDir.as_os_str()),
+                Some(Component::RootDir | Component::Prefix(_)) => {}
+                Some(Component::CurDir) => unreachable!("CurDir is never retained"),
+            },
             other => out.push(other.as_os_str()),
         }
     }
@@ -449,6 +454,40 @@ mod tests {
     use super::*;
     use std::ffi::OsString;
     use tempfile::TempDir;
+
+    #[cfg(unix)]
+    #[test]
+    fn lexical_normalize_keeps_absolute_paths_at_root() {
+        assert_eq!(
+            lexical_normalize(Path::new("/../../project")),
+            Path::new("/project")
+        );
+        assert_eq!(
+            lexical_normalize(Path::new("/project/../../..")),
+            Path::new("/")
+        );
+    }
+
+    #[test]
+    fn lexical_normalize_collapses_interior_components() {
+        assert_eq!(
+            lexical_normalize(Path::new("alpha/beta/../gamma/./delta")),
+            Path::new("alpha/gamma/delta")
+        );
+        assert_eq!(
+            lexical_normalize(Path::new("../../alpha")),
+            Path::new("../../alpha")
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn lexical_normalize_equivalent_identity_paths_match() {
+        assert_eq!(
+            lexical_normalize(Path::new("/workspace/project/../project")),
+            lexical_normalize(Path::new("/workspace/project"))
+        );
+    }
 
     const ENGINES: [Engine; 3] = [Engine::TokenZero, Engine::FsZero, Engine::GraphZero];
 
