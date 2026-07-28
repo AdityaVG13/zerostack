@@ -39,14 +39,41 @@ in a script.
 from __future__ import annotations
 
 import argparse
+from contextlib import contextmanager
 import json
 import os
 import sys
 import time
-from pathlib import Path
+from pathlib import Path, PurePosixPath, PureWindowsPath
+from typing import Iterator
+
+try:
+    import fcntl
+except ImportError:  # pragma: no cover - supported platforms provide it
+    fcntl = None  # type: ignore[assignment]
 
 LOCK_FILE = Path(__file__).resolve().parent.parent / ".agent-locks.json"
+SIDECAR_LOCK_FILE = LOCK_FILE.with_suffix(LOCK_FILE.suffix + ".lock")
 DEFAULT_TTL_SECONDS = 2 * 60 * 60
+
+
+@contextmanager
+def state_lock(*, exclusive: bool) -> Iterator[None]:
+    """Hold the stable sidecar lock for one complete state operation."""
+    if fcntl is None:
+        raise RuntimeError(
+            "agent_lock.py requires POSIX file locking (fcntl) on macOS or Linux"
+        )
+    try:
+        with SIDECAR_LOCK_FILE.open("a+", encoding="utf-8") as lock_handle:
+            operation = fcntl.LOCK_EX if exclusive else fcntl.LOCK_SH
+            fcntl.flock(lock_handle.fileno(), operation)
+            try:
+                yield
+            finally:
+                fcntl.flock(lock_handle.fileno(), fcntl.LOCK_UN)
+    except OSError as exc:
+        raise RuntimeError(f"cannot lock {SIDECAR_LOCK_FILE}: {exc}") from exc
 
 
 def load() -> dict:
@@ -63,16 +90,27 @@ def load() -> dict:
 
 
 def save(locks: dict) -> None:
-    # Write-then-rename so a concurrent reader never sees a half-written file.
-    # Two agents can still interleave read-modify-write; that is an accepted
-    # limit of an advisory tool, and the TTL bounds the damage.
+    # Write-then-rename so readers outside this tool also see atomic snapshots.
+    # Callers hold the exclusive sidecar lock across load/check/save.
     tmp = LOCK_FILE.with_suffix(".json.tmp")
     tmp.write_text(json.dumps(locks, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     os.replace(tmp, LOCK_FILE)
 
 
 def normalize(path: str) -> str:
-    return path.strip().lstrip("./").rstrip("/")
+    """Return a collision-free repository namespace key."""
+    normalized_separators = path.replace("\\", "/")
+    windows_path = PureWindowsPath(path)
+    if PurePosixPath(normalized_separators).is_absolute() or windows_path.is_absolute() or windows_path.drive:
+        raise ValueError(f"path must be repository-relative: {path!r}")
+
+    components = normalized_separators.split("/")
+    if any(component == ".." for component in components):
+        raise ValueError(f"parent traversal is not allowed: {path!r}")
+    components = [component for component in components if component not in ("", ".")]
+    if not components:
+        raise ValueError("path must name a repository-relative file")
+    return "/".join(components)
 
 
 def age_str(seconds: float) -> str:
@@ -89,51 +127,55 @@ def is_stale(entry: dict, ttl: int) -> bool:
 
 def cmd_claim(args) -> int:
     key = normalize(args.path)
-    locks = load()
-    held = locks.get(key)
+    with state_lock(exclusive=True):
+        locks = load()
+        held = locks.get(key)
 
-    if held and held.get("who") != args.who and not is_stale(held, args.ttl) and not args.force:
-        age = age_str(time.time() - held.get("ts", 0))
-        print(
-            f"LOCKED by {held.get('who')} ({age} ago): {key}\n"
-            f"  reason: {held.get('why') or '(none)'}\n"
-            f"  Coordinate over Agent Mail, pick different work, or --force if you know it is abandoned.",
-            file=sys.stderr,
-        )
-        return 1
+        if held and held.get("who") != args.who and not is_stale(held, args.ttl) and not args.force:
+            age = age_str(time.time() - held.get("ts", 0))
+            print(
+                f"LOCKED by {held.get('who')} ({age} ago): {key}\n"
+                f"  reason: {held.get('why') or '(none)'}\n"
+                f"  Coordinate over Agent Mail, pick different work, or --force if you know it is abandoned.",
+                file=sys.stderr,
+            )
+            return 1
 
-    if held and held.get("who") != args.who:
-        why = "stale" if is_stale(held, args.ttl) else "forced"
-        print(f"note: taking over {why} lock from {held.get('who')}", file=sys.stderr)
+        if held and held.get("who") != args.who:
+            why = "stale" if is_stale(held, args.ttl) else "forced"
+            print(f"note: taking over {why} lock from {held.get('who')}", file=sys.stderr)
 
-    locks[key] = {"who": args.who, "why": args.why, "ts": time.time()}
-    save(locks)
+        locks[key] = {"who": args.who, "why": args.why, "ts": time.time()}
+        save(locks)
     print(f"claimed {key} for {args.who}")
     return 0
 
 
 def cmd_release(args) -> int:
-    locks = load()
+    target = None if args.all_mine else normalize(args.path)
     released = []
-    for key in list(locks):
-        if args.all_mine:
-            if locks[key].get("who") == args.who:
+    with state_lock(exclusive=True):
+        locks = load()
+        for key in list(locks):
+            if args.all_mine:
+                if locks[key].get("who") == args.who:
+                    del locks[key]
+                    released.append(key)
+            elif key == target:
+                if locks[key].get("who") != args.who and not args.force:
+                    print(f"refusing: {key} is held by {locks[key].get('who')}, not {args.who}", file=sys.stderr)
+                    return 1
                 del locks[key]
                 released.append(key)
-        elif key == normalize(args.path):
-            if locks[key].get("who") != args.who and not args.force:
-                print(f"refusing: {key} is held by {locks[key].get('who')}, not {args.who}", file=sys.stderr)
-                return 1
-            del locks[key]
-            released.append(key)
-    save(locks)
+        save(locks)
     print(f"released {len(released)} lock(s)" + (": " + ", ".join(released) if released else ""))
     return 0
 
 
 def cmd_check(args) -> int:
     key = normalize(args.path)
-    held = load().get(key)
+    with state_lock(exclusive=False):
+        held = load().get(key)
     if not held or held.get("who") == args.who or is_stale(held, args.ttl):
         return 0
     age = age_str(time.time() - held.get("ts", 0))
@@ -142,7 +184,8 @@ def cmd_check(args) -> int:
 
 
 def cmd_list(args) -> int:
-    locks = load()
+    with state_lock(exclusive=False):
+        locks = load()
     if not locks:
         print("no active locks")
         return 0
@@ -187,7 +230,10 @@ def main() -> int:
     args = parser.parse_args()
     if getattr(args, "all_mine", False) is False and args.cmd == "release" and not args.path:
         parser.error("release needs a path or --all-mine")
-    return args.func(args)
+    try:
+        return args.func(args)
+    except (RuntimeError, ValueError) as exc:
+        parser.error(str(exc))
 
 
 if __name__ == "__main__":
