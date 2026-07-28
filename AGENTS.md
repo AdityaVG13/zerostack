@@ -10,6 +10,7 @@ This repository is the canonical public aggregation point for ZeroStack. Keep en
 - Shared foundation crates live in `crates/`.
 - `zero-abi`, `zero-ref`, `zero-store`, and conformance are pure-safe and forbid `unsafe_code`; `zerostack-machine-permit` is the intentional OS-FFI exception.
 - Audit ownership crosswalk prevents duplicate remediation: `U-SAFETY-GAP`/`EXP-003` -> `zerostack-eqbx`; OS-watch FFI -> `zerostack-zddz`; `process_alive` -> `zerostack-sqrc`; MaybeUninit/forbid/Miri residuals -> `zerostack-god3`.
+- Windows Win32 call sites 0033-0036 and 0038 are FFI, and future unsafe-inventory enumeration must record `ffi: true`.
 - Do not publish private engine source or private package source here.
 
 ## Documentation rules
