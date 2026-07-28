@@ -104,11 +104,13 @@ pub fn normalize_schema(value: &Value) -> Value {
                             normalize_schema(v)
                         }
                     }
-                    "allOf" | "anyOf" | "oneOf" | "prefixItems" => Value::Array(
-                        v.as_array()
-                            .map(|a| a.iter().map(normalize_schema).collect())
-                            .unwrap_or_default(),
-                    ),
+                    "allOf" | "anyOf" | "oneOf" | "prefixItems" => {
+                        if let Some(schemas) = v.as_array() {
+                            Value::Array(schemas.iter().map(normalize_schema).collect())
+                        } else {
+                            v.clone()
+                        }
+                    }
                     _ => normalize_schema(v),
                 };
                 out.insert(k.clone(), normalized);
@@ -132,14 +134,14 @@ fn normalize_schema_map(v: &Value) -> Value {
 }
 
 fn normalize_required(v: &Value) -> Value {
-    let mut keys: Vec<String> = v
-        .as_array()
-        .map(|a| {
-            a.iter()
-                .filter_map(|x| x.as_str().map(str::to_string))
-                .collect()
-        })
-        .unwrap_or_default();
+    let Some(required) = v.as_array() else {
+        return v.clone();
+    };
+    if !required.iter().all(Value::is_string) {
+        return v.clone();
+    }
+
+    let mut keys: Vec<&str> = required.iter().filter_map(Value::as_str).collect();
     keys.sort();
     json!(keys)
 }
@@ -281,6 +283,33 @@ mod tests {
         let a = json!({ "type": "object", "required": ["b", "a"] });
         let b = json!({ "type": "object", "required": ["a", "b"] });
         assert!(schemas_structurally_equal(&a, &b));
+    }
+
+    #[test]
+    fn malformed_required_values_remain_distinguishable() {
+        assert!(!schemas_structurally_equal(
+            &json!({ "required": "query" }),
+            &json!({ "required": [] })
+        ));
+        assert!(!schemas_structurally_equal(
+            &json!({ "required": ["query", 1] }),
+            &json!({ "required": ["query"] })
+        ));
+    }
+
+    #[test]
+    fn malformed_schema_array_keywords_remain_distinguishable() {
+        for keyword in ["allOf", "anyOf", "oneOf", "prefixItems"] {
+            let malformed = json!({ keyword: { "type": "string" } });
+            assert!(!schemas_structurally_equal(
+                &malformed,
+                &json!({ keyword: [] })
+            ));
+            assert!(!schemas_structurally_equal(
+                &malformed,
+                &json!({ keyword: "malformed" })
+            ));
+        }
     }
 
     #[test]
