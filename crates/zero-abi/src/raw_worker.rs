@@ -466,7 +466,15 @@ pub fn validate_request_frame(frame: &WorkerRequestFrame) -> Result<(), FrameCod
                     "call.deadline_unix_ms must be at least 1".into(),
                 ));
             }
-            validate_trace(&request.trace)
+            validate_trace(&request.trace)?;
+            if request.request_id != request.trace.request_id {
+                return Err(handshake_field_mismatch(
+                    "call.trace.request_id",
+                    &request.request_id,
+                    &request.trace.request_id,
+                ));
+            }
+            Ok(())
         }
         WorkerRequestFrame::Cancel { request } => {
             require_nonempty("cancel.request_id", &request.request_id)
@@ -800,7 +808,24 @@ mod tests {
     }
 
     #[test]
-    fn protocol_version_mismatch_reports_expected_canonical_version() {
+    fn abi_hardening_call_trace_request_id_binding() {
+        let matching = call_frame_bytes("read", None);
+        assert!(decode_request_frame(&matching, DEFAULT_MAX_FRAME_BYTES).is_ok());
+
+        let mut mismatched: Value = serde_json::from_slice(&matching).unwrap();
+        mismatched["request"]["trace"]["request_id"] = json!("request-2");
+        let bytes = serde_json::to_vec(&mismatched).unwrap();
+        let message = decode_request_frame(&bytes, DEFAULT_MAX_FRAME_BYTES)
+            .unwrap_err()
+            .to_string();
+        assert_eq!(
+            message,
+            "call.trace.request_id mismatch: expected=request-1 actual=request-2"
+        );
+    }
+
+    #[test]
+    fn abi_hardening_protocol_version_mismatch_reports_expected_canonical_version() {
         let request = HandshakeRequest {
             protocol_version: "zerostack.raw_worker.v1".into(),
             root: "/repo".into(),

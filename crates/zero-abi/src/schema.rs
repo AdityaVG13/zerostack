@@ -80,6 +80,8 @@ pub fn normalize_schema(value: &Value) -> Value {
                 let normalized = match k.as_str() {
                     key if OPAQUE_PAYLOAD_KEYS.contains(&key) => v.clone(),
                     "required" => normalize_required(v),
+                    "type" if v.is_array() => normalize_required(v),
+                    "dependentRequired" => normalize_dependent_required(v),
                     "enum" => normalize_enum(v),
                     "properties" | "patternProperties" | "definitions" | "$defs" => {
                         normalize_schema_map(v)
@@ -144,6 +146,17 @@ fn normalize_required(v: &Value) -> Value {
     let mut keys: Vec<&str> = required.iter().filter_map(Value::as_str).collect();
     keys.sort();
     json!(keys)
+}
+
+fn normalize_dependent_required(v: &Value) -> Value {
+    let Some(dependencies) = v.as_object() else {
+        return v.clone();
+    };
+    let mut out = Map::new();
+    for (property, required) in dependencies {
+        out.insert(property.clone(), normalize_required(required));
+    }
+    Value::Object(out)
 }
 
 fn normalize_enum(v: &Value) -> Value {
@@ -283,6 +296,27 @@ mod tests {
         let a = json!({ "type": "object", "required": ["b", "a"] });
         let b = json!({ "type": "object", "required": ["a", "b"] });
         assert!(schemas_structurally_equal(&a, &b));
+    }
+
+    #[test]
+    fn abi_hardening_type_array_order_is_set_like() {
+        let a = json!({ "type": ["null", "string"] });
+        let b = json!({ "type": ["string", "null"] });
+        assert!(schemas_structurally_equal(&a, &b));
+    }
+
+    #[test]
+    fn abi_hardening_dependent_required_order_is_set_like() {
+        let a = json!({ "dependentRequired": { "credit_card": ["billing", "name"] } });
+        let b = json!({ "dependentRequired": { "credit_card": ["name", "billing"] } });
+        assert!(schemas_structurally_equal(&a, &b));
+    }
+
+    #[test]
+    fn abi_hardening_ordinary_array_order_remains_significant() {
+        let a = json!({ "default": ["a", "b"] });
+        let b = json!({ "default": ["b", "a"] });
+        assert!(!schemas_structurally_equal(&a, &b));
     }
 
     #[test]
