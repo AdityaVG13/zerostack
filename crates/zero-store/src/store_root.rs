@@ -404,6 +404,12 @@ pub struct StoreResolutionReport {
 /// Create the directories implied by a resolved store. Separate from
 /// resolution so resolution never has side effects.
 pub fn ensure_layout(resolved: &ResolvedStore) -> std::io::Result<()> {
+    if resolved.pin_value().is_some_and(literal_tilde_root) {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "configured store root must not start with a literal '~' path component",
+        ));
+    }
     if let Some(root) = resolved.unified_root() {
         std::fs::create_dir_all(root)?;
     }
@@ -481,7 +487,14 @@ pub fn store_is_under_project_root(store: &Path, root: &Path) -> bool {
 }
 
 /// Resolve a pin against the repository root: absolute as-is, relative joined.
+fn literal_tilde_root(path: &Path) -> bool {
+    matches!(path.components().next(), Some(Component::Normal(component)) if component == OsStr::new("~"))
+}
+
 fn resolve_pin_path(repo_root: &Path, pin: &Path) -> PathBuf {
+    if literal_tilde_root(pin) {
+        return pin.to_path_buf();
+    }
     let joined = if pin.is_absolute() {
         pin.to_path_buf()
     } else {
@@ -996,5 +1009,31 @@ mod tests {
         let resolved = ResolvedStore::resolve(dir.path(), Engine::TokenZero, &env);
         assert_eq!(resolved.mode(), StoreMode::LocalUnified);
         ensure_layout(&resolved).unwrap();
+    }
+
+    #[test]
+    fn tilde_root_rejects_literal_first_component_without_creating_it() {
+        for pin in ["~", "~/foo"] {
+            let repo = TempDir::new().unwrap();
+            let env = StoreEnv::new(Some(OsString::from(pin)), true);
+            let resolved = ResolvedStore::resolve(repo.path(), Engine::TokenZero, &env);
+
+            let error = ensure_layout(&resolved).unwrap_err();
+            assert_eq!(error.kind(), std::io::ErrorKind::InvalidInput);
+            assert!(error.to_string().contains("literal '~'"));
+            assert!(!repo.path().join("~").exists());
+        }
+    }
+
+    #[test]
+    fn tilde_root_allows_tilde_after_the_first_component() {
+        for pin in ["safe/~", "safe~/store"] {
+            let repo = TempDir::new().unwrap();
+            let env = StoreEnv::new(Some(OsString::from(pin)), true);
+            let resolved = ResolvedStore::resolve(repo.path(), Engine::GraphZero, &env);
+
+            ensure_layout(&resolved).unwrap();
+            assert!(repo.path().join(pin).is_dir());
+        }
     }
 }
