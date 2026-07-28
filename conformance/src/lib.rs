@@ -2,6 +2,7 @@
 
 pub mod checks;
 pub mod fake_substrate;
+pub mod oracle;
 pub mod patterns;
 pub mod report;
 pub mod schema;
