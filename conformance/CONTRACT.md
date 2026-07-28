@@ -372,3 +372,26 @@ The deterministic hub suite publishes six machine-readable gate IDs. It owns imm
 Paper 12.2 release evidence MUST fix the preregistered target identity and digest before evaluation and report each task's raw cost `R`, compressed cost `C`, and ratio `C/R`. Every task MUST show no statistically or transactionally demonstrated regression through powered paired evidence or a valid T13 no-regret receipt. Accounting MUST include all fallback, retry, failed-trial, verification, recovery, and failed-expansion charges. A green run against the deterministic fake substrate validates the hub harness only; it is explicitly **not** a production release pass.
 
 These gates make no universal compression-percentage claim (T5) and no semantic-sufficiency claim (T6). They establish only the listed machine-checkable invariants.
+
+
+## CONTRACT T13: objective task-verified speculation
+
+A transactional task attempt begins inside a named journal and carries a nonzero, integer attempt cost. TaskAcceptanceReceipt is an opaque linear capability: it is not deserializable, has no public fields, and is minted only by the hub verify_task_acceptance function after an injected trusted TaskAcceptanceVerifier authenticates actual run evidence. The receipt fixes task_id, verifier CommandId, verifier-environment digest, passing outcome and zero exit code, expected and observed artifact digests, journal_id, and attempt cost. Artifact lists are bounded to 64 entries. A nonzero exit, count mismatch, or digest mismatch is a typed verifier failure; model judgment is never evidence.
+
+A sandbox attempt has no commit operation. A passing receipt permits the private commit transition. Verifier rejection, objective failure, or a missing receipt produces deterministic raw rollback carrying the same journal and attempt cost. Both committed and rolled-back attempts MUST charge their nonzero cost through zero-ledger checked append-only accounting (Billed for committed attempts, FailedTrial for rolled-back attempts). Missing charge and missing-receipt commit are conformance failures. Transaction mechanics are pure synchronous state transitions with no I/O or async work.
+
+EffectClass::Irreversible task speculation is rejected before an attempt even when a receipt is supplied. Pre-action Certified evidence behavior is unchanged. Reversible and approval-required transactional attempts remain policy-controlled. The prior six RACC gates and the Paper 12.2 release aggregate remain conjunctive; T13 adds a gate and does not weaken either.
+
+### Required pi-stack host mirror
+
+No existing T13 pi-stack host bead ID was found in repository metadata. Do not invent one. Create and link a downstream mirror with this exact specification:
+
+**Title:** `feat(pi-zerostack): drive T13 journaled task verification and charge attempts`
+
+**Acceptance:**
+
+1. Begin every speculative task under an FSZero TransactionJournal; capture the verifier CommandId, pinned environment digest, exit code, expected and observed artifact digests, journal ID, and nonzero integer attempt cost from the actual run.
+2. Inject the trusted host verifier and pass actual evidence to the hub contract; commit only with the returned passing TaskAcceptanceReceipt.
+3. Roll back to raw on verifier rejection, nonzero exit, artifact mismatch, or missing receipt; expose and charge the same attempt cost on every path.
+4. Reject EffectClass::Irreversible before sandbox execution while preserving Certified pre-action behavior and approval policy.
+5. Add end-to-end host tests for passing commit, failing rollback, missing-charge and missing-receipt mutations, irreversible rejection, and journal teardown.

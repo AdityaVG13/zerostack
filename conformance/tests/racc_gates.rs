@@ -1,10 +1,10 @@
 use zerostack_codemode_conformance::checks::CheckStatus;
 use zerostack_codemode_conformance::fake_substrate::RaccFakeSubstrate;
 use zerostack_codemode_conformance::racc::{
-    check_budget, check_cert, check_inline, check_irreversible_gate, check_receipt,
+    check_budget, check_cert, check_inline, check_irreversible_gate, check_receipt, check_task_transaction,
     check_release_aggregate, check_residency, digest_hex, run_racc_suite, BudgetMutation,
     CertificateMutation, Charges, ReceiptMutation, RegressionEvidence, ReleaseEvidence,
-    ResidencyMutation, TaskReleaseEvidence,
+    ResidencyMutation, TaskAcceptanceReceiptDocument, TaskReleaseEvidence, TaskTransactionMutation,
 };
 
 fn assert_fails(result: zerostack_codemode_conformance::racc::RaccCheckResult) {
@@ -12,11 +12,11 @@ fn assert_fails(result: zerostack_codemode_conformance::racc::RaccCheckResult) {
 }
 
 #[test]
-fn all_six_public_gates_pass_on_the_honest_fake() {
+fn prior_six_and_task_transaction_gate_pass_on_the_honest_fake() {
     let report = run_racc_suite(&mut RaccFakeSubstrate::default());
     assert!(report.all_pass(), "{report:#?}");
     assert_eq!(serde_json::to_value(&report.checks).unwrap()[0]["id"], "RACC-CERT");
-    assert_eq!(report.checks.len(), 6);
+    assert_eq!(report.checks.len(), 7);
 }
 
 #[test]
@@ -90,7 +90,7 @@ fn release_fixture(fake: bool) -> ReleaseEvidence {
         preregistered_before_evaluation: true,
         tasks: vec![
             TaskReleaseEvidence { task_id: "task-paired".into(), raw_cost: 100, compressed_cost: 75, evidence: RegressionEvidence::PoweredPaired { powered: true, no_regression: true } },
-            TaskReleaseEvidence { task_id: "task-t13".into(), raw_cost: 80, compressed_cost: 80, evidence: RegressionEvidence::T13NoRegret { receipt_valid: true } },
+            TaskReleaseEvidence { task_id: "task-t13".into(), raw_cost: 80, compressed_cost: 80, evidence: RegressionEvidence::T13NoRegret { receipt: TaskAcceptanceReceiptDocument { schema_version: 1, task_id: "task-t13".into(), verifier_command_id: 41, verifier_environment_digest: digest_hex(b"release-env"), outcome: "passed".into(), exit_code: 0, expected_artifact_digests: vec![digest_hex(b"artifact")], observed_artifact_digests: vec![digest_hex(b"artifact")], journal_id: digest_hex(b"journal"), attempt_cost: 5 } } },
         ],
         expected_accounting: accounting.clone(),
         reported_accounting: accounting,
@@ -123,4 +123,18 @@ fn release_aggregate_rejects_unfixed_target_regression_and_hidden_accounting() {
     let mut hidden = release_fixture(false);
     hidden.reported_accounting.failed_trials = 0;
     assert_eq!(check_release_aggregate(&hidden).status, CheckStatus::Fail);
+}
+
+
+#[test]
+fn task_transaction_gate_accepts_objective_commit_and_charged_rollback() {
+    assert_eq!(check_task_transaction(&mut RaccFakeSubstrate::default()).status, CheckStatus::Pass);
+}
+
+#[test]
+fn task_transaction_gate_rejects_missing_charge_receipt_and_irreversible_speculation() {
+    for mutation in [TaskTransactionMutation::MissingCharge, TaskTransactionMutation::MissingReceiptCommit, TaskTransactionMutation::AllowIrreversible] {
+        let mut fake = RaccFakeSubstrate { task_transaction_mutation: mutation, ..Default::default() };
+        assert_fails(check_task_transaction(&mut fake));
+    }
 }

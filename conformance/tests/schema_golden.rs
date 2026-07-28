@@ -109,3 +109,27 @@ fn racc_golden_schemas_reject_shape_drift() {
     assert!(validate_racc_schema(RACC_CERTIFICATE_SCHEMA, &json!({"schema_version": 1})).is_err());
     assert!(validate_racc_schema(RACC_RECEIPT_SCHEMA, &json!({"schema_version": 1})).is_err());
 }
+
+
+#[test]
+fn task_acceptance_receipt_schema_is_golden_pinned() {
+    use zerostack_codemode_conformance::racc::{digest_hex, validate_racc_schema, RACC_TASK_ACCEPTANCE_RECEIPT_SCHEMA};
+    let artifact = digest_hex(b"artifact");
+    let receipt = json!({
+        "schema_version": 1,
+        "task_id": "task-7",
+        "verifier_command_id": 41,
+        "verifier_environment_digest": digest_hex(b"env"),
+        "outcome": "passed",
+        "exit_code": 0,
+        "expected_artifact_digests": [artifact.clone()],
+        "observed_artifact_digests": [artifact],
+        "journal_id": digest_hex(b"journal"),
+        "attempt_cost": 13
+    });
+    validate_racc_schema(RACC_TASK_ACCEPTANCE_RECEIPT_SCHEMA, &receipt).unwrap();
+    let mut nonzero = receipt.clone(); nonzero["exit_code"] = json!(1);
+    assert!(validate_racc_schema(RACC_TASK_ACCEPTANCE_RECEIPT_SCHEMA, &nonzero).is_err());
+    let mut free = receipt; free["attempt_cost"] = json!(0);
+    assert!(validate_racc_schema(RACC_TASK_ACCEPTANCE_RECEIPT_SCHEMA, &free).is_err());
+}

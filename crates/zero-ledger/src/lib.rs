@@ -223,6 +223,10 @@ pub enum ChargeClass {
     Fallback,
 }
 
+/// Transactional task-attempt disposition used to classify mandatory cost.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum TaskAttemptDisposition { Passed, RolledBack }
+
 impl ChargeClass {
     /// Every charge class, in canonical order.
     pub const ALL: [ChargeClass; 6] = [
@@ -462,6 +466,24 @@ impl ResourceGauge {
     /// charge whose declared input is not classified exactly once, and rejects
     /// overflow rather than wrapping. On any error the ledger is unchanged, so
     /// the counters stay monotone. Performs no allocation and no I/O.
+    /// Charges one successful or rolled-back task attempt through the existing
+    /// exhaustive token accounting. A zero charge is rejected so speculation
+    /// cannot become free; checked charge() arithmetic keeps counters monotone.
+    pub fn charge_task_attempt(
+        &mut self,
+        tokenizer: &TokenizerIdentity,
+        attempt_cost: u64,
+        disposition: TaskAttemptDisposition,
+    ) -> Result<(), LedgerError> {
+        if attempt_cost == 0 { return Err(LedgerError::ZeroTaskAttemptCost); }
+        let mut charge = TokenCharge { raw_input_tokens: attempt_cost, input_tokens: attempt_cost, ..TokenCharge::default() };
+        match disposition {
+            TaskAttemptDisposition::Passed => charge.billed_tokens = attempt_cost,
+            TaskAttemptDisposition::RolledBack => charge.failed_trial_tokens = attempt_cost,
+        }
+        self.charge(tokenizer, &charge)
+    }
+
     pub fn charge(
         &mut self,
         tokenizer: &TokenizerIdentity,
@@ -1158,6 +1180,8 @@ pub enum LedgerError {
         /// Cost recorded in the ledger.
         actual: u128,
     },
+    /// Transactional speculation must never be free.
+    ZeroTaskAttemptCost,
 }
 
 impl fmt::Display for LedgerError {
@@ -1193,6 +1217,7 @@ impl fmt::Display for LedgerError {
                 "{classified} classified input tokens exceed the {declared} declared: a call was counted more than once"
             ),
             Self::EmptyExposureAccount => f.write_str("exposure account has no blocks"),
+            Self::ZeroTaskAttemptCost => f.write_str("transactional task attempt cost must be nonzero"),
             Self::ReplayIdentityMismatch {
                 side,
                 expected,

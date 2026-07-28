@@ -7,6 +7,7 @@ use std::collections::BTreeMap;
 
 pub const RACC_CERTIFICATE_SCHEMA: &str = include_str!("../schemas/racc-certificate.schema.json");
 pub const RACC_RECEIPT_SCHEMA: &str = include_str!("../schemas/racc-receipt.schema.json");
+pub const RACC_TASK_ACCEPTANCE_RECEIPT_SCHEMA: &str = include_str!("../schemas/racc-task-acceptance-receipt.schema.json");
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub enum RaccGateId {
@@ -22,16 +23,19 @@ pub enum RaccGateId {
     Inline,
     #[serde(rename = "RACC-RESIDENCY")]
     Residency,
+    #[serde(rename = "RACC-TASK-TRANSACTION")]
+    TaskTransaction,
 }
 
 impl RaccGateId {
-    pub const ALL: [Self; 6] = [
+    pub const ALL: [Self; 7] = [
         Self::Cert,
         Self::Receipt,
         Self::GateIrrev,
         Self::Budget,
         Self::Inline,
         Self::Residency,
+        Self::TaskTransaction,
     ];
 }
 
@@ -289,6 +293,47 @@ pub struct StoredFixture { pub id: String, pub bytes: Vec<u8>, pub metadata: BTr
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum StoreLookup { Hit { bytes: Vec<u8>, metadata: BTreeMap<String, String> }, Miss { id: String } }
 
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TaskEffectClass { Reversible, ApprovalRequired, Irreversible }
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum TaskAttemptCase { PassingVerifier, FailingVerifier, Irreversible }
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum TaskTransactionMutation { None, MissingCharge, MissingReceiptCommit, AllowIrreversible }
+
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TaskAttemptDisposition { Committed, RawRollback, RejectedIrreversible }
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct TaskAcceptanceReceiptDocument {
+    pub schema_version: u32,
+    pub task_id: String,
+    pub verifier_command_id: u64,
+    pub verifier_environment_digest: String,
+    pub outcome: String,
+    pub exit_code: i32,
+    pub expected_artifact_digests: Vec<String>,
+    pub observed_artifact_digests: Vec<String>,
+    pub journal_id: String,
+    pub attempt_cost: u64,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct TaskAttemptObservation {
+    pub effect_class: TaskEffectClass,
+    pub exit_code: Option<i32>,
+    pub expected_artifact_digests: Vec<String>,
+    pub observed_artifact_digests: Vec<String>,
+    pub journal_id: String,
+    pub attempt_cost: u64,
+    pub charged_attempt_cost: u64,
+    pub receipt: Option<TaskAcceptanceReceiptDocument>,
+    pub disposition: TaskAttemptDisposition,
+}
+
 pub trait RaccSubstrate {
     fn certified_query(&mut self, fixture: &QueryFixture) -> RaccCertificate;
     fn dominance_receipt(&mut self) -> DominanceReceipt;
@@ -296,6 +341,7 @@ pub trait RaccSubstrate {
     fn expansion_budget(&mut self) -> BudgetObservation;
     fn inline_fetch(&mut self, fixture: &QueryFixture) -> InlineObservation;
     fn residency_round_trip(&mut self, objects: &[StoredFixture]) -> Vec<(StoreLookup, StoreLookup)>;
+    fn task_attempt(&mut self, case: TaskAttemptCase) -> TaskAttemptObservation;
 }
 
 fn pass(id: RaccGateId, detail: impl Into<String>) -> RaccCheckResult { RaccCheckResult { id, status: CheckStatus::Pass, detail: detail.into() } }
@@ -388,14 +434,52 @@ pub fn check_residency(substrate: &mut impl RaccSubstrate) -> RaccCheckResult {
     pass(RaccGateId::Residency, "eight resident objects recovered byte-identically then returned typed misses")
 }
 
+pub fn check_task_transaction(substrate: &mut impl RaccSubstrate) -> RaccCheckResult {
+    let passing = substrate.task_attempt(TaskAttemptCase::PassingVerifier);
+    let Some(receipt) = &passing.receipt else { return fail(RaccGateId::TaskTransaction, "passing commit omitted objective receipt"); };
+    let passing_valid = passing.effect_class == TaskEffectClass::Reversible
+        && passing.exit_code == Some(0)
+        && passing.disposition == TaskAttemptDisposition::Committed
+        && passing.attempt_cost > 0
+        && passing.charged_attempt_cost == passing.attempt_cost
+        && receipt.schema_version == 1
+        && receipt.task_id == "fixture-task"
+        && receipt.verifier_command_id == 41
+        && receipt.verifier_environment_digest == digest_hex(b"fixture-verifier-env")
+        && receipt.outcome == "passed"
+        && receipt.exit_code == 0
+        && receipt.expected_artifact_digests == passing.expected_artifact_digests
+        && receipt.observed_artifact_digests == passing.observed_artifact_digests
+        && receipt.expected_artifact_digests == receipt.observed_artifact_digests
+        && receipt.journal_id == passing.journal_id
+        && receipt.attempt_cost == passing.attempt_cost;
+    if !passing_valid { return fail(RaccGateId::TaskTransaction, "passing objective verifier/receipt/charge contract mismatch"); }
+
+    let failing = substrate.task_attempt(TaskAttemptCase::FailingVerifier);
+    if failing.exit_code != Some(17)
+        || failing.receipt.is_some()
+        || failing.disposition != TaskAttemptDisposition::RawRollback
+        || failing.attempt_cost == 0
+        || failing.charged_attempt_cost != failing.attempt_cost
+    { return fail(RaccGateId::TaskTransaction, "failing verifier did not rollback to raw with charged attempt"); }
+
+    let irreversible = substrate.task_attempt(TaskAttemptCase::Irreversible);
+    if irreversible.effect_class != TaskEffectClass::Irreversible
+        || irreversible.disposition != TaskAttemptDisposition::RejectedIrreversible
+        || irreversible.receipt.is_some()
+        || irreversible.exit_code.is_some()
+    { return fail(RaccGateId::TaskTransaction, "irreversible speculation was not typed pre-attempt rejection"); }
+    pass(RaccGateId::TaskTransaction, "passing verifier committed with receipt; failure rolled back charged; irreversible rejected")
+}
+
 pub fn run_racc_suite(substrate: &mut impl RaccSubstrate) -> RaccHarnessReport {
-    let checks = vec![check_cert(substrate), check_receipt(substrate), check_irreversible_gate(substrate), check_budget(substrate), check_inline(substrate), check_residency(substrate)];
+    let checks = vec![check_cert(substrate), check_receipt(substrate), check_irreversible_gate(substrate), check_budget(substrate), check_inline(substrate), check_residency(substrate), check_task_transaction(substrate)];
     let passed = checks.iter().filter(|result| result.status == CheckStatus::Pass).count();
     RaccHarnessReport { failed: checks.len() - passed, passed, checks }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub enum RegressionEvidence { PoweredPaired { powered: bool, no_regression: bool }, T13NoRegret { receipt_valid: bool } }
+pub enum RegressionEvidence { PoweredPaired { powered: bool, no_regression: bool }, T13NoRegret { receipt: TaskAcceptanceReceiptDocument } }
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct TaskReleaseEvidence { pub task_id: String, pub raw_cost: u64, pub compressed_cost: u64, pub evidence: RegressionEvidence }
 impl TaskReleaseEvidence { pub fn ratio(&self) -> Option<(u64, u64)> { (self.raw_cost != 0).then_some((self.compressed_cost, self.raw_cost)) } }
@@ -422,7 +506,7 @@ pub fn check_release_aggregate(evidence: &ReleaseEvidence) -> ReleaseAggregateRe
     let targets_fixed = evidence.preregistered_before_evaluation && !evidence.target_identity.is_empty() && evidence.target_digest == digest_hex(evidence.target_identity.as_bytes());
     let no_regression = evidence.tasks.iter().all(|task| match task.evidence {
         RegressionEvidence::PoweredPaired { powered, no_regression } => powered && no_regression,
-        RegressionEvidence::T13NoRegret { receipt_valid } => receipt_valid,
+        RegressionEvidence::T13NoRegret { ref receipt } => receipt.schema_version == 1 && receipt.outcome == "passed" && receipt.exit_code == 0 && receipt.attempt_cost > 0 && receipt.expected_artifact_digests == receipt.observed_artifact_digests,
     });
     let complete_accounting = evidence.expected_accounting == evidence.reported_accounting;
     let valid = targets_fixed && no_regression && complete_accounting && ratios.len() == evidence.tasks.len() && !ratios.is_empty();

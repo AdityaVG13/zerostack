@@ -578,6 +578,7 @@ pub struct RaccFakeSubstrate {
     pub budget_mutation: crate::racc::BudgetMutation,
     pub second_certificate_fetch: bool,
     pub residency_mutation: crate::racc::ResidencyMutation,
+    pub task_transaction_mutation: crate::racc::TaskTransactionMutation,
 }
 
 impl Default for RaccFakeSubstrate {
@@ -589,6 +590,7 @@ impl Default for RaccFakeSubstrate {
             budget_mutation: crate::racc::BudgetMutation::None,
             second_certificate_fetch: false,
             residency_mutation: crate::racc::ResidencyMutation::None,
+            task_transaction_mutation: crate::racc::TaskTransactionMutation::None,
         }
     }
 }
@@ -710,4 +712,57 @@ impl crate::racc::RaccSubstrate for RaccFakeSubstrate {
             (resident, removed)
         }).collect()
     }
+
+    fn task_attempt(&mut self, case: crate::racc::TaskAttemptCase) -> crate::racc::TaskAttemptObservation {
+        use crate::racc::{TaskAcceptanceReceiptDocument as Receipt, TaskAttemptCase as C, TaskAttemptDisposition as D, TaskEffectClass as E, TaskTransactionMutation as M};
+        let artifact = crate::racc::digest_hex(b"fixture-artifact");
+        let journal = crate::racc::digest_hex(b"fixture-journal");
+        let cost = 13;
+        match case {
+            C::PassingVerifier => {
+                let receipt = Receipt {
+                    schema_version: 1,
+                    task_id: "fixture-task".into(),
+                    verifier_command_id: 41,
+                    verifier_environment_digest: crate::racc::digest_hex(b"fixture-verifier-env"),
+                    outcome: "passed".into(),
+                    exit_code: 0,
+                    expected_artifact_digests: vec![artifact.clone()],
+                    observed_artifact_digests: vec![artifact.clone()],
+                    journal_id: journal.clone(),
+                    attempt_cost: cost,
+                };
+                crate::racc::TaskAttemptObservation {
+                    effect_class: E::Reversible,
+                    exit_code: Some(0),
+                    expected_artifact_digests: vec![artifact.clone()],
+                    observed_artifact_digests: vec![artifact],
+                    journal_id: journal,
+                    attempt_cost: cost,
+                    charged_attempt_cost: cost,
+                    receipt: if self.task_transaction_mutation == M::MissingReceiptCommit { None } else { Some(receipt) },
+                    disposition: D::Committed,
+                }
+            }
+            C::FailingVerifier => crate::racc::TaskAttemptObservation {
+                effect_class: E::ApprovalRequired,
+                exit_code: Some(17),
+                expected_artifact_digests: vec![artifact.clone()],
+                observed_artifact_digests: vec![artifact],
+                journal_id: journal,
+                attempt_cost: cost,
+                charged_attempt_cost: if self.task_transaction_mutation == M::MissingCharge { 0 } else { cost },
+                receipt: None,
+                disposition: D::RawRollback,
+            },
+            C::Irreversible => crate::racc::TaskAttemptObservation {
+                effect_class: E::Irreversible,
+                exit_code: if self.task_transaction_mutation == M::AllowIrreversible { Some(0) } else { None },
+                expected_artifact_digests: Vec::new(), observed_artifact_digests: Vec::new(), journal_id: journal,
+                attempt_cost: 0, charged_attempt_cost: 0, receipt: None,
+                disposition: if self.task_transaction_mutation == M::AllowIrreversible { D::Committed } else { D::RejectedIrreversible },
+            },
+        }
+    }
+
 }

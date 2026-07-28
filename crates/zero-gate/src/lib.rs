@@ -2,32 +2,22 @@
 
 //! Pure, synchronous proof-carrying decision gate.
 //!
-//! A compressed commit cannot be constructed directly or from an expansion:
-//! ~~~compile_fail
-//! use zero_gate::{CompressedCommit, DecisionGate, NextBudget};
-//! let _forged = CompressedCommit { payload: b"forged" };
-//! let expansion = DecisionGate::Expand(NextBudget::new_for_doctest(8));
-//! let _ = expansion.commit(b"unproven");
-//! ~~~
+//! Commits and passing task receipts are privacy-preserving linear capabilities.
 //!
-//! Linear gates and proofs cannot be replayed:
+//! A sandbox attempt cannot commit without a passing receipt:
 //! ~~~compile_fail
 //! use zero_abi::raw_worker::EffectClass;
-//! use zero_gate::{decide, verify_task_acceptance, DecisionGate, GateInput, GateState, TaskAcceptanceClaims, TaskAcceptanceError, TaskAcceptanceVerifier};
-//! struct Trusted;
-//! impl TaskAcceptanceVerifier for Trusted { fn verify(&self, _: &TaskAcceptanceClaims) -> Result<(), TaskAcceptanceError> { Ok(()) } }
-//! let receipt = verify_task_acceptance(&Trusted, TaskAcceptanceClaims::new(7, [1; 32], [2; 32])).unwrap();
-//! let gate = decide(GateState::new(8).unwrap(), GateInput { effect_class: EffectClass::Irreversible, required_budget: 8, verified_evidence: None, task_receipt: Some(receipt) }).unwrap().1;
-//! if let DecisionGate::TaskVerified(receipt) = gate {
-//!     let _first = receipt.commit(b"once");
-//!     let _replay = receipt.commit(b"twice");
-//! }
+//! use zero_cert::CommandId;
+//! use zero_gate::{begin_task_attempt, TaskRunEvidence};
+//! let evidence = TaskRunEvidence::new(7, CommandId(1), [2; 32], 0, vec![[3; 32]], vec![[3; 32]], [4; 32], 5);
+//! let attempt = begin_task_attempt(EffectClass::ReversibleMutation, evidence).unwrap();
+//! let _ = attempt.commit(b"forged");
 //! ~~~
 
 use serde::{Deserialize, Serialize};
 use std::fmt;
 use zero_abi::raw_worker::EffectClass;
-use zero_cert::VerifiedEvidence;
+use zero_cert::{CommandId, VerifiedEvidence};
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct NextBudget { budget: u128, round: u32 }
@@ -48,36 +38,169 @@ impl<'certificate, 'payload> PolicySufficiencyWitness<'certificate, 'payload> {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub struct TaskAcceptanceClaims {
-    pub task_id: u64,
-    pub result_digest: [u8; 32],
-    pub verifier_identity: [u8; 32],
+pub enum TaskOutcome { Passed }
+
+pub const MAX_TASK_ARTIFACTS: usize = 64;
+
+/// Actual, bounded verifier-run evidence. This is input, never a proof.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct TaskRunEvidence {
+    task_id: u64,
+    verifier: CommandId,
+    verifier_environment_digest: [u8; 32],
+    exit_code: i32,
+    expected_artifact_digests: Vec<[u8; 32]>,
+    observed_artifact_digests: Vec<[u8; 32]>,
+    journal_id: [u8; 32],
+    attempt_cost: u64,
 }
-impl TaskAcceptanceClaims {
-    pub const fn new(task_id: u64, result_digest: [u8; 32], verifier_identity: [u8; 32]) -> Self { Self { task_id, result_digest, verifier_identity } }
+impl TaskRunEvidence {
+    #[allow(clippy::too_many_arguments)]
+    pub fn new(
+        task_id: u64,
+        verifier: CommandId,
+        verifier_environment_digest: [u8; 32],
+        exit_code: i32,
+        expected_artifact_digests: Vec<[u8; 32]>,
+        observed_artifact_digests: Vec<[u8; 32]>,
+        journal_id: [u8; 32],
+        attempt_cost: u64,
+    ) -> Self {
+        Self { task_id, verifier, verifier_environment_digest, exit_code, expected_artifact_digests, observed_artifact_digests, journal_id, attempt_cost }
+    }
+    pub fn task_id(&self) -> u64 { self.task_id }
+    pub fn verifier(&self) -> CommandId { self.verifier }
+    pub fn verifier_environment_digest(&self) -> &[u8; 32] { &self.verifier_environment_digest }
+    pub fn exit_code(&self) -> i32 { self.exit_code }
+    pub fn expected_artifact_digests(&self) -> &[[u8; 32]] { &self.expected_artifact_digests }
+    pub fn observed_artifact_digests(&self) -> &[[u8; 32]] { &self.observed_artifact_digests }
+    pub fn journal_id(&self) -> &[u8; 32] { &self.journal_id }
+    pub fn attempt_cost(&self) -> u64 { self.attempt_cost }
 }
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum TaskAcceptanceError { Rejected }
+pub enum SpeculationError { IrreversibleEffect, ZeroAttemptCost, TooManyArtifacts { count: usize, maximum: usize } }
+impl fmt::Display for SpeculationError { fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result { write!(f, "{self:?}") } }
+impl std::error::Error for SpeculationError {}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum TaskVerifierError { UntrustedRunEvidence }
+
+pub trait TaskAcceptanceVerifier {
+    fn verify_run(&self, evidence: &TaskRunEvidence) -> Result<(), TaskVerifierError>;
+}
+
+/// Active journal-scoped attempt. It has no commit operation.
+#[derive(Debug)]
+pub struct SandboxAttempt { evidence: TaskRunEvidence }
+
+pub fn begin_task_attempt(effect_class: EffectClass, evidence: TaskRunEvidence) -> Result<SandboxAttempt, SpeculationError> {
+    if effect_class == EffectClass::Irreversible { return Err(SpeculationError::IrreversibleEffect); }
+    if evidence.attempt_cost == 0 { return Err(SpeculationError::ZeroAttemptCost); }
+    let count = evidence.expected_artifact_digests.len().max(evidence.observed_artifact_digests.len());
+    if count > MAX_TASK_ARTIFACTS { return Err(SpeculationError::TooManyArtifacts { count, maximum: MAX_TASK_ARTIFACTS }); }
+    Ok(SandboxAttempt { evidence })
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum TaskAcceptanceError {
+    VerifierRejected(TaskVerifierError),
+    NonZeroOutcome { exit_code: i32 },
+    ArtifactCountMismatch { expected: usize, observed: usize },
+    ArtifactMismatch { index: usize, expected: [u8; 32], observed: [u8; 32] },
+}
 impl fmt::Display for TaskAcceptanceError { fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result { write!(f, "{self:?}") } }
 impl std::error::Error for TaskAcceptanceError {}
-pub trait TaskAcceptanceVerifier { fn verify(&self, claims: &TaskAcceptanceClaims) -> Result<(), TaskAcceptanceError>; }
-/// Opaque linear proof minted only by an injected verifier.
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum RollbackReason { MissingReceipt, VerificationFailed(TaskAcceptanceError) }
+
+#[derive(Debug)]
+pub struct RawRollback { task_id: u64, journal_id: [u8; 32], attempt_cost: u64, reason: RollbackReason }
+impl RawRollback {
+    pub fn task_id(&self) -> u64 { self.task_id }
+    pub fn journal_id(&self) -> &[u8; 32] { &self.journal_id }
+    pub fn attempt_cost(&self) -> u64 { self.attempt_cost }
+    pub fn reason(&self) -> RollbackReason { self.reason }
+}
+impl SandboxAttempt {
+    pub fn rollback_missing_receipt(self) -> RawRollback {
+        RawRollback { task_id: self.evidence.task_id, journal_id: self.evidence.journal_id, attempt_cost: self.evidence.attempt_cost, reason: RollbackReason::MissingReceipt }
+    }
+}
+
+#[derive(Debug)]
+pub struct TaskAcceptanceFailure { reason: TaskAcceptanceError, rollback: RawRollback }
+impl TaskAcceptanceFailure {
+    pub fn reason(&self) -> TaskAcceptanceError { self.reason }
+    pub fn rollback(&self) -> &RawRollback { &self.rollback }
+    pub fn into_rollback(self) -> RawRollback { self.rollback }
+}
+
+/// Opaque linear objective proof. It is neither Clone nor Deserialize and all fields are private.
+///
 /// ~~~compile_fail
-/// use zero_gate::{TaskAcceptanceClaims, TaskAcceptanceReceipt};
-/// let _ = TaskAcceptanceReceipt { claims: TaskAcceptanceClaims::new(7, [1; 32], [2; 32]) };
+/// use zero_cert::CommandId;
+/// use zero_gate::{TaskAcceptanceReceipt, TaskOutcome};
+/// let _ = TaskAcceptanceReceipt { task_id: 7, verifier: CommandId(1), verifier_environment_digest: [0; 32], outcome: TaskOutcome::Passed, exit_code: 0, expected_artifact_digests: vec![], observed_artifact_digests: vec![], journal_id: [0; 32], attempt_cost: 1 };
 /// ~~~
 #[derive(Debug)]
-pub struct TaskAcceptanceReceipt { claims: TaskAcceptanceClaims }
-impl TaskAcceptanceReceipt {
-    pub fn claims(&self) -> &TaskAcceptanceClaims { &self.claims }
-    pub fn task_id(&self) -> u64 { self.claims.task_id }
-    pub fn result_digest(&self) -> &[u8; 32] { &self.claims.result_digest }
-    pub fn verifier_identity(&self) -> &[u8; 32] { &self.claims.verifier_identity }
-    pub fn commit<'certificate, 'payload, 'commit>(self, payload: &'commit [u8]) -> CompressedCommit<'certificate, 'payload, 'commit> { CompressedCommit { proof: CommitProof::TaskVerified(self), payload } }
+pub struct TaskAcceptanceReceipt {
+    task_id: u64,
+    verifier: CommandId,
+    verifier_environment_digest: [u8; 32],
+    outcome: TaskOutcome,
+    exit_code: i32,
+    expected_artifact_digests: Vec<[u8; 32]>,
+    observed_artifact_digests: Vec<[u8; 32]>,
+    journal_id: [u8; 32],
+    attempt_cost: u64,
 }
-pub fn verify_task_acceptance<V: TaskAcceptanceVerifier + ?Sized>(verifier: &V, claims: TaskAcceptanceClaims) -> Result<TaskAcceptanceReceipt, TaskAcceptanceError> {
-    verifier.verify(&claims)?;
-    Ok(TaskAcceptanceReceipt { claims })
+impl TaskAcceptanceReceipt {
+    pub fn task_id(&self) -> u64 { self.task_id }
+    pub fn verifier(&self) -> CommandId { self.verifier }
+    pub fn verifier_environment_digest(&self) -> &[u8; 32] { &self.verifier_environment_digest }
+    pub fn outcome(&self) -> TaskOutcome { self.outcome }
+    pub fn exit_code(&self) -> i32 { self.exit_code }
+    pub fn expected_artifact_digests(&self) -> &[[u8; 32]] { &self.expected_artifact_digests }
+    pub fn observed_artifact_digests(&self) -> &[[u8; 32]] { &self.observed_artifact_digests }
+    pub fn journal_id(&self) -> &[u8; 32] { &self.journal_id }
+    pub fn attempt_cost(&self) -> u64 { self.attempt_cost }
+}
+
+#[derive(Debug)]
+pub struct VerifiedTaskAttempt { receipt: TaskAcceptanceReceipt }
+impl VerifiedTaskAttempt {
+    pub fn receipt(&self) -> &TaskAcceptanceReceipt { &self.receipt }
+    pub fn into_receipt(self) -> TaskAcceptanceReceipt { self.receipt }
+}
+
+pub fn verify_task_acceptance<V: TaskAcceptanceVerifier + ?Sized>(verifier: &V, attempt: SandboxAttempt) -> Result<VerifiedTaskAttempt, TaskAcceptanceFailure> {
+    let evidence = attempt.evidence;
+    let reason = if evidence.exit_code != 0 {
+        Some(TaskAcceptanceError::NonZeroOutcome { exit_code: evidence.exit_code })
+    } else if evidence.expected_artifact_digests.len() != evidence.observed_artifact_digests.len() {
+        Some(TaskAcceptanceError::ArtifactCountMismatch { expected: evidence.expected_artifact_digests.len(), observed: evidence.observed_artifact_digests.len() })
+    } else if let Some((index, (expected, observed))) = evidence.expected_artifact_digests.iter().zip(&evidence.observed_artifact_digests).enumerate().find(|(_, (expected, observed))| expected != observed) {
+        Some(TaskAcceptanceError::ArtifactMismatch { index, expected: *expected, observed: *observed })
+    } else {
+        verifier.verify_run(&evidence).err().map(TaskAcceptanceError::VerifierRejected)
+    };
+    if let Some(reason) = reason {
+        let rollback = RawRollback { task_id: evidence.task_id, journal_id: evidence.journal_id, attempt_cost: evidence.attempt_cost, reason: RollbackReason::VerificationFailed(reason) };
+        return Err(TaskAcceptanceFailure { reason, rollback });
+    }
+    Ok(VerifiedTaskAttempt { receipt: TaskAcceptanceReceipt {
+        task_id: evidence.task_id,
+        verifier: evidence.verifier,
+        verifier_environment_digest: evidence.verifier_environment_digest,
+        outcome: TaskOutcome::Passed,
+        exit_code: evidence.exit_code,
+        expected_artifact_digests: evidence.expected_artifact_digests,
+        observed_artifact_digests: evidence.observed_artifact_digests,
+        journal_id: evidence.journal_id,
+        attempt_cost: evidence.attempt_cost,
+    } })
 }
 
 #[derive(Debug)]
@@ -86,6 +209,18 @@ pub enum DecisionGate<'certificate, 'payload> {
     TaskVerified(TaskAcceptanceReceipt),
     Expand(NextBudget),
     RawFallback,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum GateCommitError { MissingPassingReceipt }
+impl<'certificate, 'payload> DecisionGate<'certificate, 'payload> {
+    pub fn commit<'commit>(self, payload: &'commit [u8]) -> Result<CompressedCommit<'certificate, 'payload, 'commit>, GateCommitError> {
+        match self {
+            Self::Certified(witness) => Ok(CompressedCommit { proof: CommitProof::Certified(witness), payload }),
+            Self::TaskVerified(receipt) => Ok(CompressedCommit { proof: CommitProof::TaskVerified(receipt), payload }),
+            Self::Expand(_) | Self::RawFallback => Err(GateCommitError::MissingPassingReceipt),
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -139,14 +274,15 @@ impl GateState {
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
-pub enum GateError { ZeroInitialBudget, TerminalState, ConflictingProofs, BudgetOverflow, RoundOverflow, ZeroHindsightBudget, BoundOverflow }
+pub enum GateError { ZeroInitialBudget, TerminalState, ConflictingProofs, IrreversibleSpeculation, BudgetOverflow, RoundOverflow, ZeroHindsightBudget, BoundOverflow }
 impl fmt::Display for GateError { fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result { write!(f, "{self:?}") } }
 impl std::error::Error for GateError {}
 
 pub fn decide<'certificate, 'payload>(mut state: GateState, input: GateInput<'certificate, 'payload>) -> Result<(GateState, DecisionGate<'certificate, 'payload>), GateError> {
     if state.phase == GatePhase::Terminal { return Err(GateError::TerminalState); }
     if input.verified_evidence.is_some() && input.task_receipt.is_some() { return Err(GateError::ConflictingProofs); }
-    if input.effect_class == EffectClass::Irreversible && input.verified_evidence.is_none() && input.task_receipt.is_none() {
+    if input.effect_class == EffectClass::Irreversible && input.task_receipt.is_some() { return Err(GateError::IrreversibleSpeculation); }
+    if input.effect_class == EffectClass::Irreversible && input.verified_evidence.is_none() {
         state.phase = GatePhase::Terminal;
         return Ok((state, DecisionGate::RawFallback));
     }
@@ -215,21 +351,68 @@ mod tests {
     }
     struct Accept;
     impl TaskAcceptanceVerifier for Accept {
-        fn verify(&self, _: &TaskAcceptanceClaims) -> Result<(), TaskAcceptanceError> { Ok(()) }
+        fn verify_run(&self, _: &TaskRunEvidence) -> Result<(), TaskVerifierError> { Ok(()) }
     }
     struct Reject;
     impl TaskAcceptanceVerifier for Reject {
-        fn verify(&self, _: &TaskAcceptanceClaims) -> Result<(), TaskAcceptanceError> { Err(TaskAcceptanceError::Rejected) }
+        fn verify_run(&self, _: &TaskRunEvidence) -> Result<(), TaskVerifierError> { Err(TaskVerifierError::UntrustedRunEvidence) }
     }
-    fn claims() -> TaskAcceptanceClaims { TaskAcceptanceClaims::new(7, [1; 32], [2; 32]) }
+    fn run(exit_code: i32, observed: Vec<[u8; 32]>, cost: u64) -> TaskRunEvidence {
+        TaskRunEvidence::new(7, CommandId(11), [2; 32], exit_code, vec![[3; 32]], observed, [4; 32], cost)
+    }
+    fn attempt(evidence: TaskRunEvidence) -> SandboxAttempt {
+        begin_task_attempt(EffectClass::ReversibleMutation, evidence).unwrap()
+    }
 
     #[test]
-    fn trusted_task_acceptance_accepts_and_rejects() {
-        assert_eq!(verify_task_acceptance(&Reject, claims()).unwrap_err(), TaskAcceptanceError::Rejected);
-        let receipt = verify_task_acceptance(&Accept, claims()).unwrap();
+    fn objective_verifier_mints_complete_passing_receipt_and_commit() {
+        let verified = verify_task_acceptance(&Accept, attempt(run(0, vec![[3; 32]], 9))).unwrap();
+        let receipt = verified.receipt();
         assert_eq!(receipt.task_id(), 7);
-        assert_eq!(receipt.result_digest(), &[1; 32]);
-        assert_eq!(receipt.verifier_identity(), &[2; 32]);
+        assert_eq!(receipt.verifier(), CommandId(11));
+        assert_eq!(receipt.verifier_environment_digest(), &[2; 32]);
+        assert_eq!(receipt.outcome(), TaskOutcome::Passed);
+        assert_eq!(receipt.exit_code(), 0);
+        assert_eq!(receipt.expected_artifact_digests(), &[[3; 32]]);
+        assert_eq!(receipt.observed_artifact_digests(), &[[3; 32]]);
+        assert_eq!(receipt.journal_id(), &[4; 32]);
+        assert_eq!(receipt.attempt_cost(), 9);
+        let gate_input = GateInput { effect_class: EffectClass::ReversibleMutation, required_budget: 4, verified_evidence: None, task_receipt: Some(verified.into_receipt()) };
+        let (_, gate) = decide(GateState::new(4).unwrap(), gate_input).unwrap();
+        let commit = gate.commit(b"accepted").unwrap();
+        assert!(commit.is_task_verified());
+        assert_eq!(commit.task_id(), Some(7));
+    }
+
+    #[test]
+    fn verifier_failures_and_missing_receipts_rollback_with_cost() {
+        let rejected = verify_task_acceptance(&Reject, attempt(run(0, vec![[3; 32]], 7))).unwrap_err();
+        assert_eq!(rejected.reason(), TaskAcceptanceError::VerifierRejected(TaskVerifierError::UntrustedRunEvidence));
+        assert_eq!(rejected.rollback().attempt_cost(), 7);
+        let nonzero = verify_task_acceptance(&Accept, attempt(run(2, vec![[3; 32]], 8))).unwrap_err();
+        assert_eq!(nonzero.reason(), TaskAcceptanceError::NonZeroOutcome { exit_code: 2 });
+        assert_eq!(nonzero.rollback().reason(), RollbackReason::VerificationFailed(TaskAcceptanceError::NonZeroOutcome { exit_code: 2 }));
+        let mismatch = verify_task_acceptance(&Accept, attempt(run(0, vec![[9; 32]], 10))).unwrap_err();
+        assert!(matches!(mismatch.reason(), TaskAcceptanceError::ArtifactMismatch { index: 0, .. }));
+        assert_eq!(mismatch.rollback().attempt_cost(), 10);
+        let missing = attempt(run(0, vec![[3; 32]], 11)).rollback_missing_receipt();
+        assert_eq!(missing.reason(), RollbackReason::MissingReceipt);
+        assert_eq!(missing.attempt_cost(), 11);
+    }
+
+    #[test]
+    fn irreversible_speculation_is_typed_rejection_even_with_receipt() {
+        assert_eq!(begin_task_attempt(EffectClass::Irreversible, run(0, vec![[3; 32]], 1)).unwrap_err(), SpeculationError::IrreversibleEffect);
+        let receipt = verify_task_acceptance(&Accept, attempt(run(0, vec![[3; 32]], 1))).unwrap().into_receipt();
+        let gate_input = GateInput { effect_class: EffectClass::Irreversible, required_budget: u128::MAX, verified_evidence: None, task_receipt: Some(receipt) };
+        assert_eq!(decide(GateState::new(4).unwrap(), gate_input).unwrap_err(), GateError::IrreversibleSpeculation);
+    }
+
+    #[test]
+    fn attempts_are_nonzero_cost_and_artifacts_are_bounded() {
+        assert_eq!(begin_task_attempt(EffectClass::ReadOnly, run(0, vec![[3; 32]], 0)).unwrap_err(), SpeculationError::ZeroAttemptCost);
+        let too_many = vec![[3; 32]; MAX_TASK_ARTIFACTS + 1];
+        assert_eq!(begin_task_attempt(EffectClass::ReadOnly, TaskRunEvidence::new(7, CommandId(1), [2; 32], 0, too_many.clone(), too_many, [4; 32], 1)).unwrap_err(), SpeculationError::TooManyArtifacts { count: MAX_TASK_ARTIFACTS + 1, maximum: MAX_TASK_ARTIFACTS });
     }
 
     #[test]
@@ -239,19 +422,6 @@ mod tests {
             assert_eq!(state.phase(), GatePhase::Terminal);
             assert!(matches!(gate, DecisionGate::RawFallback));
         }
-    }
-
-    #[test]
-    fn irreversible_with_valid_task_proof_is_legal() {
-        let receipt = verify_task_acceptance(&Accept, claims()).unwrap();
-        let gate_input = GateInput { effect_class: EffectClass::Irreversible, required_budget: u128::MAX, verified_evidence: None, task_receipt: Some(receipt) };
-        let (state, gate) = decide(GateState::new(4).unwrap(), gate_input).unwrap();
-        assert_eq!(state.phase(), GatePhase::Terminal);
-        let DecisionGate::TaskVerified(receipt) = gate else { panic!("expected task proof"); };
-        let commit = receipt.commit(b"accepted");
-        assert_eq!(commit.payload(), b"accepted");
-        assert_eq!(commit.task_id(), Some(7));
-        assert!(commit.evidence().is_none());
     }
 
     #[test]
