@@ -797,8 +797,13 @@ fn process_alive(pid: u32) -> bool {
     let Ok(pid) = libc::pid_t::try_from(pid) else {
         return true;
     };
-    // SAFETY: kill(pid, 0) sends no signal and only queries whether the PID
-    // exists and is signalable. `pid` is a validated positive process ID.
+    // SAFETY:
+    // - `pid` comes from `u32`, passed the zero check, and was successfully
+    //   converted to `pid_t`, so it is a representable positive process ID.
+    // - Signal 0 sends no signal and only performs the process existence and
+    //   permission check; the value-only call creates no mutable aliases.
+    // - A successful call means alive. ESRCH means dead, EPERM means alive,
+    //   and all other errors are conservatively treated as alive by the helper.
     let result = unsafe { libc::kill(pid, 0) };
     unix_kill_result_is_alive(result, std::io::Error::last_os_error().raw_os_error())
 }
@@ -815,8 +820,12 @@ fn process_alive(pid: u32) -> bool {
         GetExitCodeProcess, OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION,
     };
 
-    // SAFETY: the handle is closed on every successful OpenProcess path, and
-    // GetExitCodeProcess writes to a valid local `u32`.
+    // SAFETY:
+    // - OpenProcess requests only PROCESS_QUERY_LIMITED_INFORMATION. A null
+    //   handle is conservatively treated as alive.
+    // - GetExitCodeProcess receives an initialized local `u32` out pointer;
+    //   STILL_ACTIVE means alive, and query failure is conservatively alive.
+    // - Every successful OpenProcess path calls CloseHandle exactly once.
     unsafe {
         let handle = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid);
         if handle.is_null() {
