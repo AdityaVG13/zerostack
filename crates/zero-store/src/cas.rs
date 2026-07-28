@@ -28,6 +28,7 @@ pub const CAS_LAYOUT_VERSION: u64 = 1;
 pub const CAS_TEMP_REAP_AGE: Duration = Duration::from_secs(3600);
 
 const TEMP_PREFIX: &str = ".tmp-";
+const TEMP_CREATE_ATTEMPTS: usize = 5;
 
 /// Directory holding objects swept out of the CAS, relative to the store root.
 /// Bodies are moved here rather than unlinked so a wrong collection verdict
@@ -307,6 +308,18 @@ impl SharedCas {
     }
 
     fn put_with_limit(&self, bytes: &[u8], limit: u64) -> Result<PutOutcome, CasError> {
+        static TEMP_SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+        self.put_with_limit_and_sequence(bytes, limit, || {
+            TEMP_SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+        })
+    }
+
+    fn put_with_limit_and_sequence(
+        &self,
+        bytes: &[u8],
+        limit: u64,
+        next_sequence: impl FnMut() -> u64,
+    ) -> Result<PutOutcome, CasError> {
         if bytes.len() as u64 > limit {
             return Err(CasError::PolicyDenied(format!(
                 "object of {} bytes exceeds the CAS size policy ({limit} bytes)",
@@ -326,7 +339,14 @@ impl SharedCas {
         reap_stale_temps(parent, CAS_TEMP_REAP_AGE);
         // Converging on a concurrent publisher's identical object is a dedup,
         // not a creation, exactly as the preexisting-destination path reports it.
-        let created = self.publish_new_object_via_temp(parent, &dest, &hash, bytes, limit)?;
+        let created = self.publish_new_object_via_temp_with_sequence(
+            parent,
+            &dest,
+            &hash,
+            bytes,
+            limit,
+            next_sequence,
+        )?;
         Ok(PutOutcome { hash, created })
     }
 
@@ -360,28 +380,45 @@ impl SharedCas {
 
     /// Unique sibling temp, write+fsync, atomic replace with race converge.
     /// Only a temp we created ourselves is ever cleaned up.
-    fn publish_new_object_via_temp(
+    fn publish_new_object_via_temp_with_sequence(
         &self,
         parent: &Path,
         dest: &Path,
         hash: &str,
         bytes: &[u8],
         limit: u64,
+        mut next_sequence: impl FnMut() -> u64,
     ) -> Result<bool, CasError> {
-        // pid + process-wide sequence so concurrent writers in one process
-        // can never collide on the temp path.
-        static TEMP_SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
-        let tmp = parent.join(format!(
-            "{TEMP_PREFIX}{}-{}-{}",
-            &hash[..8],
-            std::process::id(),
-            TEMP_SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
-        ));
-        let mut file = fs::OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .open(&tmp)
-            .map_err(|e| io_err("create temp object", e))?;
+        let (mut file, tmp) = (0..TEMP_CREATE_ATTEMPTS)
+            .find_map(|attempt| {
+                let tmp = parent.join(format!(
+                    "{TEMP_PREFIX}{}-{}-{}",
+                    &hash[..8],
+                    std::process::id(),
+                    next_sequence()
+                ));
+                match fs::OpenOptions::new()
+                    .write(true)
+                    .create_new(true)
+                    .open(&tmp)
+                {
+                    Ok(file) => Some(Ok((file, tmp))),
+                    Err(error)
+                        if error.kind() == std::io::ErrorKind::AlreadyExists
+                            && attempt + 1 < TEMP_CREATE_ATTEMPTS =>
+                    {
+                        None
+                    }
+                    Err(error) => Some(Err(io_err(
+                        &format!(
+                            "create temp object after {} unique-name attempt(s)",
+                            attempt + 1
+                        ),
+                        error,
+                    ))),
+                }
+            })
+            .expect("terminal temp-create attempt always returns a result")?;
         // Ok(true) published our bytes; Ok(false) converged on an existing object.
         let publish = (|| -> Result<bool, CasError> {
             file.write_all(bytes)
@@ -633,6 +670,37 @@ fn reap_stale_temps(dir: &Path, max_age: Duration) {
 mod tests {
     use super::*;
     use tempfile::tempdir;
+
+    #[test]
+    fn cas_temp_retry_preserves_stale_collision_and_publishes() {
+        let root = tempdir().unwrap();
+        let cas = SharedCas::open(root.path());
+        let bytes = b"retry payload";
+        let hash = content_hash_hex(bytes);
+        let dest = cas.object_path(&hash);
+        let parent = dest.parent().unwrap();
+        fs::create_dir_all(parent).unwrap();
+
+        let stale_sequence = 41;
+        let stale = parent.join(format!(
+            "{TEMP_PREFIX}{}-{}-{stale_sequence}",
+            &hash[..8],
+            std::process::id()
+        ));
+        fs::write(&stale, b"stale candidate").unwrap();
+        let mut sequences = [stale_sequence, stale_sequence + 1].into_iter();
+
+        let outcome = cas
+            .put_with_limit_and_sequence(bytes, CAS_MAX_OBJECT_BYTES, || {
+                sequences.next().unwrap()
+            })
+            .unwrap();
+
+        assert!(outcome.created);
+        assert_eq!(outcome.hash, hash);
+        assert_eq!(cas.get_verified(&hash).unwrap(), bytes);
+        assert_eq!(fs::read(&stale).unwrap(), b"stale candidate");
+    }
 
     #[test]
     fn put_get_roundtrip_and_dedup() {
