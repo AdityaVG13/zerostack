@@ -2,6 +2,7 @@
 resolver = "2"
 members = [
     "crates/zero-abi",
+    "crates/zero-cert",
     "crates/zero-ref",
     "crates/zero-store",
     "crates/zerostack-machine-permit",
