@@ -135,3 +135,79 @@ fn all_vectors_conform() {
         }
     }
 }
+
+const ZERO_HASH: &str = "0000000000000000000000000000000000000000000000000000000000000000";
+
+fn line_ref(scheme: &str, start: u64, end: u64) -> ZeroRefV1 {
+    ZeroRefV1::parse(&format!("{scheme}://blob/{ZERO_HASH}#L{start}-{end}"))
+        .expect("test line ref parses")
+}
+
+#[test]
+fn clamp_end_is_monotonic_across_starts_and_past_eof() {
+    let bytes = b"alpha\nbeta\ngamma";
+    let cases: &[(u64, u64, &[u8])] = &[
+        (1, 1, b"alpha\n"),
+        (1, 2, b"alpha\nbeta\n"),
+        (1, 3, b"alpha\nbeta\ngamma"),
+        (1, 4, b"alpha\nbeta\ngamma"),
+        (1, 100, b"alpha\nbeta\ngamma"),
+        (2, 2, b"beta\n"),
+        (2, 3, b"beta\ngamma"),
+        (2, 4, b"beta\ngamma"),
+        (2, 100, b"beta\ngamma"),
+        (3, 3, b"gamma"),
+        (3, 4, b"gamma"),
+        (3, 100, b"gamma"),
+    ];
+
+    for &(start, end, expected) in cases {
+        let selected = line_ref("fz", start, end)
+            .select_with_policy(bytes, LineEndPolicy::ClampEnd)
+            .unwrap();
+        assert_eq!(selected, expected, "canonical #L{start}-{end} bytes");
+    }
+}
+
+#[test]
+fn adversarial_spelling_and_line_endings_have_stable_semantics() {
+    for scheme in ["FZ", "Gz", "tZ"] {
+        let input = format!("{scheme}://blob/{ZERO_HASH}");
+        let error = ZeroRefV1::parse(&input).unwrap_err();
+        assert_eq!(error.class.as_str(), "unsupported", "scheme {scheme}");
+    }
+
+    let lowercase_byte_fragment = format!("fz://blob/{ZERO_HASH}#b0-1");
+    let error = ZeroRefV1::parse(&lowercase_byte_fragment).unwrap_err();
+    assert_eq!(error.class.as_str(), "malformed", "lowercase #b spelling");
+
+    let pure_cr = b"left\rright\r";
+    assert_eq!(
+        line_ref("gz", 1, 99)
+            .select_with_policy(pure_cr, LineEndPolicy::ClampEnd)
+            .unwrap(),
+        b"left\rright\r"
+    );
+    let error = line_ref("gz", 2, 2)
+        .select_with_policy(pure_cr, LineEndPolicy::ClampEnd)
+        .unwrap_err();
+    assert_eq!(error.class.as_str(), "range_out_of_bounds");
+
+    let sole_lf = b"\n";
+    assert_eq!(
+        line_ref("tz", 1, 1)
+            .select_with_policy(sole_lf, LineEndPolicy::ClampEnd)
+            .unwrap(),
+        b"\n"
+    );
+    assert_eq!(
+        line_ref("tz", 1, 99)
+            .select_with_policy(sole_lf, LineEndPolicy::ClampEnd)
+            .unwrap(),
+        b"\n"
+    );
+    let error = line_ref("tz", 2, 2)
+        .select_with_policy(sole_lf, LineEndPolicy::ClampEnd)
+        .unwrap_err();
+    assert_eq!(error.class.as_str(), "range_out_of_bounds");
+}
