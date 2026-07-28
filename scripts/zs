@@ -214,6 +214,19 @@ def print_result(result: dict[str, Any], kind: str, machine: bool) -> None:
     if result.get("isError"):
         raise SystemExit(1)
 
+def contains_method_entry(value: Any) -> bool:
+    if isinstance(value, dict):
+        if isinstance(value.get("name"), str) and any(
+            isinstance(value.get(key), str)
+            for key in ("description", "signature", "usage")
+        ):
+            return True
+        return any(contains_method_entry(child) for child in value.values())
+    if isinstance(value, list):
+        return any(contains_method_entry(child) for child in value)
+    return False
+
+
 def main() -> None:
     argv = sys.argv[1:]
     if argv == ["--version"]:
@@ -242,7 +255,7 @@ def main() -> None:
     spec = engine(name)
     result, initialized = invoke(spec, spec[kind], arguments, root, [verb, *rest])
     texts, structured = text_items(result), result.get("structuredContent")
-    useful_search = isinstance(structured, dict) and any(key != "status" for key in structured)
+    useful_search = contains_method_entry(structured)
     if kind == "search" and texts and all(STATUS.fullmatch(item.strip()) for item in texts) and not useful_search:
         print_catalog(catalog_methods(spec, name, text, root, [verb, *rest]), root, [verb, *rest])
         return

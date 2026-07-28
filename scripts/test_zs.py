@@ -44,7 +44,7 @@ class ZsTests(unittest.TestCase):
         result=self.run_zs("-C",str(self.root),"fs","-",input_text="return 7;"); self.assertEqual(result.returncode,0,result.stderr)
         logged=json.loads(self.log.read_text()); self.assertEqual(logged["cwd"],str(self.root.resolve())); self.assertEqual(logged["call"]["params"]["arguments"]["plan"],"return 7;")
     def test_inline_discovery_and_scalar_ref(self)->None:
-        search=self.run_zs("fs-search","read file"); self.assertIn("fs.read",search.stdout); self.assertIn("Read a file",search.stdout)
+        search=self.run_zs("fs-search","read file"); self.assertIn("fs.read",search.stdout); self.assertIn("Read file contents",search.stdout)
         self.assertIn("fs.read(path)",self.run_zs("fs-describe","fs.read").stdout)
         execute=self.run_zs("fs","return 1"); self.assertIn("R2",execute.stdout); self.assertIn("expanded contents",execute.stdout); self.assertIn("fz://blob/deadbeef",execute.stdout)
         self.assertEqual(json.loads(self.log.read_text())["call"]["params"]["arguments"]["envelope"], "v1")
