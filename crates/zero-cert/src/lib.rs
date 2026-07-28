@@ -110,35 +110,63 @@ impl<'certificate, 'payload> VerifiedEvidence<'certificate, 'payload> {
 
 pub fn verify<'certificate, 'payload, R: Resolver + ?Sized>(certificate: &'certificate EvidenceCertificate<'payload>, resolver: &R) -> Result<VerifiedEvidence<'certificate, 'payload>, VerificationError> {
     check_trusted_provenance(&certificate.provenance, resolver)?;
-    let mut payload_offset = 0usize;
-    for (index, span) in certificate.spans.iter().enumerate() {
-        let object = resolver.resolve(&span.object_id).ok_or(VerificationError::MissingObject { object_id: span.object_id })?;
-        let digest = zero_abi::sha256(object);
-        if digest != span.object_id.0 { return Err(VerificationError::ObjectIdentityMismatch { span_index: index }); }
-        if digest != span.object_digest { return Err(VerificationError::ObjectDigestMismatch { span_index: index }); }
-        let start = usize::try_from(span.byte_start).map_err(|_| VerificationError::RangeOutsideObject { span_index: index })?;
-        let len = usize::try_from(span.byte_len).map_err(|_| VerificationError::RangeOutsideObject { span_index: index })?;
-        let end = start.checked_add(len).ok_or(VerificationError::RangeOverflow { span_index: index })?;
-        let bytes = object.get(start..end).ok_or(VerificationError::RangeOutsideObject { span_index: index })?;
-        if zero_abi::sha256(bytes) != span.span_digest { return Err(VerificationError::SpanDigestMismatch { span_index: index }); }
-        let payload_end = payload_offset.checked_add(len).ok_or(VerificationError::PayloadLengthMismatch)?;
-        if certificate.payload.get(payload_offset..payload_end).ok_or(VerificationError::PayloadLengthMismatch)? != bytes { return Err(VerificationError::PayloadMismatch { span_index: index }); }
-        payload_offset = payload_end;
-    }
-    if payload_offset != certificate.payload.len() { return Err(VerificationError::PayloadLengthMismatch); }
+    verify_spans(certificate, resolver)?;
     verify_completeness(certificate, resolver)?;
     Ok(VerifiedEvidence { certificate })
 }
 
-fn check_trusted_provenance<R: Resolver + ?Sized>(p: &Provenance, r: &R) -> Result<(), VerificationError> {
-    let operator = r.trusted_operator_version(&p.operator_id).ok_or(VerificationError::MissingTrustedOperator)?;
-    if operator != p.operator_version { return Err(VerificationError::StaleOperator); }
-    let parser = r.trusted_parser_version(&p.parser_id).ok_or(VerificationError::MissingTrustedParser)?;
-    if parser != p.parser_version { return Err(VerificationError::StaleParser); }
-    let index = r.trusted_index_version(&p.index_id).ok_or(VerificationError::MissingTrustedIndex)?;
-    if index != p.index_version { return Err(VerificationError::StaleIndex); }
+fn verify_spans<R: Resolver + ?Sized>(c: &EvidenceCertificate<'_>, resolver: &R) -> Result<(), VerificationError> {
+    let mut payload_offset = 0usize;
+    for (index, span) in c.spans.iter().enumerate() {
+        payload_offset = verify_span(index, span, c.payload.as_ref(), payload_offset, resolver)?;
+    }
+    if payload_offset != c.payload.len() { return Err(VerificationError::PayloadLengthMismatch); }
     Ok(())
 }
+
+fn verify_span<R: Resolver + ?Sized>(index: usize, span: &SpanRef, payload: &[u8], payload_offset: usize, resolver: &R) -> Result<usize, VerificationError> {
+    let object = resolver.resolve(&span.object_id).ok_or(VerificationError::MissingObject { object_id: span.object_id })?;
+    let digest = zero_abi::sha256(object);
+    if digest != span.object_id.0 { return Err(VerificationError::ObjectIdentityMismatch { span_index: index }); }
+    if digest != span.object_digest { return Err(VerificationError::ObjectDigestMismatch { span_index: index }); }
+    let start = usize::try_from(span.byte_start).map_err(|_| VerificationError::RangeOutsideObject { span_index: index })?;
+    let len = usize::try_from(span.byte_len).map_err(|_| VerificationError::RangeOutsideObject { span_index: index })?;
+    let end = start.checked_add(len).ok_or(VerificationError::RangeOverflow { span_index: index })?;
+    let bytes = object.get(start..end).ok_or(VerificationError::RangeOutsideObject { span_index: index })?;
+    if zero_abi::sha256(bytes) != span.span_digest { return Err(VerificationError::SpanDigestMismatch { span_index: index }); }
+    verify_payload_span(index, payload, payload_offset, bytes, len)
+}
+
+fn verify_payload_span(index: usize, payload: &[u8], payload_offset: usize, bytes: &[u8], len: usize) -> Result<usize, VerificationError> {
+    let payload_end = payload_offset.checked_add(len).ok_or(VerificationError::PayloadLengthMismatch)?;
+    if payload.get(payload_offset..payload_end).ok_or(VerificationError::PayloadLengthMismatch)? != bytes { return Err(VerificationError::PayloadMismatch { span_index: index }); }
+    Ok(payload_end)
+}
+
+fn check_trusted_provenance<R: Resolver + ?Sized>(p: &Provenance, r: &R) -> Result<(), VerificationError> {
+    check_trusted_operator(p, r)?;
+    check_trusted_parser(p, r)?;
+    check_trusted_index(p, r)
+}
+
+fn check_trusted_operator<R: Resolver + ?Sized>(p: &Provenance, r: &R) -> Result<(), VerificationError> {
+    let version = r.trusted_operator_version(&p.operator_id).ok_or(VerificationError::MissingTrustedOperator)?;
+    if version != p.operator_version { return Err(VerificationError::StaleOperator); }
+    Ok(())
+}
+
+fn check_trusted_parser<R: Resolver + ?Sized>(p: &Provenance, r: &R) -> Result<(), VerificationError> {
+    let version = r.trusted_parser_version(&p.parser_id).ok_or(VerificationError::MissingTrustedParser)?;
+    if version != p.parser_version { return Err(VerificationError::StaleParser); }
+    Ok(())
+}
+
+fn check_trusted_index<R: Resolver + ?Sized>(p: &Provenance, r: &R) -> Result<(), VerificationError> {
+    let version = r.trusted_index_version(&p.index_id).ok_or(VerificationError::MissingTrustedIndex)?;
+    if version != p.index_version { return Err(VerificationError::StaleIndex); }
+    Ok(())
+}
+
 fn check_operator(lock: &OperatorLock, p: &Provenance) -> Result<(), VerificationError> {
     if lock.operator_id == p.operator_id && lock.operator_version == p.operator_version { Ok(()) } else { Err(VerificationError::StaleOperator) }
 }
@@ -148,39 +176,129 @@ fn check_parser(id: &str, version: &str, p: &Provenance) -> Result<(), Verificat
 fn check_index(id: &str, version: &str, p: &Provenance) -> Result<(), VerificationError> {
     if id == p.index_id && version == p.index_version { Ok(()) } else { Err(VerificationError::StaleIndex) }
 }
+
 fn verify_completeness<R: Resolver + ?Sized>(c: &EvidenceCertificate<'_>, resolver: &R) -> Result<(), VerificationError> {
-    use {CompletenessWitness as W, Query as Q};
-    let (lock, valid) = match (&c.query, &c.completeness) {
-        (Q::ReadSpan(wanted), W::ReadSpan { operator }) => (operator, c.spans.as_slice() == std::slice::from_ref(wanted)),
-        (Q::ExactSearch { scope, pattern }, W::ExactSearch { operator, scope: bound_scope, pattern: bound_pattern, scope_len, match_count }) => {
-            check_operator(operator, &c.provenance)?;
-            if scope != bound_scope || pattern.as_ref() != bound_pattern.as_ref() { return Err(VerificationError::WitnessQueryMismatch); }
-            return verify_search(*scope, pattern, *scope_len, *match_count, c, resolver);
-        }
-        (Q::Definition { symbol }, W::Definition { operator, symbol: bound, index_id, index_version }) => { check_index(index_id, index_version, &c.provenance)?; if symbol != bound { return Err(VerificationError::WitnessQueryMismatch); } (operator, c.spans.len() == 1) }
-        (Q::References { symbol }, W::References { operator, symbol: bound, index_id, index_version, match_count }) => { check_index(index_id, index_version, &c.provenance)?; if symbol != bound { return Err(VerificationError::WitnessQueryMismatch); } (operator, usize::try_from(*match_count).ok() == Some(c.spans.len())) }
-        (Q::AstClosure { seeds, relations, radius }, W::AstClosure { operator, seeds: bound_seeds, relations: bound_relations, radius: bound_radius, parser_id, parser_version, visited_nodes }) => { check_parser(parser_id, parser_version, &c.provenance)?; if seeds != bound_seeds || relations != bound_relations || radius != bound_radius { return Err(VerificationError::WitnessQueryMismatch); } (operator, *visited_nodes > 0 && !c.spans.is_empty()) }
-        (Q::CallPath { source, target }, W::CallPath { operator, source: bound_source, target: bound_target, edge_count }) => { if source != bound_source || target != bound_target { return Err(VerificationError::WitnessQueryMismatch); } (operator, usize::try_from(*edge_count).ok().and_then(|n| n.checked_add(1)) == Some(c.spans.len())) },
-        (Q::DataflowSlice { sink }, W::DataflowSlice { operator, sink: bound, visited_nodes }) => { if sink != bound { return Err(VerificationError::WitnessQueryMismatch); } (operator, *visited_nodes > 0 && !c.spans.is_empty()) },
-        (Q::Diff { old, new }, W::Diff { operator, old: bound_old, new: bound_new }) => { if old != bound_old || new != bound_new { return Err(VerificationError::WitnessQueryMismatch); } (operator, c.spans.iter().any(|s| s.object_id == *old) && c.spans.iter().any(|s| s.object_id == *new)) },
-        (Q::BuildReceipt { command }, W::BuildReceipt { operator, command: bound, stdout_digest, stderr_digest, .. }) => { if command != bound { return Err(VerificationError::WitnessQueryMismatch); } (operator, c.spans.len() == 2 && c.spans[0].span_digest == *stdout_digest && c.spans[1].span_digest == *stderr_digest) },
-        (Q::TestTrace { test }, W::TestTrace { operator, test: bound, trace_digest, .. }) => { if test != bound { return Err(VerificationError::WitnessQueryMismatch); } (operator, c.spans.len() == 1 && c.spans[0].span_digest == *trace_digest) },
-        _ => return Err(VerificationError::WitnessQueryMismatch),
-    };
-    check_operator(lock, &c.provenance)?;
+    use Query as Q;
+    match &c.query {
+        Q::ReadSpan(_) => verify_read_span(c),
+        Q::ExactSearch { .. } => verify_search_binding(c, resolver),
+        Q::Definition { .. } => verify_definition(c),
+        Q::References { .. } => verify_references(c),
+        Q::AstClosure { .. } => verify_ast_closure(c),
+        _ => verify_graph_or_execution(c),
+    }
+}
+
+fn verify_graph_or_execution(c: &EvidenceCertificate<'_>) -> Result<(), VerificationError> {
+    match &c.query {
+        Query::CallPath { .. } => verify_call_path(c),
+        Query::DataflowSlice { .. } => verify_dataflow_slice(c),
+        Query::Diff { .. } => verify_diff(c),
+        Query::BuildReceipt { .. } => verify_build_receipt(c),
+        Query::TestTrace { .. } => verify_test_trace(c),
+        _ => Err(witness_mismatch()),
+    }
+}
+
+fn witness_mismatch() -> VerificationError { VerificationError::WitnessQueryMismatch }
+fn invalid_if(valid: bool) -> Result<(), VerificationError> {
     if valid { Ok(()) } else { Err(VerificationError::InvalidCompleteness) }
 }
+
+fn verify_read_span(c: &EvidenceCertificate<'_>) -> Result<(), VerificationError> {
+    let (Query::ReadSpan(wanted), CompletenessWitness::ReadSpan { operator }) = (&c.query, &c.completeness) else { return Err(witness_mismatch()); };
+    check_operator(operator, &c.provenance)?;
+    invalid_if(c.spans.as_slice() == std::slice::from_ref(wanted))
+}
+
+fn verify_search_binding<R: Resolver + ?Sized>(c: &EvidenceCertificate<'_>, resolver: &R) -> Result<(), VerificationError> {
+    let (Query::ExactSearch { scope, pattern }, CompletenessWitness::ExactSearch { operator, scope: bound_scope, pattern: bound_pattern, scope_len, match_count }) = (&c.query, &c.completeness) else { return Err(witness_mismatch()); };
+    check_operator(operator, &c.provenance)?;
+    if scope != bound_scope || pattern.as_ref() != bound_pattern.as_ref() { return Err(witness_mismatch()); }
+    verify_search(*scope, pattern, *scope_len, *match_count, c, resolver)
+}
+
+fn verify_definition(c: &EvidenceCertificate<'_>) -> Result<(), VerificationError> {
+    let (Query::Definition { symbol }, CompletenessWitness::Definition { operator, symbol: bound, index_id, index_version }) = (&c.query, &c.completeness) else { return Err(witness_mismatch()); };
+    check_index(index_id, index_version, &c.provenance)?;
+    if symbol != bound { return Err(witness_mismatch()); }
+    check_operator(operator, &c.provenance)?;
+    invalid_if(c.spans.len() == 1)
+}
+
+fn verify_references(c: &EvidenceCertificate<'_>) -> Result<(), VerificationError> {
+    let (Query::References { symbol }, CompletenessWitness::References { operator, symbol: bound, index_id, index_version, match_count }) = (&c.query, &c.completeness) else { return Err(witness_mismatch()); };
+    check_index(index_id, index_version, &c.provenance)?;
+    if symbol != bound { return Err(witness_mismatch()); }
+    check_operator(operator, &c.provenance)?;
+    invalid_if(usize::try_from(*match_count).ok() == Some(c.spans.len()))
+}
+
+fn verify_ast_closure(c: &EvidenceCertificate<'_>) -> Result<(), VerificationError> {
+    let (Query::AstClosure { seeds, relations, radius }, CompletenessWitness::AstClosure { operator, seeds: bound_seeds, relations: bound_relations, radius: bound_radius, parser_id, parser_version, visited_nodes }) = (&c.query, &c.completeness) else { return Err(witness_mismatch()); };
+    check_parser(parser_id, parser_version, &c.provenance)?;
+    if seeds != bound_seeds || relations != bound_relations || radius != bound_radius { return Err(witness_mismatch()); }
+    check_operator(operator, &c.provenance)?;
+    invalid_if(*visited_nodes > 0 && !c.spans.is_empty())
+}
+
+fn verify_call_path(c: &EvidenceCertificate<'_>) -> Result<(), VerificationError> {
+    let (Query::CallPath { source, target }, CompletenessWitness::CallPath { operator, source: bound_source, target: bound_target, edge_count }) = (&c.query, &c.completeness) else { return Err(witness_mismatch()); };
+    if source != bound_source || target != bound_target { return Err(witness_mismatch()); }
+    check_operator(operator, &c.provenance)?;
+    invalid_if(usize::try_from(*edge_count).ok().and_then(|n| n.checked_add(1)) == Some(c.spans.len()))
+}
+
+fn verify_dataflow_slice(c: &EvidenceCertificate<'_>) -> Result<(), VerificationError> {
+    let (Query::DataflowSlice { sink }, CompletenessWitness::DataflowSlice { operator, sink: bound, visited_nodes }) = (&c.query, &c.completeness) else { return Err(witness_mismatch()); };
+    if sink != bound { return Err(witness_mismatch()); }
+    check_operator(operator, &c.provenance)?;
+    invalid_if(*visited_nodes > 0 && !c.spans.is_empty())
+}
+
+fn verify_diff(c: &EvidenceCertificate<'_>) -> Result<(), VerificationError> {
+    let (Query::Diff { old, new }, CompletenessWitness::Diff { operator, old: bound_old, new: bound_new }) = (&c.query, &c.completeness) else { return Err(witness_mismatch()); };
+    if old != bound_old || new != bound_new { return Err(witness_mismatch()); }
+    check_operator(operator, &c.provenance)?;
+    invalid_if(c.spans.iter().any(|s| s.object_id == *old) && c.spans.iter().any(|s| s.object_id == *new))
+}
+
+fn verify_build_receipt(c: &EvidenceCertificate<'_>) -> Result<(), VerificationError> {
+    let (Query::BuildReceipt { command }, CompletenessWitness::BuildReceipt { operator, command: bound, stdout_digest, stderr_digest, .. }) = (&c.query, &c.completeness) else { return Err(witness_mismatch()); };
+    if command != bound { return Err(witness_mismatch()); }
+    check_operator(operator, &c.provenance)?;
+    invalid_if(c.spans.len() == 2 && c.spans[0].span_digest == *stdout_digest && c.spans[1].span_digest == *stderr_digest)
+}
+
+fn verify_test_trace(c: &EvidenceCertificate<'_>) -> Result<(), VerificationError> {
+    let (Query::TestTrace { test }, CompletenessWitness::TestTrace { operator, test: bound, trace_digest, .. }) = (&c.query, &c.completeness) else { return Err(witness_mismatch()); };
+    if test != bound { return Err(witness_mismatch()); }
+    check_operator(operator, &c.provenance)?;
+    invalid_if(c.spans.len() == 1 && c.spans[0].span_digest == *trace_digest)
+}
+
 fn verify_search<R: Resolver + ?Sized>(scope: ObjectId, pattern: &[u8], scope_len: u64, match_count: u64, c: &EvidenceCertificate<'_>, resolver: &R) -> Result<(), VerificationError> {
     let object = resolver.resolve(&scope).ok_or(VerificationError::MissingObject { object_id: scope })?;
     if zero_abi::sha256(object) != scope.0 { return Err(VerificationError::ObjectIdentityMismatch { span_index: 0 }); }
+    validate_search_domain(pattern, scope_len, match_count, object, c)?;
+    validate_search_witness(scope, pattern, object, &c.spans)
+}
+
+fn validate_search_domain(pattern: &[u8], scope_len: u64, match_count: u64, object: &[u8], c: &EvidenceCertificate<'_>) -> Result<(), VerificationError> {
     if pattern.is_empty() || usize::try_from(scope_len).ok() != Some(object.len()) || usize::try_from(match_count).ok() != Some(c.spans.len()) { return Err(VerificationError::InvalidCompleteness); }
+    Ok(())
+}
+
+fn validate_search_witness(scope: ObjectId, pattern: &[u8], object: &[u8], spans: &[SpanRef]) -> Result<(), VerificationError> {
     let mut found = 0usize;
     for (offset, window) in object.windows(pattern.len()).enumerate() {
-        if window == pattern {
-            let span = c.spans.get(found).ok_or(VerificationError::InvalidCompleteness)?;
-            if span.object_id != scope || usize::try_from(span.byte_start).ok() != Some(offset) || usize::try_from(span.byte_len).ok() != Some(pattern.len()) { return Err(VerificationError::InvalidCompleteness); }
-            found = found.checked_add(1).ok_or(VerificationError::InvalidCompleteness)?;
-        }
+        if window == pattern { found = validate_search_match(scope, pattern.len(), offset, found, spans)?; }
     }
-    if found == c.spans.len() { Ok(()) } else { Err(VerificationError::InvalidCompleteness) }
+    invalid_if(found == spans.len())
+}
+
+fn validate_search_match(scope: ObjectId, pattern_len: usize, offset: usize, found: usize, spans: &[SpanRef]) -> Result<usize, VerificationError> {
+    let span = spans.get(found).ok_or(VerificationError::InvalidCompleteness)?;
+    if span.object_id != scope || usize::try_from(span.byte_start).ok() != Some(offset) || usize::try_from(span.byte_len).ok() != Some(pattern_len) { return Err(VerificationError::InvalidCompleteness); }
+    found.checked_add(1).ok_or(VerificationError::InvalidCompleteness)
 }

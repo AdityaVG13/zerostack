@@ -457,60 +457,19 @@ impl DispatchMachine {
         let canonical_operation_id = operation.canonical_id.clone();
         let policy = operation.effect_policy;
 
-        if matches!(policy.permit, PermitRequirement::Required) {
-            let permit = match permit.as_ref() {
-                Some(grant) if !grant.permit_id.trim().is_empty() => grant,
-                _ => {
-                    return Err(self.poison(DispatchContractError::new(
-                        DispatchErrorClass::PermitRequired,
-                        "a non-empty permit is required",
-                    )))
-                }
-            };
-            if permit.canonical_operation_id != canonical_operation_id
-                || permit.effect_class != policy.effect_class
-            {
-                return Err(self.poison(DispatchContractError::new(
-                    DispatchErrorClass::PermitRequired,
-                    format!(
-                        "permit is not bound to operation {:?} and effect {:?}",
-                        canonical_operation_id, policy.effect_class
-                    ),
-                )));
-            }
-        } else if permit.is_some() {
-            return Err(self.poison(DispatchContractError::new(
-                DispatchErrorClass::InvalidStageTransition,
-                "permit supplied for an operation that does not accept one",
-            )));
+        if let Err(error) = validate_permit_authority(
+            policy,
+            &canonical_operation_id,
+            permit.as_ref(),
+        ) {
+            return Err(self.poison(error));
         }
-
-        if matches!(policy.approval, ApprovalRequirement::Required) {
-            let approval = match approval.as_ref() {
-                Some(grant) if !grant.approval_id.trim().is_empty() => grant,
-                _ => {
-                    return Err(self.poison(DispatchContractError::new(
-                        DispatchErrorClass::ApprovalRequired,
-                        "a non-empty approval is required",
-                    )))
-                }
-            };
-            if approval.canonical_operation_id != canonical_operation_id
-                || approval.effect_class != policy.effect_class
-            {
-                return Err(self.poison(DispatchContractError::new(
-                    DispatchErrorClass::ApprovalRequired,
-                    format!(
-                        "approval is not bound to operation {:?} and effect {:?}",
-                        canonical_operation_id, policy.effect_class
-                    ),
-                )));
-            }
-        } else if approval.is_some() {
-            return Err(self.poison(DispatchContractError::new(
-                DispatchErrorClass::InvalidStageTransition,
-                "approval supplied for an operation that does not accept one",
-            )));
+        if let Err(error) = validate_approval_authority(
+            policy,
+            &canonical_operation_id,
+            approval.as_ref(),
+        ) {
+            return Err(self.poison(error));
         }
         self.stage = DispatchStage::Dispatch;
         Ok(())
@@ -551,10 +510,173 @@ impl DispatchMachine {
     }
 }
 
+fn validate_permit_authority(
+    policy: EffectPolicy,
+    canonical_operation_id: &str,
+    permit: Option<&PermitGrant>,
+) -> Result<(), DispatchContractError> {
+    match policy.permit {
+        PermitRequirement::Required => {
+            let permit = require_non_empty_permit(permit)?;
+            validate_permit_binding(permit, canonical_operation_id, policy.effect_class)
+        }
+        PermitRequirement::NotRequired => reject_unexpected_permit(permit),
+    }
+}
+
+fn require_non_empty_permit(
+    permit: Option<&PermitGrant>,
+) -> Result<&PermitGrant, DispatchContractError> {
+    let Some(permit) = permit else {
+        return Err(DispatchContractError::new(
+            DispatchErrorClass::PermitRequired,
+            "a non-empty permit is required",
+        ));
+    };
+    if permit.permit_id.trim().is_empty() {
+        return Err(DispatchContractError::new(
+            DispatchErrorClass::PermitRequired,
+            "a non-empty permit is required",
+        ));
+    }
+    Ok(permit)
+}
+
+fn validate_permit_binding(
+    permit: &PermitGrant,
+    canonical_operation_id: &str,
+    effect_class: EffectClass,
+) -> Result<(), DispatchContractError> {
+    if permit.canonical_operation_id != canonical_operation_id {
+        return Err(invalid_permit_binding(
+            canonical_operation_id,
+            effect_class,
+        ));
+    }
+    if permit.effect_class != effect_class {
+        return Err(invalid_permit_binding(
+            canonical_operation_id,
+            effect_class,
+        ));
+    }
+    Ok(())
+}
+
+fn invalid_permit_binding(
+    canonical_operation_id: &str,
+    effect_class: EffectClass,
+) -> DispatchContractError {
+    DispatchContractError::new(
+        DispatchErrorClass::PermitRequired,
+        format!(
+            "permit is not bound to operation {:?} and effect {:?}",
+            canonical_operation_id, effect_class
+        ),
+    )
+}
+
+fn reject_unexpected_permit(permit: Option<&PermitGrant>) -> Result<(), DispatchContractError> {
+    if permit.is_some() {
+        return Err(DispatchContractError::new(
+            DispatchErrorClass::InvalidStageTransition,
+            "permit supplied for an operation that does not accept one",
+        ));
+    }
+    Ok(())
+}
+
+fn validate_approval_authority(
+    policy: EffectPolicy,
+    canonical_operation_id: &str,
+    approval: Option<&ApprovalGrant>,
+) -> Result<(), DispatchContractError> {
+    match policy.approval {
+        ApprovalRequirement::Required => {
+            let approval = require_non_empty_approval(approval)?;
+            validate_approval_binding(approval, canonical_operation_id, policy.effect_class)
+        }
+        ApprovalRequirement::NotRequired => reject_unexpected_approval(approval),
+    }
+}
+
+fn require_non_empty_approval(
+    approval: Option<&ApprovalGrant>,
+) -> Result<&ApprovalGrant, DispatchContractError> {
+    let Some(approval) = approval else {
+        return Err(DispatchContractError::new(
+            DispatchErrorClass::ApprovalRequired,
+            "a non-empty approval is required",
+        ));
+    };
+    if approval.approval_id.trim().is_empty() {
+        return Err(DispatchContractError::new(
+            DispatchErrorClass::ApprovalRequired,
+            "a non-empty approval is required",
+        ));
+    }
+    Ok(approval)
+}
+
+fn validate_approval_binding(
+    approval: &ApprovalGrant,
+    canonical_operation_id: &str,
+    effect_class: EffectClass,
+) -> Result<(), DispatchContractError> {
+    if approval.canonical_operation_id != canonical_operation_id {
+        return Err(invalid_approval_binding(
+            canonical_operation_id,
+            effect_class,
+        ));
+    }
+    if approval.effect_class != effect_class {
+        return Err(invalid_approval_binding(
+            canonical_operation_id,
+            effect_class,
+        ));
+    }
+    Ok(())
+}
+
+fn invalid_approval_binding(
+    canonical_operation_id: &str,
+    effect_class: EffectClass,
+) -> DispatchContractError {
+    DispatchContractError::new(
+        DispatchErrorClass::ApprovalRequired,
+        format!(
+            "approval is not bound to operation {:?} and effect {:?}",
+            canonical_operation_id, effect_class
+        ),
+    )
+}
+
+fn reject_unexpected_approval(
+    approval: Option<&ApprovalGrant>,
+) -> Result<(), DispatchContractError> {
+    if approval.is_some() {
+        return Err(DispatchContractError::new(
+            DispatchErrorClass::InvalidStageTransition,
+            "approval supplied for an operation that does not accept one",
+        ));
+    }
+    Ok(())
+}
+
 fn validate_schema_value(schema: &Value, value: &Value, path: &str) -> Result<(), String> {
-    let object = schema
+    let schema = schema
         .as_object()
         .ok_or_else(|| format!("unsupported non-object schema at {path}"))?;
+    validate_supported_schema_keywords(schema, path)?;
+    validate_enum_constraint(schema, value, path)?;
+    let expected = required_schema_type(schema, path)?;
+    validate_schema_type(expected, value, path)?;
+    validate_typed_constraints(schema, value, expected, path)
+}
+
+fn validate_supported_schema_keywords(
+    schema: &serde_json::Map<String, Value>,
+    path: &str,
+) -> Result<(), String> {
     const SUPPORTED: &[&str] = &[
         "type",
         "properties",
@@ -566,23 +688,43 @@ fn validate_schema_value(schema: &Value, value: &Value, path: &str) -> Result<()
         "title",
         "$schema",
     ];
-    if let Some(keyword) = object.keys().find(|key| !SUPPORTED.contains(&key.as_str())) {
+    if let Some(keyword) = schema
+        .keys()
+        .find(|key| !SUPPORTED.contains(&key.as_str()))
+    {
         return Err(format!("unsupported schema keyword {keyword:?} at {path}"));
     }
+    Ok(())
+}
 
-    if let Some(allowed) = object.get("enum") {
-        let allowed = allowed
-            .as_array()
-            .ok_or_else(|| format!("enum must be an array at {path}"))?;
-        if !allowed.contains(value) {
-            return Err(format!("value at {path} is not in the declared enum"));
-        }
+fn validate_enum_constraint(
+    schema: &serde_json::Map<String, Value>,
+    value: &Value,
+    path: &str,
+) -> Result<(), String> {
+    let Some(allowed) = schema.get("enum") else {
+        return Ok(());
+    };
+    let allowed = allowed
+        .as_array()
+        .ok_or_else(|| format!("enum must be an array at {path}"))?;
+    if !allowed.contains(value) {
+        return Err(format!("value at {path} is not in the declared enum"));
     }
+    Ok(())
+}
 
-    let expected = object
+fn required_schema_type<'a>(
+    schema: &'a serde_json::Map<String, Value>,
+    path: &str,
+) -> Result<&'a str, String> {
+    schema
         .get("type")
         .and_then(Value::as_str)
-        .ok_or_else(|| format!("schema type is required at {path}"))?;
+        .ok_or_else(|| format!("schema type is required at {path}"))
+}
+
+fn validate_schema_type(expected: &str, value: &Value, path: &str) -> Result<(), String> {
     let type_matches = match expected {
         "object" => value.is_object(),
         "array" => value.is_array(),
@@ -598,52 +740,110 @@ fn validate_schema_value(schema: &Value, value: &Value, path: &str) -> Result<()
     if !type_matches {
         return Err(format!("expected {expected} at {path}"));
     }
+    Ok(())
+}
 
-    if expected == "object" {
-        let value_object = value.as_object().expect("object type was checked");
-        let properties = object
-            .get("properties")
-            .map(|properties| {
-                properties
-                    .as_object()
-                    .ok_or_else(|| format!("properties must be an object at {path}"))
-            })
-            .transpose()?
-            .cloned()
-            .unwrap_or_default();
-        if let Some(required) = object.get("required") {
-            let required = required
-                .as_array()
-                .ok_or_else(|| format!("required must be an array at {path}"))?;
-            for key in required {
-                let key = key
-                    .as_str()
-                    .ok_or_else(|| format!("required entries must be strings at {path}"))?;
-                if !value_object.contains_key(key) {
-                    return Err(format!("missing required argument {path}.{key}"));
-                }
-            }
-        }
-        for (key, child) in value_object {
-            if let Some(child_schema) = properties.get(key) {
-                validate_schema_value(child_schema, child, &format!("{path}.{key}"))?;
-            } else if object.get("additionalProperties") == Some(&Value::Bool(false)) {
-                return Err(format!("unknown argument {path}.{key}"));
-            }
+fn validate_typed_constraints(
+    schema: &serde_json::Map<String, Value>,
+    value: &Value,
+    expected: &str,
+    path: &str,
+) -> Result<(), String> {
+    match expected {
+        "object" => validate_object_constraints(schema, value, path),
+        "array" => validate_array_constraints(schema, value, path),
+        "string" | "number" | "integer" => validate_scalar_constraints(),
+        "boolean" | "null" => Ok(()),
+        _ => unreachable!("schema type was checked"),
+    }
+}
+
+fn validate_scalar_constraints() -> Result<(), String> {
+    // String and number schemas currently support only type and enum constraints.
+    Ok(())
+}
+
+fn validate_object_constraints(
+    schema: &serde_json::Map<String, Value>,
+    value: &Value,
+    path: &str,
+) -> Result<(), String> {
+    let value = value.as_object().expect("object type was checked");
+    let properties = schema_properties(schema, path)?;
+    validate_required_properties(schema, value, path)?;
+    for (key, child) in value {
+        validate_object_property(schema, properties, key, child, path)?;
+    }
+    Ok(())
+}
+
+fn schema_properties<'a>(
+    schema: &'a serde_json::Map<String, Value>,
+    path: &str,
+) -> Result<Option<&'a serde_json::Map<String, Value>>, String> {
+    schema
+        .get("properties")
+        .map(|properties| {
+            properties
+                .as_object()
+                .ok_or_else(|| format!("properties must be an object at {path}"))
+        })
+        .transpose()
+}
+
+fn validate_required_properties(
+    schema: &serde_json::Map<String, Value>,
+    value: &serde_json::Map<String, Value>,
+    path: &str,
+) -> Result<(), String> {
+    let Some(required) = schema.get("required") else {
+        return Ok(());
+    };
+    let required = required
+        .as_array()
+        .ok_or_else(|| format!("required must be an array at {path}"))?;
+    for key in required {
+        let key = key
+            .as_str()
+            .ok_or_else(|| format!("required entries must be strings at {path}"))?;
+        if !value.contains_key(key) {
+            return Err(format!("missing required argument {path}.{key}"));
         }
     }
+    Ok(())
+}
 
-    if expected == "array" {
-        if let Some(item_schema) = object.get("items") {
-            for (index, item) in value
-                .as_array()
-                .expect("array type was checked")
-                .iter()
-                .enumerate()
-            {
-                validate_schema_value(item_schema, item, &format!("{path}[{index}]"))?;
-            }
-        }
+fn validate_object_property(
+    schema: &serde_json::Map<String, Value>,
+    properties: Option<&serde_json::Map<String, Value>>,
+    key: &str,
+    child: &Value,
+    path: &str,
+) -> Result<(), String> {
+    if let Some(child_schema) = properties.and_then(|properties| properties.get(key)) {
+        return validate_schema_value(child_schema, child, &format!("{path}.{key}"));
+    }
+    if schema.get("additionalProperties") == Some(&Value::Bool(false)) {
+        return Err(format!("unknown argument {path}.{key}"));
+    }
+    Ok(())
+}
+
+fn validate_array_constraints(
+    schema: &serde_json::Map<String, Value>,
+    value: &Value,
+    path: &str,
+) -> Result<(), String> {
+    let Some(item_schema) = schema.get("items") else {
+        return Ok(());
+    };
+    for (index, item) in value
+        .as_array()
+        .expect("array type was checked")
+        .iter()
+        .enumerate()
+    {
+        validate_schema_value(item_schema, item, &format!("{path}[{index}]"))?;
     }
     Ok(())
 }
@@ -705,13 +905,12 @@ mod tests {
         assert_eq!(machine.stage(), DispatchStage::Failed);
     }
 
-    fn authority_machine() -> DispatchMachine {
+    fn authority_machine_for(
+        effect_policy: EffectPolicy,
+        effect_grant: EffectGrant,
+    ) -> DispatchMachine {
         let mut operation = operation("fixture.operation", "fixture_alias");
-        operation.effect_policy = EffectPolicy {
-            effect_class: EffectClass::Irreversible,
-            permit: PermitRequirement::Required,
-            approval: ApprovalRequirement::Required,
-        };
+        operation.effect_policy = effect_policy;
         let registry = CanonicalRegistry {
             version: CANONICAL_DISPATCH_VERSION.to_owned(),
             engine: RegistryEngine::TokenZero,
@@ -720,8 +919,19 @@ mod tests {
         let mut machine = DispatchMachine::new(registry).unwrap();
         machine.resolve("fixture_alias").unwrap();
         machine.validate_arguments(&json!({})).unwrap();
-        machine.authorize_effect(EffectGrant::Irreversible).unwrap();
+        machine.authorize_effect(effect_grant).unwrap();
         machine
+    }
+
+    fn authority_machine() -> DispatchMachine {
+        authority_machine_for(
+            EffectPolicy {
+                effect_class: EffectClass::Irreversible,
+                permit: PermitRequirement::Required,
+                approval: ApprovalRequirement::Required,
+            },
+            EffectGrant::Irreversible,
+        )
     }
 
     fn valid_permit() -> PermitGrant {
@@ -765,5 +975,102 @@ mod tests {
             DispatchErrorClass::ApprovalRequired
         );
         assert_eq!(wrong_effect.stage(), DispatchStage::Failed);
+    }
+
+    #[test]
+    fn complexity_dispatch_schema_preserves_recursive_paths_and_object_rules() {
+        let schema = json!({
+            "type": "object",
+            "properties": {
+                "entries": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "name": {"type": "string", "enum": ["allowed"]}
+                        },
+                        "required": ["name"],
+                        "additionalProperties": false
+                    }
+                }
+            },
+            "required": ["entries"],
+            "additionalProperties": false
+        });
+
+        let missing = validate_schema_value(&schema, &json!({"entries": [{}]}), "$")
+            .unwrap_err();
+        assert_eq!(missing, "missing required argument $.entries[0].name");
+
+        let unknown = validate_schema_value(
+            &schema,
+            &json!({"entries": [{"name": "allowed", "extra": true}]}),
+            "$",
+        )
+        .unwrap_err();
+        assert_eq!(unknown, "unknown argument $.entries[0].extra");
+    }
+
+    #[test]
+    fn complexity_dispatch_authority_requires_ids_in_fail_closed_order() {
+        let mut empty_permit = valid_permit();
+        empty_permit.permit_id = "  ".to_owned();
+        let mut empty_approval = valid_approval();
+        empty_approval.approval_id = String::new();
+
+        let mut permit_first = authority_machine();
+        let error = permit_first
+            .acquire_authority(Some(empty_permit), Some(empty_approval.clone()))
+            .unwrap_err();
+        assert_eq!(error.class, DispatchErrorClass::PermitRequired);
+        assert_eq!(error.message, "a non-empty permit is required");
+        assert_eq!(permit_first.stage(), DispatchStage::Failed);
+
+        let mut approval_after_permit = authority_machine();
+        let error = approval_after_permit
+            .acquire_authority(Some(valid_permit()), Some(empty_approval))
+            .unwrap_err();
+        assert_eq!(error.class, DispatchErrorClass::ApprovalRequired);
+        assert_eq!(error.message, "a non-empty approval is required");
+        assert_eq!(approval_after_permit.stage(), DispatchStage::Failed);
+    }
+
+    #[test]
+    fn complexity_dispatch_rejects_authority_disallowed_by_effect_policy() {
+        let mut read_only = authority_machine_for(
+            EffectPolicy {
+                effect_class: EffectClass::ReadOnly,
+                permit: PermitRequirement::NotRequired,
+                approval: ApprovalRequirement::NotRequired,
+            },
+            EffectGrant::ReadOnly,
+        );
+        let error = read_only
+            .acquire_authority(Some(valid_permit()), None)
+            .unwrap_err();
+        assert_eq!(error.class, DispatchErrorClass::InvalidStageTransition);
+        assert_eq!(
+            error.message,
+            "permit supplied for an operation that does not accept one"
+        );
+
+        let mut reversible = authority_machine_for(
+            EffectPolicy {
+                effect_class: EffectClass::ReversibleMutation,
+                permit: PermitRequirement::Required,
+                approval: ApprovalRequirement::NotRequired,
+            },
+            EffectGrant::ReversibleMutation,
+        );
+        let mut permit = valid_permit();
+        permit.effect_class = EffectClass::ReversibleMutation;
+        let error = reversible
+            .acquire_authority(Some(permit), Some(valid_approval()))
+            .unwrap_err();
+        assert_eq!(error.class, DispatchErrorClass::InvalidStageTransition);
+        assert_eq!(
+            error.message,
+            "approval supplied for an operation that does not accept one"
+        );
     }
 }

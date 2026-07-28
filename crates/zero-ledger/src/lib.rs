@@ -350,6 +350,20 @@ impl TokenLedger {
         }
         Ok(classified)
     }
+
+    fn apply_charge_totals(&mut self, totals: TokenCharge) {
+        self.raw_input_tokens = totals.raw_input_tokens;
+        self.declared_input_tokens = totals.input_tokens;
+        self.billed_tokens = totals.billed_tokens;
+        self.failed_trial_tokens = totals.failed_trial_tokens;
+        self.retry_tokens = totals.retry_tokens;
+        self.recovery_tokens = totals.recovery_tokens;
+        self.reexpansion_tokens = totals.reexpansion_tokens;
+        self.fallback_tokens = totals.fallback_tokens;
+        self.model_output_tokens = totals.model_output_tokens;
+        self.model_calls = totals.model_calls;
+        self.retries = totals.retries;
+    }
 }
 
 /// One append-only charge against a resource gauge.
@@ -422,6 +436,85 @@ impl TokenCharge {
         }
         Ok(classified)
     }
+
+    fn accumulate(&self, ledger: &TokenLedger) -> Result<Self, LedgerError> {
+        let mut totals = Self::default();
+        self.accumulate_input_totals(ledger, &mut totals)?;
+        self.accumulate_class_totals(ledger, &mut totals)?;
+        self.accumulate_result_totals(ledger, &mut totals)?;
+        Ok(totals)
+    }
+
+    fn accumulate_input_totals(
+        &self,
+        ledger: &TokenLedger,
+        totals: &mut Self,
+    ) -> Result<(), LedgerError> {
+        totals.raw_input_tokens = add(
+            ledger.raw_input_tokens,
+            self.raw_input_tokens,
+            "raw_input_tokens",
+        )?;
+        totals.input_tokens = add(
+            ledger.declared_input_tokens,
+            self.input_tokens,
+            "declared_input_tokens",
+        )?;
+        Ok(())
+    }
+
+    fn accumulate_class_totals(
+        &self,
+        ledger: &TokenLedger,
+        totals: &mut Self,
+    ) -> Result<(), LedgerError> {
+        totals.billed_tokens = add(
+            ledger.billed_tokens,
+            self.billed_tokens,
+            "billed_tokens",
+        )?;
+        totals.failed_trial_tokens = add(
+            ledger.failed_trial_tokens,
+            self.failed_trial_tokens,
+            "failed_trial_tokens",
+        )?;
+        totals.retry_tokens = add(
+            ledger.retry_tokens,
+            self.retry_tokens,
+            "retry_tokens",
+        )?;
+        totals.recovery_tokens = add(
+            ledger.recovery_tokens,
+            self.recovery_tokens,
+            "recovery_tokens",
+        )?;
+        totals.reexpansion_tokens = add(
+            ledger.reexpansion_tokens,
+            self.reexpansion_tokens,
+            "reexpansion_tokens",
+        )?;
+        totals.fallback_tokens = add(
+            ledger.fallback_tokens,
+            self.fallback_tokens,
+            "fallback_tokens",
+        )?;
+        Ok(())
+    }
+
+    fn accumulate_result_totals(
+        &self,
+        ledger: &TokenLedger,
+        totals: &mut Self,
+    ) -> Result<(), LedgerError> {
+        totals.model_output_tokens = add(
+            ledger.model_output_tokens,
+            self.model_output_tokens,
+            "model_output_tokens",
+        )?;
+        totals.model_calls = add(ledger.model_calls, self.model_calls, "model_calls")?;
+        totals.retries = add(ledger.retries, self.retries, "retries")?;
+        Ok(())
+    }
 }
 
 /// The RACC resource gauge: a locked tokenizer plus monotone counters.
@@ -489,6 +582,17 @@ impl ResourceGauge {
         tokenizer: &TokenizerIdentity,
         charge: &TokenCharge,
     ) -> Result<(), LedgerError> {
+        self.check_tokenizer(tokenizer)?;
+        charge.check_classification()?;
+
+        let totals = charge.accumulate(&self.ledger)?;
+        let charges = add(self.charges, 1, "charges")?;
+        self.ledger.apply_charge_totals(totals);
+        self.charges = charges;
+        Ok(())
+    }
+
+    fn check_tokenizer(&self, tokenizer: &TokenizerIdentity) -> Result<(), LedgerError> {
         if tokenizer != &self.config.tokenizer {
             return Err(LedgerError::TokenizerIdentityMismatch {
                 expected_id: self.config.tokenizer.tokenizer_id.clone(),
@@ -497,69 +601,6 @@ impl ResourceGauge {
                 actual_digest: tokenizer.tokenizer_version_digest,
             });
         }
-        charge.check_classification()?;
-
-        let raw_input_tokens = add(
-            self.ledger.raw_input_tokens,
-            charge.raw_input_tokens,
-            "raw_input_tokens",
-        )?;
-        let declared_input_tokens = add(
-            self.ledger.declared_input_tokens,
-            charge.input_tokens,
-            "declared_input_tokens",
-        )?;
-        let billed_tokens = add(
-            self.ledger.billed_tokens,
-            charge.billed_tokens,
-            "billed_tokens",
-        )?;
-        let failed_trial_tokens = add(
-            self.ledger.failed_trial_tokens,
-            charge.failed_trial_tokens,
-            "failed_trial_tokens",
-        )?;
-        let retry_tokens = add(
-            self.ledger.retry_tokens,
-            charge.retry_tokens,
-            "retry_tokens",
-        )?;
-        let recovery_tokens = add(
-            self.ledger.recovery_tokens,
-            charge.recovery_tokens,
-            "recovery_tokens",
-        )?;
-        let reexpansion_tokens = add(
-            self.ledger.reexpansion_tokens,
-            charge.reexpansion_tokens,
-            "reexpansion_tokens",
-        )?;
-        let fallback_tokens = add(
-            self.ledger.fallback_tokens,
-            charge.fallback_tokens,
-            "fallback_tokens",
-        )?;
-        let model_output_tokens = add(
-            self.ledger.model_output_tokens,
-            charge.model_output_tokens,
-            "model_output_tokens",
-        )?;
-        let model_calls = add(self.ledger.model_calls, charge.model_calls, "model_calls")?;
-        let retries = add(self.ledger.retries, charge.retries, "retries")?;
-        let charges = add(self.charges, 1, "charges")?;
-
-        self.ledger.raw_input_tokens = raw_input_tokens;
-        self.ledger.declared_input_tokens = declared_input_tokens;
-        self.ledger.billed_tokens = billed_tokens;
-        self.ledger.failed_trial_tokens = failed_trial_tokens;
-        self.ledger.retry_tokens = retry_tokens;
-        self.ledger.recovery_tokens = recovery_tokens;
-        self.ledger.reexpansion_tokens = reexpansion_tokens;
-        self.ledger.fallback_tokens = fallback_tokens;
-        self.ledger.model_output_tokens = model_output_tokens;
-        self.ledger.model_calls = model_calls;
-        self.ledger.retries = retries;
-        self.charges = charges;
         Ok(())
     }
 

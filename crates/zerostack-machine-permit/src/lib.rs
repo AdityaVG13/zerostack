@@ -458,7 +458,15 @@ fn classify_waiter_entry(
     if path == self_path {
         return Ok(None);
     }
-    if !entry
+    require_waiter_directory(entry, &path)?;
+    match waiter_key(&path) {
+        Some((pid, started_at)) => classify_structured_waiter(entry, &path, pid, started_at),
+        None => classify_legacy_waiter(entry, &path),
+    }
+}
+
+fn require_waiter_directory(entry: &fs::DirEntry, path: &Path) -> Result<(), AcquireError> {
+    let is_directory = entry
         .file_type()
         .map_err(|e| {
             AcquireError::Fatal(format!(
@@ -466,39 +474,57 @@ fn classify_waiter_entry(
                 path.display()
             ))
         })?
-        .is_dir()
-    {
+        .is_dir();
+    if !is_directory {
         return Err(AcquireError::Fatal(format!(
             "codemode permit waiter is not a directory: {}",
             path.display()
         )));
     }
-    if let Some((pid, started_at)) = waiter_key(&path) {
-        let Some(identity) = read_identity(&path) else {
-            if reclaim_dead(&path) {
-                return Ok(None);
-            }
-            return Ok(Some((started_at, entry.file_name().to_string_lossy().into_owned())));
-        };
-        let reclaimable = if identity.pid == pid {
-            match identity_liveness(&identity, epoch_millis(), WAITER_IDENTITY_MAX_AGE) {
-                IdentityLiveness::Live => false,
-                IdentityLiveness::Dead => true,
-                IdentityLiveness::Incomplete => incomplete_identity_stale(&path),
-            }
-        } else {
-            incomplete_identity_stale(&path)
-        };
-        // Cookie publication and cleanup fencing remain load-bearing here.
-        if reclaimable && cleanup_owned(&path, &identity.cookie) {
+    Ok(())
+}
+
+fn classify_structured_waiter(
+    entry: &fs::DirEntry,
+    path: &Path,
+    pid: u32,
+    started_at: u128,
+) -> Result<Option<(u128, String)>, AcquireError> {
+    let Some(identity) = read_identity(path) else {
+        if reclaim_dead(path) {
             return Ok(None);
         }
-        return Ok(Some((
-            started_at,
-            entry.file_name().to_string_lossy().into_owned(),
-        )));
+        return Ok(Some(waiter_rank(entry, started_at)));
+    };
+    // Cookie publication and cleanup fencing remain load-bearing here.
+    if waiter_identity_reclaimable(path, pid, &identity)
+        && cleanup_owned(path, &identity.cookie)
+    {
+        return Ok(None);
     }
-    if reclaim_dead(&path) {
+    Ok(Some(waiter_rank(entry, started_at)))
+}
+
+fn waiter_identity_reclaimable(path: &Path, pid: u32, identity: &PermitIdentity) -> bool {
+    if identity.pid != pid {
+        return incomplete_identity_stale(path);
+    }
+    match identity_liveness(identity, epoch_millis(), WAITER_IDENTITY_MAX_AGE) {
+        IdentityLiveness::Live => false,
+        IdentityLiveness::Dead => true,
+        IdentityLiveness::Incomplete => incomplete_identity_stale(path),
+    }
+}
+
+fn waiter_rank(entry: &fs::DirEntry, started_at: u128) -> (u128, String) {
+    (started_at, entry.file_name().to_string_lossy().into_owned())
+}
+
+fn classify_legacy_waiter(
+    entry: &fs::DirEntry,
+    path: &Path,
+) -> Result<Option<(u128, String)>, AcquireError> {
+    if reclaim_dead(path) {
         return Ok(None);
     }
     let owner = fs::read_to_string(path.join("owner"))
@@ -637,33 +663,45 @@ fn read_identity(path: &Path) -> Option<PermitIdentity> {
 fn parse_identity(value: &[u8]) -> Option<PermitIdentity> {
     let value = std::str::from_utf8(value).ok()?;
     let lines = value.lines().collect::<Vec<_>>();
-    if lines.len() != 3 && lines.len() != 6 {
+    let (cookie, pid, owner) = parse_identity_header(&lines)?;
+    let (started_at, process) = parse_identity_details(&lines)?;
+    Some(PermitIdentity {
+        cookie: cookie.to_string(),
+        pid,
+        owner: owner.to_string(),
+        started_at,
+        process: process.map(|(boot_id, starttime)| ProcessIdentity {
+            boot_id: boot_id.to_string(),
+            starttime,
+        }),
+    })
+}
+
+fn parse_identity_header<'a>(lines: &'a [&'a str]) -> Option<(&'a str, u32, &'a str)> {
+    let [cookie, pid, owner, ..] = lines else {
         return None;
-    }
-    let cookie = lines[0].to_owned();
-    let pid = lines[1].parse().ok()?;
-    let owner = lines[2].to_owned();
+    };
     if cookie.len() != 32
         || !cookie.bytes().all(|byte| byte.is_ascii_hexdigit())
         || owner.is_empty()
     {
         return None;
     }
-    let (started_at, process) = if lines.len() == 6 {
-        let started_at = lines[3].parse().ok()?;
-        let process = match (lines[4], lines[5]) {
-            ("-", "-") => None,
-            (boot_id, starttime) if !boot_id.is_empty() => Some(ProcessIdentity {
-                boot_id: boot_id.to_owned(),
-                starttime: starttime.parse().ok()?,
-            }),
-            _ => return None,
-        };
-        (Some(started_at), process)
-    } else {
-        (None, None)
-    };
-    Some(PermitIdentity { cookie, pid, owner, started_at, process })
+    Some((cookie, pid.parse().ok()?, owner))
+}
+
+fn parse_identity_details<'a>(
+    lines: &'a [&'a str],
+) -> Option<(Option<u128>, Option<(&'a str, u64)>)> {
+    match lines {
+        [_, _, _] => Some((None, None)),
+        [_, _, _, started_at, "-", "-"] => Some((Some(started_at.parse().ok()?), None)),
+        [_, _, _, started_at, boot_id, starttime] if !boot_id.is_empty() => Some((
+            Some(started_at.parse().ok()?),
+            Some((boot_id, starttime.parse().ok()?)),
+        )),
+        _ => None,
+    }
 }
 
 fn parse_proc_stat_starttime(value: &str) -> Option<u64> {

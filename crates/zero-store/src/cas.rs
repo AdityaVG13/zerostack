@@ -389,7 +389,21 @@ impl SharedCas {
         limit: u64,
         mut next_sequence: impl FnMut() -> u64,
     ) -> Result<bool, CasError> {
-        let (mut file, tmp) = (0..TEMP_CREATE_ATTEMPTS)
+        let (file, tmp) =
+            Self::create_temp_object(parent, hash, &mut next_sequence)?;
+        let publish = self.publish_temp_object(file, &tmp, parent, dest, hash, bytes, limit);
+        // create_new established ownership, so removal races no other publisher.
+        // Successful rename has already consumed the path; convergence leaves it.
+        let _ = fs::remove_file(tmp);
+        publish
+    }
+
+    fn create_temp_object(
+        parent: &Path,
+        hash: &str,
+        next_sequence: &mut impl FnMut() -> u64,
+    ) -> Result<(fs::File, PathBuf), CasError> {
+        (0..TEMP_CREATE_ATTEMPTS)
             .find_map(|attempt| {
                 let tmp = parent.join(format!(
                     "{TEMP_PREFIX}{}-{}-{}",
@@ -418,48 +432,43 @@ impl SharedCas {
                     ))),
                 }
             })
-            .expect("terminal temp-create attempt always returns a result")?;
-        // Ok(true) published our bytes; Ok(false) converged on an existing object.
-        let publish = (|| -> Result<bool, CasError> {
-            file.write_all(bytes)
-                .map_err(|e| io_err("write temp object", e))?;
-            file.sync_all().map_err(|e| io_err("sync temp object", e))?;
-            // Concurrent identical writers may rename over each other; both
-            // orders leave one valid object with these exact bytes.
-            if let Err(e) = replace_file(&tmp, dest) {
-                // Destination contention: if a concurrent writer already
-                // published a verifying object, converge on it.
-                // Short-circuit order is load-bearing: is_file before verify.
-                if is_regular_file(dest) && self.read_verified_at(dest, hash, limit).is_ok() {
-                    return Ok(false);
-                }
-                return Err(io_err("publish object", e));
+            .expect("terminal temp-create attempt always returns a result")
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn publish_temp_object(
+        &self,
+        mut file: fs::File,
+        tmp: &Path,
+        parent: &Path,
+        dest: &Path,
+        hash: &str,
+        bytes: &[u8],
+        limit: u64,
+    ) -> Result<bool, CasError> {
+        file.write_all(bytes)
+            .map_err(|e| io_err("write temp object", e))?;
+        file.sync_all().map_err(|e| io_err("sync temp object", e))?;
+        // Concurrent identical writers may rename over each other; both
+        // orders leave one valid object with these exact bytes.
+        if let Err(e) = replace_file(tmp, dest) {
+            // Destination contention: if a concurrent writer already published
+            // a verifying object, converge. Order is load-bearing: stat first.
+            if is_regular_file(dest) && self.read_verified_at(dest, hash, limit).is_ok() {
+                return Ok(false);
             }
-            // The rename landed: dest already holds these exact bytes for every
-            // reader. A directory fsync failure therefore downgrades durability,
-            // it does not unpublish the object, so it must not be reported as a
-            // failed put. It is still fail-closed: the object is re-verified
-            // before the weaker guarantee is accepted.
-            if sync_dir(parent).is_err() && self.read_verified_at(dest, hash, limit).is_err() {
-                return Err(CasError::Io(format!(
-                    "sync object directory after publishing {} in '{}'",
-                    &hash[..8],
-                    self.label
-                )));
-            }
-            Ok(true)
-        })();
-        let created = match publish {
-            Ok(created) => created,
-            Err(e) => {
-                // The temp is ours (create_new succeeded), so removal races no one.
-                let _ = fs::remove_file(&tmp);
-                return Err(e);
-            }
-        };
-        // Converged-on-existing leaves our temp behind; clean it up.
-        let _ = fs::remove_file(&tmp);
-        Ok(created)
+            return Err(io_err("publish object", e));
+        }
+        // A directory fsync failure downgrades durability after publication. It
+        // is accepted only when the destination still verifies, as before.
+        if sync_dir(parent).is_err() && self.read_verified_at(dest, hash, limit).is_err() {
+            return Err(CasError::Io(format!(
+                "sync object directory after publishing {} in '{}'",
+                &hash[..8],
+                self.label
+            )));
+        }
+        Ok(true)
     }
 
     /// Refresh an object's modification time without reading it, so an

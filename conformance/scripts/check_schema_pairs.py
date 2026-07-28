@@ -70,15 +70,11 @@ def pointer_value(document: JsonValue, fragment: str, reference: str) -> JsonVal
     return value
 
 
-def resolve(node: JsonValue, current: Path, stack: tuple[tuple[Path, str], ...] = ()) -> JsonValue:
-    if isinstance(node, list):
-        return [resolve(item, current, stack) for item in node]
-    if not isinstance(node, dict):
-        return node
-    if "$ref" not in node:
-        return {key: resolve(value, current, stack) for key, value in node.items()}
+def resolve_children(node: dict[str, Any], current: Path, stack: tuple[tuple[Path, str], ...]) -> dict[str, Any]:
+    return {key: resolve(value, current, stack) for key, value in node.items()}
 
-    reference = node["$ref"]
+
+def resolve_reference(reference: object, current: Path, stack: tuple[tuple[Path, str], ...]) -> tuple[JsonValue, str]:
     if not isinstance(reference, str):
         raise ResolutionError(f"{current}: $ref must be a string")
     target = confined_path(current, reference)
@@ -88,16 +84,30 @@ def resolve(node: JsonValue, current: Path, stack: tuple[tuple[Path, str], ...] 
         chain = " -> ".join(f"{path.name}#{part}" for path, part in (*stack, marker))
         raise ResolutionError(f"cyclic $ref: {chain}")
     selected = pointer_value(load_json(target), fragment, reference)
-    resolved = resolve(copy.deepcopy(selected), target, (*stack, marker))
+    return resolve(copy.deepcopy(selected), target, (*stack, marker)), reference
+
+
+def merge_siblings(resolved: JsonValue, siblings: dict[str, Any], reference: str, current: Path, stack: tuple[tuple[Path, str], ...]) -> JsonValue:
+    if not siblings:
+        return resolved
+    if not isinstance(resolved, dict):
+        raise ResolutionError(f"cannot apply $ref siblings to non-object: {reference!r}")
+    overlap = resolved.keys() & siblings.keys()
+    if overlap:
+        raise ResolutionError(f"$ref sibling collision for {sorted(overlap)!r}: {reference!r}")
+    return {**resolved, **resolve_children(siblings, current, stack)}
+
+
+def resolve(node: JsonValue, current: Path, stack: tuple[tuple[Path, str], ...] = ()) -> JsonValue:
+    if isinstance(node, list):
+        return [resolve(item, current, stack) for item in node]
+    if not isinstance(node, dict):
+        return node
+    if "$ref" not in node:
+        return resolve_children(node, current, stack)
+    resolved, reference = resolve_reference(node["$ref"], current, stack)
     siblings = {key: value for key, value in node.items() if key != "$ref"}
-    if siblings:
-        if not isinstance(resolved, dict):
-            raise ResolutionError(f"cannot apply $ref siblings to non-object: {reference!r}")
-        overlap = resolved.keys() & siblings.keys()
-        if overlap:
-            raise ResolutionError(f"$ref sibling collision for {sorted(overlap)!r}: {reference!r}")
-        resolved = {**resolved, **resolve(siblings, current, stack)}
-    return resolved
+    return merge_siblings(resolved, siblings, reference, current, stack)
 
 
 def rendered(value: JsonValue) -> str:

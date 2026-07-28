@@ -53,19 +53,9 @@ impl SharedCas {
         let mut events = Vec::new();
         for entry in entries {
             let entry = entry.map_err(|error| io_err("read metadata entry", error))?;
-            let name = entry.file_name().to_string_lossy().into_owned();
-            let Some(digest) = canonical_event_digest(&name) else { continue };
-            if !entry.file_type().map_err(|e| io_err("stat metadata event", e))?.is_file() {
-                return Err(CasError::Malformed(format!("metadata event '{name}' is not a regular file")));
+            if let Some(event) = read_observation_event(entry)? {
+                events.push(event);
             }
-            let bytes = fs::read(entry.path()).map_err(|e| io_err("read metadata event", e))?;
-            if bytes.len() > MAX_EVENT_BYTES || hash_hex(&bytes) != digest {
-                return Err(CasError::Malformed(format!("metadata event '{name}' has invalid content")));
-            }
-            let value = serde_json::from_slice(&bytes).map_err(|e| {
-                CasError::Malformed(format!("metadata event '{name}' is invalid JSON: {e}"))
-            })?;
-            events.push((digest.to_string(), value));
         }
         events.sort_by(|a, b| a.0.cmp(&b.0));
         Ok(events.into_iter().map(|(_, value)| value).collect())
@@ -73,29 +63,83 @@ impl SharedCas {
 
     fn append_observation(&self, id: &str, value: &ObservationMetadata) -> Result<(), CasError> {
         validate_id(id)?;
-        let bytes = serde_json::to_vec(value)
-            .map_err(|e| CasError::Malformed(format!("serialize metadata: {e}")))?;
-        if bytes.len() > MAX_EVENT_BYTES {
-            return Err(CasError::PolicyDenied(format!("metadata event exceeds {MAX_EVENT_BYTES} bytes")));
-        }
+        let bytes = serialize_observation(value)?;
         let digest = hash_hex(&bytes);
         let dir = event_dir(self.root(), id);
         ensure_real_dirs(self.root(), &dir)?;
         let dest = dir.join(format!("{digest}.json"));
-        if dest.exists() { return verify_existing(&dest, &bytes); }
-        let temp = dir.join(format!(".tmp-{digest}-{}-{}", std::process::id(), TEMP_SEQ.fetch_add(1, Ordering::Relaxed)));
-        let mut file = fs::OpenOptions::new().write(true).create_new(true).open(&temp)
+        if dest.exists() {
+            return verify_existing(&dest, &bytes);
+        }
+        let temp = dir.join(format!(
+            ".tmp-{digest}-{}-{}",
+            std::process::id(),
+            TEMP_SEQ.fetch_add(1, Ordering::Relaxed)
+        ));
+        let file = fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&temp)
             .map_err(|e| io_err("create metadata temp", e))?;
-        let result = (|| {
-            file.write_all(&bytes).map_err(|e| io_err("write metadata temp", e))?;
-            match fs::hard_link(&temp, &dest) {
-                Ok(()) => Ok(()),
-                Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => verify_existing(&dest, &bytes),
-                Err(e) => Err(io_err("publish metadata event", e)),
-            }
-        })();
+        let result = publish_observation_event(file, &temp, &dest, &bytes);
         let _ = fs::remove_file(temp);
         result
+    }
+}
+
+fn read_observation_event(
+    entry: fs::DirEntry,
+) -> Result<Option<(String, ObservationMetadata)>, CasError> {
+    let name = entry.file_name().to_string_lossy().into_owned();
+    let Some(digest) = canonical_event_digest(&name) else {
+        return Ok(None);
+    };
+    if !entry
+        .file_type()
+        .map_err(|e| io_err("stat metadata event", e))?
+        .is_file()
+    {
+        return Err(CasError::Malformed(format!(
+            "metadata event '{name}' is not a regular file"
+        )));
+    }
+    let bytes = fs::read(entry.path()).map_err(|e| io_err("read metadata event", e))?;
+    if bytes.len() > MAX_EVENT_BYTES || hash_hex(&bytes) != digest {
+        return Err(CasError::Malformed(format!(
+            "metadata event '{name}' has invalid content"
+        )));
+    }
+    let value = serde_json::from_slice(&bytes).map_err(|e| {
+        CasError::Malformed(format!("metadata event '{name}' is invalid JSON: {e}"))
+    })?;
+    Ok(Some((digest.to_string(), value)))
+}
+
+fn serialize_observation(value: &ObservationMetadata) -> Result<Vec<u8>, CasError> {
+    let bytes = serde_json::to_vec(value)
+        .map_err(|e| CasError::Malformed(format!("serialize metadata: {e}")))?;
+    if bytes.len() > MAX_EVENT_BYTES {
+        return Err(CasError::PolicyDenied(format!(
+            "metadata event exceeds {MAX_EVENT_BYTES} bytes"
+        )));
+    }
+    Ok(bytes)
+}
+
+fn publish_observation_event(
+    mut file: fs::File,
+    temp: &Path,
+    dest: &Path,
+    bytes: &[u8],
+) -> Result<(), CasError> {
+    file.write_all(bytes)
+        .map_err(|e| io_err("write metadata temp", e))?;
+    match fs::hard_link(temp, dest) {
+        Ok(()) => Ok(()),
+        Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
+            verify_existing(dest, bytes)
+        }
+        Err(e) => Err(io_err("publish metadata event", e)),
     }
 }
 

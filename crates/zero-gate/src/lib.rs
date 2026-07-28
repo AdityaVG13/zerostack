@@ -280,24 +280,40 @@ impl std::error::Error for GateError {}
 
 pub fn decide<'certificate, 'payload>(mut state: GateState, input: GateInput<'certificate, 'payload>) -> Result<(GateState, DecisionGate<'certificate, 'payload>), GateError> {
     if state.phase == GatePhase::Terminal { return Err(GateError::TerminalState); }
-    if input.verified_evidence.is_some() && input.task_receipt.is_some() { return Err(GateError::ConflictingProofs); }
-    if input.effect_class == EffectClass::Irreversible && input.task_receipt.is_some() { return Err(GateError::IrreversibleSpeculation); }
-    if input.effect_class == EffectClass::Irreversible && input.verified_evidence.is_none() {
-        state.phase = GatePhase::Terminal;
-        return Ok((state, DecisionGate::RawFallback));
+    let GateInput { effect_class, required_budget, verified_evidence, task_receipt } = input;
+    if let Some(decision) = proof_decision(effect_class, verified_evidence, task_receipt)? {
+        return Ok(terminate(state, decision));
     }
-    if let Some(receipt) = input.task_receipt {
-        state.phase = GatePhase::Terminal;
-        return Ok((state, DecisionGate::TaskVerified(receipt)));
+    if required_budget <= state.current_budget {
+        return Ok(terminate(state, DecisionGate::RawFallback));
     }
-    if let Some(evidence) = input.verified_evidence {
-        state.phase = GatePhase::Terminal;
-        return Ok((state, DecisionGate::Certified(PolicySufficiencyWitness { evidence })));
+    expand(state)
+}
+
+fn proof_decision<'certificate, 'payload>(
+    effect_class: EffectClass,
+    verified_evidence: Option<VerifiedEvidence<'certificate, 'payload>>,
+    task_receipt: Option<TaskAcceptanceReceipt>,
+) -> Result<Option<DecisionGate<'certificate, 'payload>>, GateError> {
+    match (effect_class, verified_evidence, task_receipt) {
+        (_, Some(_), Some(_)) => Err(GateError::ConflictingProofs),
+        (EffectClass::Irreversible, _, Some(_)) => Err(GateError::IrreversibleSpeculation),
+        (EffectClass::Irreversible, None, None) => Ok(Some(DecisionGate::RawFallback)),
+        (_, _, Some(receipt)) => Ok(Some(DecisionGate::TaskVerified(receipt))),
+        (_, Some(evidence), None) => Ok(Some(DecisionGate::Certified(PolicySufficiencyWitness { evidence }))),
+        (_, None, None) => Ok(None),
     }
-    if input.required_budget <= state.current_budget {
-        state.phase = GatePhase::Terminal;
-        return Ok((state, DecisionGate::RawFallback));
-    }
+}
+
+fn terminate<'certificate, 'payload>(
+    mut state: GateState,
+    decision: DecisionGate<'certificate, 'payload>,
+) -> (GateState, DecisionGate<'certificate, 'payload>) {
+    state.phase = GatePhase::Terminal;
+    (state, decision)
+}
+
+fn expand<'certificate, 'payload>(mut state: GateState) -> Result<(GateState, DecisionGate<'certificate, 'payload>), GateError> {
     let budget = state.current_budget.checked_mul(2).ok_or(GateError::BudgetOverflow)?;
     let cumulative_visible_cost = state.cumulative_visible_cost.checked_add(budget).ok_or(GateError::BudgetOverflow)?;
     let rounds = state.rounds.checked_add(1).ok_or(GateError::RoundOverflow)?;
