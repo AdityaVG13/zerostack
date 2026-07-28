@@ -729,7 +729,7 @@ fn acquire_slots_returns_fatal_when_parent_is_not_a_directory() {
     match err {
         AcquireError::Fatal(message) => {
             assert!(
-                message.contains("create codemode permit"),
+                message.contains("prepare codemode permit base"),
                 "unexpected Fatal message: {message}"
             );
         }
@@ -759,8 +759,8 @@ fn sanitize_permit_class_rejects_path_metacharacters() {
 
     let poisoned = scoped_permit_base_for("../evil", None);
     assert_eq!(
-        poisoned,
-        PathBuf::from("/tmp/zerostack-codemode-invalid.permit")
+        poisoned.file_name().and_then(|name| name.to_str()),
+        Some("zerostack-codemode-invalid.permit")
     );
     let slash = scoped_permit_base_for("a/b", Some(Path::new("/tmp")));
     let name = slash.file_name().and_then(|n| n.to_str()).unwrap();
@@ -769,4 +769,44 @@ fn sanitize_permit_class_rejects_path_metacharacters() {
         "slash class must not appear in basename: {name}"
     );
     assert!(!name.contains('/') && !name.contains(".."));
+}
+
+
+#[cfg(unix)]
+#[test]
+fn unix_fallback_runtime_directory_has_exact_safe_mode() {
+    use std::os::unix::fs::MetadataExt;
+
+    let temp = std::env::temp_dir().join(format!(
+        "zerostack-runtime-safe-{}-{}", std::process::id(), epoch_millis()
+    ));
+    fs::create_dir(&temp).expect("create isolated temp");
+    let runtime = unix_runtime_dir_for(None, &temp).expect("create private runtime");
+    let metadata = fs::symlink_metadata(&runtime).expect("inspect private runtime");
+    assert_eq!(metadata.mode() & 0o777, 0o700);
+    assert_eq!(metadata.uid(), effective_uid());
+    fs::remove_dir_all(&temp).expect("remove isolated temp");
+}
+
+#[cfg(unix)]
+#[test]
+fn unix_fallback_refuses_symlink_and_unsafe_preexisting_runtime() {
+    use std::os::unix::fs::{symlink, PermissionsExt};
+
+    let temp = std::env::temp_dir().join(format!(
+        "zerostack-runtime-unsafe-{}-{}", std::process::id(), epoch_millis()
+    ));
+    fs::create_dir(&temp).expect("create isolated temp");
+    let runtime = temp.join(format!("zerostack-runtime-{}", effective_uid()));
+    let target = temp.join("target");
+    fs::create_dir(&target).expect("create symlink target");
+    symlink(&target, &runtime).expect("create malicious runtime symlink");
+    assert!(unix_runtime_dir_for(None, &temp).is_err());
+    assert!(verify_permit_base(&runtime).is_err());
+    fs::remove_file(&runtime).expect("remove runtime symlink");
+    fs::create_dir(&runtime).expect("create unsafe runtime");
+    fs::set_permissions(&runtime, fs::Permissions::from_mode(0o755)).unwrap();
+    assert!(unix_runtime_dir_for(None, &temp).is_err());
+    assert!(verify_permit_base(&runtime).is_err());
+    fs::remove_dir_all(&temp).expect("remove isolated temp");
 }

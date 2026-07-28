@@ -8,6 +8,7 @@
 //! Canonical policy: `tokenzero-mcp/CODEMODE_MACHINE_PERMITS.md`.
 
 use std::fs;
+use std::io;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
@@ -15,20 +16,14 @@ pub const PERMIT_POLL: Duration = Duration::from_millis(20);
 pub const PERMIT_POLL_MAX: Duration = Duration::from_millis(200);
 const INCOMPLETE_PERMIT_GRACE: Duration = Duration::from_millis(250);
 
-/// Repo-scoped permit base: `/tmp/zerostack-codemode-<class>-<hash16>.permit`.
-///
-/// Scope comes from `ZEROSTACK_PERMIT_SCOPE_ROOT` or the per-child root envs
-/// the CodeMode hub already sets (`FSZERO_ROOT`, `TOKENZERO_ROOT`,
-/// `GZ_REPO_ROOT`), so concurrent repos stop serializing through one
-/// machine-global slot. Without a scope (bare CLI), fall back to the legacy
-/// machine-global base so unrelated processes keep excluding each other.
+/// Repo-scoped permit base below the current user's private runtime directory.
 pub fn scoped_permit_base(class: &str) -> PathBuf {
     try_scoped_permit_base(class)
         .unwrap_or_else(|error| panic!("resolve configured permit scope root: {error}"))
 }
 
 /// Fallible repo-scoped permit base resolution for acquisition paths.
-pub fn try_scoped_permit_base(class: &str) -> std::io::Result<PathBuf> {
+pub fn try_scoped_permit_base(class: &str) -> io::Result<PathBuf> {
     try_scoped_permit_base_for(class, permit_scope_root().as_deref())
 }
 
@@ -41,25 +36,144 @@ pub fn scoped_permit_base_for(class: &str, scope_root: Option<&Path>) -> PathBuf
 pub fn try_scoped_permit_base_for(
     class: &str,
     scope_root: Option<&Path>,
-) -> std::io::Result<PathBuf> {
-    // Untrusted class must not introduce path separators or `..` into /tmp.
+) -> io::Result<PathBuf> {
     let class = sanitize_permit_class(class);
-    let Some(root) = scope_root else {
-        return Ok(PathBuf::from(format!(
-            "/tmp/zerostack-codemode-{class}.permit"
-        )));
+    let suffix = if let Some(root) = scope_root {
+        let canonical = fs::canonicalize(root)?;
+        if !canonical.is_dir() {
+            return Err(io::Error::new(
+                io::ErrorKind::NotADirectory,
+                format!("permit scope root is not a directory: {}", canonical.display()),
+            ));
+        }
+        format!("-{:016x}", fnv1a64(canonical.to_string_lossy().as_bytes()))
+    } else {
+        String::new()
     };
-    let canonical = fs::canonicalize(root)?;
-    if !canonical.is_dir() {
-        return Err(std::io::Error::new(
-            std::io::ErrorKind::NotADirectory,
-            format!("permit scope root is not a directory: {}", canonical.display()),
-        ));
-    }
-    let scope = fnv1a64(canonical.to_string_lossy().as_bytes());
-    Ok(PathBuf::from(format!(
-        "/tmp/zerostack-codemode-{class}-{scope:016x}.permit"
+    Ok(permit_runtime_dir()?.join(format!(
+        "zerostack-codemode-{class}{suffix}.permit"
     )))
+}
+
+#[cfg(unix)]
+fn permit_runtime_dir() -> io::Result<PathBuf> {
+    let xdg = std::env::var_os("XDG_RUNTIME_DIR").map(PathBuf::from);
+    unix_runtime_dir_for(xdg.as_deref(), &std::env::temp_dir())
+}
+
+#[cfg(unix)]
+fn unix_runtime_dir_for(xdg: Option<&Path>, temp: &Path) -> io::Result<PathBuf> {
+    if let Some(path) = xdg.filter(|path| path.is_absolute()) {
+        if verify_unix_private_dir(path, false).is_ok() {
+            return Ok(path.to_path_buf());
+        }
+    }
+    let path = temp.join(format!("zerostack-runtime-{}", effective_uid()));
+    ensure_unix_private_dir(&path, true)?;
+    Ok(path)
+}
+
+#[cfg(unix)]
+fn effective_uid() -> u32 {
+    // SAFETY: geteuid has no preconditions, reads process credentials only, and
+    // does not retain pointers or mutate Rust-managed memory.
+    unsafe { libc::geteuid() }
+}
+
+#[cfg(unix)]
+fn ensure_unix_private_dir(path: &Path, exact_mode: bool) -> io::Result<()> {
+    use std::os::unix::fs::{DirBuilderExt, PermissionsExt};
+
+    let mut builder = fs::DirBuilder::new();
+    builder.mode(0o700);
+    match builder.create(path) {
+        Ok(()) => fs::set_permissions(path, fs::Permissions::from_mode(0o700))?,
+        Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {}
+        Err(error) => return Err(error),
+    }
+    verify_unix_private_dir(path, exact_mode)
+}
+
+#[cfg(unix)]
+fn verify_unix_private_dir(path: &Path, exact_mode: bool) -> io::Result<()> {
+    use std::os::unix::fs::MetadataExt;
+
+    let metadata = fs::symlink_metadata(path)?;
+    if metadata.file_type().is_symlink() || !metadata.is_dir() {
+        return Err(io::Error::new(io::ErrorKind::InvalidInput, format!(
+            "permit directory is not a real directory: {}", path.display()
+        )));
+    }
+    if metadata.uid() != effective_uid() {
+        return Err(io::Error::new(io::ErrorKind::PermissionDenied, format!(
+            "permit directory is not owned by the effective uid: {}", path.display()
+        )));
+    }
+    let mode = metadata.mode() & 0o777;
+    if mode & 0o077 != 0 || (exact_mode && mode != 0o700) {
+        return Err(io::Error::new(io::ErrorKind::PermissionDenied, format!(
+            "permit directory has unsafe mode {mode:o}: {}", path.display()
+        )));
+    }
+    Ok(())
+}
+
+#[cfg(windows)]
+fn permit_runtime_dir() -> io::Result<PathBuf> {
+    let parent = std::env::var_os("LOCALAPPDATA")
+        .filter(|value| !value.is_empty())
+        .map(PathBuf::from)
+        .unwrap_or_else(std::env::temp_dir);
+    let path = parent.join("ZeroStack");
+    // std cannot verify Windows ACLs. Atomic create_dir plus refusing links and
+    // non-directories prevents silently accepting an attacker-chosen leaf.
+    ensure_portable_private_dir(&path)?;
+    Ok(path)
+}
+
+#[cfg(not(any(unix, windows)))]
+fn permit_runtime_dir() -> io::Result<PathBuf> {
+    let path = std::env::temp_dir().join("ZeroStack");
+    ensure_portable_private_dir(&path)?;
+    Ok(path)
+}
+
+#[cfg(not(unix))]
+fn ensure_portable_private_dir(path: &Path) -> io::Result<()> {
+    match fs::create_dir(path) {
+        Ok(()) => {}
+        Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {}
+        Err(error) => return Err(error),
+    }
+    let metadata = fs::symlink_metadata(path)?;
+    if metadata.file_type().is_symlink() || !metadata.is_dir() {
+        return Err(io::Error::new(io::ErrorKind::InvalidInput, format!(
+            "permit directory is not a real directory: {}", path.display()
+        )));
+    }
+    Ok(())
+}
+
+/// Verify an existing permit base before acquisition uses it.
+pub fn verify_permit_base(base: &Path) -> io::Result<()> {
+    #[cfg(unix)]
+    { verify_unix_private_dir(base, false) }
+    #[cfg(not(unix))]
+    {
+        let metadata = fs::symlink_metadata(base)?;
+        if metadata.file_type().is_symlink() || !metadata.is_dir() {
+            return Err(io::Error::new(io::ErrorKind::InvalidInput,
+                format!("permit base is not a real directory: {}", base.display())));
+        }
+        Ok(())
+    }
+}
+
+fn prepare_permit_base(base: &Path) -> io::Result<()> {
+    #[cfg(unix)]
+    { ensure_unix_private_dir(base, false) }
+    #[cfg(not(unix))]
+    { ensure_portable_private_dir(base) }
 }
 
 /// Permit class path segment: non-empty `[A-Za-z0-9._-]+`, else `"invalid"`.
@@ -139,6 +253,9 @@ impl MachinePermit {
     ) -> Result<Self, AcquireError> {
         // Always use base/slot-N — even when slots==1 — so mixed concurrency
         // envs cannot stack an exclusive base lock with slot children.
+        prepare_permit_base(base).map_err(|error| {
+            AcquireError::Fatal(format!("prepare codemode permit base {}: {error}", base.display()))
+        })?;
         // Pool size is the caller's requested budget (from env); do not freeze
         // capacity to the first asker — that would let CONCURRENCY=1 starve the
         // family-wide cores/4 analysis budget.
@@ -151,7 +268,6 @@ impl MachinePermit {
             // backoff so one directory event cannot cause an N-way scan storm.
             let has_preceding = waiter.has_preceding_competitor()?;
             if !has_preceding && !legacy_exclusive_busy(base) {
-                let _ = fs::create_dir_all(base);
                 for idx in 0..slots {
                     let path = base.join(format!("slot-{idx}"));
                     match Self::try_create(&path, command) {
