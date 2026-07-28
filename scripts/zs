@@ -10,7 +10,7 @@ import subprocess
 import sys
 from typing import Any, NoReturn
 
-VERSION = "1.1.0"
+VERSION = "1.2.0"
 BASE = Path.home() / ".pi/agent/zerostack-origin-main"
 SPECS = {
     "fs": ("ZS_FSZERO_BIN", BASE / "fszero/target/release/fszero-codemode", "fz"),
@@ -66,7 +66,7 @@ def engine(name: str) -> dict[str, str]:
     env, default, prefix = SPECS[name]
     return {"bin": os.environ.get(env, str(default)), "execute": f"{prefix}_execute_code", "search": f"{prefix}_codemode_search", "describe": f"{prefix}_codemode_describe"}
 
-def invoke(spec: dict[str, str], method: str, arguments: dict[str, str], root: Path, command: list[str]) -> tuple[dict[str, Any], dict[str, Any]]:
+def invoke(spec: dict[str, str], method: str, arguments: dict[str, Any], root: Path, command: list[str]) -> tuple[dict[str, Any], dict[str, Any]]:
     try:
         timeout = int(os.environ.get("ZS_TIMEOUT_MS", "120000"))
         if timeout <= 0:
@@ -101,6 +101,66 @@ def invoke(spec: dict[str, str], method: str, arguments: dict[str, str], root: P
         die(f"engine error: {json.dumps(response['error'], sort_keys=True)}", 1, root, command)
     return response.get("result", {}), responses.get(1, {}).get("result", {})
 
+def catalog_methods(spec: dict[str, str], engine_name: str, query: str, root: Path, command: list[str]) -> list[dict[str, str]]:
+    try:
+        timeout = int(os.environ.get("ZS_TIMEOUT_MS", "120000"))
+        proc = subprocess.run([spec["bin"], "catalog"], capture_output=True, text=True, timeout=timeout / 1000, cwd=root)
+    except FileNotFoundError:
+        die(f"engine binary missing: {spec['bin']}", 127, root, command)
+    except PermissionError:
+        die(f"engine binary is not executable: {spec['bin']}", 126, root, command)
+    except subprocess.TimeoutExpired:
+        die(f"engine catalog timed out after {timeout}ms", 124, root, command)
+    if proc.returncode:
+        evidence = (proc.stderr or proc.stdout).strip()[:400]
+        die(f"engine catalog exited with status {proc.returncode}: {evidence}", proc.returncode, root, command)
+    try:
+        document = json.loads(proc.stdout)
+    except json.JSONDecodeError as exc:
+        die(f"engine catalog returned invalid JSON: {exc}: {proc.stdout.strip()[:200]}", 1, root, command)
+
+    entries: list[dict[str, Any]] = []
+    def collect(value: Any) -> None:
+        if isinstance(value, list):
+            for child in value:
+                collect(child)
+        elif isinstance(value, dict):
+            if isinstance(value.get("name"), str) and any(key in value for key in ("description", "signature", "inputSchema", "parameters")):
+                entries.append(value)
+            else:
+                for child in value.values():
+                    collect(child)
+    collect(document)
+    terms = re.findall(r"[a-z0-9_]+", query.lower())
+    ranked: list[tuple[int, str, dict[str, str]]] = []
+    for entry in entries:
+        name = str(entry["name"])
+        lower = name.lower()
+        if not (lower.startswith(f"{engine_name}.") or lower.startswith(f"zero.{engine_name}.")):
+            continue
+        metadata = " ".join(str(entry.get(key, "")) for key in ("surface", "mode", "kind")).lower()
+        if metadata and "mcp" in metadata and "codemode" not in metadata:
+            continue
+        description = str(entry.get("description") or entry.get("detail") or "").strip()
+        signature = str(entry.get("signature") or entry.get("usage") or "").strip()
+        if not signature and isinstance(entry.get("parameters"), str):
+            signature = f"{name}({entry['parameters']})"
+        haystack = f"{lower} {signature.lower()} {description.lower()}"
+        if terms and not all(term in haystack for term in terms):
+            continue
+        score = sum((12 if term in lower else 0) + haystack.count(term) for term in terms)
+        ranked.append((-score, name, {"name": name, "signature": signature, "description": description}))
+    ranked.sort(key=lambda item: (item[0], item[1]))
+    return [entry for _, _, entry in ranked]
+
+def print_catalog(methods: list[dict[str, str]], root: Path, command: list[str]) -> None:
+    if not methods:
+        die("engine search returned only a status token and catalog had no matching CodeMode methods", 1, root, command)
+    for method in methods:
+        print(method["signature"] or method["name"])
+        if method["description"]:
+            print(f"  {method['description']}")
+
 def text_items(result: dict[str, Any]) -> list[str]:
     content = result.get("content")
     return [x["text"] for x in content if isinstance(x, dict) and x.get("type") == "text" and isinstance(x.get("text"), str)] if isinstance(content, list) else []
@@ -117,6 +177,19 @@ def find_refs(value: Any) -> list[str]:
             found.extend(find_refs(child))
     return list(dict.fromkeys(found))
 
+def inline_value(structured: Any) -> Any | None:
+    value = structured
+    if isinstance(value, dict) and "result" in value:
+        value = value["result"]
+    while isinstance(value, dict):
+        if "payload" in value:
+            value = value["payload"]
+        elif "result" in value:
+            value = value["result"]
+        else:
+            return None
+    return value
+
 def print_result(result: dict[str, Any], kind: str, machine: bool) -> None:
     if machine:
         print(json.dumps(result, indent=2, sort_keys=True))
@@ -128,6 +201,9 @@ def print_result(result: dict[str, Any], kind: str, machine: bool) -> None:
         if kind in ("search", "describe") and structured is not None:
             print(json.dumps(structured, indent=2, sort_keys=True))
         elif structured is not None:
+            value = inline_value(structured)
+            if value is not None:
+                print(value if isinstance(value, str) else json.dumps(value, indent=2, sort_keys=True))
             for ref in find_refs(structured):
                 if not any(ref in text for text in texts):
                     print(ref)
@@ -160,9 +236,16 @@ def main() -> None:
     text = (sys.stdin.read() if not rest or rest == ["-"] else " ".join(rest)).strip()
     if not text:
         die("empty plan/query", root=root, command=[verb, *rest])
-    arguments = {"plan": text, "form": "js"} if kind == "execute" else ({"query": text} if kind == "search" else {"name": text})
+    arguments: dict[str, Any] = {"plan": text, "form": "js"} if kind == "execute" else ({"query": text} if kind == "search" else {"name": text})
+    if kind == "execute" and not machine:
+        arguments["envelope"] = "v1"
     spec = engine(name)
     result, initialized = invoke(spec, spec[kind], arguments, root, [verb, *rest])
+    texts, structured = text_items(result), result.get("structuredContent")
+    useful_search = isinstance(structured, dict) and any(key != "status" for key in structured)
+    if kind == "search" and texts and all(STATUS.fullmatch(item.strip()) for item in texts) and not useful_search:
+        print_catalog(catalog_methods(spec, name, text, root, [verb, *rest]), root, [verb, *rest])
+        return
     if verbose:
         server = initialized.get("serverInfo", {}) if isinstance(initialized, dict) else {}
         revision = server.get("revision") or (initialized.get("revision", "unknown") if isinstance(initialized, dict) else "unknown")
