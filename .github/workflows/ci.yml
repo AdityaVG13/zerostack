@@ -53,21 +53,7 @@ jobs:
       - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
       - run: cargo test --workspace --all-targets --no-fail-fast
 
-  conformance-freshness:
-    name: conformance reports are not stale
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
-      - uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # branch stable
-      - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
-      # The suite itself must keep building: the hub is edition 2021 while all
-      # three engines are edition 2024 on nightly, and the harness is the only
-      # thing that spans both.
-      - run: cargo build -p zerostack-codemode-conformance
-      # A report that silently rots is worse than no report, because it reads
-      # as evidence. Fail when the committed attestations age out.
-      - run: python3 conformance/scripts/check_freshness.py
-
+  # Local engine reports are ignored runtime evidence. CI cannot attest their freshness.
   privacy:
     name: no host paths in tracked files
     runs-on: ubuntu-latest

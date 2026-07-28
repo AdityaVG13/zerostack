@@ -26,6 +26,7 @@ coverage/
 *.samply
 tmp/
 .tmp/
+# Private local runtime evidence; not a repository/CI attestation.
 conformance/reports/
 **/Cargo.lock
 

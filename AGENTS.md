@@ -307,3 +307,8 @@ br sync --flush-only                  # Export DB to JSONL after Beads mutations
 `br` never commits or pushes. Follow this repository's own git instructions before staging, committing, or pushing. If the repository says "commit only when asked," that rule overrides any generic workflow advice.
 
 <!-- end-bv-agent-instructions -->
+
+
+## Local conformance evidence (Option B)
+
+conformance/reports/ is ignored private runtime output, not a durable repository or CI attestation. CI and clean clones do not verify report freshness. Validate an intentionally supplied local index with python3 conformance/scripts/check_freshness.py <explicit-index.json>; the validator never creates evidence. Durable publication requires a separate signed, scrubbed, provenance-pinned, reviewed flow with committed artifacts and CI signature/freshness verification.

@@ -341,7 +341,7 @@ Durable step-log/replay is deferred and is not mapped to a v1.0 conformance chec
 
 ## 14. Reports
 
-A conformance run MUST emit a JSON report at `conformance/reports/<ns>-<date>.json` matching:
+A local conformance run MAY emit a JSON report under `conformance/reports/`. These ignored reports are runtime evidence only and are not repository or CI attestations. A report used with the opt-in validator must match:
 
 ```json
 {
@@ -399,3 +399,10 @@ No existing T13 pi-stack host bead ID was found in repository metadata. Do not i
 3. Roll back to raw on verifier rejection, nonzero exit, artifact mismatch, or missing receipt; expose and charge the same attempt cost on every path.
 4. Reject EffectClass::Irreversible before sandbox execution while preserving Certified pre-action behavior and approval policy.
 5. Add end-to-end host tests for passing commit, failing rollback, missing-charge and missing-receipt mutations, irreversible rejection, and journal teardown.
+
+
+## Local report evidence (Option B)
+
+Engine reports and their index under conformance/reports/ are ignored, private, local-only runtime evidence. CI and clean clones do not contain or validate them. Run python3 conformance/scripts/check_freshness.py <explicit-index.json> only against an intentionally supplied local set. The validator creates no evidence and cross-checks indexed report identity, digests, revision, completion, timestamp, and basename-only binary identity.
+
+Durable attestations require a separate signed publication flow that scrubs host/private data, pins provenance and immutable revisions, reviews artifacts before committing them outside the ignored directory, and verifies signatures and freshness in CI.
