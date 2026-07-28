@@ -636,6 +636,9 @@ impl NativeWake {
         let queue = unsafe { libc::kqueue() };
         if queue < 0 {
             let error = std::io::Error::last_os_error();
+            // SAFETY: `directory` is a valid, uniquely owned file descriptor. The
+            // constructor does not return a `NativeWake` on this path, so `Drop`
+            // cannot run; closing here consumes its ownership exactly once.
             unsafe {
                 libc::close(directory);
             }
@@ -654,6 +657,9 @@ impl NativeWake {
             unsafe { libc::kevent(queue, &change, 1, std::ptr::null_mut(), 0, std::ptr::null()) };
         if registered < 0 {
             let error = std::io::Error::last_os_error();
+            // SAFETY: `queue` and `directory` are both valid, uniquely owned file
+            // descriptors. No `NativeWake` is published on this path, so `Drop`
+            // cannot run; each descriptor is closed exactly once here.
             unsafe {
                 libc::close(queue);
                 libc::close(directory);
@@ -734,6 +740,10 @@ impl NativeWake {
         // SAFETY: handle is a live change-notification handle.
         let result = unsafe { WaitForSingleObject(self.handle, millis) };
         if result == WAIT_OBJECT_0 {
+            // SAFETY: `self.handle` is a live, owned change-notification handle.
+            // The completed wait precedes this re-arm, no concurrent
+            // `FindCloseChangeNotification` can run, and `Drop` retains ownership
+            // and closes the handle later.
             if unsafe { FindNextChangeNotification(self.handle) } == 0 {
                 return Err(std::io::Error::last_os_error());
             }
