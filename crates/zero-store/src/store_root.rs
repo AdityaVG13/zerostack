@@ -221,7 +221,7 @@ impl ResolvedStore {
             .map(|p| resolve_pin_path(&repo_root, Path::new(p)));
 
         let local = repo_root.join(LOCAL_STORE_DIR);
-        if local.is_dir() {
+        if is_real_dir(&local) {
             return Self {
                 engine_dir: local.join(engine.dir_name()),
                 unified_root: Some(local),
@@ -352,6 +352,11 @@ impl ResolvedStore {
             )),
             _ => {}
         }
+        if local_marker_is_symlink(&self.repo_root) {
+            warnings.push(format!(
+                "{LOCAL_STORE_DIR} is a symlink and was refused: a project-local store marker must be a real directory"
+            ));
+        }
         if env.shared_opt_in && !self.pin_set() {
             warnings.push(format!(
                 "shared store opt-in set but no store root pinned: set {}",
@@ -402,7 +407,35 @@ pub fn ensure_layout(resolved: &ResolvedStore) -> std::io::Result<()> {
     if let Some(root) = resolved.unified_root() {
         std::fs::create_dir_all(root)?;
     }
+    if local_marker_is_symlink(resolved.repo_root()) {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            format!("{LOCAL_STORE_DIR} is a symlink; a project-local store marker must be a real directory"),
+        ));
+    }
     std::fs::create_dir_all(resolved.engine_dir())
+}
+
+/// True only for a real directory: a symlinked `.zerostack` is refused.
+///
+/// `Path::is_dir` follows symlinks, so a symlink dropped into a repository
+/// would silently redirect every engine's store — including publishes and
+/// collections — to a root the repository never declared. The marker is a
+/// security-relevant declaration, so the policy is fail-closed: a symlinked
+/// marker is not a local unified store, and resolution falls through to the pin
+/// or legacy path instead of following the link.
+fn is_real_dir(path: &Path) -> bool {
+    std::fs::symlink_metadata(path)
+        .map(|m| m.file_type().is_dir())
+        .unwrap_or(false)
+}
+
+/// True when a `.zerostack` marker exists but is a symlink, which [ResolvedStore]
+/// refuses to adopt.
+fn local_marker_is_symlink(repo_root: &Path) -> bool {
+    std::fs::symlink_metadata(repo_root.join(LOCAL_STORE_DIR))
+        .map(|m| m.file_type().is_symlink())
+        .unwrap_or(false)
 }
 
 /// Stable project key: sha256 over the absolutized root path string, first
@@ -928,5 +961,40 @@ mod tests {
                 "accepted {name:?}"
             );
         }
+    }
+
+    #[test]
+    fn a_symlinked_local_marker_is_refused() {
+        let dir = TempDir::new().unwrap();
+        let repo = dir.path().join("repo");
+        let elsewhere = dir.path().join("elsewhere");
+        std::fs::create_dir_all(&repo).unwrap();
+        std::fs::create_dir_all(&elsewhere).unwrap();
+        std::os::unix::fs::symlink(&elsewhere, repo.join(LOCAL_STORE_DIR)).unwrap();
+
+        let env = StoreEnv::new(None, false);
+        let resolved = ResolvedStore::resolve(&repo, Engine::TokenZero, &env);
+        assert_eq!(
+            resolved.mode(),
+            StoreMode::Legacy,
+            "a symlinked marker must not be adopted as a local unified store"
+        );
+        assert!(resolved.unified_root().is_none());
+        assert!(resolved
+            .report(&env)
+            .warnings
+            .iter()
+            .any(|w| w.contains("symlink")));
+        assert!(ensure_layout(&resolved).is_err());
+    }
+
+    #[test]
+    fn a_real_local_marker_is_still_adopted() {
+        let dir = TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join(LOCAL_STORE_DIR)).unwrap();
+        let env = StoreEnv::new(None, false);
+        let resolved = ResolvedStore::resolve(dir.path(), Engine::TokenZero, &env);
+        assert_eq!(resolved.mode(), StoreMode::LocalUnified);
+        ensure_layout(&resolved).unwrap();
     }
 }

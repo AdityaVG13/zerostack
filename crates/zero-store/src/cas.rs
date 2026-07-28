@@ -8,10 +8,9 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime};
 
-use sha2::{Digest, Sha256};
 use zero_ref::{content_hash_hex, is_full_lower_hex};
 
-use crate::fs_replace::replace_file;
+use crate::fs_replace::{replace_file, sync_dir};
 use crate::gc_lock::{StoreLock, LOCK_DEADLINE};
 
 /// Size policy for CAS objects: reads and writes above this are refused as
@@ -136,6 +135,17 @@ impl std::fmt::Display for CasError {
 
 impl std::error::Error for CasError {}
 
+/// True only for a regular file at exactly this path.
+///
+/// `Path::is_file` follows symlinks, so a symlink pointing at a regular file
+/// reports present and then fails verification under [SharedCas::get_verified],
+/// which stats the link itself. Every presence check uses this instead.
+fn is_regular_file(path: &Path) -> bool {
+    fs::symlink_metadata(path)
+        .map(|m| m.file_type().is_file())
+        .unwrap_or(false)
+}
+
 fn io_err(context: &str, e: impl std::fmt::Display) -> CasError {
     CasError::Io(format!("{context}: {e}"))
 }
@@ -196,7 +206,7 @@ impl SharedCas {
 
     /// True when the object exists as a regular file at its canonical path.
     pub fn contains(&self, sha256: &str) -> bool {
-        is_full_lower_hex(sha256) && self.object_path(sha256).is_file()
+        is_full_lower_hex(sha256) && is_regular_file(&self.object_path(sha256))
     }
 
     /// Publish complete bytes at their canonical path and return the full
@@ -247,6 +257,22 @@ impl SharedCas {
     ///
     /// Panics in debug builds if handed a sweep guard, which would mean the
     /// caller is publishing from inside a collection.
+    ///
+    /// # Multi-object contract
+    ///
+    /// There is no cross-object barrier. Each call is individually atomic (a
+    /// reader sees an object either absent or complete and verifying), but a
+    /// batch is **not** all-or-nothing: if the third of five calls fails, or the
+    /// process dies mid-batch, the objects already published stay published.
+    ///
+    /// This is safe because CAS objects are content-addressed and immutable, so
+    /// a partial batch is a subset of the intended objects and never a corrupt
+    /// or half-written one. Callers that need set-level atomicity must get it
+    /// from the artifact that names the set: publish every member first, and
+    /// only then publish the manifest/root that references them, so a crash
+    /// leaves unreferenced garbage for the sweeper rather than a dangling
+    /// reference. Do not treat an error from this method as "nothing was
+    /// written".
     pub fn put_in_lock(
         &self,
         bytes: &[u8],
@@ -257,6 +283,7 @@ impl SharedCas {
             !guard.is_exclusive(),
             "publishing under a sweep guard inverts the protocol"
         );
+        self.check_guard_root(guard)?;
         self.put_with_limit(bytes, limit.min(CAS_MAX_OBJECT_BYTES))
     }
 
@@ -297,11 +324,10 @@ impl SharedCas {
         let parent = dest.parent().expect("object path always has a parent");
         ensure_object_publish_dirs(parent)?;
         reap_stale_temps(parent, CAS_TEMP_REAP_AGE);
-        self.publish_new_object_via_temp(parent, &dest, &hash, bytes, limit)?;
-        Ok(PutOutcome {
-            hash,
-            created: true,
-        })
+        // Converging on a concurrent publisher's identical object is a dedup,
+        // not a creation, exactly as the preexisting-destination path reports it.
+        let created = self.publish_new_object_via_temp(parent, &dest, &hash, bytes, limit)?;
+        Ok(PutOutcome { hash, created })
     }
 
     /// Preexisting destination: verify, touch mtime, never overwrite.
@@ -341,7 +367,7 @@ impl SharedCas {
         hash: &str,
         bytes: &[u8],
         limit: u64,
-    ) -> Result<(), CasError> {
+    ) -> Result<bool, CasError> {
         // pid + process-wide sequence so concurrent writers in one process
         // can never collide on the temp path.
         static TEMP_SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
@@ -356,7 +382,8 @@ impl SharedCas {
             .create_new(true)
             .open(&tmp)
             .map_err(|e| io_err("create temp object", e))?;
-        let publish = (|| -> Result<(), CasError> {
+        // Ok(true) published our bytes; Ok(false) converged on an existing object.
+        let publish = (|| -> Result<bool, CasError> {
             file.write_all(bytes)
                 .map_err(|e| io_err("write temp object", e))?;
             file.sync_all().map_err(|e| io_err("sync temp object", e))?;
@@ -366,22 +393,36 @@ impl SharedCas {
                 // Destination contention: if a concurrent writer already
                 // published a verifying object, converge on it.
                 // Short-circuit order is load-bearing: is_file before verify.
-                if dest.is_file() && self.read_verified_at(dest, hash, limit).is_ok() {
-                    return Ok(());
+                if is_regular_file(dest) && self.read_verified_at(dest, hash, limit).is_ok() {
+                    return Ok(false);
                 }
                 return Err(io_err("publish object", e));
             }
-            sync_dir(parent);
-            Ok(())
+            // The rename landed: dest already holds these exact bytes for every
+            // reader. A directory fsync failure therefore downgrades durability,
+            // it does not unpublish the object, so it must not be reported as a
+            // failed put. It is still fail-closed: the object is re-verified
+            // before the weaker guarantee is accepted.
+            if sync_dir(parent).is_err() && self.read_verified_at(dest, hash, limit).is_err() {
+                return Err(CasError::Io(format!(
+                    "sync object directory after publishing {} in '{}'",
+                    &hash[..8],
+                    self.label
+                )));
+            }
+            Ok(true)
         })();
-        if let Err(e) = publish {
-            // The temp is ours (create_new succeeded), so removal races no one.
-            let _ = fs::remove_file(&tmp);
-            return Err(e);
-        }
+        let created = match publish {
+            Ok(created) => created,
+            Err(e) => {
+                // The temp is ours (create_new succeeded), so removal races no one.
+                let _ = fs::remove_file(&tmp);
+                return Err(e);
+            }
+        };
         // Converged-on-existing leaves our temp behind; clean it up.
         let _ = fs::remove_file(&tmp);
-        Ok(())
+        Ok(created)
     }
 
     /// Refresh an object's modification time without reading it, so an
@@ -394,7 +435,7 @@ impl SharedCas {
             )));
         }
         let path = self.object_path(sha256);
-        if !path.is_file() {
+        if !is_regular_file(&path) {
             return Err(CasError::NotFound);
         }
         touch_path(&path).map_err(|e| io_err("touch object", e))
@@ -440,7 +481,9 @@ impl SharedCas {
         fs::create_dir_all(&dir).map_err(|e| io_err("create quarantine directory", e))?;
         let dest = dir.join(sha256);
         replace_file(&path, &dest).map_err(|e| io_err("quarantine object", e))?;
-        sync_dir(&dir);
+        // Post-rename: the object is already out of the object tree, so a
+        // directory fsync failure is a durability warning, not a failed move.
+        let _ = sync_dir(&dir);
         Ok(())
     }
 
@@ -453,6 +496,7 @@ impl SharedCas {
                 "removing objects requires the exclusive store sweep lock".to_string(),
             ));
         }
+        self.check_guard_root(guard)?;
         if !is_full_lower_hex(sha256) {
             return Err(CasError::Malformed(format!(
                 "identity must be full lowercase 64-hex SHA-256, got '{sha256}'"
@@ -497,6 +541,19 @@ impl SharedCas {
             )));
         }
         self.read_verified_at(&path, sha256, CAS_MAX_OBJECT_BYTES)
+    }
+
+    /// A guard only excludes writers of the store it was taken on, so using one
+    /// store's lock while mutating another provides no exclusion at all. Refuse
+    /// it rather than run an unsynchronized publish or sweep.
+    fn check_guard_root(&self, guard: &StoreLock) -> Result<(), CasError> {
+        if guard.is_for_store_root(&self.root) {
+            return Ok(());
+        }
+        Err(CasError::PolicyDenied(format!(
+            "store lock was taken on a different store root than '{}'",
+            self.label
+        )))
     }
 
     fn check_regular(&self, meta: &fs::Metadata, sha256: &str) -> Result<(), CasError> {
@@ -571,14 +628,6 @@ fn reap_stale_temps(dir: &Path, max_age: Duration) {
 }
 
 /// Durability for the published rename where the platform supports it.
-fn sync_dir(dir: &Path) {
-    #[cfg(unix)]
-    if let Ok(handle) = fs::File::open(dir) {
-        let _ = handle.sync_all();
-    }
-    #[cfg(not(unix))]
-    let _ = dir;
-}
 
 #[cfg(test)]
 mod tests {
@@ -934,5 +983,84 @@ mod tests {
             // Path construction must also be total, not panicking.
             let _ = cas.object_path(bad);
         }
+    }
+
+    #[test]
+    fn a_symlinked_object_is_not_present() {
+        let dir = tempdir().unwrap();
+        let cas = SharedCas::open_labeled(dir.path(), "test");
+        let hash = cas.put(b"payload").unwrap();
+        let real = cas.object_path(&hash);
+        let moved = dir.path().join("elsewhere");
+        fs::rename(&real, &moved).unwrap();
+        std::os::unix::fs::symlink(&moved, &real).unwrap();
+
+        assert!(!cas.contains(&hash), "a symlink is not a published object");
+        assert!(matches!(cas.touch(&hash), Err(CasError::NotFound)));
+        assert!(cas.get_verified(&hash).is_err());
+    }
+
+    #[test]
+    fn converging_on_an_existing_object_is_not_a_creation() {
+        let dir = tempdir().unwrap();
+        let cas = SharedCas::open_labeled(dir.path(), "test");
+        let first = cas.put_outcome(b"payload", CAS_MAX_OBJECT_BYTES).unwrap();
+        assert!(first.created);
+        let second = cas.put_outcome(b"payload", CAS_MAX_OBJECT_BYTES).unwrap();
+        assert!(!second.created, "a dedup must not report creation");
+        assert_eq!(first.hash, second.hash);
+    }
+
+    #[test]
+    fn a_lock_from_another_store_is_refused() {
+        let a = tempdir().unwrap();
+        let b = tempdir().unwrap();
+        let cas = SharedCas::open_labeled(a.path(), "a");
+        let foreign = StoreLock::publish(b.path(), LOCK_DEADLINE).unwrap();
+        let err = cas
+            .put_in_lock(b"payload", CAS_MAX_OBJECT_BYTES, &foreign)
+            .unwrap_err();
+        assert!(matches!(err, CasError::PolicyDenied(_)), "got {err:?}");
+        drop(foreign);
+
+        let hash = cas.put(b"payload").unwrap();
+        let foreign_sweep = StoreLock::sweep(b.path(), LOCK_DEADLINE).unwrap();
+        assert!(matches!(
+            cas.remove_object(&hash, &foreign_sweep),
+            Err(CasError::PolicyDenied(_))
+        ));
+    }
+
+    #[test]
+    fn a_lock_on_the_same_store_spelled_differently_is_accepted() {
+        let dir = tempdir().unwrap();
+        let cas = SharedCas::open_labeled(dir.path(), "test");
+        let alias = dir
+            .path()
+            .join("..")
+            .join(dir.path().file_name().unwrap());
+        let guard = StoreLock::publish(&alias, LOCK_DEADLINE).unwrap();
+        let outcome = cas
+            .put_in_lock(b"payload", CAS_MAX_OBJECT_BYTES, &guard)
+            .unwrap();
+        assert!(outcome.created);
+    }
+
+    #[test]
+    fn a_partial_batch_keeps_earlier_objects_published() {
+        let dir = tempdir().unwrap();
+        let cas = SharedCas::open_labeled(dir.path(), "test");
+        let guard = cas.lock_for_publish().unwrap();
+        let first = cas
+            .put_in_lock(b"one", CAS_MAX_OBJECT_BYTES, &guard)
+            .unwrap();
+        // Second member of the batch is refused by policy.
+        assert!(matches!(
+            cas.put_in_lock(b"two-is-too-large", 4, &guard),
+            Err(CasError::PolicyDenied(_))
+        ));
+        // Documented contract: no cross-object rollback.
+        assert!(cas.contains(&first.hash));
+        assert_eq!(cas.list_objects().unwrap(), vec![first.hash]);
     }
 }

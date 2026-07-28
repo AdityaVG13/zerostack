@@ -69,21 +69,31 @@ fn open_unique_temp(parent: &Path, file_name: &OsStr) -> io::Result<(File, PathB
     }
 }
 
-/// Write all bytes, fsync the temp, replace onto dest, then fsync parent on Unix.
+/// Write all bytes, fsync the temp, then replace onto dest.
 /// Order is load-bearing: never replace before `sync_all` on the temp.
-fn write_sync_replace(
-    mut file: File,
-    temp: &Path,
-    dest: &Path,
-    parent: &Path,
-    bytes: &[u8],
-) -> io::Result<()> {
+///
+/// The parent directory fsync deliberately lives in [atomic_write_file], after
+/// this function has reported that dest is published: once the rename lands the
+/// bytes are visible to every reader, so a later directory-sync failure means
+/// "present but not proven durable", never "not written".
+fn write_sync_replace(mut file: File, temp: &Path, dest: &Path, bytes: &[u8]) -> io::Result<()> {
     file.write_all(bytes)?;
     file.sync_all()?;
     drop(file);
-    replace_file(temp, dest)?;
+    replace_file(temp, dest)
+}
+
+/// Fsync a directory so a rename inside it survives a crash.
+///
+/// Returns the error instead of discarding it; callers decide whether the
+/// failure is fatal, which depends on whether the rename already published.
+pub(crate) fn sync_dir(dir: &Path) -> io::Result<()> {
     #[cfg(unix)]
-    File::open(parent)?.sync_all()?;
+    {
+        File::open(dir)?.sync_all()?;
+    }
+    #[cfg(not(unix))]
+    let _ = dir;
     Ok(())
 }
 
@@ -98,9 +108,96 @@ pub fn atomic_write_file(dest: &Path, bytes: &[u8]) -> io::Result<()> {
     let file_name = dest.file_name().unwrap_or_else(|| OsStr::new("artifact"));
 
     let (file, temp) = open_unique_temp(parent, file_name)?;
-    let published = write_sync_replace(file, &temp, dest, parent, bytes);
+    let published = write_sync_replace(file, &temp, dest, bytes);
     if published.is_err() {
         let _ = fs::remove_file(&temp);
+        return published;
     }
-    published
+    // dest is published. A failed directory fsync leaves the new bytes visible,
+    // so returning Err here would make callers retry or report a write that in
+    // fact succeeded; the weaker durability guarantee is not a failed write.
+    let _ = sync_dir(parent);
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::tempdir;
+
+    fn temps_in(dir: &Path) -> Vec<String> {
+        fs::read_dir(dir)
+            .unwrap()
+            .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+            .filter(|n| n.contains(".tmp-"))
+            .collect()
+    }
+
+    #[test]
+    fn atomic_write_publishes_bytes_and_leaves_no_temp() {
+        let dir = tempdir().unwrap();
+        let dest = dir.path().join("artifact.json");
+        atomic_write_file(&dest, b"first").unwrap();
+        assert_eq!(fs::read(&dest).unwrap(), b"first");
+        assert!(temps_in(dir.path()).is_empty(), "temp must not survive");
+    }
+
+    #[test]
+    fn atomic_write_replaces_existing_contents_whole() {
+        let dir = tempdir().unwrap();
+        let dest = dir.path().join("artifact.json");
+        atomic_write_file(&dest, b"first").unwrap();
+        atomic_write_file(&dest, b"second-and-longer").unwrap();
+        assert_eq!(fs::read(&dest).unwrap(), b"second-and-longer");
+        assert!(temps_in(dir.path()).is_empty());
+    }
+
+    #[test]
+    fn atomic_write_creates_missing_parents() {
+        let dir = tempdir().unwrap();
+        let dest = dir.path().join("a").join("b").join("artifact.json");
+        atomic_write_file(&dest, b"nested").unwrap();
+        assert_eq!(fs::read(&dest).unwrap(), b"nested");
+    }
+
+    #[test]
+    fn a_failed_publish_removes_our_temp() {
+        let dir = tempdir().unwrap();
+        // A directory at dest makes the rename fail on every platform.
+        let dest = dir.path().join("artifact.json");
+        fs::create_dir(&dest).unwrap();
+        assert!(atomic_write_file(&dest, b"bytes").is_err());
+        assert!(
+            temps_in(dir.path()).is_empty(),
+            "the temp we created must be cleaned up on failure"
+        );
+    }
+
+    #[test]
+    fn a_blocked_parent_is_reported_and_writes_nothing() {
+        let dir = tempdir().unwrap();
+        let blocker = dir.path().join("parent");
+        fs::write(&blocker, b"not a directory").unwrap();
+        let dest = blocker.join("artifact.json");
+        assert!(atomic_write_file(&dest, b"bytes").is_err());
+        assert_eq!(fs::read(&blocker).unwrap(), b"not a directory");
+    }
+
+    #[test]
+    fn replace_file_moves_the_temp_exactly_once() {
+        let dir = tempdir().unwrap();
+        let tmp = dir.path().join("tmp");
+        let dest = dir.path().join("dest");
+        fs::write(&tmp, b"payload").unwrap();
+        replace_file(&tmp, &dest).unwrap();
+        assert_eq!(fs::read(&dest).unwrap(), b"payload");
+        assert!(!tmp.exists());
+        assert!(replace_file(&tmp, &dest).is_err(), "temp is gone");
+    }
+
+    #[test]
+    fn sync_dir_reports_a_bad_directory() {
+        let dir = tempdir().unwrap();
+        assert!(sync_dir(&dir.path().join("missing")).is_err());
+    }
 }

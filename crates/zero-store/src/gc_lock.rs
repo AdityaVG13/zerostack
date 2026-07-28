@@ -66,6 +66,7 @@ pub struct StoreLock {
     file: File,
     mode: LockMode,
     path: PathBuf,
+    store_root: PathBuf,
 }
 
 impl StoreLock {
@@ -104,13 +105,33 @@ impl StoreLock {
         self.mode == LockMode::Exclusive
     }
 
+    /// The store root this guard was acquired on, normalized.
+    ///
+    /// A guard excludes only writers of its own store, so mutators compare
+    /// against this instead of assuming the caller passed a matching lock.
+    pub fn store_root(&self) -> &Path {
+        &self.store_root
+    }
+
+    /// True when this guard coordinates `store_root`, spelling-independently.
+    pub fn is_for_store_root(&self, store_root: &Path) -> bool {
+        self.store_root == crate::store_root::absolutize(store_root)
+    }
+
     fn acquire(store_root: &Path, mode: LockMode, deadline: Duration) -> io::Result<Self> {
         let (path, file) = open_lock_file(store_root)?;
         let start = Instant::now();
         let mut backoff = INITIAL_BACKOFF;
         loop {
             match try_lock(&file, mode) {
-                Ok(()) => return Ok(Self { file, mode, path }),
+                Ok(()) => {
+                    return Ok(Self {
+                        file,
+                        mode,
+                        store_root: crate::store_root::absolutize(store_root),
+                        path,
+                    })
+                }
                 Err(TryLockError::WouldBlock) => {
                     if start.elapsed() >= deadline {
                         return Err(io::Error::new(
@@ -133,7 +154,12 @@ impl StoreLock {
     fn try_acquire(store_root: &Path, mode: LockMode) -> io::Result<Option<Self>> {
         let (path, file) = open_lock_file(store_root)?;
         match try_lock(&file, mode) {
-            Ok(()) => Ok(Some(Self { file, mode, path })),
+            Ok(()) => Ok(Some(Self {
+                file,
+                mode,
+                store_root: crate::store_root::absolutize(store_root),
+                path,
+            })),
             Err(TryLockError::WouldBlock) => Ok(None),
             Err(TryLockError::Error(e)) => Err(e),
         }
@@ -265,5 +291,20 @@ mod tests {
             StoreLock::publish(root.path(), LOCK_DEADLINE).is_ok(),
             "publish must succeed once the sweep releases"
         );
+    }
+
+    #[test]
+    fn a_guard_remembers_its_store_root() {
+        let a = TempDir::new().unwrap();
+        let b = TempDir::new().unwrap();
+        let guard = StoreLock::publish(a.path(), LOCK_DEADLINE).unwrap();
+        assert!(guard.is_for_store_root(a.path()));
+        assert!(!guard.is_for_store_root(b.path()));
+        let alias = a.path().join("..").join(a.path().file_name().unwrap());
+        assert!(
+            guard.is_for_store_root(&alias),
+            "binding is spelling-independent"
+        );
+        assert_eq!(guard.store_root(), crate::store_root::absolutize(a.path()));
     }
 }
