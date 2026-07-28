@@ -23,7 +23,7 @@ question
   -> answer: minimal visible evidence
 ~~~
 
-CodeMode can execute this sequence as one JavaScript plan. Standard MCP mode exposes equivalent engine capabilities as individual tool calls. A deployment selects one mode, never both.
+CodeMode can execute this sequence as one JavaScript plan. Standard MCP mode exposes equivalent engine capabilities as individual tool calls. A deployment selects one mode, never both. [ADR 0001](adr/0001-codemode-execution-boundary.md) proposes the normative one-runtime boundary, aggregate raw-worker topology, ownership, and gates.
 
 ## Source and release model
 
