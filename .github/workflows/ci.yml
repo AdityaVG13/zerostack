@@ -85,3 +85,12 @@ jobs:
           else
             echo "::warning::engine checkouts absent; canonical-JSON guard did not run"
           fi
+
+  machine-permit-windows-ffi:
+    name: machine-permit targeted Windows FFI coverage
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # branch stable
+      - run: cargo test -p zerostack-machine-permit --lib tests::native_wake_handle_closes_on_drop -- --exact
+      - run: cargo test -p zerostack-machine-permit --lib tests::native_pid_liveness_handles_alive_dead_and_conservative_errors -- --exact
