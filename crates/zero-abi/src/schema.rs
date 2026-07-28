@@ -11,11 +11,14 @@ use std::collections::BTreeSet;
 use crate::digest::sha256_hex;
 
 /// Keys treated as non-structural documentation (ignored in parity compare).
-const DOC_KEYS: &[&str] = &["description", "title", "examples", "$comment"];
+const DOC_KEYS: &[&str] = &["description", "title", "$comment"];
+
+/// Schema keywords whose values are arbitrary JSON rather than nested schemas.
+const OPAQUE_PAYLOAD_KEYS: &[&str] = &["default", "const", "examples"];
 
 /// Deep structural equality of two JSON Schema fragments.
 pub fn schemas_structurally_equal(a: &Value, b: &Value) -> bool {
-    normalize_schema(a) == normalize_schema(b)
+    canonical_schema_json(a) == canonical_schema_json(b)
 }
 
 /// Human-readable first structural divergence (for kill-test assertions).
@@ -75,6 +78,7 @@ pub fn normalize_schema(value: &Value) -> Value {
                     continue;
                 }
                 let normalized = match k.as_str() {
+                    key if OPAQUE_PAYLOAD_KEYS.contains(&key) => v.clone(),
                     "required" => normalize_required(v),
                     "enum" => normalize_enum(v),
                     "properties" | "patternProperties" | "definitions" | "$defs" => {
@@ -287,6 +291,75 @@ mod tests {
         let c = json!({ "enum": [1, "a"] });
         let d = json!({ "enum": ["a", 1] });
         assert!(!schemas_structurally_equal(&c, &d));
+    }
+
+    #[test]
+    fn payload_keywords_are_opaque_while_schema_docs_are_stripped() {
+        let schema = json!({
+            "description": "schema documentation",
+            "properties": {
+                "value": {
+                    "title": "property documentation",
+                    "type": "object",
+                    "default": {
+                        "description": "payload description",
+                        "title": "payload title",
+                        "nested": { "description": "still payload" }
+                    },
+                    "const": { "title": "constant payload", "value": 1.0 },
+                    "examples": [
+                        { "description": "example payload", "title": "preserved" }
+                    ]
+                }
+            }
+        });
+
+        let normalized = normalize_schema(&schema);
+        assert!(normalized.get("description").is_none());
+        assert!(normalized["properties"]["value"].get("title").is_none());
+        assert_eq!(
+            canonical_json(&normalized["properties"]["value"]["default"]),
+            canonical_json(&schema["properties"]["value"]["default"])
+        );
+        assert_eq!(
+            canonical_json(&normalized["properties"]["value"]["const"]),
+            canonical_json(&schema["properties"]["value"]["const"])
+        );
+        assert_eq!(
+            canonical_json(&normalized["properties"]["value"]["examples"]),
+            canonical_json(&schema["properties"]["value"]["examples"])
+        );
+    }
+
+    #[test]
+    fn structural_equality_uses_canonical_number_semantics() {
+        let integer: Value = serde_json::from_str(r#"{"default":1}"#).unwrap();
+        let decimal: Value = serde_json::from_str(r#"{"default":1.0}"#).unwrap();
+
+        assert_ne!(
+            canonical_schema_json(&integer),
+            canonical_schema_json(&decimal)
+        );
+        assert_ne!(
+            schema_fingerprint_hex(&integer),
+            schema_fingerprint_hex(&decimal)
+        );
+        assert!(!schemas_structurally_equal(&integer, &decimal));
+    }
+
+    #[test]
+    fn equality_and_fingerprint_agree_after_key_order_normalization() {
+        let a: Value = serde_json::from_str(
+            r#"{"type":"object","properties":{"b":{"type":"string"},"a":{"type":"integer"}}}"#,
+        )
+        .unwrap();
+        let b: Value = serde_json::from_str(
+            r#"{"properties":{"a":{"type":"integer"},"b":{"type":"string"}},"type":"object"}"#,
+        )
+        .unwrap();
+
+        assert!(schemas_structurally_equal(&a, &b));
+        assert_eq!(schema_fingerprint_hex(&a), schema_fingerprint_hex(&b));
     }
 
     #[test]
