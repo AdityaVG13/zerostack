@@ -8,6 +8,7 @@ This repository is the canonical public aggregation point for ZeroStack. Keep en
 - Reproducible measurements live in `benchmarks/`.
 - Shared contracts and checks live in `conformance/`.
 - Shared foundation crates live in `crates/`.
+- `zero-abi`, `zero-ref`, `zero-store`, and conformance are pure-safe and forbid `unsafe_code`; `zerostack-machine-permit` is the intentional OS-FFI exception.
 - Do not publish private engine source or private package source here.
 
 ## Documentation rules
