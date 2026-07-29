@@ -34,6 +34,10 @@ use std::fmt;
 use serde::de::{self, Deserializer, Visitor};
 use serde::{Deserialize, Serialize, Serializer};
 
+pub mod fresh_work;
+
+pub use fresh_work::{ActionFreshWork, FreshWorkComponent, FreshWorkVector, SessionFreshWork};
+
 /// Parts per million denominator used by every retained-fraction comparison.
 pub const PPM_ONE: u32 = 1_000_000;
 
@@ -287,6 +291,12 @@ pub struct TokenLedger {
     pub model_calls: u64,
     /// Number of retried calls.
     pub retries: u64,
+    /// Cumulative fresh-work decomposition of the declared input.
+    #[serde(default)]
+    pub fresh_work: FreshWorkVector,
+    /// Number of charges that declared a fresh-work vector.
+    #[serde(default)]
+    pub fresh_work_actions: u64,
 }
 
 impl TokenLedger {
@@ -305,6 +315,8 @@ impl TokenLedger {
             model_output_tokens: 0,
             model_calls: 0,
             retries: 0,
+            fresh_work: FreshWorkVector::default(),
+            fresh_work_actions: 0,
         }
     }
 
@@ -366,6 +378,7 @@ impl TokenLedger {
         self.model_output_tokens = totals.model_output_tokens;
         self.model_calls = totals.model_calls;
         self.retries = totals.retries;
+        self.fresh_work = totals.fresh_work;
     }
 }
 
@@ -398,6 +411,11 @@ pub struct TokenCharge {
     pub model_calls: u64,
     /// Retries represented.
     pub retries: u64,
+    /// Fresh-work decomposition of this call's declared input.
+    ///
+    /// Either the all-zero (undeclared) vector, or a vector whose component
+    /// sum equals `input_tokens`.
+    pub fresh_work: FreshWorkVector,
 }
 
 impl TokenCharge {
@@ -437,7 +455,24 @@ impl TokenCharge {
                 classified,
             });
         }
+        self.check_fresh_work(classified)?;
         Ok(classified)
+    }
+
+    /// Verifies the fresh-work vector, when declared, decomposes exactly the
+    /// declared input of this call.
+    pub fn check_fresh_work(&self, declared: u64) -> Result<(), LedgerError> {
+        if !self.fresh_work.is_declared() {
+            return Ok(());
+        }
+        let decomposed = self.fresh_work.component_sum()?;
+        if decomposed != declared {
+            return Err(LedgerError::FreshWorkTotalMismatch {
+                declared,
+                decomposed,
+            });
+        }
+        Ok(())
     }
 
     fn accumulate(&self, ledger: &TokenLedger) -> Result<Self, LedgerError> {
@@ -508,6 +543,7 @@ impl TokenCharge {
         )?;
         totals.model_calls = add(ledger.model_calls, self.model_calls, "model_calls")?;
         totals.retries = add(ledger.retries, self.retries, "retries")?;
+        totals.fresh_work = ledger.fresh_work.merge(&self.fresh_work)?;
         Ok(())
     }
 }
@@ -587,8 +623,14 @@ impl ResourceGauge {
         charge.check_classification()?;
 
         let totals = charge.accumulate(&self.ledger)?;
+        let fresh_work_actions = if charge.fresh_work.is_declared() {
+            add(self.ledger.fresh_work_actions, 1, "fresh_work_actions")?
+        } else {
+            self.ledger.fresh_work_actions
+        };
         let charges = add(self.charges, 1, "charges")?;
         self.ledger.apply_charge_totals(totals);
+        self.ledger.fresh_work_actions = fresh_work_actions;
         self.charges = charges;
         Ok(())
     }
@@ -1224,6 +1266,15 @@ pub enum LedgerError {
     },
     /// Transactional speculation must never be free.
     ZeroTaskAttemptCost,
+    /// A fresh-work vector did not decompose exactly the declared total.
+    FreshWorkTotalMismatch {
+        /// The total the vector claims to decompose.
+        declared: u64,
+        /// Sum over the fresh-work components.
+        decomposed: u64,
+    },
+    /// An action record carried no action identity.
+    EmptyActionId,
 }
 
 impl fmt::Display for LedgerError {
@@ -1268,6 +1319,16 @@ impl fmt::Display for LedgerError {
                 f,
                 "replay identity mismatch on {side} side: exposure account implies {expected}, ledger recorded {actual}"
             ),
+            Self::FreshWorkTotalMismatch {
+                declared,
+                decomposed,
+            } => write!(
+                f,
+                "fresh-work components sum to {decomposed} but the declared total is {declared}: every token must sit in exactly one component"
+            ),
+            Self::EmptyActionId => {
+                f.write_str("fresh-work action record requires a nonempty action id")
+            }
         }
     }
 }
