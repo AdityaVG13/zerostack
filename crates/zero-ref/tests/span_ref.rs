@@ -100,7 +100,7 @@ fn serde_wire_shape_is_stable_and_round_trips() {
 }
 
 proptest! {
-    #![proptest_config(ProptestConfig { cases: 128, failure_persistence: None, rng_seed: RngSeed::Fixed(0x86_04_5eed), ..ProptestConfig::default() })]
+    #![proptest_config(ProptestConfig { cases: 128, failure_persistence: None, rng_seed: RngSeed::Fixed(0x8604_5eed), ..ProptestConfig::default() })]
     #[test]
     fn span_only_matches_full_object_verification(object in prop::collection::vec(any::<u8>(), 0..512), raw_start in 0usize..1024, raw_width in 0usize..1024) {
         let start = raw_start % (object.len() + 1); let width = raw_width % (object.len() - start + 1); let end = start + width;
