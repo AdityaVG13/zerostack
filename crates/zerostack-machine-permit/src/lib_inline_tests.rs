@@ -49,13 +49,20 @@ fn create_private_permit_base(base: &Path) {
 #[test]
 fn permit_fence_replaced_cookie_survives_old_guard_drop() {
     let path = fencing_test_path("drop-foreign");
-    let permit = MachinePermit::acquire(
-        &path, Instant::now() + Duration::from_secs(2), "old-owner",
-    ).expect("acquire old owner");
+    let permit =
+        MachinePermit::acquire(&path, Instant::now() + Duration::from_secs(2), "old-owner")
+            .expect("acquire old owner");
     fs::remove_dir_all(&path).expect("simulate external replacement");
     fs::create_dir(&path).expect("create replacement");
     let foreign_cookie = "fedcba9876543210fedcba9876543210";
-    publish_identity(&path, foreign_cookie, std::process::id(), "foreign", epoch_millis()).unwrap();
+    publish_identity(
+        &path,
+        foreign_cookie,
+        std::process::id(),
+        "foreign",
+        epoch_millis(),
+    )
+    .unwrap();
 
     drop(permit);
 
@@ -68,7 +75,8 @@ fn permit_fence_stale_reclaim_snapshot_cannot_delete_new_owner() {
     let path = fencing_test_path("reclaim-foreign");
     fs::create_dir(&path).expect("create stale slot");
     let stale_cookie = "11111111111111111111111111111111";
-    publish_identity(&path, stale_cookie, 1, "stale", epoch_millis()).expect("publish stale identity");
+    publish_identity(&path, stale_cookie, 1, "stale", epoch_millis())
+        .expect("publish stale identity");
     let stale_snapshot = fs::read(path.join("identity")).expect("snapshot stale identity");
     fs::remove_dir_all(&path).expect("replace stale slot");
     fs::create_dir(&path).expect("create new slot");
@@ -209,7 +217,10 @@ fn native_pid_liveness_handles_alive_dead_and_conservative_errors() {
     );
     // OpenProcess failure is intentionally fail-open (alive). A reaped child
     // often yields a null handle, so polarity is pinned on the pure helper.
-    assert!(windows_query_is_alive(0, 0), "query failure is conservative alive");
+    assert!(
+        windows_query_is_alive(0, 0),
+        "query failure is conservative alive"
+    );
     assert!(
         windows_query_is_alive(1, STILL_ACTIVE as u32),
         "STILL_ACTIVE means alive"
@@ -238,15 +249,21 @@ fn stale_malformed_pid_is_reclaimed_after_grace() {
 
 fn permit_liveness_identity(pid: u32) -> PermitIdentity {
     PermitIdentity {
-        cookie: "0123456789abcdef0123456789abcdef".into(), pid, owner: "test-owner".into(),
+        cookie: "0123456789abcdef0123456789abcdef".into(),
+        pid,
+        owner: "test-owner".into(),
         started_at: Some(1_000),
-        process: Some(ProcessIdentity { boot_id: "boot-a".into(), starttime: 77 }),
+        process: Some(ProcessIdentity {
+            boot_id: "boot-a".into(),
+            starttime: 77,
+        }),
     }
 }
 
 #[test]
 fn permit_liveness_proc_stat_parses_parenthesized_comm_with_spaces_and_parens() {
-    let stat = "42 (worker name) with parens) S 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 4242 20";
+    let stat =
+        "42 (worker name) with parens) S 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 4242 20";
     assert_eq!(parse_proc_stat_starttime(stat), Some(4242));
 }
 
@@ -257,22 +274,65 @@ fn permit_liveness_classifier_cases_cover_reuse_boot_pid_zero_age_and_fresh_hold
     };
     let mut identity = permit_liveness_identity(42);
     let observed = ProcessObservation::Exists(identity.process.clone().unwrap());
-    assert_eq!(classify(&identity, observed, 1_001, OWNER_IDENTITY_MAX_AGE), IdentityLiveness::Live);
+    assert_eq!(
+        classify(&identity, observed, 1_001, OWNER_IDENTITY_MAX_AGE),
+        IdentityLiveness::Live
+    );
 
     let mut reused = identity.process.clone().unwrap();
     reused.starttime += 1;
-    assert_eq!(classify(&identity, ProcessObservation::Exists(reused), 1_001, OWNER_IDENTITY_MAX_AGE), IdentityLiveness::Dead);
+    assert_eq!(
+        classify(
+            &identity,
+            ProcessObservation::Exists(reused),
+            1_001,
+            OWNER_IDENTITY_MAX_AGE
+        ),
+        IdentityLiveness::Dead
+    );
     let mut rebooted = identity.process.clone().unwrap();
     rebooted.boot_id = "boot-b".into();
-    assert_eq!(classify(&identity, ProcessObservation::Exists(rebooted), 1_001, OWNER_IDENTITY_MAX_AGE), IdentityLiveness::Dead);
+    assert_eq!(
+        classify(
+            &identity,
+            ProcessObservation::Exists(rebooted),
+            1_001,
+            OWNER_IDENTITY_MAX_AGE
+        ),
+        IdentityLiveness::Dead
+    );
 
     identity.pid = 0;
-    assert_eq!(classify(&identity, ProcessObservation::Missing, 1_001, OWNER_IDENTITY_MAX_AGE), IdentityLiveness::Incomplete);
+    assert_eq!(
+        classify(
+            &identity,
+            ProcessObservation::Missing,
+            1_001,
+            OWNER_IDENTITY_MAX_AGE
+        ),
+        IdentityLiveness::Incomplete
+    );
     identity.pid = 42;
     let observed = ProcessObservation::Exists(identity.process.clone().unwrap());
-    assert_eq!(classify(&identity, observed, 1_000 + WAITER_IDENTITY_MAX_AGE.as_millis() + 1, WAITER_IDENTITY_MAX_AGE), IdentityLiveness::Dead);
+    assert_eq!(
+        classify(
+            &identity,
+            observed,
+            1_000 + WAITER_IDENTITY_MAX_AGE.as_millis() + 1,
+            WAITER_IDENTITY_MAX_AGE
+        ),
+        IdentityLiveness::Dead
+    );
     let observed = ProcessObservation::Exists(identity.process.clone().unwrap());
-    assert_eq!(classify(&identity, observed, 1_000 + OWNER_IDENTITY_MAX_AGE.as_millis() - 1, OWNER_IDENTITY_MAX_AGE), IdentityLiveness::Live);
+    assert_eq!(
+        classify(
+            &identity,
+            observed,
+            1_000 + OWNER_IDENTITY_MAX_AGE.as_millis() - 1,
+            OWNER_IDENTITY_MAX_AGE
+        ),
+        IdentityLiveness::Live
+    );
 }
 
 #[test]
@@ -976,7 +1036,6 @@ fn acquire_slots_returns_fatal_when_parent_is_not_a_directory() {
     }
 }
 
-
 #[test]
 fn sanitize_permit_class_accepts_safe_tokens() {
     assert_eq!(sanitize_permit_class("analysis"), "analysis");
@@ -1008,14 +1067,15 @@ fn sanitize_permit_class_rejects_path_metacharacters() {
     assert!(!name.contains('/') && !name.contains(".."));
 }
 
-
 #[cfg(unix)]
 #[test]
 fn unix_fallback_runtime_directory_has_exact_safe_mode() {
     use std::os::unix::fs::MetadataExt;
 
     let temp = std::env::temp_dir().join(format!(
-        "zerostack-runtime-safe-{}-{}", std::process::id(), epoch_millis()
+        "zerostack-runtime-safe-{}-{}",
+        std::process::id(),
+        epoch_millis()
     ));
     fs::create_dir(&temp).expect("create isolated temp");
     let runtime = unix_runtime_dir_for(None, &temp).expect("create private runtime");
@@ -1031,7 +1091,9 @@ fn unix_fallback_refuses_symlink_and_unsafe_preexisting_runtime() {
     use std::os::unix::fs::{symlink, PermissionsExt};
 
     let temp = std::env::temp_dir().join(format!(
-        "zerostack-runtime-unsafe-{}-{}", std::process::id(), epoch_millis()
+        "zerostack-runtime-unsafe-{}-{}",
+        std::process::id(),
+        epoch_millis()
     ));
     fs::create_dir(&temp).expect("create isolated temp");
     let runtime = temp.join(format!("zerostack-runtime-{}", effective_uid()));
