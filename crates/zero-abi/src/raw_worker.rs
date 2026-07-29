@@ -967,7 +967,7 @@ mod tests {
             protocol_version: RAW_WORKER_PROTOCOL_VERSION.into(),
             root: binding.root.clone(),
             session_id: binding.session_id.clone(),
-            expected_engine: binding.engine.clone(),
+            expected_engine: binding.engine,
             expected_worker_revision: Some(binding.worker_revision.clone()),
             expected_contract_digest: binding.semantic_contract_digest.clone(),
             expected_registry_digest: Some(binding.operation_registry_digest.clone()),
