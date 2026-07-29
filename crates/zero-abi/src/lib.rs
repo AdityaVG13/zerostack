@@ -13,6 +13,7 @@
 //! Engines wrap these primitives with their own registry types and parity
 //! assertions, so adopting this crate changes no digests and no behavior.
 
+pub mod cache_entry;
 pub mod capability;
 pub mod digest;
 pub mod dispatch;
@@ -21,6 +22,10 @@ pub mod result;
 pub mod schema;
 pub mod telemetry;
 
+pub use cache_entry::{
+    CacheEntryError, CacheEntryV1, CacheKeyV1, CacheRootV1, CacheValueV1, CompletenessWitnessV1,
+    OperatorIdentityV1, VerifierReceiptV1, CACHE_ENTRY_SCHEMA_V1,
+};
 pub use capability::{
     CapabilityMismatch, CapabilitySchema, CasLayout, FragmentBehavior, FragmentPolicy,
     HashAlgorithm, HashCapability, LayoutVersion, SharedCapability, SharedCasCapability,
