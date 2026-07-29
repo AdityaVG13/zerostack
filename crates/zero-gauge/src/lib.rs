@@ -16,22 +16,34 @@ use std::str::FromStr;
 
 /// Closed set of engines that can own an ordinal reference.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub enum EngineScheme { Fz, Gz, Tz }
+pub enum EngineScheme {
+    Fz,
+    Gz,
+    Tz,
+}
 
 impl EngineScheme {
     /// Canonical lowercase scheme.
     pub const fn as_str(self) -> &'static str {
-        match self { Self::Fz => "fz", Self::Gz => "gz", Self::Tz => "tz" }
+        match self {
+            Self::Fz => "fz",
+            Self::Gz => "gz",
+            Self::Tz => "tz",
+        }
     }
 }
 impl fmt::Display for EngineScheme {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result { f.write_str(self.as_str()) }
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.as_str())
+    }
 }
 impl FromStr for EngineScheme {
     type Err = ParseOrdinalRefError;
     fn from_str(value: &str) -> Result<Self, Self::Err> {
         match value {
-            "fz" => Ok(Self::Fz), "gz" => Ok(Self::Gz), "tz" => Ok(Self::Tz),
+            "fz" => Ok(Self::Fz),
+            "gz" => Ok(Self::Gz),
+            "tz" => Ok(Self::Tz),
             _ => Err(ParseOrdinalRefError::InvalidScheme),
         }
     }
@@ -43,7 +55,9 @@ impl Serialize for EngineScheme {
 }
 impl<'de> Deserialize<'de> for EngineScheme {
     fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        <&str>::deserialize(deserializer)?.parse().map_err(de::Error::custom)
+        <&str>::deserialize(deserializer)?
+            .parse()
+            .map_err(de::Error::custom)
     }
 }
 
@@ -52,33 +66,59 @@ impl<'de> Deserialize<'de> for EngineScheme {
 /// Coordinates are unsigned ASCII-decimal u64 values. Zero is valid syntax;
 /// allocation gauges use one-based, nonzero coordinates.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub struct OrdinalRef { scheme: EngineScheme, generation: u64, ordinal: u64 }
+pub struct OrdinalRef {
+    scheme: EngineScheme,
+    generation: u64,
+    ordinal: u64,
+}
 
 impl OrdinalRef {
     pub const fn new(scheme: EngineScheme, generation: u64, ordinal: u64) -> Self {
-        Self { scheme, generation, ordinal }
+        Self {
+            scheme,
+            generation,
+            ordinal,
+        }
     }
-    pub const fn scheme(self) -> EngineScheme { self.scheme }
-    pub const fn generation(self) -> u64 { self.generation }
-    pub const fn ordinal(self) -> u64 { self.ordinal }
+    pub const fn scheme(self) -> EngineScheme {
+        self.scheme
+    }
+    pub const fn generation(self) -> u64 {
+        self.generation
+    }
+    pub const fn ordinal(self) -> u64 {
+        self.ordinal
+    }
 }
 impl fmt::Display for OrdinalRef {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}://o/{}/{}", self.scheme, self.generation, self.ordinal)
+        write!(
+            f,
+            "{}://o/{}/{}",
+            self.scheme, self.generation, self.ordinal
+        )
     }
 }
 impl FromStr for OrdinalRef {
     type Err = ParseOrdinalRefError;
     fn from_str(value: &str) -> Result<Self, Self::Err> {
-        if !value.is_ascii() { return Err(ParseOrdinalRefError::NonAscii); }
-        if value.contains('?') || value.contains('#') { return Err(ParseOrdinalRefError::QueryOrFragment); }
-        let (scheme, coordinates) = value.split_once("://o/")
+        if !value.is_ascii() {
+            return Err(ParseOrdinalRefError::NonAscii);
+        }
+        if value.contains('?') || value.contains('#') {
+            return Err(ParseOrdinalRefError::QueryOrFragment);
+        }
+        let (scheme, coordinates) = value
+            .split_once("://o/")
             .ok_or(ParseOrdinalRefError::InvalidShape)?;
         let scheme = scheme.parse()?;
         let mut fields = coordinates.split('/');
-        let generation = parse_decimal(fields.next().unwrap_or_default(), DecimalField::Generation)?;
+        let generation =
+            parse_decimal(fields.next().unwrap_or_default(), DecimalField::Generation)?;
         let ordinal = parse_decimal(fields.next().unwrap_or_default(), DecimalField::Ordinal)?;
-        if fields.next().is_some() { return Err(ParseOrdinalRefError::InvalidShape); }
+        if fields.next().is_some() {
+            return Err(ParseOrdinalRefError::InvalidShape);
+        }
         Ok(Self::new(scheme, generation, ordinal))
     }
 }
@@ -89,7 +129,9 @@ fn parse_decimal(value: &str, field: DecimalField) -> Result<u64, ParseOrdinalRe
     if value.len() > 1 && value.starts_with('0') {
         return Err(ParseOrdinalRefError::LeadingZero(field));
     }
-    value.parse().map_err(|_| ParseOrdinalRefError::DecimalOverflow(field))
+    value
+        .parse()
+        .map_err(|_| ParseOrdinalRefError::DecimalOverflow(field))
 }
 impl Serialize for OrdinalRef {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
@@ -98,18 +140,28 @@ impl Serialize for OrdinalRef {
 }
 impl<'de> Deserialize<'de> for OrdinalRef {
     fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        <&str>::deserialize(deserializer)?.parse().map_err(de::Error::custom)
+        <&str>::deserialize(deserializer)?
+            .parse()
+            .map_err(de::Error::custom)
     }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum DecimalField { Generation, Ordinal }
+pub enum DecimalField {
+    Generation,
+    Ordinal,
+}
 
 /// Strict grammar failure. Extra paths, queries, and fragments are refused.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ParseOrdinalRefError {
-    NonAscii, InvalidScheme, InvalidShape, QueryOrFragment,
-    InvalidDecimal(DecimalField), LeadingZero(DecimalField), DecimalOverflow(DecimalField),
+    NonAscii,
+    InvalidScheme,
+    InvalidShape,
+    QueryOrFragment,
+    InvalidDecimal(DecimalField),
+    LeadingZero(DecimalField),
+    DecimalOverflow(DecimalField),
 }
 impl fmt::Display for ParseOrdinalRefError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -120,21 +172,31 @@ impl Error for ParseOrdinalRefError {}
 
 /// Checked mapping between zero-based allocations and one-based coordinates.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct Gauge { capacity: NonZeroU64 }
+pub struct Gauge {
+    capacity: NonZeroU64,
+}
 impl Gauge {
     /// Construct with a nonzero number of ordinal slots per generation.
     pub fn new(capacity: u64) -> Result<Self, GaugeError> {
-        NonZeroU64::new(capacity).map(|capacity| Self { capacity })
+        NonZeroU64::new(capacity)
+            .map(|capacity| Self { capacity })
             .ok_or(GaugeError::ZeroCapacity)
     }
-    pub const fn capacity(self) -> NonZeroU64 { self.capacity }
+    pub const fn capacity(self) -> NonZeroU64 {
+        self.capacity
+    }
 
     /// Map a zero-based allocation to one-based generation and ordinal coordinates.
     pub fn allocate(self, scheme: EngineScheme, allocation: u64) -> Result<OrdinalRef, GaugeError> {
         let capacity = self.capacity.get();
-        let generation = (allocation / capacity).checked_add(1)
+        let generation = (allocation / capacity)
+            .checked_add(1)
             .ok_or(GaugeError::ArithmeticOverflow)?;
-        Ok(OrdinalRef::new(scheme, generation, allocation % capacity + 1))
+        Ok(OrdinalRef::new(
+            scheme,
+            generation,
+            allocation % capacity + 1,
+        ))
     }
 
     /// Recover a zero-based allocation from one-based gauge coordinates.
@@ -144,10 +206,12 @@ impl Gauge {
         }
         if reference.ordinal > self.capacity.get() {
             return Err(GaugeError::OrdinalOutOfRange {
-                ordinal: reference.ordinal, capacity: self.capacity.get(),
+                ordinal: reference.ordinal,
+                capacity: self.capacity.get(),
             });
         }
-        (reference.generation - 1).checked_mul(self.capacity.get())
+        (reference.generation - 1)
+            .checked_mul(self.capacity.get())
             .and_then(|base| base.checked_add(reference.ordinal - 1))
             .ok_or(GaugeError::ArithmeticOverflow)
     }
@@ -155,7 +219,8 @@ impl Gauge {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum GaugeError {
-    ZeroCapacity, ZeroCoordinate,
+    ZeroCapacity,
+    ZeroCoordinate,
     OrdinalOutOfRange { ordinal: u64, capacity: u64 },
     ArithmeticOverflow,
 }
@@ -165,7 +230,6 @@ impl fmt::Display for GaugeError {
     }
 }
 impl Error for GaugeError {}
-
 
 /// Exact provider, model, and tokenizer revision identity used for certification.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -186,7 +250,9 @@ pub struct FixtureInstance {
 }
 fn deserialize_expected_token_count<'de, D: Deserializer<'de>>(
     deserializer: D,
-) -> Result<Option<u64>, D::Error> { Option::<u64>::deserialize(deserializer) }
+) -> Result<Option<u64>, D::Error> {
+    Option::<u64>::deserialize(deserializer)
+}
 
 /// Versioned provider-locked complete-instance fixture.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -198,10 +264,17 @@ pub struct AtomFixture {
 
 /// Proof that all listed complete refs counted as one token under one exact lock.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Certification { provider_lock: ProviderLock, certified_instances: usize }
+pub struct Certification {
+    provider_lock: ProviderLock,
+    certified_instances: usize,
+}
 impl Certification {
-    pub fn provider_lock(&self) -> &ProviderLock { &self.provider_lock }
-    pub const fn certified_instances(&self) -> usize { self.certified_instances }
+    pub fn provider_lock(&self) -> &ProviderLock {
+        &self.provider_lock
+    }
+    pub const fn certified_instances(&self) -> usize {
+        self.certified_instances
+    }
 }
 
 /// Generic public fixtures. Null expected counts make runtime certification mandatory.
@@ -222,7 +295,8 @@ pub fn certify_fixture<F>(
     expected_lock: &ProviderLock,
     mut count_tokens: F,
 ) -> Result<Certification, CertificationError>
-where F: FnMut(&ProviderLock, &str) -> Result<u64, String>,
+where
+    F: FnMut(&ProviderLock, &str) -> Result<u64, String>,
 {
     validate_lock(&fixture.provider_lock)?;
     if &fixture.provider_lock != expected_lock {
@@ -231,23 +305,34 @@ where F: FnMut(&ProviderLock, &str) -> Result<u64, String>,
     if fixture.schema != "zerostack.zero_gauge.complete_atoms.v1" {
         return Err(CertificationError::UnsupportedSchema);
     }
-    if fixture.instances.is_empty() { return Err(CertificationError::EmptyFixture); }
+    if fixture.instances.is_empty() {
+        return Err(CertificationError::EmptyFixture);
+    }
 
     let mut unique = BTreeSet::new();
     for instance in &fixture.instances {
-        if instance.rendered.is_empty() { return Err(CertificationError::EmptyInstance); }
-        if !unique.insert(instance.rendered.as_str()) {
-            return Err(CertificationError::DuplicateInstance(instance.rendered.clone()));
+        if instance.rendered.is_empty() {
+            return Err(CertificationError::EmptyInstance);
         }
-        let parsed: OrdinalRef = instance.rendered.parse()
+        if !unique.insert(instance.rendered.as_str()) {
+            return Err(CertificationError::DuplicateInstance(
+                instance.rendered.clone(),
+            ));
+        }
+        let parsed: OrdinalRef = instance
+            .rendered
+            .parse()
             .map_err(|_| CertificationError::NoncanonicalInstance(instance.rendered.clone()))?;
         if parsed.to_string() != instance.rendered {
-            return Err(CertificationError::NoncanonicalInstance(instance.rendered.clone()));
+            return Err(CertificationError::NoncanonicalInstance(
+                instance.rendered.clone(),
+            ));
         }
         if let Some(count) = instance.expected_token_count {
             if count != 1 {
                 return Err(CertificationError::ExpectedCountNotOne {
-                    rendered: instance.rendered.clone(), count,
+                    rendered: instance.rendered.clone(),
+                    count,
                 });
             }
         }
@@ -255,7 +340,8 @@ where F: FnMut(&ProviderLock, &str) -> Result<u64, String>,
             .map_err(CertificationError::Tokenizer)?;
         if count != 1 {
             return Err(CertificationError::RuntimeCountNotOne {
-                rendered: instance.rendered.clone(), count,
+                rendered: instance.rendered.clone(),
+                count,
             });
         }
     }
@@ -270,9 +356,11 @@ fn validate_lock(lock: &ProviderLock) -> Result<(), CertificationError> {
         return Err(CertificationError::EmptyProviderLockField);
     }
     let digest = lock.tokenizer_revision_digest.as_bytes();
-    if digest.len() != 64 || !digest.iter().all(|byte| {
-        byte.is_ascii_digit() || (b'a'..=b'f').contains(byte)
-    }) {
+    if digest.len() != 64
+        || !digest
+            .iter()
+            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(byte))
+    {
         return Err(CertificationError::InvalidTokenizerRevisionDigest);
     }
     Ok(())
@@ -281,9 +369,15 @@ fn validate_lock(lock: &ProviderLock) -> Result<(), CertificationError> {
 /// Fixture validation or tokenizer proof failure.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CertificationError {
-    InvalidJson(String), UnsupportedSchema, EmptyProviderLockField,
-    InvalidTokenizerRevisionDigest, ProviderLockMismatch, EmptyFixture, EmptyInstance,
-    DuplicateInstance(String), NoncanonicalInstance(String),
+    InvalidJson(String),
+    UnsupportedSchema,
+    EmptyProviderLockField,
+    InvalidTokenizerRevisionDigest,
+    ProviderLockMismatch,
+    EmptyFixture,
+    EmptyInstance,
+    DuplicateInstance(String),
+    NoncanonicalInstance(String),
     ExpectedCountNotOne { rendered: String, count: u64 },
     RuntimeCountNotOne { rendered: String, count: u64 },
     Tokenizer(String),
@@ -298,49 +392,135 @@ impl Error for CertificationError {}
 #[cfg(test)]
 mod tests {
     use super::*;
-    fn lock() -> ProviderLock { ProviderLock { provider: "runtime".into(), model: "caller-supplied".into(), tokenizer_revision_digest: "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855".into() } }
-    fn fixture(rendered: &[&str]) -> AtomFixture { AtomFixture { schema: "zerostack.zero_gauge.complete_atoms.v1".into(), provider_lock: lock(), instances: rendered.iter().map(|rendered| FixtureInstance { rendered: (*rendered).into(), expected_token_count: None }).collect() } }
+    fn lock() -> ProviderLock {
+        ProviderLock {
+            provider: "runtime".into(),
+            model: "caller-supplied".into(),
+            tokenizer_revision_digest:
+                "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855".into(),
+        }
+    }
+    fn fixture(rendered: &[&str]) -> AtomFixture {
+        AtomFixture {
+            schema: "zerostack.zero_gauge.complete_atoms.v1".into(),
+            provider_lock: lock(),
+            instances: rendered
+                .iter()
+                .map(|rendered| FixtureInstance {
+                    rendered: (*rendered).into(),
+                    expected_token_count: None,
+                })
+                .collect(),
+        }
+    }
 
     #[test]
     fn zero_gauge_grammar_canonicality_and_tamper() {
         for value in ["fz://o/0/0", "gz://o/1/9", "tz://o/18446744073709551615/2"] {
-            let parsed: OrdinalRef = value.parse().unwrap(); assert_eq!(parsed.to_string(), value);
-            let json = serde_json::to_string(&parsed).unwrap(); assert_eq!(serde_json::from_str::<OrdinalRef>(&json).unwrap(), parsed);
+            let parsed: OrdinalRef = value.parse().unwrap();
+            assert_eq!(parsed.to_string(), value);
+            let json = serde_json::to_string(&parsed).unwrap();
+            assert_eq!(serde_json::from_str::<OrdinalRef>(&json).unwrap(), parsed);
         }
-        for invalid in ["xz://o/1/1", "TZ://o/1/1", "tz://o/+1/1", "tz://o/-1/1", "tz://o/01/1", "tz://o/1/00", "tz://o/1/1/2", "tz://o/1/1?x", "tz://o/1/1#x", "tz://o/18446744073709551616/1", "tz://o/１/1"] { assert!(invalid.parse::<OrdinalRef>().is_err(), "accepted {invalid}"); }
+        for invalid in [
+            "xz://o/1/1",
+            "TZ://o/1/1",
+            "tz://o/+1/1",
+            "tz://o/-1/1",
+            "tz://o/01/1",
+            "tz://o/1/00",
+            "tz://o/1/1/2",
+            "tz://o/1/1?x",
+            "tz://o/1/1#x",
+            "tz://o/18446744073709551616/1",
+            "tz://o/１/1",
+        ] {
+            assert!(invalid.parse::<OrdinalRef>().is_err(), "accepted {invalid}");
+        }
     }
 
     #[test]
     fn zero_gauge_arithmetic_roundtrip_bounds_and_overflow() {
-        assert_eq!(Gauge::new(0), Err(GaugeError::ZeroCapacity)); let gauge = Gauge::new(3).unwrap();
-        for allocation in [0, 1, 2, 3, 4, u64::MAX] { let reference = gauge.allocate(EngineScheme::Gz, allocation).unwrap(); assert_eq!(gauge.allocation(reference).unwrap(), allocation); }
-        assert_eq!(gauge.allocation(OrdinalRef::new(EngineScheme::Fz, 1, 4)), Err(GaugeError::OrdinalOutOfRange { ordinal: 4, capacity: 3 }));
-        assert_eq!(gauge.allocation(OrdinalRef::new(EngineScheme::Tz, 0, 1)), Err(GaugeError::ZeroCoordinate));
-        assert_eq!(Gauge::new(1).unwrap().allocate(EngineScheme::Tz, u64::MAX), Err(GaugeError::ArithmeticOverflow));
-        assert_eq!(Gauge::new(u64::MAX).unwrap().allocation(OrdinalRef::new(EngineScheme::Tz, u64::MAX, u64::MAX)), Err(GaugeError::ArithmeticOverflow));
+        assert_eq!(Gauge::new(0), Err(GaugeError::ZeroCapacity));
+        let gauge = Gauge::new(3).unwrap();
+        for allocation in [0, 1, 2, 3, 4, u64::MAX] {
+            let reference = gauge.allocate(EngineScheme::Gz, allocation).unwrap();
+            assert_eq!(gauge.allocation(reference).unwrap(), allocation);
+        }
+        assert_eq!(
+            gauge.allocation(OrdinalRef::new(EngineScheme::Fz, 1, 4)),
+            Err(GaugeError::OrdinalOutOfRange {
+                ordinal: 4,
+                capacity: 3
+            })
+        );
+        assert_eq!(
+            gauge.allocation(OrdinalRef::new(EngineScheme::Tz, 0, 1)),
+            Err(GaugeError::ZeroCoordinate)
+        );
+        assert_eq!(
+            Gauge::new(1).unwrap().allocate(EngineScheme::Tz, u64::MAX),
+            Err(GaugeError::ArithmeticOverflow)
+        );
+        assert_eq!(
+            Gauge::new(u64::MAX).unwrap().allocation(OrdinalRef::new(
+                EngineScheme::Tz,
+                u64::MAX,
+                u64::MAX
+            )),
+            Err(GaugeError::ArithmeticOverflow)
+        );
     }
 
     #[test]
     fn zero_gauge_fixture_lock_and_callback_one_token_pass_fail() {
         let bundled = parse_fixture(BUNDLED_ATOM_FIXTURE_JSON).unwrap();
-        let proof = certify_fixture(&bundled, &lock(), |seen, rendered| { assert_eq!(seen, &lock()); assert!(rendered.contains("://o/")); Ok(1) }).unwrap();
+        let proof = certify_fixture(&bundled, &lock(), |seen, rendered| {
+            assert_eq!(seen, &lock());
+            assert!(rendered.contains("://o/"));
+            Ok(1)
+        })
+        .unwrap();
         assert_eq!(proof.certified_instances(), 3);
-        assert!(matches!(certify_fixture(&bundled, &lock(), |_, _| Ok(2)), Err(CertificationError::RuntimeCountNotOne { .. })));
-        let mut wrong_lock = lock(); wrong_lock.model = "other".into(); assert_eq!(certify_fixture(&bundled, &wrong_lock, |_, _| Ok(1)), Err(CertificationError::ProviderLockMismatch));
-        assert!(matches!(certify_fixture(&fixture(&["tz://o/1/1", "tz://o/1/1"]), &lock(), |_, _| Ok(1)), Err(CertificationError::DuplicateInstance(_))));
+        assert!(matches!(
+            certify_fixture(&bundled, &lock(), |_, _| Ok(2)),
+            Err(CertificationError::RuntimeCountNotOne { .. })
+        ));
+        let mut wrong_lock = lock();
+        wrong_lock.model = "other".into();
+        assert_eq!(
+            certify_fixture(&bundled, &wrong_lock, |_, _| Ok(1)),
+            Err(CertificationError::ProviderLockMismatch)
+        );
+        assert!(matches!(
+            certify_fixture(&fixture(&["tz://o/1/1", "tz://o/1/1"]), &lock(), |_, _| Ok(
+                1
+            )),
+            Err(CertificationError::DuplicateInstance(_))
+        ));
     }
 
     #[test]
     fn zero_gauge_fixture_tamper_requires_explicit_count() {
         let missing = "{\"schema\":\"zerostack.zero_gauge.complete_atoms.v1\",\"provider_lock\":{\"provider\":\"p\",\"model\":\"m\",\"tokenizer_revision_digest\":\"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855\"},\"instances\":[{\"rendered\":\"tz://o/1/1\"}]}";
         assert!(parse_fixture(missing).is_err());
-        for rendered in ["", "tz://o/01/1", "tz://o/1/1#fragment"] { assert!(certify_fixture(&fixture(&[rendered]), &lock(), |_, _| Ok(1)).is_err()); }
+        for rendered in ["", "tz://o/01/1", "tz://o/1/1#fragment"] {
+            assert!(certify_fixture(&fixture(&[rendered]), &lock(), |_, _| Ok(1)).is_err());
+        }
     }
 
     #[test]
     fn zero_gauge_one_token_pieces_do_not_certify_untested_composed_ref() {
-        let pieces = fixture(&["tz://o/", "1", "1"]); let mut callbacks = 0;
-        let result = certify_fixture(&pieces, &lock(), |_, _| { callbacks += 1; Ok(1) });
-        assert!(matches!(result, Err(CertificationError::NoncanonicalInstance(_)))); assert_eq!(callbacks, 0);
+        let pieces = fixture(&["tz://o/", "1", "1"]);
+        let mut callbacks = 0;
+        let result = certify_fixture(&pieces, &lock(), |_, _| {
+            callbacks += 1;
+            Ok(1)
+        });
+        assert!(matches!(
+            result,
+            Err(CertificationError::NoncanonicalInstance(_))
+        ));
+        assert_eq!(callbacks, 0);
     }
 }

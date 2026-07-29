@@ -457,18 +457,14 @@ impl DispatchMachine {
         let canonical_operation_id = operation.canonical_id.clone();
         let policy = operation.effect_policy;
 
-        if let Err(error) = validate_permit_authority(
-            policy,
-            &canonical_operation_id,
-            permit.as_ref(),
-        ) {
+        if let Err(error) =
+            validate_permit_authority(policy, &canonical_operation_id, permit.as_ref())
+        {
             return Err(self.poison(error));
         }
-        if let Err(error) = validate_approval_authority(
-            policy,
-            &canonical_operation_id,
-            approval.as_ref(),
-        ) {
+        if let Err(error) =
+            validate_approval_authority(policy, &canonical_operation_id, approval.as_ref())
+        {
             return Err(self.poison(error));
         }
         self.stage = DispatchStage::Dispatch;
@@ -548,16 +544,10 @@ fn validate_permit_binding(
     effect_class: EffectClass,
 ) -> Result<(), DispatchContractError> {
     if permit.canonical_operation_id != canonical_operation_id {
-        return Err(invalid_permit_binding(
-            canonical_operation_id,
-            effect_class,
-        ));
+        return Err(invalid_permit_binding(canonical_operation_id, effect_class));
     }
     if permit.effect_class != effect_class {
-        return Err(invalid_permit_binding(
-            canonical_operation_id,
-            effect_class,
-        ));
+        return Err(invalid_permit_binding(canonical_operation_id, effect_class));
     }
     Ok(())
 }
@@ -688,10 +678,7 @@ fn validate_supported_schema_keywords(
         "title",
         "$schema",
     ];
-    if let Some(keyword) = schema
-        .keys()
-        .find(|key| !SUPPORTED.contains(&key.as_str()))
-    {
+    if let Some(keyword) = schema.keys().find(|key| !SUPPORTED.contains(&key.as_str())) {
         return Err(format!("unsupported schema keyword {keyword:?} at {path}"));
     }
     Ok(())
@@ -998,8 +985,7 @@ mod tests {
             "additionalProperties": false
         });
 
-        let missing = validate_schema_value(&schema, &json!({"entries": [{}]}), "$")
-            .unwrap_err();
+        let missing = validate_schema_value(&schema, &json!({"entries": [{}]}), "$").unwrap_err();
         assert_eq!(missing, "missing required argument $.entries[0].name");
 
         let unknown = validate_schema_value(

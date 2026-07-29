@@ -345,7 +345,9 @@ impl SpanRef {
             .ok_or(SpanRefError::RangeOverflow)?;
         let start = usize::try_from(self.byte_start).map_err(|_| SpanRefError::RangeOutOfBounds)?;
         let end = usize::try_from(end).map_err(|_| SpanRefError::RangeOutOfBounds)?;
-        let selected = object.get(start..end).ok_or(SpanRefError::RangeOutOfBounds)?;
+        let selected = object
+            .get(start..end)
+            .ok_or(SpanRefError::RangeOutOfBounds)?;
         self.verify_span(selected)?;
         Ok(selected)
     }
@@ -638,12 +640,7 @@ fn resolve_policy_end(
 }
 
 /// Slice bytes for 1-based inclusive line range [start, end] using precomputed starts.
-fn line_span_bytes<'a>(
-    bytes: &'a [u8],
-    line_starts: &[usize],
-    start: u64,
-    end: u64,
-) -> &'a [u8] {
+fn line_span_bytes<'a>(bytes: &'a [u8], line_starts: &[usize], start: u64, end: u64) -> &'a [u8] {
     let start_byte = line_starts[(start - 1) as usize];
     let end_byte = if (end as usize) < line_starts.len() {
         line_starts[end as usize]
@@ -663,7 +660,6 @@ impl fmt::Display for ZeroRefV1 {
         }
     }
 }
-
 
 #[cfg(test)]
 mod tests {

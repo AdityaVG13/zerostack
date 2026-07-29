@@ -389,8 +389,7 @@ impl SharedCas {
         limit: u64,
         mut next_sequence: impl FnMut() -> u64,
     ) -> Result<bool, CasError> {
-        let (file, tmp) =
-            Self::create_temp_object(parent, hash, &mut next_sequence)?;
+        let (file, tmp) = Self::create_temp_object(parent, hash, &mut next_sequence)?;
         let publish = self.publish_temp_object(file, &tmp, parent, dest, hash, bytes, limit);
         // create_new established ownership, so removal races no other publisher.
         // Successful rename has already consumed the path; convergence leaves it.
@@ -700,9 +699,7 @@ mod tests {
         let mut sequences = [stale_sequence, stale_sequence + 1].into_iter();
 
         let outcome = cas
-            .put_with_limit_and_sequence(bytes, CAS_MAX_OBJECT_BYTES, || {
-                sequences.next().unwrap()
-            })
+            .put_with_limit_and_sequence(bytes, CAS_MAX_OBJECT_BYTES, || sequences.next().unwrap())
             .unwrap();
 
         assert!(outcome.created);
@@ -1112,10 +1109,7 @@ mod tests {
     fn a_lock_on_the_same_store_spelled_differently_is_accepted() {
         let dir = tempdir().unwrap();
         let cas = SharedCas::open_labeled(dir.path(), "test");
-        let alias = dir
-            .path()
-            .join("..")
-            .join(dir.path().file_name().unwrap());
+        let alias = dir.path().join("..").join(dir.path().file_name().unwrap());
         let guard = StoreLock::publish(&alias, LOCK_DEADLINE).unwrap();
         let outcome = cas
             .put_in_lock(b"payload", CAS_MAX_OBJECT_BYTES, &guard)

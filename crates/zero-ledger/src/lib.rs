@@ -225,7 +225,10 @@ pub enum ChargeClass {
 
 /// Transactional task-attempt disposition used to classify mandatory cost.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum TaskAttemptDisposition { Passed, RolledBack }
+pub enum TaskAttemptDisposition {
+    Passed,
+    RolledBack,
+}
 
 impl ChargeClass {
     /// Every charge class, in canonical order.
@@ -468,21 +471,13 @@ impl TokenCharge {
         ledger: &TokenLedger,
         totals: &mut Self,
     ) -> Result<(), LedgerError> {
-        totals.billed_tokens = add(
-            ledger.billed_tokens,
-            self.billed_tokens,
-            "billed_tokens",
-        )?;
+        totals.billed_tokens = add(ledger.billed_tokens, self.billed_tokens, "billed_tokens")?;
         totals.failed_trial_tokens = add(
             ledger.failed_trial_tokens,
             self.failed_trial_tokens,
             "failed_trial_tokens",
         )?;
-        totals.retry_tokens = add(
-            ledger.retry_tokens,
-            self.retry_tokens,
-            "retry_tokens",
-        )?;
+        totals.retry_tokens = add(ledger.retry_tokens, self.retry_tokens, "retry_tokens")?;
         totals.recovery_tokens = add(
             ledger.recovery_tokens,
             self.recovery_tokens,
@@ -568,8 +563,14 @@ impl ResourceGauge {
         attempt_cost: u64,
         disposition: TaskAttemptDisposition,
     ) -> Result<(), LedgerError> {
-        if attempt_cost == 0 { return Err(LedgerError::ZeroTaskAttemptCost); }
-        let mut charge = TokenCharge { raw_input_tokens: attempt_cost, input_tokens: attempt_cost, ..TokenCharge::default() };
+        if attempt_cost == 0 {
+            return Err(LedgerError::ZeroTaskAttemptCost);
+        }
+        let mut charge = TokenCharge {
+            raw_input_tokens: attempt_cost,
+            input_tokens: attempt_cost,
+            ..TokenCharge::default()
+        };
         match disposition {
             TaskAttemptDisposition::Passed => charge.billed_tokens = attempt_cost,
             TaskAttemptDisposition::RolledBack => charge.failed_trial_tokens = attempt_cost,

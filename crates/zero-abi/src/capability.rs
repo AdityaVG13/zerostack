@@ -168,12 +168,30 @@ impl SharedCapability {
 /// One typed compatibility mismatch dimension.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum CapabilityMismatch {
-    HashAlgorithm { expected: HashAlgorithm, actual: HashAlgorithm },
-    CasLayout { expected: CasLayout, actual: CasLayout },
-    LayoutVersion { expected: LayoutVersion, actual: LayoutVersion },
-    FragmentByte { expected: FragmentBehavior, actual: FragmentBehavior },
-    FragmentLineStart { expected: FragmentBehavior, actual: FragmentBehavior },
-    FragmentLineEnd { expected: FragmentBehavior, actual: FragmentBehavior },
+    HashAlgorithm {
+        expected: HashAlgorithm,
+        actual: HashAlgorithm,
+    },
+    CasLayout {
+        expected: CasLayout,
+        actual: CasLayout,
+    },
+    LayoutVersion {
+        expected: LayoutVersion,
+        actual: LayoutVersion,
+    },
+    FragmentByte {
+        expected: FragmentBehavior,
+        actual: FragmentBehavior,
+    },
+    FragmentLineStart {
+        expected: FragmentBehavior,
+        actual: FragmentBehavior,
+    },
+    FragmentLineEnd {
+        expected: FragmentBehavior,
+        actual: FragmentBehavior,
+    },
 }
 
 #[cfg(test)]
@@ -196,13 +214,15 @@ mod tests {
             "hash": {"algorithm": "sha256"},
             "shared_cas": {"layout": "blobs/sha256/<hh>/<hash>", "layout_version": 1},
             "fragments": {"byte": "strict", "line_start": "strict", "line_end": "clamp_end"}
-        })).unwrap();
+        }))
+        .unwrap();
         let legacy: SharedCapability = serde_json::from_value(json!({
             "schema": "zeroref-capability/v1",
             "hash": {"algo": "sha256"},
             "shared_cas": {"layout": "blobs/sha256/<hh>/<hash>", "version": 1},
             "fragments": {"byte": "strict", "line_start": "strict", "line_end": "clamp_end"}
-        })).unwrap();
+        }))
+        .unwrap();
         assert_eq!(canonical, legacy);
     }
 
@@ -210,12 +230,18 @@ mod tests {
     fn shared_capability_serializes_only_canonical_spellings() {
         let value = serde_json::to_value(canonical()).unwrap();
         assert_eq!(value["hash"], json!({"algorithm": "sha256"}));
-        assert_eq!(value["shared_cas"], json!({
-            "layout": "blobs/sha256/<hh>/<hash>", "layout_version": 1
-        }));
+        assert_eq!(
+            value["shared_cas"],
+            json!({
+                "layout": "blobs/sha256/<hh>/<hash>", "layout_version": 1
+            })
+        );
         assert!(value["hash"].get("algo").is_none());
         assert!(value["shared_cas"].get("version").is_none());
-        assert_eq!(serde_json::to_string(&canonical()).unwrap(), serde_json::to_string(&canonical()).unwrap());
+        assert_eq!(
+            serde_json::to_string(&canonical()).unwrap(),
+            serde_json::to_string(&canonical()).unwrap()
+        );
     }
 
     #[test]
@@ -225,7 +251,10 @@ mod tests {
         assert!(serde_json::from_value::<SharedCapability>(value).is_err());
 
         let mut missing = serde_json::to_value(canonical()).unwrap();
-        missing["fragments"].as_object_mut().unwrap().remove("line_end");
+        missing["fragments"]
+            .as_object_mut()
+            .unwrap()
+            .remove("line_end");
         assert!(serde_json::from_value::<SharedCapability>(missing).is_err());
 
         let mut zero = serde_json::to_value(canonical()).unwrap();
@@ -237,7 +266,9 @@ mod tests {
     fn shared_capability_reports_each_mismatch_in_deterministic_order() {
         let local = canonical();
         let peer = SharedCapability {
-            hash: HashCapability { algorithm: HashAlgorithm::Sha1 },
+            hash: HashCapability {
+                algorithm: HashAlgorithm::Sha1,
+            },
             shared_cas: SharedCasCapability {
                 layout: CasLayout::BlobsSha256Xx,
                 layout_version: LayoutVersion::new(NonZeroU64::new(2).unwrap()),
@@ -249,13 +280,34 @@ mod tests {
             },
             ..local
         };
-        assert_eq!(local.compatibility_mismatches(&peer), vec![
-            CapabilityMismatch::HashAlgorithm { expected: HashAlgorithm::Sha256, actual: HashAlgorithm::Sha1 },
-            CapabilityMismatch::CasLayout { expected: CasLayout::BlobsSha256Hh, actual: CasLayout::BlobsSha256Xx },
-            CapabilityMismatch::LayoutVersion { expected: LayoutVersion::V1, actual: peer.shared_cas.layout_version },
-            CapabilityMismatch::FragmentByte { expected: FragmentBehavior::Strict, actual: FragmentBehavior::ClampEnd },
-            CapabilityMismatch::FragmentLineStart { expected: FragmentBehavior::Strict, actual: FragmentBehavior::ClampEnd },
-            CapabilityMismatch::FragmentLineEnd { expected: FragmentBehavior::ClampEnd, actual: FragmentBehavior::Strict },
-        ]);
+        assert_eq!(
+            local.compatibility_mismatches(&peer),
+            vec![
+                CapabilityMismatch::HashAlgorithm {
+                    expected: HashAlgorithm::Sha256,
+                    actual: HashAlgorithm::Sha1
+                },
+                CapabilityMismatch::CasLayout {
+                    expected: CasLayout::BlobsSha256Hh,
+                    actual: CasLayout::BlobsSha256Xx
+                },
+                CapabilityMismatch::LayoutVersion {
+                    expected: LayoutVersion::V1,
+                    actual: peer.shared_cas.layout_version
+                },
+                CapabilityMismatch::FragmentByte {
+                    expected: FragmentBehavior::Strict,
+                    actual: FragmentBehavior::ClampEnd
+                },
+                CapabilityMismatch::FragmentLineStart {
+                    expected: FragmentBehavior::Strict,
+                    actual: FragmentBehavior::ClampEnd
+                },
+                CapabilityMismatch::FragmentLineEnd {
+                    expected: FragmentBehavior::ClampEnd,
+                    actual: FragmentBehavior::Strict
+                },
+            ]
+        );
     }
 }

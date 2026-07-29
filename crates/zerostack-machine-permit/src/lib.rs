@@ -40,26 +40,24 @@ pub fn scoped_permit_base_for(class: &str, scope_root: Option<&Path>) -> PathBuf
 }
 
 /// Resolve an explicit scope root without ever hashing an uncanonicalized path.
-pub fn try_scoped_permit_base_for(
-    class: &str,
-    scope_root: Option<&Path>,
-) -> io::Result<PathBuf> {
+pub fn try_scoped_permit_base_for(class: &str, scope_root: Option<&Path>) -> io::Result<PathBuf> {
     let class = sanitize_permit_class(class);
     let suffix = if let Some(root) = scope_root {
         let canonical = fs::canonicalize(root)?;
         if !canonical.is_dir() {
             return Err(io::Error::new(
                 io::ErrorKind::NotADirectory,
-                format!("permit scope root is not a directory: {}", canonical.display()),
+                format!(
+                    "permit scope root is not a directory: {}",
+                    canonical.display()
+                ),
             ));
         }
         format!("-{:016x}", fnv1a64(canonical.to_string_lossy().as_bytes()))
     } else {
         String::new()
     };
-    Ok(permit_runtime_dir()?.join(format!(
-        "zerostack-codemode-{class}{suffix}.permit"
-    )))
+    Ok(permit_runtime_dir()?.join(format!("zerostack-codemode-{class}{suffix}.permit")))
 }
 
 #[cfg(unix)]
@@ -107,20 +105,32 @@ fn verify_unix_private_dir(path: &Path, exact_mode: bool) -> io::Result<()> {
 
     let metadata = fs::symlink_metadata(path)?;
     if metadata.file_type().is_symlink() || !metadata.is_dir() {
-        return Err(io::Error::new(io::ErrorKind::InvalidInput, format!(
-            "permit directory is not a real directory: {}", path.display()
-        )));
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            format!(
+                "permit directory is not a real directory: {}",
+                path.display()
+            ),
+        ));
     }
     if metadata.uid() != effective_uid() {
-        return Err(io::Error::new(io::ErrorKind::PermissionDenied, format!(
-            "permit directory is not owned by the effective uid: {}", path.display()
-        )));
+        return Err(io::Error::new(
+            io::ErrorKind::PermissionDenied,
+            format!(
+                "permit directory is not owned by the effective uid: {}",
+                path.display()
+            ),
+        ));
     }
     let mode = metadata.mode() & 0o777;
     if mode & 0o077 != 0 || (exact_mode && mode != 0o700) {
-        return Err(io::Error::new(io::ErrorKind::PermissionDenied, format!(
-            "permit directory has unsafe mode {mode:o}: {}", path.display()
-        )));
+        return Err(io::Error::new(
+            io::ErrorKind::PermissionDenied,
+            format!(
+                "permit directory has unsafe mode {mode:o}: {}",
+                path.display()
+            ),
+        ));
     }
     Ok(())
 }
@@ -154,9 +164,13 @@ fn ensure_portable_private_dir(path: &Path) -> io::Result<()> {
     }
     let metadata = fs::symlink_metadata(path)?;
     if metadata.file_type().is_symlink() || !metadata.is_dir() {
-        return Err(io::Error::new(io::ErrorKind::InvalidInput, format!(
-            "permit directory is not a real directory: {}", path.display()
-        )));
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            format!(
+                "permit directory is not a real directory: {}",
+                path.display()
+            ),
+        ));
     }
     Ok(())
 }
@@ -164,13 +178,17 @@ fn ensure_portable_private_dir(path: &Path) -> io::Result<()> {
 /// Verify an existing permit base before acquisition uses it.
 pub fn verify_permit_base(base: &Path) -> io::Result<()> {
     #[cfg(unix)]
-    { verify_unix_private_dir(base, false) }
+    {
+        verify_unix_private_dir(base, false)
+    }
     #[cfg(not(unix))]
     {
         let metadata = fs::symlink_metadata(base)?;
         if metadata.file_type().is_symlink() || !metadata.is_dir() {
-            return Err(io::Error::new(io::ErrorKind::InvalidInput,
-                format!("permit base is not a real directory: {}", base.display())));
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                format!("permit base is not a real directory: {}", base.display()),
+            ));
         }
         Ok(())
     }
@@ -178,9 +196,13 @@ pub fn verify_permit_base(base: &Path) -> io::Result<()> {
 
 fn prepare_permit_base(base: &Path) -> io::Result<()> {
     #[cfg(unix)]
-    { ensure_unix_private_dir(base, false) }
+    {
+        ensure_unix_private_dir(base, false)
+    }
     #[cfg(not(unix))]
-    { ensure_portable_private_dir(base) }
+    {
+        ensure_portable_private_dir(base)
+    }
 }
 
 /// Permit class path segment: non-empty `[A-Za-z0-9._-]+`, else `"invalid"`.
@@ -197,7 +219,27 @@ pub(crate) fn sanitize_permit_class(class: &str) -> &str {
 }
 
 /// True when byte is allowed in a permit class path segment ([A-Za-z0-9._-]).
-const SAFE_PERMIT_BYTE: [bool; 256] = [false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,true,true,false,true,true,true,true,true,true,true,true,true,true,false,false,false,false,false,false,false,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,false,false,false,false,true,false,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false];
+const SAFE_PERMIT_BYTE: [bool; 256] = [
+    false, false, false, false, false, false, false, false, false, false, false, false, false,
+    false, false, false, false, false, false, false, false, false, false, false, false, false,
+    false, false, false, false, false, false, false, false, false, false, false, false, false,
+    false, false, false, false, false, false, true, true, false, true, true, true, true, true,
+    true, true, true, true, true, false, false, false, false, false, false, false, true, true,
+    true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true,
+    true, true, true, true, true, true, true, true, false, false, false, false, true, false, true,
+    true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true,
+    true, true, true, true, true, true, true, true, true, false, false, false, false, false, false,
+    false, false, false, false, false, false, false, false, false, false, false, false, false,
+    false, false, false, false, false, false, false, false, false, false, false, false, false,
+    false, false, false, false, false, false, false, false, false, false, false, false, false,
+    false, false, false, false, false, false, false, false, false, false, false, false, false,
+    false, false, false, false, false, false, false, false, false, false, false, false, false,
+    false, false, false, false, false, false, false, false, false, false, false, false, false,
+    false, false, false, false, false, false, false, false, false, false, false, false, false,
+    false, false, false, false, false, false, false, false, false, false, false, false, false,
+    false, false, false, false, false, false, false, false, false, false, false, false, false,
+    false, false, false, false, false, false, false, false, false, false,
+];
 
 fn is_safe_permit_class(class: &str) -> bool {
     // Charset alone still allows "." / ".." as a bare path segment.
@@ -206,7 +248,6 @@ fn is_safe_permit_class(class: &str) -> bool {
         _ => class.bytes().all(|b| SAFE_PERMIT_BYTE[b as usize]),
     }
 }
-
 
 fn permit_scope_root() -> Option<PathBuf> {
     for name in [
@@ -261,7 +302,10 @@ impl MachinePermit {
         // Always use base/slot-N — even when slots==1 — so mixed concurrency
         // envs cannot stack an exclusive base lock with slot children.
         prepare_permit_base(base).map_err(|error| {
-            AcquireError::Fatal(format!("prepare codemode permit base {}: {error}", base.display()))
+            AcquireError::Fatal(format!(
+                "prepare codemode permit base {}: {error}",
+                base.display()
+            ))
         })?;
         // Pool size is the caller's requested budget (from env); do not freeze
         // capacity to the first asker — that would let CONCURRENCY=1 starve the
@@ -341,7 +385,9 @@ impl MachinePermit {
                         "write codemode permit metadata: {e}"
                     )));
                 }
-                if read_identity(path).as_ref().map(|identity| identity.cookie.as_str())
+                if read_identity(path)
+                    .as_ref()
+                    .map(|identity| identity.cookie.as_str())
                     != Some(cookie.as_str())
                 {
                     cleanup_owned(path, &cookie);
@@ -390,13 +436,7 @@ impl WaiterIntent {
                 path.display()
             ))
         })?;
-        if let Err(e) = publish_identity(
-            &path,
-            &cookie,
-            std::process::id(),
-            &owner,
-            started_at,
-        ) {
+        if let Err(e) = publish_identity(&path, &cookie, std::process::id(), &owner, started_at) {
             quarantine_exact(&path, None);
             return Err(AcquireError::Fatal(format!(
                 "write codemode permit waiter metadata: {e}"
@@ -497,9 +537,7 @@ fn classify_structured_waiter(
         return Ok(Some(waiter_rank(entry, started_at)));
     };
     // Cookie publication and cleanup fencing remain load-bearing here.
-    if waiter_identity_reclaimable(path, pid, &identity)
-        && cleanup_owned(path, &identity.cookie)
-    {
+    if waiter_identity_reclaimable(path, pid, &identity) && cleanup_owned(path, &identity.cookie) {
         return Ok(None);
     }
     Ok(Some(waiter_rank(entry, started_at)))
@@ -637,7 +675,10 @@ fn publish_identity(
 ) -> io::Result<()> {
     #[cfg(any(target_os = "linux", target_os = "android"))]
     let process = Some(read_linux_process_identity(pid)?.ok_or_else(|| {
-        io::Error::new(io::ErrorKind::InvalidData, "current process identity unavailable")
+        io::Error::new(
+            io::ErrorKind::InvalidData,
+            "current process identity unavailable",
+        )
     })?);
     #[cfg(not(any(target_os = "linux", target_os = "android")))]
     let process: Option<ProcessIdentity> = None;
@@ -713,7 +754,9 @@ fn parse_proc_stat_starttime(value: &str) -> Option<u64> {
 
 #[cfg(any(target_os = "linux", target_os = "android"))]
 fn read_linux_process_identity(pid: u32) -> io::Result<Option<ProcessIdentity>> {
-    if pid == 0 { return Ok(None); }
+    if pid == 0 {
+        return Ok(None);
+    }
     if libc::pid_t::try_from(pid).is_err() {
         return Err(io::ErrorKind::InvalidInput.into());
     }
@@ -728,10 +771,7 @@ fn read_linux_process_identity(pid: u32) -> io::Result<Option<ProcessIdentity>> 
         Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
         Err(error) => return Err(error),
     };
-    Ok(parse_proc_stat_starttime(&stat).map(|starttime| ProcessIdentity {
-        boot_id,
-        starttime,
-    }))
+    Ok(parse_proc_stat_starttime(&stat).map(|starttime| ProcessIdentity { boot_id, starttime }))
 }
 
 fn classify_identity_snapshot(
@@ -764,11 +804,7 @@ fn classify_identity_snapshot(
     }
 }
 
-fn identity_liveness(
-    identity: &PermitIdentity,
-    now: u128,
-    max_age: Duration,
-) -> IdentityLiveness {
+fn identity_liveness(identity: &PermitIdentity, now: u128, max_age: Duration) -> IdentityLiveness {
     #[cfg(any(target_os = "linux", target_os = "android"))]
     {
         let observation = match read_linux_process_identity(identity.pid) {
@@ -798,7 +834,8 @@ fn waiter_key(path: &Path) -> Option<(u32, u128)> {
     let mut parts = path.file_name()?.to_str()?.splitn(3, '-');
     let pid = parts.next()?.parse().ok()?;
     let started_at = parts.next()?.parse().ok()?;
-    parts.next()?
+    parts
+        .next()?
         .bytes()
         .all(|byte| byte.is_ascii_hexdigit())
         .then_some((pid, started_at))
@@ -809,15 +846,24 @@ fn cleanup_owned(path: &Path, cookie: &str) -> bool {
         Ok(observed) => observed,
         Err(_) => return false,
     };
-    if parse_identity(&observed).as_ref().map(|identity| identity.cookie.as_str()) != Some(cookie) {
+    if parse_identity(&observed)
+        .as_ref()
+        .map(|identity| identity.cookie.as_str())
+        != Some(cookie)
+    {
         return false;
     }
     quarantine_exact(path, Some(&observed))
 }
 
 fn quarantine_exact(path: &Path, observed_identity: Option<&[u8]>) -> bool {
-    let Some(parent) = path.parent() else { return false };
-    let name = path.file_name().and_then(|name| name.to_str()).unwrap_or("permit");
+    let Some(parent) = path.parent() else {
+        return false;
+    };
+    let name = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or("permit");
     let quarantine = parent.join(format!(".{name}.reclaim-{}", owner_cookie()));
     if fs::rename(path, &quarantine).is_err() {
         return false;
@@ -1093,10 +1139,7 @@ impl NativeWake {
             ident: directory as libc::uintptr_t,
             filter: libc::EVFILT_VNODE,
             flags: libc::EV_ADD | libc::EV_CLEAR,
-            fflags: libc::NOTE_WRITE
-                | libc::NOTE_DELETE
-                | libc::NOTE_RENAME
-                | libc::NOTE_ATTRIB,
+            fflags: libc::NOTE_WRITE | libc::NOTE_DELETE | libc::NOTE_RENAME | libc::NOTE_ATTRIB,
             data: 0,
             udata: std::ptr::null_mut(),
         };

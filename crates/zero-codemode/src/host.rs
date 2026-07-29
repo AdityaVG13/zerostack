@@ -142,9 +142,7 @@ pub struct Host {
 impl Host {
     pub fn new(limits: HostLimits, registration: GlobalRegistration) -> Result<Self, HostError> {
         limits.validate().map_err(HostError::Limits)?;
-        registration
-            .validate()
-            .map_err(HostError::Registration)?;
+        registration.validate().map_err(HostError::Registration)?;
         #[cfg(not(feature = "quickjs"))]
         {
             let _ = registration;
@@ -168,7 +166,11 @@ impl Host {
     }
 
     #[cfg(feature = "quickjs")]
-    pub fn execute(&self, plan: &str, connector: Rc<dyn Connector>) -> Result<JsonValue, HostError> {
+    pub fn execute(
+        &self,
+        plan: &str,
+        connector: Rc<dyn Connector>,
+    ) -> Result<JsonValue, HostError> {
         quickjs::execute(self, plan, connector)
     }
 
@@ -407,58 +409,55 @@ mod quickjs {
             let descriptor = capability.clone();
             let connector = Rc::clone(&connector);
             let expired = Arc::clone(&dispatch_expired);
-            let function = Function::new(
-                ctx.clone(),
-                move |ctx: Ctx<'js>, args: Value<'js>| {
-                    let Some(json) = ctx.json_stringify(args)? else {
-                        return Err(rquickjs::Error::new_from_js_message(
-                            "value",
-                            "JSON",
-                            "arguments are not JSON-serializable",
-                        ));
-                    };
-                    let encoded = json.to_string()?;
-                    if encoded.len() > dispatch_context.max_json_bytes {
-                        return Err(rquickjs::Error::new_from_js_message(
-                            "JSON",
-                            "connector",
-                            "arguments exceed JSON limit",
-                        ));
-                    }
-                    if dispatch_context.is_expired() {
-                        expired.store(true, Ordering::Relaxed);
-                        return Err(rquickjs::Error::new_from_js_message(
-                            "deadline",
-                            "connector",
-                            "wall-clock deadline exceeded",
-                        ));
-                    }
-                    let result = connector.call(&descriptor, &encoded, dispatch_context);
-                    if dispatch_context.is_expired() {
-                        expired.store(true, Ordering::Relaxed);
-                        return Err(rquickjs::Error::new_from_js_message(
-                            "deadline",
-                            "connector",
-                            "wall-clock deadline exceeded",
-                        ));
-                    }
-                    let encoded = result.map_err(|error| {
-                        rquickjs::Error::new_from_js_message(
-                            "connector",
-                            "JavaScript",
-                            error.to_string(),
-                        )
-                    })?;
-                    if encoded.len() > dispatch_context.max_json_bytes {
-                        return Err(rquickjs::Error::new_from_js_message(
-                            "connector",
-                            "JSON",
-                            "result exceeds JSON limit",
-                        ));
-                    }
-                    ctx.json_parse(encoded)
-                },
-            )
+            let function = Function::new(ctx.clone(), move |ctx: Ctx<'js>, args: Value<'js>| {
+                let Some(json) = ctx.json_stringify(args)? else {
+                    return Err(rquickjs::Error::new_from_js_message(
+                        "value",
+                        "JSON",
+                        "arguments are not JSON-serializable",
+                    ));
+                };
+                let encoded = json.to_string()?;
+                if encoded.len() > dispatch_context.max_json_bytes {
+                    return Err(rquickjs::Error::new_from_js_message(
+                        "JSON",
+                        "connector",
+                        "arguments exceed JSON limit",
+                    ));
+                }
+                if dispatch_context.is_expired() {
+                    expired.store(true, Ordering::Relaxed);
+                    return Err(rquickjs::Error::new_from_js_message(
+                        "deadline",
+                        "connector",
+                        "wall-clock deadline exceeded",
+                    ));
+                }
+                let result = connector.call(&descriptor, &encoded, dispatch_context);
+                if dispatch_context.is_expired() {
+                    expired.store(true, Ordering::Relaxed);
+                    return Err(rquickjs::Error::new_from_js_message(
+                        "deadline",
+                        "connector",
+                        "wall-clock deadline exceeded",
+                    ));
+                }
+                let encoded = result.map_err(|error| {
+                    rquickjs::Error::new_from_js_message(
+                        "connector",
+                        "JavaScript",
+                        error.to_string(),
+                    )
+                })?;
+                if encoded.len() > dispatch_context.max_json_bytes {
+                    return Err(rquickjs::Error::new_from_js_message(
+                        "connector",
+                        "JSON",
+                        "result exceeds JSON limit",
+                    ));
+                }
+                ctx.json_parse(encoded)
+            })
             .map_err(js_error)?;
             surface
                 .set(capability.method.as_str(), function)

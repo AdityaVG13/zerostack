@@ -38,13 +38,27 @@ impl HostLimits {
     }
 
     pub fn validate(&self) -> Result<(), LimitError> {
-        if self.memory_bytes == 0 { return Err(LimitError::Zero("memory_bytes")); }
-        if self.stack_bytes == 0 { return Err(LimitError::Zero("stack_bytes")); }
-        if self.wall_timeout.is_zero() { return Err(LimitError::Zero("wall_timeout")); }
-        if self.instruction_budget == 0 { return Err(LimitError::Zero("instruction_budget")); }
-        if self.microtask_ceiling == 0 { return Err(LimitError::Zero("microtask_ceiling")); }
-        if self.max_plan_bytes == 0 { return Err(LimitError::Zero("max_plan_bytes")); }
-        if self.max_json_bytes == 0 { return Err(LimitError::Zero("max_json_bytes")); }
+        if self.memory_bytes == 0 {
+            return Err(LimitError::Zero("memory_bytes"));
+        }
+        if self.stack_bytes == 0 {
+            return Err(LimitError::Zero("stack_bytes"));
+        }
+        if self.wall_timeout.is_zero() {
+            return Err(LimitError::Zero("wall_timeout"));
+        }
+        if self.instruction_budget == 0 {
+            return Err(LimitError::Zero("instruction_budget"));
+        }
+        if self.microtask_ceiling == 0 {
+            return Err(LimitError::Zero("microtask_ceiling"));
+        }
+        if self.max_plan_bytes == 0 {
+            return Err(LimitError::Zero("max_plan_bytes"));
+        }
+        if self.max_json_bytes == 0 {
+            return Err(LimitError::Zero("max_json_bytes"));
+        }
         Ok(())
     }
 }
@@ -64,11 +78,15 @@ impl Default for HostLimits {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum LimitError { Zero(&'static str) }
+pub enum LimitError {
+    Zero(&'static str),
+}
 
 impl fmt::Display for LimitError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self { Self::Zero(field) => write!(f, "{field} must be nonzero") }
+        match self {
+            Self::Zero(field) => write!(f, "{field} must be nonzero"),
+        }
     }
 }
 impl std::error::Error for LimitError {}

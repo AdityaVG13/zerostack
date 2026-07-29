@@ -42,11 +42,11 @@ pub use raw_worker::{
     RAW_WORKER_PROTOCOL_VERSION,
 };
 pub use result::{
-    ZeroResultAccessError, ZeroResultBuildError, ZeroResultV1, MAX_ACK_CHARS,
-    MAX_PREVIEW_CHARS, ZERO_RESULT_V1,
+    ZeroResultAccessError, ZeroResultBuildError, ZeroResultV1, MAX_ACK_CHARS, MAX_PREVIEW_CHARS,
+    ZERO_RESULT_V1,
 };
-pub use telemetry::{TelemetryCounter, TelemetryOverflow, TelemetrySchema, ZeroTelemetryV1};
 pub use schema::{
     canonical_json, canonical_schema_json, normalize_schema, schema_diff, schema_fingerprint_hex,
     schema_property_keys, schema_required_keys, schemas_structurally_equal,
 };
+pub use telemetry::{TelemetryCounter, TelemetryOverflow, TelemetrySchema, ZeroTelemetryV1};

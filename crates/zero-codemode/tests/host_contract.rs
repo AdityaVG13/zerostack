@@ -6,9 +6,7 @@ use std::{cell::RefCell, rc::Rc, thread};
 #[cfg(feature = "quickjs")]
 use serde_json::{json, Value};
 #[cfg(feature = "quickjs")]
-use zero_codemode::{
-    runtime_creation_count, Connector, ConnectorError, DispatchContext,
-};
+use zero_codemode::{runtime_creation_count, Connector, ConnectorError, DispatchContext};
 use zero_codemode::{
     wrap_plan, CapabilityDescriptor, GlobalRegistration, Host, HostError, HostLimits, PlanError,
     RegistrationError,
@@ -93,8 +91,7 @@ fn wrap_injection_and_validation() {
 
 #[test]
 fn invalid_duplicate_and_poison_identifiers() {
-    let registration =
-        GlobalRegistration::zero(vec![CapabilityDescriptor::new("bad-name", "x")]);
+    let registration = GlobalRegistration::zero(vec![CapabilityDescriptor::new("bad-name", "x")]);
     assert!(matches!(
         registration.validate(),
         Err(RegistrationError::InvalidCapability(_))
@@ -117,13 +114,11 @@ fn invalid_duplicate_and_poison_identifiers() {
             Err(RegistrationError::InvalidGlobal(_))
         ));
         assert!(matches!(
-            GlobalRegistration::zero(vec![CapabilityDescriptor::new(poison, "read")])
-                .validate(),
+            GlobalRegistration::zero(vec![CapabilityDescriptor::new(poison, "read")]).validate(),
             Err(RegistrationError::InvalidCapability(_))
         ));
         assert!(matches!(
-            GlobalRegistration::zero(vec![CapabilityDescriptor::new("fs", poison)])
-                .validate(),
+            GlobalRegistration::zero(vec![CapabilityDescriptor::new("fs", poison)]).validate(),
             Err(RegistrationError::InvalidCapability(_))
         ));
     }
@@ -192,12 +187,11 @@ fn connector_error() {
         result: None,
     });
     let host = Host::new(lim(), reg()).unwrap_or_else(|error| panic!("host: {error}"));
-    assert!(
-        host.execute("return await zero['fs'].read({});", connector.clone())
-            .expect_err("fail")
-            .to_string()
-            .contains("connector refused request")
-    );
+    assert!(host
+        .execute("return await zero['fs'].read({});", connector.clone())
+        .expect_err("fail")
+        .to_string()
+        .contains("connector refused request"));
 }
 
 #[cfg(feature = "quickjs")]
@@ -212,12 +206,11 @@ fn oversized_connector_result_is_rejected_before_parse() {
         result: Some(format!("\"{}\"", "x".repeat(64))),
     });
     let host = Host::new(limits, reg()).unwrap_or_else(|error| panic!("host: {error}"));
-    assert!(
-        host.execute("return await zero['fs']['read']({});", connector)
-            .expect_err("oversized connector result")
-            .to_string()
-            .contains("result exceeds JSON limit")
-    );
+    assert!(host
+        .execute("return await zero['fs']['read']({});", connector)
+        .expect_err("oversized connector result")
+        .to_string()
+        .contains("result exceeds JSON limit"));
 }
 
 #[cfg(feature = "quickjs")]

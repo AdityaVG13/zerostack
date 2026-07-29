@@ -9,12 +9,16 @@ static GLOBAL: &StatsAlloc<System> = &INSTRUMENTED_SYSTEM;
 #[test]
 fn successful_decide_allocates_nothing() {
     let region = Region::new(GLOBAL);
-    let (_, gate) = decide(GateState::new(8).unwrap(), GateInput {
-        effect_class: EffectClass::ReadOnly,
-        required_budget: 9,
-        verified_evidence: None,
-        task_receipt: None,
-    }).unwrap();
+    let (_, gate) = decide(
+        GateState::new(8).unwrap(),
+        GateInput {
+            effect_class: EffectClass::ReadOnly,
+            required_budget: 9,
+            verified_evidence: None,
+            task_receipt: None,
+        },
+    )
+    .unwrap();
     assert!(matches!(gate, DecisionGate::Expand(_)));
     assert_eq!(region.change().allocations, 0);
 }

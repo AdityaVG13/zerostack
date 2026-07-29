@@ -210,36 +210,68 @@ pub struct ApprovalGrant {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ApprovalGrantRejection { Missing, Malformed, BindingMismatch, WrongEffect, Expired, Replayed }
+pub enum ApprovalGrantRejection {
+    Missing,
+    Malformed,
+    BindingMismatch,
+    WrongEffect,
+    Expired,
+    Replayed,
+}
 
 impl CallRequest {
     /// Validate and consume an approval grant immediately before its action.
     pub fn validate_approval_grant(
-        &self, expected_engine: EngineIdentity, expected_root: &str,
-        expected_session_id: &str, expected_effect: EffectClass, now_unix_ms: u64,
+        &self,
+        expected_engine: EngineIdentity,
+        expected_root: &str,
+        expected_session_id: &str,
+        expected_effect: EffectClass,
+        now_unix_ms: u64,
         consumed_grants: &mut std::collections::BTreeSet<String>,
     ) -> Result<(), ApprovalGrantRejection> {
         let required = expected_effect == EffectClass::ApprovalRequiredMutation;
         let Some(grant) = &self.approval_grant else {
-            return if required { Err(ApprovalGrantRejection::Missing) } else { Ok(()) };
+            return if required {
+                Err(ApprovalGrantRejection::Missing)
+            } else {
+                Ok(())
+            };
         };
-        let lower_hex = |v: &str| v.len() == 64 && v.bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b));
-        if grant.grant_id.is_empty() || grant.root.is_empty() || grant.session_id.is_empty()
-            || grant.request_id.is_empty() || grant.operation.is_empty()
-            || !lower_hex(&grant.authority_digest) || !lower_hex(&grant.policy_digest)
-            || grant.issued_at_unix_ms >= grant.expires_at_unix_ms {
+        let lower_hex = |v: &str| {
+            v.len() == 64
+                && v.bytes()
+                    .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+        };
+        if grant.grant_id.is_empty()
+            || grant.root.is_empty()
+            || grant.session_id.is_empty()
+            || grant.request_id.is_empty()
+            || grant.operation.is_empty()
+            || !lower_hex(&grant.authority_digest)
+            || !lower_hex(&grant.policy_digest)
+            || grant.issued_at_unix_ms >= grant.expires_at_unix_ms
+        {
             return Err(ApprovalGrantRejection::Malformed);
         }
-        if grant.engine != expected_engine || grant.root != expected_root
-            || grant.session_id != expected_session_id || grant.request_id != self.request_id
-            || grant.operation != self.op { return Err(ApprovalGrantRejection::BindingMismatch); }
-        if grant.effect != EffectClass::ApprovalRequiredMutation || grant.effect != expected_effect {
+        if grant.engine != expected_engine
+            || grant.root != expected_root
+            || grant.session_id != expected_session_id
+            || grant.request_id != self.request_id
+            || grant.operation != self.op
+        {
+            return Err(ApprovalGrantRejection::BindingMismatch);
+        }
+        if grant.effect != EffectClass::ApprovalRequiredMutation || grant.effect != expected_effect
+        {
             return Err(ApprovalGrantRejection::WrongEffect);
         }
         if now_unix_ms < grant.issued_at_unix_ms || now_unix_ms >= grant.expires_at_unix_ms {
             return Err(ApprovalGrantRejection::Expired);
         }
-        if !consumed_grants.insert(grant.grant_id.clone()) { return Err(ApprovalGrantRejection::Replayed); }
+        if !consumed_grants.insert(grant.grant_id.clone()) {
+            return Err(ApprovalGrantRejection::Replayed);
+        }
         Ok(())
     }
 }
@@ -267,6 +299,10 @@ pub struct ShutdownRequest {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+// Call carries the full approval/trace surface; boxing would change only the
+// Rust layout, not JSON, but keep the flat shape so golden/fuzz fixtures stay
+// identical to the schema-facing types. Size is bounded by frame limits.
+#[allow(clippy::large_enum_variant)]
 pub enum WorkerRequestFrame {
     Handshake { request: HandshakeRequest },
     Call { request: CallRequest },
@@ -624,7 +660,7 @@ pub fn raw_worker_protocol_manifest() -> Value {
         args: Value::Null,
         deadline_unix_ms: Some(0),
         trace: manifest_trace(),
-            approval_grant: None,
+        approval_grant: None,
     };
     let result_metadata = WorkerResultMetadata {
         effect: EffectClass::ReadOnly,
@@ -713,7 +749,7 @@ mod tests {
                 args: json!({"path": "README.md"}),
                 deadline_unix_ms: Some(100),
                 trace: trace(),
-            approval_grant: None,
+                approval_grant: None,
             },
         };
         let encoded = encode_frame(&call, DEFAULT_MAX_FRAME_BYTES).unwrap();
@@ -744,7 +780,7 @@ mod tests {
                     args: json!({}),
                     deadline_unix_ms: deadline,
                     trace: trace(),
-            approval_grant: None,
+                    approval_grant: None,
                 },
             },
             DEFAULT_MAX_FRAME_BYTES,

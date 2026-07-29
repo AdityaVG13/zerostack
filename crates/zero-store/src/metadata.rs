@@ -136,25 +136,33 @@ fn publish_observation_event(
         .map_err(|e| io_err("write metadata temp", e))?;
     match fs::hard_link(temp, dest) {
         Ok(()) => Ok(()),
-        Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
-            verify_existing(dest, bytes)
-        }
+        Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => verify_existing(dest, bytes),
         Err(e) => Err(io_err("publish metadata event", e)),
     }
 }
 
 fn event_dir(root: &Path, id: &str) -> PathBuf {
-    root.join("metadata/observations/sha256").join(&id[..2]).join(id)
+    root.join("metadata/observations/sha256")
+        .join(&id[..2])
+        .join(id)
 }
 
 fn ensure_real_dirs(root: &Path, dir: &Path) -> Result<(), CasError> {
     fs::create_dir_all(dir).map_err(|e| io_err("create metadata directory", e))?;
-    let relative = dir.strip_prefix(root).map_err(|_| CasError::Malformed("metadata path escaped store root".into()))?;
+    let relative = dir
+        .strip_prefix(root)
+        .map_err(|_| CasError::Malformed("metadata path escaped store root".into()))?;
     let mut current = root.to_path_buf();
     for component in relative.components() {
         current.push(component);
-        if !fs::symlink_metadata(&current).map_err(|e| io_err("stat metadata directory", e))?.file_type().is_dir() {
-            return Err(CasError::Malformed("metadata directory is not a real directory".into()));
+        if !fs::symlink_metadata(&current)
+            .map_err(|e| io_err("stat metadata directory", e))?
+            .file_type()
+            .is_dir()
+        {
+            return Err(CasError::Malformed(
+                "metadata directory is not a real directory".into(),
+            ));
         }
     }
     Ok(())
@@ -162,19 +170,42 @@ fn ensure_real_dirs(root: &Path, dir: &Path) -> Result<(), CasError> {
 
 fn verify_existing(path: &Path, expected: &[u8]) -> Result<(), CasError> {
     let meta = fs::symlink_metadata(path).map_err(|e| io_err("stat metadata event", e))?;
-    if !meta.file_type().is_file() { return Err(CasError::Malformed("metadata event is not a regular file".into())); }
+    if !meta.file_type().is_file() {
+        return Err(CasError::Malformed(
+            "metadata event is not a regular file".into(),
+        ));
+    }
     let actual = fs::read(path).map_err(|e| io_err("read metadata event", e))?;
-    if actual == expected { Ok(()) } else { Err(CasError::Malformed("metadata digest collision or corrupt event".into())) }
+    if actual == expected {
+        Ok(())
+    } else {
+        Err(CasError::Malformed(
+            "metadata digest collision or corrupt event".into(),
+        ))
+    }
 }
 
 fn validate_id(id: &str) -> Result<(), CasError> {
-    if id.len() == 64 && id.bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b)) { Ok(()) }
-    else { Err(CasError::Malformed(format!("identity must be full lowercase 64-hex SHA-256, got '{id}'"))) }
+    if id.len() == 64
+        && id
+            .bytes()
+            .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+    {
+        Ok(())
+    } else {
+        Err(CasError::Malformed(format!(
+            "identity must be full lowercase 64-hex SHA-256, got '{id}'"
+        )))
+    }
 }
 
 fn canonical_event_digest(name: &str) -> Option<&str> {
     let id = name.strip_suffix(".json")?;
-    (id.len() == 64 && id.bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))).then_some(id)
+    (id.len() == 64
+        && id
+            .bytes()
+            .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b)))
+    .then_some(id)
 }
 
 fn hash_hex(bytes: &[u8]) -> String {
@@ -183,7 +214,9 @@ fn hash_hex(bytes: &[u8]) -> String {
     format!("{:x}", hash.finalize())
 }
 
-fn io_err(context: &str, error: impl std::fmt::Display) -> CasError { CasError::Io(format!("{context}: {error}")) }
+fn io_err(context: &str, error: impl std::fmt::Display) -> CasError {
+    CasError::Io(format!("{context}: {error}"))
+}
 
 #[cfg(test)]
 mod tests {
@@ -191,7 +224,12 @@ mod tests {
     use tempfile::tempdir;
 
     fn meta(n: usize) -> ObservationMetadata {
-        ObservationMetadata { source_engine: format!("engine-{n}"), session: "s".into(), timestamp: format!("2026-07-28T00:00:0{n}Z"), declared_kind: "trace".into() }
+        ObservationMetadata {
+            source_engine: format!("engine-{n}"),
+            session: "s".into(),
+            timestamp: format!("2026-07-28T00:00:0{n}Z"),
+            declared_kind: "trace".into(),
+        }
     }
 
     #[test]
@@ -216,7 +254,12 @@ mod tests {
     fn concurrent_identical_events_converge_and_distinct_events_persist() {
         let root = tempdir().unwrap();
         let cas = SharedCas::open(root.path());
-        let threads: Vec<_> = (0..8).map(|n| { let cas = cas.clone(); std::thread::spawn(move || cas.ingest_with_metadata(b"same", meta(n % 2)).unwrap()) }).collect();
+        let threads: Vec<_> = (0..8)
+            .map(|n| {
+                let cas = cas.clone();
+                std::thread::spawn(move || cas.ingest_with_metadata(b"same", meta(n % 2)).unwrap())
+            })
+            .collect();
         let ids: Vec<_> = threads.into_iter().map(|t| t.join().unwrap()).collect();
         assert!(ids.iter().all(|id| id == &ids[0]));
         let events = cas.observation_metadata(&ids[0]).unwrap();
@@ -234,22 +277,43 @@ mod tests {
         fs::write(dir.join("README"), b"debris").unwrap();
         assert!(cas.observation_metadata(&id).unwrap().is_empty());
         fs::write(dir.join(format!("{}.json", "0".repeat(64))), b"bad").unwrap();
-        assert_eq!(cas.observation_metadata(&id).unwrap_err().class(), "malformed");
-        assert_eq!(cas.observation_metadata("../escape").unwrap_err().class(), "malformed");
+        assert_eq!(
+            cas.observation_metadata(&id).unwrap_err().class(),
+            "malformed"
+        );
+        assert_eq!(
+            cas.observation_metadata("../escape").unwrap_err().class(),
+            "malformed"
+        );
     }
 
     #[test]
     fn resident_objects_are_byte_exact_until_guarded_gc_removal() {
         let root = tempdir().unwrap();
         let cas = SharedCas::open(root.path());
-        let payloads = [Vec::new(), b"alpha".to_vec(), vec![0, 1, 2, 255], vec![b'x'; 4096]];
-        let resident: Vec<_> = payloads.iter().enumerate().map(|(n, bytes)| {
-            let id = if n % 2 == 0 { cas.ingest_with_metadata(bytes, meta(n)).unwrap() } else { cas.put(bytes).unwrap() };
-            assert_eq!(cas.get_verified(&id).unwrap(), *bytes);
-            (id, bytes)
-        }).collect();
+        let payloads = [
+            Vec::new(),
+            b"alpha".to_vec(),
+            vec![0, 1, 2, 255],
+            vec![b'x'; 4096],
+        ];
+        let resident: Vec<_> = payloads
+            .iter()
+            .enumerate()
+            .map(|(n, bytes)| {
+                let id = if n % 2 == 0 {
+                    cas.ingest_with_metadata(bytes, meta(n)).unwrap()
+                } else {
+                    cas.put(bytes).unwrap()
+                };
+                assert_eq!(cas.get_verified(&id).unwrap(), *bytes);
+                (id, bytes)
+            })
+            .collect();
         for (step, (id, _)) in resident.iter().enumerate() {
-            for (candidate, expected) in resident.iter().skip(step) { assert_eq!(cas.get_verified(candidate).unwrap(), **expected); }
+            for (candidate, expected) in resident.iter().skip(step) {
+                assert_eq!(cas.get_verified(candidate).unwrap(), **expected);
+            }
             let guard = cas.lock_for_sweep().unwrap();
             cas.remove_object(id, &guard).unwrap();
             drop(guard);

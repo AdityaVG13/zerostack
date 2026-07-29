@@ -3,7 +3,12 @@ use zero_abi::raw_worker::EffectClass;
 use zero_gate::{check_t10_bound, decide, DecisionGate, GateInput, GateState};
 
 fn input(effect_class: EffectClass, required_budget: u128) -> GateInput<'static, 'static> {
-    GateInput { effect_class, required_budget, verified_evidence: None, task_receipt: None }
+    GateInput {
+        effect_class,
+        required_budget,
+        verified_evidence: None,
+        task_receipt: None,
+    }
 }
 
 proptest! {

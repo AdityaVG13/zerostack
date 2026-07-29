@@ -10,8 +10,8 @@ use zero_ledger::{
     ArchiveAttestation, ChargeClass, Digest, DominanceReceipt, EvidenceError, ExactnessGates,
     ExposureAccount, ExposureBlock, ExposureSide, LedgerConfig, LedgerError, PolicyDecision,
     PolicyEvidence, ReceiptError, ReceiptRoots, ResourceGauge, RetainedFractionPpm,
-    TaskAcceptanceReceipt, TaskAttemptDisposition, TaskOutcome, TokenCharge, TokenLedger, TokenizerIdentity, PPM_ONE,
-    RECEIPT_SCHEMA_VERSION,
+    TaskAcceptanceReceipt, TaskAttemptDisposition, TaskOutcome, TokenCharge, TokenLedger,
+    TokenizerIdentity, PPM_ONE, RECEIPT_SCHEMA_VERSION,
 };
 
 fn d(x: u8) -> Digest {
@@ -1056,14 +1056,20 @@ proptest! {
     }
 }
 
-
 #[test]
 fn task_attempt_cost_is_mandatory_and_classified_for_both_outcomes() {
     let id = tokenizer();
     let mut gauge = gauge();
-    assert_eq!(gauge.charge_task_attempt(&id, 0, TaskAttemptDisposition::RolledBack), Err(LedgerError::ZeroTaskAttemptCost));
-    gauge.charge_task_attempt(&id, 7, TaskAttemptDisposition::RolledBack).unwrap();
-    gauge.charge_task_attempt(&id, 11, TaskAttemptDisposition::Passed).unwrap();
+    assert_eq!(
+        gauge.charge_task_attempt(&id, 0, TaskAttemptDisposition::RolledBack),
+        Err(LedgerError::ZeroTaskAttemptCost)
+    );
+    gauge
+        .charge_task_attempt(&id, 7, TaskAttemptDisposition::RolledBack)
+        .unwrap();
+    gauge
+        .charge_task_attempt(&id, 11, TaskAttemptDisposition::Passed)
+        .unwrap();
     assert_eq!(gauge.ledger().failed_trial_tokens, 7);
     assert_eq!(gauge.ledger().billed_tokens, 11);
     assert_eq!(gauge.ledger().declared_input_tokens, 18);
@@ -1074,8 +1080,13 @@ fn task_attempt_cost_is_mandatory_and_classified_for_both_outcomes() {
 fn task_attempt_charge_overflow_is_typed_and_atomic() {
     let id = tokenizer();
     let mut gauge = gauge();
-    gauge.charge_task_attempt(&id, u64::MAX, TaskAttemptDisposition::RolledBack).unwrap();
+    gauge
+        .charge_task_attempt(&id, u64::MAX, TaskAttemptDisposition::RolledBack)
+        .unwrap();
     let before = gauge.ledger().clone();
-    assert!(matches!(gauge.charge_task_attempt(&id, 1, TaskAttemptDisposition::Passed), Err(LedgerError::CounterOverflow { .. })));
+    assert!(matches!(
+        gauge.charge_task_attempt(&id, 1, TaskAttemptDisposition::Passed),
+        Err(LedgerError::CounterOverflow { .. })
+    ));
     assert_eq!(gauge.ledger(), &before);
 }
