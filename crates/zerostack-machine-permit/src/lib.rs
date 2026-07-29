@@ -690,9 +690,9 @@ fn parse_identity_header<'a>(lines: &'a [&'a str]) -> Option<(&'a str, u32, &'a 
     Some((cookie, pid.parse().ok()?, owner))
 }
 
-fn parse_identity_details<'a>(
-    lines: &'a [&'a str],
-) -> Option<(Option<u128>, Option<(&'a str, u64)>)> {
+type ParsedIdentityDetails<'a> = (Option<u128>, Option<(&'a str, u64)>);
+
+fn parse_identity_details<'a>(lines: &'a [&'a str]) -> Option<ParsedIdentityDetails<'a>> {
     match lines {
         [_, _, _] => Some((None, None)),
         [_, _, _, started_at, "-", "-"] => Some((Some(started_at.parse().ok()?), None)),
@@ -1282,8 +1282,15 @@ fn unix_kill_result_is_alive(result: libc::c_int, errno: Option<i32>) -> bool {
 }
 
 #[cfg(windows)]
+fn windows_query_is_alive(queried: i32, exit_code: u32) -> bool {
+    use windows_sys::Win32::Foundation::STILL_ACTIVE;
+    // Query failure is conservatively alive; STILL_ACTIVE means running.
+    queried == 0 || exit_code == STILL_ACTIVE as u32
+}
+
+#[cfg(windows)]
 fn process_alive(pid: u32) -> bool {
-    use windows_sys::Win32::Foundation::{CloseHandle, STILL_ACTIVE};
+    use windows_sys::Win32::Foundation::CloseHandle;
     use windows_sys::Win32::System::Threading::{
         GetExitCodeProcess, OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION,
     };
@@ -1302,7 +1309,7 @@ fn process_alive(pid: u32) -> bool {
         let mut exit_code = 0;
         let queried = GetExitCodeProcess(handle, &mut exit_code);
         let _ = CloseHandle(handle);
-        queried == 0 || exit_code == STILL_ACTIVE as u32
+        windows_query_is_alive(queried, exit_code)
     }
 }
 

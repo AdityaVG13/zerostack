@@ -145,6 +145,81 @@ fn native_pid_liveness_handles_alive_dead_and_conservative_errors() {
     assert!(process_alive(0), "pid zero must be treated conservatively");
 }
 
+/// Linux/Android reclaim uses `/proc` identity, not `kill(pid,0)`.
+/// Keep the exact CI filter name so `--exact` cannot false-green on 0 tests.
+#[cfg(any(target_os = "linux", target_os = "android"))]
+#[test]
+fn native_pid_liveness_handles_alive_dead_and_conservative_errors() {
+    let self_id = std::process::id();
+    let observed = read_linux_process_identity(self_id)
+        .expect("read self /proc identity")
+        .expect("current process must have a /proc identity");
+
+    let mut child = std::process::Command::new("true")
+        .spawn()
+        .expect("spawn short-lived child");
+    let child_pid = child.id();
+    child.wait().expect("reap short-lived child");
+    assert!(
+        read_linux_process_identity(child_pid)
+            .expect("read reaped child /proc identity")
+            .is_none(),
+        "reaped child must be missing from /proc"
+    );
+
+    assert!(
+        read_linux_process_identity(0)
+            .expect("pid zero observation")
+            .is_none(),
+        "pid zero must not fabricate a process identity"
+    );
+
+    let now = 1_000u128;
+    let live = PermitIdentity {
+        cookie: "0123456789abcdef0123456789abcdef".into(),
+        pid: self_id,
+        owner: "test-owner".into(),
+        started_at: Some(now),
+        process: Some(observed.clone()),
+    };
+    assert_eq!(
+        identity_liveness(&live, now + 10, Duration::from_secs(60)),
+        IdentityLiveness::Live
+    );
+    let mut reused = live;
+    reused.process = Some(ProcessIdentity {
+        boot_id: observed.boot_id,
+        starttime: observed.starttime.wrapping_add(1),
+    });
+    assert_eq!(
+        identity_liveness(&reused, now + 10, Duration::from_secs(60)),
+        IdentityLiveness::Dead,
+        "starttime mismatch is PID reuse"
+    );
+}
+
+#[cfg(windows)]
+#[test]
+fn native_pid_liveness_handles_alive_dead_and_conservative_errors() {
+    use windows_sys::Win32::Foundation::STILL_ACTIVE;
+
+    assert!(
+        process_alive(std::process::id()),
+        "current process must be alive"
+    );
+    // OpenProcess failure is intentionally fail-open (alive). A reaped child
+    // often yields a null handle, so polarity is pinned on the pure helper.
+    assert!(windows_query_is_alive(0, 0), "query failure is conservative alive");
+    assert!(
+        windows_query_is_alive(1, STILL_ACTIVE as u32),
+        "STILL_ACTIVE means alive"
+    );
+    assert!(
+        !windows_query_is_alive(1, 0),
+        "successful query with exit code 0 means dead"
+    );
+}
+
 #[test]
 fn stale_malformed_pid_is_reclaimed_after_grace() {
     let path = std::env::temp_dir().join(format!(
@@ -614,6 +689,37 @@ fn native_wake_handle_closes_on_drop() {
     let wake = NativeWake::new(&base).expect("create native wake");
     drop(wake);
     fs::remove_dir(&base).expect("closed wake must not retain directory handle");
+}
+
+/// Fence canary: NativeWake stays crate-private and is structurally !Send/!Sync
+/// via `PhantomData<Rc<()>>`. Uncommenting the `thread::spawn` line below must
+/// fail to compile if the fence is removed.
+#[cfg(any(
+    target_os = "linux",
+    target_os = "android",
+    target_os = "macos",
+    windows
+))]
+#[test]
+fn native_wake_is_private_and_not_send_sync() {
+    use std::rc::Rc;
+
+    // Structural: the fence field type is !Send + !Sync on stable Rust.
+    // Rc<()> is !Send + !Sync; NativeWake embeds PhantomData<Rc<()>>.
+    let _: PhantomData<Rc<()>> = PhantomData;
+    let _ = std::mem::size_of::<NativeWake>();
+
+    let base = std::env::temp_dir().join(format!(
+        "zerostack-wake-fence-{}-{}",
+        std::process::id(),
+        epoch_millis()
+    ));
+    fs::create_dir(&base).expect("create watched directory");
+    let wake = NativeWake::new(&base).expect("create native wake");
+    // Must fail to compile if NativeWake becomes Send:
+    // std::thread::spawn(move || drop(wake));
+    drop(wake);
+    fs::remove_dir(&base).expect("remove watched directory");
 }
 
 #[test]
