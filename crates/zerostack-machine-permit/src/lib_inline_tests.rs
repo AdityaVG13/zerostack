@@ -25,6 +25,27 @@ fn fencing_test_path(label: &str) -> PathBuf {
     ))
 }
 
+/// Pre-create a permit base that satisfies uid/mode checks (0o700, self-owned).
+///
+/// `create_dir` / `create_dir_all` under `/tmp` typically yield 0o755, which
+/// `prepare_permit_base` correctly refuses. Tests that need a pre-existing
+/// base (e.g. seeded waiters) must use this helper first.
+#[cfg(unix)]
+fn create_private_permit_base(base: &Path) {
+    use std::os::unix::fs::{DirBuilderExt, PermissionsExt};
+
+    let mut builder = fs::DirBuilder::new();
+    builder.mode(0o700);
+    builder.create(base).expect("create private permit base");
+    fs::set_permissions(base, fs::Permissions::from_mode(0o700))
+        .expect("chmod private permit base");
+}
+
+#[cfg(not(unix))]
+fn create_private_permit_base(base: &Path) {
+    fs::create_dir(base).expect("create permit base");
+}
+
 #[test]
 fn permit_fence_replaced_cookie_survives_old_guard_drop() {
     let path = fencing_test_path("drop-foreign");
@@ -436,6 +457,7 @@ fn stale_incomplete_waiter_is_reclaimed() {
     ));
     let stale = base.join("waiters/stale");
     let _ = fs::remove_dir_all(&base);
+    create_private_permit_base(&base);
     fs::create_dir_all(&stale).expect("create stale waiter");
     thread::sleep(INCOMPLETE_PERMIT_GRACE + Duration::from_millis(20));
 
