@@ -9,6 +9,11 @@ description = "Pure-safe generic CodeMode host foundation"
 default = []
 quickjs = ["dep:rquickjs"]
 
+[[bin]]
+name = "zerostack-codemode-host"
+path = "src/bin/zerostack-codemode-host.rs"
+required-features = ["quickjs"]
+
 [dependencies]
 serde.workspace = true
 serde_json.workspace = true

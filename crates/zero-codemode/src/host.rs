@@ -2,6 +2,8 @@ use std::collections::BTreeSet;
 use std::fmt;
 use std::rc::Rc;
 use std::sync::atomic::{AtomicU64, Ordering};
+#[cfg(feature = "quickjs")]
+use std::sync::{atomic::AtomicBool, Arc};
 use std::time::{Duration, Instant};
 
 use serde_json::Value as JsonValue;
@@ -171,7 +173,17 @@ impl Host {
         plan: &str,
         connector: Rc<dyn Connector>,
     ) -> Result<JsonValue, HostError> {
-        quickjs::execute(self, plan, connector)
+        self.execute_with_cancel(plan, connector, Arc::new(AtomicBool::new(false)))
+    }
+
+    #[cfg(feature = "quickjs")]
+    pub fn execute_with_cancel(
+        &self,
+        plan: &str,
+        connector: Rc<dyn Connector>,
+        cancelled: Arc<AtomicBool>,
+    ) -> Result<JsonValue, HostError> {
+        quickjs::execute(self, plan, connector, cancelled)
     }
 
     #[cfg(not(feature = "quickjs"))]
@@ -221,6 +233,7 @@ pub enum HostError {
     MicrotaskLimit,
     DeadlineExceeded,
     FuelExhausted,
+    Cancelled,
 }
 
 impl fmt::Display for HostError {
@@ -240,6 +253,7 @@ impl fmt::Display for HostError {
             Self::MicrotaskLimit => f.write_str("microtask ceiling exceeded"),
             Self::DeadlineExceeded => f.write_str("wall-clock deadline exceeded"),
             Self::FuelExhausted => f.write_str("instruction budget exhausted"),
+            Self::Cancelled => f.write_str("execution cancelled"),
         }
     }
 }
@@ -249,8 +263,7 @@ impl std::error::Error for HostError {}
 #[cfg(feature = "quickjs")]
 mod quickjs {
     use std::collections::BTreeMap;
-    use std::sync::atomic::{AtomicBool, AtomicU64};
-    use std::sync::Arc;
+    use std::sync::atomic::AtomicU64;
 
     use rquickjs::promise::PromiseState;
     use rquickjs::{Context, Ctx, Function, Object, Persistent, Promise, Runtime, Value};
@@ -261,6 +274,7 @@ mod quickjs {
         host: &Host,
         plan: &str,
         connector: Rc<dyn Connector>,
+        cancelled: Arc<AtomicBool>,
     ) -> Result<JsonValue, HostError> {
         let wrapped = wrap_plan(plan, host.limits.max_plan_bytes).map_err(HostError::Plan)?;
         let runtime = Runtime::new().map_err(runtime_error)?;
@@ -276,7 +290,11 @@ mod quickjs {
         let interrupt_fuel = Arc::clone(&fuel);
         let interrupt_timeout = Arc::clone(&timed_out);
         let interrupt_exhausted = Arc::clone(&exhausted);
+        let interrupt_cancelled = Arc::clone(&cancelled);
         runtime.set_interrupt_handler(Some(Box::new(move || {
+            if interrupt_cancelled.load(Ordering::Relaxed) {
+                return true;
+            }
             if Instant::now() >= deadline {
                 interrupt_timeout.store(true, Ordering::Relaxed);
                 return true;
@@ -311,7 +329,13 @@ mod quickjs {
             Ok(Persistent::save(&ctx, promise))
         });
 
-        check_limits(&timed_out, &dispatch_expired, &exhausted, deadline)?;
+        check_limits(
+            &timed_out,
+            &dispatch_expired,
+            &exhausted,
+            &cancelled,
+            deadline,
+        )?;
         let persistent = persistent?;
 
         let mut executed_jobs = 0;
@@ -329,7 +353,13 @@ mod quickjs {
             if executed_jobs >= host.limits.microtask_ceiling {
                 return Err(HostError::MicrotaskLimit);
             }
-            check_limits(&timed_out, &dispatch_expired, &exhausted, deadline)?;
+            check_limits(
+                &timed_out,
+                &dispatch_expired,
+                &exhausted,
+                &cancelled,
+                deadline,
+            )?;
             match runtime.execute_pending_job() {
                 Ok(true) => executed_jobs += 1,
                 Ok(false) => {
@@ -338,14 +368,32 @@ mod quickjs {
                     ));
                 }
                 Err(error) => {
-                    check_limits(&timed_out, &dispatch_expired, &exhausted, deadline)?;
+                    check_limits(
+                        &timed_out,
+                        &dispatch_expired,
+                        &exhausted,
+                        &cancelled,
+                        deadline,
+                    )?;
                     return Err(HostError::JavaScript(error.to_string()));
                 }
             }
-            check_limits(&timed_out, &dispatch_expired, &exhausted, deadline)?;
+            check_limits(
+                &timed_out,
+                &dispatch_expired,
+                &exhausted,
+                &cancelled,
+                deadline,
+            )?;
         }
 
-        check_limits(&timed_out, &dispatch_expired, &exhausted, deadline)?;
+        check_limits(
+            &timed_out,
+            &dispatch_expired,
+            &exhausted,
+            &cancelled,
+            deadline,
+        )?;
         let encoded = context.with(move |ctx| {
             let promise = persistent.restore(&ctx).map_err(js_error)?;
             match promise.result::<String>() {
@@ -369,8 +417,12 @@ mod quickjs {
         timed_out: &AtomicBool,
         dispatch_expired: &AtomicBool,
         exhausted: &AtomicBool,
+        cancelled: &AtomicBool,
         deadline: Instant,
     ) -> Result<(), HostError> {
+        if cancelled.load(Ordering::Relaxed) {
+            return Err(HostError::Cancelled);
+        }
         if timed_out.load(Ordering::Relaxed)
             || dispatch_expired.load(Ordering::Relaxed)
             || Instant::now() >= deadline

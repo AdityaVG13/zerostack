@@ -1,7 +1,17 @@
 use std::time::Duration;
+#[cfg(feature = "quickjs")]
+use std::time::Instant;
 
 #[cfg(feature = "quickjs")]
-use std::{cell::RefCell, rc::Rc, thread};
+use std::{
+    cell::RefCell,
+    rc::Rc,
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc,
+    },
+    thread,
+};
 
 #[cfg(feature = "quickjs")]
 use serde_json::{json, Value};
@@ -151,7 +161,7 @@ fn hello_dispatch_and_counter() {
     );
     assert_eq!(connector.calls.borrow().len(), 1);
     assert!(
-        runtime_creation_count() >= creations + 1,
+        runtime_creation_count() > creations,
         "this execution must create one runtime even when tests run concurrently",
     );
 }
@@ -316,6 +326,25 @@ return new Promise(resolve => {
         host.execute(plan, Rc::new(C::ok())).expect_err("bounded"),
         HostError::MicrotaskLimit
     );
+}
+
+#[cfg(feature = "quickjs")]
+#[test]
+fn external_cancel_interrupts_sync_loop() {
+    let host = Host::new(lim(), reg()).unwrap_or_else(|error| panic!("host: {error}"));
+    let cancelled = Arc::new(AtomicBool::new(false));
+    let trigger = Arc::clone(&cancelled);
+    thread::spawn(move || {
+        thread::sleep(Duration::from_millis(2));
+        trigger.store(true, Ordering::Relaxed);
+    });
+    let started = Instant::now();
+    assert_eq!(
+        host.execute_with_cancel("for(;;){}", Rc::new(C::ok()), cancelled)
+            .expect_err("cancel"),
+        HostError::Cancelled
+    );
+    assert!(started.elapsed() < Duration::from_millis(50));
 }
 
 #[cfg(feature = "quickjs")]
