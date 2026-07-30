@@ -15,6 +15,7 @@ use zero_codemode::{
     is_executable_file, locate_report, CapabilityDescriptor, Connector, ConnectorError,
     DiscoveryEnv, DispatchContext, GlobalRegistration, Host, HostError, HostLimits,
 };
+use zero_store::{ensure_layout, Engine, ResolvedStore};
 
 const PROTOCOL: &str = "zerostack-codemode-host/v1";
 const MAX_CELLS: usize = 1;
@@ -378,13 +379,16 @@ fn spawn_cell(
                 16 * 1024 * 1024,
             )
             .map_err(HostError::Limits)?;
-            let host = Host::new(
+            let mut host = Host::new(
                 limits,
                 GlobalRegistration {
                     root: "__zero".to_owned(),
                     capabilities: vec![CapabilityDescriptor::new("host", "call")],
                 },
             )?;
+            if let Some(cas_root) = spill_root() {
+                host = host.with_result_spill(cas_root);
+            }
             host.execute_with_cancel(
                 &source,
                 Rc::new(SidecarConnector {
@@ -402,6 +406,16 @@ fn spawn_cell(
         };
         let _ = events.send(Event::Complete { cell_id, outcome });
     });
+}
+
+/// CAS root for oversized result spill, resolved from the process working
+/// directory. None when the store layout cannot be prepared, in which case an
+/// oversized result keeps reporting the framing limit instead of spilling.
+fn spill_root() -> Option<std::path::PathBuf> {
+    let cwd = std::env::current_dir().ok()?;
+    let resolved = ResolvedStore::resolve_from_process(&cwd, Engine::TokenZero, &[]);
+    ensure_layout(&resolved).ok()?;
+    Some(resolved.cas_host().to_path_buf())
 }
 
 fn deadline(yield_ms: u64) -> Option<Instant> {

@@ -21,6 +21,10 @@ use zero_codemode::{
     wrap_plan, CapabilityDescriptor, GlobalRegistration, Host, HostError, HostLimits, PlanError,
     RegistrationError,
 };
+#[cfg(feature = "quickjs")]
+use zero_codemode::{RESULT_SPILL_PREVIEW_BYTES, RESULT_SPILL_SCHEMA};
+#[cfg(feature = "quickjs")]
+use zero_store::SharedCas;
 
 #[cfg(feature = "quickjs")]
 struct C {
@@ -359,4 +363,52 @@ fn sync_loop_hits_deadline() {
             .expect_err("deadline"),
         HostError::DeadlineExceeded
     );
+}
+
+#[cfg(feature = "quickjs")]
+#[test]
+fn oversized_result_spills_to_a_ref_with_a_bounded_preview() {
+    let store = tempfile::tempdir().unwrap_or_else(|error| panic!("tempdir: {error}"));
+    let mut limits = lim();
+    limits.max_json_bytes = 16 * 1024 * 1024;
+    limits.memory_bytes = 512 * 1024 * 1024;
+    limits.instruction_budget = 100_000_000;
+    limits.wall_timeout = Duration::from_secs(60);
+    let host = Host::new(limits, reg())
+        .unwrap_or_else(|error| panic!("host: {error}"))
+        .with_result_spill(store.path());
+
+    // 20971522 bytes encoded: the exact size that used to be a hard error.
+    let plan = "return 'x'.repeat(20971520);";
+    let value = host
+        .execute(plan, Rc::new(C::ok()))
+        .unwrap_or_else(|error| panic!("spill: {error}"));
+
+    assert_eq!(value["schema"], RESULT_SPILL_SCHEMA);
+    assert_eq!(value["spilled"], true);
+    assert_eq!(value["bytes"], 20_971_522);
+    assert_eq!(value["previewTruncated"], true);
+    let preview = value["preview"].as_str().expect("preview text");
+    assert!(preview.len() <= RESULT_SPILL_PREVIEW_BYTES);
+    assert_eq!(value["previewBytes"], preview.len());
+
+    let sha = value["sha256"].as_str().expect("sha256");
+    assert_eq!(value["ref"], format!("tz://blob/{sha}"));
+    let stored = SharedCas::open(store.path())
+        .get_verified(sha)
+        .unwrap_or_else(|error| panic!("verify spilled object: {error}"));
+    assert_eq!(stored.len(), 20_971_522);
+}
+
+#[cfg(feature = "quickjs")]
+#[test]
+fn oversized_result_without_a_spill_root_still_reports_the_limit() {
+    let mut limits = lim();
+    limits.max_json_bytes = 32;
+    let host = Host::new(limits, reg()).unwrap_or_else(|error| panic!("host: {error}"));
+    assert!(host
+        .execute("return 'x'.repeat(64);", Rc::new(C::ok()))
+        .expect_err("oversized result")
+        .to_string()
+        .contains("maximum is 32"));
 }

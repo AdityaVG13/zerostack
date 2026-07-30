@@ -1,5 +1,6 @@
 use std::collections::BTreeSet;
 use std::fmt;
+use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::sync::atomic::{AtomicU64, Ordering};
 #[cfg(feature = "quickjs")]
@@ -7,6 +8,7 @@ use std::sync::{atomic::AtomicBool, Arc};
 use std::time::{Duration, Instant};
 
 use serde_json::Value as JsonValue;
+use zero_store::SharedCas;
 
 #[cfg(feature = "quickjs")]
 use crate::wrap_plan;
@@ -135,10 +137,17 @@ impl fmt::Display for ConnectorError {
 
 impl std::error::Error for ConnectorError {}
 
+/// Schema tag of the envelope returned in place of an oversized result.
+pub const RESULT_SPILL_SCHEMA: &str = "zerostack.codemode.result_spill.v1";
+
+/// Upper bound on the inline preview carried beside a spilled result ref.
+pub const RESULT_SPILL_PREVIEW_BYTES: usize = 8 * 1024;
+
 #[derive(Clone, Debug)]
 pub struct Host {
     limits: HostLimits,
     registration: GlobalRegistration,
+    spill_root: Option<PathBuf>,
 }
 
 impl Host {
@@ -155,8 +164,17 @@ impl Host {
             Ok(Self {
                 limits,
                 registration,
+                spill_root: None,
             })
         }
+    }
+
+    /// Publish results larger than `max_json_bytes` into the content-addressed
+    /// store rooted at `cas_root` and return a ref plus a bounded preview,
+    /// instead of failing with [HostError::ResultTooLarge].
+    pub fn with_result_spill(mut self, cas_root: impl Into<PathBuf>) -> Self {
+        self.spill_root = Some(cas_root.into());
+        self
     }
 
     pub fn limits(&self) -> HostLimits {
@@ -230,6 +248,7 @@ pub enum HostError {
     Connector(String),
     Json(String),
     ResultTooLarge { actual: usize, maximum: usize },
+    ResultSpill(String),
     MicrotaskLimit,
     DeadlineExceeded,
     FuelExhausted,
@@ -250,6 +269,7 @@ impl fmt::Display for HostError {
             Self::ResultTooLarge { actual, maximum } => {
                 write!(f, "result is {actual} bytes; maximum is {maximum}")
             }
+            Self::ResultSpill(message) => write!(f, "result spill failed: {message}"),
             Self::MicrotaskLimit => f.write_str("microtask ceiling exceeded"),
             Self::DeadlineExceeded => f.write_str("wall-clock deadline exceeded"),
             Self::FuelExhausted => f.write_str("instruction budget exhausted"),
@@ -259,6 +279,40 @@ impl fmt::Display for HostError {
 }
 
 impl std::error::Error for HostError {}
+
+/// Publish an oversized encoded result into the CAS and describe it with a ref
+/// plus a bounded preview, so a large final value degrades to a fetchable
+/// reference instead of a hard framing error.
+fn spill_result(cas_root: &Path, encoded: &str) -> Result<JsonValue, HostError> {
+    let cas = SharedCas::open_labeled(cas_root, "codemode-result-spill");
+    let hash = cas
+        .put(encoded.as_bytes())
+        .map_err(|error| HostError::ResultSpill(error.to_string()))?;
+    let preview_end = preview_boundary(encoded, RESULT_SPILL_PREVIEW_BYTES);
+    Ok(serde_json::json!({
+        "schema": RESULT_SPILL_SCHEMA,
+        "spilled": true,
+        "ref": format!("tz://blob/{hash}"),
+        "sha256": hash,
+        "bytes": encoded.len(),
+        "preview": &encoded[..preview_end],
+        "previewBytes": preview_end,
+        "previewTruncated": preview_end < encoded.len(),
+    }))
+}
+
+/// Largest index no greater than the limit that is a char boundary, so a
+/// preview never splits a UTF-8 sequence.
+fn preview_boundary(value: &str, limit: usize) -> usize {
+    if limit >= value.len() {
+        return value.len();
+    }
+    let mut end = limit;
+    while end > 0 && !value.is_char_boundary(end) {
+        end -= 1;
+    }
+    end
+}
 
 #[cfg(feature = "quickjs")]
 mod quickjs {
@@ -405,10 +459,13 @@ mod quickjs {
             }
         })?;
         if encoded.len() > host.limits.max_json_bytes {
-            return Err(HostError::ResultTooLarge {
-                actual: encoded.len(),
-                maximum: host.limits.max_json_bytes,
-            });
+            return match host.spill_root.as_deref() {
+                Some(root) => spill_result(root, &encoded),
+                None => Err(HostError::ResultTooLarge {
+                    actual: encoded.len(),
+                    maximum: host.limits.max_json_bytes,
+                }),
+            };
         }
         serde_json::from_str(&encoded).map_err(|error| HostError::Json(error.to_string()))
     }
