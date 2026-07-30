@@ -1,0 +1,16 @@
+#!/usr/bin/env bash
+# zdev-post-wave: audit worker deliveries — dangling in_progress, recent commits, unsynced beads
+set -uo pipefail
+for R in FSZero GraphZero TokenZero ZeroStack; do
+  D="$HOME/AI/$R"; [ -d "$D" ] || continue; cd "$D"
+  echo "== $R"
+  echo " last commits:"
+  git log --oneline -3 2>/dev/null | sed 's/^/   /'
+  IP=$(br list --status in_progress 2>/dev/null)
+  if [ -n "$IP" ]; then echo " DANGLING in_progress:"; echo "$IP" | sed 's/^/   /'; fi
+  SY=$(br sync --flush-only 2>&1 | tail -1)
+  echo " sync: $SY"
+  DIRTY=$(git status --porcelain 2>/dev/null | head -5)
+  [ -n "$DIRTY" ] && { echo " UNCOMMITTED:"; echo "$DIRTY" | sed 's/^/   /'; }
+done
+exit 0
