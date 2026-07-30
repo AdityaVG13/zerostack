@@ -574,3 +574,22 @@ fn canonical_field_names_are_published() {
     assert_eq!(CANONICAL_TEXT_ALIASES[0], "text");
     assert_eq!(CANONICAL_REF_ALIASES[0], "ref");
 }
+
+#[cfg(feature = "quickjs")]
+#[test]
+fn capability_calls_return_thenables_usable_with_promise_all() {
+    let connector = Rc::new(C::ok());
+    let host = Host::new(lim(), reg()).unwrap_or_else(|error| panic!("host: {error}"));
+    let value = host
+        .execute(
+            r#"const a = zero["fs"].read({path:"a"});
+             const b = zero["fs"].read({path:"b"});
+             const thenable = typeof a.then === "function";
+             const [ra, rb] = await Promise.all([a, b]);
+             return {thenable, a: ra.echo.path, b: rb.echo.path};"#,
+            connector.clone(),
+        )
+        .unwrap_or_else(|error| panic!("promise.all plan: {error}"));
+    assert_eq!(value, json!({"thenable": true, "a": "a", "b": "b"}));
+    assert_eq!(connector.calls.borrow().len(), 2);
+}

@@ -564,7 +564,10 @@ const guard = (value, label) => {
         },
     });
 };
-return (call, label) => (...args) => guard(normalize(call(...args)), label);
+// Async so every capability call returns a real Promise: plans can use
+// Promise.all/.then over calls. The dispatch itself still runs eagerly at
+// invocation, so await semantics are unchanged.
+return (call, label) => async (...args) => guard(normalize(call(...args)), label);
 })()"#;
 
     fn strict_result_wrapper<'js>(ctx: &Ctx<'js>) -> Result<Function<'js>, HostError> {
