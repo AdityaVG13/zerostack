@@ -1,0 +1,26 @@
+{
+  "name": "@zerostack/aggregate-runtime",
+  "version": "0.1.0",
+  "description": "ZeroStack aggregate runtime + substrate entry points. Public, harness-agnostic replacement for reaching into pi-stack internals.",
+  "license": "MIT OR Apache-2.0",
+  "type": "module",
+  "main": "./index.js",
+  "exports": {
+    ".": "./index.js",
+    "./raw-runtime": "./src/raw-runtime.js",
+    "./substrates": "./src/substrates.js",
+    "./paths": "./src/paths.js"
+  },
+  "files": [
+    "index.js",
+    "src/**/*.js",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "node ../../scripts/build-aggregate-runtime.mjs",
+    "test:smoke": "node --test test/external-install.test.mjs"
+  },
+  "engines": {
+    "node": ">=22.0.0"
+  }
+}
