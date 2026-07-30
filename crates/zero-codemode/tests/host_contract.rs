@@ -593,3 +593,26 @@ fn capability_calls_return_thenables_usable_with_promise_all() {
     assert_eq!(value, json!({"thenable": true, "a": "a", "b": "b"}));
     assert_eq!(connector.calls.borrow().len(), 2);
 }
+
+#[cfg(feature = "quickjs")]
+#[test]
+fn unserializable_plan_result_degrades_instead_of_failing() {
+    let host = Host::new(lim(), reg()).unwrap_or_else(|error| panic!("host: {error}"));
+    let plan = r#"
+const value = { status: "committed", count: 2, ref: "fz://blob/abc" };
+Object.defineProperty(value, "handle", {
+  enumerable: true,
+  get() { throw new TypeError("host-guarded property"); },
+});
+value.cycle = value;
+return value;
+"#;
+    let result: Value = host
+        .execute(plan, Rc::new(C::ok()))
+        .unwrap_or_else(|error| panic!("execute: {error}"));
+    assert_eq!(result["serialization_degraded"], json!(true));
+    assert_eq!(result["result"]["status"], json!("committed"));
+    assert_eq!(result["result"]["count"], json!(2));
+    assert_eq!(result["result"]["handle"], json!("[unreadable]"));
+    assert_eq!(result["refs"], json!(["fz://blob/abc"]));
+}
