@@ -644,9 +644,9 @@ enum ProcessObservation {
 
 fn write_metadata(path: &Path, cookie: &str, owner: &str, command: &str) -> io::Result<()> {
     let started_at = epoch_millis();
-    write_file_sync(&path.join("owner"), owner)?;
-    write_file_sync(&path.join("pid"), &std::process::id().to_string())?;
-    write_file_sync(
+    write_file(&path.join("owner"), owner)?;
+    write_file(&path.join("pid"), &std::process::id().to_string())?;
+    write_file(
         &path.join("repository"),
         &std::env::current_dir()
             .unwrap_or_else(|_| PathBuf::from("."))
@@ -655,15 +655,21 @@ fn write_metadata(path: &Path, cookie: &str, owner: &str, command: &str) -> io::
             .take(1024)
             .collect::<String>(),
     )?;
-    write_file_sync(&path.join("command"), command)?;
-    write_file_sync(&path.join("started_at"), &started_at.to_string())?;
+    write_file(&path.join("command"), command)?;
+    write_file(&path.join("started_at"), &started_at.to_string())?;
     publish_identity(path, cookie, std::process::id(), owner, started_at)
 }
 
-fn write_file_sync(path: &Path, value: &str) -> io::Result<()> {
+// Permits are machine-local liveness state under a tmp dir: every record is
+// keyed to a pid plus (on Linux) boot id / process start time, so nothing here
+// outlives a reboot and crash durability is meaningless. Peers that read these
+// files are live processes on the same host, and the page cache already makes
+// writes visible to them immediately. fsync therefore bought no correctness
+// while costing ~4ms per file on APFS, which alone exceeded the PERMIT_POLL
+// wake budget for a single acquisition.
+fn write_file(path: &Path, value: &str) -> io::Result<()> {
     let mut file = fs::File::create(path)?;
-    file.write_all(value.as_bytes())?;
-    file.sync_all()
+    file.write_all(value.as_bytes())
 }
 
 fn publish_identity(
@@ -686,14 +692,13 @@ fn publish_identity(
         .map(|value| (value.boot_id, value.starttime.to_string()))
         .unwrap_or_else(|| ("-".to_owned(), "-".to_owned()));
     let temporary = path.join(format!(".identity-{cookie}.tmp"));
-    write_file_sync(
+    write_file(
         &temporary,
         &format!("{cookie}\n{pid}\n{owner}\n{started_at}\n{boot_id}\n{starttime}\n"),
     )?;
+    // The rename is atomic within the directory, which is all readers rely on;
+    // see write_file for why no durability barrier is needed.
     fs::rename(&temporary, path.join("identity"))?;
-    // Directory sync is unavailable on some supported platforms. The identity
-    // file itself is durable before the atomic publication rename.
-    let _ = fs::File::open(path).and_then(|directory| directory.sync_all());
     Ok(())
 }
 
