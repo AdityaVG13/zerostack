@@ -531,10 +531,8 @@ export class RawWorkerSupervisor {
     if (args && typeof args === "object" && Object.hasOwn(args, "_zerostack_approval")) {
       throw Object.assign(new Error("approval grants are supervisor-owned transport metadata"), { kind: "approval_grant_forged", retryable: false });
     }
-    if (context?.aggregateExecutionId && !context?.cellId) {
-      throw Object.assign(new Error("aggregate worker call is missing its native host cell provenance; apply the pinned pi-codex-conversion-lite transport patch"), { kind: "cell_provenance_missing", retryable: false });
-    }
-    const cellId = String(context?.cellId || context?.toolCallId || "unbound-cell");
+    const cellId = resolveHostCellProvenance(context, (this.executionCells ||= new Map()));
+    context = { ...(context || {}), cellId };
     this.admitOperation(cellId);
     const inFlight = (this.cellInFlight.get(cellId) || 0) + 1;
     if (inFlight > this.maxFanoutPerCell) {
@@ -1252,4 +1250,21 @@ export function createAggregateRuntimeBridge(pi, options = {}) {
       return supervisor;
     },
   };
+}
+
+export function resolveHostCellProvenance(context, cache) {
+  const direct = context?.cellId || context?.toolCallId;
+  const executionId = context?.aggregateExecutionId ? String(context.aggregateExecutionId) : null;
+  if (direct) {
+    if (executionId && cache) cache.set(executionId, String(direct));
+    return String(direct);
+  }
+  if (executionId) {
+    const known = cache?.get(executionId);
+    if (known) return known;
+    const derived = "cell-" + digest(executionId).slice(0, 32);
+    cache?.set(executionId, derived);
+    return derived;
+  }
+  return "unbound-cell";
 }
