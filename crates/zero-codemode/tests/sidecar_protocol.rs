@@ -134,3 +134,103 @@ fn missing_cells_fail_closed_without_replay() {
     assert_eq!(response["kind"], "missing");
     assert_eq!(response["missingCell"], true);
 }
+
+#[test]
+fn every_delegate_in_a_multi_call_plan_carries_cell_provenance() {
+    let mut sidecar = Sidecar::spawn();
+    sidecar.send(json!({
+        "type":"execute",
+        "id":1,
+        "cell_id":"cell-multi",
+        "source":"const a=await __zero.host.call({name:'shell',input:{command:'echo one'}});const b=await __zero.host.call({name:'shell',input:{command:'echo two'}});return [a,b];"
+    }));
+
+    let mut commands = Vec::new();
+    for _ in 0..2 {
+        let delegate = sidecar.read();
+        assert_eq!(delegate["type"], "delegate_request");
+        assert_eq!(delegate["cell_id"], "cell-multi");
+        commands.push(
+            delegate["payload"]["input"]["command"]
+                .as_str()
+                .expect("command string")
+                .to_owned(),
+        );
+        sidecar.send(json!({
+            "type":"delegate_response",
+            "delegate_id":delegate["delegate_id"],
+            "ok":true,
+            "result":{"ok":true}
+        }));
+    }
+    assert_eq!(commands, vec!["echo one".to_owned(), "echo two".to_owned()]);
+
+    let result = sidecar.read();
+    assert_eq!(result["kind"], "result");
+}
+
+#[test]
+fn mixed_capability_plan_keeps_cell_provenance_on_both_surfaces() {
+    let mut sidecar = Sidecar::spawn();
+    sidecar.send(json!({
+        "type":"execute",
+        "id":1,
+        "cell_id":"cell-mixed",
+        "source":"const listed=await __zero.host.call({name:'fs',input:{operation:'list',path:'.'}});const shown=await __zero.host.call({name:'shell',input:{command:'echo mixed'}});return {listed,shown};"
+    }));
+
+    let mut names = Vec::new();
+    for _ in 0..2 {
+        let delegate = sidecar.read();
+        assert_eq!(delegate["type"], "delegate_request");
+        assert_eq!(delegate["cell_id"], "cell-mixed");
+        names.push(
+            delegate["payload"]["name"]
+                .as_str()
+                .expect("capability name")
+                .to_owned(),
+        );
+        sidecar.send(json!({
+            "type":"delegate_response",
+            "delegate_id":delegate["delegate_id"],
+            "ok":true,
+            "result":{"ok":true}
+        }));
+    }
+    assert_eq!(names, vec!["fs".to_owned(), "shell".to_owned()]);
+
+    let result = sidecar.read();
+    assert_eq!(result["kind"], "result");
+}
+
+#[test]
+fn dynamically_built_oversized_command_keeps_cell_provenance() {
+    let mut sidecar = Sidecar::spawn();
+    sidecar.send(json!({
+        "type":"execute",
+        "id":1,
+        "cell_id":"cell-concat",
+        "source":"const tail='x'.repeat(900);const command='echo '+JSON.stringify('start-'+tail);return await __zero.host.call({name:'shell',input:{command}});"
+    }));
+
+    let delegate = sidecar.read();
+    assert_eq!(delegate["type"], "delegate_request");
+    assert_eq!(delegate["cell_id"], "cell-concat");
+    let command = delegate["payload"]["input"]["command"]
+        .as_str()
+        .expect("command string");
+    assert!(
+        command.len() > 900,
+        "command should exceed the reported inline threshold"
+    );
+    assert!(command.contains("start-xxx"));
+    sidecar.send(json!({
+        "type":"delegate_response",
+        "delegate_id":delegate["delegate_id"],
+        "ok":true,
+        "result":{"ok":true}
+    }));
+
+    let result = sidecar.read();
+    assert_eq!(result["kind"], "result");
+}
