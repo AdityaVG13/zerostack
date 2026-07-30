@@ -407,6 +407,27 @@ fn known_properties_stay_readable_through_the_strict_guard() {
 
 #[cfg(feature = "quickjs")]
 #[test]
+fn opts_bearing_calls_forward_every_argument_to_the_connector() {
+    let connector = Rc::new(C::ok());
+    let host = Host::new(lim(), reg()).unwrap_or_else(|error| panic!("host: {error}"));
+    host.execute(
+        "await zero['fs'].read({path:'a'}); await zero['fs'].read({path:'b'}, {timeoutMs:60000}); return null;",
+        connector.clone(),
+    )
+    .unwrap_or_else(|error| panic!("execute: {error}"));
+
+    let calls = connector.calls.borrow();
+    assert_eq!(calls.len(), 2);
+    assert_eq!(calls[0], json!({ "path": "a" }));
+    assert_eq!(
+        calls[1],
+        json!([{ "path": "b" }, { "timeoutMs": 60_000 }]),
+        "an opts argument must reach the connector instead of being dropped"
+    );
+}
+
+#[cfg(feature = "quickjs")]
+#[test]
 fn oversized_result_spills_to_a_ref_with_a_bounded_preview() {
     let store = tempfile::tempdir().unwrap_or_else(|error| panic!("tempdir: {error}"));
     let mut limits = lim();

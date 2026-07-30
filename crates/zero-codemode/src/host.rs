@@ -319,8 +319,9 @@ mod quickjs {
     use std::collections::BTreeMap;
     use std::sync::atomic::AtomicU64;
 
+    use rquickjs::function::Rest;
     use rquickjs::promise::PromiseState;
-    use rquickjs::{Context, Ctx, Function, Object, Persistent, Promise, Runtime, Value};
+    use rquickjs::{Array, Context, Ctx, Function, Object, Persistent, Promise, Runtime, Value};
 
     use super::*;
 
@@ -533,6 +534,24 @@ return (call, label) => (...args) => guard(call(...args), label);
             .map_err(|error| normalized_js_error(ctx, error))
     }
 
+    /// Encodes a capability call's argument list for the connector. A single
+    /// argument keeps its own shape so existing one-argument capabilities are
+    /// unchanged; extra arguments (an `opts` bag, for example) are forwarded as
+    /// a JSON array instead of being dropped before dispatch.
+    fn call_arguments<'js>(
+        ctx: &Ctx<'js>,
+        mut args: Vec<Value<'js>>,
+    ) -> Result<Value<'js>, rquickjs::Error> {
+        if args.len() == 1 {
+            return Ok(args.remove(0));
+        }
+        let array = Array::new(ctx.clone())?;
+        for (index, value) in args.into_iter().enumerate() {
+            array.set(index, value)?;
+        }
+        Ok(array.into_value())
+    }
+
     fn install_globals<'js>(
         ctx: Ctx<'js>,
         registration: &GlobalRegistration,
@@ -555,56 +574,58 @@ return (call, label) => (...args) => guard(call(...args), label);
             let descriptor = capability.clone();
             let connector = Rc::clone(&connector);
             let expired = Arc::clone(&dispatch_expired);
-            let function = Function::new(ctx.clone(), move |ctx: Ctx<'js>, args: Value<'js>| {
-                let Some(json) = ctx.json_stringify(args)? else {
-                    return Err(rquickjs::Error::new_from_js_message(
-                        "value",
-                        "JSON",
-                        "arguments are not JSON-serializable",
-                    ));
-                };
-                let encoded = json.to_string()?;
-                if encoded.len() > dispatch_context.max_json_bytes {
-                    return Err(rquickjs::Error::new_from_js_message(
-                        "JSON",
-                        "connector",
-                        "arguments exceed JSON limit",
-                    ));
-                }
-                if dispatch_context.is_expired() {
-                    expired.store(true, Ordering::Relaxed);
-                    return Err(rquickjs::Error::new_from_js_message(
-                        "deadline",
-                        "connector",
-                        "wall-clock deadline exceeded",
-                    ));
-                }
-                let result = connector.call(&descriptor, &encoded, dispatch_context);
-                if dispatch_context.is_expired() {
-                    expired.store(true, Ordering::Relaxed);
-                    return Err(rquickjs::Error::new_from_js_message(
-                        "deadline",
-                        "connector",
-                        "wall-clock deadline exceeded",
-                    ));
-                }
-                let encoded = result.map_err(|error| {
-                    rquickjs::Error::new_from_js_message(
-                        "connector",
-                        "JavaScript",
-                        error.to_string(),
-                    )
-                })?;
-                if encoded.len() > dispatch_context.max_json_bytes {
-                    return Err(rquickjs::Error::new_from_js_message(
-                        "connector",
-                        "JSON",
-                        "result exceeds JSON limit",
-                    ));
-                }
-                ctx.json_parse(encoded)
-            })
-            .map_err(js_error)?;
+            let function =
+                Function::new(ctx.clone(), move |ctx: Ctx<'js>, args: Rest<Value<'js>>| {
+                    let args = call_arguments(&ctx, args.0)?;
+                    let Some(json) = ctx.json_stringify(args)? else {
+                        return Err(rquickjs::Error::new_from_js_message(
+                            "value",
+                            "JSON",
+                            "arguments are not JSON-serializable",
+                        ));
+                    };
+                    let encoded = json.to_string()?;
+                    if encoded.len() > dispatch_context.max_json_bytes {
+                        return Err(rquickjs::Error::new_from_js_message(
+                            "JSON",
+                            "connector",
+                            "arguments exceed JSON limit",
+                        ));
+                    }
+                    if dispatch_context.is_expired() {
+                        expired.store(true, Ordering::Relaxed);
+                        return Err(rquickjs::Error::new_from_js_message(
+                            "deadline",
+                            "connector",
+                            "wall-clock deadline exceeded",
+                        ));
+                    }
+                    let result = connector.call(&descriptor, &encoded, dispatch_context);
+                    if dispatch_context.is_expired() {
+                        expired.store(true, Ordering::Relaxed);
+                        return Err(rquickjs::Error::new_from_js_message(
+                            "deadline",
+                            "connector",
+                            "wall-clock deadline exceeded",
+                        ));
+                    }
+                    let encoded = result.map_err(|error| {
+                        rquickjs::Error::new_from_js_message(
+                            "connector",
+                            "JavaScript",
+                            error.to_string(),
+                        )
+                    })?;
+                    if encoded.len() > dispatch_context.max_json_bytes {
+                        return Err(rquickjs::Error::new_from_js_message(
+                            "connector",
+                            "JSON",
+                            "result exceeds JSON limit",
+                        ));
+                    }
+                    ctx.json_parse(encoded)
+                })
+                .map_err(js_error)?;
             let label = format!("{}.{} result", capability.surface, capability.method);
             let guarded: Function<'js> = strict_result
                 .call((function, label))
