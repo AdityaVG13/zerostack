@@ -12,8 +12,8 @@ use std::{
     time::{Duration, Instant},
 };
 use zero_codemode::{
-    CapabilityDescriptor, Connector, ConnectorError, DispatchContext, GlobalRegistration, Host,
-    HostError, HostLimits,
+    is_executable_file, locate_report, CapabilityDescriptor, Connector, ConnectorError,
+    DiscoveryEnv, DispatchContext, GlobalRegistration, Host, HostError, HostLimits,
 };
 
 const PROTOCOL: &str = "zerostack-codemode-host/v1";
@@ -313,7 +313,18 @@ fn print_cli_metadata() -> Result<bool, Box<dyn std::error::Error>> {
             Ok(true)
         }
         [flag] if flag == "--help" || flag == "-h" => {
-            println!("ZeroStack native aggregate CodeMode sidecar\n\nUsage: zerostack-codemode-host [--help|--version]\n\nWithout arguments, bounded NDJSON frames are read from stdin and written to stdout.");
+            println!("ZeroStack native aggregate CodeMode sidecar\n\nUsage: zerostack-codemode-host [--help|--version|--locate]\n\nWithout arguments, bounded NDJSON frames are read from stdin and written to stdout.\n\n--locate prints a JSON discovery report so a harness needs no absolute paths in\nits config. Resolution order: $ZEROSTACK_HOME/bin, $ZEROSTACK_DEV_ROOT/<Repo>/target/release,\n$XDG_DATA_HOME/zerostack/bin, platform install dirs, then PATH.");
+            Ok(true)
+        }
+        [flag] if flag == "--locate" => {
+            // Discovery is reported, never enforced here: a harness may legitimately
+            // run with only the engines it installed, so unresolved delegates are
+            // data in the report rather than a non-zero exit.
+            let env = DiscoveryEnv::from_process();
+            println!(
+                "{}",
+                serde_json::to_string_pretty(&locate_report(&env, &is_executable_file))?
+            );
             Ok(true)
         }
         _ => Err(format!("unsupported arguments: {}", args.join(" ")).into()),

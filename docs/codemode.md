@@ -45,6 +45,52 @@ zs -C . fs-search 'read a file'
 
 `-C/--root` must precede the engine command. Plan paths stay relative to that validated root. `--verbose` reports wrapper and invoked engine version/revision. `--json` emits the complete engine result. Normal output preserves typed status and copyable scalar `fz://`, `gz://`, `tz://`, and `cm://` refs. Binary overrides are `ZS_FSZERO_BIN`, `ZS_GRAPHZERO_BIN`, and `ZS_TOKENZERO_BIN`; `ZS_TIMEOUT_MS` changes the 120000 ms default.
 
+## Binary discovery for embedded harnesses
+
+A harness needs four executables: the aggregate host `zerostack-codemode-host` and
+the `fszero-codemode` / `graphzero-codemode` / `tokenzero-codemode` delegates. None of
+them belong in a config as an absolute path — a shipped config that names one
+developer's worktree resolves nothing on any other machine and fails at spawn
+time with a bare `ENOENT`.
+
+Ask the host where things are instead:
+
+~~~sh
+zerostack-codemode-host --locate
+~~~
+
+It prints a `zerostack.binary_discovery.v1` JSON report naming, per binary, either
+the resolved path and the rule that found it, or every candidate that was probed.
+
+Resolution order, highest precedence first:
+
+| Order | Source label | Location |
+| --- | --- | --- |
+| 1 | `zerostack_home` | `$ZEROSTACK_HOME/bin/<binary>` |
+| 2 | `dev_checkout` | `$ZEROSTACK_DEV_ROOT/<Repo>/target/release/<binary>` |
+| 3 | `xdg_data` | `$XDG_DATA_HOME/zerostack/bin/<binary>`, default `$HOME/.local/share/zerostack/bin` |
+| 4 | `platform_install` | `/usr/local/lib/zerostack/bin`, `/opt/zerostack/bin`, `/usr/lib/zerostack/bin`; on Windows the `LOCALAPPDATA` and Program Files equivalents |
+| 5 | `path` | each absolute `PATH` entry, in order |
+
+`ZEROSTACK_DEV_ROOT` is the documented dev-checkout override: point it at the
+parent directory holding the sibling `ZeroStack`, `FSZero`, `GraphZero`, and
+`TokenZero` checkouts and their `target/release` builds are used directly.
+
+Rules that keep resolution predictable:
+
+- An empty or whitespace-only variable is treated as unset. Exporting a blank
+  value is a shell artifact, not an instruction.
+- A relative install root, or a blank `PATH` entry meaning "current directory",
+  is skipped. Otherwise resolution would silently depend on the spawning cwd.
+- An explicit `XDG_DATA_HOME` replaces the `~/.local/share` default rather than
+  adding to it, so a redirect is honored instead of quietly bypassed.
+- Only a regular file with an execute bit is accepted, so a same-named directory
+  cannot shadow a real binary further down the order.
+- Each directory is probed once even if several rules name it.
+
+An engine that is not installed is reported as unresolved rather than aborting
+discovery; the harness decides which delegates it actually requires.
+
 ## Exclusive deployment rule
 
 Choose exactly one:
