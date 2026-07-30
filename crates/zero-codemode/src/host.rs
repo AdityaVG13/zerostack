@@ -497,6 +497,42 @@ mod quickjs {
             .map_err(|error| normalized_js_error(ctx, error))
     }
 
+    /// Wraps every capability result so reading a property the host never
+    /// returned throws instead of yielding undefined. A mistyped field name is a
+    /// caller bug worth one error, not a silent empty value.
+    const STRICT_RESULT_WRAPPER: &str = r#"(() => {
+"use strict";
+const guard = (value, label) => {
+    if (value === null || typeof value !== "object" || Array.isArray(value)) {
+        return value;
+    }
+    return new Proxy(value, {
+        get(target, property) {
+            if (typeof property === "symbol") {
+                return Reflect.get(target, property);
+            }
+            if (Object.prototype.hasOwnProperty.call(target, property)) {
+                return guard(target[property], label + "." + property);
+            }
+            if (property === "then" || property === "toJSON") {
+                return undefined;
+            }
+            const keys = Object.keys(target);
+            throw new TypeError(
+                "unknown property '" + property + "' on " + label +
+                "; available properties: " + (keys.length ? keys.join(", ") : "(none)")
+            );
+        },
+    });
+};
+return (call, label) => (...args) => guard(call(...args), label);
+})()"#;
+
+    fn strict_result_wrapper<'js>(ctx: &Ctx<'js>) -> Result<Function<'js>, HostError> {
+        ctx.eval::<Function<'js>, _>(STRICT_RESULT_WRAPPER)
+            .map_err(|error| normalized_js_error(ctx, error))
+    }
+
     fn install_globals<'js>(
         ctx: Ctx<'js>,
         registration: &GlobalRegistration,
@@ -505,6 +541,7 @@ mod quickjs {
         dispatch_expired: Arc<AtomicBool>,
     ) -> Result<(), HostError> {
         let root = null_object(&ctx)?;
+        let strict_result = strict_result_wrapper(&ctx)?;
         let mut surfaces: BTreeMap<String, Object<'js>> = BTreeMap::new();
 
         for capability in &registration.capabilities {
@@ -568,8 +605,12 @@ mod quickjs {
                 ctx.json_parse(encoded)
             })
             .map_err(js_error)?;
+            let label = format!("{}.{} result", capability.surface, capability.method);
+            let guarded: Function<'js> = strict_result
+                .call((function, label))
+                .map_err(|error| normalized_js_error(&ctx, error))?;
             surface
-                .set(capability.method.as_str(), function)
+                .set(capability.method.as_str(), guarded)
                 .map_err(js_error)?;
         }
 

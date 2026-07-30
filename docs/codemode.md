@@ -21,6 +21,20 @@ return { files: files.ref, graph: graph.ref };
 
 This Cloudflare-style execution model reduces protocol round trips and keeps intermediate values inside the sandbox rather than exposing each one to model context.
 
+### Capability result shape
+
+Every capability call resolves to the JSON object the connector returned, and nothing else. There are no POSIX-style aliases: `zero.token.shell` reports command output on `result` (with the rendered form on `visible` when present), not on `stdout`/`stderr`.
+
+Reading a property the connector did not return throws a `TypeError` naming the property and listing the available ones, so a mistyped field fails loudly instead of yielding `undefined`:
+
+~~~js
+const run = await zero.token.shell("echo hi");
+run.result;  // "hi\n"
+run.stdout;  // TypeError: unknown property 'stdout' on token.shell result; available properties: result, visible
+~~~
+
+Use `Object.keys(value)` to inspect an unfamiliar result; enumeration is unaffected by the guard.
+
 ## Install the `zs` wrapper
 
 The tracked Python wrapper supports Linux and macOS and has no third-party dependencies.

@@ -367,6 +367,46 @@ fn sync_loop_hits_deadline() {
 
 #[cfg(feature = "quickjs")]
 #[test]
+fn unknown_property_on_a_connector_result_throws() {
+    let host = Host::new(lim(), reg()).unwrap_or_else(|error| panic!("host: {error}"));
+    let error = host
+        .execute(
+            "const r = await zero['fs'].read({path:'a'}); return r.stdout;",
+            Rc::new(C::ok()),
+        )
+        .expect_err("unknown property must throw");
+    let message = error.to_string();
+    assert!(
+        message.contains("unknown property 'stdout'"),
+        "message must name the property: {message}"
+    );
+    assert!(
+        message.contains("available properties: echo"),
+        "message must list the real shape: {message}"
+    );
+}
+
+#[cfg(feature = "quickjs")]
+#[test]
+fn known_properties_stay_readable_through_the_strict_guard() {
+    let connector = Rc::new(C {
+        calls: RefCell::new(vec![]),
+        fail: false,
+        delay: Duration::ZERO,
+        result: Some("{\"result\":\"ok\",\"nested\":{\"visible\":1},\"list\":[1,2]}".to_owned()),
+    });
+    let host = Host::new(lim(), reg()).unwrap_or_else(|error| panic!("host: {error}"));
+    let value = host
+        .execute(
+            "const r = await zero['fs'].read({}); return [r.result, r.nested.visible, r.list.length];",
+            connector,
+        )
+        .unwrap_or_else(|error| panic!("execute: {error}"));
+    assert_eq!(value, json!(["ok", 1, 2]));
+}
+
+#[cfg(feature = "quickjs")]
+#[test]
 fn oversized_result_spills_to_a_ref_with_a_bounded_preview() {
     let store = tempfile::tempdir().unwrap_or_else(|error| panic!("tempdir: {error}"));
     let mut limits = lim();
