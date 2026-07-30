@@ -1,5 +1,6 @@
 [workspace]
 resolver = "2"
+exclude = ["conformance"]
 members = [
     "crates/zero-abi",
     "crates/zero-cert",
@@ -11,7 +12,6 @@ members = [
     "crates/zero-store",
     "crates/zero-testkit",
     "crates/zerostack-machine-permit",
-    "conformance",
 ]
 
 [workspace.package]

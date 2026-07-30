@@ -68,24 +68,6 @@ jobs:
       # silently fixing it and passing.
       - run: scripts/check-portability.sh
 
-  drift-guards:
-    name: cross-engine drift guards
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
-      # Hyphenated schemas are the SSOT; underscore files are generated embeds.
-      - run: python3 conformance/scripts/check_schema_pairs.py
-      # Canonical JSON feeds the contract digest, and it has already drifted
-      # once without anything failing. The guard needs the engine checkouts to
-      # have anything to scan, so it is a no-op-with-warning when they are
-      # absent rather than a false pass.
-      - run: |
-          if [ -d ../GraphZero ] || [ -d ../TokenZero ] || [ -d ../FSZero ]; then
-            python3 conformance/scripts/check_canonical_json_impls.py
-          else
-            echo "::warning::engine checkouts absent; canonical-JSON guard did not run"
-          fi
-
   machine-permit-windows-ffi:
     name: machine-permit targeted Windows FFI coverage
     runs-on: windows-latest

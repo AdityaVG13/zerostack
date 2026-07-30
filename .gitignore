@@ -104,3 +104,23 @@ CLAUDE.md
 
 # Beads compliance audit dir (managed by /beads-compliance-and-completion-verification skill)
 /beads_compliance_audit/
+
+# local-only (pruned from public repo 2026-07-30)
+.bench-history/
+.claude/
+.codex/
+benchmarks/
+conformance/
+fuzz/
+packages/
+reports/
+archive/
+.ubsignore
+log.txt
+scripts/dev/
+scripts/__pycache__/
+beads_compliance_audit/
+tmp/
+videos/
+blobs/
+dist/

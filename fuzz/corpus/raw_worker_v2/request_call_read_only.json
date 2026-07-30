@@ -1,1 +1,0 @@
-{"kind":"call","request":{"request_id":"q1","op":"read","args":{"path":"README.md"},"deadline_unix_ms":1,"trace":{"runtime_id":"rt","cell_id":"c","request_id":"q1","trace_id":"t1","worker_revision":"r1","contract_digest":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}}}
