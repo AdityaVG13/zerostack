@@ -39,6 +39,48 @@ class ZsTests(unittest.TestCase):
     def tearDown(self) -> None: self.tmp.cleanup()
     def run_zs(self,*args:str,input_text:str|None=None)->subprocess.CompletedProcess[str]:
         return subprocess.run([sys.executable,str(ZS),*args],input=input_text,text=True,capture_output=True,env=self.env)
+    def test_unpinned_engine_resolves_from_install_root_not_build_dir(self)->None:
+        install=self.root/"home"/"bin"; install.mkdir(parents=True)
+        binary=install/"fszero-codemode"; binary.write_text(FAKE); binary.chmod(0o755)
+        env={k:v for k,v in self.env.items() if not k.startswith("ZS_")}|{"ZEROSTACK_HOME":str(self.root/"home"),"FAKE_LOG":str(self.log)}
+        result=subprocess.run([sys.executable,str(ZS),"-C",str(self.root),"fs","-"],input="return 7;",text=True,capture_output=True,env=env)
+        self.assertEqual(result.returncode,0,result.stderr)
+        self.assertEqual(json.loads(self.log.read_text())["call"]["params"]["arguments"]["plan"],"return 7;")
+    def test_missing_engine_reports_every_probed_install_location(self)->None:
+        env={k:v for k,v in self.env.items() if not k.startswith("ZS_")}|{"ZEROSTACK_HOME":str(self.root/"absent"),"PATH":str(self.root/"empty")}
+        result=subprocess.run([sys.executable,str(ZS),"-C",str(self.root),"fs","return 1"],text=True,capture_output=True,env=env)
+        self.assertEqual(result.returncode,127); self.assertIn("fszero-codemode not found",result.stderr)
+        self.assertIn(str(self.root/"absent"/"bin"/"fszero-codemode"),result.stderr)
+    def test_blank_or_relative_roots_cannot_pull_a_binary_from_the_cwd(self)->None:
+        install=self.root/"xdg"/"zerostack"/"bin"; install.mkdir(parents=True)
+        (install/"graphzero-codemode").write_text(FAKE); (install/"graphzero-codemode").chmod(0o755)
+        # A blank or relative install root would resolve against the spawning cwd.
+        # Decoys sit exactly where each such reading would land; picking one is
+        # visible because the decoy exits 23 instead of answering.
+        for relative in ("bin", "relative/root/bin"):
+            decoy=self.root/relative; decoy.mkdir(parents=True,exist_ok=True)
+            (decoy/"graphzero-codemode").write_text("#!/bin/sh\nexit 23\n"); (decoy/"graphzero-codemode").chmod(0o755)
+        for home in ("   ", "relative/root"):
+            with self.subTest(home=home):
+                env={k:v for k,v in self.env.items() if not k.startswith("ZS_")}|{"ZS_GRAPHZERO_BIN":"  ","ZEROSTACK_HOME":home,"XDG_DATA_HOME":str(self.root/"xdg"),"FAKE_LOG":str(self.log)}
+                result=subprocess.run([sys.executable,str(ZS),"-C",str(self.root),"graph","return 1"],text=True,capture_output=True,env=env,cwd=self.root)
+                self.assertEqual(result.returncode,0,result.stderr)
+    def test_blank_path_entry_does_not_resolve_from_the_cwd(self)->None:
+        # An empty PATH entry means "current directory" to some shells; honoring it
+        # would let whatever sits in the cwd impersonate an engine.
+        (self.root/"graphzero-codemode").write_text("#!/bin/sh\nexit 23\n"); (self.root/"graphzero-codemode").chmod(0o755)
+        env={k:v for k,v in self.env.items() if not k.startswith("ZS_")}|{"XDG_DATA_HOME":str(self.root/"empty"),"PATH":":"}
+        env.pop("ZEROSTACK_HOME",None); env.pop("ZEROSTACK_DEV_ROOT",None)
+        result=subprocess.run([sys.executable,str(ZS),"-C",str(self.root),"graph","return 1"],text=True,capture_output=True,env=env,cwd=self.root)
+        self.assertEqual(result.returncode,127,result.stderr); self.assertIn("graphzero-codemode not found",result.stderr)
+    def test_non_executable_file_does_not_shadow_a_real_binary(self)->None:
+        shadow=self.root/"home"/"bin"; shadow.mkdir(parents=True)
+        (shadow/"graphzero-codemode").write_text(FAKE); (shadow/"graphzero-codemode").chmod(0o644)
+        install=self.root/"xdg"/"zerostack"/"bin"; install.mkdir(parents=True)
+        (install/"graphzero-codemode").write_text(FAKE); (install/"graphzero-codemode").chmod(0o755)
+        env={k:v for k,v in self.env.items() if not k.startswith("ZS_")}|{"ZEROSTACK_HOME":str(self.root/"home"),"XDG_DATA_HOME":str(self.root/"xdg"),"FAKE_LOG":str(self.log)}
+        result=subprocess.run([sys.executable,str(ZS),"-C",str(self.root),"graph","return 1"],text=True,capture_output=True,env=env)
+        self.assertEqual(result.returncode,0,result.stderr)
     def test_version(self)->None:
         result=self.run_zs("--version"); self.assertEqual(result.returncode,0); self.assertRegex(result.stdout,r"^zs \d+\.\d+\.\d+")
     def test_root_and_stdin_plan(self)->None:
@@ -60,7 +102,7 @@ class ZsTests(unittest.TestCase):
         result=self.run_zs("graph-search","read")
         self.assertEqual(result.returncode,19); self.assertIn("catalog exited with status 19: catalog failed",result.stderr)
     def test_json_and_verbose_metadata(self)->None:
-        result=self.run_zs("--json","--verbose","fs","return 1"); self.assertIn("structuredContent",result.stdout); self.assertIn("zs 1.2.1; engine fakezero 9.1; revision abc123",result.stderr)
+        result=self.run_zs("--json","--verbose","fs","return 1"); self.assertIn("structuredContent",result.stdout); self.assertIn("zs 1.3.0; engine fakezero 9.1; revision abc123",result.stderr)
         self.assertNotIn("envelope",json.loads(self.log.read_text())["call"]["params"]["arguments"])
     def test_error_has_copyable_root_guidance(self)->None:
         result=self.run_zs("-C",str(self.root),"bogus","x"); self.assertEqual(result.returncode,2); self.assertIn(f"Rerun: zs -C {self.root.resolve()} bogus x",result.stderr); self.assertIn("Use paths relative to this root",result.stderr)

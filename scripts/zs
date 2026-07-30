@@ -10,13 +10,18 @@ import subprocess
 import sys
 from typing import Any, NoReturn
 
-VERSION = "1.2.1"
-BASE = Path.home() / ".pi/agent/zerostack-origin-main"
+VERSION = "1.3.0"
+# A Cargo build unlinks and replaces everything in target/release, so spawning an
+# engine from a live build directory lets any concurrent build kill running
+# sessions. Binaries are resolved in the installed-location order documented for
+# zerostack.binary_discovery.v1 instead; a dev checkout is reachable only when
+# ZEROSTACK_DEV_ROOT is set explicitly, which opts that session into the churn.
 SPECS = {
-    "fs": ("ZS_FSZERO_BIN", BASE / "fszero/target/release/fszero-codemode", "fz"),
-    "graph": ("ZS_GRAPHZERO_BIN", BASE / "graphzero/target/release/graphzero-codemode", "gz"),
-    "token": ("ZS_TOKENZERO_BIN", BASE / "TokenZero/target/release/tokenzero-codemode", "tz"),
+    "fs": ("ZS_FSZERO_BIN", "fszero-codemode", "FSZero", "fz"),
+    "graph": ("ZS_GRAPHZERO_BIN", "graphzero-codemode", "GraphZero", "gz"),
+    "token": ("ZS_TOKENZERO_BIN", "tokenzero-codemode", "TokenZero", "tz"),
 }
+PLATFORM_BIN_DIRS = ("/usr/local/lib/zerostack/bin", "/opt/zerostack/bin", "/usr/lib/zerostack/bin")
 REF = re.compile(r"^(?:fz|gz|tz|cm)://\S+$")
 STATUS = re.compile(r"^[A-Z][A-Z0-9_-]*\d+$")
 HELP = """zs -- ZeroStack CodeMode CLI
@@ -27,6 +32,8 @@ Usage:
   zs --version
 Use '-' or omit plan/query arguments to read stdin. Environment overrides:
 ZS_FSZERO_BIN, ZS_GRAPHZERO_BIN, ZS_TOKENZERO_BIN, ZS_TIMEOUT_MS.
+Unpinned engines resolve from $ZEROSTACK_HOME/bin, $ZEROSTACK_DEV_ROOT/<Repo>/target/release,
+$XDG_DATA_HOME/zerostack/bin, platform install dirs, then PATH.
 """
 
 def die(message: str, code: int = 2, root: Path | None = None, command: list[str] | None = None) -> NoReturn:
@@ -62,9 +69,51 @@ def parse(argv: list[str]) -> tuple[Path, bool, bool, str, list[str]]:
         raise SystemExit(0)
     return root, machine, verbose, argv[i], argv[i + 1:]
 
-def engine(name: str) -> dict[str, str]:
-    env, default, prefix = SPECS[name]
-    return {"bin": os.environ.get(env, str(default)), "execute": f"{prefix}_execute_code", "search": f"{prefix}_codemode_search", "describe": f"{prefix}_codemode_describe"}
+def absolute_env(name: str) -> Path | None:
+    value = os.environ.get(name, "").strip()
+    candidate = Path(value) if value else None
+    return candidate if candidate is not None and candidate.is_absolute() else None
+
+def candidates(binary: str, repo: str) -> list[Path]:
+    probed: list[Path] = []
+    home = absolute_env("ZEROSTACK_HOME")
+    if home is not None:
+        probed.append(home / "bin" / binary)
+    dev_root = absolute_env("ZEROSTACK_DEV_ROOT")
+    if dev_root is not None:
+        probed.append(dev_root / repo / "target" / "release" / binary)
+    data_home = absolute_env("XDG_DATA_HOME") or Path.home() / ".local" / "share"
+    probed.append(data_home / "zerostack" / "bin" / binary)
+    probed.extend(Path(directory) / binary for directory in PLATFORM_BIN_DIRS)
+    for entry in os.environ.get("PATH", "").split(os.pathsep):
+        # A blank PATH entry means "current directory" to some shells; honoring it
+        # would make resolution depend on the spawning cwd.
+        if entry and Path(entry).is_absolute():
+            probed.append(Path(entry) / binary)
+    unique: list[Path] = []
+    for path in probed:
+        if path not in unique:
+            unique.append(path)
+    return unique
+
+def is_executable_file(path: Path) -> bool:
+    return path.is_file() and os.access(path, os.X_OK)
+
+def resolve_binary(name: str, root: Path, command: list[str]) -> str:
+    env, binary, repo, _ = SPECS[name]
+    pinned = os.environ.get(env, "").strip()
+    if pinned:
+        return pinned
+    probed = candidates(binary, repo)
+    for path in probed:
+        if is_executable_file(path):
+            return str(path)
+    locations = "".join(f"\n  {path}" for path in probed)
+    die(f"engine binary {binary} not found in any installed location; install it under $ZEROSTACK_HOME/bin or $XDG_DATA_HOME/zerostack/bin, or pin {env}. Probed:{locations}", 127, root, command)
+
+def engine(name: str, root: Path, command: list[str]) -> dict[str, str]:
+    prefix = SPECS[name][3]
+    return {"bin": resolve_binary(name, root, command), "execute": f"{prefix}_execute_code", "search": f"{prefix}_codemode_search", "describe": f"{prefix}_codemode_describe"}
 
 def invoke(spec: dict[str, str], method: str, arguments: dict[str, Any], root: Path, command: list[str]) -> tuple[dict[str, Any], dict[str, Any]]:
     try:
@@ -252,7 +301,7 @@ def main() -> None:
     arguments: dict[str, Any] = {"plan": text, "form": "js"} if kind == "execute" else ({"query": text} if kind == "search" else {"name": text})
     if kind == "execute" and not machine:
         arguments["envelope"] = "v1"
-    spec = engine(name)
+    spec = engine(name, root, [verb, *rest])
     result, initialized = invoke(spec, spec[kind], arguments, root, [verb, *rest])
     texts, structured = text_items(result), result.get("structuredContent")
     useful_search = contains_method_entry(structured)
