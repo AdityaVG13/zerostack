@@ -23,17 +23,28 @@ This Cloudflare-style execution model reduces protocol round trips and keeps int
 
 ### Capability result shape
 
-Every capability call resolves to the JSON object the connector returned, and nothing else. There are no POSIX-style aliases: `zero.token.shell` reports command output on `result` (with the rendered form on `visible` when present), not on `stdout`/`stderr`.
+Every capability call resolves to the JSON object the connector returned, plus two canonical fields the host normalizes onto it so a plan reads output the same way whichever route served the call. The single-surface (Rust sandbox) and cross-surface (QuickJS sidecar) routes name their output fields differently; the host reconciles that at the boundary:
 
-Reading a property the connector did not return throws a `TypeError` naming the property and listing the available ones, so a mistyped field fails loudly instead of yielding `undefined`:
+- `text` — inline output. Mirrored from the first string present among `text`, `visible`, `result`, `stdout`.
+- `ref` — ref-ed output. Mirrored from the first string present among `ref`, `stdout_ref`, `combined_ref`.
+
+A field the connector returned itself is never overwritten, and a result carrying none of the aliases gains neither field — normalization mirrors output, it does not invent it. The route-specific names stay readable, so existing plans keep working.
 
 ~~~js
+// Single-surface route returns {text, stdout_ref, exit_code, ...}
+// Cross-surface route returns {visible, result, ref, status, ...}
 const run = await zero.token.shell("echo hi");
-run.result;  // "hi\n"
-run.stdout;  // TypeError: unknown property 'stdout' on token.shell result; available properties: result, visible
+run.text;  // "hi\n"  - both routes
+run.ref;   // "tz://blob/..." - both routes, when output was ref-ed
 ~~~
 
-Use `Object.keys(value)` to inspect an unfamiliar result; enumeration is unaffected by the guard.
+Reading a property neither the connector nor normalization produced throws a `TypeError` naming the property and listing the available ones, so a mistyped field fails loudly instead of yielding `undefined`:
+
+~~~js
+run.stdout;  // TypeError: unknown property 'stdout' on token.shell result; available properties: text, ref, visible, ...
+~~~
+
+Use `Object.keys(value)` to inspect an unfamiliar result; enumeration is unaffected by the guard and includes the canonical fields.
 
 ## Install the `zs` wrapper
 

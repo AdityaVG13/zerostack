@@ -143,6 +143,18 @@ pub const RESULT_SPILL_SCHEMA: &str = "zerostack.codemode.result_spill.v1";
 /// Upper bound on the inline preview carried beside a spilled result ref.
 pub const RESULT_SPILL_PREVIEW_BYTES: usize = 8 * 1024;
 
+/// Fields every capability result exposes for inline output and for ref-ed
+/// output, whichever route produced the result.
+pub const CANONICAL_RESULT_FIELDS: &[&str] = &["text", "ref"];
+
+/// Source fields, in precedence order, that a connector may use for inline
+/// output. The first one present as a string is mirrored onto `text`.
+pub const CANONICAL_TEXT_ALIASES: &[&str] = &["text", "visible", "result", "stdout"];
+
+/// Source fields, in precedence order, that a connector may use for ref-ed
+/// output. The first one present as a string is mirrored onto `ref`.
+pub const CANONICAL_REF_ALIASES: &[&str] = &["ref", "stdout_ref", "combined_ref"];
+
 #[derive(Clone, Debug)]
 pub struct Host {
     limits: HostLimits,
@@ -503,6 +515,32 @@ mod quickjs {
     /// caller bug worth one error, not a silent empty value.
     const STRICT_RESULT_WRAPPER: &str = r#"(() => {
 "use strict";
+const TEXT_ALIASES = __TEXT_ALIASES__;
+const REF_ALIASES = __REF_ALIASES__;
+const firstString = (target, names) => {
+    for (const name of names) {
+        if (Object.prototype.hasOwnProperty.call(target, name) && typeof target[name] === "string") {
+            return target[name];
+        }
+    }
+    return undefined;
+};
+// Mirrors whichever alias the producing route used onto the canonical field,
+// so a plan reads output identically whichever route served the call.
+const normalize = (value) => {
+    if (value === null || typeof value !== "object" || Array.isArray(value)) {
+        return value;
+    }
+    const text = firstString(value, TEXT_ALIASES);
+    if (text !== undefined && !Object.prototype.hasOwnProperty.call(value, "text")) {
+        value.text = text;
+    }
+    const reference = firstString(value, REF_ALIASES);
+    if (reference !== undefined && !Object.prototype.hasOwnProperty.call(value, "ref")) {
+        value.ref = reference;
+    }
+    return value;
+};
 const guard = (value, label) => {
     if (value === null || typeof value !== "object" || Array.isArray(value)) {
         return value;
@@ -526,12 +564,19 @@ const guard = (value, label) => {
         },
     });
 };
-return (call, label) => (...args) => guard(call(...args), label);
+return (call, label) => (...args) => guard(normalize(call(...args)), label);
 })()"#;
 
     fn strict_result_wrapper<'js>(ctx: &Ctx<'js>) -> Result<Function<'js>, HostError> {
-        ctx.eval::<Function<'js>, _>(STRICT_RESULT_WRAPPER)
+        let source = STRICT_RESULT_WRAPPER
+            .replace("__TEXT_ALIASES__", &alias_literal(CANONICAL_TEXT_ALIASES))
+            .replace("__REF_ALIASES__", &alias_literal(CANONICAL_REF_ALIASES));
+        ctx.eval::<Function<'js>, _>(source)
             .map_err(|error| normalized_js_error(ctx, error))
+    }
+
+    fn alias_literal(aliases: &[&str]) -> String {
+        serde_json::to_string(aliases).expect("alias names serialize")
     }
 
     /// Encodes a capability call's argument list for the connector. A single

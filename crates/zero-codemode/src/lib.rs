@@ -18,7 +18,8 @@ pub use edit_protocol::{
 };
 pub use host::{
     runtime_creation_count, CapabilityDescriptor, Connector, ConnectorError, DispatchContext,
-    GlobalRegistration, Host, HostError, RegistrationError, RESULT_SPILL_PREVIEW_BYTES,
+    GlobalRegistration, Host, HostError, RegistrationError, CANONICAL_REF_ALIASES,
+    CANONICAL_RESULT_FIELDS, CANONICAL_TEXT_ALIASES, RESULT_SPILL_PREVIEW_BYTES,
     RESULT_SPILL_SCHEMA,
 };
 pub use limits::{HostLimits, LimitError};

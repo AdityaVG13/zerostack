@@ -17,6 +17,8 @@ use std::{
 use serde_json::{json, Value};
 #[cfg(feature = "quickjs")]
 use zero_codemode::{runtime_creation_count, Connector, ConnectorError, DispatchContext};
+use zero_codemode::{CANONICAL_REF_ALIASES, CANONICAL_RESULT_FIELDS, CANONICAL_TEXT_ALIASES};
+
 use zero_codemode::{
     wrap_plan, CapabilityDescriptor, GlobalRegistration, Host, HostError, HostLimits, PlanError,
     RegistrationError,
@@ -472,4 +474,103 @@ fn oversized_result_without_a_spill_root_still_reports_the_limit() {
         .expect_err("oversized result")
         .to_string()
         .contains("maximum is 32"));
+}
+
+#[cfg(feature = "quickjs")]
+#[test]
+fn both_routes_expose_the_same_canonical_result_fields() {
+    // Shape A: the single-surface route names inline output `text` and the
+    // ref-ed output `stdout_ref`. Shape B: the cross-surface route names them
+    // `visible`/`result` and `ref`. A plan must read both identically.
+    let route_shapes = [
+        r#"{"text":"hi\n","stdout_ref":"tz://blob/a","combined_ref":"tz://blob/c","exit_code":0}"#,
+        r#"{"visible":"hi\n","result":"hi\n","ref":"tz://blob/a","status":"ok"}"#,
+    ];
+    for shape in route_shapes {
+        let connector = Rc::new(C {
+            calls: RefCell::new(vec![]),
+            fail: false,
+            delay: Duration::ZERO,
+            result: Some(shape.to_owned()),
+        });
+        let host = Host::new(lim(), reg()).unwrap_or_else(|error| panic!("host: {error}"));
+        let value = host
+            .execute(
+                "const r = await zero['fs'].read({}); return [r.text, r.ref];",
+                connector,
+            )
+            .unwrap_or_else(|error| panic!("execute {shape}: {error}"));
+        assert_eq!(
+            value,
+            json!(["hi\n", "tz://blob/a"]),
+            "canonical fields must be identical for {shape}"
+        );
+    }
+}
+
+#[cfg(feature = "quickjs")]
+#[test]
+fn canonical_fields_never_shadow_what_the_connector_returned() {
+    let connector = Rc::new(C {
+        calls: RefCell::new(vec![]),
+        fail: false,
+        delay: Duration::ZERO,
+        result: Some(
+            r#"{"text":"own","visible":"other","ref":"tz://blob/own","stdout_ref":"tz://blob/other"}"#
+                .to_owned(),
+        ),
+    });
+    let host = Host::new(lim(), reg()).unwrap_or_else(|error| panic!("host: {error}"));
+    let value = host
+        .execute(
+            "const r = await zero['fs'].read({}); return [r.text, r.ref, r.visible, r.stdout_ref];",
+            connector,
+        )
+        .unwrap_or_else(|error| panic!("execute: {error}"));
+    assert_eq!(
+        value,
+        json!(["own", "tz://blob/own", "other", "tz://blob/other"])
+    );
+}
+
+#[cfg(feature = "quickjs")]
+#[test]
+fn canonical_fields_pass_the_strict_guard_and_are_enumerable() {
+    let connector = Rc::new(C {
+        calls: RefCell::new(vec![]),
+        fail: false,
+        delay: Duration::ZERO,
+        result: Some(r#"{"visible":"hi","stdout_ref":"tz://blob/a"}"#.to_owned()),
+    });
+    let host = Host::new(lim(), reg()).unwrap_or_else(|error| panic!("host: {error}"));
+    let value = host
+        .execute(
+            "const r = await zero['fs'].read({}); return Object.keys(r).sort();",
+            connector,
+        )
+        .unwrap_or_else(|error| panic!("execute: {error}"));
+    assert_eq!(value, json!(["ref", "stdout_ref", "text", "visible"]));
+}
+
+#[cfg(feature = "quickjs")]
+#[test]
+fn a_result_without_any_output_alias_gains_no_canonical_fields() {
+    let host = Host::new(lim(), reg()).unwrap_or_else(|error| panic!("host: {error}"));
+    let error = host
+        .execute(
+            "const r = await zero['fs'].read({path:'a'}); return r.text;",
+            Rc::new(C::ok()),
+        )
+        .expect_err("normalization must not invent output fields");
+    assert!(
+        error.to_string().contains("unknown property 'text'"),
+        "{error}"
+    );
+}
+
+#[test]
+fn canonical_field_names_are_published() {
+    assert_eq!(CANONICAL_RESULT_FIELDS, &["text", "ref"]);
+    assert_eq!(CANONICAL_TEXT_ALIASES[0], "text");
+    assert_eq!(CANONICAL_REF_ALIASES[0], "ref");
 }
