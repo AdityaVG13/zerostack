@@ -16,6 +16,14 @@ export {
 } from "./src/raw-runtime.js";
 
 export {
+  LOCATE_SCHEMA,
+  applyManifestDefaults,
+  hostCandidates,
+  loadLocateManifest,
+  manifestField,
+} from "./src/locate.js";
+
+export {
   platformBinaryRel,
   originMainBackendConfigs,
   refreshLockActive,

@@ -4,6 +4,8 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
+import { applyManifestDefaults, manifestField } from "./locate.js";
+
 const PROTOCOL = "zerostack.raw_worker.v2";
 const MAX_FRAME_BYTES = 1_048_576;
 const DEFAULT_DEADLINE_MS = 30_000;
@@ -404,7 +406,7 @@ class RawWorkerClient {
 }
 
 export class RawWorkerSupervisor {
-  constructor({ journalDir, approvalHandler } = {}) {
+  constructor({ journalDir, approvalHandler, locateManifest } = {}) {
     this.runtimeId = crypto.randomUUID();
     this.executionSecret = crypto.randomBytes(32);
     this.sessionId = `pi-${process.pid}-${crypto.randomUUID()}`;
@@ -414,7 +416,11 @@ export class RawWorkerSupervisor {
     this.refCache = new Map();
     this.storeRoots = new Map();
     this.protocolDigest = null;
-    this.journalDir = journalDir || process.env.ZERO_AGGREGATE_JOURNAL_DIR || path.join(os.homedir(), ".pi", "agent", "zerostack", "aggregate-journal");
+    // Precedence: explicit option > env > locate manifest journal_dir > pi legacy literal.
+    this.journalDir = journalDir
+      || process.env.ZERO_AGGREGATE_JOURNAL_DIR
+      || (locateManifest ? manifestField(locateManifest, "journal_dir") : undefined)
+      || path.join(os.homedir(), ".pi", "agent", "zerostack", "aggregate-journal");
     this.journalPath = path.join(this.journalDir, `${this.sessionId}.ndjson`);
     this.idleTtlMs = Math.max(1_000, Number(process.env.ZERO_RAW_WORKER_IDLE_TTL_MS || DEFAULT_IDLE_TTL_MS));
     this.maxWorkers = Math.max(3, Number(process.env.ZERO_RAW_WORKER_MAX_PROCESSES || DEFAULT_MAX_WORKERS));
@@ -982,7 +988,10 @@ export function runtimeResponseToToolResult(response) {
 }
 
 export function createAggregateRuntimeBridge(pi, options = {}) {
-  let supervisor = new RawWorkerSupervisor(options.rawRuntime);
+  const rawRuntimeOptions = options.locateManifest
+    ? applyManifestDefaults({ ...(options.rawRuntime || {}), locateManifest: options.locateManifest }, options.locateManifest)
+    : options.rawRuntime;
+  let supervisor = new RawWorkerSupervisor(rawRuntimeOptions);
   let substrates = null;
   const provider = {
     getTools: () => createRawWorkerTools(supervisor),
@@ -1242,7 +1251,7 @@ export function createAggregateRuntimeBridge(pi, options = {}) {
       if (runtime && providerId) runtime.removeProvider?.(providerId);
       runtime = null;
       providerId = null;
-      supervisor = new RawWorkerSupervisor(options.rawRuntime);
+      supervisor = new RawWorkerSupervisor(rawRuntimeOptions);
       attachSupervisorHooks(supervisor);
       if (substrates) supervisor.configureSubstrates(substrates);
     },
