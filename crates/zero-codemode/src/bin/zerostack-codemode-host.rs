@@ -66,6 +66,7 @@ enum Event {
     Complete {
         cell_id: String,
         outcome: CellOutcome,
+        duration_ms: u64,
     },
 }
 struct DelegateCall {
@@ -86,7 +87,9 @@ struct Waiter {
 struct Cell {
     cancelled: Arc<AtomicBool>,
     outcome: Option<CellOutcome>,
+    duration_ms: Option<u64>,
     waiter: Option<Waiter>,
+    started: Instant,
 }
 struct PendingDelegate {
     cell_id: String,
@@ -189,6 +192,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         Cell {
                             cancelled: Arc::clone(&cancelled),
                             outcome: None,
+                            duration_ms: None,
+                            started: Instant::now(),
                             waiter: Some(Waiter {
                                 request_id: id,
                                 deadline: deadline(yield_ms),
@@ -211,7 +216,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         continue;
                     }
                     if let Some(outcome) = cell.outcome.clone() {
-                        write_outcome(&mut writer, id, &cell_id, outcome)?;
+                        let duration_ms = cell.duration_ms;
+                        write_outcome(&mut writer, id, &cell_id, outcome, duration_ms)?;
                         cells.remove(&cell_id);
                     } else {
                         cell.waiter = Some(Waiter {
@@ -278,16 +284,27 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     &json!({"type":"delegate_request","delegate_id":delegate_id,"cell_id":call.cell_id,"payload":call.payload}),
                 )?;
             }
-            Event::Complete { cell_id, outcome } => {
+            Event::Complete {
+                cell_id,
+                outcome,
+                duration_ms,
+            } => {
                 cancel_delegates(&cell_id, &mut delegates);
                 let Some(cell) = cells.get_mut(&cell_id) else {
                     continue;
                 };
                 if let Some(waiter) = cell.waiter.take() {
-                    write_outcome(&mut writer, waiter.request_id, &cell_id, outcome)?;
+                    write_outcome(
+                        &mut writer,
+                        waiter.request_id,
+                        &cell_id,
+                        outcome,
+                        Some(duration_ms),
+                    )?;
                     cells.remove(&cell_id);
                 } else {
                     cell.outcome = Some(outcome);
+                    cell.duration_ms = Some(duration_ms);
                 }
             }
             Event::InputError(message) => write_frame(
@@ -484,12 +501,18 @@ fn spawn_cell(
                 cancelled,
             )
         };
+        let started = Instant::now();
         let outcome = match execute() {
             Ok(value) => CellOutcome::Result(value),
             Err(HostError::Cancelled) => CellOutcome::Terminated,
             Err(e) => CellOutcome::Error(e.to_string()),
         };
-        let _ = events.send(Event::Complete { cell_id, outcome });
+        let duration_ms = u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX);
+        let _ = events.send(Event::Complete {
+            cell_id,
+            outcome,
+            duration_ms,
+        });
     });
 }
 
@@ -528,12 +551,20 @@ fn flush_deadlines(
     for cell_id in expired {
         if let Some(cell) = cells.get_mut(&cell_id) {
             if let Some(waiter) = cell.waiter.take() {
+                let elapsed_ms =
+                    u64::try_from(cell.started.elapsed().as_millis()).unwrap_or(u64::MAX);
                 if cell.cancelled.load(Ordering::Relaxed) {
-                    write_outcome(writer, waiter.request_id, &cell_id, CellOutcome::Terminated)?;
+                    write_outcome(
+                        writer,
+                        waiter.request_id,
+                        &cell_id,
+                        CellOutcome::Terminated,
+                        Some(elapsed_ms),
+                    )?;
                 } else {
                     write_frame(
                         writer,
-                        &json!({"type":"response","id":waiter.request_id,"ok":true,"kind":"yielded","cellId":cell_id,"contentItems":[]}),
+                        &json!({"type":"response","id":waiter.request_id,"ok":true,"kind":"yielded","cellId":cell_id,"durationMs":elapsed_ms,"contentItems":[]}),
                     )?;
                 }
             }
@@ -557,8 +588,9 @@ fn write_outcome(
     id: u64,
     cell_id: &str,
     outcome: CellOutcome,
+    duration_ms: Option<u64>,
 ) -> io::Result<()> {
-    let frame = match outcome {
+    let mut frame = match outcome {
         CellOutcome::Result(value) => {
             let text = match value {
                 Value::String(v) => v,
@@ -573,6 +605,9 @@ fn write_outcome(
             json!({"type":"response","id":id,"ok":true,"kind":"terminated","cellId":cell_id,"contentItems":[]})
         }
     };
+    if let (Some(map), Some(duration_ms)) = (frame.as_object_mut(), duration_ms) {
+        map.insert("durationMs".to_owned(), json!(duration_ms));
+    }
     write_frame(writer, &frame)
 }
 fn write_missing(

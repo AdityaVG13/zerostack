@@ -127,6 +127,23 @@ fn yielded_cell_can_be_cancelled_while_delegate_is_pending() {
 }
 
 #[test]
+fn result_frame_reports_wall_clock_duration() {
+    let mut sidecar = Sidecar::spawn();
+    sidecar.send(json!({
+        "type":"execute",
+        "id":1,
+        "cell_id":"cell-duration",
+        "source":"return 1;"
+    }));
+    let result = sidecar.read();
+    assert_eq!(result["kind"], "result");
+    assert!(
+        result["durationMs"].is_u64(),
+        "expected durationMs in {result}"
+    );
+}
+
+#[test]
 fn missing_cells_fail_closed_without_replay() {
     let mut sidecar = Sidecar::spawn();
     sidecar.send(json!({"type":"wait","id":9,"cell_id":"missing","yield_ms":1}));
