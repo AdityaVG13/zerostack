@@ -11,6 +11,7 @@ use std::{
     thread,
     time::{Duration, Instant},
 };
+use zero_codemode::node::{node_report, NodeEnv, NODE_SCHEMA};
 use zero_codemode::{
     is_executable_file, is_readable_file, locate_manifest, locate_report, ArtifactEnv,
     CapabilityDescriptor, Connector, ConnectorError, DiscoveryEnv, DispatchContext,
@@ -316,7 +317,7 @@ fn print_cli_metadata() -> Result<bool, Box<dyn std::error::Error>> {
             Ok(true)
         }
         [flag] if flag == "--help" || flag == "-h" => {
-            println!("ZeroStack native aggregate CodeMode sidecar\n\nUsage: zerostack-codemode-host [--help|--version|--locate [--json]|--locate-binaries]\n\nWithout arguments, bounded NDJSON frames are read from stdin and written to stdout.\n\n--locate prints every binary, module, and store path a harness needs, so no\nabsolute path belongs in its config; --json emits the {MANIFEST_SCHEMA} manifest.\n--locate-binaries emits the narrower {DISCOVERY_SCHEMA} executable report.\n\nResolution order: explicit pin, $ZEROSTACK_HOME, $ZEROSTACK_DEV_ROOT/<Repo>,\n$XDG_DATA_HOME/zerostack, platform install dirs, then PATH.");
+            println!("ZeroStack native aggregate CodeMode sidecar\n\nUsage: zerostack-codemode-host [--help|--version|--locate [--json]|--locate-binaries|--locate-node]\n\nWithout arguments, bounded NDJSON frames are read from stdin and written to stdout.\n\n--locate prints every binary, module, and store path a harness needs, so no\nabsolute path belongs in its config; --json emits the {MANIFEST_SCHEMA} manifest.\n--locate-binaries emits the narrower {DISCOVERY_SCHEMA} executable report.\n--locate-node emits the {NODE_SCHEMA} node runtime report, which refuses\nper-shell fnm multishell paths so a pin cannot die with the shell that made it.\n\nResolution order: explicit pin, $ZEROSTACK_HOME, $ZEROSTACK_DEV_ROOT/<Repo>,\n$XDG_DATA_HOME/zerostack, platform install dirs, then PATH.");
             Ok(true)
         }
         [flag] if flag == "--locate-binaries" => {
@@ -327,6 +328,19 @@ fn print_cli_metadata() -> Result<bool, Box<dyn std::error::Error>> {
             println!(
                 "{}",
                 serde_json::to_string_pretty(&locate_report(&env, &is_executable_file))?
+            );
+            Ok(true)
+        }
+        [flag] if flag == "--locate-node" => {
+            // Reported, never enforced: a harness that needs no JavaScript runtime
+            // is a legitimate install, so an unresolved node is data in the report
+            // rather than a non-zero exit.
+            println!(
+                "{}",
+                serde_json::to_string_pretty(&node_report(
+                    &NodeEnv::from_process(),
+                    &is_executable_file
+                ))?
             );
             Ok(true)
         }
