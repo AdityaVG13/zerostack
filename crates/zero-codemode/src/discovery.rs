@@ -104,6 +104,8 @@ impl HarnessBinary {
 /// Which rule produced a candidate directory.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Source {
+    /// A direct file pin, used by artifacts that are not install-root binaries.
+    Explicit,
     /// From [HOME_ENV].
     Home,
     /// From [DEV_ROOT_ENV].
@@ -120,6 +122,7 @@ impl Source {
     /// Stable wire label.
     pub const fn as_str(self) -> &'static str {
         match self {
+            Self::Explicit => "explicit",
             Self::Home => "zerostack_home",
             Self::DevCheckout => "dev_checkout",
             Self::XdgData => "xdg_data",

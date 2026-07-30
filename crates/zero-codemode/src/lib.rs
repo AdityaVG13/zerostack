@@ -4,6 +4,8 @@ pub mod discovery;
 mod edit_protocol;
 mod host;
 mod limits;
+pub mod manifest;
+pub mod node;
 mod wrap;
 
 pub use discovery::{
@@ -20,4 +22,15 @@ pub use host::{
     RESULT_SPILL_SCHEMA,
 };
 pub use limits::{HostLimits, LimitError};
+pub use manifest::{
+    artifact_candidates, is_ephemeral, is_readable_file, locate_manifest, manifest_order,
+    resolve_artifact, ArtifactEnv, ArtifactOutcome, HarnessArtifact, ManifestFacts, Refusal,
+    StorePaths, EPHEMERAL_MARKERS, EPHEMERAL_REASON, HARNESS_ARTIFACTS, JOURNAL_DIR, LIB_DIR,
+    MANIFEST_SCHEMA, NODE_ENV, RUNTIME_MODULE_ENV, SUBSTRATE_MODULE_ENV,
+};
+pub use node::{
+    node_candidates, node_file_name, node_report, resolve_node, resolve_node_with, NodeCandidate,
+    NodeEnv, NodeError, NodeOutcome, NodeRefusal, NodeSource, FNM_DEFAULT_ALIAS_SUBDIR,
+    FNM_DIR_ENV, NODE_ORDER, NODE_SCHEMA,
+};
 pub use wrap::{validate_plan, wrap_plan, PlanError};

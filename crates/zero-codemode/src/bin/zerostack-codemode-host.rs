@@ -12,8 +12,10 @@ use std::{
     time::{Duration, Instant},
 };
 use zero_codemode::{
-    is_executable_file, locate_report, CapabilityDescriptor, Connector, ConnectorError,
-    DiscoveryEnv, DispatchContext, GlobalRegistration, Host, HostError, HostLimits,
+    is_executable_file, is_readable_file, locate_manifest, locate_report, ArtifactEnv,
+    CapabilityDescriptor, Connector, ConnectorError, DiscoveryEnv, DispatchContext,
+    GlobalRegistration, Host, HostError, HostLimits, ManifestFacts, StorePaths, DISCOVERY_SCHEMA,
+    MANIFEST_SCHEMA,
 };
 use zero_store::{ensure_layout, Engine, ResolvedStore};
 
@@ -314,10 +316,10 @@ fn print_cli_metadata() -> Result<bool, Box<dyn std::error::Error>> {
             Ok(true)
         }
         [flag] if flag == "--help" || flag == "-h" => {
-            println!("ZeroStack native aggregate CodeMode sidecar\n\nUsage: zerostack-codemode-host [--help|--version|--locate]\n\nWithout arguments, bounded NDJSON frames are read from stdin and written to stdout.\n\n--locate prints a JSON discovery report so a harness needs no absolute paths in\nits config. Resolution order: $ZEROSTACK_HOME/bin, $ZEROSTACK_DEV_ROOT/<Repo>/target/release,\n$XDG_DATA_HOME/zerostack/bin, platform install dirs, then PATH.");
+            println!("ZeroStack native aggregate CodeMode sidecar\n\nUsage: zerostack-codemode-host [--help|--version|--locate [--json]|--locate-binaries]\n\nWithout arguments, bounded NDJSON frames are read from stdin and written to stdout.\n\n--locate prints every binary, module, and store path a harness needs, so no\nabsolute path belongs in its config; --json emits the {MANIFEST_SCHEMA} manifest.\n--locate-binaries emits the narrower {DISCOVERY_SCHEMA} executable report.\n\nResolution order: explicit pin, $ZEROSTACK_HOME, $ZEROSTACK_DEV_ROOT/<Repo>,\n$XDG_DATA_HOME/zerostack, platform install dirs, then PATH.");
             Ok(true)
         }
-        [flag] if flag == "--locate" => {
+        [flag] if flag == "--locate-binaries" => {
             // Discovery is reported, never enforced here: a harness may legitimately
             // run with only the engines it installed, so unresolved delegates are
             // data in the report rather than a non-zero exit.
@@ -328,8 +330,77 @@ fn print_cli_metadata() -> Result<bool, Box<dyn std::error::Error>> {
             );
             Ok(true)
         }
+        [flag] if flag == "--locate" => {
+            print_manifest(false)?;
+            Ok(true)
+        }
+        [locate, json] if locate == "--locate" && json == "--json" => {
+            print_manifest(true)?;
+            Ok(true)
+        }
         _ => Err(format!("unsupported arguments: {}", args.join(" ")).into()),
     }
+}
+
+/// Print the harness manifest: JSON for machines, one aligned line per entry for
+/// a human reading a terminal.
+///
+/// Unresolved entries are data, not failure: an install with only some engines is
+/// legitimate, and the harness decides which delegates it requires.
+fn print_manifest(json: bool) -> Result<(), Box<dyn std::error::Error>> {
+    let manifest = locate_manifest(
+        &DiscoveryEnv::from_process(),
+        &ArtifactEnv::from_process(),
+        &ManifestFacts {
+            host_version: env!("CARGO_PKG_VERSION").to_owned(),
+            protocol: PROTOCOL.to_owned(),
+            store: store_paths(),
+        },
+        &is_executable_file,
+        &is_readable_file,
+    );
+    if json {
+        println!("{}", serde_json::to_string_pretty(&manifest)?);
+        return Ok(());
+    }
+    for (key, value) in manifest.as_object().into_iter().flatten() {
+        print_entry(key, value);
+    }
+    Ok(())
+}
+
+/// One manifest field as a line. A nested map is either a located entry, which
+/// has a resolution, or a group of them, which is flattened one level so every
+/// path stays on its own line.
+fn print_entry(key: &str, value: &Value) {
+    match value {
+        Value::Object(entry) if entry.contains_key("resolved") => {
+            let path = entry
+                .get("path")
+                .and_then(Value::as_str)
+                .unwrap_or("<unresolved>");
+            let source = entry.get("source").and_then(Value::as_str).unwrap_or("-");
+            println!("{key:<17} {path}  [{source}]");
+        }
+        Value::Object(group) => {
+            for (nested, value) in group {
+                print_entry(&format!("{key}.{nested}"), value);
+            }
+        }
+        Value::String(text) => println!("{key:<17} {text}"),
+        Value::Null => println!("{key:<17} <unresolved>"),
+        other => println!("{key:<17} {other}"),
+    }
+}
+
+/// Store and journal directories for the current project, resolved without
+/// creating anything: reporting a location must not have side effects.
+fn store_paths() -> StorePaths {
+    let Ok(cwd) = std::env::current_dir() else {
+        return StorePaths::default();
+    };
+    let resolved = ResolvedStore::resolve_from_process(&cwd, Engine::TokenZero, &[]);
+    StorePaths::from_store_root(resolved.engine_dir().to_path_buf())
 }
 
 fn read_stdin(events: mpsc::Sender<Event>) {
