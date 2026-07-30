@@ -99,3 +99,8 @@ archive/
 # Python bytecode
 __pycache__/
 *.py[cod]
+AGENTS.md
+CLAUDE.md
+
+# Beads compliance audit dir (managed by /beads-compliance-and-completion-verification skill)
+/beads_compliance_audit/
