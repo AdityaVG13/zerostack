@@ -4,7 +4,7 @@
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use serde_json::json;
 use zero_abi::raw_worker::EngineIdentity;
@@ -494,6 +494,131 @@ fn deadline_cancel_and_crash_kill_fixture_descendants() {
     }
 }
 
+#[cfg(unix)]
+#[test]
+fn lifecycle_reap_p95_is_below_one_second() {
+    const RUNS: usize = 20;
+    let mut completed = Vec::with_capacity(RUNS);
+    let mut cancelled = Vec::with_capacity(RUNS);
+    let mut timed_out = Vec::with_capacity(RUNS);
+    let mut crashed = Vec::with_capacity(RUNS);
+    let mut session_closed = Vec::with_capacity(RUNS);
+
+    for iteration in 0..RUNS {
+        let mut client = registry("normal")
+            .launch(
+                context(EngineIdentity::FsZero),
+                WorkerClientConfig::default(),
+            )
+            .unwrap();
+        assert!(client
+            .dispatch(request(&format!("complete-{iteration}"), json!({}), None,))
+            .is_ok());
+        let started = Instant::now();
+        client.shutdown().unwrap();
+        assert!(client.is_reaped());
+        completed.push(started.elapsed());
+
+        let temp = tempfile::tempdir().unwrap();
+        let pid_file = temp.path().join("cancelled.pid");
+        let mut client = client_with_pid("tree-cancel", &pid_file);
+        let signal = CancellationSignal::new();
+        let trigger = signal.clone();
+        let thread = std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(5));
+            trigger.cancel();
+        });
+        let started = Instant::now();
+        assert!(matches!(
+            client.dispatch_with_cancel(
+                request(&format!("cancel-{iteration}"), json!({}), None),
+                &signal,
+            ),
+            Err(WorkerAdapterError::Cancelled { .. })
+        ));
+        thread.join().unwrap();
+        let descendant = read_descendant_pid(&pid_file);
+        assert_descendant_gone(descendant);
+        cancelled.push(started.elapsed());
+
+        let temp = tempfile::tempdir().unwrap();
+        let pid_file = temp.path().join("timeout.pid");
+        let mut client = client_with_pid("tree-deadline", &pid_file);
+        let started = Instant::now();
+        assert!(matches!(
+            client.dispatch(request(
+                &format!("timeout-{iteration}"),
+                json!({}),
+                Some(unix_ms() + 50),
+            )),
+            Err(WorkerAdapterError::Deadline { .. })
+        ));
+        let descendant = read_descendant_pid(&pid_file);
+        assert_descendant_gone(descendant);
+        timed_out.push(started.elapsed());
+
+        let temp = tempfile::tempdir().unwrap();
+        let pid_file = temp.path().join("crash.pid");
+        let mut client = client_with_pid("tree-crash", &pid_file);
+        let started = Instant::now();
+        assert!(matches!(
+            client.dispatch(request(&format!("crash-{iteration}"), json!({}), None,)),
+            Err(WorkerAdapterError::Crash { .. })
+        ));
+        let descendant = read_descendant_pid(&pid_file);
+        assert_descendant_gone(descendant);
+        crashed.push(started.elapsed());
+
+        let temp = tempfile::tempdir().unwrap();
+        let pid_file = temp.path().join("session.pid");
+        let client = client_with_pid("inherited-open", &pid_file);
+        let descendant = read_descendant_pid(&pid_file);
+        let started = Instant::now();
+        drop(client);
+        assert_descendant_gone(descendant);
+        session_closed.push(started.elapsed());
+    }
+
+    assert_p95_below_one_second("completed", &mut completed);
+    assert_p95_below_one_second("cancelled", &mut cancelled);
+    assert_p95_below_one_second("timed_out", &mut timed_out);
+    assert_p95_below_one_second("crashed", &mut crashed);
+    assert_p95_below_one_second("session_closed", &mut session_closed);
+}
+
+#[test]
+fn injected_spin_and_cancellation_loss_hit_hard_deadlines() {
+    const RUNS: usize = 20;
+    for mode in ["spin", "ignore-cancel"] {
+        let mut samples = Vec::with_capacity(RUNS);
+        for iteration in 0..RUNS {
+            let mut client = registry(mode)
+                .launch(
+                    context(EngineIdentity::TokenZero),
+                    WorkerClientConfig::default(),
+                )
+                .unwrap();
+            let request = request(
+                &format!("hard-{mode}-{iteration}"),
+                json!({}),
+                Some(unix_ms() + 75),
+            );
+            let started = Instant::now();
+            let outcome = if mode == "ignore-cancel" {
+                let signal = CancellationSignal::new();
+                signal.cancel();
+                client.dispatch_with_cancel(request, &signal)
+            } else {
+                client.dispatch(request)
+            };
+            assert!(matches!(outcome, Err(WorkerAdapterError::Deadline { .. })));
+            assert!(client.is_reaped());
+            samples.push(started.elapsed());
+        }
+        assert_p95_below_one_second(mode, &mut samples);
+    }
+}
+
 #[test]
 fn result_and_error_before_false_cancel_ack_are_correlated_and_reusable() {
     for mode in ["result-first-cancel-false", "error-first-cancel-false"] {
@@ -684,6 +809,18 @@ fn observations_and_saturating_accounting_cover_lifecycle() {
     }
     assert!(events.iter().any(|event| event.input_bytes > 0));
     assert!(events.iter().any(|event| event.output_bytes > 0));
+}
+
+fn assert_p95_below_one_second(label: &str, samples: &mut [Duration]) {
+    assert!(!samples.is_empty(), "{label} must have samples");
+    samples.sort_unstable();
+    let rank = (samples.len() * 95).div_ceil(100);
+    let p95 = samples[rank - 1];
+    eprintln!("{label} lifecycle p95={p95:?} samples={}", samples.len());
+    assert!(
+        p95 < Duration::from_secs(1),
+        "{label} lifecycle p95 {p95:?} exceeded one second"
+    );
 }
 
 fn read_descendant_pid(path: &std::path::Path) -> i32 {

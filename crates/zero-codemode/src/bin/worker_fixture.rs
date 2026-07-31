@@ -97,6 +97,7 @@ fn main() {
                 }
                 if mode == "hold"
                     || mode == "tree-cancel"
+                    || mode == "ignore-cancel"
                     || mode == "cancel-false-result"
                     || (!cancellation_race_done
                         && matches!(
@@ -106,6 +107,11 @@ fn main() {
                 {
                     assert!(pending.replace(request).is_none(), "only one pending call");
                     continue;
+                }
+                if mode == "spin" {
+                    loop {
+                        std::hint::spin_loop();
+                    }
                 }
                 if mode == "crash" || mode == "tree-crash" {
                     eprintln!("fixture crash");
@@ -188,6 +194,9 @@ fn main() {
                 );
             }
             WorkerRequestFrame::Cancel { request } => {
+                if mode == "ignore-cancel" {
+                    continue;
+                }
                 if !cancellation_race_done
                     && matches!(
                         mode.as_str(),
