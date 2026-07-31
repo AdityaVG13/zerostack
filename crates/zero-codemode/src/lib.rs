@@ -6,6 +6,7 @@ mod host;
 mod limits;
 pub mod manifest;
 pub mod node;
+pub mod worker;
 mod wrap;
 
 pub use discovery::{

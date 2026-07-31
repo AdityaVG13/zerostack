@@ -130,3 +130,85 @@ Never register both for the same deployment. Duplicate surfaces waste context, c
 CodeMode is not a fourth engine. It is an execution mode over TokenZero, FSZero, and GraphZero.
 
 See the [Release-N engine MCP compatibility policy](mcp-compatibility-policy.md) for defaults, maintenance scope, migration, and staged removal gates.
+
+## Harness-neutral raw-worker client
+
+The zero_codemode::worker module is the stable Rust ownership boundary between
+any harness and raw-worker v2 processes. It is independent of Pi, MCP, QuickJS,
+and engine runtimes. WorkerRegistry maps the closed EngineIdentity set
+(FsZero, GraphZero, TokenZero) to a WorkerFactory. A factory returns a
+WorkerSpec; WorkerClient alone owns spawn, framed stdin/stdout/stderr,
+handshake, dispatch, cancel, deadlines, shutdown, kill, and reap.
+
+Clients provide an explicit store root and session id in WorkerContext and pin
+worker revision, semantic contract digest, and operation registry digest in the
+factory. The adapter propagates context through the canonical raw-worker v2
+handshake and ZEROSTACK_STORE_ROOT, ZEROSTACK_SESSION_ID, and ZEROSTACK_ENGINE.
+Startup fails closed unless protocol version/digest, engine, root, session,
+semantic digest, registry digest, and revision all match. Raw-worker v2 and its
+digest are unchanged by this process adapter.
+
+WorkerClientConfig bounds NDJSON frames, the stdout queue, response payloads,
+stderr capture, startup, operation deadlines, and shutdown. Reader threads never
+require an unbounded join, including when another process keeps stderr open. Failures are typed as
+WorkerAdapterError protocol, handshake, bounds, deadline, crash, remote,
+registration, spawn, or I/O errors. WorkerAccounting reports request and byte
+counts. An optional observer receives lifecycle, timing, byte, deadline, crash,
+and bounds observations. dispatch_with_cancel accepts a cloneable CancellationSignal, sends Cancel for
+the active request, requires the matching CancelAck, and returns the typed
+Cancelled error after reaping. Mismatched response ids fail closed. Dropping a
+client performs bounded shutdown and reaps the child; deadline, bounds, cancel,
+and protocol failures make the client terminal. is_reaped and terminal_status
+expose the direct child wait result without platform-specific PID probing.
+
+Engine migration beads adopt this boundary without moving runtime logic:
+
+1. Keep each engine's operation registry and domain dispatch in its engine.
+2. Expose one planner-free raw-worker v2 binary using the existing zero-abi
+   frames and digest.
+3. Register a factory with the engine identity, executable, revision, semantic
+   contract digest, and registry digest.
+4. Launch through WorkerRegistry with the harness store root and session id;
+   remove copied process, framing, timeout, cancellation, and reaping code only
+   after that engine's migration conformance passes.
+
+The feature-gated zero-codemode-worker-fixture exists only for adapter
+conformance and is not built by default.
+
+### Worker lifecycle details
+
+Deadline conversion uses checked Instant arithmetic. Deadlines outside the
+portable signed-millisecond range fail as DeadlineOverflow and terminate the
+worker. Every forced termination kills the owned process tree and waits for the
+direct child. command-group 5.0.1 retains the platform containment handle:
+Unix uses a dedicated process group and Windows uses a kill-on-close Job Object.
+The Linux process-group path is exercised on Spark; the Windows Job Object path
+is provided by command-group but is not executed by the Linux-only test host. Drop retries termination whenever no direct
+child ExitStatus has been collected.
+
+A standalone CancelAck with cancelled=false is a correlated, non-poisoning
+Ok(false). During dispatch cancellation, a true acknowledgement returns the
+typed Cancelled error and reaps the tree. A false acknowledgement is accepted
+once, is never resent, and permits only the matching result or remote error;
+other response correlation fails closed. Matching remote errors emit the same
+Dispatch observation as matching results.
+
+Crash stderr is represented by StderrCapture. Its text is bounded, while
+observed_bytes saturates, complete states whether EOF was observed, and
+truncated states whether observed bytes exceeded retained text. The client uses
+a bounded condition-variable wait for direct-child stderr without waiting
+indefinitely on inherited descriptors.
+
+
+All stdin frames use one dedicated writer thread behind a capacity-one channel.
+Submission uses try_send and never blocks the caller; the writer acknowledges
+write and flush completion before the same checked operation deadline used for
+the response. Writer queue, write, or acknowledgement failure terminates the
+contained tree and synchronously waits for the direct child. Drop never joins
+the writer thread.
+
+When a matching result or remote error races ahead of CancelAck(false), the
+client retains that completion, consumes exactly one matching late false
+acknowledgement, and then returns the completion. The worker remains reusable.
+A true acknowledgement still returns Cancelled and reaps the tree; mismatched
+or duplicate correlation fails closed.

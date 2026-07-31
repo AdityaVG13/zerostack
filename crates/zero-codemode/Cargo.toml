@@ -8,17 +8,25 @@ description = "Pure-safe generic CodeMode host foundation"
 [features]
 default = []
 quickjs = ["dep:rquickjs"]
+worker-fixture = []
 
 [[bin]]
 name = "zerostack-codemode-host"
 path = "src/bin/zerostack-codemode-host.rs"
 required-features = ["quickjs"]
 
+[[bin]]
+name = "zero-codemode-worker-fixture"
+path = "src/bin/worker_fixture.rs"
+required-features = ["worker-fixture"]
+
 [dependencies]
 serde.workspace = true
 serde_json.workspace = true
+zero-abi = { path = "../zero-abi" }
 zero-store = { path = "../zero-store" }
 rquickjs = { version = "0.12", optional = true, default-features = false, features = ["full", "macro"] }
+command-group = "5.0.1"
 
 [dev-dependencies]
 tempfile = "3"
