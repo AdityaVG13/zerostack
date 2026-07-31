@@ -111,6 +111,15 @@ CLAUDE.md
 .codex/
 benchmarks/
 conformance/
+!conformance/
+conformance/*
+!conformance/engine-topology-v1.json
+!conformance/schemas/
+conformance/schemas/*
+!conformance/schemas/engine-topology-v1.schema.json
+!conformance/tests/
+conformance/tests/*
+!conformance/tests/test_engine_topology.py
 fuzz/
 packages/
 reports/

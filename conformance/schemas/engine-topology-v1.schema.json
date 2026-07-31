@@ -1,0 +1,722 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://zerostack.local/schemas/engine-topology-v1.schema.json",
+  "title": "ZeroStack canonical engine topology v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "$schema",
+    "schema_version",
+    "topology_id",
+    "status",
+    "source_repositories",
+    "hub",
+    "canonical_engine_skeleton",
+    "dependency_direction",
+    "raw_worker_v2",
+    "harness_adapters",
+    "engines"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "1"
+    },
+    "topology_id": {
+      "const": "zerostack.engine-topology"
+    },
+    "status": {
+      "const": "accepted-for-migration"
+    },
+    "source_repositories": {
+      "type": "array",
+      "minItems": 4,
+      "uniqueItems": true,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "name",
+          "cargo_manifest",
+          "branch",
+          "role"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^[a-z0-9-]+$"
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1
+          },
+          "cargo_manifest": {
+            "const": "Cargo.toml"
+          },
+          "branch": {
+            "const": "main"
+          },
+          "role": {
+            "enum": [
+              "contract-hub",
+              "domain-engine"
+            ]
+          }
+        }
+      }
+    },
+    "hub": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "repository",
+        "workspace_manifest",
+        "crates",
+        "binaries",
+        "build_commands"
+      ],
+      "properties": {
+        "repository": {
+          "const": "zerostack"
+        },
+        "workspace_manifest": {
+          "const": "Cargo.toml"
+        },
+        "crates": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "name",
+              "path",
+              "role",
+              "status"
+            ],
+            "properties": {
+              "name": {
+                "type": "string",
+                "pattern": "^[a-z0-9-]+$"
+              },
+              "path": {
+                "type": "string",
+                "pattern": "^(?!/)(?!\\\\)(?![A-Za-z]:)(?!.*(?:^|/)\\.\\.(?:/|$))(?!.*\\\\).+$"
+              },
+              "role": {
+                "type": "string",
+                "minLength": 1
+              },
+              "status": {
+                "const": "keep"
+              }
+            }
+          }
+        },
+        "binaries": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "name",
+              "package",
+              "path",
+              "role",
+              "status"
+            ],
+            "properties": {
+              "name": {
+                "type": "string",
+                "pattern": "^[a-zA-Z0-9_-]+$"
+              },
+              "package": {
+                "type": "string",
+                "pattern": "^[a-z0-9-]+$"
+              },
+              "path": {
+                "type": "string",
+                "pattern": "^(?!/)(?!\\\\)(?![A-Za-z]:)(?!.*(?:^|/)\\.\\.(?:/|$))(?!.*\\\\).+$"
+              },
+              "role": {
+                "type": "string",
+                "minLength": 1
+              },
+              "status": {
+                "enum": [
+                  "keep",
+                  "quarantine"
+                ]
+              }
+            }
+          }
+        },
+        "build_commands": {
+          "type": "array",
+          "minItems": 2,
+          "items": {
+            "$ref": "#/$defs/command"
+          }
+        }
+      }
+    },
+    "canonical_engine_skeleton": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "roles",
+        "feature_policy",
+        "binary_policy",
+        "host_client_contract"
+      ],
+      "properties": {
+        "roles": {
+          "type": "array",
+          "minItems": 5,
+          "uniqueItems": true,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "id",
+              "required",
+              "package_pattern",
+              "binary_pattern",
+              "owner"
+            ],
+            "properties": {
+              "id": {
+                "enum": [
+                  "domain-core",
+                  "raw-worker",
+                  "cli",
+                  "test-support",
+                  "optional-developer-tool"
+                ]
+              },
+              "required": {
+                "type": "boolean"
+              },
+              "package_pattern": {
+                "type": "string",
+                "minLength": 1
+              },
+              "binary_pattern": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "owner": {
+                "enum": [
+                  "engine",
+                  "hub"
+                ]
+              }
+            }
+          }
+        },
+        "feature_policy": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "worker_default_features",
+            "worker_forbidden_features",
+            "host_feature_owner",
+            "adapter_feature_owner"
+          ],
+          "properties": {
+            "worker_default_features": {
+              "type": "array",
+              "maxItems": 0
+            },
+            "worker_forbidden_features": {
+              "type": "array",
+              "minItems": 5,
+              "uniqueItems": true,
+              "items": {
+                "type": "string"
+              }
+            },
+            "host_feature_owner": {
+              "const": "zero-codemode"
+            },
+            "adapter_feature_owner": {
+              "const": "hub-adapter-package"
+            }
+          }
+        },
+        "binary_policy": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "cli_suffix",
+            "worker_suffix",
+            "shipping_binaries"
+          ],
+          "properties": {
+            "cli_suffix": {
+              "const": ""
+            },
+            "worker_suffix": {
+              "const": "-codemode"
+            },
+            "shipping_binaries": {
+              "type": "array",
+              "minItems": 2,
+              "uniqueItems": true,
+              "items": {
+                "type": "string"
+              }
+            }
+          }
+        },
+        "host_client_contract": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "name",
+            "entrypoint",
+            "stability",
+            "reference_bridge"
+          ],
+          "properties": {
+            "name": {
+              "const": "zerostack-host-client-v1"
+            },
+            "entrypoint": {
+              "const": "zerostack-codemode-host"
+            },
+            "stability": {
+              "const": "public-versioned"
+            },
+            "reference_bridge": {
+              "const": "hub-owned"
+            }
+          }
+        }
+      }
+    },
+    "dependency_direction": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "layers",
+        "allowed_edges",
+        "forbidden_edges"
+      ],
+      "properties": {
+        "layers": {
+          "type": "array",
+          "minItems": 5,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "id",
+              "may_depend_on",
+              "must_not_depend_on"
+            ],
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "may_depend_on": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "must_not_depend_on": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        },
+        "allowed_edges": {
+          "type": "array",
+          "minItems": 5,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "from",
+              "to"
+            ],
+            "properties": {
+              "from": {
+                "type": "string",
+                "minLength": 1
+              },
+              "to": {
+                "type": "string",
+                "minLength": 1
+              }
+            }
+          }
+        },
+        "forbidden_edges": {
+          "type": "array",
+          "minItems": 5,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "from",
+              "to"
+            ],
+            "properties": {
+              "from": {
+                "type": "string",
+                "minLength": 1
+              },
+              "to": {
+                "type": "string",
+                "minLength": 1
+              }
+            }
+          }
+        }
+      }
+    },
+    "raw_worker_v2": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "protocol",
+        "required_capabilities",
+        "required_fields",
+        "prohibitions",
+        "runtime_owner",
+        "unknown_fields",
+        "skew_policy"
+      ],
+      "properties": {
+        "protocol": {
+          "const": "raw-worker-v2"
+        },
+        "required_capabilities": {
+          "type": "array",
+          "minItems": 5,
+          "uniqueItems": true,
+          "items": {
+            "type": "string"
+          }
+        },
+        "required_fields": {
+          "type": "array",
+          "minItems": 7,
+          "uniqueItems": true,
+          "items": {
+            "type": "string"
+          }
+        },
+        "prohibitions": {
+          "type": "array",
+          "minItems": 7,
+          "uniqueItems": true,
+          "items": {
+            "type": "string"
+          }
+        },
+        "runtime_owner": {
+          "const": "zerostack-codemode-host"
+        },
+        "unknown_fields": {
+          "const": "versioned"
+        },
+        "skew_policy": {
+          "const": "fail-closed"
+        }
+      }
+    },
+    "harness_adapters": {
+      "type": "array",
+      "minItems": 4,
+      "uniqueItems": true,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "kind",
+          "entrypoint",
+          "transport",
+          "owns",
+          "depends_on",
+          "must_not_import",
+          "status"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^[a-z0-9-]+$"
+          },
+          "kind": {
+            "enum": [
+              "plain-cli",
+              "mcp-claude-code",
+              "pi",
+              "third-party"
+            ]
+          },
+          "entrypoint": {
+            "const": "zerostack-codemode-host"
+          },
+          "transport": {
+            "type": "string",
+            "minLength": 1
+          },
+          "owns": {
+            "type": "array",
+            "minItems": 2,
+            "uniqueItems": true,
+            "items": {
+              "type": "string"
+            }
+          },
+          "depends_on": {
+            "type": "array",
+            "minItems": 2,
+            "uniqueItems": true,
+            "items": {
+              "type": "string"
+            }
+          },
+          "must_not_import": {
+            "type": "array",
+            "minItems": 3,
+            "uniqueItems": true,
+            "items": {
+              "type": "string"
+            }
+          },
+          "status": {
+            "const": "thin-adapter"
+          }
+        }
+      }
+    },
+    "engines": {
+      "type": "array",
+      "minItems": 3,
+      "uniqueItems": true,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "name",
+          "repository",
+          "domain",
+          "target",
+          "current_to_target"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^[a-z0-9-]+$"
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1
+          },
+          "repository": {
+            "type": "string",
+            "minLength": 1
+          },
+          "domain": {
+            "type": "string",
+            "minLength": 1
+          },
+          "target": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "domain_packages",
+              "worker_package",
+              "cli_package",
+              "test_support_package",
+              "optional_packages",
+              "worker_binary",
+              "cli_binary",
+              "build_commands"
+            ],
+            "properties": {
+              "domain_packages": {
+                "type": "array",
+                "minItems": 1,
+                "uniqueItems": true,
+                "items": {
+                  "type": "string",
+                  "pattern": "^[a-z0-9-]+$"
+                }
+              },
+              "worker_package": {
+                "type": "string",
+                "pattern": "^[a-z0-9-]+$"
+              },
+              "cli_package": {
+                "type": "string",
+                "pattern": "^[a-z0-9-]+$"
+              },
+              "test_support_package": {
+                "type": "string",
+                "pattern": "^[a-z0-9-]+$"
+              },
+              "optional_packages": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "pattern": "^[a-z0-9-]+$"
+                }
+              },
+              "worker_binary": {
+                "type": "string",
+                "pattern": "^[a-z0-9-]+$"
+              },
+              "cli_binary": {
+                "type": "string",
+                "pattern": "^[a-z0-9-]+$"
+              },
+              "build_commands": {
+                "type": "array",
+                "minItems": 4,
+                "items": {
+                  "$ref": "#/$defs/command"
+                }
+              }
+            }
+          },
+          "current_to_target": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "kind",
+                "path",
+                "package",
+                "name",
+                "disposition",
+                "target_role",
+                "target_package",
+                "target_binary"
+              ],
+              "properties": {
+                "kind": {
+                  "enum": [
+                    "crate",
+                    "binary"
+                  ]
+                },
+                "path": {
+                  "type": "string",
+                  "pattern": "^(?!/)(?!\\\\)(?![A-Za-z]:)(?!.*(?:^|/)\\.\\.(?:/|$))(?!.*\\\\).+$"
+                },
+                "package": {
+                  "type": "string",
+                  "pattern": "^[a-z0-9-]+$"
+                },
+                "name": {
+                  "type": "string",
+                  "pattern": "^[a-zA-Z0-9_-]+$"
+                },
+                "disposition": {
+                  "enum": [
+                    "keep",
+                    "move",
+                    "merge",
+                    "retire-from-release",
+                    "quarantine"
+                  ]
+                },
+                "target_role": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "target_package": {
+                  "type": "string",
+                  "pattern": "^[a-z0-9-]+$"
+                },
+                "target_binary": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "notes": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "$schema": {
+      "const": "https://zerostack.local/schemas/engine-topology-v1.schema.json"
+    }
+  },
+  "$defs": {
+    "command": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "runner",
+        "program",
+        "args",
+        "working_directory",
+        "purpose",
+        "env"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[a-z0-9-]+$"
+        },
+        "runner": {
+          "const": "rch"
+        },
+        "program": {
+          "const": "cargo"
+        },
+        "args": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "working_directory": {
+          "type": "string",
+          "pattern": "^(?!/)(?!\\\\)(?![A-Za-z]:)(?!.*(?:^|/)\\.\\.(?:/|$))(?!.*\\\\).+$"
+        },
+        "purpose": {
+          "type": "string",
+          "minLength": 1
+        },
+        "env": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "CARGO_TARGET_DIR"
+          ],
+          "properties": {
+            "CARGO_TARGET_DIR": {
+              "type": "string",
+              "pattern": "^(?!/)(?!\\\\)(?![A-Za-z]:)(?!.*(?:^|/)\\.\\.(?:/|$))(?!.*\\\\).+$"
+            }
+          }
+        }
+      }
+    }
+  }
+}
