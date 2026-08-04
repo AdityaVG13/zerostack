@@ -18,6 +18,7 @@ pub mod cache_entry;
 pub mod capability;
 pub mod digest;
 pub mod dispatch;
+pub mod freshness;
 pub mod raw_worker;
 pub mod result;
 pub mod robust_snap;
@@ -47,6 +48,15 @@ pub use dispatch::{
     DispatchContractError, DispatchErrorClass, DispatchMachine, DispatchStage, EffectGrant,
     EffectPolicy, PermitGrant, PermitRequirement, RegistryEngine, SourceDiagnostic, SourceForm,
     ALL_DISPATCH_ERROR_CLASSES, CANONICAL_DISPATCH_VERSION,
+};
+pub use freshness::{
+    decide_freshness_v1, freshness_contract_digest_v1, freshness_contract_manifest_v1,
+    influence_closure_v1, CertifiedInfluenceClosure, DependencyEdgeKindV1, DependencyEdgeV1,
+    EssentialDependencyCertificate, EssentialDependencyWitnessV1, FreshnessDecisionV1,
+    FreshnessErrorV1, FreshnessFailureCodeV1, FreshnessHeadV1, FreshnessStatusV1,
+    IndexedThroughCertificate, ProducerDomainV1, FRESHNESS_CONTRACT_VERSION, FRESHNESS_MAX_EDGES,
+    FRESHNESS_MAX_NODES, FRESHNESS_MAX_REPOSITORIES, FRESHNESS_MAX_WITNESSES,
+    FRESHNESS_MODEL_VERSION,
 };
 pub use raw_worker::{
     decode_request_frame, decode_response_frame, encode_frame, raw_worker_protocol_digest_hex,
