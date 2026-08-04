@@ -9,3 +9,7 @@ description = "Shared, transport-neutral ZeroStack engine promise suites"
 serde.workspace = true
 serde_json.workspace = true
 zero-abi = { path = "../zero-abi" }
+zero-store = { path = "../zero-store" }
+
+[dev-dependencies]
+tempfile = "3"

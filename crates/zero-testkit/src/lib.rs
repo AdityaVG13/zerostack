@@ -17,6 +17,7 @@
 
 #![forbid(unsafe_code)]
 
+pub mod assembly_kat;
 pub mod authority;
 
 use serde::{Deserialize, Serialize};
