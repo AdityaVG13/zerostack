@@ -6,6 +6,7 @@ license.workspace = true
 description = "Proof-carrying deterministic decision gate for ZeroStack"
 
 [dependencies]
+sha2 = { workspace = true }
 serde = { workspace = true }
 zero-abi = { path = "../zero-abi" }
 zero-cert = { path = "../zero-cert" }

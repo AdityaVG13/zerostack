@@ -1,0 +1,11 @@
+{
+  "evidence_scope": "cross_language_kat_only; native_process_evidence_not_inferred",
+  "files": {
+    "runners/python/verify_v1.py": "e0ac7225af940485d5bab04f892ccb7fbb1bada26db16a6b7c77cec6d30cc720",
+    "schema.json": "04f2abdca3342c18398eee6aa052ab25defe23c4c6f99eb1c27b766bc03614a3",
+    "vectors.json": "b8bdb462a4a1ed68d24860de74cfa0179b8970b9b3e847dbabee7eb5f3613919"
+  },
+  "immutable": true,
+  "schema_version": 1,
+  "vector_set": "zerostack.two-phase-gate-kat.v1"
+}

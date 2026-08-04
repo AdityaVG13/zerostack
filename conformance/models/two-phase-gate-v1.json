@@ -1,0 +1,212 @@
+{
+  "assembly_manifest_digest": "6312a10ac50df63e315ae3f271c4a520665dc5c8bbf57484df523412101ceba8",
+  "authority": {
+    "alias": "AF5_TWO_PHASE_KERNEL",
+    "authority_hash": "dc6a8262b0cae49c3aed38f08ce13fb1d6c80acc90c7f05fdff21558243c73af",
+    "freeze_id": "Z5",
+    "kind": "freeze"
+  },
+  "evidence_scope": "Rust and Python KATs are compilation/abstract conformance only; native process, filesystem, crash, performance, and packaging claims require DSR receipts.",
+  "guard_order": [
+    {
+      "id": "G0",
+      "obligation": "canonical decode and full-object digest",
+      "predecessor": null,
+      "rust": "G0Canonical"
+    },
+    {
+      "id": "G1",
+      "obligation": "owner, producer, schema, and source-root coherence",
+      "predecessor": "G0",
+      "rust": "G1Coherence"
+    },
+    {
+      "id": "G2",
+      "obligation": "finite plan shape and instruction bounds",
+      "predecessor": "G1",
+      "rust": "G2FinitePlan"
+    },
+    {
+      "id": "G3",
+      "obligation": "semantic-cut and attribution validity",
+      "predecessor": "G2",
+      "rust": "G3Attribution"
+    },
+    {
+      "id": "G4",
+      "obligation": "native resource and risk admission",
+      "predecessor": "G3",
+      "rust": "G4Resources"
+    },
+    {
+      "id": "G5",
+      "obligation": "Robust Snap certificate when S0 is claimed",
+      "predecessor": "G4",
+      "rust": "G5RobustSnap"
+    },
+    {
+      "id": "G6",
+      "obligation": "V2 effect, verifier, approval-grant, and transaction shield",
+      "predecessor": "G5",
+      "rust": "G6SafetyShield"
+    },
+    {
+      "id": "G7",
+      "obligation": "candidate-versus-baseline performance gate",
+      "predecessor": "G6",
+      "rust": "G7Performance"
+    },
+    {
+      "id": "G8",
+      "obligation": "closed publication or complete restoration state",
+      "predecessor": "G7",
+      "rust": "G8TransactionClosure"
+    },
+    {
+      "id": "G9",
+      "obligation": "receipt-chain and successor-root commitment",
+      "predecessor": "G8",
+      "rust": "G9ReceiptCommitment"
+    }
+  ],
+  "invariants": {
+    "approval_required_effects": "require_matching_validated_grant_commitment",
+    "controller": "finite_linear_no_jump_recursion_timer_watcher_or_self_schedule",
+    "early_irreversible_effects": "require_matching_pre_action_evidence",
+    "early_visible_bytes": "rejected_and_private_until_publish",
+    "execution_without_permit": "unrepresentable_by_public_API",
+    "fallback_accounting": "attempted_equals_completed_plus_debt_and_promotable_debt_is_zero",
+    "semantic_authority": "owner_scoped_workers_zero_stack_aggregate_authority"
+  },
+  "linear_capabilities": [
+    "ExecutionPermit",
+    "BrokeredExecution",
+    "ReadyToFinalize",
+    "CommitReceipt"
+  ],
+  "model_version": "zerostack.two-phase-gate.v1",
+  "phase_contract": {
+    "close": {
+      "guard": "G8",
+      "input": "TransactionClosure",
+      "output": "ReadyToFinalize"
+    },
+    "execute": {
+      "input": "ExecutionPermit",
+      "output": "BrokeredExecution",
+      "private_sinks": [
+        "buffered_visible",
+        "staged_effects"
+      ],
+      "unbounded_control": false
+    },
+    "finalize": {
+      "guard": "G9",
+      "output": [
+        "CommitReceipt",
+        "FallbackReceipt"
+      ],
+      "publish_capability": "CommitReceipt::publish"
+    },
+    "prepare": {
+      "guards": [
+        "G0",
+        "G1",
+        "G2",
+        "G3",
+        "G4",
+        "G5",
+        "G6",
+        "G7"
+      ],
+      "input": "PrepareRequest",
+      "output": "ExecutionPermit"
+    }
+  },
+  "platform_profiles": {
+    "linux_arm64": {
+      "archived_old_source_receipt": "conformance/models/two-phase-gate-v1-native-linux-receipt-1.json",
+      "archived_superseded_receipt": "conformance/models/two-phase-gate-v1-native-linux-receipt-2.json",
+      "native_evidence": true,
+      "receipt": "conformance/models/two-phase-gate-v1-native-linux-receipt-3.json",
+      "status": "PASSED_NATIVE"
+    },
+    "macos_arm64": {
+      "archived_old_source_receipt": "conformance/models/two-phase-gate-v1-native-macos-receipt-1.json",
+      "archived_superseded_receipt": "conformance/models/two-phase-gate-v1-native-macos-receipt-2.json",
+      "native_evidence": true,
+      "receipt": "conformance/models/two-phase-gate-v1-native-macos-receipt-3.json",
+      "status": "PASSED_NATIVE"
+    },
+    "windows_amd64": {
+      "native_evidence": false,
+      "status": "NOT_RUN"
+    }
+  },
+  "receipt_bindings": [
+    "schema_version",
+    "kind",
+    "permit_id",
+    "binding_digest",
+    "admission_digest",
+    "assembly_manifest_digest",
+    "source_tree_digest",
+    "source_repository_heads",
+    "image_digest",
+    "plan_digest",
+    "comparison_identity_digest",
+    "surface",
+    "verification_digest",
+    "output_digest",
+    "effects_digest",
+    "resource_usage",
+    "predecessor_receipt_head",
+    "successor_root",
+    "trace_digest",
+    "receipt_head",
+    "failure_code",
+    "restoration"
+  ],
+  "required_types": [
+    "ExecutionPermit",
+    "ExecutionTrace",
+    "CommitReceipt",
+    "FallbackReceipt",
+    "TransactionClosure"
+  ],
+  "residual_assumptions": [
+    "worker implementations refine owner-scoped contracts",
+    "operating-system resource enforcement is external",
+    "Z4 final closure awaits the preregistered Windows receipt"
+  ],
+  "resource_bounds": [
+    "fuel",
+    "deadline_ms",
+    "io_bytes",
+    "output_bytes",
+    "memory_bytes",
+    "processes",
+    "risk_units",
+    "worker_steps"
+  ],
+  "schema_version": 1,
+  "source_repository_heads": {
+    "ZeroStack": "87c8ef5df0699b6345e4a829876b3f086f9c3ae5"
+  },
+  "typed_mutants": {
+    "bound_exceeded": "bound_exceeded",
+    "early_visible_byte": "early_visible_byte",
+    "execute_without_permit": "execute_without_permit",
+    "forged_permit": "forged_permit",
+    "forged_predecessor": "forged_predecessor",
+    "forged_receipt": "forged_receipt",
+    "incomplete_trace": "incomplete_trace",
+    "irreversible_pre_evidence_effect": "irreversible_pre_evidence_effect",
+    "missing_approval_grant": "missing_approval_grant",
+    "plan_step_mismatch": "plan_step_mismatch",
+    "semantic_cut_crossing": "semantic_cut_crossing",
+    "skipped_g8": "incomplete_trace",
+    "unaccounted_fallback": "unaccounted_fallback",
+    "unbounded_worker": "unbounded_worker"
+  }
+}

@@ -1,0 +1,249 @@
+{
+  "archived_old_source_native_receipts": {
+    "linux_arm64": {
+      "receipt": "conformance/models/two-phase-gate-v1-native-linux-receipt-1.json",
+      "receipt_sha256": "36adc3775c4faa617975996ab017b235e6c82de966d52f8f628036909b3add57",
+      "source_tree_digest": "78bc1eea14727efeda39b7eba45b23cddd1c1ffd24b69ab59264bfcd9ec264de"
+    },
+    "macos_arm64": {
+      "receipt": "conformance/models/two-phase-gate-v1-native-macos-receipt-1.json",
+      "receipt_sha256": "9de6c193be5f9658bfac194fdf8e9bc3a26e42a6b7bc97c884cab69971f70c65",
+      "source_tree_digest": "78bc1eea14727efeda39b7eba45b23cddd1c1ffd24b69ab59264bfcd9ec264de"
+    }
+  },
+  "archived_superseded_source_native_receipts": {
+    "linux_arm64": {
+      "receipt": "conformance/models/two-phase-gate-v1-native-linux-receipt-2.json",
+      "receipt_sha256": "6c407b78ab4972f0915e8c24a07ebba26bcdd44f9243f391c0e44b9b3d65541d",
+      "source_tree_digest": "42bc68d460a0bf19ca3871e48f4eb8510d7260ceb66110047e994bd5dca6b86d"
+    },
+    "macos_arm64": {
+      "receipt": "conformance/models/two-phase-gate-v1-native-macos-receipt-2.json",
+      "receipt_sha256": "99d82a1ae19e784aec4d3e6cd9a737730b4d8fb21e8165834e8716047f599bb5",
+      "source_tree_digest": "42bc68d460a0bf19ca3871e48f4eb8510d7260ceb66110047e994bd5dca6b86d"
+    }
+  },
+  "assembly_manifest_digest": "6312a10ac50df63e315ae3f271c4a520665dc5c8bbf57484df523412101ceba8",
+  "authority_binding": {
+    "alias": "AF5_TWO_PHASE_KERNEL",
+    "authority_hash": "dc6a8262b0cae49c3aed38f08ce13fb1d6c80acc90c7f05fdff21558243c73af",
+    "freeze_id": "Z5",
+    "kind": "freeze"
+  },
+  "bead_key": "zerostack-3btw",
+  "claim_or_freeze_ids": [
+    "Z5",
+    "zerostack-racc-frontier-86qk.20"
+  ],
+  "completed_at": "2026-08-04T13:42:33Z",
+  "exact_commands": [
+    "rch exec -- env CARGO_TARGET_DIR=/tmp/rch_target_zerostack_z5 cargo test -p zero-gate state_machine -- --test-threads=1",
+    "rch exec -- env CARGO_TARGET_DIR=/tmp/rch_target_zerostack_z5 cargo test -p zero-testkit aggregate_broker_gate -- --test-threads=1",
+    "rch exec -- env CARGO_TARGET_DIR=/tmp/rch_target_zerostack_z5_conformance cargo test --manifest-path conformance/Cargo.toml --test two_phase_gate -- --test-threads=1",
+    "python3 crates/zero-testkit/conformance/two-phase-gate/v1/runners/python/verify_v1.py crates/zero-testkit/conformance/two-phase-gate/v1",
+    "dsr --json --non-interactive build --repo zerostack-z5 --version z5-87c8ef5d-20260804t1350z --target darwin/arm64 --allow-dirty",
+    "dsr --json --non-interactive build --repo zerostack-z5 --version z5-87c8ef5d-20260804t1350z --target linux/arm64 --allow-dirty"
+  ],
+  "failure_code": "NATIVE_WINDOWS_NOT_RUN",
+  "immutability": {
+    "policy": "corrections create successor receipts; promoted native receipts are never mutated",
+    "sidecar_hashes_raw_receipt_bytes": true
+  },
+  "input_fixture_hashes": {
+    "conformance/authority/sources/round8-executable-freezes.json": "e5101ed9aaf05b7029e3c1e66107df35a125721be7b844867cd772fcda2e07a9",
+    "crates/zero-testkit/conformance/two-phase-gate/v1/index.json": "f5ed0f671d771662864499e4ece43ab59a9177cc50c9f6784dd8b439ab9bea9c",
+    "crates/zero-testkit/conformance/two-phase-gate/v1/runners/python/verify_v1.py": "e0ac7225af940485d5bab04f892ccb7fbb1bada26db16a6b7c77cec6d30cc720",
+    "crates/zero-testkit/conformance/two-phase-gate/v1/schema.json": "04f2abdca3342c18398eee6aa052ab25defe23c4c6f99eb1c27b766bc03614a3",
+    "crates/zero-testkit/conformance/two-phase-gate/v1/vectors.json": "b8bdb462a4a1ed68d24860de74cfa0179b8970b9b3e847dbabee7eb5f3613919"
+  },
+  "model_or_spec_version": "zerostack.two-phase-gate.v1",
+  "mutants_run": {
+    "buffer_overflow": {
+      "failure_code": "BUFFER_OVERFLOW",
+      "promotable": false,
+      "status": "FALLBACK_ONLY"
+    },
+    "early_visible_byte": {
+      "failure_code": "EARLY_VISIBLE_BYTE",
+      "promotable": false,
+      "status": "REJECTED_TYPED"
+    },
+    "execute_without_permit": {
+      "failure_code": "EXECUTE_WITHOUT_PERMIT",
+      "promotable": false,
+      "status": "REJECTED_TYPED"
+    },
+    "forged_permit": {
+      "failure_code": "FORGED_PERMIT",
+      "promotable": false,
+      "status": "REJECTED_TYPED"
+    },
+    "forged_predecessor": {
+      "failure_code": "FORGED_PREDECESSOR",
+      "promotable": false,
+      "status": "REJECTED_TYPED"
+    },
+    "forged_receipt": {
+      "failure_code": "FORGED_RECEIPT",
+      "promotable": false,
+      "status": "REJECTED_TYPED"
+    },
+    "incomplete_trace": {
+      "failure_code": "INCOMPLETE_TRACE",
+      "promotable": false,
+      "status": "REJECTED_TYPED"
+    },
+    "irreversible_pre_evidence_effect": {
+      "failure_code": "IRREVERSIBLE_PRE_EVIDENCE_EFFECT",
+      "promotable": false,
+      "status": "REJECTED_TYPED"
+    },
+    "missing_approval_grant": {
+      "failure_code": "MISSING_APPROVAL_GRANT",
+      "promotable": false,
+      "status": "REJECTED_TYPED"
+    },
+    "missing_predecessor_binding": {
+      "failure_code": "MISSING_BINDING",
+      "promotable": false,
+      "status": "REJECTED_TYPED"
+    },
+    "semantic_cut_crossing": {
+      "failure_code": "SEMANTIC_CUT_CROSSING",
+      "promotable": false,
+      "status": "REJECTED_TYPED"
+    },
+    "skipped_g8": {
+      "failure_code": "INCOMPLETE_TRACE",
+      "promotable": false,
+      "status": "REJECTED_TYPED"
+    },
+    "unaccounted_fallback": {
+      "failure_code": "UNACCOUNTED_FALLBACK",
+      "promotable": false,
+      "status": "REJECTED_TYPED"
+    },
+    "unbounded_worker": {
+      "failure_code": "UNBOUNDED_WORKER",
+      "promotable": false,
+      "status": "REJECTED_TYPED"
+    }
+  },
+  "output_artifact_hashes": {
+    "conformance/models/two-phase-gate-rust-correspondence-v1.md": "8a8db61a0c2de7f76f45917e8e1518f51a41a75a4e2f0b9346f60a052438bb07",
+    "conformance/models/two-phase-gate-v1-native-linux-receipt-1.json": "36adc3775c4faa617975996ab017b235e6c82de966d52f8f628036909b3add57",
+    "conformance/models/two-phase-gate-v1-native-linux-receipt-2.json": "6c407b78ab4972f0915e8c24a07ebba26bcdd44f9243f391c0e44b9b3d65541d",
+    "conformance/models/two-phase-gate-v1-native-linux-receipt-3.json": "2008e4761c3585d424480a8d26cc3c4ca855934eba6f4a6061fe205d2f1d82d5",
+    "conformance/models/two-phase-gate-v1-native-macos-receipt-1.json": "9de6c193be5f9658bfac194fdf8e9bc3a26e42a6b7bc97c884cab69971f70c65",
+    "conformance/models/two-phase-gate-v1-native-macos-receipt-2.json": "99d82a1ae19e784aec4d3e6cd9a737730b4d8fb21e8165834e8716047f599bb5",
+    "conformance/models/two-phase-gate-v1-native-macos-receipt-3.json": "422c6d2bb87b6c53fec9925db13516d013e68dc154f5f475f5bfd87edf544fc7",
+    "conformance/models/two-phase-gate-v1.json": "a5c3baef0a79f3e265388b853651a8ada9740ba0924a22d3399dd67ab7a84e1f",
+    "conformance/schemas/two-phase-gate-v1.schema.json": "ccc8bec3599fcbe596545d88f50386e57963f94a3465c15813ac5a8fe72a63fe",
+    "conformance/src/racc.rs": "26bdab8928e13ca22beaa58e4750eff867b134593de2712042523b8d305d9777",
+    "conformance/tests/two_phase_gate.rs": "9c31945df953f2bcf10b78a0572b98ee38626da6499757aec836b4772a75b57e",
+    "crates/zero-gate/Cargo.toml": "dab4358082f58084829c55f073740261a28410a6725b731ba5942a5860fcd38f",
+    "crates/zero-gate/src/lib.rs": "32e769e26c1d1c6cc03b1aca0cd308802ac17513a834d82930767ae7e4f7e77b",
+    "crates/zero-gate/src/two_phase.rs": "0bea0ec705e049b1d9a4f26050edf0becc19c2479679c61a19ce1053e294a237",
+    "crates/zero-testkit/Cargo.toml": "0162419cdab2c05f6c5e2c35905d07c7a889362c13df151a7ab5c3d5163ca11e",
+    "crates/zero-testkit/conformance/two-phase-gate/v1/index.json": "f5ed0f671d771662864499e4ece43ab59a9177cc50c9f6784dd8b439ab9bea9c",
+    "crates/zero-testkit/conformance/two-phase-gate/v1/runners/python/verify_v1.py": "e0ac7225af940485d5bab04f892ccb7fbb1bada26db16a6b7c77cec6d30cc720",
+    "crates/zero-testkit/conformance/two-phase-gate/v1/schema.json": "04f2abdca3342c18398eee6aa052ab25defe23c4c6f99eb1c27b766bc03614a3",
+    "crates/zero-testkit/conformance/two-phase-gate/v1/vectors.json": "b8bdb462a4a1ed68d24860de74cfa0179b8970b9b3e847dbabee7eb5f3613919",
+    "crates/zero-testkit/examples/native_broker_boundary.rs": "9136b7805b5920635463d71a3157c6eaeaa77464ae8e0fa6c53405f7476d17b7",
+    "crates/zero-testkit/src/aggregate_broker_gate.rs": "9e468b875b9491711032af8f5ee1f99df133cf40b22ee2af2718a6bd54be56ea",
+    "crates/zero-testkit/src/lib.rs": "18c5f88f8c14d7d8f4c80eaf4a634fc5baa7fffffef0ab523d6da29605c47d48"
+  },
+  "platform_profile": {
+    "linux_arm64": {
+      "native_evidence": true,
+      "receipt": "conformance/models/two-phase-gate-v1-native-linux-receipt-3.json",
+      "receipt_sha256": "2008e4761c3585d424480a8d26cc3c4ca855934eba6f4a6061fe205d2f1d82d5",
+      "status": "PASSED_NATIVE"
+    },
+    "macos_arm64": {
+      "native_evidence": true,
+      "receipt": "conformance/models/two-phase-gate-v1-native-macos-receipt-3.json",
+      "receipt_sha256": "422c6d2bb87b6c53fec9925db13516d013e68dc154f5f475f5bfd87edf544fc7",
+      "status": "PASSED_NATIVE"
+    },
+    "windows_amd64": {
+      "attempted_at": null,
+      "native_evidence": false,
+      "reason": "Operator requested completion without Windows verification; no pass is inferred.",
+      "reason_code": "OPERATOR_EXCLUDED_WINDOWS_THIS_PASS",
+      "recorded_at": "2026-08-04T13:42:33Z",
+      "status": "NOT_RUN"
+    }
+  },
+  "residual_assumptions": [
+    "the test-only child process refines the broker boundary but is not a production engine worker",
+    "operating-system hard resource enforcement remains external",
+    "final Z5 closure remains dependency-blocked until Z4 Windows evidence closes",
+    "no Windows native behavior is inferred from macOS, Linux, RCH, or KAT evidence"
+  ],
+  "result": {
+    "final_z5_acceptance": false,
+    "implementation_complete": true,
+    "macos_linux_native_complete": true,
+    "promotable": false,
+    "status": "PARTIAL",
+    "windows_native_complete": false
+  },
+  "schema_version": 1,
+  "source_repository_heads": {
+    "ZeroStack": "87c8ef5df0699b6345e4a829876b3f086f9c3ae5"
+  },
+  "source_tree_digest": "21466625410742aaae85a7210dee4d5725e9279245f5b08ae71f694c6830d84c",
+  "started_at": "2026-08-04T12:43:11Z",
+  "task_specific_results": {
+    "compatibility": {
+      "legacy_publication_bypass": false,
+      "policy_only_legacy_api_retained": true
+    },
+    "cross_language_kat": {
+      "engines": [
+        "rust",
+        "python"
+      ],
+      "native_evidence_inferred": false,
+      "status": "passed"
+    },
+    "native_broker_boundary": {
+      "linux_arm64": "passed_native",
+      "macos_arm64": "passed_native",
+      "windows_amd64": "NOT_RUN"
+    },
+    "state_machine": {
+      "admission_inputs_hash_bound": true,
+      "approval_grant_hash_bound": true,
+      "finalize_guards": 2,
+      "guards": 10,
+      "linear_capabilities": true,
+      "prepare_guards": 8,
+      "receipt_integrity_validation": true,
+      "status": "passed"
+    }
+  },
+  "toolchain_identities": {
+    "dsr": {
+      "version": "0.1.2"
+    },
+    "linux_native_rustc": {
+      "tool": "rustc",
+      "verbose_version": "rustc 1.97.1 (8bab26f4f 2026-07-14)\nbinary: rustc\ncommit-hash: 8bab26f4f68e0e26f0bb7960be334d5b520ea452\ncommit-date: 2026-07-14\nhost: aarch64-unknown-linux-gnu\nrelease: 1.97.1\nLLVM version: 22.1.6\n"
+    },
+    "macos_native_rustc": {
+      "tool": "rustc",
+      "verbose_version": "rustc 1.97.1 (8bab26f4f 2026-07-14)\nbinary: rustc\ncommit-hash: 8bab26f4f68e0e26f0bb7960be334d5b520ea452\ncommit-date: 2026-07-14\nhost: aarch64-apple-darwin\nrelease: 1.97.1\nLLVM version: 22.1.6\n"
+    },
+    "python": {
+      "version": "3.14.6"
+    },
+    "rch_rustc": {
+      "commit_hash": "8bab26f4f68e0e26f0bb7960be334d5b520ea452",
+      "host": "aarch64-apple-darwin",
+      "llvm": "22.1.6",
+      "version": "1.97.1"
+    }
+  }
+}

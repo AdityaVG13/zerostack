@@ -1,8 +1,9 @@
 #![forbid(unsafe_code)]
 
-//! Pure, synchronous proof-carrying decision gate.
+//! Pure proof-carrying policy and two-phase execution gate.
 //!
-//! Commits and passing task receipts are privacy-preserving linear capabilities.
+//! Passing task receipts and two-phase permits are privacy-preserving linear capabilities.
+//! Candidate bytes and staged effects are released only by `CommitReceipt::publish` after G8/G9.
 //!
 //! A sandbox attempt cannot commit without a passing receipt:
 //! ~~~compile_fail
@@ -18,6 +19,9 @@ use serde::{Deserialize, Serialize};
 use std::fmt;
 use zero_abi::raw_worker::EffectClass;
 use zero_cert::{CommandId, VerifiedEvidence};
+
+pub mod two_phase;
+pub use two_phase::*;
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct NextBudget {
@@ -44,15 +48,6 @@ pub struct PolicySufficiencyWitness<'certificate, 'payload> {
 impl<'certificate, 'payload> PolicySufficiencyWitness<'certificate, 'payload> {
     pub fn evidence(&self) -> &VerifiedEvidence<'certificate, 'payload> {
         &self.evidence
-    }
-    pub fn commit<'commit>(
-        self,
-        payload: &'commit [u8],
-    ) -> CompressedCommit<'certificate, 'payload, 'commit> {
-        CompressedCommit {
-            proof: CommitProof::Certified(self),
-            payload,
-        }
     }
 }
 
@@ -379,61 +374,6 @@ pub enum DecisionGate<'certificate, 'payload> {
     RawFallback,
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum GateCommitError {
-    MissingPassingReceipt,
-}
-impl<'certificate, 'payload> DecisionGate<'certificate, 'payload> {
-    pub fn commit<'commit>(
-        self,
-        payload: &'commit [u8],
-    ) -> Result<CompressedCommit<'certificate, 'payload, 'commit>, GateCommitError> {
-        match self {
-            Self::Certified(witness) => Ok(CompressedCommit {
-                proof: CommitProof::Certified(witness),
-                payload,
-            }),
-            Self::TaskVerified(receipt) => Ok(CompressedCommit {
-                proof: CommitProof::TaskVerified(receipt),
-                payload,
-            }),
-            Self::Expand(_) | Self::RawFallback => Err(GateCommitError::MissingPassingReceipt),
-        }
-    }
-}
-
-#[derive(Debug)]
-enum CommitProof<'certificate, 'payload> {
-    Certified(PolicySufficiencyWitness<'certificate, 'payload>),
-    TaskVerified(TaskAcceptanceReceipt),
-}
-
-#[derive(Debug)]
-pub struct CompressedCommit<'certificate, 'payload, 'commit> {
-    proof: CommitProof<'certificate, 'payload>,
-    payload: &'commit [u8],
-}
-impl CompressedCommit<'_, '_, '_> {
-    pub fn payload(&self) -> &[u8] {
-        self.payload
-    }
-    pub fn is_task_verified(&self) -> bool {
-        matches!(self.proof, CommitProof::TaskVerified(_))
-    }
-    pub fn task_id(&self) -> Option<u64> {
-        match &self.proof {
-            CommitProof::TaskVerified(r) => Some(r.task_id()),
-            CommitProof::Certified(_) => None,
-        }
-    }
-    pub fn evidence(&self) -> Option<&VerifiedEvidence<'_, '_>> {
-        match &self.proof {
-            CommitProof::Certified(w) => Some(&w.evidence),
-            CommitProof::TaskVerified(_) => None,
-        }
-    }
-}
-
 #[derive(Debug)]
 pub struct GateInput<'certificate, 'payload> {
     pub effect_class: EffectClass,
@@ -718,9 +658,10 @@ mod tests {
             task_receipt: Some(verified.into_receipt()),
         };
         let (_, gate) = decide(GateState::new(4).unwrap(), gate_input).unwrap();
-        let commit = gate.commit(b"accepted").unwrap();
-        assert!(commit.is_task_verified());
-        assert_eq!(commit.task_id(), Some(7));
+        let DecisionGate::TaskVerified(receipt) = gate else {
+            panic!("expected task receipt")
+        };
+        assert_eq!(receipt.task_id(), 7);
     }
 
     #[test]

@@ -1,0 +1,67 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "assembly_manifest_digest": {
+      "pattern": "^[0-9a-f]{64}$",
+      "type": "string"
+    },
+    "expected_guard_order": {
+      "items": {
+        "type": "string"
+      },
+      "maxItems": 10,
+      "minItems": 10,
+      "type": "array",
+      "uniqueItems": true
+    },
+    "schema_version": {
+      "const": 1
+    },
+    "source_repository_heads": {
+      "additionalProperties": {
+        "pattern": "^[0-9a-f]{40,64}$",
+        "type": "string"
+      },
+      "minProperties": 1,
+      "type": "object"
+    },
+    "surfaces": {
+      "const": [
+        "mcp",
+        "cli",
+        "claude_code",
+        "pi"
+      ]
+    },
+    "trace_cases": {
+      "items": {
+        "type": "object"
+      },
+      "minItems": 12,
+      "type": "array"
+    },
+    "typed_mutants": {
+      "additionalProperties": {
+        "type": "string"
+      },
+      "minProperties": 8,
+      "type": "object"
+    },
+    "vector_set": {
+      "const": "zerostack.two-phase-gate-kat.v1"
+    }
+  },
+  "required": [
+    "schema_version",
+    "vector_set",
+    "assembly_manifest_digest",
+    "source_repository_heads",
+    "expected_guard_order",
+    "surfaces",
+    "trace_cases",
+    "typed_mutants"
+  ],
+  "title": "ZeroStack two-phase gate KAT vectors v1",
+  "type": "object"
+}

@@ -10,6 +10,7 @@ autoexamples = false
 serde.workspace = true
 serde_json.workspace = true
 zero-abi = { path = "../zero-abi" }
+zero-gate = { path = "../zero-gate" }
 zero-ledger = { path = "../zero-ledger" }
 zero-store = { path = "../zero-store" }
 
@@ -19,3 +20,7 @@ tempfile = "3"
 [[bin]]
 name = "z4-native-counter"
 path = "examples/native_counter_correspondence.rs"
+
+[[bin]]
+name = "z5-native-broker"
+path = "examples/native_broker_boundary.rs"

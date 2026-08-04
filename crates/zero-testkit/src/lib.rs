@@ -17,6 +17,7 @@
 
 #![forbid(unsafe_code)]
 
+pub mod aggregate_broker_gate;
 pub mod assembly_kat;
 pub mod authority;
 pub mod invalidation_contract;

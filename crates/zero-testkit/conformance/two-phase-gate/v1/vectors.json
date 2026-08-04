@@ -1,0 +1,758 @@
+{
+  "assembly_manifest_digest": "6312a10ac50df63e315ae3f271c4a520665dc5c8bbf57484df523412101ceba8",
+  "expected_guard_order": [
+    "g0_canonical",
+    "g1_coherence",
+    "g2_finite_plan",
+    "g3_attribution",
+    "g4_resources",
+    "g5_robust_snap",
+    "g6_safety_shield",
+    "g7_performance",
+    "g8_transaction_closure",
+    "g9_receipt_commitment"
+  ],
+  "schema_version": 1,
+  "source_repository_heads": {
+    "ZeroStack": "87c8ef5df0699b6345e4a829876b3f086f9c3ae5"
+  },
+  "surfaces": [
+    "mcp",
+    "cli",
+    "claude_code",
+    "pi"
+  ],
+  "trace_cases": [
+    {
+      "case_id": "complete-g0-g9",
+      "expected_failure_code": null,
+      "expected_status": "passed",
+      "trace": {
+        "buffered_visible_bytes": 15,
+        "events": [
+          {
+            "guard": "g0_canonical",
+            "predecessor": null,
+            "status": "passed"
+          },
+          {
+            "guard": "g1_coherence",
+            "predecessor": "g0_canonical",
+            "status": "passed"
+          },
+          {
+            "guard": "g2_finite_plan",
+            "predecessor": "g1_coherence",
+            "status": "passed"
+          },
+          {
+            "guard": "g3_attribution",
+            "predecessor": "g2_finite_plan",
+            "status": "passed"
+          },
+          {
+            "guard": "g4_resources",
+            "predecessor": "g3_attribution",
+            "status": "passed"
+          },
+          {
+            "guard": "g5_robust_snap",
+            "predecessor": "g4_resources",
+            "status": "passed"
+          },
+          {
+            "guard": "g6_safety_shield",
+            "predecessor": "g5_robust_snap",
+            "status": "passed"
+          },
+          {
+            "guard": "g7_performance",
+            "predecessor": "g6_safety_shield",
+            "status": "passed"
+          },
+          {
+            "guard": "g8_transaction_closure",
+            "predecessor": "g7_performance",
+            "status": "passed"
+          },
+          {
+            "guard": "g9_receipt_commitment",
+            "predecessor": "g8_transaction_closure",
+            "status": "passed"
+          }
+        ],
+        "executed_instructions": 5,
+        "execution_failure": null,
+        "staged_effects": 1,
+        "worker_steps": 1
+      }
+    },
+    {
+      "case_id": "omit-g0_canonical",
+      "expected_failure_code": "incomplete_trace",
+      "expected_status": "rejected",
+      "trace": {
+        "buffered_visible_bytes": 15,
+        "events": [
+          {
+            "guard": "g1_coherence",
+            "predecessor": "g0_canonical",
+            "status": "passed"
+          },
+          {
+            "guard": "g2_finite_plan",
+            "predecessor": "g1_coherence",
+            "status": "passed"
+          },
+          {
+            "guard": "g3_attribution",
+            "predecessor": "g2_finite_plan",
+            "status": "passed"
+          },
+          {
+            "guard": "g4_resources",
+            "predecessor": "g3_attribution",
+            "status": "passed"
+          },
+          {
+            "guard": "g5_robust_snap",
+            "predecessor": "g4_resources",
+            "status": "passed"
+          },
+          {
+            "guard": "g6_safety_shield",
+            "predecessor": "g5_robust_snap",
+            "status": "passed"
+          },
+          {
+            "guard": "g7_performance",
+            "predecessor": "g6_safety_shield",
+            "status": "passed"
+          },
+          {
+            "guard": "g8_transaction_closure",
+            "predecessor": "g7_performance",
+            "status": "passed"
+          },
+          {
+            "guard": "g9_receipt_commitment",
+            "predecessor": "g8_transaction_closure",
+            "status": "passed"
+          }
+        ],
+        "executed_instructions": 5,
+        "execution_failure": null,
+        "staged_effects": 1,
+        "worker_steps": 1
+      }
+    },
+    {
+      "case_id": "omit-g1_coherence",
+      "expected_failure_code": "incomplete_trace",
+      "expected_status": "rejected",
+      "trace": {
+        "buffered_visible_bytes": 15,
+        "events": [
+          {
+            "guard": "g0_canonical",
+            "predecessor": null,
+            "status": "passed"
+          },
+          {
+            "guard": "g2_finite_plan",
+            "predecessor": "g1_coherence",
+            "status": "passed"
+          },
+          {
+            "guard": "g3_attribution",
+            "predecessor": "g2_finite_plan",
+            "status": "passed"
+          },
+          {
+            "guard": "g4_resources",
+            "predecessor": "g3_attribution",
+            "status": "passed"
+          },
+          {
+            "guard": "g5_robust_snap",
+            "predecessor": "g4_resources",
+            "status": "passed"
+          },
+          {
+            "guard": "g6_safety_shield",
+            "predecessor": "g5_robust_snap",
+            "status": "passed"
+          },
+          {
+            "guard": "g7_performance",
+            "predecessor": "g6_safety_shield",
+            "status": "passed"
+          },
+          {
+            "guard": "g8_transaction_closure",
+            "predecessor": "g7_performance",
+            "status": "passed"
+          },
+          {
+            "guard": "g9_receipt_commitment",
+            "predecessor": "g8_transaction_closure",
+            "status": "passed"
+          }
+        ],
+        "executed_instructions": 5,
+        "execution_failure": null,
+        "staged_effects": 1,
+        "worker_steps": 1
+      }
+    },
+    {
+      "case_id": "omit-g2_finite_plan",
+      "expected_failure_code": "incomplete_trace",
+      "expected_status": "rejected",
+      "trace": {
+        "buffered_visible_bytes": 15,
+        "events": [
+          {
+            "guard": "g0_canonical",
+            "predecessor": null,
+            "status": "passed"
+          },
+          {
+            "guard": "g1_coherence",
+            "predecessor": "g0_canonical",
+            "status": "passed"
+          },
+          {
+            "guard": "g3_attribution",
+            "predecessor": "g2_finite_plan",
+            "status": "passed"
+          },
+          {
+            "guard": "g4_resources",
+            "predecessor": "g3_attribution",
+            "status": "passed"
+          },
+          {
+            "guard": "g5_robust_snap",
+            "predecessor": "g4_resources",
+            "status": "passed"
+          },
+          {
+            "guard": "g6_safety_shield",
+            "predecessor": "g5_robust_snap",
+            "status": "passed"
+          },
+          {
+            "guard": "g7_performance",
+            "predecessor": "g6_safety_shield",
+            "status": "passed"
+          },
+          {
+            "guard": "g8_transaction_closure",
+            "predecessor": "g7_performance",
+            "status": "passed"
+          },
+          {
+            "guard": "g9_receipt_commitment",
+            "predecessor": "g8_transaction_closure",
+            "status": "passed"
+          }
+        ],
+        "executed_instructions": 5,
+        "execution_failure": null,
+        "staged_effects": 1,
+        "worker_steps": 1
+      }
+    },
+    {
+      "case_id": "omit-g3_attribution",
+      "expected_failure_code": "incomplete_trace",
+      "expected_status": "rejected",
+      "trace": {
+        "buffered_visible_bytes": 15,
+        "events": [
+          {
+            "guard": "g0_canonical",
+            "predecessor": null,
+            "status": "passed"
+          },
+          {
+            "guard": "g1_coherence",
+            "predecessor": "g0_canonical",
+            "status": "passed"
+          },
+          {
+            "guard": "g2_finite_plan",
+            "predecessor": "g1_coherence",
+            "status": "passed"
+          },
+          {
+            "guard": "g4_resources",
+            "predecessor": "g3_attribution",
+            "status": "passed"
+          },
+          {
+            "guard": "g5_robust_snap",
+            "predecessor": "g4_resources",
+            "status": "passed"
+          },
+          {
+            "guard": "g6_safety_shield",
+            "predecessor": "g5_robust_snap",
+            "status": "passed"
+          },
+          {
+            "guard": "g7_performance",
+            "predecessor": "g6_safety_shield",
+            "status": "passed"
+          },
+          {
+            "guard": "g8_transaction_closure",
+            "predecessor": "g7_performance",
+            "status": "passed"
+          },
+          {
+            "guard": "g9_receipt_commitment",
+            "predecessor": "g8_transaction_closure",
+            "status": "passed"
+          }
+        ],
+        "executed_instructions": 5,
+        "execution_failure": null,
+        "staged_effects": 1,
+        "worker_steps": 1
+      }
+    },
+    {
+      "case_id": "omit-g4_resources",
+      "expected_failure_code": "incomplete_trace",
+      "expected_status": "rejected",
+      "trace": {
+        "buffered_visible_bytes": 15,
+        "events": [
+          {
+            "guard": "g0_canonical",
+            "predecessor": null,
+            "status": "passed"
+          },
+          {
+            "guard": "g1_coherence",
+            "predecessor": "g0_canonical",
+            "status": "passed"
+          },
+          {
+            "guard": "g2_finite_plan",
+            "predecessor": "g1_coherence",
+            "status": "passed"
+          },
+          {
+            "guard": "g3_attribution",
+            "predecessor": "g2_finite_plan",
+            "status": "passed"
+          },
+          {
+            "guard": "g5_robust_snap",
+            "predecessor": "g4_resources",
+            "status": "passed"
+          },
+          {
+            "guard": "g6_safety_shield",
+            "predecessor": "g5_robust_snap",
+            "status": "passed"
+          },
+          {
+            "guard": "g7_performance",
+            "predecessor": "g6_safety_shield",
+            "status": "passed"
+          },
+          {
+            "guard": "g8_transaction_closure",
+            "predecessor": "g7_performance",
+            "status": "passed"
+          },
+          {
+            "guard": "g9_receipt_commitment",
+            "predecessor": "g8_transaction_closure",
+            "status": "passed"
+          }
+        ],
+        "executed_instructions": 5,
+        "execution_failure": null,
+        "staged_effects": 1,
+        "worker_steps": 1
+      }
+    },
+    {
+      "case_id": "omit-g5_robust_snap",
+      "expected_failure_code": "incomplete_trace",
+      "expected_status": "rejected",
+      "trace": {
+        "buffered_visible_bytes": 15,
+        "events": [
+          {
+            "guard": "g0_canonical",
+            "predecessor": null,
+            "status": "passed"
+          },
+          {
+            "guard": "g1_coherence",
+            "predecessor": "g0_canonical",
+            "status": "passed"
+          },
+          {
+            "guard": "g2_finite_plan",
+            "predecessor": "g1_coherence",
+            "status": "passed"
+          },
+          {
+            "guard": "g3_attribution",
+            "predecessor": "g2_finite_plan",
+            "status": "passed"
+          },
+          {
+            "guard": "g4_resources",
+            "predecessor": "g3_attribution",
+            "status": "passed"
+          },
+          {
+            "guard": "g6_safety_shield",
+            "predecessor": "g5_robust_snap",
+            "status": "passed"
+          },
+          {
+            "guard": "g7_performance",
+            "predecessor": "g6_safety_shield",
+            "status": "passed"
+          },
+          {
+            "guard": "g8_transaction_closure",
+            "predecessor": "g7_performance",
+            "status": "passed"
+          },
+          {
+            "guard": "g9_receipt_commitment",
+            "predecessor": "g8_transaction_closure",
+            "status": "passed"
+          }
+        ],
+        "executed_instructions": 5,
+        "execution_failure": null,
+        "staged_effects": 1,
+        "worker_steps": 1
+      }
+    },
+    {
+      "case_id": "omit-g6_safety_shield",
+      "expected_failure_code": "incomplete_trace",
+      "expected_status": "rejected",
+      "trace": {
+        "buffered_visible_bytes": 15,
+        "events": [
+          {
+            "guard": "g0_canonical",
+            "predecessor": null,
+            "status": "passed"
+          },
+          {
+            "guard": "g1_coherence",
+            "predecessor": "g0_canonical",
+            "status": "passed"
+          },
+          {
+            "guard": "g2_finite_plan",
+            "predecessor": "g1_coherence",
+            "status": "passed"
+          },
+          {
+            "guard": "g3_attribution",
+            "predecessor": "g2_finite_plan",
+            "status": "passed"
+          },
+          {
+            "guard": "g4_resources",
+            "predecessor": "g3_attribution",
+            "status": "passed"
+          },
+          {
+            "guard": "g5_robust_snap",
+            "predecessor": "g4_resources",
+            "status": "passed"
+          },
+          {
+            "guard": "g7_performance",
+            "predecessor": "g6_safety_shield",
+            "status": "passed"
+          },
+          {
+            "guard": "g8_transaction_closure",
+            "predecessor": "g7_performance",
+            "status": "passed"
+          },
+          {
+            "guard": "g9_receipt_commitment",
+            "predecessor": "g8_transaction_closure",
+            "status": "passed"
+          }
+        ],
+        "executed_instructions": 5,
+        "execution_failure": null,
+        "staged_effects": 1,
+        "worker_steps": 1
+      }
+    },
+    {
+      "case_id": "omit-g7_performance",
+      "expected_failure_code": "incomplete_trace",
+      "expected_status": "rejected",
+      "trace": {
+        "buffered_visible_bytes": 15,
+        "events": [
+          {
+            "guard": "g0_canonical",
+            "predecessor": null,
+            "status": "passed"
+          },
+          {
+            "guard": "g1_coherence",
+            "predecessor": "g0_canonical",
+            "status": "passed"
+          },
+          {
+            "guard": "g2_finite_plan",
+            "predecessor": "g1_coherence",
+            "status": "passed"
+          },
+          {
+            "guard": "g3_attribution",
+            "predecessor": "g2_finite_plan",
+            "status": "passed"
+          },
+          {
+            "guard": "g4_resources",
+            "predecessor": "g3_attribution",
+            "status": "passed"
+          },
+          {
+            "guard": "g5_robust_snap",
+            "predecessor": "g4_resources",
+            "status": "passed"
+          },
+          {
+            "guard": "g6_safety_shield",
+            "predecessor": "g5_robust_snap",
+            "status": "passed"
+          },
+          {
+            "guard": "g8_transaction_closure",
+            "predecessor": "g7_performance",
+            "status": "passed"
+          },
+          {
+            "guard": "g9_receipt_commitment",
+            "predecessor": "g8_transaction_closure",
+            "status": "passed"
+          }
+        ],
+        "executed_instructions": 5,
+        "execution_failure": null,
+        "staged_effects": 1,
+        "worker_steps": 1
+      }
+    },
+    {
+      "case_id": "omit-g8_transaction_closure",
+      "expected_failure_code": "incomplete_trace",
+      "expected_status": "rejected",
+      "trace": {
+        "buffered_visible_bytes": 15,
+        "events": [
+          {
+            "guard": "g0_canonical",
+            "predecessor": null,
+            "status": "passed"
+          },
+          {
+            "guard": "g1_coherence",
+            "predecessor": "g0_canonical",
+            "status": "passed"
+          },
+          {
+            "guard": "g2_finite_plan",
+            "predecessor": "g1_coherence",
+            "status": "passed"
+          },
+          {
+            "guard": "g3_attribution",
+            "predecessor": "g2_finite_plan",
+            "status": "passed"
+          },
+          {
+            "guard": "g4_resources",
+            "predecessor": "g3_attribution",
+            "status": "passed"
+          },
+          {
+            "guard": "g5_robust_snap",
+            "predecessor": "g4_resources",
+            "status": "passed"
+          },
+          {
+            "guard": "g6_safety_shield",
+            "predecessor": "g5_robust_snap",
+            "status": "passed"
+          },
+          {
+            "guard": "g7_performance",
+            "predecessor": "g6_safety_shield",
+            "status": "passed"
+          },
+          {
+            "guard": "g9_receipt_commitment",
+            "predecessor": "g8_transaction_closure",
+            "status": "passed"
+          }
+        ],
+        "executed_instructions": 5,
+        "execution_failure": null,
+        "staged_effects": 1,
+        "worker_steps": 1
+      }
+    },
+    {
+      "case_id": "omit-g9_receipt_commitment",
+      "expected_failure_code": "incomplete_trace",
+      "expected_status": "rejected",
+      "trace": {
+        "buffered_visible_bytes": 15,
+        "events": [
+          {
+            "guard": "g0_canonical",
+            "predecessor": null,
+            "status": "passed"
+          },
+          {
+            "guard": "g1_coherence",
+            "predecessor": "g0_canonical",
+            "status": "passed"
+          },
+          {
+            "guard": "g2_finite_plan",
+            "predecessor": "g1_coherence",
+            "status": "passed"
+          },
+          {
+            "guard": "g3_attribution",
+            "predecessor": "g2_finite_plan",
+            "status": "passed"
+          },
+          {
+            "guard": "g4_resources",
+            "predecessor": "g3_attribution",
+            "status": "passed"
+          },
+          {
+            "guard": "g5_robust_snap",
+            "predecessor": "g4_resources",
+            "status": "passed"
+          },
+          {
+            "guard": "g6_safety_shield",
+            "predecessor": "g5_robust_snap",
+            "status": "passed"
+          },
+          {
+            "guard": "g7_performance",
+            "predecessor": "g6_safety_shield",
+            "status": "passed"
+          },
+          {
+            "guard": "g8_transaction_closure",
+            "predecessor": "g7_performance",
+            "status": "passed"
+          }
+        ],
+        "executed_instructions": 5,
+        "execution_failure": null,
+        "staged_effects": 1,
+        "worker_steps": 1
+      }
+    },
+    {
+      "case_id": "forged-g8-predecessor",
+      "expected_failure_code": "forged_predecessor",
+      "expected_status": "rejected",
+      "trace": {
+        "buffered_visible_bytes": 15,
+        "events": [
+          {
+            "guard": "g0_canonical",
+            "predecessor": null,
+            "status": "passed"
+          },
+          {
+            "guard": "g1_coherence",
+            "predecessor": "g0_canonical",
+            "status": "passed"
+          },
+          {
+            "guard": "g2_finite_plan",
+            "predecessor": "g1_coherence",
+            "status": "passed"
+          },
+          {
+            "guard": "g3_attribution",
+            "predecessor": "g2_finite_plan",
+            "status": "passed"
+          },
+          {
+            "guard": "g4_resources",
+            "predecessor": "g3_attribution",
+            "status": "passed"
+          },
+          {
+            "guard": "g5_robust_snap",
+            "predecessor": "g4_resources",
+            "status": "passed"
+          },
+          {
+            "guard": "g6_safety_shield",
+            "predecessor": "g5_robust_snap",
+            "status": "passed"
+          },
+          {
+            "guard": "g7_performance",
+            "predecessor": "g6_safety_shield",
+            "status": "passed"
+          },
+          {
+            "guard": "g8_transaction_closure",
+            "predecessor": "g6_safety_shield",
+            "status": "passed"
+          },
+          {
+            "guard": "g9_receipt_commitment",
+            "predecessor": "g8_transaction_closure",
+            "status": "passed"
+          }
+        ],
+        "executed_instructions": 5,
+        "execution_failure": null,
+        "staged_effects": 1,
+        "worker_steps": 1
+      }
+    }
+  ],
+  "typed_mutants": {
+    "early_visible_byte": "early_visible_byte",
+    "execute_without_permit": "execute_without_permit",
+    "forged_permit": "forged_permit",
+    "forged_receipt": "forged_receipt",
+    "incomplete_trace": "incomplete_trace",
+    "irreversible_pre_evidence_effect": "irreversible_pre_evidence_effect",
+    "missing_approval_grant": "missing_approval_grant",
+    "semantic_cut_crossing": "semantic_cut_crossing",
+    "unaccounted_fallback": "unaccounted_fallback",
+    "unbounded_worker": "unbounded_worker"
+  },
+  "vector_set": "zerostack.two-phase-gate-kat.v1"
+}
