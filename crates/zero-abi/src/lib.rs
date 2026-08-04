@@ -20,6 +20,7 @@ pub mod digest;
 pub mod dispatch;
 pub mod raw_worker;
 pub mod result;
+pub mod robust_snap;
 pub mod schema;
 pub mod telemetry;
 
@@ -59,6 +60,15 @@ pub use raw_worker::{
 pub use result::{
     ZeroResultAccessError, ZeroResultBuildError, ZeroResultV1, MAX_ACK_CHARS, MAX_PREVIEW_CHARS,
     ZERO_RESULT_V1,
+};
+pub use robust_snap::{
+    robust_snap_contract_digest_v1, robust_snap_contract_manifest_v1,
+    validate_heuristic_world_order, EvidenceDecisionTree, EvidenceLeafV1, EvidenceObservationV1,
+    ProtectedEffectClassV1, ProtectedEffectSet, ProtectedEffectV1, RobustSnapCertificate,
+    RobustSnapErrorV1, RobustSnapFailureCodeV1, SnapLevel, WorldFiberDescriptor,
+    ROBUST_SNAP_CONTRACT_VERSION, ROBUST_SNAP_MAX_ASSUMPTIONS, ROBUST_SNAP_MAX_ASSUMPTION_BYTES,
+    ROBUST_SNAP_MAX_EFFECTS, ROBUST_SNAP_MAX_EVIDENCE_DEPTH, ROBUST_SNAP_MAX_LEAVES,
+    ROBUST_SNAP_MAX_WORLDS, ROBUST_SNAP_MODEL_VERSION,
 };
 pub use schema::{
     canonical_json, canonical_schema_json, normalize_schema, schema_diff, schema_fingerprint_hex,

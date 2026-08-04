@@ -117,6 +117,8 @@ conformance/*
 !conformance/authority/
 !conformance/authority/**
 !conformance/engine-topology-v1.json
+!conformance/models/
+!conformance/models/**
 !conformance/schemas/
 conformance/schemas/*
 !conformance/schemas/engine-topology-v1.schema.json

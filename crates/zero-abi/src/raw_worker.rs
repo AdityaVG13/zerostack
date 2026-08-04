@@ -16,6 +16,9 @@ use crate::{
         ASSEMBLY_MANIFEST_SCHEMA_VERSION,
     },
     digest::contract_digest_hex,
+    robust_snap::{
+        robust_snap_contract_digest_v1, ROBUST_SNAP_CONTRACT_VERSION, ROBUST_SNAP_MODEL_VERSION,
+    },
 };
 
 /// One protocol across FSZero, GraphZero, and TokenZero.
@@ -715,6 +718,9 @@ pub fn raw_worker_protocol_manifest() -> Value {
             "assembly_abi_contract_version": ASSEMBLY_ABI_CONTRACT_VERSION,
             "assembly_manifest_schema_version": ASSEMBLY_MANIFEST_SCHEMA_VERSION,
             "assembly_abi_contract_digest": assembly_abi_contract_digest_v1(),
+                "robust_snap_contract_version": ROBUST_SNAP_CONTRACT_VERSION,
+                "robust_snap_model_version": ROBUST_SNAP_MODEL_VERSION,
+                "robust_snap_contract_digest": robust_snap_contract_digest_v1(),
         },
         "framing": "bounded_ndjson",
         "default_max_frame_bytes": DEFAULT_MAX_FRAME_BYTES,
@@ -954,6 +960,10 @@ mod tests {
             manifest["linked_contracts"]["assembly_manifest_schema_version"],
             ASSEMBLY_MANIFEST_SCHEMA_VERSION
         );
+        assert_eq!(
+            manifest["linked_contracts"]["robust_snap_contract_digest"],
+            robust_snap_contract_digest_v1().to_hex()
+        );
     }
 
     #[test]
@@ -1017,7 +1027,7 @@ mod tests {
         assert_eq!(digest.len(), 64);
         assert_eq!(
             digest,
-            "ccdf310271b1dfdcad7ca0c2140c90331b5e14e180b29b8bd8b4fbf807449b1c"
+            "f4988ffa04c60607e232ffbdbfc965c13e52e09e938280c2dffbc303da87352e"
         );
         assert_eq!(digest, raw_worker_protocol_digest_hex());
     }

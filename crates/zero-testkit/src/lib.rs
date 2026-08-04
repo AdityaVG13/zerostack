@@ -19,6 +19,7 @@
 
 pub mod assembly_kat;
 pub mod authority;
+pub mod robust_snap_model;
 
 use serde::{Deserialize, Serialize};
 use std::fmt;
