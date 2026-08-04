@@ -10,7 +10,13 @@ use std::fmt;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
-use crate::digest::contract_digest_hex;
+use crate::{
+    assembly::{
+        assembly_abi_contract_digest_v1, ASSEMBLY_ABI_CONTRACT_VERSION,
+        ASSEMBLY_MANIFEST_SCHEMA_VERSION,
+    },
+    digest::contract_digest_hex,
+};
 
 /// One protocol across FSZero, GraphZero, and TokenZero.
 pub const RAW_WORKER_PROTOCOL_VERSION: &str = "zerostack.raw_worker.v2";
@@ -705,6 +711,11 @@ pub fn raw_worker_protocol_manifest() -> Value {
 
     json!({
         "protocol_version": RAW_WORKER_PROTOCOL_VERSION,
+        "linked_contracts": {
+            "assembly_abi_contract_version": ASSEMBLY_ABI_CONTRACT_VERSION,
+            "assembly_manifest_schema_version": ASSEMBLY_MANIFEST_SCHEMA_VERSION,
+            "assembly_abi_contract_digest": assembly_abi_contract_digest_v1(),
+        },
         "framing": "bounded_ndjson",
         "default_max_frame_bytes": DEFAULT_MAX_FRAME_BYTES,
         "request_frames": ["handshake", "call", "cancel", "shutdown"],
@@ -935,6 +946,14 @@ mod tests {
             .unwrap()
             .iter()
             .any(|value| value == "parent_span_id"));
+        assert_eq!(
+            manifest["linked_contracts"]["assembly_abi_contract_digest"],
+            assembly_abi_contract_digest_v1().to_hex()
+        );
+        assert_eq!(
+            manifest["linked_contracts"]["assembly_manifest_schema_version"],
+            ASSEMBLY_MANIFEST_SCHEMA_VERSION
+        );
     }
 
     #[test]
@@ -998,7 +1017,7 @@ mod tests {
         assert_eq!(digest.len(), 64);
         assert_eq!(
             digest,
-            "5c887d5b3443ec572b153cbd635b205d3e68f54308a3815d5878b59842e9fd38"
+            "ccdf310271b1dfdcad7ca0c2140c90331b5e14e180b29b8bd8b4fbf807449b1c"
         );
         assert_eq!(digest, raw_worker_protocol_digest_hex());
     }

@@ -13,6 +13,7 @@
 //! Engines wrap these primitives with their own registry types and parity
 //! assertions, so adopting this crate changes no digests and no behavior.
 
+pub mod assembly;
 pub mod cache_entry;
 pub mod capability;
 pub mod digest;
@@ -22,6 +23,15 @@ pub mod result;
 pub mod schema;
 pub mod telemetry;
 
+pub use assembly::{
+    assembly_abi_contract_digest_v1, assembly_abi_contract_manifest_v1,
+    validate_assembly_pre_dispatch_v1, ArtifactOwnerV1, AssemblyExpectationV1,
+    AssemblyFailureCodeV1, AssemblyManifestErrorV1, AssemblyManifestV1, AssemblyPreDispatchErrorV1,
+    DigestParseErrorV1, DigestV1, LinkedArtifactV1, LinkedProfileV1, PlatformIdentityV1,
+    ProfileKindV1, ReceiptSchemaIdentityV1, TargetIdentityV1, VerifierIdentityV1, WorkerIdentityV1,
+    ASSEMBLY_ABI_CONTRACT_VERSION, ASSEMBLY_MANIFEST_DOMAIN_V1, ASSEMBLY_MANIFEST_SCHEMA_VERSION,
+    MAX_ASSEMBLY_ITEMS, MAX_ASSEMBLY_MANIFEST_BYTES, MAX_ASSEMBLY_STRING_BYTES,
+};
 pub use cache_entry::{
     CacheEntryError, CacheEntryV1, CacheKeyV1, CacheRootV1, CacheValueV1, CompletenessWitnessV1,
     OperatorIdentityV1, VerifierReceiptV1, CACHE_ENTRY_SCHEMA_V1,
@@ -40,11 +50,11 @@ pub use dispatch::{
 pub use raw_worker::{
     decode_request_frame, decode_response_frame, encode_frame, raw_worker_protocol_digest_hex,
     raw_worker_protocol_manifest, validate_handshake_request, validate_request_frame,
-    ApprovalMetadata, ApprovalState, CallRequest, CancelRequest, EffectClass, FrameCodecError,
-    HandshakeAck, HandshakeRequest, ProtocolLimits, RefOwnership, RevertMetadata, ShutdownRequest,
-    SnapshotIdentity, WorkerBinding, WorkerCapabilities, WorkerError, WorkerRequestFrame,
-    WorkerResponseFrame, WorkerResult, WorkerResultMetadata, WorkerTrace, DEFAULT_MAX_FRAME_BYTES,
-    RAW_WORKER_PROTOCOL_VERSION,
+    ApprovalMetadata, ApprovalState, CallRequest, CancelRequest, EffectClass, EngineIdentity,
+    FrameCodecError, HandshakeAck, HandshakeRequest, ProtocolLimits, RefOwnership, RevertMetadata,
+    ShutdownRequest, SnapshotIdentity, WorkerBinding, WorkerCapabilities, WorkerError,
+    WorkerRequestFrame, WorkerResponseFrame, WorkerResult, WorkerResultMetadata, WorkerTrace,
+    DEFAULT_MAX_FRAME_BYTES, RAW_WORKER_PROTOCOL_VERSION,
 };
 pub use result::{
     ZeroResultAccessError, ZeroResultBuildError, ZeroResultV1, MAX_ACK_CHARS, MAX_PREVIEW_CHARS,
