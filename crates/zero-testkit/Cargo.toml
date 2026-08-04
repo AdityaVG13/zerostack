@@ -4,12 +4,18 @@ version = "0.1.0"
 edition.workspace = true
 license.workspace = true
 description = "Shared, transport-neutral ZeroStack engine promise suites"
+autoexamples = false
 
 [dependencies]
 serde.workspace = true
 serde_json.workspace = true
 zero-abi = { path = "../zero-abi" }
+zero-ledger = { path = "../zero-ledger" }
 zero-store = { path = "../zero-store" }
 
 [dev-dependencies]
 tempfile = "3"
+
+[[bin]]
+name = "z4-native-counter"
+path = "examples/native_counter_correspondence.rs"

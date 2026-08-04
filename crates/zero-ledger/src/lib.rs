@@ -34,7 +34,19 @@ use std::fmt;
 use serde::de::{self, Deserializer, Visitor};
 use serde::{Deserialize, Serialize, Serializer};
 
+pub mod causal_work;
 pub mod fresh_work;
+
+pub use causal_work::{
+    causal_work_contract_digest_v1, causal_work_contract_manifest_v1, map_legacy_class_v2,
+    CausalClassTotalsV1, CausalCounterUnitV1, CausalWorkChargeV1, CausalWorkClassV1,
+    CausalWorkErrorV1, CausalWorkFailureCodeV1, CausalWorkOutcomeV1, CausalWorkReceiptV1,
+    CounterCorrespondenceReceiptV1, CounterEvidenceModeV1, DeclaredEstimateV1,
+    LegacyChargeClassV2, LegacyClassMappingV1, ParentCounterIdentityV1,
+    ParentCounterObservationV1, ParentCounterWindowV1, ResiduePolicyV1,
+    CAUSAL_WORK_MAX_CHARGES, CAUSAL_WORK_MAX_ID_BYTES, CAUSAL_WORK_RECEIPT_SCHEMA_V1,
+    CAUSAL_WORK_TAXONOMY_VERSION_V1,
+};
 
 pub use fresh_work::{ActionFreshWork, FreshWorkComponent, FreshWorkVector, SessionFreshWork};
 

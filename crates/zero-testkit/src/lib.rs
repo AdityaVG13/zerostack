@@ -20,6 +20,7 @@
 pub mod assembly_kat;
 pub mod authority;
 pub mod robust_snap_model;
+pub mod ledger_conservation;
 
 use serde::{Deserialize, Serialize};
 use std::fmt;
