@@ -26,6 +26,9 @@ fn main() {
         std::thread::sleep(Duration::from_secs(30));
         return;
     }
+    if mode == "spawn-descendant-normal" {
+        spawn_descendant();
+    }
     let stdin = io::stdin();
     let mut stdout = io::stdout().lock();
     let mut pending: Option<CallRequest> = None;

@@ -213,7 +213,24 @@ impl Host {
         connector: Rc<dyn Connector>,
         cancelled: Arc<AtomicBool>,
     ) -> Result<JsonValue, HostError> {
-        quickjs::execute(self, plan, connector, cancelled)
+        quickjs::execute(self, plan, connector, cancelled, self.limits.wall_timeout)
+    }
+
+    #[cfg(feature = "quickjs")]
+    pub fn execute_with_cancel_timeout(
+        &self,
+        plan: &str,
+        connector: Rc<dyn Connector>,
+        cancelled: Arc<AtomicBool>,
+        timeout: Duration,
+    ) -> Result<JsonValue, HostError> {
+        quickjs::execute(
+            self,
+            plan,
+            connector,
+            cancelled,
+            timeout.min(self.limits.wall_timeout),
+        )
     }
 
     #[cfg(not(feature = "quickjs"))]
@@ -342,6 +359,7 @@ mod quickjs {
         plan: &str,
         connector: Rc<dyn Connector>,
         cancelled: Arc<AtomicBool>,
+        wall_timeout: Duration,
     ) -> Result<JsonValue, HostError> {
         let wrapped = wrap_plan(plan, host.limits.max_plan_bytes).map_err(HostError::Plan)?;
         let runtime = Runtime::new().map_err(runtime_error)?;
@@ -349,7 +367,7 @@ mod quickjs {
         runtime.set_memory_limit(host.limits.memory_bytes);
         runtime.set_max_stack_size(host.limits.stack_bytes);
 
-        let deadline = Instant::now() + host.limits.wall_timeout;
+        let deadline = Instant::now() + wall_timeout;
         let fuel = Arc::new(AtomicU64::new(host.limits.instruction_budget));
         let timed_out = Arc::new(AtomicBool::new(false));
         let dispatch_expired = Arc::new(AtomicBool::new(false));

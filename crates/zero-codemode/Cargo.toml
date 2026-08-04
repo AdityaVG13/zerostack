@@ -16,6 +16,16 @@ path = "src/bin/zerostack-codemode-host.rs"
 required-features = ["quickjs"]
 
 [[bin]]
+name = "zerostack-session"
+path = "src/bin/zerostack-session.rs"
+required-features = ["quickjs"]
+
+[[bin]]
+name = "zsx"
+path = "src/bin/zsx.rs"
+required-features = ["quickjs"]
+
+[[bin]]
 name = "zero-codemode-worker-fixture"
 path = "src/bin/worker_fixture.rs"
 required-features = ["worker-fixture"]
@@ -27,6 +37,8 @@ zero-abi = { path = "../zero-abi" }
 zero-store = { path = "../zero-store" }
 rquickjs = { version = "0.12", optional = true, default-features = false, features = ["full", "macro"] }
 command-group = "5.0.1"
+sha2.workspace = true
+zerostack-machine-permit = { path = "../zerostack-machine-permit" }
 
 [dev-dependencies]
 tempfile = "3"
