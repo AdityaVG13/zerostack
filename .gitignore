@@ -113,6 +113,9 @@ benchmarks/
 conformance/
 !conformance/
 conformance/*
+!conformance/CONTRACT.md
+!conformance/authority/
+!conformance/authority/**
 !conformance/engine-topology-v1.json
 !conformance/schemas/
 conformance/schemas/*

@@ -1,0 +1,796 @@
+{
+  "schema": "zerostack.acceptance-freezes.v3",
+  "proof_receipt_required_fields": [
+    "claim_ids",
+    "assembly_manifest_digest",
+    "source_heads",
+    "model_or_spec_version",
+    "toolchain_identities",
+    "commands",
+    "input_fixture_hashes",
+    "output_hashes",
+    "mutants_run",
+    "platform_profile",
+    "result",
+    "residual_assumptions"
+  ],
+  "freezes": [
+    {
+      "id": "Z0",
+      "title": "Provenance and claim authority",
+      "depends_on": [],
+      "owners": [
+        "ZeroStack"
+      ],
+      "required_types_or_artifacts": [
+        "SourceArchiveReceipt",
+        "ToolchainAttestation",
+        "single canonical claim ledger",
+        "LedgerNormalizationReceipt",
+        "independent Rust/Lean command receipts"
+      ],
+      "required_invariants": [
+        "pristine bytes",
+        "generated views only",
+        "no stale attainment wording",
+        "raw archive fields preserved separately from normalized semantics"
+      ],
+      "must_pass": [
+        "131-member hash replay",
+        "pinned Rust and Lean receipts",
+        "AUDIT-11/12 semantic normalization replay",
+        "claim-id/title/claim/status byte preservation"
+      ],
+      "must_fail_mutants": [
+        "polluted extraction accepted",
+        "shifted ledger accepted",
+        "validator mutates checked source",
+        "confidence vocabulary accepted as a Lean target",
+        "mislabelled theorem view overrides canonical ledger"
+      ],
+      "native_evidence": [
+        "none"
+      ],
+      "claim_ids": [
+        "R5-AUDIT-01",
+        "R5-AUDIT-02",
+        "R5-AUDIT-03",
+        "R5-AUDIT-04",
+        "R5-AUDIT-05",
+        "R5-AUDIT-06",
+        "R5-CON-01",
+        "R5-CON-04",
+        "R5-EMP-01",
+        "R5-EMP-02"
+      ],
+      "status": "UNIMPLEMENTED",
+      "af_alias": "AF0_PROVENANCE"
+    },
+    {
+      "id": "Z1",
+      "title": "AssemblyManifest and ZBF",
+      "depends_on": [
+        "Z0"
+      ],
+      "owners": [
+        "ZeroStack"
+      ],
+      "required_types_or_artifacts": [
+        "AssemblyManifestV1",
+        "ZbfHeaderV1",
+        "ZbfObjectV1",
+        "LinkedArtifactV1"
+      ],
+      "required_invariants": [
+        "canonical injective bytes",
+        "bounded strict decode",
+        "all identities pinned",
+        "mismatch rejects before dispatch"
+      ],
+      "must_pass": [
+        "Rust/C/Python vectors",
+        "full round-trip",
+        "all supported platform profiles"
+      ],
+      "must_fail_mutants": [
+        "every header/manifest field mutation",
+        "unknown major",
+        "trailing bytes",
+        "owner/root/worker mismatch"
+      ],
+      "native_evidence": [
+        "native package smoke on macOS/Linux/Windows"
+      ],
+      "claim_ids": [
+        "R5-AUDIT-07",
+        "R5-AUDIT-12",
+        "R5-DEF-01",
+        "R5-DEF-12",
+        "R5-DEF-13",
+        "R5-THM-12",
+        "R5-THM-13",
+        "R5-THM-14",
+        "R5-CE-09",
+        "R5-CE-29",
+        "R5-KNOWN-04",
+        "R5-CON-07",
+        "R5-CON-12"
+      ],
+      "status": "UNIMPLEMENTED",
+      "af_alias": "AF1_ASSEMBLY_ZBF"
+    },
+    {
+      "id": "Z2",
+      "title": "Robust Snap contract",
+      "depends_on": [
+        "Z1"
+      ],
+      "owners": [
+        "ZeroStack",
+        "GraphZero",
+        "FSZero",
+        "TokenZero"
+      ],
+      "required_types_or_artifacts": [
+        "WorldFiberDescriptor",
+        "ProtectedEffectSet",
+        "RobustSnapCertificate",
+        "SnapLevel",
+        "EvidenceDecisionTree"
+      ],
+      "required_invariants": [
+        "S0 iff common protected effect",
+        "S1 leaves all nonempty",
+        "heuristics cannot narrow protected worlds"
+      ],
+      "must_pass": [
+        "model-level Lean characterization over a frozen semantic model",
+        "release correspondence plan with named Rust types and vectors",
+        "finite fibers"
+      ],
+      "must_fail_mutants": [
+        "disjoint worlds",
+        "unsafe randomized support",
+        "expressibility/verifier gap",
+        "restricted-query coloring gap"
+      ],
+      "native_evidence": [
+        "none for abstract theorem; engine receipts for operational use"
+      ],
+      "claim_ids": [
+        "R5-DEF-02",
+        "R5-DEF-03",
+        "R5-DEF-04",
+        "R5-DEF-05",
+        "R5-DEF-06",
+        "R5-THM-01",
+        "R5-THM-02",
+        "R5-THM-03",
+        "R5-THM-04",
+        "R5-CE-01",
+        "R5-CE-02",
+        "R5-CE-03",
+        "R5-CE-04",
+        "R5-DEF-21",
+        "R5-DEF-22",
+        "R5-THM-36",
+        "R5-THM-37",
+        "R5-THM-38",
+        "R5-CE-31"
+      ],
+      "status": "UNIMPLEMENTED",
+      "af_alias": "AF2_ROBUST_SNAP"
+    },
+    {
+      "id": "Z3",
+      "title": "Certified invalidation and freshness",
+      "depends_on": [
+        "Z1"
+      ],
+      "owners": [
+        "ZeroStack",
+        "GraphZero",
+        "FSZero",
+        "TokenZero"
+      ],
+      "required_types_or_artifacts": [
+        "CertifiedInfluenceClosure",
+        "EssentialDependencyCertificate",
+        "IndexedThroughCertificate",
+        "ProducerDomainV1"
+      ],
+      "required_invariants": [
+        "fresh source root",
+        "complete scoped dependencies",
+        "minimal only on proved domains",
+        "unknown otherwise"
+      ],
+      "must_pass": [
+        "finite-DAG model proof over frozen semantics",
+        "release correspondence plan with named GraphZero/FSZero types and vectors",
+        "clean-vs-incremental differential",
+        "exact freshness"
+      ],
+      "must_fail_mutants": [
+        "missing edge",
+        "build config",
+        "generated source",
+        "stale graph",
+        "partial negative knowledge"
+      ],
+      "native_evidence": [
+        "native filesystem/profile freshness fixtures"
+      ],
+      "claim_ids": [
+        "R5-AUDIT-10",
+        "R5-AUDIT-11",
+        "R5-DEF-07",
+        "R5-DEF-08",
+        "R5-DEF-09",
+        "R5-THM-05",
+        "R5-THM-06",
+        "R5-THM-07",
+        "R5-THM-08",
+        "R5-THM-09",
+        "R5-THM-35",
+        "R5-CE-05",
+        "R5-CE-06",
+        "R5-CE-10",
+        "R5-CE-21",
+        "R5-CE-22",
+        "R5-CE-30",
+        "R5-KNOWN-01",
+        "R5-KNOWN-02",
+        "R5-KNOWN-06"
+      ],
+      "status": "UNIMPLEMENTED",
+      "af_alias": "AF3_CERTIFIED_INVALIDATION"
+    },
+    {
+      "id": "Z4",
+      "title": "Complete causal-work accounting",
+      "depends_on": [
+        "Z1"
+      ],
+      "owners": [
+        "ZeroStack",
+        "TokenZero",
+        "all engines"
+      ],
+      "required_types_or_artifacts": [
+        "ChargeClassV3",
+        "ResourceVectorV1",
+        "CausalWorkReceipt",
+        "ResiduePolicy"
+      ],
+      "required_invariants": [
+        "each unit exactly one class",
+        "integer arithmetic",
+        "all paths charged",
+        "residue threshold preregistered"
+      ],
+      "must_pass": [
+        "conservation",
+        "overflow bounds",
+        "adapter counter correspondence"
+      ],
+      "must_fail_mutants": [
+        "unclassified/double charge",
+        "hidden fallback/restoration/prewarm",
+        "concurrent work hidden as residue"
+      ],
+      "native_evidence": [
+        "macOS/Linux/Windows counter adapter receipts"
+      ],
+      "claim_ids": [
+        "R5-THM-10",
+        "R5-THM-11",
+        "R5-THM-16",
+        "R5-THM-33",
+        "R5-CE-07",
+        "R5-CE-08",
+        "R5-CE-20",
+        "R5-CE-23",
+        "R5-KNOWN-05"
+      ],
+      "status": "UNIMPLEMENTED",
+      "af_alias": "AF4_CAUSAL_ACCOUNTING"
+    },
+    {
+      "id": "Z5",
+      "title": "Two-phase G0-G9 kernel",
+      "depends_on": [
+        "Z1",
+        "Z2",
+        "Z4"
+      ],
+      "owners": [
+        "ZeroStack"
+      ],
+      "required_types_or_artifacts": [
+        "ExecutionPermit",
+        "ExecutionTrace",
+        "CommitReceipt",
+        "FallbackReceipt",
+        "TransactionClosure"
+      ],
+      "required_invariants": [
+        "prepare before execution",
+        "dispatch under permit",
+        "finalize from measured facts",
+        "no publish before G8/G9",
+        "fallback chains",
+        "CommitReceipt and FallbackReceipt bind assembly_manifest_digest",
+        "irreversible effects require pre-action verified evidence or rejection"
+      ],
+      "must_pass": [
+        "state-machine correspondence",
+        "dynamic JS envelope",
+        "all surface parity"
+      ],
+      "must_fail_mutants": [
+        "omit each G0-G9",
+        "forged handle",
+        "unbounded worker",
+        "semantic cut crossing",
+        "incomplete trace"
+      ],
+      "native_evidence": [
+        "native process/resource enforcement receipts"
+      ],
+      "claim_ids": [
+        "R5-DEF-10",
+        "R5-DEF-11",
+        "R5-DEF-19",
+        "R5-THM-15",
+        "R5-THM-17",
+        "R5-THM-31",
+        "R5-THM-32",
+        "R5-CE-11",
+        "R5-CE-12",
+        "R5-CE-24",
+        "R5-CON-02",
+        "R5-CON-03",
+        "R5-CON-10",
+        "R5-CON-11"
+      ],
+      "status": "UNIMPLEMENTED",
+      "af_alias": "AF5_TWO_PHASE_KERNEL"
+    },
+    {
+      "id": "Z6",
+      "title": "Durability and profile equivalence",
+      "depends_on": [
+        "Z1",
+        "Z4",
+        "Z5"
+      ],
+      "owners": [
+        "ZeroStack",
+        "FSZero",
+        "GraphZero"
+      ],
+      "required_types_or_artifacts": [
+        "DurableJournalV2",
+        "RootPublicationReceipt",
+        "ContinuationCartridgeV1",
+        "session receipt chain"
+      ],
+      "required_invariants": [
+        "old-or-new complete root",
+        "prepare/commit/abort recoverable",
+        "continuation-complete state",
+        "owner death bounded"
+      ],
+      "must_pass": [
+        "trace equivalence",
+        "recovery oracle",
+        "receipt chain"
+      ],
+      "must_fail_mutants": [
+        "kill every write/fsync/rename point",
+        "omit RNG/reserve/transaction/identity",
+        "orphan owner"
+      ],
+      "native_evidence": [
+        "APFS, ext4, XFS, and NTFS native kill matrices under preregistered platform profiles"
+      ],
+      "claim_ids": [
+        "R5-AUDIT-09",
+        "R5-DEF-14",
+        "R5-THM-18",
+        "R5-THM-19",
+        "R5-THM-20",
+        "R5-THM-21",
+        "R5-THM-22",
+        "R5-CE-18",
+        "R5-CE-19",
+        "R5-CE-26",
+        "R5-CON-08",
+        "R5-EMP-09"
+      ],
+      "status": "UNIMPLEMENTED",
+      "af_alias": "AF6_DURABILITY_RESUMPTION"
+    },
+    {
+      "id": "Z7",
+      "title": "Protected quality, cache truth, and benchmark identity",
+      "depends_on": [
+        "Z1",
+        "Z4",
+        "Z5"
+      ],
+      "owners": [
+        "ZeroStack",
+        "TokenZero",
+        "all engines"
+      ],
+      "required_types_or_artifacts": [
+        "QualityEvidenceMode",
+        "ComparisonIdentityV1",
+        "ProviderCacheReceiptV1",
+        "LockedBenchmarkIdentity",
+        "ParetoVictoryCertificate",
+        "VerifierScopeCertificate"
+      ],
+      "required_invariants": [
+        "quality claim matches evidence mode",
+        "baseline always feasible",
+        "cache statuses distinct",
+        "eligible denominator frozen",
+        "no scalar best-in-class claim",
+        "THM-39/40 envelope claims require a sound candidate-vs-baseline selector or name selector soundness as a residual assumption"
+      ],
+      "must_pass": [
+        "paired same-model tasks",
+        "exact-neutral vectors",
+        "Pareto report",
+        "selector-soundness scope receipt for dual/sequential quality envelopes"
+      ],
+      "must_fail_mutants": [
+        "quality-floor laundering",
+        "token-saving degradation",
+        "eligible cache miss",
+        "cache-ratio gaming",
+        "model identity change"
+      ],
+      "native_evidence": [
+        "preregistered named-hardware benchmark receipts"
+      ],
+      "claim_ids": [
+        "R5-DEF-15",
+        "R5-DEF-16",
+        "R5-DEF-17",
+        "R5-DEF-18",
+        "R5-THM-23",
+        "R5-THM-24",
+        "R5-THM-25",
+        "R5-THM-26",
+        "R5-THM-27",
+        "R5-THM-28",
+        "R5-THM-29",
+        "R5-THM-30",
+        "R5-THM-34",
+        "R5-CE-13",
+        "R5-CE-14",
+        "R5-CE-15",
+        "R5-CE-16",
+        "R5-CE-17",
+        "R5-CE-25",
+        "R5-CE-27",
+        "R5-CE-28",
+        "R5-KNOWN-03",
+        "R5-CON-09",
+        "R5-EMP-03",
+        "R5-EMP-04",
+        "R5-EMP-05",
+        "R5-EMP-06",
+        "R5-EMP-07",
+        "R5-EMP-10",
+        "R5-THM-39",
+        "R5-THM-40",
+        "R5-EMP-13"
+      ],
+      "status": "UNIMPLEMENTED",
+      "af_alias": "AF7_QUALITY_CACHE"
+    },
+    {
+      "id": "Z8",
+      "title": "Formal and release claim promotion",
+      "depends_on": [
+        "Z0",
+        "Z1",
+        "Z2",
+        "Z3",
+        "Z4",
+        "Z5",
+        "Z6",
+        "Z7",
+        "E-FS",
+        "E-GRAPH",
+        "E-TOKEN",
+        "P1",
+        "S1"
+      ],
+      "owners": [
+        "ZeroStack",
+        "all engines"
+      ],
+      "required_types_or_artifacts": [
+        "FormalObligationManifest",
+        "RustModelCorrespondenceReceipt",
+        "NativeReleaseReceipt",
+        "ArchivedVerifierBundle",
+        "VerifierVersionRevalidationReceipt"
+      ],
+      "required_invariants": [
+        "definition != system guarantee != empirical != novelty",
+        "proof hashes immutable",
+        "no green from missing target",
+        "model-level Lean proof never promotes a product claim without a release-current RustModelCorrespondenceReceipt",
+        "old receipts remain re-checkable against their archived verifier version",
+        "promotion is per claim: mapped-freeze success plus a claim-specific Z8 receipt check can promote only that claim; full V3-close promotion requires all 14 executable freezes"
+      ],
+      "must_pass": [
+        "pinned Lean targets",
+        "targeted RCH",
+        "manual native triples",
+        "claim generator",
+        "RustModelCorrespondenceReceipt re-issued per release for every model-level proof",
+        "receipt revalidation against archived verifier version N-1"
+      ],
+      "must_fail_mutants": [
+        "sorry/axiom/native_decide",
+        "bare lake false-green",
+        "stale artifact",
+        "hosted-only evidence",
+        "upgraded verifier silently revalidates a pre-upgrade receipt",
+        "model theorem promoted without release-current Rust correspondence",
+        "V4 vocabulary appears in a V3 release surface",
+        "deferred empirical hypothesis is presented as measured or implemented"
+      ],
+      "native_evidence": [
+        "macOS/Linux/Windows complete release receipts"
+      ],
+      "claim_ids": [
+        "R5-AUDIT-08",
+        "R5-KNOWN-07",
+        "R5-KNOWN-08",
+        "R5-CON-05",
+        "R5-CON-06"
+      ],
+      "status": "UNIMPLEMENTED",
+      "af_alias": "AF8_FORMAL_RELEASE"
+    },
+    {
+      "id": "E-FS",
+      "title": "FSZero engine adoption",
+      "depends_on": [
+        "Z1",
+        "Z4",
+        "Z5",
+        "Z6"
+      ],
+      "owners": [
+        "FSZero"
+      ],
+      "required_types_or_artifacts": [
+        "engine catalog",
+        "durable mutation adapter",
+        "snapshot/root receipts"
+      ],
+      "required_invariants": [
+        "standalone",
+        "no peer imports",
+        "byte-identical surfaces",
+        "FULL snap-edit durability"
+      ],
+      "must_pass": [
+        "targeted engine conformance and crash suites"
+      ],
+      "must_fail_mutants": [
+        "stale expected digest",
+        "partial publish",
+        "rollback metadata loss"
+      ],
+      "native_evidence": [
+        "native filesystem kill matrices"
+      ],
+      "claim_ids": [],
+      "status": "UNIMPLEMENTED"
+    },
+    {
+      "id": "E-GRAPH",
+      "title": "GraphZero engine adoption",
+      "depends_on": [
+        "Z1",
+        "Z3",
+        "Z4",
+        "Z5"
+      ],
+      "owners": [
+        "GraphZero"
+      ],
+      "required_types_or_artifacts": [
+        "engine catalog",
+        "coverage/freshness/influence certificates"
+      ],
+      "required_invariants": [
+        "standalone",
+        "no peer imports",
+        "INDEX_BEHIND on stale",
+        "negative only under complete scope"
+      ],
+      "must_pass": [
+        "extractor differentials and query parity"
+      ],
+      "must_fail_mutants": [
+        "missing edge/config/generated source/stale snapshot"
+      ],
+      "native_evidence": [
+        "native large-repo/index receipts"
+      ],
+      "claim_ids": [],
+      "status": "UNIMPLEMENTED"
+    },
+    {
+      "id": "E-TOKEN",
+      "title": "TokenZero engine adoption",
+      "depends_on": [
+        "Z1",
+        "Z4",
+        "Z5",
+        "Z7"
+      ],
+      "owners": [
+        "TokenZero"
+      ],
+      "required_types_or_artifacts": [
+        "engine catalog",
+        "cache/provider receipts",
+        "capsule identities"
+      ],
+      "required_invariants": [
+        "standalone",
+        "no peer imports",
+        "no double tokenization",
+        "uncertified lossy expandable"
+      ],
+      "must_pass": [
+        "provider fixtures and replay identity"
+      ],
+      "must_fail_mutants": [
+        "status conflation",
+        "quality regression",
+        "dangling recovery",
+        "project-store collision"
+      ],
+      "native_evidence": [
+        "native provider/cache and store receipts"
+      ],
+      "claim_ids": [],
+      "status": "UNIMPLEMENTED"
+    },
+    {
+      "id": "P1",
+      "title": "pi-zerostack thin adapter",
+      "depends_on": [
+        "Z1",
+        "Z5",
+        "E-FS",
+        "E-GRAPH",
+        "E-TOKEN"
+      ],
+      "owners": [
+        "pi-zerostack"
+      ],
+      "required_types_or_artifacts": [
+        "verbatim assembly renderer",
+        "canonical zero_execute adapter"
+      ],
+      "required_invariants": [
+        "one model-visible card",
+        "no business logic",
+        "receipt bytes preserved"
+      ],
+      "must_pass": [
+        "tool-array stability and backend smoke"
+      ],
+      "must_fail_mutants": [
+        "adapter forks schema/runtime/result"
+      ],
+      "native_evidence": [
+        "native Pi session smoke"
+      ],
+      "claim_ids": [],
+      "status": "UNIMPLEMENTED"
+    },
+    {
+      "id": "S1",
+      "title": "Operational Snap compiler",
+      "depends_on": [
+        "Z2",
+        "Z3",
+        "Z5",
+        "Z6",
+        "Z7",
+        "E-FS",
+        "E-GRAPH",
+        "E-TOKEN"
+      ],
+      "owners": [
+        "ZeroStack",
+        "all engines"
+      ],
+      "required_types_or_artifacts": [
+        "S0/S1 compiler",
+        "effect publisher"
+      ],
+      "required_invariants": [
+        "one zero_execute",
+        "one FS dispatch",
+        "one journaled mutation",
+        "proof-selected fallback"
+      ],
+      "must_pass": [
+        "real-repo fibers",
+        "effect verification",
+        "durability and quality envelopes",
+        "preregistered real-repository S0/S1 rate measurement"
+      ],
+      "must_fail_mutants": [
+        "ambiguous worlds",
+        "stale evidence",
+        "crash",
+        "protected loss"
+      ],
+      "native_evidence": [
+        "native end-to-end task receipts"
+      ],
+      "claim_ids": [
+        "R5-EMP-08"
+      ],
+      "status": "UNIMPLEMENTED"
+    }
+  ],
+  "executable_freeze_count": 14,
+  "freeze_aliases": {
+    "AF0_PROVENANCE": "Z0",
+    "AF1_ASSEMBLY_ZBF": "Z1",
+    "AF2_ROBUST_SNAP": "Z2",
+    "AF3_CERTIFIED_INVALIDATION": "Z3",
+    "AF4_CAUSAL_ACCOUNTING": "Z4",
+    "AF5_TWO_PHASE_KERNEL": "Z5",
+    "AF6_DURABILITY_RESUMPTION": "Z6",
+    "AF7_QUALITY_CACHE": "Z7",
+    "AF8_FORMAL_RELEASE": "Z8",
+    "S1": "S1",
+    "DEFER_V4": "deferred_boundaries.DEFER_V4"
+  },
+  "deferred_boundaries": [
+    {
+      "id": "DEFER_V4",
+      "kind": "NON_EXECUTABLE_RESEARCH_BOUNDARY",
+      "claim_ids": [
+        "R5-DEF-20",
+        "R5-EMP-11",
+        "R5-EMP-12"
+      ],
+      "required_invariants": [
+        "no V4 claim in a V3 product API, receipt, release note, or attainment statement",
+        "research artifacts remain outside product authority"
+      ],
+      "must_fail_mutants": [
+        "V4 vocabulary appears in a V3 release surface",
+        "deferred empirical hypothesis is presented as measured or implemented"
+      ],
+      "status": "DEFERRED_RESEARCH_ONLY",
+      "enforced_by": "Z8"
+    }
+  ],
+  "promotion_semantics": {
+    "owning_freeze_status": "A mapped claim may record VERIFIED_AT_FREEZE when its own freeze passes. This is non-public; model theorems remain model-level until a release-current RustModelCorrespondenceReceipt exists.",
+    "claim_specific_z8_check": "A public claim requires its mapped freeze plus a claim-specific Z8 check of current correspondence, archived-verifier, native, and claim-ladder receipts. A claim-specific check does not mark the full Z8 freeze passed.",
+    "full_v3_close": "Full V3, suite-wide, best-in-class, or complete-release wording requires all 14 executable freezes and Z8 status PASSED."
+  }
+}

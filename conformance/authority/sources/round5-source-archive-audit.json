@@ -1,0 +1,57 @@
+{
+  "archives": {
+    "round1": {
+      "crc_pass": true,
+      "first_bad_member": null,
+      "path": "/mnt/data/ZeroStack-RACC-V3-Round1-Active-Causal-Information.zip",
+      "regular_files": 17,
+      "sha256": "7a69b914208554b5ced6ec841ad3067f1cf583462394734dab9290f9309ad195",
+      "size": 107443
+    },
+    "round2": {
+      "crc_pass": true,
+      "first_bad_member": null,
+      "path": "/mnt/data/ZeroStack-RACC-V3-Round2-Value-of-Causal-Information.zip",
+      "regular_files": 21,
+      "sha256": "a5af67866f0acf20c7ee9eabda5e8f3473c54be7a5c844d4097ff640a77b9d27",
+      "size": 125192
+    },
+    "round3": {
+      "crc_pass": true,
+      "first_bad_member": null,
+      "path": "/mnt/data/ZeroStack-RACC-V3-Round3-Adaptive-Safe-Regret.zip",
+      "regular_files": 24,
+      "sha256": "4334361ad0ee3c258b75da8cbee3dfc07a62060f723709609461d638604e7ecb",
+      "size": 130306
+    },
+    "round4": {
+      "crc_pass": true,
+      "first_bad_member": null,
+      "path": "/mnt/data/ZeroStack-RACC-V3-Round4-Compiled-Project-Cognition.zip",
+      "regular_files": 56,
+      "sha256": "30dfe3a65b768af8ba77e0d9f57c4b94c978a0aba6bc5e733b8965837d1cdd39",
+      "size": 213732
+    },
+    "v2": {
+      "crc_pass": true,
+      "first_bad_member": null,
+      "path": "/mnt/data/ZeroStack-V2-Rust-Architecture-and-Lean-Audit(1).zip",
+      "regular_files": 43,
+      "sha256": "b27758791d65e5d9e9836cd252417694d610ef4303d12b8f5cccd10e15f266f5",
+      "size": 520100
+    }
+  },
+  "toolchains": {
+    "cargo": null,
+    "cc": "/usr/bin/cc",
+    "clang": "/usr/local/swift/usr/bin/clang",
+    "clippy-driver": null,
+    "elan": null,
+    "gcc": "/usr/bin/gcc",
+    "lake": null,
+    "lean": null,
+    "python3": "/opt/pyvenv/bin/python3",
+    "rustc": null,
+    "rustfmt": null
+  }
+}
