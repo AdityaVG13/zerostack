@@ -9,6 +9,7 @@ description = "Canonical ZeroRef v1 content-addressed store layout and publish p
 serde = { workspace = true }
 serde_json = { workspace = true }
 sha2 = { workspace = true }
+zero-abi = { path = "../zero-abi" }
 zero-ref = { path = "../zero-ref" }
 
 [dev-dependencies]

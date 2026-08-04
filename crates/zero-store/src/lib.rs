@@ -21,6 +21,7 @@ mod fs_replace;
 mod gc_lock;
 mod metadata;
 mod store_root;
+mod zbf;
 
 pub use cas::{
     CasError, PutOutcome, SharedCas, CAS_LAYOUT, CAS_LAYOUT_VERSION, CAS_MAX_OBJECT_BYTES,
@@ -31,6 +32,13 @@ pub use gc_lock::{
     coordinator_lock_path, LockMode, StoreLock, COORDINATOR_LOCK, GC_DIR, LOCK_DEADLINE,
 };
 pub use metadata::ObservationMetadata;
+pub use zbf::{
+    zbf_contract_digest_v1, zbf_contract_manifest_v1, DurableProfileIdV1, DurableProfileV1,
+    ZbfArtifactKindV1, ZbfErrorV1, ZbfFailureCodeV1, ZbfHeaderV1, ZbfObjectV1, ZbfPayloadV1,
+    ZBF_CONTAINER_FLAG_V1, ZBF_CONTRACT_VERSION_V1, ZBF_HEADER_LEN_V1, ZBF_MAGIC_V1,
+    ZBF_MAX_CHILDREN_V1, ZBF_MAX_DEPTH_V1, ZBF_MAX_OBJECT_BYTES_V1, ZBF_SCHEMA_MAJOR_V1,
+    ZBF_SCHEMA_MINOR_V1,
+};
 
 pub use store_root::{
     absolutize, ensure_layout, project_key, store_is_under_project_root, Engine, ResolvedStore,

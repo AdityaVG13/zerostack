@@ -565,11 +565,19 @@ impl SharedCas {
     /// complete bytes, and only then return data. Digest mismatch is loud and
     /// returns no bytes.
     pub fn get_verified(&self, sha256: &str) -> Result<Vec<u8>, CasError> {
+        self.get_verified_limited(sha256, CAS_MAX_OBJECT_BYTES)
+    }
+
+    /// Verified read under a caller-supplied bound no weaker than the CAS policy.
+    /// Metadata is checked before allocation so strict format profiles can impose
+    /// a smaller ceiling than the shared CAS maximum.
+    pub fn get_verified_limited(&self, sha256: &str, limit: u64) -> Result<Vec<u8>, CasError> {
         if !is_full_lower_hex(sha256) {
             return Err(CasError::Malformed(format!(
                 "identity must be full lowercase 64-hex SHA-256, got '{sha256}'"
             )));
         }
+        let effective_limit = limit.min(CAS_MAX_OBJECT_BYTES);
         let path = self.object_path(sha256);
         let meta = match fs::symlink_metadata(&path) {
             Ok(meta) => meta,
@@ -579,13 +587,13 @@ impl SharedCas {
             Err(e) => return Err(io_err("stat object", e)),
         };
         self.check_regular(&meta, sha256)?;
-        if meta.len() > CAS_MAX_OBJECT_BYTES {
+        if meta.len() > effective_limit {
             return Err(CasError::PolicyDenied(format!(
-                "object of {} bytes exceeds the CAS size policy ({CAS_MAX_OBJECT_BYTES} bytes)",
+                "object of {} bytes exceeds the CAS size policy ({effective_limit} bytes)",
                 meta.len()
             )));
         }
-        self.read_verified_at(&path, sha256, CAS_MAX_OBJECT_BYTES)
+        self.read_verified_at(&path, sha256, effective_limit)
     }
 
     /// A guard only excludes writers of the store it was taken on, so using one
