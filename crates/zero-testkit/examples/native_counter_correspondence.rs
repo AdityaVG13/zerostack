@@ -8,7 +8,6 @@ use std::{
     error::Error,
     fs::{self, OpenOptions},
     io::{self, Write},
-    path::PathBuf,
     process::Command,
     time::{SystemTime, UNIX_EPOCH},
 };
@@ -22,15 +21,57 @@ use zero_ledger::{
 
 const WORKLOAD_BYTES: usize = 4_096;
 const RECEIPT_MARKER: &str = "ZEROSTACK_Z4_NATIVE_RECEIPT=";
-const SOURCE_PATHS: [&str; 8] = [
-    "conformance/models/causal-work-v3.json",
-    "crates/zero-ledger/src/causal_work.rs",
-    "crates/zero-ledger/src/lib.rs",
-    "crates/zero-ledger/tests/fixtures/token-ledger-v2-archive.json",
-    "crates/zero-testkit/Cargo.toml",
-    "crates/zero-testkit/examples/native_counter_correspondence.rs",
-    "crates/zero-testkit/src/ledger_conservation.rs",
-    "crates/zero-testkit/src/lib.rs",
+const SOURCE_INPUTS: [(&str, &[u8]); 8] = [
+    (
+        "conformance/models/causal-work-v3.json",
+        include_bytes!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../conformance/models/causal-work-v3.json"
+        )),
+    ),
+    (
+        "crates/zero-ledger/src/causal_work.rs",
+        include_bytes!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../zero-ledger/src/causal_work.rs"
+        )),
+    ),
+    (
+        "crates/zero-ledger/src/lib.rs",
+        include_bytes!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../zero-ledger/src/lib.rs"
+        )),
+    ),
+    (
+        "crates/zero-ledger/tests/fixtures/token-ledger-v2-archive.json",
+        include_bytes!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../zero-ledger/tests/fixtures/token-ledger-v2-archive.json"
+        )),
+    ),
+    (
+        "crates/zero-testkit/Cargo.toml",
+        include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/Cargo.toml")),
+    ),
+    (
+        "crates/zero-testkit/examples/native_counter_correspondence.rs",
+        include_bytes!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/examples/native_counter_correspondence.rs"
+        )),
+    ),
+    (
+        "crates/zero-testkit/src/ledger_conservation.rs",
+        include_bytes!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/src/ledger_conservation.rs"
+        )),
+    ),
+    (
+        "crates/zero-testkit/src/lib.rs",
+        include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/src/lib.rs")),
+    ),
 ];
 
 fn now_unix_ns() -> Result<u128, Box<dyn Error>> {
@@ -54,16 +95,13 @@ fn required_env(name: &'static str) -> Result<String, Box<dyn Error>> {
 }
 
 fn source_tree_digest() -> Result<DigestV1, Box<dyn Error>> {
-    let workspace_root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
     let mut bytes = b"zerostack.z4.source_tree.v1\0".to_vec();
-    for path in SOURCE_PATHS {
+    for (path, content) in SOURCE_INPUTS {
         let path_bytes = path.as_bytes();
-        let content = fs::read(workspace_root.join(path))
-            .map_err(|error| format!("cannot read source-bound path {path}: {error}"))?;
         bytes.extend_from_slice(&u32::try_from(path_bytes.len())?.to_be_bytes());
         bytes.extend_from_slice(path_bytes);
         bytes.extend_from_slice(&u64::try_from(content.len())?.to_be_bytes());
-        bytes.extend_from_slice(&content);
+        bytes.extend_from_slice(content);
     }
     Ok(DigestV1::from_bytes(sha256(&bytes)))
 }
