@@ -2,9 +2,8 @@ use std::collections::BTreeSet;
 use std::fmt;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
-use std::sync::atomic::{AtomicU64, Ordering};
-#[cfg(feature = "quickjs")]
-use std::sync::{atomic::AtomicBool, Arc};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use serde_json::Value as JsonValue;
@@ -238,6 +237,17 @@ impl Host {
         &self,
         _plan: &str,
         _connector: Rc<dyn Connector>,
+    ) -> Result<JsonValue, HostError> {
+        Err(HostError::QuickJsDisabled)
+    }
+
+    #[cfg(not(feature = "quickjs"))]
+    pub fn execute_with_cancel_timeout(
+        &self,
+        _plan: &str,
+        _connector: Rc<dyn Connector>,
+        _cancelled: Arc<AtomicBool>,
+        _timeout: Duration,
     ) -> Result<JsonValue, HostError> {
         Err(HostError::QuickJsDisabled)
     }

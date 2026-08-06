@@ -28,6 +28,12 @@ use zero_codemode::{RESULT_SPILL_PREVIEW_BYTES, RESULT_SPILL_SCHEMA};
 #[cfg(feature = "quickjs")]
 use zero_store::SharedCas;
 
+#[cfg(not(feature = "quickjs"))]
+#[test]
+fn cancel_timeout_entrypoint_is_available_without_quickjs() {
+    let _entrypoint = Host::execute_with_cancel_timeout;
+}
+
 #[cfg(feature = "quickjs")]
 struct C {
     calls: RefCell<Vec<Value>>,
@@ -365,6 +371,27 @@ fn sync_loop_hits_deadline() {
             .expect_err("deadline"),
         HostError::DeadlineExceeded
     );
+}
+
+#[cfg(feature = "quickjs")]
+#[test]
+fn explicit_timeout_is_bounded_by_host_limit() {
+    let mut limits = lim();
+    limits.instruction_budget = u64::MAX;
+    limits.wall_timeout = Duration::from_millis(2);
+    let host = Host::new(limits, reg()).unwrap_or_else(|error| panic!("host: {error}"));
+    for requested in [Duration::from_millis(1), Duration::from_secs(1)] {
+        assert_eq!(
+            host.execute_with_cancel_timeout(
+                "for(;;){}",
+                Rc::new(C::ok()),
+                Arc::new(AtomicBool::new(false)),
+                requested,
+            )
+            .expect_err("deadline"),
+            HostError::DeadlineExceeded
+        );
+    }
 }
 
 #[cfg(feature = "quickjs")]
