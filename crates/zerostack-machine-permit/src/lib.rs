@@ -277,12 +277,34 @@ fn fnv1a64(bytes: &[u8]) -> u64 {
 
 /// RAII machine permit for one slot (or legacy exclusive) directory.
 #[derive(Debug)]
-pub struct MachinePermit(PathBuf, String);
+pub struct MachinePermit {
+    path: PathBuf,
+    cookie: String,
+}
 
 impl MachinePermit {
     /// Path of the held permit directory (`base/slot-N` or legacy exclusive).
     pub fn path(&self) -> &Path {
-        &self.0
+        &self.path
+    }
+
+    /// Refresh the diagnostic lease timestamp after verifying that this guard
+    /// still owns the exact permit cookie. A replaced owner is never touched.
+    pub fn heartbeat(&self) -> io::Result<()> {
+        let observed = fs::read(self.path.join("identity"))?;
+        if parse_identity(&observed)
+            .as_ref()
+            .map(|identity| identity.cookie.as_str())
+            != Some(self.cookie.as_str())
+        {
+            return Err(io::Error::new(
+                io::ErrorKind::PermissionDenied,
+                "machine permit ownership changed before heartbeat",
+            ));
+        }
+        let temporary = self.path.join(format!(".heartbeat-{}.tmp", self.cookie));
+        write_file(&temporary, &epoch_millis().to_string())?;
+        fs::rename(temporary, self.path.join("heartbeat_at"))
     }
 
     pub fn acquire_slots(
@@ -331,10 +353,7 @@ impl MachinePermit {
                 }
             }
             if Instant::now() >= deadline {
-                return Err(AcquireError::Busy(format!(
-                    "codemode permit {} is held by live process(es) across {slots} slots",
-                    base.display()
-                )));
+                return Err(AcquireError::Busy(describe_busy_slots(base, slots)));
             }
             let wait_for = waiter_wait_timeout(has_preceding, attempt)
                 .min(deadline.saturating_duration_since(Instant::now()));
@@ -356,10 +375,7 @@ impl MachinePermit {
                 Ok(permit) => return Ok(permit),
                 Err(TryPermit::Busy) => {
                     if Instant::now() >= deadline {
-                        return Err(AcquireError::Busy(format!(
-                            "codemode permit {} is held by a live process",
-                            path.display()
-                        )));
+                        return Err(AcquireError::Busy(describe_busy_path(path)));
                     }
                     let sleep_for = permit_backoff(attempt)
                         .min(deadline.saturating_duration_since(Instant::now()));
@@ -395,7 +411,10 @@ impl MachinePermit {
                     cleanup_owned(path, &cookie);
                     return Err(TryPermit::Busy);
                 }
-                Ok(Self(path.to_path_buf(), cookie))
+                Ok(Self {
+                    path: path.to_path_buf(),
+                    cookie,
+                })
             }
             Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
                 if reclaim_dead(path) {
@@ -609,9 +628,167 @@ impl std::fmt::Display for AcquireError {
 
 impl std::error::Error for AcquireError {}
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum PermitHolderLiveness {
+    Live,
+    Dead,
+    Incomplete,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct PermitHolderStatus {
+    pub status_ref: String,
+    pub slot: PathBuf,
+    pub pid: Option<u32>,
+    pub repository: Option<String>,
+    pub operation: Option<String>,
+    pub session_ref: Option<String>,
+    pub cell_ref: Option<String>,
+    pub started_at_ms: Option<u128>,
+    pub heartbeat_at_ms: Option<u128>,
+    pub age_ms: Option<u128>,
+    pub heartbeat_age_ms: Option<u128>,
+    pub liveness: PermitHolderLiveness,
+}
+
+/// Inspect every occupied slot without mutating or reclaiming it. This is the
+/// safe status route named in busy diagnostics.
+pub fn permit_status(base: &Path, slots: usize) -> io::Result<Vec<PermitHolderStatus>> {
+    let mut holders = Vec::new();
+    for index in 0..slots {
+        let path = base.join(format!("slot-{index}"));
+        if path.exists() {
+            holders.push(status_for_path(base, &path)?);
+        }
+    }
+    Ok(holders)
+}
+
+fn status_for_path(base: &Path, path: &Path) -> io::Result<PermitHolderStatus> {
+    let now = epoch_millis();
+    let identity = read_identity(path);
+    let pid = identity
+        .as_ref()
+        .map(|value| value.pid)
+        .or_else(|| read_metadata(path, "pid").and_then(|value| value.parse().ok()));
+    let started_at_ms = identity
+        .as_ref()
+        .and_then(|value| value.started_at)
+        .or_else(|| read_metadata(path, "started_at").and_then(|value| value.parse().ok()));
+    let heartbeat_at_ms = read_metadata(path, "heartbeat_at").and_then(|value| value.parse().ok());
+    let liveness = identity
+        .as_ref()
+        .map(
+            |value| match identity_liveness(value, now, OWNER_IDENTITY_MAX_AGE) {
+                IdentityLiveness::Live => PermitHolderLiveness::Live,
+                IdentityLiveness::Dead => PermitHolderLiveness::Dead,
+                IdentityLiveness::Incomplete => PermitHolderLiveness::Incomplete,
+            },
+        )
+        .unwrap_or(PermitHolderLiveness::Incomplete);
+    let slot_name = path
+        .file_name()
+        .and_then(|value| value.to_str())
+        .unwrap_or("permit");
+    Ok(PermitHolderStatus {
+        status_ref: format!(
+            "cm://permit/{:016x}/{}",
+            fnv1a64(base.to_string_lossy().as_bytes()),
+            slot_name
+        ),
+        slot: path.to_path_buf(),
+        pid,
+        repository: read_metadata(path, "repository"),
+        operation: read_metadata(path, "operation").or_else(|| read_metadata(path, "command")),
+        session_ref: read_metadata(path, "session_ref"),
+        cell_ref: read_metadata(path, "cell_ref"),
+        started_at_ms,
+        heartbeat_at_ms,
+        age_ms: started_at_ms
+            .filter(|value| now >= *value)
+            .map(|value| now - value),
+        heartbeat_age_ms: heartbeat_at_ms
+            .filter(|value| now >= *value)
+            .map(|value| now - value),
+        liveness,
+    })
+}
+
+fn read_metadata(path: &Path, name: &str) -> Option<String> {
+    fs::read_to_string(path.join(name))
+        .ok()
+        .map(|value| metadata_text(value.trim()))
+        .filter(|value| !value.is_empty())
+}
+
+fn describe_busy_slots(base: &Path, slots: usize) -> String {
+    match permit_status(base, slots) {
+        Ok(holders) if !holders.is_empty() => format!(
+            "codemode permit busy: {}",
+            holders
+                .iter()
+                .map(describe_holder)
+                .collect::<Vec<_>>()
+                .join("; ")
+        ),
+        Ok(_) if looks_like_legacy_exclusive_permit(base) => describe_busy_path(base),
+        Ok(_) => format!(
+            "codemode permit {} is busy but no complete holder metadata is visible",
+            base.display()
+        ),
+        Err(error) => format!(
+            "codemode permit {} is busy and status inspection failed: {error}",
+            base.display()
+        ),
+    }
+}
+
+fn describe_busy_path(path: &Path) -> String {
+    let base = path.parent().unwrap_or(path);
+    match status_for_path(base, path) {
+        Ok(holder) => format!("codemode permit busy: {}", describe_holder(&holder)),
+        Err(error) => format!(
+            "codemode permit {} is busy and status inspection failed: {error}",
+            path.display()
+        ),
+    }
+}
+
+fn describe_holder(holder: &PermitHolderStatus) -> String {
+    let show = |value: Option<&str>| {
+        value
+            .map(|value| value.replace('"', "'"))
+            .unwrap_or_else(|| "unavailable".into())
+    };
+    format!(
+        "status={} pid={} repository=\"{}\" operation=\"{}\" started_at_ms={} age_ms={} heartbeat_at_ms={} heartbeat_age_ms={} session={} cell={} liveness={:?}",
+        holder.status_ref,
+        holder
+            .pid
+            .map_or_else(|| "unavailable".into(), |value| value.to_string()),
+        show(holder.repository.as_deref()),
+        show(holder.operation.as_deref()),
+        holder
+            .started_at_ms
+            .map_or_else(|| "unavailable".into(), |value| value.to_string()),
+        holder
+            .age_ms
+            .map_or_else(|| "unavailable".into(), |value| value.to_string()),
+        holder
+            .heartbeat_at_ms
+            .map_or_else(|| "unavailable".into(), |value| value.to_string()),
+        holder
+            .heartbeat_age_ms
+            .map_or_else(|| "unavailable".into(), |value| value.to_string()),
+        show(holder.session_ref.as_deref()),
+        show(holder.cell_ref.as_deref()),
+        holder.liveness,
+    )
+}
+
 impl Drop for MachinePermit {
     fn drop(&mut self) {
-        cleanup_owned(&self.0, &self.1);
+        cleanup_owned(&self.path, &self.cookie);
     }
 }
 
@@ -646,20 +823,41 @@ enum ProcessObservation {
 
 fn write_metadata(path: &Path, cookie: &str, owner: &str, command: &str) -> io::Result<()> {
     let started_at = epoch_millis();
-    write_file(&path.join("owner"), owner)?;
-    write_file(&path.join("pid"), &std::process::id().to_string())?;
+    let pid = std::process::id();
+    let repository = permit_scope_root()
+        .or_else(|| std::env::current_dir().ok())
+        .unwrap_or_else(|| PathBuf::from("."));
+    let session_ref = std::env::var("ZEROSTACK_SESSION_ID")
+        .ok()
+        .filter(|value| !value.trim().is_empty())
+        .map(|value| format!("cm://session/{}", metadata_text(&value)))
+        .unwrap_or_else(|| format!("cm://session/process/{pid}/{started_at}"));
+    let cell_ref = format!("cm://cell/process/{}", metadata_text(owner));
+    write_file(&path.join("owner"), &metadata_text(owner))?;
+    write_file(&path.join("pid"), &pid.to_string())?;
     write_file(
         &path.join("repository"),
-        &std::env::current_dir()
-            .unwrap_or_else(|_| PathBuf::from("."))
-            .to_string_lossy()
-            .chars()
-            .take(1024)
-            .collect::<String>(),
+        &metadata_text(&repository.to_string_lossy()),
     )?;
-    write_file(&path.join("command"), command)?;
+    write_file(&path.join("command"), &metadata_text(command))?;
+    write_file(&path.join("session_ref"), &session_ref)?;
+    write_file(&path.join("cell_ref"), &cell_ref)?;
     write_file(&path.join("started_at"), &started_at.to_string())?;
-    publish_identity(path, cookie, std::process::id(), owner, started_at)
+    write_file(&path.join("heartbeat_at"), &started_at.to_string())?;
+    publish_identity(path, cookie, pid, owner, started_at)
+}
+
+fn metadata_text(value: &str) -> String {
+    const MAX_BYTES: usize = 1_024;
+    let normalized = value.replace(['\r', '\n'], " ");
+    if normalized.len() <= MAX_BYTES {
+        return normalized;
+    }
+    let mut end = MAX_BYTES;
+    while end > 0 && !normalized.is_char_boundary(end) {
+        end -= 1;
+    }
+    normalized[..end].to_owned()
 }
 
 // Permits are machine-local liveness state under a tmp dir: every record is
@@ -794,14 +992,14 @@ fn classify_identity_snapshot(
     if identity.pid == 0 || now < started_at {
         return IdentityLiveness::Incomplete;
     }
-    if now - started_at > max_age.as_millis() {
-        return IdentityLiveness::Dead;
-    }
     if require_process_identity && identity.process.is_none() {
         return IdentityLiveness::Incomplete;
     }
     match observation {
         ProcessObservation::Missing => IdentityLiveness::Dead,
+        ProcessObservation::Unknown if now - started_at > max_age.as_millis() => {
+            IdentityLiveness::Dead
+        }
         ProcessObservation::Unknown => IdentityLiveness::Incomplete,
         ProcessObservation::Exists(observed) => match identity.process.as_ref() {
             Some(expected) if expected == &observed => IdentityLiveness::Live,

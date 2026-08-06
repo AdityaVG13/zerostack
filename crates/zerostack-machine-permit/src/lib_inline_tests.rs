@@ -109,11 +109,119 @@ fn permit_fence_normal_drop_removes_its_own_cookie() {
     )
     .expect("acquire owner");
     let cookie = read_identity(&path).expect("published identity").cookie;
-    assert_eq!(permit.1, cookie);
+    assert_eq!(permit.cookie, cookie);
 
     drop(permit);
 
     assert!(!path.exists());
+}
+
+#[test]
+fn slot_status_and_busy_error_identify_the_actionable_live_owner() {
+    let base = fencing_test_path("actionable-status");
+    let permit = MachinePermit::acquire_slots(
+        &base,
+        1,
+        Instant::now() + Duration::from_secs(2),
+        "tokenzero-codemode-heavy",
+    )
+    .expect("acquire holder");
+    let initial = permit_status(&base, 1).expect("inspect holder");
+    assert_eq!(initial.len(), 1);
+    let initial = &initial[0];
+    assert_eq!(initial.pid, Some(std::process::id()));
+    assert_eq!(
+        initial.operation.as_deref(),
+        Some("tokenzero-codemode-heavy")
+    );
+    assert_eq!(initial.liveness, PermitHolderLiveness::Live);
+    assert!(initial.repository.is_some());
+    assert!(
+        initial
+            .session_ref
+            .as_deref()
+            .unwrap()
+            .starts_with("cm://session/")
+    );
+    assert!(
+        initial
+            .cell_ref
+            .as_deref()
+            .unwrap()
+            .starts_with("cm://cell/")
+    );
+    assert!(initial.status_ref.starts_with("cm://permit/"));
+    let heartbeat = initial.heartbeat_at_ms.unwrap();
+    thread::sleep(Duration::from_millis(2));
+    permit.heartbeat().expect("refresh heartbeat");
+    let refreshed = permit_status(&base, 1).unwrap();
+    assert!(refreshed[0].heartbeat_at_ms.unwrap() >= heartbeat);
+
+    let contested = MachinePermit::acquire_slots(
+        &base,
+        1,
+        Instant::now() + Duration::from_millis(20),
+        "contender",
+    )
+    .expect_err("live holder must not be stolen");
+    let AcquireError::Busy(message) = contested else {
+        panic!("expected retryable busy error");
+    };
+    for field in [
+        "status=cm://permit/",
+        "pid=",
+        "repository=",
+        "operation=\"tokenzero-codemode-heavy\"",
+        "started_at_ms=",
+        "age_ms=",
+        "heartbeat_at_ms=",
+        "heartbeat_age_ms=",
+        "session=cm://session/",
+        "cell=cm://cell/",
+        "liveness=Live",
+    ] {
+        assert!(message.contains(field), "missing {field:?}: {message}");
+    }
+    assert!(!message.contains("unknown"), "{message}");
+    drop(permit);
+    MachinePermit::acquire_slots(
+        &base,
+        1,
+        Instant::now() + Duration::from_secs(2),
+        "after-release",
+    )
+    .expect("fresh acquisition succeeds after release");
+    fs::remove_dir_all(&base).ok();
+}
+
+#[test]
+fn heartbeat_is_cookie_fenced_against_a_replaced_owner() {
+    let path = fencing_test_path("heartbeat-foreign");
+    let permit =
+        MachinePermit::acquire(&path, Instant::now() + Duration::from_secs(2), "old-owner")
+            .expect("acquire old owner");
+    let replacement_cookie = owner_cookie();
+    let replacement_started = epoch_millis();
+    publish_identity(
+        &path,
+        &replacement_cookie,
+        std::process::id(),
+        "replacement-owner",
+        replacement_started,
+    )
+    .expect("publish replacement identity");
+    let heartbeat_before = fs::read(path.join("heartbeat_at")).unwrap();
+    let error = permit
+        .heartbeat()
+        .expect_err("old owner heartbeat must fail");
+    assert_eq!(error.kind(), io::ErrorKind::PermissionDenied);
+    assert_eq!(
+        fs::read(path.join("heartbeat_at")).unwrap(),
+        heartbeat_before
+    );
+    drop(permit);
+    assert!(path.exists(), "old guard must not delete replacement");
+    assert!(cleanup_owned(&path, &replacement_cookie));
 }
 
 #[test]
@@ -318,6 +426,15 @@ fn permit_liveness_classifier_cases_cover_reuse_boot_pid_zero_age_and_fresh_hold
         classify(
             &identity,
             observed,
+            1_000 + WAITER_IDENTITY_MAX_AGE.as_millis() + 1,
+            WAITER_IDENTITY_MAX_AGE
+        ),
+        IdentityLiveness::Live
+    );
+    assert_eq!(
+        classify(
+            &identity,
+            ProcessObservation::Unknown,
             1_000 + WAITER_IDENTITY_MAX_AGE.as_millis() + 1,
             WAITER_IDENTITY_MAX_AGE
         ),
