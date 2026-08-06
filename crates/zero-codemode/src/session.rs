@@ -171,15 +171,37 @@ const METHODS: &[(&str, &str)] = &[
     ("token", "shell"),
 ];
 
-struct AggregateConnector {
+// Fixed session-owned dispatchers keep admission bounded and block on the
+// channel while idle. Bursts may launch at most this many raw workers total.
+const AGGREGATE_DISPATCH_THREADS: usize = 8;
+// Retain one warm raw worker per engine; surplus burst workers shut down before
+// their completion is published, so idle process count never grows with use.
+const MAX_IDLE_WORKERS_PER_ENGINE: usize = 1;
+
+struct AggregateWorkerState {
     registry: WorkerRegistry,
-    workers: Mutex<BTreeMap<EngineIdentity, WorkerClient>>,
+    workers: Mutex<BTreeMap<EngineIdentity, Vec<WorkerClient>>>,
     worker_config: WorkerClientConfig,
     root: PathBuf,
     session_id: String,
     pins: BTreeMap<EngineIdentity, (String, String)>,
-    sequence: AtomicU64,
     cancellation: CancellationSignal,
+}
+
+struct AggregateDispatch {
+    engine: EngineIdentity,
+    request: CallRequest,
+    revision: String,
+    contract_digest: String,
+    context: DispatchContext,
+    completion: crate::ConnectorCompletion,
+}
+
+struct AggregateConnector {
+    state: Arc<AggregateWorkerState>,
+    dispatch_sender: Option<SyncSender<AggregateDispatch>>,
+    dispatchers: Vec<JoinHandle<()>>,
+    sequence: AtomicU64,
 }
 
 impl AggregateConnector {
@@ -273,7 +295,7 @@ impl AggregateConnector {
                 .register(engine, Arc::new(factory))
                 .map_err(worker_error)?;
         }
-        let config = WorkerClientConfig::default();
+        let worker_config = WorkerClientConfig::default();
         let mut workers = BTreeMap::new();
         for engine in [
             EngineIdentity::FsZero,
@@ -287,21 +309,60 @@ impl AggregateConnector {
                         store_root: root.clone(),
                         session_id: session_id.clone(),
                     },
-                    config.clone(),
+                    worker_config.clone(),
                 )
                 .map_err(worker_error)?;
-            workers.insert(engine, client);
+            workers.insert(engine, vec![client]);
         }
-        Ok(Self {
+        let state = Arc::new(AggregateWorkerState {
             registry,
             workers: Mutex::new(workers),
-            worker_config: config,
+            worker_config,
             root,
             session_id,
             pins: configured_pins,
-            sequence: AtomicU64::new(1),
             cancellation,
+        });
+        let (dispatch_sender, dispatch_receiver) =
+            mpsc::sync_channel(crate::MAX_INFLIGHT_CONNECTOR_CALLS);
+        let dispatch_receiver = Arc::new(Mutex::new(dispatch_receiver));
+        let mut dispatchers: Vec<JoinHandle<()>> = Vec::with_capacity(AGGREGATE_DISPATCH_THREADS);
+        for index in 0..AGGREGATE_DISPATCH_THREADS {
+            let state = Arc::clone(&state);
+            let receiver = Arc::clone(&dispatch_receiver);
+            let handle = match thread::Builder::new()
+                .name(format!("zerostack-dispatch-{index}"))
+                .spawn(move || aggregate_dispatch_loop(state, receiver))
+            {
+                Ok(handle) => handle,
+                Err(error) => {
+                    drop(dispatch_sender);
+                    for dispatcher in dispatchers {
+                        let _ = dispatcher.join();
+                    }
+                    return Err(HostError::Connector(format!(
+                        "cannot start aggregate dispatcher: {error}"
+                    )));
+                }
+            };
+            dispatchers.push(handle);
+        }
+        Ok(Self {
+            state,
+            dispatch_sender: Some(dispatch_sender),
+            dispatchers,
+            sequence: AtomicU64::new(1),
         })
+    }
+}
+
+impl Drop for AggregateConnector {
+    fn drop(&mut self) {
+        self.state.cancellation.cancel();
+        self.dispatch_sender.take();
+        for dispatcher in self.dispatchers.drain(..) {
+            let _ = dispatcher.join();
+        }
     }
 }
 
@@ -736,31 +797,35 @@ fn lower(
 }
 
 impl Connector for AggregateConnector {
-    fn call(
+    fn dispatch(
         &self,
         capability: &CapabilityDescriptor,
         args_json: &str,
         context: DispatchContext,
-    ) -> Result<String, ConnectorError> {
-        let input: Value =
-            serde_json::from_str(args_json).map_err(|e| ConnectorError::new(e.to_string()))?;
+        completion: crate::ConnectorCompletion,
+    ) -> Result<(), ConnectorError> {
+        let input: Value = serde_json::from_str(args_json)
+            .map_err(|error| ConnectorError::new(error.to_string()))?;
         let (engine, op, args) = lower(&capability.surface, &capability.method, input)?;
-        if context.is_expired() {
-            return Err(ConnectorError::new("aggregate dispatch deadline exceeded"));
+        if context.is_expired() || self.state.cancellation.is_cancelled() {
+            return Err(ConnectorError::new(
+                "aggregate dispatch deadline or cancellation",
+            ));
         }
         let id = format!(
             "{}-{}",
-            self.session_id,
+            self.state.session_id,
             self.sequence.fetch_add(1, Ordering::Relaxed)
         );
         let (revision, contract_digest) = self
+            .state
             .pins
             .get(&engine)
             .cloned()
             .ok_or_else(|| ConnectorError::new("worker pin missing"))?;
         let trace = WorkerTrace {
-            runtime_id: self.session_id.clone(),
-            cell_id: self.session_id.clone(),
+            runtime_id: self.state.session_id.clone(),
+            cell_id: self.state.session_id.clone(),
             request_id: id.clone(),
             trace_id: id.clone(),
             parent_span_id: None,
@@ -784,49 +849,142 @@ impl Connector for AggregateConnector {
             approval_grant: None,
             telemetry_request: None,
         };
-        let mut workers = self
-            .workers
-            .lock()
-            .map_err(|_| ConnectorError::new("worker registry lock poisoned"))?;
-        let worker = workers
-            .get_mut(&engine)
-            .ok_or_else(|| ConnectorError::new("worker unavailable"))?;
-        if worker.is_terminal() {
-            *worker = self
-                .registry
-                .launch(
-                    WorkerContext {
-                        engine,
-                        store_root: self.root.clone(),
-                        session_id: self.session_id.clone(),
-                    },
-                    self.worker_config.clone(),
-                )
-                .map_err(|error| ConnectorError::new(error.to_string()))?;
+        let dispatch = AggregateDispatch {
+            engine,
+            request,
+            revision,
+            contract_digest,
+            context,
+            completion,
+        };
+        let sender = self
+            .dispatch_sender
+            .as_ref()
+            .ok_or_else(|| ConnectorError::new("aggregate dispatcher closed"))?;
+        match sender.try_send(dispatch) {
+            Ok(()) => Ok(()),
+            Err(TrySendError::Full(_)) => {
+                Err(ConnectorError::new("aggregate dispatch capacity exhausted"))
+            }
+            Err(TrySendError::Disconnected(_)) => {
+                Err(ConnectorError::new("aggregate dispatcher closed"))
+            }
         }
-        let result: WorkerResult = worker
-            .dispatch_with_cancel(request, &self.cancellation)
-            .map_err(|e| ConnectorError::new(e.to_string()))?;
-        if matches!(
-            result.metadata.approval.state,
-            ApprovalState::Required | ApprovalState::Denied
-        ) {
-            return Err(ConnectorError::new("worker approval required or denied"));
-        }
-        if result.metadata.ownership.engine != engine
-            || result.metadata.ownership.session_id != self.session_id
-            || result.metadata.trace.runtime_id != self.session_id
-            || result.metadata.trace.request_id != result.metadata.trace.trace_id
-            || result.metadata.trace.worker_revision != revision
-            || result.metadata.trace.contract_digest != contract_digest
-        {
-            return Err(ConnectorError::new("worker result binding mismatch"));
-        }
-        serde_json::to_string(
-            &serde_json::json!({"value": result.value, "metadata": result.metadata}),
-        )
-        .map_err(|e| ConnectorError::new(e.to_string()))
     }
+}
+
+fn aggregate_dispatch_loop(
+    state: Arc<AggregateWorkerState>,
+    receiver: Arc<Mutex<Receiver<AggregateDispatch>>>,
+) {
+    loop {
+        let dispatch = match receiver.lock() {
+            Ok(receiver) => receiver.recv(),
+            Err(poisoned) => poisoned.into_inner().recv(),
+        };
+        let Ok(dispatch) = dispatch else {
+            break;
+        };
+        let result = run_aggregate_dispatch(&state, &dispatch);
+        let _ = dispatch.completion.complete(result);
+    }
+}
+
+fn run_aggregate_dispatch(
+    state: &AggregateWorkerState,
+    dispatch: &AggregateDispatch,
+) -> Result<String, ConnectorError> {
+    if dispatch.context.is_expired() || state.cancellation.is_cancelled() {
+        return Err(ConnectorError::new(
+            "aggregate dispatch deadline or cancellation",
+        ));
+    }
+    let mut worker = checkout_worker(state, dispatch.engine)?;
+    if worker.is_terminal() {
+        worker = launch_worker(state, dispatch.engine)?;
+    }
+    let result = worker
+        .dispatch_with_cancel(dispatch.request.clone(), &state.cancellation)
+        .map_err(|error| ConnectorError::new(error.to_string()));
+    let reusable = !worker.is_terminal();
+    let checkin = if reusable {
+        checkin_worker(state, dispatch.engine, worker)
+    } else {
+        Ok(())
+    };
+    let result: WorkerResult = result?;
+    checkin?;
+    if matches!(
+        result.metadata.approval.state,
+        ApprovalState::Required | ApprovalState::Denied
+    ) {
+        return Err(ConnectorError::new("worker approval required or denied"));
+    }
+    if result.metadata.ownership.engine != dispatch.engine
+        || result.metadata.ownership.session_id != state.session_id
+        || result.metadata.trace.runtime_id != state.session_id
+        || result.metadata.trace.request_id != result.metadata.trace.trace_id
+        || result.metadata.trace.worker_revision != dispatch.revision
+        || result.metadata.trace.contract_digest != dispatch.contract_digest
+    {
+        return Err(ConnectorError::new("worker result binding mismatch"));
+    }
+    serde_json::to_string(&serde_json::json!({"value": result.value, "metadata": result.metadata}))
+        .map_err(|error| ConnectorError::new(error.to_string()))
+}
+
+fn checkout_worker(
+    state: &AggregateWorkerState,
+    engine: EngineIdentity,
+) -> Result<WorkerClient, ConnectorError> {
+    let worker = state
+        .workers
+        .lock()
+        .map_err(|_| ConnectorError::new("worker pool lock poisoned"))?
+        .entry(engine)
+        .or_default()
+        .pop();
+    match worker {
+        Some(worker) => Ok(worker),
+        None => launch_worker(state, engine),
+    }
+}
+
+fn launch_worker(
+    state: &AggregateWorkerState,
+    engine: EngineIdentity,
+) -> Result<WorkerClient, ConnectorError> {
+    state
+        .registry
+        .launch(
+            WorkerContext {
+                engine,
+                store_root: state.root.clone(),
+                session_id: state.session_id.clone(),
+            },
+            state.worker_config.clone(),
+        )
+        .map_err(|error| ConnectorError::new(error.to_string()))
+}
+
+fn checkin_worker(
+    state: &AggregateWorkerState,
+    engine: EngineIdentity,
+    mut worker: WorkerClient,
+) -> Result<(), ConnectorError> {
+    let mut workers = state
+        .workers
+        .lock()
+        .map_err(|_| ConnectorError::new("worker pool lock poisoned"))?;
+    let idle = workers.entry(engine).or_default();
+    if idle.len() < MAX_IDLE_WORKERS_PER_ENGINE {
+        idle.push(worker);
+        return Ok(());
+    }
+    drop(workers);
+    worker
+        .shutdown()
+        .map_err(|error| ConnectorError::new(format!("surplus worker shutdown failed: {error}")))
 }
 
 #[derive(Clone)]
@@ -906,7 +1064,9 @@ impl SessionExecutor {
         })
     }
     pub fn execute(&self, source: &str, timeout: Duration) -> Result<Value, HostError> {
-        if self.cancelled.load(Ordering::Acquire) || self.connector.cancellation.is_cancelled() {
+        if self.cancelled.load(Ordering::Acquire)
+            || self.connector.state.cancellation.is_cancelled()
+        {
             return Err(HostError::Connector("session cancelled".into()));
         }
         self.host.execute_with_cancel_timeout(
@@ -919,7 +1079,7 @@ impl SessionExecutor {
     pub fn cancellation(&self) -> SessionCancellation {
         SessionCancellation {
             host: self.cancelled.clone(),
-            worker: self.connector.cancellation.clone(),
+            worker: self.connector.state.cancellation.clone(),
         }
     }
     pub fn cancel(&self) {

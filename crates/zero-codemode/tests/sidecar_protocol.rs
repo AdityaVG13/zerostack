@@ -1,7 +1,9 @@
 #![cfg(feature = "quickjs")]
 
 use std::io::{BufRead, BufReader, Write};
-use std::process::{Child, ChildStdin, ChildStdout, Command, Stdio};
+use std::process::{Child, ChildStdin, Command, Stdio};
+use std::sync::mpsc::{self, Receiver};
+use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 
 use serde_json::{Value, json};
@@ -9,7 +11,8 @@ use serde_json::{Value, json};
 struct Sidecar {
     child: Child,
     input: ChildStdin,
-    output: BufReader<ChildStdout>,
+    output: Receiver<Value>,
+    reader: Option<JoinHandle<()>>,
 }
 
 impl Sidecar {
@@ -21,11 +24,22 @@ impl Sidecar {
             .spawn()
             .expect("spawn sidecar");
         let input = child.stdin.take().expect("stdin");
-        let output = BufReader::new(child.stdout.take().expect("stdout"));
+        let stdout = child.stdout.take().expect("stdout");
+        let (output_sender, output) = mpsc::channel();
+        let reader = thread::spawn(move || {
+            for line in BufReader::new(stdout).lines() {
+                let line = line.expect("read frame");
+                let value = serde_json::from_str(&line).expect("JSON frame");
+                if output_sender.send(value).is_err() {
+                    break;
+                }
+            }
+        });
         let mut sidecar = Self {
             child,
             input,
             output,
+            reader: Some(reader),
         };
         let ready = sidecar.read();
         assert_eq!(ready["protocol"], "zerostack-codemode-host/v1");
@@ -39,10 +53,9 @@ impl Sidecar {
     }
 
     fn read(&mut self) -> Value {
-        let mut line = String::new();
-        self.output.read_line(&mut line).expect("read frame");
-        assert!(!line.is_empty(), "sidecar closed unexpectedly");
-        serde_json::from_str(&line).expect("JSON frame")
+        self.output
+            .recv_timeout(Duration::from_secs(2))
+            .expect("sidecar frame within two seconds")
     }
 }
 
@@ -50,6 +63,9 @@ impl Drop for Sidecar {
     fn drop(&mut self) {
         let _ = self.child.kill();
         let _ = self.child.wait();
+        if let Some(reader) = self.reader.take() {
+            let _ = reader.join();
+        }
     }
 }
 
@@ -202,6 +218,58 @@ fn every_delegate_in_a_multi_call_plan_carries_cell_provenance() {
 
     let result = sidecar.read();
     assert_eq!(result["kind"], "result");
+}
+
+#[test]
+fn promise_all_emits_every_delegate_before_any_response_and_settles_fifo() {
+    let mut sidecar = Sidecar::spawn();
+    sidecar.send(json!({
+        "type":"execute",
+        "id":1,
+        "cell_id":"cell-concurrent",
+        "source":r#"const completionOrder = [];
+            const calls = Array.from({length: 6}, (_, sequence) =>
+              __zero.host.call({name:'shell',input:{sequence}}).then(value => {
+                completionOrder.push(value.sequence);
+                return value.sequence;
+              }));
+            const values = await Promise.all(calls);
+            return {completionOrder, values};"#
+    }));
+
+    let mut delegates = Vec::new();
+    for expected in 0..6 {
+        let delegate = sidecar.read();
+        assert_eq!(delegate["type"], "delegate_request");
+        assert_eq!(delegate["cell_id"], "cell-concurrent");
+        assert_eq!(delegate["payload"]["input"]["sequence"], expected);
+        delegates.push(delegate);
+    }
+    for delegate in delegates {
+        let sequence = delegate["payload"]["input"]["sequence"].clone();
+        sidecar.send(json!({
+            "type":"delegate_response",
+            "delegate_id":delegate["delegate_id"],
+            "ok":true,
+            "result":{"sequence":sequence}
+        }));
+    }
+
+    let result = sidecar.read();
+    assert_eq!(result["kind"], "result");
+    let visible: Value = serde_json::from_str(
+        result["contentItems"][0]["text"]
+            .as_str()
+            .expect("visible JSON"),
+    )
+    .expect("parse visible result");
+    assert_eq!(
+        visible,
+        json!({
+            "completionOrder": [0, 1, 2, 3, 4, 5],
+            "values": [0, 1, 2, 3, 4, 5],
+        })
+    );
 }
 
 #[test]

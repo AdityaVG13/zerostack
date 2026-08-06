@@ -197,6 +197,52 @@ fn authenticated_cross_surface_and_rejections() {
     assert!(!sock.exists())
 }
 #[test]
+fn aggregate_promise_all_dispatches_slow_calls_in_parallel() {
+    let (directory, mut session, token, shutdown_token, _) =
+        start_configured(ProcessIdentity::current().unwrap(), |command, _| {
+            command.env("ZEROSTACK_TOKENZERO_RAW_ARGS", "sleep");
+        });
+    let socket = directory.path().join("runtime/session.sock");
+    let (mut stream, mut reader, generation) = connect_authenticated(&socket, &token);
+    stream
+        .set_read_timeout(Some(Duration::from_secs(8)))
+        .unwrap();
+    let started = Instant::now();
+    send(
+        &mut stream,
+        json!({
+            "type":"execute",
+            "id":1,
+            "generation":generation,
+            "root":directory.path(),
+            "source":r#"const calls = Array.from({length: 6}, (_, sequence) =>
+                zero.token.shell(`sleep-${sequence}`).then(value => value.value.args.command));
+                return await Promise.all(calls);"#,
+        }),
+    );
+    let response = read(&mut reader);
+    let elapsed = started.elapsed();
+    assert_eq!(response["ok"], true, "{response}");
+    let exact = exact_result(directory.path(), &response);
+    assert_eq!(
+        exact,
+        json!([
+            "sleep-0", "sleep-1", "sleep-2", "sleep-3", "sleep-4", "sleep-5"
+        ])
+    );
+    assert!(
+        elapsed < Duration::from_secs(4),
+        "six two-second calls did not finish in one parallel wave: {elapsed:?}"
+    );
+    send(
+        &mut stream,
+        json!({"type":"shutdown","id":2,"token":shutdown_token}),
+    );
+    assert_eq!(read(&mut reader)["ok"], true);
+    assert!(session.wait().unwrap().success());
+}
+
+#[test]
 fn all_public_methods_preserve_arguments_and_ref_owners() {
     let (d, mut session, token, shutdown_token, _) = start(ProcessIdentity::current().unwrap());
     let socket = d.path().join("runtime/session.sock");

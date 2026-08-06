@@ -17,7 +17,9 @@ use std::{
 use serde_json::{Value, json};
 use zero_codemode::{CANONICAL_REF_ALIASES, CANONICAL_RESULT_FIELDS, CANONICAL_TEXT_ALIASES};
 #[cfg(feature = "quickjs")]
-use zero_codemode::{Connector, ConnectorError, DispatchContext, runtime_creation_count};
+use zero_codemode::{
+    Connector, ConnectorCompletion, ConnectorError, DispatchContext, runtime_creation_count,
+};
 
 use zero_codemode::{
     CapabilityDescriptor, GlobalRegistration, Host, HostError, HostLimits, PlanError,
@@ -25,8 +27,9 @@ use zero_codemode::{
 };
 #[cfg(feature = "quickjs")]
 use zero_codemode::{
-    DEFAULT_MAX_VISIBLE_RESULT_BYTES, MAX_RESULT_SPILL_ENVELOPE_BYTES, MAX_VISIBLE_ERROR_BYTES,
-    RESULT_SPILL_PREVIEW_BYTES, RESULT_SPILL_SCHEMA, finalize_visible_error,
+    DEFAULT_MAX_VISIBLE_RESULT_BYTES, MAX_INFLIGHT_CONNECTOR_CALLS,
+    MAX_RESULT_SPILL_ENVELOPE_BYTES, MAX_VISIBLE_ERROR_BYTES, RESULT_SPILL_PREVIEW_BYTES,
+    RESULT_SPILL_SCHEMA, finalize_visible_error,
 };
 #[cfg(feature = "quickjs")]
 use zero_store::SharedCas;
@@ -59,27 +62,75 @@ impl C {
 
 #[cfg(feature = "quickjs")]
 impl Connector for C {
-    fn call(
+    fn dispatch(
         &self,
         _: &CapabilityDescriptor,
         args_json: &str,
         context: DispatchContext,
-    ) -> Result<String, ConnectorError> {
+        completion: ConnectorCompletion,
+    ) -> Result<(), ConnectorError> {
         assert!(context.max_json_bytes > 0);
         let args: Value = serde_json::from_str(args_json)
             .map_err(|error| ConnectorError::new(error.to_string()))?;
         self.calls.borrow_mut().push(args.clone());
-        if !self.delay.is_zero() {
-            thread::sleep(self.delay);
-        }
-        if self.fail {
+        let result = if self.fail {
             Err(ConnectorError::new("connector refused request"))
         } else if let Some(result) = &self.result {
             Ok(result.clone())
         } else {
             serde_json::to_string(&json!({ "echo": args }))
                 .map_err(|error| ConnectorError::new(error.to_string()))
+        };
+        if self.delay.is_zero() {
+            completion.complete(result)
+        } else {
+            let delay = self.delay;
+            thread::spawn(move || {
+                thread::sleep(delay);
+                let _ = completion.complete(result);
+            });
+            Ok(())
         }
+    }
+}
+
+#[cfg(feature = "quickjs")]
+struct CoordinatedConnector {
+    expected: usize,
+    completions: RefCell<Vec<(u64, ConnectorCompletion)>>,
+}
+
+#[cfg(feature = "quickjs")]
+impl Connector for CoordinatedConnector {
+    fn dispatch(
+        &self,
+        _: &CapabilityDescriptor,
+        args_json: &str,
+        _: DispatchContext,
+        completion: ConnectorCompletion,
+    ) -> Result<(), ConnectorError> {
+        let args: Value = serde_json::from_str(args_json)
+            .map_err(|error| ConnectorError::new(error.to_string()))?;
+        let sequence = args
+            .get("sequence")
+            .and_then(Value::as_u64)
+            .ok_or_else(|| ConnectorError::new("missing sequence"))?;
+        let mut completions = self.completions.borrow_mut();
+        completions.push((sequence, completion));
+        if completions.len() == self.expected {
+            let mut ready = std::mem::take(&mut *completions);
+            ready.sort_by_key(|(sequence, _)| *sequence);
+            drop(completions);
+            for (sequence, completion) in ready {
+                completion.complete(
+                    serde_json::to_string(&json!({
+                        "sequence": sequence,
+                    }))
+                    .map_err(|error| ConnectorError::new(error.to_string())),
+                )?;
+            }
+        }
+        Ok(())
     }
 }
 
@@ -822,6 +873,62 @@ fn capability_calls_return_thenables_usable_with_promise_all() {
         .unwrap_or_else(|error| panic!("promise.all plan: {error}"));
     assert_eq!(value, json!({"thenable": true, "a": "a", "b": "b"}));
     assert_eq!(connector.calls.borrow().len(), 2);
+}
+
+#[cfg(feature = "quickjs")]
+#[test]
+fn promise_all_dispatches_concurrently_and_settles_fifo_completions() {
+    const CALLS: usize = 6;
+    let connector = Rc::new(CoordinatedConnector {
+        expected: CALLS,
+        completions: RefCell::new(Vec::new()),
+    });
+    let host = Host::new(lim(), reg()).unwrap_or_else(|error| panic!("host: {error}"));
+    let value = host
+        .execute(
+            r#"const completionOrder = [];
+               const calls = Array.from({length: 6}, (_, sequence) =>
+                 zero.fs.read({sequence}).then(value => {
+                   completionOrder.push(value.sequence);
+                   return value.sequence;
+                 }));
+               const values = await Promise.all(calls);
+               return {completionOrder, values};"#,
+            connector,
+        )
+        .unwrap_or_else(|error| panic!("concurrent plan: {error}"));
+    assert_eq!(
+        value,
+        json!({
+            "completionOrder": [0, 1, 2, 3, 4, 5],
+            "values": [0, 1, 2, 3, 4, 5],
+        })
+    );
+}
+
+#[cfg(feature = "quickjs")]
+#[test]
+fn connector_inflight_capacity_fails_loud_without_unbounded_queueing() {
+    let connector = Rc::new(CoordinatedConnector {
+        expected: MAX_INFLIGHT_CONNECTOR_CALLS,
+        completions: RefCell::new(Vec::new()),
+    });
+    let mut limits = lim();
+    limits.microtask_ceiling = 1_024;
+    let host = Host::new(limits, reg()).unwrap_or_else(|error| panic!("host: {error}"));
+    let calls = MAX_INFLIGHT_CONNECTOR_CALLS + 1;
+    let plan = format!(
+        "const calls=Array.from({{length:{calls}}},(_,sequence)=>zero.fs.read({{sequence}}));return await Promise.all(calls);"
+    );
+    let error = host
+        .execute(&plan, connector)
+        .expect_err("capacity overflow must fail");
+    assert!(
+        error
+            .to_string()
+            .contains("connector in-flight capacity exhausted"),
+        "{error}"
+    );
 }
 
 #[cfg(feature = "quickjs")]

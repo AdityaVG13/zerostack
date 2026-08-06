@@ -4,6 +4,7 @@ use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
 use serde_json::Value as JsonValue;
@@ -84,8 +85,9 @@ fn validate_identifier(value: &str) -> Result<(), ()> {
 
 /// Deadline and serialization budget supplied to a connector dispatch.
 ///
-/// Connectors must cooperatively enforce this context for a complete timeout:
-/// Rust callbacks cannot be safely preempted while they are executing.
+/// Connectors must enforce this context for the complete accepted operation.
+/// The host refuses to settle late completions, but connector-owned workers
+/// remain responsible for stopping their underlying work at the deadline.
 #[derive(Clone, Copy, Debug)]
 pub struct DispatchContext {
     pub deadline: Instant,
@@ -102,13 +104,54 @@ impl DispatchContext {
     }
 }
 
+/// Maximum capability calls one plan may have in flight at once.
+///
+/// The shared completion channel has the same capacity, so connector results
+/// remain bounded even while the JavaScript runtime is executing microtasks.
+pub const MAX_INFLIGHT_CONNECTOR_CALLS: usize = 64;
+
+struct ConnectorCompletionMessage {
+    sequence: u64,
+    result: Result<String, ConnectorError>,
+}
+
+/// One-shot completion authority for an accepted connector dispatch.
+///
+/// A connector may move this value to its own bounded dispatcher or event
+/// loop, but it must complete it exactly once. The completion never enters
+/// QuickJS directly; the host runtime thread receives and settles it.
+pub struct ConnectorCompletion {
+    sequence: u64,
+    sender: mpsc::SyncSender<ConnectorCompletionMessage>,
+}
+
+impl ConnectorCompletion {
+    fn new(sequence: u64, sender: mpsc::SyncSender<ConnectorCompletionMessage>) -> Self {
+        Self { sequence, sender }
+    }
+
+    pub fn complete(self, result: Result<String, ConnectorError>) -> Result<(), ConnectorError> {
+        self.sender
+            .send(ConnectorCompletionMessage {
+                sequence: self.sequence,
+                result,
+            })
+            .map_err(|_| ConnectorError::new("connector completion receiver closed"))
+    }
+}
+
 pub trait Connector {
-    fn call(
+    /// Accept a bounded dispatch without blocking the JavaScript runtime.
+    ///
+    /// Returning `Ok(())` transfers completion authority to the connector.
+    /// Returning `Err` rejects the call immediately and must not complete it.
+    fn dispatch(
         &self,
         capability: &CapabilityDescriptor,
         args_json: &str,
         context: DispatchContext,
-    ) -> Result<String, ConnectorError>;
+        completion: ConnectorCompletion,
+    ) -> Result<(), ConnectorError>;
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -432,14 +475,53 @@ fn spill_result(cas_root: &Path, encoded: &str) -> Result<JsonValue, HostError> 
 
 #[cfg(feature = "quickjs")]
 mod quickjs {
+    use std::cell::RefCell;
     use std::collections::BTreeMap;
     use std::sync::atomic::AtomicU64;
+    use std::sync::mpsc::{Receiver, RecvTimeoutError, SyncSender, TryRecvError};
 
-    use rquickjs::function::Rest;
+    use rquickjs::function::{Constructor, Rest};
     use rquickjs::promise::PromiseState;
     use rquickjs::{Array, Context, Ctx, Function, Object, Persistent, Promise, Runtime, Value};
 
     use super::*;
+
+    struct PendingDispatch {
+        resolve: Persistent<Function<'static>>,
+        reject: Persistent<Function<'static>>,
+    }
+
+    type PendingDispatches = Rc<RefCell<BTreeMap<u64, PendingDispatch>>>;
+
+    #[derive(Clone)]
+    struct DispatchBindings {
+        context: DispatchContext,
+        expired: Arc<AtomicBool>,
+        completion_sender: SyncSender<ConnectorCompletionMessage>,
+        pending: PendingDispatches,
+        sequence: Arc<AtomicU64>,
+    }
+
+    struct PendingCleanup<'a> {
+        context: &'a Context,
+        pending: PendingDispatches,
+    }
+
+    impl Drop for PendingCleanup<'_> {
+        fn drop(&mut self) {
+            let dispatches = std::mem::take(&mut *self.pending.borrow_mut());
+            self.context.with(|ctx| {
+                for (_, dispatch) in dispatches {
+                    if let Ok(resolve) = dispatch.resolve.restore(&ctx) {
+                        drop(resolve);
+                    }
+                    if let Ok(reject) = dispatch.reject.restore(&ctx) {
+                        drop(reject);
+                    }
+                }
+            });
+        }
+    }
 
     pub(super) fn execute(
         host: &Host,
@@ -484,17 +566,26 @@ mod quickjs {
         })));
 
         let context = Context::full(&runtime).map_err(runtime_error)?;
+        let dispatch_context = DispatchContext {
+            deadline,
+            max_json_bytes: host.limits.max_json_bytes,
+        };
+        let (completion_sender, completion_receiver) =
+            std::sync::mpsc::sync_channel(MAX_INFLIGHT_CONNECTOR_CALLS);
+        let pending = Rc::new(RefCell::new(BTreeMap::new()));
+        let _pending_cleanup = PendingCleanup {
+            context: &context,
+            pending: Rc::clone(&pending),
+        };
+        let bindings = DispatchBindings {
+            context: dispatch_context,
+            expired: Arc::clone(&dispatch_expired),
+            completion_sender,
+            pending: Rc::clone(&pending),
+            sequence: Arc::new(AtomicU64::new(1)),
+        };
         let persistent: Result<Persistent<Promise<'static>>, HostError> = context.with(|ctx| {
-            install_globals(
-                ctx.clone(),
-                &host.registration,
-                connector,
-                DispatchContext {
-                    deadline,
-                    max_json_bytes: host.limits.max_json_bytes,
-                },
-                Arc::clone(&dispatch_expired),
-            )?;
+            install_globals(ctx.clone(), &host.registration, connector, bindings)?;
             let promise: Promise<'_> = ctx
                 .eval(wrapped.as_str())
                 .map_err(|error| normalized_js_error(&ctx, error))?;
@@ -512,6 +603,14 @@ mod quickjs {
 
         let mut executed_jobs = 0;
         loop {
+            check_limits(
+                &timed_out,
+                &dispatch_expired,
+                &exhausted,
+                &cancelled,
+                deadline,
+            )?;
+            drain_ready_completions(&context, &completion_receiver, &pending, dispatch_context)?;
             let state = context.with(|ctx| {
                 persistent
                     .clone()
@@ -519,44 +618,48 @@ mod quickjs {
                     .map(|promise| promise.state())
                     .map_err(js_error)
             })?;
-            if state != PromiseState::Pending {
+            if state != PromiseState::Pending && pending.borrow().is_empty() {
                 break;
             }
-            if executed_jobs >= host.limits.microtask_ceiling {
-                return Err(HostError::MicrotaskLimit);
+            if state == PromiseState::Pending {
+                if executed_jobs >= host.limits.microtask_ceiling {
+                    return Err(HostError::MicrotaskLimit);
+                }
+                match runtime.execute_pending_job() {
+                    Ok(true) => {
+                        executed_jobs += 1;
+                        continue;
+                    }
+                    Ok(false) => {}
+                    Err(error) => {
+                        check_limits(
+                            &timed_out,
+                            &dispatch_expired,
+                            &exhausted,
+                            &cancelled,
+                            deadline,
+                        )?;
+                        return Err(HostError::JavaScript(error.to_string()));
+                    }
+                }
             }
-            check_limits(
-                &timed_out,
-                &dispatch_expired,
-                &exhausted,
-                &cancelled,
-                deadline,
-            )?;
-            match runtime.execute_pending_job() {
-                Ok(true) => executed_jobs += 1,
-                Ok(false) => {
-                    return Err(HostError::JavaScript(
-                        "plan promise did not settle".to_owned(),
+            if pending.borrow().is_empty() {
+                return Err(HostError::JavaScript(
+                    "plan promise did not settle".to_owned(),
+                ));
+            }
+            let wait = dispatch_context.remaining().min(Duration::from_millis(25));
+            match completion_receiver.recv_timeout(wait) {
+                Ok(completion) => {
+                    settle_completion(&context, &pending, completion, dispatch_context)?;
+                }
+                Err(RecvTimeoutError::Timeout) => continue,
+                Err(RecvTimeoutError::Disconnected) => {
+                    return Err(HostError::Connector(
+                        "connector completion channel closed with calls in flight".into(),
                     ));
                 }
-                Err(error) => {
-                    check_limits(
-                        &timed_out,
-                        &dispatch_expired,
-                        &exhausted,
-                        &cancelled,
-                        deadline,
-                    )?;
-                    return Err(HostError::JavaScript(error.to_string()));
-                }
             }
-            check_limits(
-                &timed_out,
-                &dispatch_expired,
-                &exhausted,
-                &cancelled,
-                deadline,
-            )?;
         }
 
         check_limits(
@@ -586,6 +689,80 @@ mod quickjs {
             };
         }
         serde_json::from_str(&encoded).map_err(|error| HostError::Json(error.to_string()))
+    }
+
+    fn drain_ready_completions(
+        context: &Context,
+        receiver: &Receiver<ConnectorCompletionMessage>,
+        pending: &PendingDispatches,
+        dispatch_context: DispatchContext,
+    ) -> Result<(), HostError> {
+        let mut ready = Vec::new();
+        loop {
+            match receiver.try_recv() {
+                Ok(completion) => ready.push(completion),
+                Err(TryRecvError::Empty) => break,
+                Err(TryRecvError::Disconnected) => {
+                    if pending.borrow().is_empty() {
+                        break;
+                    }
+                    return Err(HostError::Connector(
+                        "connector completion channel closed with calls in flight".into(),
+                    ));
+                }
+            }
+        }
+        // The bounded MPSC channel preserves the connector completion order.
+        // Dispatch sequence only identifies the matching JavaScript promise.
+        for completion in ready {
+            settle_completion(context, pending, completion, dispatch_context)?;
+        }
+        Ok(())
+    }
+
+    fn settle_completion(
+        context: &Context,
+        pending: &PendingDispatches,
+        completion: ConnectorCompletionMessage,
+        dispatch_context: DispatchContext,
+    ) -> Result<(), HostError> {
+        let dispatch = pending
+            .borrow_mut()
+            .remove(&completion.sequence)
+            .ok_or_else(|| {
+                HostError::Connector(format!(
+                    "connector returned unknown or duplicate completion {}",
+                    completion.sequence
+                ))
+            })?;
+        context.with(move |ctx| {
+            let resolve = dispatch.resolve.restore(&ctx).map_err(js_error)?;
+            let reject = dispatch.reject.restore(&ctx).map_err(js_error)?;
+            match completion.result {
+                Ok(encoded) if encoded.len() > dispatch_context.max_json_bytes => reject_error(
+                    &ctx,
+                    &reject,
+                    "connector result exceeds JSON limit".to_owned(),
+                ),
+                Ok(encoded) => {
+                    let value = ctx.json_parse(encoded).map_err(|error| {
+                        HostError::Json(format!("connector returned invalid JSON: {error}"))
+                    })?;
+                    resolve.call::<_, ()>((value,)).map_err(js_error)
+                }
+                Err(error) => reject_error(&ctx, &reject, error.to_string()),
+            }
+        })
+    }
+
+    fn reject_error<'js>(
+        ctx: &Ctx<'js>,
+        reject: &Function<'js>,
+        message: String,
+    ) -> Result<(), HostError> {
+        let constructor: Constructor<'_> = ctx.globals().get("Error").map_err(js_error)?;
+        let error: Object<'_> = constructor.construct((message,)).map_err(js_error)?;
+        reject.call::<_, ()>((error,)).map_err(js_error)
     }
 
     fn check_limits(
@@ -674,10 +851,9 @@ const guard = (value, label) => {
         },
     });
 };
-// Async so every capability call returns a real Promise: plans can use
-// Promise.all/.then over calls. The dispatch itself still runs eagerly at
-// invocation, so await semantics are unchanged.
-return (call, label) => async (...args) => guard(normalize(call(...args)), label);
+// Every capability returns a real Promise. The native call only enqueues
+// bounded work; normalization and guarding happen after its completion.
+return (call, label) => async (...args) => guard(normalize(await call(...args)), label);
 })()"#;
 
     fn strict_result_wrapper<'js>(ctx: &Ctx<'js>) -> Result<Function<'js>, HostError> {
@@ -764,8 +940,7 @@ return (target, label, kind) => new Proxy(target, {
         ctx: Ctx<'js>,
         registration: &GlobalRegistration,
         connector: Rc<dyn Connector>,
-        dispatch_context: DispatchContext,
-        dispatch_expired: Arc<AtomicBool>,
+        bindings: DispatchBindings,
     ) -> Result<(), HostError> {
         let root = null_object(&ctx)?;
         let strict_result = strict_result_wrapper(&ctx)?;
@@ -782,7 +957,7 @@ return (target, label, kind) => new Proxy(target, {
             .clone();
             let descriptor = capability.clone();
             let connector = Rc::clone(&connector);
-            let expired = Arc::clone(&dispatch_expired);
+            let bindings = bindings.clone();
             let function =
                 Function::new(ctx.clone(), move |ctx: Ctx<'js>, args: Rest<Value<'js>>| {
                     let args = call_arguments(&ctx, args.0)?;
@@ -794,45 +969,50 @@ return (target, label, kind) => new Proxy(target, {
                         ));
                     };
                     let encoded = json.to_string()?;
-                    if encoded.len() > dispatch_context.max_json_bytes {
+                    if encoded.len() > bindings.context.max_json_bytes {
                         return Err(rquickjs::Error::new_from_js_message(
                             "JSON",
                             "connector",
                             "arguments exceed JSON limit",
                         ));
                     }
-                    if dispatch_context.is_expired() {
-                        expired.store(true, Ordering::Relaxed);
+                    if bindings.context.is_expired() {
+                        bindings.expired.store(true, Ordering::Relaxed);
                         return Err(rquickjs::Error::new_from_js_message(
                             "deadline",
                             "connector",
                             "wall-clock deadline exceeded",
                         ));
                     }
-                    let result = connector.call(&descriptor, &encoded, dispatch_context);
-                    if dispatch_context.is_expired() {
-                        expired.store(true, Ordering::Relaxed);
+                    if bindings.pending.borrow().len() >= MAX_INFLIGHT_CONNECTOR_CALLS {
                         return Err(rquickjs::Error::new_from_js_message(
-                            "deadline",
                             "connector",
-                            "wall-clock deadline exceeded",
+                            "JavaScript",
+                            "connector in-flight capacity exhausted",
                         ));
                     }
-                    let encoded = result.map_err(|error| {
-                        rquickjs::Error::new_from_js_message(
+                    let dispatch_id = bindings.sequence.fetch_add(1, Ordering::Relaxed);
+                    let (promise, resolve, reject) = Promise::new(&ctx)?;
+                    bindings.pending.borrow_mut().insert(
+                        dispatch_id,
+                        PendingDispatch {
+                            resolve: Persistent::save(&ctx, resolve),
+                            reject: Persistent::save(&ctx, reject),
+                        },
+                    );
+                    let completion =
+                        ConnectorCompletion::new(dispatch_id, bindings.completion_sender.clone());
+                    if let Err(error) =
+                        connector.dispatch(&descriptor, &encoded, bindings.context, completion)
+                    {
+                        bindings.pending.borrow_mut().remove(&dispatch_id);
+                        return Err(rquickjs::Error::new_from_js_message(
                             "connector",
                             "JavaScript",
                             error.to_string(),
-                        )
-                    })?;
-                    if encoded.len() > dispatch_context.max_json_bytes {
-                        return Err(rquickjs::Error::new_from_js_message(
-                            "connector",
-                            "JSON",
-                            "result exceeds JSON limit",
                         ));
                     }
-                    ctx.json_parse(encoded)
+                    Ok(promise)
                 })
                 .map_err(js_error)?;
             let label = format!("{}.{} result", capability.surface, capability.method);

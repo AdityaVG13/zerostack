@@ -14,10 +14,10 @@ use std::{
 };
 use zero_codemode::node::{NODE_SCHEMA, NodeEnv, node_report};
 use zero_codemode::{
-    ArtifactEnv, CapabilityDescriptor, Connector, ConnectorError, DEFAULT_MAX_VISIBLE_RESULT_BYTES,
-    DISCOVERY_SCHEMA, DiscoveryEnv, DispatchContext, GlobalRegistration, Host, HostError,
-    HostLimits, MANIFEST_SCHEMA, ManifestFacts, StorePaths, finalize_visible_error,
-    is_executable_file, is_readable_file, locate_manifest, locate_report,
+    ArtifactEnv, CapabilityDescriptor, Connector, ConnectorCompletion, ConnectorError,
+    DEFAULT_MAX_VISIBLE_RESULT_BYTES, DISCOVERY_SCHEMA, DiscoveryEnv, DispatchContext,
+    GlobalRegistration, Host, HostError, HostLimits, MANIFEST_SCHEMA, ManifestFacts, StorePaths,
+    finalize_visible_error, is_executable_file, is_readable_file, locate_manifest, locate_report,
 };
 use zero_store::{Engine, ResolvedStore, ensure_layout};
 
@@ -73,7 +73,7 @@ enum Event {
 struct DelegateCall {
     cell_id: String,
     payload: Value,
-    response: mpsc::Sender<Result<Value, String>>,
+    completion: ConnectorCompletion,
 }
 #[derive(Clone)]
 enum CellOutcome {
@@ -94,7 +94,7 @@ struct Cell {
 }
 struct PendingDelegate {
     cell_id: String,
-    response: mpsc::Sender<Result<Value, String>>,
+    completion: ConnectorCompletion,
 }
 struct SidecarConnector {
     cell_id: String,
@@ -103,41 +103,28 @@ struct SidecarConnector {
 }
 
 impl Connector for SidecarConnector {
-    fn call(
+    fn dispatch(
         &self,
         _: &CapabilityDescriptor,
         args_json: &str,
         context: DispatchContext,
-    ) -> Result<String, ConnectorError> {
-        let payload =
-            serde_json::from_str(args_json).map_err(|e| ConnectorError::new(e.to_string()))?;
-        let (response, receive) = mpsc::channel();
+        completion: ConnectorCompletion,
+    ) -> Result<(), ConnectorError> {
+        if self.cancelled.load(Ordering::Relaxed) {
+            return Err(ConnectorError::new("execution cancelled"));
+        }
+        if context.is_expired() {
+            return Err(ConnectorError::new("wall-clock deadline exceeded"));
+        }
+        let payload = serde_json::from_str(args_json)
+            .map_err(|error| ConnectorError::new(error.to_string()))?;
         self.events
             .send(Event::Delegate(DelegateCall {
                 cell_id: self.cell_id.clone(),
                 payload,
-                response,
+                completion,
             }))
-            .map_err(|_| ConnectorError::new("sidecar transport closed"))?;
-        loop {
-            if self.cancelled.load(Ordering::Relaxed) {
-                return Err(ConnectorError::new("execution cancelled"));
-            }
-            if context.is_expired() {
-                return Err(ConnectorError::new("wall-clock deadline exceeded"));
-            }
-            match receive.recv_timeout(context.remaining().min(Duration::from_millis(25))) {
-                Ok(Ok(value)) => {
-                    return serde_json::to_string(&value)
-                        .map_err(|e| ConnectorError::new(e.to_string()));
-                }
-                Ok(Err(message)) => return Err(ConnectorError::new(message)),
-                Err(mpsc::RecvTimeoutError::Timeout) => {}
-                Err(mpsc::RecvTimeoutError::Disconnected) => {
-                    return Err(ConnectorError::new("delegate transport closed"));
-                }
-            }
-        }
+            .map_err(|_| ConnectorError::new("sidecar transport closed"))
     }
 }
 
@@ -247,11 +234,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 } => {
                     if let Some(pending) = delegates.remove(&delegate_id) {
                         let value = if ok {
-                            Ok(result.unwrap_or(Value::Null))
+                            serde_json::to_string(&result.unwrap_or(Value::Null))
+                                .map_err(|error| ConnectorError::new(error.to_string()))
                         } else {
-                            Err(error.unwrap_or_else(|| "delegate failed".to_owned()))
+                            Err(ConnectorError::new(
+                                error.unwrap_or_else(|| "delegate failed".to_owned()),
+                            ))
                         };
-                        let _ = pending.response.send(value);
+                        let _ = pending.completion.complete(value);
                     }
                 }
                 ClientFrame::Shutdown { id } => {
@@ -260,8 +250,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     }
                     for pending in delegates.into_values() {
                         let _ = pending
-                            .response
-                            .send(Err("sidecar shutting down".to_owned()));
+                            .completion
+                            .complete(Err(ConnectorError::new("sidecar shutting down")));
                     }
                     write_frame(&mut writer, &json!({"type":"response","id":id,"ok":true}))?;
                     break;
@@ -269,7 +259,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             },
             Event::Delegate(call) => {
                 if !cells.contains_key(&call.cell_id) {
-                    let _ = call.response.send(Err("cell is unavailable".to_owned()));
+                    let _ = call
+                        .completion
+                        .complete(Err(ConnectorError::new("cell is unavailable")));
                     continue;
                 }
                 let delegate_id = delegate_ids.fetch_add(1, Ordering::Relaxed);
@@ -277,7 +269,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     delegate_id,
                     PendingDelegate {
                         cell_id: call.cell_id.clone(),
-                        response: call.response,
+                        completion: call.completion,
                     },
                 );
                 write_frame(
@@ -583,7 +575,9 @@ fn cancel_delegates(cell_id: &str, delegates: &mut HashMap<u64, PendingDelegate>
         .collect();
     for id in ids {
         if let Some(p) = delegates.remove(&id) {
-            let _ = p.response.send(Err("execution cancelled".to_owned()));
+            let _ = p
+                .completion
+                .complete(Err(ConnectorError::new("execution cancelled")));
         }
     }
 }
