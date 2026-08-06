@@ -22,15 +22,15 @@ fn golden_valid_certificate_and_canonical_vectors_are_stable() {
 
 #[test]
 fn zero_ref_object_identity_convention_is_portable_sha256() {
+    const ABC_SHA256: &str = "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad";
+
     assert_eq!(OBJECT_ID_HASH_ALGORITHM, "sha256");
     assert_eq!(OBJECT_ID_HEX_LENGTH, 64);
+    assert_eq!(object_identity_hex(b"abc"), ABC_SHA256);
+    assert_eq!(zero_ref::content_hash_hex(b"abc"), ABC_SHA256);
     assert_eq!(
-        object_identity_hex(b"abc"),
-        "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
-    );
-    assert_eq!(
-        ObjectId(zero_abi::sha256(b"abc")).0,
-        zero_abi::sha256(b"abc")
+        zero_abi::DigestV1::from_bytes(zero_abi::sha256(b"abc")).to_hex(),
+        ABC_SHA256
     );
 }
 

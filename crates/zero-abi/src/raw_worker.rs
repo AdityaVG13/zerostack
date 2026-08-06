@@ -758,6 +758,60 @@ mod tests {
     }
 
     #[test]
+    fn engine_identity_and_call_frame_bytes_are_golden() {
+        let identities = [
+            (EngineIdentity::FsZero, "fszero", ["fs_zero", "fs"]),
+            (
+                EngineIdentity::GraphZero,
+                "graphzero",
+                ["graph_zero", "graph"],
+            ),
+            (
+                EngineIdentity::TokenZero,
+                "tokenzero",
+                ["token_zero", "token"],
+            ),
+        ];
+        for (identity, canonical, aliases) in identities {
+            assert_eq!(
+                serde_json::to_string(&identity).unwrap(),
+                format!("\"{canonical}\"")
+            );
+            for alias in aliases {
+                let decoded: EngineIdentity =
+                    serde_json::from_str(&format!("\"{alias}\"")).unwrap();
+                assert_eq!(decoded, identity);
+                assert_eq!(
+                    serde_json::to_string(&decoded).unwrap(),
+                    format!("\"{canonical}\"")
+                );
+            }
+        }
+        for invalid in ["fz", "FSZero", "fs-zero", ""] {
+            assert!(serde_json::from_str::<EngineIdentity>(&format!("\"{invalid}\"")).is_err());
+        }
+
+        let call = WorkerRequestFrame::Call {
+            request: CallRequest {
+                request_id: "request-1".into(),
+                op: "read".into(),
+                args: json!({"path": "README.md"}),
+                deadline_unix_ms: Some(100),
+                trace: trace(),
+                approval_grant: None,
+            },
+        };
+        let encoded = encode_frame(&call, DEFAULT_MAX_FRAME_BYTES).unwrap();
+        assert_eq!(
+            std::str::from_utf8(&encoded).unwrap(),
+            concat!(
+                r#"{"kind":"call","request":{"request_id":"request-1","op":"read","args":{"path":"README.md"},"deadline_unix_ms":100,"trace":{"runtime_id":"runtime-1","cell_id":"cell-1","request_id":"request-1","trace_id":"trace-1","worker_revision":"abc123","contract_digest":"dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"}}}"#,
+                "\n"
+            )
+        );
+    }
+
+    #[test]
     fn call_and_cancel_round_trip_through_bounded_ndjson() {
         let call = WorkerRequestFrame::Call {
             request: CallRequest {
