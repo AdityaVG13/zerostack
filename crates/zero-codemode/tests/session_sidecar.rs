@@ -113,6 +113,26 @@ fn read_rejection(r: &mut BufReader<UnixStream>) -> Option<Value> {
         Some(serde_json::from_str(&s).unwrap())
     }
 }
+
+fn connect_authenticated(
+    socket: &std::path::Path,
+    token: &str,
+) -> (UnixStream, BufReader<UnixStream>, u64) {
+    let mut stream = UnixStream::connect(socket).unwrap();
+    stream
+        .set_read_timeout(Some(Duration::from_secs(3)))
+        .unwrap();
+    let mut reader = BufReader::new(stream.try_clone().unwrap());
+    send(
+        &mut stream,
+        json!({"type":"hello","protocol":"zerostack-session/v1","token":token}),
+    );
+    let hello = read(&mut reader);
+    assert_eq!(hello["ok"], true, "{hello}");
+    let generation = hello["generation"].as_u64().unwrap();
+    (stream, reader, generation)
+}
+
 #[test]
 fn authenticated_cross_surface_and_rejections() {
     let (d, mut c, t, shutdown_token, _generation) = start(ProcessIdentity::current().unwrap());
@@ -239,6 +259,299 @@ fn all_public_methods_preserve_arguments_and_ref_owners() {
     send(
         &mut stream,
         json!({"type":"shutdown","id":2,"token":shutdown_token}),
+    );
+    assert_eq!(read(&mut reader)["ok"], true);
+    assert!(session.wait().unwrap().success());
+}
+
+#[test]
+fn replacement_cancels_inflight_and_suppresses_stale_result() {
+    let (d, mut session, token, shutdown_token, initial_generation) =
+        start_configured(ProcessIdentity::current().unwrap(), |command, _| {
+            command.env("ZEROSTACK_TOKENZERO_RAW_ARGS", "hold");
+        });
+    let socket = d.path().join("runtime/session.sock");
+    let (mut old_stream, mut old_reader, old_generation) = connect_authenticated(&socket, &token);
+    assert_eq!(old_generation, initial_generation);
+    send(
+        &mut old_stream,
+        json!({
+            "type":"execute",
+            "id":41,
+            "generation":old_generation,
+            "root":d.path(),
+            "source":"return await zero.token.shell('hold');",
+            "timeout_ms":30000
+        }),
+    );
+    thread::sleep(Duration::from_millis(20));
+
+    let (mut control, mut control_reader, control_generation) =
+        connect_authenticated(&socket, &token);
+    assert_eq!(control_generation, old_generation);
+    send(
+        &mut control,
+        json!({
+            "type":"replace",
+            "id":42,
+            "generation":old_generation,
+            "token":shutdown_token,
+            "reason":"before_switch"
+        }),
+    );
+    let replaced = read(&mut control_reader);
+    assert_eq!(replaced["ok"], true, "{replaced}");
+    assert_eq!(replaced["result"]["previous_generation"], old_generation);
+    assert_eq!(replaced["generation"], old_generation);
+    assert_eq!(replaced["result"]["reauthentication_required"], true);
+    let new_generation = replaced["result"]["generation"].as_u64().unwrap();
+    assert_eq!(new_generation, old_generation + 1);
+
+    let (mut current_stream, mut current_reader, authenticated_generation) =
+        connect_authenticated(&socket, &token);
+    assert_eq!(authenticated_generation, new_generation);
+    send(
+        &mut current_stream,
+        json!({
+            "type":"execute",
+            "id":44,
+            "generation":new_generation,
+            "root":d.path(),
+            "source":"return 44;"
+        }),
+    );
+    let stale_settlement = read(&mut old_reader);
+    assert_eq!(stale_settlement["ok"], false, "{stale_settlement}");
+    assert_eq!(stale_settlement["id"], 41);
+    assert_eq!(stale_settlement["code"], "stale_generation");
+
+    let (mut stale_stream, mut stale_reader, observed_generation) =
+        connect_authenticated(&socket, &token);
+    assert_eq!(observed_generation, new_generation);
+    send(
+        &mut stale_stream,
+        json!({
+            "type":"execute",
+            "id":43,
+            "generation":old_generation,
+            "root":d.path(),
+            "source":"return 'must-not-run';"
+        }),
+    );
+    let stale_admission = read(&mut stale_reader);
+    assert_eq!(stale_admission["code"], "stale_generation");
+
+    let current = read(&mut current_reader);
+    assert_eq!(current["ok"], true, "{current}");
+    assert_eq!(current["result"], 44);
+    send(
+        &mut current_stream,
+        json!({"type":"shutdown","id":45,"token":shutdown_token}),
+    );
+    assert_eq!(read(&mut current_reader)["ok"], true);
+    assert!(session.wait().unwrap().success());
+}
+
+#[test]
+fn overlapping_replacements_have_one_linearized_winner() {
+    let (d, mut session, token, shutdown_token, generation) =
+        start(ProcessIdentity::current().unwrap());
+    let socket = d.path().join("runtime/session.sock");
+    let (mut first, mut first_reader, first_generation) = connect_authenticated(&socket, &token);
+    let (mut second, mut second_reader, second_generation) = connect_authenticated(&socket, &token);
+    assert_eq!(first_generation, generation);
+    assert_eq!(second_generation, generation);
+    send(
+        &mut first,
+        json!({
+            "type":"replace","id":300,"generation":generation,
+            "token":shutdown_token,"reason":"before_fork"
+        }),
+    );
+    send(
+        &mut second,
+        json!({
+            "type":"replace","id":301,"generation":generation,
+            "token":shutdown_token,"reason":"worker_revision_change"
+        }),
+    );
+    let first_result = read(&mut first_reader);
+    let second_result = read(&mut second_reader);
+    assert_ne!(first_result["ok"], second_result["ok"]);
+    let loser = if first_result["ok"] == false {
+        &first_result
+    } else {
+        &second_result
+    };
+    assert!(
+        loser["code"] == "stale_generation"
+            || loser["code"] == "replacement_in_progress"
+            || loser["code"] == "reauthentication_required",
+        "{loser}"
+    );
+    let next_generation = if first_result["ok"] == true {
+        first_result["result"]["generation"].as_u64().unwrap()
+    } else {
+        second_result["result"]["generation"].as_u64().unwrap()
+    };
+    let (mut current, mut current_reader, observed_generation) =
+        connect_authenticated(&socket, &token);
+    assert_eq!(observed_generation, next_generation);
+    send(
+        &mut current,
+        json!({"type":"shutdown","id":302,"token":shutdown_token}),
+    );
+    assert_eq!(read(&mut current_reader)["generation"], next_generation);
+    assert!(session.wait().unwrap().success());
+}
+
+#[test]
+fn concurrent_client_bound_returns_typed_retry_guidance() {
+    let (d, mut session, token, shutdown_token, generation) =
+        start_configured(ProcessIdentity::current().unwrap(), |command, _| {
+            command.env("ZEROSTACK_TOKENZERO_RAW_ARGS", "hold");
+        });
+    let socket = d.path().join("runtime/session.sock");
+    let mut blocked = Vec::new();
+    for id in 100..107 {
+        let (mut stream, reader, observed_generation) = connect_authenticated(&socket, &token);
+        assert_eq!(observed_generation, generation);
+        send(
+            &mut stream,
+            json!({
+                "type":"execute","id":id,"generation":generation,"root":d.path(),
+                "source":"return await zero.token.shell('hold');","timeout_ms":30000
+            }),
+        );
+        blocked.push((stream, reader));
+    }
+    let (mut control, mut control_reader, control_generation) =
+        connect_authenticated(&socket, &token);
+    assert_eq!(control_generation, generation);
+
+    let overflow = UnixStream::connect(&socket).unwrap();
+    overflow
+        .set_read_timeout(Some(Duration::from_secs(1)))
+        .unwrap();
+    let mut overflow_reader = BufReader::new(overflow);
+    let rejected = read(&mut overflow_reader);
+    assert_eq!(rejected["ok"], false, "{rejected}");
+    assert_eq!(rejected["code"], "backpressure");
+    assert_eq!(rejected["retry_after_ms"], 1);
+
+    send(
+        &mut control,
+        json!({
+            "type":"replace","id":200,"generation":generation,
+            "token":shutdown_token,"reason":"manual"
+        }),
+    );
+    let replaced = read(&mut control_reader);
+    assert_eq!(replaced["ok"], true, "{replaced}");
+    assert_eq!(replaced["generation"], generation);
+    let next_generation = replaced["result"]["generation"].as_u64().unwrap();
+    for (_, mut reader) in blocked {
+        let settlement = read(&mut reader);
+        assert_eq!(settlement["ok"], false, "{settlement}");
+        assert_eq!(settlement["code"], "stale_generation");
+    }
+    let (mut current, mut current_reader, observed_generation) =
+        connect_authenticated(&socket, &token);
+    assert_eq!(observed_generation, next_generation);
+    send(
+        &mut current,
+        json!({"type":"shutdown","id":201,"token":shutdown_token}),
+    );
+    let stopped = read(&mut current_reader);
+    assert_eq!(stopped["ok"], true, "{stopped}");
+    assert_eq!(stopped["generation"], next_generation);
+    assert!(session.wait().unwrap().success());
+}
+
+#[test]
+fn request_ids_are_global_per_generation() {
+    let (d, mut session, token, shutdown_token, _) = start(ProcessIdentity::current().unwrap());
+    let socket = d.path().join("runtime/session.sock");
+    let (mut first, mut first_reader, generation) = connect_authenticated(&socket, &token);
+    let (mut second, mut second_reader, second_generation) = connect_authenticated(&socket, &token);
+    assert_eq!(second_generation, generation);
+    send(
+        &mut first,
+        json!({
+            "type":"execute","id":77,"generation":generation,
+            "root":d.path(),"source":"return 1;"
+        }),
+    );
+    assert_eq!(read(&mut first_reader)["result"], 1);
+    send(
+        &mut second,
+        json!({
+            "type":"execute","id":77,"generation":generation,
+            "root":d.path(),"source":"return 2;"
+        }),
+    );
+    let duplicate = read(&mut second_reader);
+    assert_eq!(duplicate["ok"], false, "{duplicate}");
+    assert_eq!(duplicate["code"], "duplicate_request_id");
+    send(
+        &mut second,
+        json!({"type":"shutdown","id":78,"token":shutdown_token}),
+    );
+    assert_eq!(read(&mut second_reader)["ok"], true);
+    assert!(session.wait().unwrap().success());
+}
+
+#[test]
+fn ten_thousand_calls_settle_once_without_generation_drift() {
+    let (d, mut session, token, shutdown_token, _) = start(ProcessIdentity::current().unwrap());
+    let socket = d.path().join("runtime/session.sock");
+    let (mut stream, mut reader, generation) = connect_authenticated(&socket, &token);
+    for id in 1..=10_000_u64 {
+        send(
+            &mut stream,
+            json!({
+                "type":"execute","id":id,"generation":generation,
+                "root":d.path(),"source":"return 1;"
+            }),
+        );
+        let settled = read(&mut reader);
+        assert_eq!(settled["ok"], true, "request {id}: {settled}");
+        assert_eq!(settled["id"], id);
+        assert_eq!(settled["generation"], generation);
+        assert_eq!(settled["result"], 1);
+    }
+    send(
+        &mut stream,
+        json!({"type":"shutdown","id":10_001,"token":shutdown_token}),
+    );
+    assert_eq!(read(&mut reader)["ok"], true);
+    assert!(session.wait().unwrap().success());
+}
+
+#[test]
+fn quickjs_globals_do_not_cross_model_visible_plans() {
+    let (d, mut session, token, shutdown_token, _) = start(ProcessIdentity::current().unwrap());
+    let socket = d.path().join("runtime/session.sock");
+    let (mut stream, mut reader, generation) = connect_authenticated(&socket, &token);
+    send(
+        &mut stream,
+        json!({
+            "type":"execute","id":90,"generation":generation,"root":d.path(),
+            "source":"globalThis.__zerostack_leak_probe=7;return __zerostack_leak_probe;"
+        }),
+    );
+    assert_eq!(read(&mut reader)["result"], 7);
+    send(
+        &mut stream,
+        json!({
+            "type":"execute","id":91,"generation":generation,"root":d.path(),
+            "source":"return typeof globalThis.__zerostack_leak_probe;"
+        }),
+    );
+    assert_eq!(read(&mut reader)["result"], "undefined");
+    send(
+        &mut stream,
+        json!({"type":"shutdown","id":92,"token":shutdown_token}),
     );
     assert_eq!(read(&mut reader)["ok"], true);
     assert!(session.wait().unwrap().success());
@@ -500,6 +813,43 @@ fn worker_sha256_mismatch_fails_closed_without_stale_socket() {
     );
     assert!(!runtime.join("session.sock").exists());
     assert!(!runtime.exists());
+}
+
+#[test]
+fn unknown_authenticated_request_is_typed_and_connection_survives() {
+    let (d, mut session, token, shutdown_token, _) = start(ProcessIdentity::current().unwrap());
+    let socket = d.path().join("runtime/session.sock");
+    let (mut stream, mut reader, generation) = connect_authenticated(&socket, &token);
+    send(
+        &mut stream,
+        json!({"type":"future_control","id":700,"payload":{"x":1}}),
+    );
+    let rejected = read(&mut reader);
+    assert_eq!(rejected["ok"], false, "{rejected}");
+    assert_eq!(rejected["id"], 700);
+    assert_eq!(rejected["generation"], generation);
+    assert_eq!(rejected["code"], "unknown_request_type");
+    assert!(rejected["error"]
+        .as_str()
+        .unwrap()
+        .contains("request rejected"));
+
+    send(
+        &mut stream,
+        json!({
+            "type":"execute","id":701,"generation":generation,
+            "root":d.path(),"source":"return 701;"
+        }),
+    );
+    let current = read(&mut reader);
+    assert_eq!(current["ok"], true, "{current}");
+    assert_eq!(current["result"], 701);
+    send(
+        &mut stream,
+        json!({"type":"shutdown","id":702,"token":shutdown_token}),
+    );
+    assert_eq!(read(&mut reader)["ok"], true);
+    assert!(session.wait().unwrap().success());
 }
 
 #[test]

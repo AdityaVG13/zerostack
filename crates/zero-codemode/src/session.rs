@@ -13,16 +13,17 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 use std::{
-    collections::BTreeMap,
+    collections::{BTreeMap, BTreeSet},
     io::Read,
     path::{Path, PathBuf},
     process::{Command, Stdio},
     rc::Rc,
     sync::{
         atomic::{AtomicBool, AtomicU64, Ordering},
+        mpsc::{self, Receiver, SyncSender, TrySendError},
         Arc, Mutex,
     },
-    thread,
+    thread::{self, JoinHandle},
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 use zero_abi::raw_worker::EngineIdentity;
@@ -33,6 +34,28 @@ pub const MAX_SESSION_FRAME: usize = 1_048_576;
 pub const SESSION_SOCKET_ENV: &str = "ZEROSTACK_SESSION_SOCKET";
 pub const SESSION_TOKEN_ENV: &str = "ZEROSTACK_SESSION_TOKEN";
 pub const SESSION_SHUTDOWN_TOKEN_ENV: &str = "ZEROSTACK_SESSION_SHUTDOWN_TOKEN";
+
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SessionReplacementReason {
+    SessionStart,
+    BeforeSwitch,
+    BeforeFork,
+    WorkerRevisionChange,
+    Manual,
+}
+
+impl SessionReplacementReason {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::SessionStart => "session_start",
+            Self::BeforeSwitch => "before_switch",
+            Self::BeforeFork => "before_fork",
+            Self::WorkerRevisionChange => "worker_revision_change",
+            Self::Manual => "manual",
+        }
+    }
+}
 
 #[derive(Debug, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
@@ -48,6 +71,12 @@ pub enum SessionRequest {
         source: String,
         #[serde(default)]
         timeout_ms: Option<u64>,
+    },
+    Replace {
+        id: u64,
+        generation: u64,
+        token: String,
+        reason: SessionReplacementReason,
     },
     Shutdown {
         id: u64,
@@ -65,6 +94,10 @@ pub struct SessionResponse {
     pub result: Option<Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub code: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub retry_after_ms: Option<u64>,
 }
 impl SessionResponse {
     pub fn ok(id: Option<u64>, generation: u64, result: Value) -> Self {
@@ -75,9 +108,30 @@ impl SessionResponse {
             generation,
             result: Some(result),
             error: None,
+            code: None,
+            retry_after_ms: None,
         }
     }
     pub fn error(id: Option<u64>, generation: u64, error: impl Into<String>) -> Self {
+        Self::typed_error(id, generation, "internal", error)
+    }
+
+    pub fn typed_error(
+        id: Option<u64>,
+        generation: u64,
+        error_code: impl Into<String>,
+        error: impl Into<String>,
+    ) -> Self {
+        Self::typed_error_with_retry(id, generation, error_code, error, None)
+    }
+
+    pub fn typed_error_with_retry(
+        id: Option<u64>,
+        generation: u64,
+        error_code: impl Into<String>,
+        error: impl Into<String>,
+        retry_after_ms: Option<u64>,
+    ) -> Self {
         Self {
             protocol: SESSION_PROTOCOL.into(),
             id,
@@ -85,6 +139,8 @@ impl SessionResponse {
             generation,
             result: None,
             error: Some(error.into()),
+            code: Some(error_code.into()),
+            retry_after_ms,
         }
     }
 }
@@ -812,6 +868,670 @@ impl SessionExecutor {
     pub fn cancel(&self) {
         self.cancellation().cancel();
     }
+}
+
+pub const SESSION_EXECUTION_QUEUE_CAPACITY: usize = 8;
+pub const SESSION_REPLACEMENT_SETTLE_TIMEOUT: Duration = Duration::from_secs(1);
+pub const SESSION_EXECUTOR_START_TIMEOUT: Duration = Duration::from_secs(5);
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AggregateSessionFailureCode {
+    InvalidGeneration,
+    StaleGeneration,
+    DuplicateRequestId,
+    Backpressure,
+    ReplacementInProgress,
+    Terminating,
+    GenerationExhausted,
+    BackendUnavailable,
+    BackendExecution,
+    Internal,
+}
+
+impl AggregateSessionFailureCode {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::InvalidGeneration => "invalid_generation",
+            Self::StaleGeneration => "stale_generation",
+            Self::DuplicateRequestId => "duplicate_request_id",
+            Self::Backpressure => "backpressure",
+            Self::ReplacementInProgress => "replacement_in_progress",
+            Self::Terminating => "session_terminating",
+            Self::GenerationExhausted => "generation_exhausted",
+            Self::BackendUnavailable => "backend_unavailable",
+            Self::BackendExecution => "backend_execution",
+            Self::Internal => "internal",
+        }
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct AggregateSessionError {
+    pub code: AggregateSessionFailureCode,
+    pub generation: u64,
+    pub request_id: Option<u64>,
+    pub detail: String,
+    pub retry_after_ms: Option<u64>,
+}
+
+impl AggregateSessionError {
+    fn new(
+        code: AggregateSessionFailureCode,
+        generation: u64,
+        request_id: Option<u64>,
+        detail: impl Into<String>,
+    ) -> Self {
+        Self {
+            code,
+            generation,
+            request_id,
+            detail: detail.into(),
+            retry_after_ms: None,
+        }
+    }
+
+    fn backpressure(generation: u64, request_id: u64) -> Self {
+        Self {
+            code: AggregateSessionFailureCode::Backpressure,
+            generation,
+            request_id: Some(request_id),
+            detail: format!(
+                "session execution queue is full (capacity {})",
+                SESSION_EXECUTION_QUEUE_CAPACITY
+            ),
+            retry_after_ms: Some(1),
+        }
+    }
+}
+
+impl std::fmt::Display for AggregateSessionError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}: {}", self.code.as_str(), self.detail)
+    }
+}
+
+impl std::error::Error for AggregateSessionError {}
+
+#[derive(Debug)]
+pub struct SessionExecutionResult {
+    pub generation: u64,
+    pub request_id: u64,
+    pub value: Value,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct SessionReplacementReceipt {
+    pub previous_generation: u64,
+    pub generation: u64,
+    pub reason: SessionReplacementReason,
+}
+
+#[derive(Debug)]
+struct AggregateSessionState {
+    generation: u64,
+    accepting: bool,
+    replacing: bool,
+    terminating: bool,
+    shutdown_sent: bool,
+    worker_stopped: bool,
+    seen_request_ids: BTreeSet<u64>,
+    active_request_ids: BTreeSet<u64>,
+}
+
+enum SessionCommand {
+    Execute {
+        source: String,
+        timeout: Duration,
+        reply: SyncSender<Result<Value, String>>,
+    },
+    Replace {
+        generation: u64,
+        reply: SyncSender<Result<(), String>>,
+    },
+    Shutdown {
+        reply: SyncSender<()>,
+    },
+}
+
+pub struct AggregateSession {
+    state: Arc<Mutex<AggregateSessionState>>,
+    commands: SyncSender<SessionCommand>,
+    cancellation: Arc<Mutex<Option<SessionCancellation>>>,
+    worker: Mutex<Option<JoinHandle<()>>>,
+}
+
+#[derive(Clone)]
+pub struct AggregateSessionCancellation {
+    state: Arc<Mutex<AggregateSessionState>>,
+    cancellation: Arc<Mutex<Option<SessionCancellation>>>,
+}
+
+impl AggregateSessionCancellation {
+    pub fn cancel(&self) {
+        if let Ok(mut state) = self.state.lock() {
+            state.accepting = false;
+            state.terminating = true;
+            if let Some(next) = state.generation.checked_add(1) {
+                state.generation = next;
+                state.seen_request_ids.clear();
+            }
+        }
+        cancel_backend(&self.cancellation);
+    }
+}
+
+impl AggregateSession {
+    pub fn new(initial_generation: u64) -> Result<Self, AggregateSessionError> {
+        if initial_generation == 0 {
+            return Err(AggregateSessionError::new(
+                AggregateSessionFailureCode::InvalidGeneration,
+                initial_generation,
+                None,
+                "initial generation must be nonzero",
+            ));
+        }
+        let (commands, receiver) = mpsc::sync_channel(SESSION_EXECUTION_QUEUE_CAPACITY);
+        let (ready_tx, ready_rx) = mpsc::sync_channel(1);
+        let cancellation = Arc::new(Mutex::new(None));
+        let worker_cancellation = Arc::clone(&cancellation);
+        let worker = thread::Builder::new()
+            .name("zerostack-session-executor".into())
+            .spawn(move || {
+                session_worker(initial_generation, receiver, worker_cancellation, ready_tx)
+            })
+            .map_err(|error| {
+                AggregateSessionError::new(
+                    AggregateSessionFailureCode::BackendUnavailable,
+                    initial_generation,
+                    None,
+                    format!("failed to spawn session executor: {error}"),
+                )
+            })?;
+        match ready_rx.recv_timeout(SESSION_EXECUTOR_START_TIMEOUT) {
+            Ok(Ok(())) => {}
+            Ok(Err(detail)) => {
+                let _ = worker.join();
+                return Err(AggregateSessionError::new(
+                    AggregateSessionFailureCode::BackendUnavailable,
+                    initial_generation,
+                    None,
+                    detail,
+                ));
+            }
+            Err(error) => {
+                return Err(AggregateSessionError::new(
+                    AggregateSessionFailureCode::BackendUnavailable,
+                    initial_generation,
+                    None,
+                    format!(
+                        "session executor did not start within {}ms: {error}",
+                        SESSION_EXECUTOR_START_TIMEOUT.as_millis()
+                    ),
+                ));
+            }
+        }
+        Ok(Self {
+            state: Arc::new(Mutex::new(AggregateSessionState {
+                generation: initial_generation,
+                accepting: true,
+                replacing: false,
+                terminating: false,
+                shutdown_sent: false,
+                worker_stopped: false,
+                seen_request_ids: BTreeSet::new(),
+                active_request_ids: BTreeSet::new(),
+            })),
+            commands,
+            cancellation,
+            worker: Mutex::new(Some(worker)),
+        })
+    }
+
+    pub fn generation(&self) -> Result<u64, AggregateSessionError> {
+        self.state
+            .lock()
+            .map(|state| state.generation)
+            .map_err(|_| {
+                AggregateSessionError::new(
+                    AggregateSessionFailureCode::Internal,
+                    0,
+                    None,
+                    "session lifecycle state is poisoned",
+                )
+            })
+    }
+
+    pub fn cancellation(&self) -> AggregateSessionCancellation {
+        AggregateSessionCancellation {
+            state: Arc::clone(&self.state),
+            cancellation: Arc::clone(&self.cancellation),
+        }
+    }
+
+    pub fn execute(
+        &self,
+        generation: u64,
+        request_id: u64,
+        source: impl Into<String>,
+        timeout: Duration,
+    ) -> Result<SessionExecutionResult, AggregateSessionError> {
+        let (reply_tx, reply_rx) = mpsc::sync_channel(1);
+        {
+            let mut state = self.lock_state(Some(request_id))?;
+            if generation != state.generation {
+                return Err(AggregateSessionError::new(
+                    AggregateSessionFailureCode::StaleGeneration,
+                    state.generation,
+                    Some(request_id),
+                    format!(
+                        "request generation {generation} does not match active generation {}",
+                        state.generation
+                    ),
+                ));
+            }
+            if state.terminating || !state.accepting {
+                return Err(AggregateSessionError::new(
+                    AggregateSessionFailureCode::Terminating,
+                    state.generation,
+                    Some(request_id),
+                    "session is not accepting execution",
+                ));
+            }
+            if !state.seen_request_ids.insert(request_id) {
+                return Err(AggregateSessionError::new(
+                    AggregateSessionFailureCode::DuplicateRequestId,
+                    state.generation,
+                    Some(request_id),
+                    "request id was already admitted in this generation",
+                ));
+            }
+            state.active_request_ids.insert(request_id);
+        }
+        match self.commands.try_send(SessionCommand::Execute {
+            source: source.into(),
+            timeout,
+            reply: reply_tx,
+        }) {
+            Ok(()) => {}
+            Err(TrySendError::Full(_)) => {
+                self.release_unadmitted(generation, request_id);
+                return Err(AggregateSessionError::backpressure(generation, request_id));
+            }
+            Err(TrySendError::Disconnected(_)) => {
+                self.release_active(request_id);
+                return Err(AggregateSessionError::new(
+                    AggregateSessionFailureCode::BackendUnavailable,
+                    generation,
+                    Some(request_id),
+                    "session executor is unavailable",
+                ));
+            }
+        }
+        let backend_result = reply_rx.recv().map_err(|error| {
+            AggregateSessionError::new(
+                AggregateSessionFailureCode::BackendUnavailable,
+                generation,
+                Some(request_id),
+                format!("session executor dropped the result: {error}"),
+            )
+        });
+        let (current, terminating) = {
+            let mut state = self.lock_state(Some(request_id))?;
+            state.active_request_ids.remove(&request_id);
+            (state.generation, state.terminating)
+        };
+        if current != generation || terminating {
+            return Err(AggregateSessionError::new(
+                AggregateSessionFailureCode::StaleGeneration,
+                current,
+                Some(request_id),
+                "execution settled after its generation was replaced",
+            ));
+        }
+        let value = backend_result?.map_err(|detail| {
+            AggregateSessionError::new(
+                AggregateSessionFailureCode::BackendExecution,
+                generation,
+                Some(request_id),
+                detail,
+            )
+        })?;
+        Ok(SessionExecutionResult {
+            generation,
+            request_id,
+            value,
+        })
+    }
+
+    pub fn replace(
+        &self,
+        expected_generation: u64,
+        reason: SessionReplacementReason,
+    ) -> Result<SessionReplacementReceipt, AggregateSessionError> {
+        let next_generation = {
+            let mut state = self.lock_state(None)?;
+            if expected_generation != state.generation {
+                return Err(AggregateSessionError::new(
+                    AggregateSessionFailureCode::StaleGeneration,
+                    state.generation,
+                    None,
+                    format!(
+                        "replacement generation {expected_generation} does not match active generation {}",
+                        state.generation
+                    ),
+                ));
+            }
+            if state.terminating {
+                return Err(AggregateSessionError::new(
+                    AggregateSessionFailureCode::Terminating,
+                    state.generation,
+                    None,
+                    "session is terminating",
+                ));
+            }
+            if state.replacing {
+                return Err(AggregateSessionError::new(
+                    AggregateSessionFailureCode::ReplacementInProgress,
+                    state.generation,
+                    None,
+                    "another replacement is already in progress",
+                ));
+            }
+            let next = state.generation.checked_add(1).ok_or_else(|| {
+                AggregateSessionError::new(
+                    AggregateSessionFailureCode::GenerationExhausted,
+                    state.generation,
+                    None,
+                    "session generation cannot advance",
+                )
+            })?;
+            state.accepting = false;
+            state.replacing = true;
+            state.generation = next;
+            state.seen_request_ids.clear();
+            next
+        };
+        cancel_backend(&self.cancellation);
+        let control_started = Instant::now();
+        let (reply_tx, reply_rx) = mpsc::sync_channel(1);
+        if let Err(detail) = send_control_with_deadline(
+            &self.commands,
+            SessionCommand::Replace {
+                generation: next_generation,
+                reply: reply_tx,
+            },
+            SESSION_REPLACEMENT_SETTLE_TIMEOUT,
+        ) {
+            self.finish_failed_replacement(next_generation);
+            return Err(AggregateSessionError::new(
+                AggregateSessionFailureCode::BackendUnavailable,
+                next_generation,
+                None,
+                detail,
+            ));
+        }
+        let settle_remaining =
+            SESSION_REPLACEMENT_SETTLE_TIMEOUT.saturating_sub(control_started.elapsed());
+        let replacement = reply_rx.recv_timeout(settle_remaining).map_err(|error| {
+            self.finish_failed_replacement(next_generation);
+            AggregateSessionError::new(
+                AggregateSessionFailureCode::BackendUnavailable,
+                next_generation,
+                None,
+                format!(
+                    "session replacement did not settle within {}ms: {error}",
+                    SESSION_REPLACEMENT_SETTLE_TIMEOUT.as_millis()
+                ),
+            )
+        })?;
+        let mut state = self.lock_state(None)?;
+        state.replacing = false;
+        match replacement {
+            Ok(()) if state.generation == next_generation && !state.terminating => {
+                state.accepting = true;
+                Ok(SessionReplacementReceipt {
+                    previous_generation: expected_generation,
+                    generation: next_generation,
+                    reason,
+                })
+            }
+            Ok(()) => Err(AggregateSessionError::new(
+                AggregateSessionFailureCode::StaleGeneration,
+                state.generation,
+                None,
+                "replacement completed after lifecycle state advanced",
+            )),
+            Err(detail) => Err(AggregateSessionError::new(
+                AggregateSessionFailureCode::BackendUnavailable,
+                state.generation,
+                None,
+                detail,
+            )),
+        }
+    }
+
+    pub fn shutdown(&self) -> Result<u64, AggregateSessionError> {
+        let (generation, should_send) = {
+            let mut state = self.lock_state(None)?;
+            if state.worker_stopped || state.shutdown_sent {
+                return Ok(state.generation);
+            }
+            state.accepting = false;
+            state.terminating = true;
+            state.replacing = false;
+            state.shutdown_sent = true;
+            (state.generation, true)
+        };
+        cancel_backend(&self.cancellation);
+        if should_send {
+            let control_started = Instant::now();
+            let (reply_tx, reply_rx) = mpsc::sync_channel(1);
+            send_control_with_deadline(
+                &self.commands,
+                SessionCommand::Shutdown { reply: reply_tx },
+                SESSION_REPLACEMENT_SETTLE_TIMEOUT,
+            )
+            .map_err(|detail| {
+                AggregateSessionError::new(
+                    AggregateSessionFailureCode::BackendUnavailable,
+                    generation,
+                    None,
+                    detail,
+                )
+            })?;
+            let settle_remaining =
+                SESSION_REPLACEMENT_SETTLE_TIMEOUT.saturating_sub(control_started.elapsed());
+            reply_rx.recv_timeout(settle_remaining).map_err(|error| {
+                AggregateSessionError::new(
+                    AggregateSessionFailureCode::BackendUnavailable,
+                    generation,
+                    None,
+                    format!(
+                        "session shutdown did not settle within {}ms: {error}",
+                        SESSION_REPLACEMENT_SETTLE_TIMEOUT.as_millis()
+                    ),
+                )
+            })?;
+        }
+        if let Ok(mut worker) = self.worker.lock() {
+            if let Some(handle) = worker.take() {
+                handle.join().map_err(|_| {
+                    AggregateSessionError::new(
+                        AggregateSessionFailureCode::BackendUnavailable,
+                        generation,
+                        None,
+                        "session executor panicked during shutdown",
+                    )
+                })?;
+            }
+        }
+        if let Ok(mut state) = self.state.lock() {
+            state.worker_stopped = true;
+        }
+        Ok(generation)
+    }
+
+    fn lock_state(
+        &self,
+        request_id: Option<u64>,
+    ) -> Result<std::sync::MutexGuard<'_, AggregateSessionState>, AggregateSessionError> {
+        self.state.lock().map_err(|_| {
+            AggregateSessionError::new(
+                AggregateSessionFailureCode::Internal,
+                0,
+                request_id,
+                "session lifecycle state is poisoned",
+            )
+        })
+    }
+
+    fn release_unadmitted(&self, generation: u64, request_id: u64) {
+        if let Ok(mut state) = self.state.lock() {
+            state.active_request_ids.remove(&request_id);
+            if state.generation == generation {
+                state.seen_request_ids.remove(&request_id);
+            }
+        }
+    }
+
+    fn release_active(&self, request_id: u64) {
+        if let Ok(mut state) = self.state.lock() {
+            state.active_request_ids.remove(&request_id);
+        }
+    }
+
+    fn finish_failed_replacement(&self, generation: u64) {
+        if let Ok(mut state) = self.state.lock() {
+            if state.generation == generation {
+                state.replacing = false;
+                state.accepting = false;
+            }
+        }
+    }
+}
+
+impl Drop for AggregateSession {
+    fn drop(&mut self) {
+        self.cancellation().cancel();
+        if let Ok(state) = self.state.lock() {
+            if state.shutdown_sent || state.worker_stopped {
+                return;
+            }
+        }
+        let (reply, _) = mpsc::sync_channel(1);
+        let _ = self.commands.try_send(SessionCommand::Shutdown { reply });
+    }
+}
+
+fn send_control_with_deadline(
+    commands: &SyncSender<SessionCommand>,
+    mut command: SessionCommand,
+    timeout: Duration,
+) -> Result<(), String> {
+    let started = Instant::now();
+    loop {
+        match commands.try_send(command) {
+            Ok(()) => return Ok(()),
+            Err(TrySendError::Disconnected(_)) => {
+                return Err("session executor is unavailable".into());
+            }
+            Err(TrySendError::Full(returned)) => {
+                if started.elapsed() >= timeout {
+                    return Err(format!(
+                        "session control queue did not admit within {}ms",
+                        timeout.as_millis()
+                    ));
+                }
+                command = returned;
+                thread::sleep(Duration::from_millis(1));
+            }
+        }
+    }
+}
+
+fn cancel_backend(cancellation: &Arc<Mutex<Option<SessionCancellation>>>) {
+    if let Ok(slot) = cancellation.lock() {
+        if let Some(signal) = slot.as_ref() {
+            signal.cancel();
+        }
+    }
+}
+
+fn session_worker(
+    initial_generation: u64,
+    commands: Receiver<SessionCommand>,
+    cancellation: Arc<Mutex<Option<SessionCancellation>>>,
+    ready: SyncSender<Result<(), String>>,
+) {
+    let mut executor = match start_session_executor(initial_generation) {
+        Ok(executor) => {
+            if let Ok(mut slot) = cancellation.lock() {
+                *slot = Some(executor.cancellation());
+            }
+            let _ = ready.send(Ok(()));
+            Some(executor)
+        }
+        Err(error) => {
+            let _ = ready.send(Err(error));
+            return;
+        }
+    };
+    while let Ok(command) = commands.recv() {
+        match command {
+            SessionCommand::Execute {
+                source,
+                timeout,
+                reply,
+            } => {
+                let result = executor
+                    .as_ref()
+                    .ok_or_else(|| "session executor is unavailable".to_owned())
+                    .and_then(|executor| {
+                        executor
+                            .execute(&source, timeout)
+                            .map_err(|error| error.to_string())
+                    });
+                let _ = reply.send(result);
+            }
+            SessionCommand::Replace { generation, reply } => {
+                if let Ok(mut slot) = cancellation.lock() {
+                    *slot = None;
+                }
+                drop(executor.take());
+                let result = start_session_executor(generation).map(|next| {
+                    if let Ok(mut slot) = cancellation.lock() {
+                        *slot = Some(next.cancellation());
+                    }
+                    executor = Some(next);
+                });
+                let _ = reply.send(result);
+            }
+            SessionCommand::Shutdown { reply } => {
+                if let Ok(mut slot) = cancellation.lock() {
+                    *slot = None;
+                }
+                drop(executor.take());
+                let _ = reply.send(());
+                break;
+            }
+        }
+    }
+    if let Ok(mut slot) = cancellation.lock() {
+        *slot = None;
+    }
+}
+
+fn start_session_executor(generation: u64) -> Result<SessionExecutor, String> {
+    std::env::set_var(
+        crate::worker::SESSION_ID_ENV,
+        format!("session-{generation:016x}"),
+    );
+    let executor = SessionExecutor::new().map_err(|error| error.to_string())?;
+    executor
+        .execute("return null", Duration::from_secs(1))
+        .map_err(|error| format!("session prewarm failed: {error}"))?;
+    Ok(executor)
 }
 
 #[cfg(test)]

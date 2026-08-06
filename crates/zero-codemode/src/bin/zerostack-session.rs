@@ -27,26 +27,40 @@ impl Drop for RuntimeCleanup {
 }
 
 #[cfg(unix)]
+const MAX_SESSION_CLIENTS: usize = 8;
+
+#[cfg(unix)]
+enum SessionEvent {
+    Client(std::os::unix::net::UnixStream),
+    Terminate(Option<String>),
+}
+
+#[cfg(unix)]
+struct ActiveClientGuard(std::sync::Arc<std::sync::atomic::AtomicUsize>);
+
+#[cfg(unix)]
+impl Drop for ActiveClientGuard {
+    fn drop(&mut self) {
+        self.0.fetch_sub(1, std::sync::atomic::Ordering::AcqRel);
+    }
+}
+
+#[cfg(unix)]
 fn run() -> Result<(), Box<dyn std::error::Error>> {
-    use serde_json::Value;
     use std::{
-        collections::BTreeSet,
         fs,
         io::{BufReader, Write},
-        os::unix::{
-            fs::PermissionsExt,
-            net::{UnixListener, UnixStream},
-        },
+        os::unix::{fs::PermissionsExt, net::UnixListener},
         path::PathBuf,
         sync::{
-            atomic::{AtomicBool, Ordering},
+            atomic::{AtomicBool, AtomicUsize, Ordering},
             mpsc, Arc,
         },
         thread,
         time::Duration,
     };
     use zero_codemode::session::{
-        SessionExecutor, SessionRequest, SessionResponse, SESSION_PROTOCOL,
+        AggregateSession, SessionRequest, SessionResponse, SESSION_PROTOCOL,
         SESSION_SHUTDOWN_TOKEN_ENV, SESSION_TOKEN_ENV,
     };
     use zerostack_machine_permit::session_owner::{
@@ -96,24 +110,22 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     let generation = entropy_u64()?;
     let session_id = format!("session-{generation:016x}");
     std::env::set_var("ZEROSTACK_SESSION_ID", &session_id);
-    let exec = SessionExecutor::new()?;
+    let exec = Arc::new(AggregateSession::new(generation)?);
     let watcher = OwnerWatcher::new(owner)?;
-    enum Event {
-        Client(UnixStream),
-        Terminate(Option<String>),
-    }
     let (tx, rx) = mpsc::sync_channel(8);
     let terminating = Arc::new(AtomicBool::new(false));
     let admission_token = token.clone();
     let listener_terminating = terminating.clone();
     let listener_cancellation = exec.cancellation();
+    let listener_exec = Arc::clone(&exec);
     let watcher_tx = tx.clone();
+    let handler_tx = tx.clone();
     thread::spawn(move || {
         for incoming in listener.incoming() {
             match incoming {
-                Ok(s) => match tx.try_send(Event::Client(s)) {
+                Ok(s) => match tx.try_send(SessionEvent::Client(s)) {
                     Ok(()) => {}
-                    Err(mpsc::TrySendError::Full(Event::Client(mut stream))) => {
+                    Err(mpsc::TrySendError::Full(SessionEvent::Client(mut stream))) => {
                         if peer_euid(&stream).ok() == Some(current_euid()) {
                             let _ = stream.set_read_timeout(Some(Duration::from_millis(100)));
                             let _ = stream.set_write_timeout(Some(Duration::from_millis(100)));
@@ -129,21 +141,31 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                                             admission_token.as_bytes(),
                                         )
                                     {
-                                        let _ =
-                                            write_error(&mut stream, generation, "session busy");
+                                        let active_generation =
+                                            listener_exec.generation().unwrap_or(generation);
+                                        let _ = write_frame(
+                                            &mut stream,
+                                            &SessionResponse::typed_error_with_retry(
+                                                None,
+                                                active_generation,
+                                                "backpressure",
+                                                "session client queue is full",
+                                                Some(1),
+                                            ),
+                                        );
                                     }
                                 }
                             }
                         }
                     }
-                    Err(mpsc::TrySendError::Full(Event::Terminate(_))) => unreachable!(),
+                    Err(mpsc::TrySendError::Full(SessionEvent::Terminate(_))) => unreachable!(),
                     Err(mpsc::TrySendError::Disconnected(_)) => break,
                 },
                 Err(error) => {
                     eprintln!("fatal session listener: {error}");
                     listener_terminating.store(true, Ordering::Release);
                     listener_cancellation.cancel();
-                    let _ = tx.send(Event::Terminate(Some(format!(
+                    let _ = tx.send(SessionEvent::Terminate(Some(format!(
                         "session listener failed: {error}"
                     ))));
                     break;
@@ -160,158 +182,405 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         });
         watcher_terminating.store(true, Ordering::Release);
         watcher_cancellation.cancel();
-        let _ = watcher_tx.send(Event::Terminate(error));
+        let _ = watcher_tx.send(SessionEvent::Terminate(error));
     });
-    exec.execute("return null", Duration::from_secs(1))?;
     println!(
         "{}",
         serde_json::json!({"type":"ready","protocol":SESSION_PROTOCOL,"generation":generation})
     );
     std::io::stdout().flush()?;
-    let mut stop = false;
-    let mut fatal_error = None;
-    while !stop {
+    let active_clients = Arc::new(AtomicUsize::new(0));
+    let mut handlers = Vec::new();
+    let fatal_error = loop {
         match rx.recv()? {
-            Event::Terminate(error) => {
-                fatal_error = error;
-                break;
+            SessionEvent::Terminate(error) => {
+                terminating.store(true, Ordering::Release);
+                exec.cancellation().cancel();
+                break error;
             }
-            Event::Client(mut stream) => {
+            SessionEvent::Client(mut stream) => {
                 if terminating.load(Ordering::Acquire) {
                     continue;
                 }
-                match peer_euid(&stream) {
-                    Ok(uid) if uid == current_euid() => {}
-                    Ok(uid) => {
-                        eprintln!("peer identity rejected: {uid} != {}", current_euid());
-                        let _ = write_error(&mut stream, generation, "peer identity rejected");
-                        continue;
-                    }
-                    Err(error) => {
-                        eprintln!("peer credential failure: {error}");
-                        let _ = write_error(&mut stream, generation, "peer credential unavailable");
-                        continue;
-                    }
-                }
-                stream.set_read_timeout(Some(Duration::from_millis(250)))?;
-                stream.set_write_timeout(Some(Duration::from_millis(250)))?;
-                let mut reader = BufReader::new(stream.try_clone()?);
-                let hello = match read_frame(&mut reader) {
-                    Ok(v) => v,
-                    Err(_) => continue,
-                };
-                let authed = match hello {
-                    SessionRequest::Hello {
-                        protocol,
-                        token: provided,
-                    } => {
-                        protocol == SESSION_PROTOCOL
-                            && constant_time_eq(provided.as_bytes(), token.as_bytes())
-                    }
-                    _ => false,
-                };
-                if !authed {
-                    let _ = write_error(&mut stream, generation, "authentication rejected");
+                let admitted = active_clients
+                    .fetch_update(Ordering::AcqRel, Ordering::Acquire, |active| {
+                        (active < MAX_SESSION_CLIENTS).then_some(active + 1)
+                    })
+                    .is_ok();
+                if !admitted {
+                    let active_generation = exec.generation().unwrap_or(generation);
+                    let _ = stream.set_write_timeout(Some(Duration::from_millis(100)));
+                    let _ = write_frame(
+                        &mut stream,
+                        &SessionResponse::typed_error_with_retry(
+                            None,
+                            active_generation,
+                            "backpressure",
+                            "session client limit reached; retry after 1ms",
+                            Some(1),
+                        ),
+                    );
                     continue;
-                };
-                write_frame(
-                    &mut stream,
-                    &SessionResponse::ok(
-                        None,
-                        generation,
-                        serde_json::json!({"authenticated":true,"generation":generation}),
-                    ),
-                )?;
-                let mut ids = BTreeSet::new();
-                loop {
-                    if terminating.load(Ordering::Acquire) {
-                        break;
+                }
+                let session = Arc::clone(&exec);
+                let root = root.clone();
+                let token = token.clone();
+                let shutdown_token = shutdown_token.clone();
+                let handler_terminating = Arc::clone(&terminating);
+                let handler_events = handler_tx.clone();
+                let active = Arc::clone(&active_clients);
+                handlers.push(thread::spawn(move || {
+                    let _guard = ActiveClientGuard(active);
+                    if let Err(error) = handle_client(
+                        stream,
+                        session,
+                        root,
+                        token,
+                        shutdown_token,
+                        handler_terminating,
+                        handler_events,
+                    ) {
+                        eprintln!("session client failed: {error}");
                     }
-                    let req = match read_frame(&mut reader) {
-                        Ok(v) => v,
-                        Err(_) => break,
-                    };
-                    match req {
-                        SessionRequest::Execute {
-                            id,
-                            generation: given,
-                            root: requested,
-                            source,
-                            timeout_ms,
-                        } => {
-                            if !ids.insert(id) {
-                                write_error_id(
-                                    &mut stream,
-                                    generation,
-                                    id,
-                                    "duplicate request id",
-                                )?;
-                                continue;
-                            }
-                            if given != generation {
-                                write_error_id(&mut stream, generation, id, "stale generation")?;
-                                continue;
-                            }
-                            if PathBuf::from(requested).canonicalize().ok().as_ref() != Some(&root)
-                            {
-                                write_error_id(
-                                    &mut stream,
-                                    generation,
-                                    id,
-                                    "authorized root mismatch",
-                                )?;
-                                continue;
-                            }
-                            let result = exec.execute(
-                                &source,
-                                Duration::from_millis(
-                                    timeout_ms.unwrap_or(30000).clamp(1, 3_600_000),
-                                ),
-                            );
-                            match result {
-                                Ok(v) => write_frame(
-                                    &mut stream,
-                                    &SessionResponse::ok(Some(id), generation, v),
-                                )?,
-                                Err(e) => {
-                                    write_error_id(&mut stream, generation, id, &e.to_string())?
-                                }
-                            }
-                        }
-                        SessionRequest::Shutdown {
-                            id,
-                            token: provided,
-                        } => {
-                            if !constant_time_eq(provided.as_bytes(), shutdown_token.as_bytes()) {
-                                write_error_id(
-                                    &mut stream,
-                                    generation,
-                                    id,
-                                    "shutdown capability rejected",
-                                )?;
-                                continue;
-                            }
-                            write_frame(
-                                &mut stream,
-                                &SessionResponse::ok(Some(id), generation, Value::Null),
-                            )?;
-                            stop = true;
-                            break;
-                        }
-                        SessionRequest::Hello { .. } => {
-                            write_error_id(&mut stream, generation, 0, "duplicate hello")?
-                        }
+                }));
+                let mut pending = Vec::with_capacity(handlers.len());
+                for handler in handlers.drain(..) {
+                    if handler.is_finished() {
+                        let _ = handler.join();
+                    } else {
+                        pending.push(handler);
                     }
                 }
+                handlers = pending;
             }
         }
+    };
+    let shutdown_result = exec.shutdown();
+    for handler in handlers {
+        let _ = handler.join();
     }
-    drop(exec);
+    if let Err(error) = shutdown_result {
+        if fatal_error.is_none() {
+            return Err(error.into());
+        }
+    }
     if let Some(error) = fatal_error {
         return Err(error.into());
     }
     Ok(())
 }
+
+#[cfg(unix)]
+fn handle_client(
+    mut stream: std::os::unix::net::UnixStream,
+    session: std::sync::Arc<zero_codemode::session::AggregateSession>,
+    root: std::path::PathBuf,
+    token: String,
+    shutdown_token: String,
+    terminating: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    events: std::sync::mpsc::SyncSender<SessionEvent>,
+) -> Result<(), Box<dyn std::error::Error>> {
+    use serde_json::Value;
+    use std::{
+        collections::BTreeSet, io::BufReader, path::PathBuf, sync::atomic::Ordering, time::Duration,
+    };
+    use zero_codemode::session::{SessionRequest, SessionResponse, SESSION_PROTOCOL};
+    use zerostack_machine_permit::session_owner::{current_euid, peer_euid};
+
+    let generation = session.generation()?;
+    match peer_euid(&stream) {
+        Ok(uid) if uid == current_euid() => {}
+        Ok(uid) => {
+            eprintln!("peer identity rejected: {uid} != {}", current_euid());
+            let _ = write_frame(
+                &mut stream,
+                &SessionResponse::typed_error(
+                    None,
+                    generation,
+                    "peer_identity_rejected",
+                    "peer identity rejected",
+                ),
+            );
+            return Ok(());
+        }
+        Err(error) => {
+            eprintln!("peer credential failure: {error}");
+            let _ = write_frame(
+                &mut stream,
+                &SessionResponse::typed_error(
+                    None,
+                    generation,
+                    "peer_identity_unavailable",
+                    "peer credential unavailable",
+                ),
+            );
+            return Ok(());
+        }
+    }
+    stream.set_read_timeout(Some(Duration::from_millis(250)))?;
+    stream.set_write_timeout(Some(Duration::from_millis(250)))?;
+    let mut reader = BufReader::new(stream.try_clone()?);
+    let hello = match read_frame(&mut reader) {
+        Ok(value) => value,
+        Err(_) => return Ok(()),
+    };
+    let authed = match hello {
+        SessionRequest::Hello {
+            protocol,
+            token: provided,
+        } => {
+            protocol == SESSION_PROTOCOL && constant_time_eq(provided.as_bytes(), token.as_bytes())
+        }
+        _ => false,
+    };
+    if !authed {
+        let active_generation = session.generation().unwrap_or(generation);
+        let _ = write_frame(
+            &mut stream,
+            &SessionResponse::typed_error(
+                None,
+                active_generation,
+                "authentication_rejected",
+                "authentication rejected",
+            ),
+        );
+        return Ok(());
+    }
+    let active_generation = session.generation()?;
+    write_frame(
+        &mut stream,
+        &SessionResponse::ok(
+            None,
+            active_generation,
+            serde_json::json!({
+                "authenticated": true,
+                "generation": active_generation,
+            }),
+        ),
+    )?;
+    let mut ids = BTreeSet::new();
+    loop {
+        if terminating.load(Ordering::Acquire) {
+            break;
+        }
+        let raw_request = match read_value_frame(&mut reader) {
+            Ok(value) => value,
+            Err(_) => break,
+        };
+        let request_id = raw_request.get("id").and_then(Value::as_u64);
+        let request = match serde_json::from_value::<SessionRequest>(raw_request.clone()) {
+            Ok(request) => request,
+            Err(error) => {
+                let request_type = raw_request.get("type").and_then(Value::as_str);
+                let code = if request_type.is_some_and(|kind| {
+                    !matches!(kind, "hello" | "execute" | "replace" | "shutdown")
+                }) {
+                    "unknown_request_type"
+                } else {
+                    "invalid_request"
+                };
+                write_frame(
+                    &mut stream,
+                    &SessionResponse::typed_error(
+                        request_id,
+                        active_generation,
+                        code,
+                        format!("request rejected: {error}"),
+                    ),
+                )?;
+                continue;
+            }
+        };
+        if session.generation()? != active_generation {
+            write_frame(
+                &mut stream,
+                &SessionResponse::typed_error(
+                    request_id,
+                    active_generation,
+                    "reauthentication_required",
+                    "session generation changed; open a fresh authenticated connection",
+                ),
+            )?;
+            break;
+        }
+        match request {
+            SessionRequest::Execute {
+                id,
+                generation,
+                root: requested,
+                source,
+                timeout_ms,
+            } => {
+                if !ids.insert((generation, id)) {
+                    write_frame(
+                        &mut stream,
+                        &SessionResponse::typed_error(
+                            Some(id),
+                            active_generation,
+                            "duplicate_request_id",
+                            "duplicate request id",
+                        ),
+                    )?;
+                    continue;
+                }
+                if PathBuf::from(requested).canonicalize().ok().as_ref() != Some(&root) {
+                    write_frame(
+                        &mut stream,
+                        &SessionResponse::typed_error(
+                            Some(id),
+                            active_generation,
+                            "authorized_root_mismatch",
+                            "authorized root mismatch",
+                        ),
+                    )?;
+                    continue;
+                }
+                match session.execute(
+                    generation,
+                    id,
+                    source,
+                    Duration::from_millis(timeout_ms.unwrap_or(30_000).clamp(1, 3_600_000)),
+                ) {
+                    Ok(result) => write_frame(
+                        &mut stream,
+                        &SessionResponse::ok(Some(id), active_generation, result.value),
+                    )?,
+                    Err(error) => {
+                        write_frame(
+                            &mut stream,
+                            &SessionResponse::typed_error_with_retry(
+                                Some(id),
+                                active_generation,
+                                error.code.as_str(),
+                                error.to_string(),
+                                error.retry_after_ms,
+                            ),
+                        )?;
+                        if session.generation()? != active_generation {
+                            break;
+                        }
+                    }
+                }
+            }
+            SessionRequest::Replace {
+                id,
+                generation,
+                token: provided,
+                reason,
+            } => {
+                if !ids.insert((generation, id)) {
+                    write_frame(
+                        &mut stream,
+                        &SessionResponse::typed_error(
+                            Some(id),
+                            active_generation,
+                            "duplicate_request_id",
+                            "duplicate request id",
+                        ),
+                    )?;
+                    continue;
+                }
+                if !constant_time_eq(provided.as_bytes(), shutdown_token.as_bytes()) {
+                    write_frame(
+                        &mut stream,
+                        &SessionResponse::typed_error(
+                            Some(id),
+                            active_generation,
+                            "replacement_capability_rejected",
+                            "replacement capability rejected",
+                        ),
+                    )?;
+                    continue;
+                }
+                match session.replace(generation, reason) {
+                    Ok(receipt) => {
+                        write_frame(
+                            &mut stream,
+                            &SessionResponse::ok(
+                                Some(id),
+                                active_generation,
+                                serde_json::json!({
+                                    "previous_generation": receipt.previous_generation,
+                                    "generation": receipt.generation,
+                                    "reason": receipt.reason.as_str(),
+                                    "reauthentication_required": true,
+                                }),
+                            ),
+                        )?;
+                        break;
+                    }
+                    Err(error) => {
+                        write_frame(
+                            &mut stream,
+                            &SessionResponse::typed_error_with_retry(
+                                Some(id),
+                                active_generation,
+                                error.code.as_str(),
+                                error.to_string(),
+                                error.retry_after_ms,
+                            ),
+                        )?;
+                        if session.generation()? != active_generation {
+                            break;
+                        }
+                    }
+                }
+            }
+            SessionRequest::Shutdown {
+                id,
+                token: provided,
+            } => {
+                let generation = session.generation()?;
+                if !ids.insert((generation, id)) {
+                    write_frame(
+                        &mut stream,
+                        &SessionResponse::typed_error(
+                            Some(id),
+                            generation,
+                            "duplicate_request_id",
+                            "duplicate request id",
+                        ),
+                    )?;
+                    continue;
+                }
+                if !constant_time_eq(provided.as_bytes(), shutdown_token.as_bytes()) {
+                    write_frame(
+                        &mut stream,
+                        &SessionResponse::typed_error(
+                            Some(id),
+                            generation,
+                            "shutdown_capability_rejected",
+                            "shutdown capability rejected",
+                        ),
+                    )?;
+                    continue;
+                }
+                let shutdown_generation = session.shutdown()?;
+                write_frame(
+                    &mut stream,
+                    &SessionResponse::ok(Some(id), shutdown_generation, Value::Null),
+                )?;
+                terminating.store(true, Ordering::Release);
+                let _ = events.send(SessionEvent::Terminate(None));
+                break;
+            }
+            SessionRequest::Hello { .. } => {
+                let generation = session.generation()?;
+                write_frame(
+                    &mut stream,
+                    &SessionResponse::typed_error(
+                        Some(0),
+                        generation,
+                        "duplicate_hello",
+                        "duplicate hello",
+                    ),
+                )?;
+            }
+        }
+    }
+    Ok(())
+}
+
 #[cfg(unix)]
 fn prepare_runtime(dir: &std::path::Path, uid: u32) -> Result<(), Box<dyn std::error::Error>> {
     use std::{
@@ -360,19 +629,29 @@ fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
     d == 0
 }
 #[cfg(unix)]
-fn read_frame(
+fn read_value_frame(
     r: &mut impl std::io::BufRead,
-) -> Result<zero_codemode::session::SessionRequest, Box<dyn std::error::Error>> {
-    let mut b = Vec::new();
+) -> Result<serde_json::Value, Box<dyn std::error::Error>> {
+    let mut bytes = Vec::new();
     let mut limited = std::io::Read::take(
         &mut *r,
         (zero_codemode::session::MAX_SESSION_FRAME + 1) as u64,
     );
-    let n = std::io::BufRead::read_until(&mut limited, b'\n', &mut b)?;
-    if n == 0 || b.len() > zero_codemode::session::MAX_SESSION_FRAME || b.last() != Some(&b'\n') {
+    let count = std::io::BufRead::read_until(&mut limited, b'\n', &mut bytes)?;
+    if count == 0
+        || bytes.len() > zero_codemode::session::MAX_SESSION_FRAME
+        || bytes.last() != Some(&b'\n')
+    {
         return Err("invalid or oversized frame".into());
     }
-    Ok(serde_json::from_slice(&b)?)
+    Ok(serde_json::from_slice(&bytes)?)
+}
+
+#[cfg(unix)]
+fn read_frame(
+    r: &mut impl std::io::BufRead,
+) -> Result<zero_codemode::session::SessionRequest, Box<dyn std::error::Error>> {
+    Ok(serde_json::from_value(read_value_frame(r)?)?)
 }
 #[cfg(unix)]
 fn write_frame(
@@ -387,27 +666,4 @@ fn write_frame(
     w.write_all(&b)?;
     w.flush()?;
     Ok(())
-}
-#[cfg(unix)]
-fn write_error(
-    w: &mut impl std::io::Write,
-    g: u64,
-    msg: &str,
-) -> Result<(), Box<dyn std::error::Error>> {
-    write_frame(
-        w,
-        &zero_codemode::session::SessionResponse::error(None, g, msg),
-    )
-}
-#[cfg(unix)]
-fn write_error_id(
-    w: &mut impl std::io::Write,
-    g: u64,
-    id: u64,
-    msg: &str,
-) -> Result<(), Box<dyn std::error::Error>> {
-    write_frame(
-        w,
-        &zero_codemode::session::SessionResponse::error(Some(id), g, msg),
-    )
 }
