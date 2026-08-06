@@ -65,6 +65,7 @@ archive/research/
 
 # Internal historical material (local only)
 archive/
+docs/adr/
 
 # Advisory cross-session file locks (scripts/agent_lock.py). Local coordination
 # state between concurrent agent sessions sharing this checkout, not project
