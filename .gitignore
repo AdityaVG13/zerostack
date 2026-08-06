@@ -124,6 +124,7 @@ conformance/*
 conformance/schemas/*
 !conformance/schemas/engine-topology-v1.schema.json
 !conformance/schemas/reasoning-contract-v1.schema.json
+!conformance/schemas/dominance-complete-recovery-v1.schema.json
 !conformance/tests/
 conformance/tests/*
 !conformance/tests/test_engine_topology.py
