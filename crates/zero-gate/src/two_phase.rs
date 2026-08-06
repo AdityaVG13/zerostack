@@ -2402,6 +2402,57 @@ pub fn validate_receipt_record(record: &ReceiptRecord) -> Result<(), KernelError
     Ok(())
 }
 
+#[cfg(test)]
+pub(crate) fn seal_receipt_record_for_test(record: &mut ReceiptRecord) {
+    let binding = ExecutionBinding {
+        schema_version: record.schema_version,
+        assembly_manifest_digest: record.assembly_manifest_digest,
+        source_tree_digest: record.source_tree_digest,
+        source_repository_heads: record.source_repository_heads.clone(),
+        image_digest: record.image_digest,
+        state_snapshot_digest: record.state_snapshot_digest,
+        task_fingerprint_digest: record.task_fingerprint_digest,
+        plan_digest: record.plan_digest,
+        fixed_model_digest: record.fixed_model_digest,
+        baseline_reasoning_contract: record.baseline_reasoning_contract.clone(),
+        reasoning_contract: record.reasoning_contract.clone(),
+        baseline_reasoning_contract_digest: record.baseline_reasoning_contract_digest,
+        reasoning_contract_digest: record.reasoning_contract_digest,
+        comparison_identity_digest: record.comparison_identity_digest,
+        semantic_cut_verifier_identity_digest: record.semantic_cut_verifier_identity_digest,
+        predecessor_receipt_head: record.predecessor_receipt_head,
+    };
+    record.binding_digest = binding.digest();
+    record.receipt_head = receipt_digest(
+        record.kind,
+        record.permit_id,
+        &binding,
+        record.admission_digest,
+        record.artifact_set_digest,
+        *record.reasoning_admission.admission_digest.as_bytes(),
+        record.semantic_cut_certificate_digest,
+        record.terminal_rcq_identity_digest,
+        record.snap_certificate_digest,
+        record.safety_shield_digest,
+        &record.quality_admission,
+        record.final_quality_selection,
+        record.transaction_receipt_digest,
+        record.deoptimization_execution_receipt_digest,
+        record.attribution_class,
+        record.effect_class,
+        record.resource_envelope,
+        record.surface,
+        record.verification_digest,
+        record.output_digest,
+        record.effects_digest,
+        record.resource_usage,
+        record.successor_root,
+        record.trace_digest,
+        record.failure_code,
+        record.restoration,
+    );
+}
+
 fn reasoning_receipt_fields_valid(record: &ReceiptRecord) -> bool {
     record.baseline_reasoning_contract.validate().is_ok()
         && record

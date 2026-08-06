@@ -16,7 +16,8 @@ use zero_store::{
 };
 
 use crate::two_phase::{
-    CommitReceipt, PublicationDurabilityV1, PublishedCommit, ReceiptKind, ReceiptRecord,
+    validate_receipt_record, CommitReceipt, PublicationDurabilityV1, PublishedCommit, ReceiptKind,
+    ReceiptRecord,
 };
 
 const DURABLE_PUBLICATION_DOMAIN_V1: &[u8] = b"zerostack.durable_publication.v1\0";
@@ -27,6 +28,7 @@ pub const DURABLE_PUBLICATION_SCHEMA_VERSION_V1: u16 = 1;
 pub enum DurablePublicationFailureCodeV1 {
     SchemaVersionMismatch,
     NonCommitReceipt,
+    InvalidBaseReceipt,
     AssemblyMismatch,
     BindingMismatch,
     RootMismatch,
@@ -40,6 +42,7 @@ impl DurablePublicationFailureCodeV1 {
         match self {
             Self::SchemaVersionMismatch => "schema_version_mismatch",
             Self::NonCommitReceipt => "non_commit_receipt",
+            Self::InvalidBaseReceipt => "invalid_base_receipt",
             Self::AssemblyMismatch => "assembly_mismatch",
             Self::BindingMismatch => "binding_mismatch",
             Self::RootMismatch => "root_mismatch",
@@ -393,6 +396,12 @@ pub fn verify_durable_publication_v1(
             "verified native profile evidence differs from journal profile",
         ));
     }
+    validate_receipt_record(record).map_err(|error| {
+        DurablePublicationErrorV1::new(
+            DurablePublicationFailureCodeV1::InvalidBaseReceipt,
+            format!("base kernel receipt is invalid: {error}"),
+        )
+    })?;
     evidence.digest()
 }
 
@@ -429,13 +438,14 @@ mod tests {
     };
 
     use crate::two_phase::{
-        candidate_protocol_identity_v1, AttributionClass, ExecutionBinding, ExecutionSurface,
-        ResourceUsage, RestorationAccounting, SourceHead, WorkerEnvelope, TWO_PHASE_SCHEMA_VERSION,
+        candidate_protocol_identity_v1, seal_receipt_record_for_test, AttributionClass,
+        ExecutionBinding, ExecutionSurface, ResourceUsage, RestorationAccounting, SourceHead,
+        WorkerEnvelope, TWO_PHASE_SCHEMA_VERSION,
     };
     use crate::{
         ExactNeutralCertificateV1, FrozenBaselineV1, QualityAdmissionV1, QualityEvidenceV1,
         ReasoningSafepointV1, ReasoningStateStatusV1, SemanticCutCertificateRecordV1,
-        SemanticCutClaimV1,
+        SemanticCutClaimV1, SemanticCutEvidenceV1,
     };
     use zero_abi::{
         raw_worker::EffectClass, verify_strict_no_downshift_v1, NativeStatePolicyV1,
@@ -520,13 +530,13 @@ mod tests {
         .record()
     }
 
-    fn semantic_cut_record() -> SemanticCutCertificateRecordV1 {
+    fn semantic_cut_record(reasoning_contract_digest: [u8; 32]) -> SemanticCutCertificateRecordV1 {
         let terminal = |receipt| {
             ReasoningSafepointV1::new(
                 [1; 32],
                 [2; 32],
                 [3; 32],
-                [1; 32],
+                reasoning_contract_digest,
                 [1; 32],
                 [4; 32],
                 ReasoningStateStatusV1::ExactPreserved,
@@ -555,14 +565,47 @@ mod tests {
             [16; 32],
         )
         .unwrap();
-        SemanticCutCertificateRecordV1 {
-            contract_version: 1,
-            claim_digest: claim.digest().unwrap(),
-            claim,
-            evidence_digest: [17; 32],
-            verifier_identity_digest: [1; 32],
-            certificate_digest: [1; 32],
-        }
+        let bytes = claim.canonical_bytes().unwrap();
+        let digest = zero_abi::sha256(&bytes);
+        let span = SpanRef {
+            object_id: ObjectId(digest),
+            object_digest: digest,
+            byte_start: 0,
+            byte_len: bytes.len() as u64,
+            span_digest: digest,
+        };
+        let certificate = EvidenceCertificate {
+            query: Query::TestTrace { test: TestId(9) },
+            spans: vec![span],
+            payload: Cow::Borrowed(&bytes),
+            provenance: Provenance {
+                parser_id: "canonical-json".into(),
+                parser_version: "1".into(),
+                index_id: "native-receipts".into(),
+                index_version: "1".into(),
+                operator_id: "native-journal".into(),
+                operator_version: "1".into(),
+            },
+            completeness: CompletenessWitness::TestTrace {
+                operator: OperatorLock {
+                    operator_id: "native-journal".into(),
+                    operator_version: "1".into(),
+                },
+                test: TestId(9),
+                exit_code: 0,
+                trace_digest: digest,
+            },
+            input_token_cost: 0,
+            backend_work_units: 1,
+        };
+        let resident = Resident {
+            object: ObjectId(digest),
+            bytes: &bytes,
+        };
+        let evidence = verify(&certificate, &resident).unwrap();
+        SemanticCutEvidenceV1::verify_owner_scoped(claim, &evidence)
+            .unwrap()
+            .record()
     }
 
     fn record() -> ReceiptRecord {
@@ -572,7 +615,11 @@ mod tests {
             verify_strict_no_downshift_v1(&reasoning_contract, &reasoning_contract)
                 .unwrap()
                 .record();
-        ReceiptRecord {
+        let semantic_cut = semantic_cut_record(reasoning_contract_digest);
+        let semantic_cut_certificate_digest = semantic_cut.certificate_digest;
+        let semantic_cut_verifier_identity_digest = semantic_cut.verifier_identity_digest;
+        let terminal_rcq_identity_digest = semantic_cut.claim.terminal_rcq_identity_digest();
+        let mut record = ReceiptRecord {
             schema_version: TWO_PHASE_SCHEMA_VERSION,
             kind: ReceiptKind::Commit,
             permit_id: [1; 32],
@@ -595,11 +642,11 @@ mod tests {
             reasoning_contract_digest,
             reasoning_admission,
             comparison_identity_digest: [1; 32],
-            semantic_cut_verifier_identity_digest: [1; 32],
+            semantic_cut_verifier_identity_digest,
             artifact_set_digest: [1; 32],
-            semantic_cut_certificate_digest: [1; 32],
-            semantic_cut: semantic_cut_record(),
-            terminal_rcq_identity_digest: [1; 32],
+            semantic_cut_certificate_digest,
+            semantic_cut,
+            terminal_rcq_identity_digest,
             snap_certificate_digest: None,
             safety_shield_digest: [1; 32],
             quality_admission: quality_admission(),
@@ -641,7 +688,9 @@ mod tests {
                 completed: 0,
                 debt: 0,
             },
-        }
+        };
+        seal_receipt_record_for_test(&mut record);
+        record
     }
 
     struct Resident<'a> {
@@ -799,6 +848,19 @@ mod tests {
             .unwrap_err()
             .code,
             DurablePublicationFailureCodeV1::UnverifiedNativeEvidence
+        );
+    }
+
+    #[test]
+    fn durable_publication_rejects_invalid_base_kernel_receipt() {
+        let (_directory, evidence) = evidence();
+        let mut gate = record();
+        gate.receipt_head = [0x99; 32];
+        assert_eq!(
+            verify_durable_publication_v1(&gate, &evidence)
+                .unwrap_err()
+                .code,
+            DurablePublicationFailureCodeV1::InvalidBaseReceipt
         );
     }
 
