@@ -132,6 +132,8 @@ conformance/schemas/*
 !conformance/schemas/q99-claim-v1.schema.json
 !conformance/schemas/robust-snap-intake-v1.schema.json
 !conformance/schemas/causal-artifact-intake-v1.schema.json
+!conformance/schemas/reinvestment-plan-v1.schema.json
+!conformance/schemas/reinvestment-selection-v1.schema.json
 !conformance/tests/
 conformance/tests/*
 !conformance/tests/test_engine_topology.py
