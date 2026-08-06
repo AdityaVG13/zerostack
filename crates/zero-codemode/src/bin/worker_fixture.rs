@@ -14,9 +14,16 @@ use zero_abi::{
     WorkerTokenAccountingV1, WorkerTokenCountKind, decode_request_frame, encode_frame,
     raw_worker_protocol_digest_hex,
 };
+use zero_codemode::session::{SESSION_SHUTDOWN_TOKEN_ENV, SESSION_TOKEN_ENV};
 use zero_codemode::worker::{ENGINE_ENV, SESSION_ID_ENV, STORE_ROOT_ENV};
 
 fn main() {
+    for name in [SESSION_TOKEN_ENV, SESSION_SHUTDOWN_TOKEN_ENV] {
+        if std::env::var_os(name).is_some() {
+            eprintln!("session capability leaked into raw worker: {name}");
+            std::process::exit(70);
+        }
+    }
     let mode = std::env::args().nth(1).unwrap_or_else(|| "normal".into());
     if mode == "tree-descendant" {
         std::thread::sleep(Duration::from_secs(30));

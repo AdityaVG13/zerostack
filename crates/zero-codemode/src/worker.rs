@@ -391,6 +391,8 @@ impl WorkerClient {
             .env(STORE_ROOT_ENV, &spec.store_root)
             .env(SESSION_ID_ENV, &spec.session_id)
             .env(ENGINE_ENV, spec.engine.as_str())
+            .env_remove(crate::session::SESSION_TOKEN_ENV)
+            .env_remove(crate::session::SESSION_SHUTDOWN_TOKEN_ENV)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());

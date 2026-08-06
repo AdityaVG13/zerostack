@@ -362,6 +362,8 @@ fn pinned_worker_binary(path: &Path, key: &str) -> Result<(PathBuf, String), Hos
 fn probe_output(program: &Path, args: &[&str], key: &str) -> Result<String, HostError> {
     let mut child = Command::new(program)
         .args(args)
+        .env_remove(SESSION_TOKEN_ENV)
+        .env_remove(SESSION_SHUTDOWN_TOKEN_ENV)
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -824,20 +826,27 @@ pub struct SessionExecutor {
 }
 impl SessionExecutor {
     pub fn new() -> Result<Self, HostError> {
-        let configured_root = std::env::var("ZEROSTACK_SESSION_ROOT").map_err(|_| {
+        let root = std::env::var("ZEROSTACK_SESSION_ROOT").map_err(|_| {
             HostError::Connector("missing explicit ZEROSTACK_SESSION_ROOT authorization".into())
         })?;
-        let root = PathBuf::from(configured_root)
-            .canonicalize()
-            .map_err(|error| {
-                HostError::Connector(format!("cannot resolve authorized session root: {error}"))
-            })?;
-        let session_id = current_session_id()
-            .or_else(|| std::env::var(crate::worker::SESSION_ID_ENV).ok())
+        let session_id = std::env::var(crate::worker::SESSION_ID_ENV)
+            .ok()
             .filter(|value| !value.is_empty())
             .ok_or_else(|| {
                 HostError::Connector("missing explicit ZeroStack session identity".into())
             })?;
+        Self::new_authorized(PathBuf::from(root), session_id)
+    }
+
+    fn new_authorized(root: PathBuf, session_id: String) -> Result<Self, HostError> {
+        if session_id.is_empty() {
+            return Err(HostError::Connector(
+                "missing explicit ZeroStack session identity".into(),
+            ));
+        }
+        let root = root.canonicalize().map_err(|error| {
+            HostError::Connector(format!("cannot resolve authorized session root: {error}"))
+        })?;
         let resolved_store = ResolvedStore::resolve_from_process(&root, Engine::TokenZero, &[]);
         ensure_layout(&resolved_store).map_err(|error| {
             HostError::Connector(format!("cannot prepare session result store: {error}"))
@@ -1069,6 +1078,29 @@ impl AggregateSession {
                 "initial generation must be nonzero",
             ));
         }
+        let root = std::env::var("ZEROSTACK_SESSION_ROOT").map_err(|_| {
+            AggregateSessionError::new(
+                AggregateSessionFailureCode::BackendUnavailable,
+                initial_generation,
+                None,
+                "missing explicit ZEROSTACK_SESSION_ROOT authorization",
+            )
+        })?;
+        Self::new_authorized(initial_generation, PathBuf::from(root))
+    }
+
+    pub fn new_authorized(
+        initial_generation: u64,
+        root: PathBuf,
+    ) -> Result<Self, AggregateSessionError> {
+        if initial_generation == 0 {
+            return Err(AggregateSessionError::new(
+                AggregateSessionFailureCode::InvalidGeneration,
+                initial_generation,
+                None,
+                "initial generation must be nonzero",
+            ));
+        }
         let (commands, receiver) = mpsc::sync_channel(SESSION_EXECUTION_QUEUE_CAPACITY);
         let (ready_tx, ready_rx) = mpsc::sync_channel(1);
         let cancellation = Arc::new(Mutex::new(None));
@@ -1076,7 +1108,13 @@ impl AggregateSession {
         let worker = thread::Builder::new()
             .name("zerostack-session-executor".into())
             .spawn(move || {
-                session_worker(initial_generation, receiver, worker_cancellation, ready_tx)
+                session_worker(
+                    initial_generation,
+                    root,
+                    receiver,
+                    worker_cancellation,
+                    ready_tx,
+                )
             })
             .map_err(|error| {
                 AggregateSessionError::new(
@@ -1498,11 +1536,12 @@ fn cancel_backend(cancellation: &Arc<Mutex<Option<SessionCancellation>>>) {
 
 fn session_worker(
     initial_generation: u64,
+    root: PathBuf,
     commands: Receiver<SessionCommand>,
     cancellation: Arc<Mutex<Option<SessionCancellation>>>,
     ready: SyncSender<Result<(), String>>,
 ) {
-    let mut executor = match start_session_executor(initial_generation) {
+    let mut executor = match start_session_executor(initial_generation, &root) {
         Ok(executor) => {
             if let Ok(mut slot) = cancellation.lock() {
                 *slot = Some(executor.cancellation());
@@ -1533,7 +1572,7 @@ fn session_worker(
                     *slot = None;
                 }
                 drop(executor.take());
-                let result = start_session_executor(generation).map(|next| {
+                let result = start_session_executor(generation, &root).map(|next| {
                     if let Ok(mut slot) = cancellation.lock() {
                         *slot = Some(next.cancellation());
                     }
@@ -1556,21 +1595,12 @@ fn session_worker(
     }
 }
 
-/// In-process session-id channel between executor startup and
-/// `SessionExecutor::new`. Replaces the former `set_var` call: edition 2024
-/// makes `set_var` unsafe and this crate forbids unsafe code. Worker child
-/// processes still receive the id via `Command::env` in `worker.rs`.
-static SESSION_ID_SLOT: std::sync::Mutex<Option<String>> = std::sync::Mutex::new(None);
-
-pub(crate) fn current_session_id() -> Option<String> {
-    SESSION_ID_SLOT.lock().ok().and_then(|slot| slot.clone())
-}
-
-fn start_session_executor(generation: u64) -> Result<SessionExecutor, String> {
-    if let Ok(mut slot) = SESSION_ID_SLOT.lock() {
-        *slot = Some(format!("session-{generation:016x}"));
-    }
-    let executor = SessionExecutor::new().map_err(|error| error.to_string())?;
+/// Starts one generation-bound executor with explicit authorization context.
+/// Worker child processes receive the derived session id via `Command::env`.
+fn start_session_executor(generation: u64, root: &Path) -> Result<SessionExecutor, String> {
+    let session_id = format!("session-{generation:016x}");
+    let executor = SessionExecutor::new_authorized(root.to_path_buf(), session_id)
+        .map_err(|error| error.to_string())?;
     executor
         .execute("return null", Duration::from_secs(1))
         .map_err(|error| format!("session prewarm failed: {error}"))?;
