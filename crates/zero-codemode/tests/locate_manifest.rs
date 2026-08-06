@@ -7,9 +7,9 @@
 use std::path::{Path, PathBuf};
 
 use zero_codemode::{
-    artifact_candidates, is_ephemeral, locate_manifest, resolve_artifact, ArtifactEnv,
-    DiscoveryEnv, HarnessArtifact, ManifestFacts, Source, StorePaths, EPHEMERAL_REASON,
-    HARNESS_ARTIFACTS, MANIFEST_SCHEMA,
+    ArtifactEnv, DiscoveryEnv, EPHEMERAL_REASON, HARNESS_ARTIFACTS, HarnessArtifact,
+    MANIFEST_SCHEMA, ManifestFacts, Source, StorePaths, artifact_candidates, is_ephemeral,
+    locate_manifest, resolve_artifact,
 };
 
 fn env_with(home: Option<&str>, dev_root: Option<&str>, path: &[&str]) -> DiscoveryEnv {
@@ -189,9 +189,11 @@ fn unresolved_entries_report_probed_paths_and_shrink_capabilities() {
     for artifact in HARNESS_ARTIFACTS {
         let entry = &manifest[artifact.manifest_key()];
         assert_eq!(entry["resolved"], false, "{}", artifact.manifest_key());
-        assert!(entry["probed"]
-            .as_array()
-            .is_some_and(|probed| !probed.is_empty()));
+        assert!(
+            entry["probed"]
+                .as_array()
+                .is_some_and(|probed| !probed.is_empty())
+        );
     }
 }
 

@@ -1,6 +1,6 @@
 use std::time::Duration;
 
-use criterion::{black_box, criterion_group, criterion_main, Criterion};
+use criterion::{Criterion, black_box, criterion_group, criterion_main};
 use zero_ref::ZeroRefV1;
 
 const PARSE_CASES: &[(&str, &str)] = &[

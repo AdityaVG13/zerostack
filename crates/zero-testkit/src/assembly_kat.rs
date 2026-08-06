@@ -2,13 +2,13 @@
 
 use serde::{Deserialize, Serialize};
 use zero_abi::{
-    assembly_abi_contract_digest_v1, canonical_json, sha256_hex, ArtifactOwnerV1,
+    ASSEMBLY_ABI_CONTRACT_VERSION, ASSEMBLY_MANIFEST_SCHEMA_VERSION, ArtifactOwnerV1,
     AssemblyManifestV1, DigestV1, EngineIdentity, LinkedArtifactV1, LinkedProfileV1,
     PlatformIdentityV1, ProfileKindV1, ReceiptSchemaIdentityV1, TargetIdentityV1,
-    VerifierIdentityV1, WorkerIdentityV1, ASSEMBLY_ABI_CONTRACT_VERSION,
-    ASSEMBLY_MANIFEST_SCHEMA_VERSION,
+    VerifierIdentityV1, WorkerIdentityV1, assembly_abi_contract_digest_v1, canonical_json,
+    sha256_hex,
 };
-use zero_store::{DurableProfileV1, ZbfArtifactKindV1, ZbfObjectV1, ZBF_HEADER_LEN_V1};
+use zero_store::{DurableProfileV1, ZBF_HEADER_LEN_V1, ZbfArtifactKindV1, ZbfObjectV1};
 
 pub const KAT_VECTOR_SET_V1: &str = "zerostack.assembly-zbf-kat.v1";
 pub const KAT_FIXTURE_RELATIVE_DIR: &str = "conformance/assembly-zbf/v1";
@@ -330,14 +330,9 @@ pub fn canonical_index_bytes_v1(index: &KatVectorIndexV1) -> Vec<u8> {
 mod tests {
     use super::*;
     use serde_json::Value;
-    use std::{
-        collections::BTreeSet,
-        fs,
-        path::PathBuf,
-        process::Command,
-    };
+    use std::{collections::BTreeSet, fs, path::PathBuf, process::Command};
     use tempfile::tempdir;
-    use zero_abi::{validate_assembly_pre_dispatch_v1, AssemblyManifestV1};
+    use zero_abi::{AssemblyManifestV1, validate_assembly_pre_dispatch_v1};
     use zero_store::{DurableProfileIdV1, ZbfFailureCodeV1};
 
     fn fixture_dir() -> PathBuf {

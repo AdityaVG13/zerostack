@@ -130,7 +130,7 @@ impl StoreLock {
                         mode,
                         store_root: crate::store_root::absolutize(store_root),
                         path,
-                    })
+                    });
                 }
                 Err(TryLockError::WouldBlock) => {
                     if start.elapsed() >= deadline {

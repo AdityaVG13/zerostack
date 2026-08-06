@@ -1,24 +1,25 @@
 use serde::Deserialize;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::{
     collections::HashMap,
     io::{self, BufRead, BufReader, BufWriter, Write},
     rc::Rc,
     sync::{
+        Arc,
         atomic::{AtomicBool, AtomicU64, Ordering},
-        mpsc, Arc,
+        mpsc,
     },
     thread,
     time::{Duration, Instant},
 };
-use zero_codemode::node::{node_report, NodeEnv, NODE_SCHEMA};
+use zero_codemode::node::{NODE_SCHEMA, NodeEnv, node_report};
 use zero_codemode::{
-    is_executable_file, is_readable_file, locate_manifest, locate_report, ArtifactEnv,
-    CapabilityDescriptor, Connector, ConnectorError, DiscoveryEnv, DispatchContext,
-    GlobalRegistration, Host, HostError, HostLimits, ManifestFacts, StorePaths, DISCOVERY_SCHEMA,
-    MANIFEST_SCHEMA,
+    ArtifactEnv, CapabilityDescriptor, Connector, ConnectorError, DISCOVERY_SCHEMA, DiscoveryEnv,
+    DispatchContext, GlobalRegistration, Host, HostError, HostLimits, MANIFEST_SCHEMA,
+    ManifestFacts, StorePaths, is_executable_file, is_readable_file, locate_manifest,
+    locate_report,
 };
-use zero_store::{ensure_layout, Engine, ResolvedStore};
+use zero_store::{Engine, ResolvedStore, ensure_layout};
 
 const PROTOCOL: &str = "zerostack-codemode-host/v1";
 const MAX_CELLS: usize = 1;
@@ -128,12 +129,12 @@ impl Connector for SidecarConnector {
             match receive.recv_timeout(context.remaining().min(Duration::from_millis(25))) {
                 Ok(Ok(value)) => {
                     return serde_json::to_string(&value)
-                        .map_err(|e| ConnectorError::new(e.to_string()))
+                        .map_err(|e| ConnectorError::new(e.to_string()));
                 }
                 Ok(Err(message)) => return Err(ConnectorError::new(message)),
                 Err(mpsc::RecvTimeoutError::Timeout) => {}
                 Err(mpsc::RecvTimeoutError::Disconnected) => {
-                    return Err(ConnectorError::new("delegate transport closed"))
+                    return Err(ConnectorError::new("delegate transport closed"));
                 }
             }
         }
@@ -334,7 +335,9 @@ fn print_cli_metadata() -> Result<bool, Box<dyn std::error::Error>> {
             Ok(true)
         }
         [flag] if flag == "--help" || flag == "-h" => {
-            println!("ZeroStack native aggregate CodeMode sidecar\n\nUsage: zerostack-codemode-host [--help|--version|--locate [--json]|--locate-binaries|--locate-node]\n\nWithout arguments, bounded NDJSON frames are read from stdin and written to stdout.\n\n--locate prints every binary, module, and store path a harness needs, so no\nabsolute path belongs in its config; --json emits the {MANIFEST_SCHEMA} manifest.\n--locate-binaries emits the narrower {DISCOVERY_SCHEMA} executable report.\n--locate-node emits the {NODE_SCHEMA} node runtime report, which refuses\nper-shell fnm multishell paths so a pin cannot die with the shell that made it.\n\nResolution order: explicit pin, $ZEROSTACK_HOME, $ZEROSTACK_DEV_ROOT/<Repo>,\n$XDG_DATA_HOME/zerostack, platform install dirs, then PATH.");
+            println!(
+                "ZeroStack native aggregate CodeMode sidecar\n\nUsage: zerostack-codemode-host [--help|--version|--locate [--json]|--locate-binaries|--locate-node]\n\nWithout arguments, bounded NDJSON frames are read from stdin and written to stdout.\n\n--locate prints every binary, module, and store path a harness needs, so no\nabsolute path belongs in its config; --json emits the {MANIFEST_SCHEMA} manifest.\n--locate-binaries emits the narrower {DISCOVERY_SCHEMA} executable report.\n--locate-node emits the {NODE_SCHEMA} node runtime report, which refuses\nper-shell fnm multishell paths so a pin cannot die with the shell that made it.\n\nResolution order: explicit pin, $ZEROSTACK_HOME, $ZEROSTACK_DEV_ROOT/<Repo>,\n$XDG_DATA_HOME/zerostack, platform install dirs, then PATH."
+            );
             Ok(true)
         }
         [flag] if flag == "--locate-binaries" => {

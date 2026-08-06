@@ -3,8 +3,8 @@
 //! Format types remain re-exported here for source compatibility. `zero-abi`
 //! is the only format authority; this module owns only CAS persistence glue.
 
-pub use zero_abi::zbf::*;
 use zero_abi::DigestV1;
+pub use zero_abi::zbf::*;
 
 use crate::{CasError, PutOutcome, SharedCas};
 

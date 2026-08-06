@@ -4,11 +4,11 @@
 mod tests {
     use serde_json::Value;
     use zero_abi::{
-        sha256_hex, validate_heuristic_world_order, DigestV1, EvidenceDecisionTree, EvidenceLeafV1,
-        EvidenceObservationV1, ProtectedEffectClassV1, ProtectedEffectSet, ProtectedEffectV1,
-        RobustSnapCertificate, RobustSnapFailureCodeV1, SnapLevel, WorldFiberDescriptor,
-        ROBUST_SNAP_MAX_EFFECTS, ROBUST_SNAP_MAX_EVIDENCE_DEPTH, ROBUST_SNAP_MAX_LEAVES,
-        ROBUST_SNAP_MAX_WORLDS, ROBUST_SNAP_MODEL_VERSION,
+        DigestV1, EvidenceDecisionTree, EvidenceLeafV1, EvidenceObservationV1,
+        ProtectedEffectClassV1, ProtectedEffectSet, ProtectedEffectV1, ROBUST_SNAP_MAX_EFFECTS,
+        ROBUST_SNAP_MAX_EVIDENCE_DEPTH, ROBUST_SNAP_MAX_LEAVES, ROBUST_SNAP_MAX_WORLDS,
+        ROBUST_SNAP_MODEL_VERSION, RobustSnapCertificate, RobustSnapFailureCodeV1, SnapLevel,
+        WorldFiberDescriptor, sha256_hex, validate_heuristic_world_order,
     };
 
     const MODEL: &str = include_str!("../../../conformance/models/robust-snap-v1.json");
@@ -121,10 +121,9 @@ mod tests {
                                 admitted += 1;
                                 let certificate = result.unwrap();
                                 certificate.validate().unwrap();
-                                assert!(certificate
-                                    .common_s0_effects()
-                                    .unwrap()
-                                    .contains(&selected));
+                                assert!(
+                                    certificate.common_s0_effects().unwrap().contains(&selected)
+                                );
                             }
                         }
                     }

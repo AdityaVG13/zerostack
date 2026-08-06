@@ -11,7 +11,7 @@ use std::time::{Duration, SystemTime};
 use zero_ref::{content_hash_hex, is_full_lower_hex};
 
 use crate::fs_replace::{replace_file, sync_dir};
-use crate::gc_lock::{StoreLock, LOCK_DEADLINE};
+use crate::gc_lock::{LOCK_DEADLINE, StoreLock};
 
 /// Size policy for CAS objects: reads and writes above this are refused as
 /// policy_denied so one runaway object cannot wedge shared storage.
@@ -860,10 +860,12 @@ mod tests {
     #[test]
     fn list_objects_is_empty_for_a_fresh_store() {
         let root = tempdir().unwrap();
-        assert!(SharedCas::open(root.path())
-            .list_objects()
-            .unwrap()
-            .is_empty());
+        assert!(
+            SharedCas::open(root.path())
+                .list_objects()
+                .unwrap()
+                .is_empty()
+        );
     }
 
     /// Removal is refused without the exclusive guard, so no caller can sweep

@@ -8,7 +8,7 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use serde_json::json;
 use zero_abi::raw_worker::EngineIdentity;
-use zero_abi::{encode_frame, CallRequest, FrameCodecError, WorkerTrace, DEFAULT_MAX_FRAME_BYTES};
+use zero_abi::{CallRequest, DEFAULT_MAX_FRAME_BYTES, FrameCodecError, WorkerTrace, encode_frame};
 use zero_codemode::worker::{
     CancellationSignal, StaticWorkerFactory, WorkerAdapterError, WorkerClient, WorkerClientConfig,
     WorkerContext, WorkerEvent, WorkerRegistry, WorkerSpec,
@@ -281,9 +281,11 @@ fn standalone_cancel_false_is_non_poisoning() {
         )
         .unwrap();
     assert!(!client.cancel("unknown", None).unwrap());
-    assert!(client
-        .dispatch(request("after-false", json!({}), None))
-        .is_ok());
+    assert!(
+        client
+            .dispatch(request("after-false", json!({}), None))
+            .is_ok()
+    );
     client.shutdown().unwrap();
 }
 
@@ -378,9 +380,11 @@ fn every_input_output_and_protocol_failure_reaps_and_observes_bounds() {
             .count()
             >= 2
     );
-    assert!(events
-        .iter()
-        .any(|event| event.event == WorkerEvent::ProtocolError));
+    assert!(
+        events
+            .iter()
+            .any(|event| event.event == WorkerEvent::ProtocolError)
+    );
 }
 
 #[test]
@@ -429,12 +433,14 @@ fn matching_remote_error_emits_dispatch_observation() {
         client.dispatch(request("remote", json!({}), None)),
         Err(WorkerAdapterError::Remote { .. })
     ));
-    assert!(events
-        .lock()
-        .unwrap()
-        .iter()
-        .any(|event| event.event == WorkerEvent::Dispatch
-            && event.request_id.as_deref() == Some("remote")));
+    assert!(
+        events
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|event| event.event == WorkerEvent::Dispatch
+                && event.request_id.as_deref() == Some("remote"))
+    );
     client.shutdown().unwrap();
 }
 
@@ -511,9 +517,11 @@ fn lifecycle_reap_p95_is_below_one_second() {
                 WorkerClientConfig::default(),
             )
             .unwrap();
-        assert!(client
-            .dispatch(request(&format!("complete-{iteration}"), json!({}), None,))
-            .is_ok());
+        assert!(
+            client
+                .dispatch(request(&format!("complete-{iteration}"), json!({}), None,))
+                .is_ok()
+        );
         let started = Instant::now();
         client.shutdown().unwrap();
         assert!(client.is_reaped());
@@ -653,9 +661,11 @@ fn result_and_error_before_false_cancel_ack_are_correlated_and_reusable() {
             .expect("race dispatch observation");
         assert_eq!(dispatch.output_bytes, race_completion_bytes(mode));
         assert_ne!(dispatch.output_bytes, race_cancel_ack_bytes());
-        assert!(client
-            .dispatch(request("reuse", json!({"reuse": true}), None))
-            .is_ok());
+        assert!(
+            client
+                .dispatch(request("reuse", json!({"reuse": true}), None))
+                .is_ok()
+        );
         client.shutdown().unwrap();
     }
 }
@@ -681,9 +691,11 @@ fn bounded_writer_handles_nonreading_workers_without_orphans() {
     short.shutdown_timeout = Duration::from_millis(80);
     short.limits.default_deadline_ms = 80;
     let started = std::time::Instant::now();
-    assert!(startup_registry
-        .launch(context(EngineIdentity::FsZero), short.clone())
-        .is_err());
+    assert!(
+        startup_registry
+            .launch(context(EngineIdentity::FsZero), short.clone())
+            .is_err()
+    );
     assert!(started.elapsed() < Duration::from_secs(1));
     let pid = read_descendant_pid(&startup_pid);
     assert_descendant_gone(pid);

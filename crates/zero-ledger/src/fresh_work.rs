@@ -18,7 +18,7 @@
 use serde::de;
 use serde::{Deserialize, Deserializer, Serialize};
 
-use crate::{LedgerError, RetainedFractionPpm, PPM_ONE};
+use crate::{LedgerError, PPM_ONE, RetainedFractionPpm};
 
 /// The exhaustive component set of the fresh-work vector.
 ///

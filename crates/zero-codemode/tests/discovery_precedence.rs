@@ -8,7 +8,7 @@ use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 
 use zero_codemode::discovery::{
-    candidates, locate_report, resolve_with, DiscoveryEnv, HarnessBinary, Source, HARNESS_BINARIES,
+    DiscoveryEnv, HARNESS_BINARIES, HarnessBinary, Source, candidates, locate_report, resolve_with,
 };
 
 fn env_with(
@@ -237,7 +237,9 @@ fn locate_report_is_stable_and_labels_resolution_source() {
     );
     // An engine that is not installed is reported, not fatal to the others.
     assert_eq!(report["binaries"]["fs"]["resolved"], false);
-    assert!(report["binaries"]["fs"]["probed"]
-        .as_array()
-        .is_some_and(|probed| !probed.is_empty()));
+    assert!(
+        report["binaries"]["fs"]["probed"]
+            .as_array()
+            .is_some_and(|probed| !probed.is_empty())
+    );
 }

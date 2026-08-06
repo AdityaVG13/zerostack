@@ -9,21 +9,21 @@
 use std::{error::Error, fmt};
 
 use serde::{Deserialize, Serialize};
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use zero_abi::{
-    canonical_json, reasoning_contract_digest_v1, sha256, DigestV1, NativeStatePolicyV1,
-    ReasoningContractV1,
+    DigestV1, NativeStatePolicyV1, ReasoningContractV1, canonical_json,
+    reasoning_contract_digest_v1, sha256,
 };
 use zero_cert::{CompletenessWitness, Query, VerifiedEvidence};
 use zero_store::RecoveryOutcomeV1;
 
 use crate::{
-    quality::{quality_envelope_contract_digest_v1, QualityAdmissionRecordV1, QualitySelectionV1},
-    recovery::{dcr_contract_digest_v1, RecoveryUnknownDecisionV1},
+    quality::{QualityAdmissionRecordV1, QualitySelectionV1, quality_envelope_contract_digest_v1},
+    recovery::{RecoveryUnknownDecisionV1, dcr_contract_digest_v1},
     semantic_cut::{ReasoningSafepointV1, ReasoningStateStatusV1},
     transaction::{
-        transaction_contract_digest_v1, RestorationScopeV1, TransactionDispositionV1,
-        TransactionReceiptV1,
+        RestorationScopeV1, TransactionDispositionV1, TransactionReceiptV1,
+        transaction_contract_digest_v1,
     },
     two_phase::{FailureCode, WorkerEnvelope},
 };
@@ -2147,10 +2147,10 @@ mod tests {
     use super::*;
     use crate::{
         transaction::{
-            begin_effect_transaction_v1, effect_journal_binding_v1, validate_effect_closure_v1,
             EffectClosureManifestV1, EffectClosureRequestV1, EffectResourceClosureV1,
             ResourceIsolationModeV1, ResourceRestorationModeV1, TransactionAccessV1,
             TransactionResourceKindV1, TransactionResourceRequirementV1,
+            begin_effect_transaction_v1, effect_journal_binding_v1, validate_effect_closure_v1,
         },
         two_phase::{ClosureKind, TransactionClosure},
     };
@@ -2160,9 +2160,9 @@ mod tests {
         EffectVerificationPlanV1, EffectVerificationStepV1, TypedEffectOperationV1,
     };
     use zero_cert::{
-        verify, EvidenceCertificate, ObjectId, OperatorLock, Provenance, Resolver, SpanRef, TestId,
+        EvidenceCertificate, ObjectId, OperatorLock, Provenance, Resolver, SpanRef, TestId, verify,
     };
-    use zero_store::{initialize_published_root_v1, DurableProfileIdV1, JournalPathsV1};
+    use zero_store::{DurableProfileIdV1, JournalPathsV1, initialize_published_root_v1};
 
     fn d(byte: u8) -> DigestV1 {
         DigestV1::from_bytes([byte; 32])

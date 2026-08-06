@@ -1088,7 +1088,7 @@ fn unix_fallback_runtime_directory_has_exact_safe_mode() {
 #[cfg(unix)]
 #[test]
 fn unix_fallback_refuses_symlink_and_unsafe_preexisting_runtime() {
-    use std::os::unix::fs::{symlink, PermissionsExt};
+    use std::os::unix::fs::{PermissionsExt, symlink};
 
     let temp = std::env::temp_dir().join(format!(
         "zerostack-runtime-unsafe-{}-{}",

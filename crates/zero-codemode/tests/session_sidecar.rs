@@ -1,5 +1,5 @@
 #![cfg(all(unix, feature = "quickjs"))]
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::{
     io::{BufRead, BufReader, Read, Write},
     os::unix::{fs::PermissionsExt, net::UnixStream},
@@ -156,7 +156,7 @@ fn authenticated_cross_surface_and_rejections() {
     let hello = read(&mut r);
     assert_eq!(hello["ok"], true);
     let generation = hello["generation"].as_u64().unwrap();
-    let source="const a=await zero.fs.compound('read',{x:1});const b=await zero.token.shell('echo fixture');return {a,b};";
+    let source = "const a=await zero.fs.compound('read',{x:1});const b=await zero.token.shell('echo fixture');return {a,b};";
     send(
         &mut s,
         json!({"type":"execute","id":1,"generation":generation,"root":d.path(),"source":source}),
@@ -833,10 +833,12 @@ fn unknown_authenticated_request_is_typed_and_connection_survives() {
     assert_eq!(rejected["id"], 700);
     assert_eq!(rejected["generation"], generation);
     assert_eq!(rejected["code"], "unknown_request_type");
-    assert!(rejected["error"]
-        .as_str()
-        .unwrap()
-        .contains("request rejected"));
+    assert!(
+        rejected["error"]
+            .as_str()
+            .unwrap()
+            .contains("request rejected")
+    );
 
     send(
         &mut stream,

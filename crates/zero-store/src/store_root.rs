@@ -416,7 +416,9 @@ pub fn ensure_layout(resolved: &ResolvedStore) -> std::io::Result<()> {
     if local_marker_is_symlink(resolved.repo_root()) {
         return Err(std::io::Error::new(
             std::io::ErrorKind::InvalidInput,
-            format!("{LOCAL_STORE_DIR} is a symlink; a project-local store marker must be a real directory"),
+            format!(
+                "{LOCAL_STORE_DIR} is a symlink; a project-local store marker must be a real directory"
+            ),
         ));
     }
     std::fs::create_dir_all(resolved.engine_dir())
@@ -761,9 +763,11 @@ mod tests {
         assert_eq!(keys[0], keys[1]);
         assert_eq!(keys[1], keys[2]);
         assert_eq!(keys[0].len(), PROJECT_KEY_HEX_LEN);
-        assert!(keys[0]
-            .bytes()
-            .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b)));
+        assert!(
+            keys[0]
+                .bytes()
+                .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+        );
     }
 
     /// Golden rows 19 and 20: the CAS root is shared per store root and is
@@ -853,10 +857,12 @@ mod tests {
         let env = env_of(Some(shared.path()), true);
         let report = ResolvedStore::resolve(repo.path(), Engine::TokenZero, &env).report(&env);
         assert_eq!(report.mode, StoreMode::LocalUnified);
-        assert!(report
-            .warnings
-            .iter()
-            .any(|w| w.contains("takes precedence")));
+        assert!(
+            report
+                .warnings
+                .iter()
+                .any(|w| w.contains("takes precedence"))
+        );
     }
 
     /// Opt-in with nothing pinned is a misconfiguration worth surfacing.
@@ -866,10 +872,12 @@ mod tests {
         let env = env_of(None, true);
         let report = ResolvedStore::resolve(repo.path(), Engine::FsZero, &env).report(&env);
         assert_eq!(report.mode, StoreMode::Legacy);
-        assert!(report
-            .warnings
-            .iter()
-            .any(|w| w.contains("no store root pinned")));
+        assert!(
+            report
+                .warnings
+                .iter()
+                .any(|w| w.contains("no store root pinned"))
+        );
     }
 
     /// Golden row 25: `.zerostack` as a regular file is not a store.
@@ -998,11 +1006,13 @@ mod tests {
             "a symlinked marker must not be adopted as a local unified store"
         );
         assert!(resolved.unified_root().is_none());
-        assert!(resolved
-            .report(&env)
-            .warnings
-            .iter()
-            .any(|w| w.contains("symlink")));
+        assert!(
+            resolved
+                .report(&env)
+                .warnings
+                .iter()
+                .any(|w| w.contains("symlink"))
+        );
         assert!(ensure_layout(&resolved).is_err());
     }
 

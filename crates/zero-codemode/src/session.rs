@@ -19,9 +19,9 @@ use std::{
     process::{Command, Stdio},
     rc::Rc,
     sync::{
+        Arc, Mutex,
         atomic::{AtomicBool, AtomicU64, Ordering},
         mpsc::{self, Receiver, SyncSender, TrySendError},
-        Arc, Mutex,
     },
     thread::{self, JoinHandle},
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
@@ -337,11 +337,13 @@ fn pinned_worker_binary(path: &Path, key: &str) -> Result<(PathBuf, String), Hos
         digest.update(&buffer[..read]);
     }
     let digest_bytes: [u8; 32] = digest.finalize().into();
-    let actual = digest_bytes.iter().fold(String::with_capacity(64), |mut out, b| {
-        use std::fmt::Write;
-        let _ = write!(out, "{b:02x}");
-        out
-    });
+    let actual = digest_bytes
+        .iter()
+        .fold(String::with_capacity(64), |mut out, b| {
+            use std::fmt::Write;
+            let _ = write!(out, "{b:02x}");
+            out
+        });
     let variable = format!("ZEROSTACK_{key}_WORKER_SHA256");
     let expected = std::env::var(&variable).unwrap_or_else(|_| actual.clone());
     if expected.len() != 64
@@ -647,7 +649,7 @@ fn lower(
             _ => {
                 return Err(ConnectorError::new(
                     "unsupported planner-free fs.compound operation",
-                ))
+                ));
             }
         };
         return Ok((engine, op.into(), compound_args));

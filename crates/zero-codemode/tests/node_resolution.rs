@@ -8,8 +8,8 @@ use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 
 use zero_codemode::node::{
-    is_ephemeral, node_candidates, node_report, resolve_node_with, NodeEnv, NodeSource,
-    EPHEMERAL_REASON, NODE_SCHEMA,
+    EPHEMERAL_REASON, NODE_SCHEMA, NodeEnv, NodeSource, is_ephemeral, node_candidates, node_report,
+    resolve_node_with,
 };
 
 const MULTISHELL: &str = "/home/u/.local/state/fnm_multishells/1347_1785364489620/bin/node";
@@ -113,10 +113,12 @@ fn ephemeral_multishell_pin_is_refused_and_never_probed() {
     let outcome = resolve_node_with(&env, &present(&[MULTISHELL, "/usr/bin/node"]));
     let resolved = outcome.resolved.clone().unwrap();
     assert_eq!(resolved.path, PathBuf::from("/usr/bin/node"));
-    assert!(!outcome
-        .probed
-        .iter()
-        .any(|candidate| candidate.path == Path::new(MULTISHELL)));
+    assert!(
+        !outcome
+            .probed
+            .iter()
+            .any(|candidate| candidate.path == Path::new(MULTISHELL))
+    );
     assert_eq!(outcome.refused.len(), 1);
     assert_eq!(outcome.refused[0].reason, EPHEMERAL_REASON);
     assert_eq!(outcome.refused[0].candidate.source, NodeSource::Explicit);

@@ -10,9 +10,9 @@ mod tests {
     use serde::Deserialize;
     use std::{collections::BTreeMap, fs, path::PathBuf, process::Command};
     use zero_abi::{
-        decide_freshness_v1, sha256_hex, CertifiedInfluenceClosure, DependencyEdgeKindV1,
-        DependencyEdgeV1, DigestV1, EssentialDependencyCertificate, FreshnessFailureCodeV1,
-        FreshnessHeadV1, FreshnessStatusV1, IndexedThroughCertificate, ProducerDomainV1,
+        CertifiedInfluenceClosure, DependencyEdgeKindV1, DependencyEdgeV1, DigestV1,
+        EssentialDependencyCertificate, FreshnessFailureCodeV1, FreshnessHeadV1, FreshnessStatusV1,
+        IndexedThroughCertificate, ProducerDomainV1, decide_freshness_v1, sha256_hex,
     };
 
     #[derive(Deserialize)]
@@ -189,11 +189,13 @@ mod tests {
                     &vectors.required_closure.source_repository_heads[0].head,
                     &["fs:file", "graph:symbol", "token:cache"],
                     vec![first.clone(), edge("graph:symbol", "token:cache")],
-                    vec![EssentialDependencyCertificate::new(
-                        first,
-                        vec!["fs:file".into(), "graph:symbol".into()],
-                    )
-                    .unwrap()],
+                    vec![
+                        EssentialDependencyCertificate::new(
+                            first,
+                            vec!["fs:file".into(), "graph:symbol".into()],
+                        )
+                        .unwrap(),
+                    ],
                 )
             } else {
                 vectors.required_closure.clone()
@@ -237,22 +239,26 @@ mod tests {
             &vectors.required_closure.source_repository_heads[0].head,
             &["fs:file", "graph:symbol", "token:cache"],
             vec![first.clone(), second],
-            vec![EssentialDependencyCertificate::new(
-                first.clone(),
-                vec!["fs:file".into(), "graph:symbol".into()],
-            )
-            .unwrap()],
+            vec![
+                EssentialDependencyCertificate::new(
+                    first.clone(),
+                    vec!["fs:file".into(), "graph:symbol".into()],
+                )
+                .unwrap(),
+            ],
         );
         let incomplete = closure(
             &vectors.assembly_manifest_digest,
             &vectors.required_closure.source_repository_heads[0].head,
             &["fs:file", "graph:symbol", "token:cache"],
             vec![first.clone()],
-            vec![EssentialDependencyCertificate::new(
-                first,
-                vec!["fs:file".into(), "graph:symbol".into()],
-            )
-            .unwrap()],
+            vec![
+                EssentialDependencyCertificate::new(
+                    first,
+                    vec!["fs:file".into(), "graph:symbol".into()],
+                )
+                .unwrap(),
+            ],
         );
         let indexed = IndexedThroughCertificate::new("graph-index", 7, incomplete).unwrap();
         let decision = decide_freshness_v1(&required, &indexed, 7);
@@ -273,22 +279,26 @@ mod tests {
             &vectors.required_closure.source_repository_heads[0].head,
             &["fs:file", "graph:symbol", "token:cache"],
             vec![first.clone(), edge("graph:symbol", "token:cache")],
-            vec![EssentialDependencyCertificate::new(
-                first.clone(),
-                vec!["fs:file".into(), "graph:symbol".into()],
-            )
-            .unwrap()],
+            vec![
+                EssentialDependencyCertificate::new(
+                    first.clone(),
+                    vec!["fs:file".into(), "graph:symbol".into()],
+                )
+                .unwrap(),
+            ],
         );
         let incomplete = closure(
             &vectors.assembly_manifest_digest,
             &vectors.required_closure.source_repository_heads[0].head,
             &["fs:file", "graph:symbol"],
             vec![first.clone()],
-            vec![EssentialDependencyCertificate::new(
-                first,
-                vec!["fs:file".into(), "graph:symbol".into()],
-            )
-            .unwrap()],
+            vec![
+                EssentialDependencyCertificate::new(
+                    first,
+                    vec!["fs:file".into(), "graph:symbol".into()],
+                )
+                .unwrap(),
+            ],
         );
         let indexed = IndexedThroughCertificate::new("graph-index", 7, incomplete).unwrap();
         let decision = decide_freshness_v1(&required, &indexed, 7);

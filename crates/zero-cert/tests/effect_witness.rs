@@ -2,16 +2,16 @@ mod common;
 
 use std::borrow::Cow;
 
-use common::{fixture, object_id, provenance, span, Residents};
+use common::{Residents, fixture, object_id, provenance, span};
 use zero_abi::{
-    sha256, CwirVerifierClassV1, DigestV1, EffectProgramV1, EffectRollbackV1,
-    EffectVerificationPlanV1, EffectVerificationStepV1, TypedEffectOperationV1,
+    CwirVerifierClassV1, DigestV1, EffectProgramV1, EffectRollbackV1, EffectVerificationPlanV1,
+    EffectVerificationStepV1, TypedEffectOperationV1, sha256,
 };
 use zero_cert::{
+    CompletenessWitness, EffectLocalizationV1, EffectVerificationOutcomeV1,
+    EffectWitnessFailureCodeV1, EffectWitnessKindV1, EvidenceCertificate, OperatorLock, Query,
     accept_effect_verification_v1, domain_snapshot_digest, effect_witness_contract_digest_v1,
-    incomplete_effect_verification_v1, reject_effect_verification_v1, verify, CompletenessWitness,
-    EffectLocalizationV1, EffectVerificationOutcomeV1, EffectWitnessFailureCodeV1,
-    EffectWitnessKindV1, EvidenceCertificate, OperatorLock, Query,
+    incomplete_effect_verification_v1, reject_effect_verification_v1, verify,
 };
 
 fn digest(byte: u8) -> DigestV1 {

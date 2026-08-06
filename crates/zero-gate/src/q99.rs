@@ -7,10 +7,10 @@
 use std::{collections::BTreeSet, error::Error, fmt};
 
 use serde::{Deserialize, Serialize};
-use serde_json::{json, Value};
-use zero_abi::{canonical_json, reasoning_contract_digest_v1, sha256, ArtifactOwnerV1, DigestV1};
+use serde_json::{Value, json};
+use zero_abi::{ArtifactOwnerV1, DigestV1, canonical_json, reasoning_contract_digest_v1, sha256};
 use zero_cert::{CompletenessWitness, Query, VerifiedEvidence};
-use zero_ledger::{causal_work_contract_digest_v1, CausalCounterUnitV1, CausalWorkReceiptV1};
+use zero_ledger::{CausalCounterUnitV1, CausalWorkReceiptV1, causal_work_contract_digest_v1};
 
 use crate::invalidation::BoundCausalCacheInvalidationV1;
 
@@ -1684,7 +1684,7 @@ mod tests {
 
     use super::*;
     use zero_cert::{
-        verify, EvidenceCertificate, ObjectId, OperatorLock, Provenance, Resolver, SpanRef, TestId,
+        EvidenceCertificate, ObjectId, OperatorLock, Provenance, Resolver, SpanRef, TestId, verify,
     };
     use zero_ledger::{
         CausalWorkChargeV1, CausalWorkClassV1, CausalWorkOutcomeV1, ParentCounterIdentityV1,
@@ -1941,24 +1941,28 @@ mod tests {
         };
         assert!(admission.record().provider_eligible);
         assert_eq!(admission.record().provider_reported_hit_tokens, None);
-        assert!(CausalCacheComponentClaimV1::new(
-            binding(),
-            CacheCoordinateV1::Source,
-            ArtifactOwnerV1::FsZero,
-            CacheValidityV1::ProviderEligible,
-            d(33),
-            verifier_route(),
-        )
-        .is_err());
-        assert!(CausalCacheComponentClaimV1::new(
-            binding(),
-            CacheCoordinateV1::ReasoningContinuation,
-            ArtifactOwnerV1::TokenZero,
-            CacheValidityV1::Exact,
-            d(34),
-            verifier_route(),
-        )
-        .is_err());
+        assert!(
+            CausalCacheComponentClaimV1::new(
+                binding(),
+                CacheCoordinateV1::Source,
+                ArtifactOwnerV1::FsZero,
+                CacheValidityV1::ProviderEligible,
+                d(33),
+                verifier_route(),
+            )
+            .is_err()
+        );
+        assert!(
+            CausalCacheComponentClaimV1::new(
+                binding(),
+                CacheCoordinateV1::ReasoningContinuation,
+                ArtifactOwnerV1::TokenZero,
+                CacheValidityV1::Exact,
+                d(34),
+                verifier_route(),
+            )
+            .is_err()
+        );
     }
 
     #[test]
@@ -2053,17 +2057,19 @@ mod tests {
         };
         assert!(!input.attained);
         assert_eq!(input.label, Q99LabelV1::Q99Input);
-        assert!(Q99MetricReceiptClaimV1::new(
-            Q99LabelV1::Q99Total,
-            d(1),
-            d(2),
-            1,
-            1,
-            1,
-            d(3),
-            verifier_route(),
-        )
-        .is_err());
+        assert!(
+            Q99MetricReceiptClaimV1::new(
+                Q99LabelV1::Q99Total,
+                d(1),
+                d(2),
+                1,
+                1,
+                1,
+                d(3),
+                verifier_route(),
+            )
+            .is_err()
+        );
     }
 
     fn work_receipt(

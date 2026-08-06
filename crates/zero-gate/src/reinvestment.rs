@@ -9,19 +9,19 @@
 use std::{error::Error, fmt};
 
 use serde::{Deserialize, Serialize};
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use zero_abi::{
-    canonical_json, reasoning_contract_digest_v1, DigestV1, StrictReasoningAdmissionV1,
+    DigestV1, StrictReasoningAdmissionV1, canonical_json, reasoning_contract_digest_v1,
 };
 use zero_cert::VerifiedEvidence;
-use zero_ledger::{causal_work_contract_digest_v1, CausalWorkReceiptV1, ParentCounterIdentityV1};
+use zero_ledger::{CausalWorkReceiptV1, ParentCounterIdentityV1, causal_work_contract_digest_v1};
 
 use crate::{
     q99::{q99_verifier_identity_v1, verified_evidence_digest, verify_exact_successful_payload},
-    quality::{quality_envelope_contract_digest_v1, QualityAdmissionV1, QualitySelectionV1},
+    quality::{QualityAdmissionV1, QualitySelectionV1, quality_envelope_contract_digest_v1},
     transaction::{
-        transaction_contract_digest_v1, RestorationScopeV1, TransactionDispositionV1,
-        TransactionReceiptV1,
+        RestorationScopeV1, TransactionDispositionV1, TransactionReceiptV1,
+        transaction_contract_digest_v1,
     },
 };
 
@@ -1547,27 +1547,28 @@ mod tests {
     };
     use tempfile::tempdir;
     use zero_abi::{
-        sha256, verify_strict_no_downshift_v1, ArtifactOwnerV1, CwirVerifierClassV1,
-        EffectProgramV1, EffectRollbackV1, EffectTargetV1, EffectVerificationPlanV1,
-        EffectVerificationStepV1, NativeStatePolicyV1, ReasoningContractV1, TypedEffectOperationV1,
+        ArtifactOwnerV1, CwirVerifierClassV1, EffectProgramV1, EffectRollbackV1, EffectTargetV1,
+        EffectVerificationPlanV1, EffectVerificationStepV1, NativeStatePolicyV1,
+        ReasoningContractV1, TypedEffectOperationV1, sha256, verify_strict_no_downshift_v1,
     };
     use zero_cert::{
-        accept_effect_verification_v1, verify, CompletenessWitness, EffectVerificationOutcomeV1,
-        EvidenceCertificate, ObjectId, OperatorLock, Provenance, Query, Resolver, SpanRef, TestId,
+        CompletenessWitness, EffectVerificationOutcomeV1, EvidenceCertificate, ObjectId,
+        OperatorLock, Provenance, Query, Resolver, SpanRef, TestId, accept_effect_verification_v1,
+        verify,
     };
     use zero_ledger::{
         CausalCounterUnitV1, CausalWorkChargeV1, CausalWorkClassV1, CausalWorkOutcomeV1,
         ParentCounterObservationV1, ParentCounterWindowV1, ResiduePolicyV1,
     };
     use zero_store::{
-        initialize_published_root_v1, DurableProfileIdV1, JournalBindingV1, JournalPathsV1,
+        DurableProfileIdV1, JournalBindingV1, JournalPathsV1, initialize_published_root_v1,
     };
 
     use crate::{
-        begin_effect_transaction_v1, effect_journal_binding_v1, validate_effect_closure_v1,
         EffectClosureManifestV1, EffectClosureRequestV1, EffectResourceClosureV1,
         ResourceIsolationModeV1, ResourceRestorationModeV1, TransactionAccessV1,
-        TransactionResourceKindV1, TransactionResourceRequirementV1,
+        TransactionResourceKindV1, TransactionResourceRequirementV1, begin_effect_transaction_v1,
+        effect_journal_binding_v1, validate_effect_closure_v1,
     };
 
     fn d(byte: u8) -> DigestV1 {

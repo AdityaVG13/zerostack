@@ -8,17 +8,17 @@
 
 use std::{error::Error, fmt};
 
-use serde::{de, Deserialize, Deserializer, Serialize, Serializer};
-use serde_json::{json, Value};
+use serde::{Deserialize, Deserializer, Serialize, Serializer, de};
+use serde_json::{Value, json};
 
 use crate::{
     canonical_json,
-    cwir::{cwir_contract_digest_v1, CWIR_CONTRACT_VERSION_V1},
-    effect::{effect_ir_contract_digest_v1, EFFECT_IR_CONTRACT_VERSION_V1},
+    cwir::{CWIR_CONTRACT_VERSION_V1, cwir_contract_digest_v1},
+    effect::{EFFECT_IR_CONTRACT_VERSION_V1, effect_ir_contract_digest_v1},
     raw_worker::EngineIdentity,
-    reasoning::{reasoning_contract_digest_v1, REASONING_CONTRACT_VERSION_V1},
+    reasoning::{REASONING_CONTRACT_VERSION_V1, reasoning_contract_digest_v1},
     sha256,
-    zbf::{zbf_contract_digest_v1, ZBF_CONTRACT_VERSION_V1},
+    zbf::{ZBF_CONTRACT_VERSION_V1, zbf_contract_digest_v1},
 };
 
 pub const ASSEMBLY_MANIFEST_SCHEMA_VERSION: u16 = 1;

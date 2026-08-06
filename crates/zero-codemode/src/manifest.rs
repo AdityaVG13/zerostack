@@ -13,8 +13,8 @@
 use std::path::{Path, PathBuf};
 
 use crate::discovery::{
-    candidates, resolve_all, Candidate, DiscoveryEnv, HarnessBinary, Source, BIN_DIR,
-    DEV_TARGET_SUBDIR, DISCOVERY_SCHEMA,
+    BIN_DIR, Candidate, DEV_TARGET_SUBDIR, DISCOVERY_SCHEMA, DiscoveryEnv, HarnessBinary, Source,
+    candidates, resolve_all,
 };
 
 /// Versioned manifest schema, stable across surfaces.

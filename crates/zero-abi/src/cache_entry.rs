@@ -494,7 +494,7 @@ fn normalize_roots(roots: &mut Vec<CacheRootV1>) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use serde_json::{json, Map};
+    use serde_json::{Map, json};
 
     fn root(name: &str) -> CacheRootV1 {
         CacheRootV1::new(name).unwrap()

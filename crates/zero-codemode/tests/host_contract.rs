@@ -7,21 +7,21 @@ use std::{
     cell::RefCell,
     rc::Rc,
     sync::{
-        atomic::{AtomicBool, Ordering},
         Arc,
+        atomic::{AtomicBool, Ordering},
     },
     thread,
 };
 
 #[cfg(feature = "quickjs")]
-use serde_json::{json, Value};
-#[cfg(feature = "quickjs")]
-use zero_codemode::{runtime_creation_count, Connector, ConnectorError, DispatchContext};
+use serde_json::{Value, json};
 use zero_codemode::{CANONICAL_REF_ALIASES, CANONICAL_RESULT_FIELDS, CANONICAL_TEXT_ALIASES};
+#[cfg(feature = "quickjs")]
+use zero_codemode::{Connector, ConnectorError, DispatchContext, runtime_creation_count};
 
 use zero_codemode::{
-    wrap_plan, CapabilityDescriptor, GlobalRegistration, Host, HostError, HostLimits, PlanError,
-    RegistrationError,
+    CapabilityDescriptor, GlobalRegistration, Host, HostError, HostLimits, PlanError,
+    RegistrationError, wrap_plan,
 };
 #[cfg(feature = "quickjs")]
 use zero_codemode::{RESULT_SPILL_PREVIEW_BYTES, RESULT_SPILL_SCHEMA};
@@ -272,11 +272,12 @@ fn connector_error() {
         result: None,
     });
     let host = Host::new(lim(), reg()).unwrap_or_else(|error| panic!("host: {error}"));
-    assert!(host
-        .execute("return await zero['fs'].read({});", connector.clone())
-        .expect_err("fail")
-        .to_string()
-        .contains("connector refused request"));
+    assert!(
+        host.execute("return await zero['fs'].read({});", connector.clone())
+            .expect_err("fail")
+            .to_string()
+            .contains("connector refused request")
+    );
 }
 
 #[cfg(feature = "quickjs")]
@@ -291,11 +292,12 @@ fn oversized_connector_result_is_rejected_before_parse() {
         result: Some(format!("\"{}\"", "x".repeat(64))),
     });
     let host = Host::new(limits, reg()).unwrap_or_else(|error| panic!("host: {error}"));
-    assert!(host
-        .execute("return await zero['fs']['read']({});", connector)
-        .expect_err("oversized connector result")
-        .to_string()
-        .contains("result exceeds JSON limit"));
+    assert!(
+        host.execute("return await zero['fs']['read']({});", connector)
+            .expect_err("oversized connector result")
+            .to_string()
+            .contains("result exceeds JSON limit")
+    );
 }
 
 #[cfg(feature = "quickjs")]
@@ -308,9 +310,10 @@ fn invalid_connector_json_is_rejected() {
         result: Some("not json".to_owned()),
     });
     let host = Host::new(lim(), reg()).unwrap_or_else(|error| panic!("host: {error}"));
-    assert!(host
-        .execute("return await zero['fs']['read']({});", connector)
-        .is_err());
+    assert!(
+        host.execute("return await zero['fs']['read']({});", connector)
+            .is_err()
+    );
 }
 
 #[cfg(feature = "quickjs")]
@@ -559,11 +562,12 @@ fn oversized_result_without_a_spill_root_still_reports_the_limit() {
     let mut limits = lim();
     limits.max_json_bytes = 32;
     let host = Host::new(limits, reg()).unwrap_or_else(|error| panic!("host: {error}"));
-    assert!(host
-        .execute("return 'x'.repeat(64);", Rc::new(C::ok()))
-        .expect_err("oversized result")
-        .to_string()
-        .contains("maximum is 32"));
+    assert!(
+        host.execute("return 'x'.repeat(64);", Rc::new(C::ok()))
+            .expect_err("oversized result")
+            .to_string()
+            .contains("maximum is 32")
+    );
 }
 
 #[cfg(feature = "quickjs")]

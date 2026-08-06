@@ -8,7 +8,7 @@ use std::{collections::BTreeSet, fmt};
 
 use serde::{Deserialize, Serialize};
 use sha2::{Digest as _, Sha256};
-use zero_abi::{canonical_json, DigestV1 as AbiDigestV1};
+use zero_abi::{DigestV1 as AbiDigestV1, canonical_json};
 use zero_cert::{CompletenessWitness, Query, VerifiedEvidence};
 use zero_store::{
     DurableProfileIdV1, DurableProfileV1, JournalBindingV1, JournalFailureCodeV1, PublishedRootV1,
@@ -16,8 +16,8 @@ use zero_store::{
 };
 
 use crate::two_phase::{
-    validate_receipt_record, CommitReceipt, PublicationDurabilityV1, PublishedCommit, ReceiptKind,
-    ReceiptRecord,
+    CommitReceipt, PublicationDurabilityV1, PublishedCommit, ReceiptKind, ReceiptRecord,
+    validate_receipt_record,
 };
 
 const DURABLE_PUBLICATION_DOMAIN_V1: &[u8] = b"zerostack.durable_publication.v1\0";
@@ -431,16 +431,16 @@ mod tests {
     use super::*;
     use tempfile::tempdir;
     use zero_cert::{
-        verify, EvidenceCertificate, ObjectId, OperatorLock, Provenance, Resolver, SpanRef, TestId,
+        EvidenceCertificate, ObjectId, OperatorLock, Provenance, Resolver, SpanRef, TestId, verify,
     };
     use zero_store::{
-        commit_journal_v1, initialize_published_root_v1, prepare_journal_v1, JournalPathsV1,
+        JournalPathsV1, commit_journal_v1, initialize_published_root_v1, prepare_journal_v1,
     };
 
     use crate::two_phase::{
-        candidate_protocol_identity_v1, seal_receipt_record_for_test, AttributionClass,
-        ExecutionBinding, ExecutionSurface, ResourceUsage, RestorationAccounting, SourceHead,
-        WorkerEnvelope, TWO_PHASE_SCHEMA_VERSION,
+        AttributionClass, ExecutionBinding, ExecutionSurface, ResourceUsage, RestorationAccounting,
+        SourceHead, TWO_PHASE_SCHEMA_VERSION, WorkerEnvelope, candidate_protocol_identity_v1,
+        seal_receipt_record_for_test,
     };
     use crate::{
         ExactNeutralCertificateV1, FrozenBaselineV1, QualityAdmissionV1, QualityEvidenceV1,
@@ -448,8 +448,8 @@ mod tests {
         SemanticCutClaimV1, SemanticCutEvidenceV1,
     };
     use zero_abi::{
-        raw_worker::EffectClass, verify_strict_no_downshift_v1, NativeStatePolicyV1,
-        ReasoningContractV1,
+        NativeStatePolicyV1, ReasoningContractV1, raw_worker::EffectClass,
+        verify_strict_no_downshift_v1,
     };
 
     fn abi(byte: u8) -> AbiDigestV1 {

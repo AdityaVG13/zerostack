@@ -1,7 +1,7 @@
 mod common;
 use common::fixture;
 use std::borrow::Cow;
-use zero_cert::{verify, OperatorLock, VerificationError};
+use zero_cert::{OperatorLock, VerificationError, verify};
 
 #[test]
 fn fixed_seed_valid_and_single_bit_tampering_property() {
@@ -35,7 +35,7 @@ fn fixed_seed_valid_and_single_bit_tampering_property() {
 
 #[test]
 fn ordered_domain_digest_and_overlapping_matches_are_deterministic() {
-    use zero_cert::{domain_snapshot_digest, CompletenessWitness, EvidenceCertificate, Query};
+    use zero_cert::{CompletenessWitness, EvidenceCertificate, Query, domain_snapshot_digest};
     let first = b"aaa".as_slice();
     let second = b"ba".as_slice();
     let objects = vec![common::object_id(first), common::object_id(second)];

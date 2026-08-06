@@ -108,10 +108,12 @@ mod tests {
         assert!(serde_json::from_value::<ZeroTelemetryV1>(json!({
             "schema": "zero-telemetry/v1", "prevented_files": 1, "prevented_bytes": 2, "sink": "engine-specific"
         })).is_err());
-        assert!(serde_json::from_value::<ZeroTelemetryV1>(json!({
-            "schema": "zero-telemetry/v1", "prevented_files": 1
-        }))
-        .is_err());
+        assert!(
+            serde_json::from_value::<ZeroTelemetryV1>(json!({
+                "schema": "zero-telemetry/v1", "prevented_files": 1
+            }))
+            .is_err()
+        );
     }
 
     #[test]

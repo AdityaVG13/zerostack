@@ -13,7 +13,7 @@ use std::{
 };
 
 use serde_json::json;
-use zero_abi::{canonical_json, sha256, DigestV1};
+use zero_abi::{DigestV1, canonical_json, sha256};
 use zero_ledger::{
     CausalCounterUnitV1, CounterCorrespondenceReceiptV1, CounterEvidenceModeV1,
     ParentCounterIdentityV1, ParentCounterWindowV1,

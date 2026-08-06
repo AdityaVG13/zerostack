@@ -11,9 +11,9 @@ use std::{
 };
 
 use serde_json::json;
-use zero_abi::{canonical_json, sha256, DigestV1};
+use zero_abi::{DigestV1, canonical_json, sha256};
 use zero_gate::{
-    prepare, two_phase_contract_digest_v5, ExecutionSurface, FinalReceipt, PeerOwner, ResourceUsage,
+    ExecutionSurface, FinalReceipt, PeerOwner, ResourceUsage, prepare, two_phase_contract_digest_v5,
 };
 use zero_testkit::kernel_fixture::kernel_mutation_fixture_v2;
 

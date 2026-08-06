@@ -8,8 +8,8 @@
 use std::{error::Error, fmt};
 
 use serde::{Deserialize, Serialize};
-use serde_json::{json, Value};
-use zero_abi::{canonical_json, sha256, DigestV1};
+use serde_json::{Value, json};
+use zero_abi::{DigestV1, canonical_json, sha256};
 use zero_cert::VerifiedEvidence;
 
 pub const QUALITY_ENVELOPE_CONTRACT_VERSION_V1: u16 = 1;
@@ -1763,8 +1763,8 @@ mod tests {
     use super::*;
     use std::borrow::Cow;
     use zero_cert::{
-        verify, CompletenessWitness, EvidenceCertificate, ObjectId, OperatorLock, Provenance,
-        Query, Resolver, SpanRef,
+        CompletenessWitness, EvidenceCertificate, ObjectId, OperatorLock, Provenance, Query,
+        Resolver, SpanRef, verify,
     };
 
     fn digest(byte: u8) -> DigestV1 {

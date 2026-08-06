@@ -8,13 +8,13 @@ mod tests {
     use super::TWO_PHASE_GATE_VECTORS_V1;
     use serde::Deserialize;
     use std::{collections::BTreeMap, fs, path::PathBuf, process::Command};
-    use zero_abi::{raw_worker::EffectClass, sha256_hex, DigestV1};
+    use zero_abi::{DigestV1, raw_worker::EffectClass, sha256_hex};
     use zero_gate::{
-        prepare, validate_receipt_record, ExecutionSurface, ExecutionTrace, FailureCode,
-        FinalReceipt, FrozenBaselineV1, Guard, QualityEnvelopeFailureCodeV1, ResourceUsage,
+        ExecutionSurface, ExecutionTrace, FailureCode, FinalReceipt, FrozenBaselineV1, Guard,
+        QualityEnvelopeFailureCodeV1, ResourceUsage, prepare, validate_receipt_record,
     };
 
-    use crate::kernel_fixture::{kernel_mutation_fixture_v2, KernelMutationFixtureV2};
+    use crate::kernel_fixture::{KernelMutationFixtureV2, kernel_mutation_fixture_v2};
 
     #[derive(Deserialize)]
     struct Vectors {

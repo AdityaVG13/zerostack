@@ -10,17 +10,17 @@
 use std::fmt;
 
 use serde::{Deserialize, Serialize};
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use sha2::{Digest as _, Sha256};
 use zero_abi::{
-    canonical_json, ArtifactOwnerV1, DigestV1, EffectClass, EffectProgramV1, EffectRollbackV1,
-    TypedEffectOperationV1,
+    ArtifactOwnerV1, DigestV1, EffectClass, EffectProgramV1, EffectRollbackV1,
+    TypedEffectOperationV1, canonical_json,
 };
 use zero_cert::EffectAcceptedV1;
 use zero_store::{
-    abort_journal_v1, commit_journal_v1, prepare_journal_v1, recover_journal_v1,
     ContinuationCartridgeV1, DurableProfileIdV1, JournalBindingV1, JournalErrorV1,
-    JournalFailureCodeV1, JournalPathsV1, RecoveryOutcomeV1, RecoveryReceiptV1,
+    JournalFailureCodeV1, JournalPathsV1, RecoveryOutcomeV1, RecoveryReceiptV1, abort_journal_v1,
+    commit_journal_v1, prepare_journal_v1, recover_journal_v1,
 };
 
 pub const TRANSACTION_CONTRACT_VERSION_V1: u16 = 1;
@@ -1349,14 +1349,14 @@ mod tests {
     use std::borrow::Cow;
     use tempfile::tempdir;
     use zero_abi::{
-        sha256, CwirVerifierClassV1, EffectTargetV1, EffectVerificationPlanV1,
-        EffectVerificationStepV1, TypedEffectOperationV1,
+        CwirVerifierClassV1, EffectTargetV1, EffectVerificationPlanV1, EffectVerificationStepV1,
+        TypedEffectOperationV1, sha256,
     };
     use zero_cert::{
-        accept_effect_verification_v1, verify, CompletenessWitness, EffectVerificationOutcomeV1,
-        EvidenceCertificate, ObjectId, OperatorLock, Provenance, Query, Resolver, SpanRef,
+        CompletenessWitness, EffectVerificationOutcomeV1, EvidenceCertificate, ObjectId,
+        OperatorLock, Provenance, Query, Resolver, SpanRef, accept_effect_verification_v1, verify,
     };
-    use zero_store::{initialize_published_root_v1, DurableProfileIdV1};
+    use zero_store::{DurableProfileIdV1, initialize_published_root_v1};
 
     fn digest(byte: u8) -> DigestV1 {
         DigestV1::from_bytes([byte; 32])

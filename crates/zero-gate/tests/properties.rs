@@ -1,6 +1,6 @@
 use proptest::prelude::*;
 use zero_abi::raw_worker::EffectClass;
-use zero_gate::{check_t10_bound, decide, DecisionGate, GateInput, GateState};
+use zero_gate::{DecisionGate, GateInput, GateState, check_t10_bound, decide};
 
 fn input(effect_class: EffectClass, required_budget: u128) -> GateInput<'static, 'static> {
     GateInput {

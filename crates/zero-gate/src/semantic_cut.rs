@@ -7,7 +7,7 @@
 use std::{error::Error, fmt};
 
 use serde::{Deserialize, Serialize};
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use zero_abi::{canonical_json, sha256};
 use zero_cert::{CompletenessWitness, Query, VerifiedEvidence};
 

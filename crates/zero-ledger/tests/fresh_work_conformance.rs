@@ -5,7 +5,7 @@
 use proptest::prelude::*;
 use zero_ledger::{
     ActionFreshWork, Digest, FreshWorkComponent, FreshWorkVector, LedgerConfig, LedgerError,
-    ResourceGauge, SessionFreshWork, TokenCharge, TokenizerIdentity, PPM_ONE,
+    PPM_ONE, ResourceGauge, SessionFreshWork, TokenCharge, TokenizerIdentity,
 };
 
 fn tokenizer() -> TokenizerIdentity {

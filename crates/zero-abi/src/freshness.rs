@@ -5,9 +5,9 @@
 //! deliberately absent: repository, assembly, index, and closure identities are
 //! the only freshness authority.
 
-use crate::{canonical_json, sha256, DigestV1};
+use crate::{DigestV1, canonical_json, sha256};
 use serde::{Deserialize, Serialize};
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::collections::{BTreeMap, BTreeSet};
 use std::error::Error;
 use std::fmt;
@@ -529,21 +529,21 @@ pub fn decide_freshness_v1(
                 FreshnessStatusV1::IndexBehind,
                 FreshnessFailureCodeV1::MissingProofScope,
                 "indexed proof omits a required repository head",
-            )
+            );
         }
         HeadComparison::Changed => {
             return FreshnessDecisionV1::rejected(
                 FreshnessStatusV1::IndexBehind,
                 FreshnessFailureCodeV1::SourceHeadMismatch,
                 "indexed proof was collected for a different source head",
-            )
+            );
         }
         HeadComparison::Extra => {
             return FreshnessDecisionV1::rejected(
                 FreshnessStatusV1::Unknown,
                 FreshnessFailureCodeV1::IncomparableScope,
                 "indexed proof has incomparable repository scope",
-            )
+            );
         }
     }
     if indexed.index_generation < minimum_generation {
@@ -751,11 +751,10 @@ mod tests {
     }
     fn closure(head: u8, extra_scope: bool) -> CertifiedInfluenceClosure {
         let mut scope = vec!["fs:file".into(), "graph:symbol".into()];
-        let mut edges =
-            vec![
-                DependencyEdgeV1::new("fs:file", "graph:symbol", DependencyEdgeKindV1::Derives)
-                    .unwrap(),
-            ];
+        let mut edges = vec![
+            DependencyEdgeV1::new("fs:file", "graph:symbol", DependencyEdgeKindV1::Derives)
+                .unwrap(),
+        ];
         if extra_scope {
             scope.push("token:cache".into());
             edges.push(

@@ -6,7 +6,7 @@ use std::io::{BufRead, BufReader, Read, Write};
 use std::path::PathBuf;
 use std::process::{Command, ExitStatus, Stdio};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{mpsc, Arc, Condvar, Mutex};
+use std::sync::{Arc, Condvar, Mutex, mpsc};
 use std::thread;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
@@ -14,10 +14,10 @@ use command_group::{CommandGroup, GroupChild};
 
 use zero_abi::raw_worker::EngineIdentity;
 use zero_abi::{
-    decode_response_frame, encode_frame, raw_worker_protocol_digest_hex,
-    validate_handshake_request, CallRequest, CancelRequest, FrameCodecError, HandshakeAck,
-    HandshakeRequest, ProtocolLimits, ShutdownRequest, WorkerRequestFrame, WorkerResponseFrame,
-    WorkerResult, RAW_WORKER_PROTOCOL_VERSION,
+    CallRequest, CancelRequest, FrameCodecError, HandshakeAck, HandshakeRequest, ProtocolLimits,
+    RAW_WORKER_PROTOCOL_VERSION, ShutdownRequest, WorkerRequestFrame, WorkerResponseFrame,
+    WorkerResult, decode_response_frame, encode_frame, raw_worker_protocol_digest_hex,
+    validate_handshake_request,
 };
 
 pub const STORE_ROOT_ENV: &str = "ZEROSTACK_STORE_ROOT";
@@ -373,7 +373,7 @@ impl WorkerClient {
                     &mut child,
                     config.shutdown_timeout,
                     "worker stdin unavailable",
-                ))
+                ));
             }
         };
         let stdout = match child.inner().stdout.take() {
@@ -383,7 +383,7 @@ impl WorkerClient {
                     &mut child,
                     config.shutdown_timeout,
                     "worker stdout unavailable",
-                ))
+                ));
             }
         };
         let stderr = match child.inner().stderr.take() {
@@ -393,7 +393,7 @@ impl WorkerClient {
                     &mut child,
                     config.shutdown_timeout,
                     "worker stderr unavailable",
-                ))
+                ));
             }
         };
 
@@ -795,7 +795,7 @@ impl WorkerClient {
                 other => {
                     return self.protocol_terminate(format!(
                         "mismatched or unexpected dispatch response: {other:?}"
-                    ))
+                    ));
                 }
             }
         }
@@ -957,7 +957,7 @@ impl WorkerClient {
             Ok(()) => {}
             Err(mpsc::TrySendError::Full(_)) => return Err(WorkerAdapterError::WriterBusy),
             Err(mpsc::TrySendError::Disconnected(_)) => {
-                return Err(WorkerAdapterError::WriterClosed)
+                return Err(WorkerAdapterError::WriterClosed);
             }
         }
         let remaining = deadline.saturating_duration_since(Instant::now());
@@ -1112,7 +1112,7 @@ impl WorkerClient {
                     observed_bytes: u64::MAX,
                     complete: false,
                     truncated: true,
-                }
+                };
             }
         };
         let deadline = Instant::now().checked_add(timeout);
@@ -1135,7 +1135,7 @@ impl WorkerClient {
                         observed_bytes: u64::MAX,
                         complete: false,
                         truncated: true,
-                    }
+                    };
                 }
             }
         }

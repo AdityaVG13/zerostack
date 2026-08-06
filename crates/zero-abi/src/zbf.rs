@@ -7,7 +7,7 @@
 
 use std::{error::Error, fmt};
 
-use crate::{canonical_json, sha256, ArtifactOwnerV1, DigestV1};
+use crate::{ArtifactOwnerV1, DigestV1, canonical_json, sha256};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 

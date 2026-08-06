@@ -8,16 +8,16 @@
 use std::{error::Error, fmt};
 
 use serde::{Deserialize, Serialize};
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use zero_abi::{
-    canonical_json, freshness_contract_digest_v1, robust_snap_contract_digest_v1, sha256,
     ArtifactOwnerV1, CertifiedInfluenceClosure, DigestV1, RobustSnapCertificate, SnapLevel,
+    canonical_json, freshness_contract_digest_v1, robust_snap_contract_digest_v1, sha256,
 };
 use zero_cert::VerifiedEvidence;
 
 use crate::q99::{
-    q99_contract_digest_v2, q99_verifier_identity_v1, verified_evidence_digest,
-    verify_exact_successful_payload, CausalCacheBindingV1,
+    CausalCacheBindingV1, q99_contract_digest_v2, q99_verifier_identity_v1,
+    verified_evidence_digest, verify_exact_successful_payload,
 };
 
 pub const INVALIDATION_INTAKE_CONTRACT_VERSION_V1: u16 = 1;
@@ -955,18 +955,18 @@ mod tests {
 
     use super::*;
     use crate::q99::{
-        validate_causal_cache_v1, CacheCoordinateV1, CacheValidityV1, CausalCacheComponentClaimV1,
-        CausalCacheDecisionV1, VerifiedCausalCacheComponentV1,
+        CacheCoordinateV1, CacheValidityV1, CausalCacheComponentClaimV1, CausalCacheDecisionV1,
+        VerifiedCausalCacheComponentV1, validate_causal_cache_v1,
     };
     use zero_abi::{
         DependencyEdgeKindV1, DependencyEdgeV1, EssentialDependencyCertificate,
         EvidenceDecisionTree, EvidenceLeafV1, EvidenceObservationV1, FreshnessHeadV1,
         ProducerDomainV1, ProtectedEffectClassV1, ProtectedEffectSet, ProtectedEffectV1,
-        WorldFiberDescriptor, ROBUST_SNAP_MODEL_VERSION,
+        ROBUST_SNAP_MODEL_VERSION, WorldFiberDescriptor,
     };
     use zero_cert::{
-        verify, CompletenessWitness, EvidenceCertificate, ObjectId, OperatorLock, Provenance,
-        Query, Resolver, SpanRef, TestId,
+        CompletenessWitness, EvidenceCertificate, ObjectId, OperatorLock, Provenance, Query,
+        Resolver, SpanRef, TestId, verify,
     };
 
     fn d(byte: u8) -> DigestV1 {
@@ -1242,11 +1242,13 @@ mod tests {
             vec![ProducerDomainV1::GraphIndex],
             vec!["graph.artifact".into(), "graph.source".into()],
             vec![edge.clone()],
-            vec![EssentialDependencyCertificate::new(
-                edge,
-                vec!["graph.source".into(), "graph.artifact".into()],
-            )
-            .unwrap()],
+            vec![
+                EssentialDependencyCertificate::new(
+                    edge,
+                    vec!["graph.source".into(), "graph.artifact".into()],
+                )
+                .unwrap(),
+            ],
         )
         .unwrap()
     }

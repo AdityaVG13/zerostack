@@ -14,7 +14,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
-use zero_abi::{canonical_json, sha256, DigestV1};
+use zero_abi::{DigestV1, canonical_json, sha256};
 
 use crate::fs_replace::{replace_file, sync_dir};
 use crate::{DurableProfileIdV1, DurableProfileV1};
@@ -821,7 +821,7 @@ pub fn commit_journal_with_fault_v1(
             return Err(JournalErrorV1::new(
                 JournalFailureCodeV1::AlreadyTerminal,
                 "aborted journal cannot commit",
-            ))
+            ));
         }
         JournalStateV1::Committed => {
             let root = read_root(paths)?;
@@ -910,7 +910,7 @@ pub fn abort_journal_with_fault_v1(
             return Err(JournalErrorV1::new(
                 JournalFailureCodeV1::AlreadyTerminal,
                 "committed journal cannot abort",
-            ))
+            ));
         }
         JournalStateV1::Aborted => {
             let root = read_root(paths)?;
@@ -1376,7 +1376,7 @@ where
             return Err(JournalErrorV1::new(
                 JournalFailureCodeV1::IoBeforePublish,
                 format!("record stat failed: {error}"),
-            ))
+            ));
         }
     };
     if !metadata.file_type().is_file() {
@@ -1470,14 +1470,14 @@ fn write_once(
             return Err(JournalErrorV1::new(
                 JournalFailureCodeV1::ImmutableReceiptConflict,
                 "immutable record already exists with different bytes",
-            ))
+            ));
         }
         Err(error) if error.kind() == io::ErrorKind::NotFound => {}
         Err(error) => {
             return Err(JournalErrorV1::new(
                 JournalFailureCodeV1::IoBeforePublish,
                 format!("immutable record read failed: {error}"),
-            ))
+            ));
         }
     }
     durable_replace(path, bytes, boundaries, fault)

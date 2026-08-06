@@ -12,9 +12,9 @@
 use std::{error::Error, fmt};
 
 use serde::{Deserialize, Serialize};
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
-use crate::{canonical_json, sha256, ArtifactOwnerV1, CwirVerifierClassV1, DigestV1, EffectClass};
+use crate::{ArtifactOwnerV1, CwirVerifierClassV1, DigestV1, EffectClass, canonical_json, sha256};
 
 pub const EFFECT_IR_CONTRACT_VERSION_V1: u16 = 1;
 pub const EFFECT_IR_ACTION_DOMAIN_V1: &[u8] = b"zerostack.effect_ir.action.v1\0";

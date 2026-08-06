@@ -15,15 +15,15 @@ use std::{
 };
 
 use serde::{Deserialize, Serialize};
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use zero_abi::{
-    canonical_json,
+    DigestV1, canonical_json,
     robust_snap::{
-        ProtectedEffectSet, ProtectedEffectV1, WorldFiberDescriptor, ROBUST_SNAP_MAX_ASSUMPTIONS,
-        ROBUST_SNAP_MAX_ASSUMPTION_BYTES, ROBUST_SNAP_MAX_EFFECTS, ROBUST_SNAP_MAX_WORLDS,
-        ROBUST_SNAP_MODEL_VERSION,
+        ProtectedEffectSet, ProtectedEffectV1, ROBUST_SNAP_MAX_ASSUMPTION_BYTES,
+        ROBUST_SNAP_MAX_ASSUMPTIONS, ROBUST_SNAP_MAX_EFFECTS, ROBUST_SNAP_MAX_WORLDS,
+        ROBUST_SNAP_MODEL_VERSION, WorldFiberDescriptor,
     },
-    sha256, DigestV1,
+    sha256,
 };
 use zero_cert::{CompletenessWitness, Query, VerifiedEvidence};
 
@@ -481,7 +481,7 @@ pub struct ExactRecoveryCostV1 {
 }
 
 mod u128_decimal {
-    use serde::{de::Error as _, Deserialize, Deserializer, Serializer};
+    use serde::{Deserialize, Deserializer, Serializer, de::Error as _};
 
     pub fn serialize<S>(value: &u128, serializer: S) -> Result<S::Ok, S::Error>
     where
@@ -1294,11 +1294,7 @@ const fn gcd(mut left: u128, mut right: u128) -> u128 {
         left = right;
         right = remainder;
     }
-    if left == 0 {
-        1
-    } else {
-        left
-    }
+    if left == 0 { 1 } else { left }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -1642,7 +1638,7 @@ mod tests {
     use super::*;
     use zero_abi::robust_snap::ProtectedEffectClassV1;
     use zero_cert::{
-        verify, EvidenceCertificate, ObjectId, OperatorLock, Provenance, Resolver, SpanRef, TestId,
+        EvidenceCertificate, ObjectId, OperatorLock, Provenance, Resolver, SpanRef, TestId, verify,
     };
 
     fn d(byte: u8) -> DigestV1 {
@@ -1907,10 +1903,12 @@ mod tests {
             &[d(1), d(2), d(3)]
         );
         for pair in [[d(1), d(2)], [d(1), d(3)], [d(2), d(3)]] {
-            assert!(!decision
-                .conflict_hyperedges()
-                .iter()
-                .any(|edge| edge.worlds() == pair));
+            assert!(
+                !decision
+                    .conflict_hyperedges()
+                    .iter()
+                    .any(|edge| edge.worlds() == pair)
+            );
         }
     }
 

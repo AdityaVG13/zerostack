@@ -1,7 +1,7 @@
 //! Zero Edit Protocol v1 conformance: round-trip, rejection, Level-0 fallback.
 
 use zero_codemode::{
-    classify_ref, EditErrorClass, EditOp, EditPlan, RefKind, Side, EDIT_PROTOCOL_VERSION,
+    EDIT_PROTOCOL_VERSION, EditErrorClass, EditOp, EditPlan, RefKind, Side, classify_ref,
 };
 
 fn every_verb() -> Vec<EditOp> {

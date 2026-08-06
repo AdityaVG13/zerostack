@@ -1,7 +1,7 @@
-use stats_alloc::{Region, StatsAlloc, INSTRUMENTED_SYSTEM};
+use stats_alloc::{INSTRUMENTED_SYSTEM, Region, StatsAlloc};
 use std::alloc::System;
 use zero_abi::raw_worker::EffectClass;
-use zero_gate::{decide, DecisionGate, GateInput, GateState};
+use zero_gate::{DecisionGate, GateInput, GateState, decide};
 
 #[global_allocator]
 static GLOBAL: &StatsAlloc<System> = &INSTRUMENTED_SYSTEM;

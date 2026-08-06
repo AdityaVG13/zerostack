@@ -4,7 +4,7 @@
 //! decision that bumps fixture_version everywhere atomically.
 
 use serde_json::Value;
-use zero_ref::{content_hash_hex, LineEndPolicy, ZeroRefV1};
+use zero_ref::{LineEndPolicy, ZeroRefV1, content_hash_hex};
 
 fn fixture() -> Value {
     let raw = include_str!("../fixtures/zeroref_v1_vectors.json");

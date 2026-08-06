@@ -8,10 +8,10 @@
 use proptest::prelude::*;
 use zero_ledger::{
     ArchiveAttestation, ChargeClass, Digest, DominanceReceipt, EvidenceError, ExactnessGates,
-    ExposureAccount, ExposureBlock, ExposureSide, LedgerConfig, LedgerError, PolicyDecision,
-    PolicyEvidence, ReceiptError, ReceiptRoots, ResourceGauge, RetainedFractionPpm,
-    TaskAcceptanceReceipt, TaskAttemptDisposition, TaskOutcome, TokenCharge, TokenLedger,
-    TokenizerIdentity, PPM_ONE, RECEIPT_SCHEMA_VERSION,
+    ExposureAccount, ExposureBlock, ExposureSide, LedgerConfig, LedgerError, PPM_ONE,
+    PolicyDecision, PolicyEvidence, RECEIPT_SCHEMA_VERSION, ReceiptError, ReceiptRoots,
+    ResourceGauge, RetainedFractionPpm, TaskAcceptanceReceipt, TaskAttemptDisposition, TaskOutcome,
+    TokenCharge, TokenLedger, TokenizerIdentity,
 };
 
 fn d(x: u8) -> Digest {
@@ -513,13 +513,15 @@ fn policy_and_task_evidence_are_not_interchangeable() {
         task_digest: d(0x41),
     }]);
     assert_ne!(policy_root, task_root);
-    assert!(TaskAcceptanceReceipt::verify(
-        policy_root,
-        &[TaskOutcome::Accepted {
-            task_digest: d(0x41)
-        }]
-    )
-    .is_err());
+    assert!(
+        TaskAcceptanceReceipt::verify(
+            policy_root,
+            &[TaskOutcome::Accepted {
+                task_digest: d(0x41)
+            }]
+        )
+        .is_err()
+    );
 }
 
 #[test]

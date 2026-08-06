@@ -7,12 +7,12 @@ use tempfile::tempdir;
 use zero_abi::DigestV1;
 use zero_store::DurableProfileIdV1;
 use zero_store::{
-    abort_journal_with_fault_v1, commit_journal_with_fault_v1, initialize_published_root_v1,
-    initialize_published_root_with_fault_v1, prepare_journal_v1, prepare_journal_with_fault_v1,
-    read_journal_record_v1, read_published_root_v1, record_owner_death_v1,
-    record_owner_death_with_fault_v1, recover_journal_v1, recover_journal_with_fault_v1,
     FaultPlanV1, JournalBindingV1, JournalBoundaryV1, JournalFailureCodeV1, JournalPathsV1,
-    JournalStateV1, RecoveryOutcomeV1,
+    JournalStateV1, RecoveryOutcomeV1, abort_journal_with_fault_v1, commit_journal_with_fault_v1,
+    initialize_published_root_v1, initialize_published_root_with_fault_v1, prepare_journal_v1,
+    prepare_journal_with_fault_v1, read_journal_record_v1, read_published_root_v1,
+    record_owner_death_v1, record_owner_death_with_fault_v1, recover_journal_v1,
+    recover_journal_with_fault_v1,
 };
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]

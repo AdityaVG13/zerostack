@@ -1,5 +1,5 @@
 use serde::{Deserialize, Serialize};
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::collections::BTreeSet;
 use std::fmt;
 
@@ -439,16 +439,20 @@ mod tests {
             generated_freezes.as_slice(),
             source_freezes["freezes"].as_array().unwrap().as_slice()
         );
-        assert!(authority["claims"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .all(|claim| claim["proof_state"] == CLAIM_PROOF_STATE));
-        assert!(authority["freezes"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .all(|freeze| freeze["proof_state"] == FREEZE_PROOF_STATE));
+        assert!(
+            authority["claims"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .all(|claim| claim["proof_state"] == CLAIM_PROOF_STATE)
+        );
+        assert!(
+            authority["freezes"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .all(|freeze| freeze["proof_state"] == FREEZE_PROOF_STATE)
+        );
     }
 
     #[test]

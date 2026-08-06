@@ -21,7 +21,7 @@
 use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
 
-use crate::discovery::{is_executable_file, BIN_DIR, HOME_ENV};
+use crate::discovery::{BIN_DIR, HOME_ENV, is_executable_file};
 
 /// Direct file pin for the Node runtime. Highest precedence.
 pub const NODE_ENV: &str = "ZEROSTACK_NODE";
@@ -77,11 +77,7 @@ pub const NODE_ORDER: [NodeSource; 4] = [
 
 /// Platform file name of the Node executable.
 pub fn node_file_name() -> &'static str {
-    if cfg!(windows) {
-        "node.exe"
-    } else {
-        "node"
-    }
+    if cfg!(windows) { "node.exe" } else { "node" }
 }
 
 /// Environment state node resolution depends on, captured so entry points read

@@ -11,9 +11,9 @@
 use std::{collections::BTreeMap, error::Error, fmt};
 
 use serde::{Deserialize, Serialize};
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
-use crate::{canonical_json, sha256, ArtifactOwnerV1, DigestV1};
+use crate::{ArtifactOwnerV1, DigestV1, canonical_json, sha256};
 
 pub const CWIR_CONTRACT_VERSION_V1: u16 = 1;
 pub const CWIR_MODEL_VERSION_V1: u16 = 1;

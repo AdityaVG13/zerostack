@@ -8,16 +8,16 @@
 use std::fmt;
 
 use serde::{Deserialize, Serialize};
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 use crate::{
     assembly::{
-        assembly_abi_contract_digest_v1, ASSEMBLY_ABI_CONTRACT_VERSION,
-        ASSEMBLY_MANIFEST_SCHEMA_VERSION,
+        ASSEMBLY_ABI_CONTRACT_VERSION, ASSEMBLY_MANIFEST_SCHEMA_VERSION,
+        assembly_abi_contract_digest_v1,
     },
     digest::contract_digest_hex,
     robust_snap::{
-        robust_snap_contract_digest_v1, ROBUST_SNAP_CONTRACT_VERSION, ROBUST_SNAP_MODEL_VERSION,
+        ROBUST_SNAP_CONTRACT_VERSION, ROBUST_SNAP_MODEL_VERSION, robust_snap_contract_digest_v1,
     },
 };
 
@@ -1001,11 +1001,13 @@ mod tests {
         for field in ["semantic_contract_version", "ref_scheme"] {
             assert!(binding.iter().any(|value| value == field), "{field}");
         }
-        assert!(manifest["trace"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .any(|value| value == "parent_span_id"));
+        assert!(
+            manifest["trace"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|value| value == "parent_span_id")
+        );
         assert_eq!(
             manifest["linked_contracts"]["assembly_abi_contract_digest"],
             assembly_abi_contract_digest_v1().to_hex()

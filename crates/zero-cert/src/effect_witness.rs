@@ -7,8 +7,8 @@
 use std::{error::Error, fmt};
 
 use serde::{Deserialize, Serialize};
-use serde_json::{json, Value};
-use zero_abi::{canonical_json, sha256, CwirVerifierClassV1, DigestV1, EffectProgramV1};
+use serde_json::{Value, json};
+use zero_abi::{CwirVerifierClassV1, DigestV1, EffectProgramV1, canonical_json, sha256};
 
 use crate::{CompletenessWitness, Query, VerifiedEvidence};
 

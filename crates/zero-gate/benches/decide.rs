@@ -1,6 +1,6 @@
-use criterion::{black_box, criterion_group, criterion_main, Criterion};
+use criterion::{Criterion, black_box, criterion_group, criterion_main};
 use zero_abi::raw_worker::EffectClass;
-use zero_gate::{decide, GateInput, GateState};
+use zero_gate::{GateInput, GateState, decide};
 
 fn bench_decide(c: &mut Criterion) {
     c.bench_function("zero_gate_decide_expand", |b| {

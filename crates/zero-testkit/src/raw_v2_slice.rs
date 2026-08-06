@@ -9,42 +9,42 @@
 
 use std::{borrow::Cow, fmt};
 
-use serde::{de, Deserialize, Deserializer, Serialize};
-use serde_json::{json, Value};
+use serde::{Deserialize, Deserializer, Serialize, de};
+use serde_json::{Value, json};
 use zero_abi::{
-    assembly_abi_contract_digest_v1, canonical_json, cwir_contract_digest_v1, decode_request_frame,
-    decode_response_frame, effect_ir_contract_digest_v1, encode_frame,
-    raw_worker_protocol_digest_hex, sha256, validate_handshake_request, ApprovalMetadata,
-    ApprovalState, ArtifactOwnerV1, CallRequest, CausalWorkIrV1, CwirCoverageV1, CwirDeterminismV1,
-    CwirEffectSpaceV1, CwirEpistemicProductV1, CwirFreshnessV1, CwirNodeKindV1, CwirNodeV1,
-    CwirSoundnessV1, CwirStateAnchorV1, CwirTaskContractV1, CwirVerificationContractV1,
-    CwirVerifierClassV1, DigestV1, EffectPredicateV1, EffectProgramV1, EffectRollbackV1,
-    EffectTargetV1, EffectVerificationPlanV1, EffectVerificationStepV1, EngineIdentity,
-    HandshakeAck, HandshakeRequest, ProtocolLimits, RefOwnership, RevertMetadata, SnapshotIdentity,
-    TypedEffectOperationV1, WorkerBinding, WorkerCapabilities, WorkerRequestFrame,
-    WorkerResponseFrame, WorkerResult, WorkerResultMetadata, WorkerTrace, DEFAULT_MAX_FRAME_BYTES,
-    RAW_WORKER_PROTOCOL_VERSION,
+    ApprovalMetadata, ApprovalState, ArtifactOwnerV1, CallRequest, CausalWorkIrV1, CwirCoverageV1,
+    CwirDeterminismV1, CwirEffectSpaceV1, CwirEpistemicProductV1, CwirFreshnessV1, CwirNodeKindV1,
+    CwirNodeV1, CwirSoundnessV1, CwirStateAnchorV1, CwirTaskContractV1, CwirVerificationContractV1,
+    CwirVerifierClassV1, DEFAULT_MAX_FRAME_BYTES, DigestV1, EffectPredicateV1, EffectProgramV1,
+    EffectRollbackV1, EffectTargetV1, EffectVerificationPlanV1, EffectVerificationStepV1,
+    EngineIdentity, HandshakeAck, HandshakeRequest, ProtocolLimits, RAW_WORKER_PROTOCOL_VERSION,
+    RefOwnership, RevertMetadata, SnapshotIdentity, TypedEffectOperationV1, WorkerBinding,
+    WorkerCapabilities, WorkerRequestFrame, WorkerResponseFrame, WorkerResult,
+    WorkerResultMetadata, WorkerTrace, assembly_abi_contract_digest_v1, canonical_json,
+    cwir_contract_digest_v1, decode_request_frame, decode_response_frame,
+    effect_ir_contract_digest_v1, encode_frame, raw_worker_protocol_digest_hex, sha256,
+    validate_handshake_request,
 };
 use zero_cert::{
-    accept_effect_verification_v1, effect_witness_contract_digest_v1, verify, CommandId,
-    CompletenessWitness, EffectAcceptedV1, EffectVerificationOutcomeV1, EvidenceCertificate,
-    ObjectId, OperatorLock, Provenance, Query, Resolver, SpanRef,
+    CommandId, CompletenessWitness, EffectAcceptedV1, EffectVerificationOutcomeV1,
+    EvidenceCertificate, ObjectId, OperatorLock, Provenance, Query, Resolver, SpanRef,
+    accept_effect_verification_v1, effect_witness_contract_digest_v1, verify,
 };
 use zero_gate::{
-    begin_effect_transaction_v1, begin_task_attempt, effect_journal_binding_v1,
-    transaction_contract_digest_v1, validate_effect_closure_v1, verify_task_acceptance,
     EffectClosureManifestV1, EffectClosureRequestV1, EffectResourceClosureV1,
     ResourceIsolationModeV1, ResourceRestorationModeV1, TaskAcceptanceReceipt,
     TaskAcceptanceVerifier, TaskRunEvidence, TaskVerifierError, TransactionAccessV1,
     TransactionDispositionV1, TransactionResourceKindV1, TransactionResourceRequirementV1,
+    begin_effect_transaction_v1, begin_task_attempt, effect_journal_binding_v1,
+    transaction_contract_digest_v1, validate_effect_closure_v1, verify_task_acceptance,
 };
 use zero_ledger::{
-    causal_work_contract_digest_v1, CausalCounterUnitV1, CausalWorkChargeV1, CausalWorkClassV1,
-    CausalWorkOutcomeV1, CausalWorkReceiptV1, Digest as LedgerDigest, LedgerConfig,
-    ParentCounterIdentityV1, ParentCounterObservationV1, ParentCounterWindowV1, ResiduePolicyV1,
-    ResourceGauge, TokenCharge, TokenizerIdentity,
+    CausalCounterUnitV1, CausalWorkChargeV1, CausalWorkClassV1, CausalWorkOutcomeV1,
+    CausalWorkReceiptV1, Digest as LedgerDigest, LedgerConfig, ParentCounterIdentityV1,
+    ParentCounterObservationV1, ParentCounterWindowV1, ResiduePolicyV1, ResourceGauge, TokenCharge,
+    TokenizerIdentity, causal_work_contract_digest_v1,
 };
-use zero_store::{initialize_published_root_v1, DurableProfileIdV1, JournalPathsV1, SharedCas};
+use zero_store::{DurableProfileIdV1, JournalPathsV1, SharedCas, initialize_published_root_v1};
 
 pub const RAW_V2_SLICE_SCHEMA_VERSION_V1: u16 = 1;
 pub const RAW_V2_SLICE_MAX_INPUT_BYTES_V1: usize = 64 * 1024;

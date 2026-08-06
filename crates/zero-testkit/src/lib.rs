@@ -672,9 +672,11 @@ mod tests {
     fn zero_testkit_passing_fake_harness_completes_every_suite() {
         let reports = run_all(&mut FakeHarness::default());
         assert_eq!(reports.len(), 5);
-        assert!(reports
-            .iter()
-            .all(|report| report.status == SuiteStatus::Complete));
+        assert!(
+            reports
+                .iter()
+                .all(|report| report.status == SuiteStatus::Complete)
+        );
     }
 
     #[test]
@@ -751,8 +753,10 @@ mod tests {
             vec!["a", "z"]
         );
         let reports = run_all(&mut FakeHarness::default());
-        assert!(reports
-            .windows(2)
-            .all(|pair| pair[0].promise <= pair[1].promise));
+        assert!(
+            reports
+                .windows(2)
+                .all(|pair| pair[0].promise <= pair[1].promise)
+        );
     }
 }

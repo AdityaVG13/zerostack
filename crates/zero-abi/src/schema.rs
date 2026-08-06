@@ -5,7 +5,7 @@
 //! sets. Description/title text is ignored so prose edits do not mask real
 //! drift.
 
-use serde_json::{json, Map, Value};
+use serde_json::{Map, Value, json};
 use std::collections::BTreeSet;
 
 use crate::digest::sha256_hex;

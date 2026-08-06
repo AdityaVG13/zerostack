@@ -7,9 +7,9 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use crate::{
+    EffectClass,
     digest::{contract_digest as digest_manifest, contract_digest_hex as digest_manifest_hex},
     schema::normalize_schema,
-    EffectClass,
 };
 
 pub const CANONICAL_DISPATCH_VERSION: &str = "zerostack.canonical_dispatch.v2";

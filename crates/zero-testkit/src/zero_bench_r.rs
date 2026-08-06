@@ -8,15 +8,15 @@
 use std::{collections::BTreeSet, error::Error, fmt};
 
 use serde::{Deserialize, Serialize};
-use serde_json::{json, Value};
-use zero_abi::{canonical_json, DigestV1};
+use serde_json::{Value, json};
+use zero_abi::{DigestV1, canonical_json};
 use zero_cert::{CompletenessWitness, Query, VerifiedEvidence};
 use zero_gate::{
     BaselineExecutionReceiptV1, QualityAdmissionV1, QualityEvidenceClassV1, QualitySelectionV1,
 };
 use zero_ledger::{
-    causal_work_contract_digest_v1, CausalClassTotalsV1, CausalCounterUnitV1, CausalWorkReceiptV1,
-    ParentCounterIdentityV1,
+    CausalClassTotalsV1, CausalCounterUnitV1, CausalWorkReceiptV1, ParentCounterIdentityV1,
+    causal_work_contract_digest_v1,
 };
 
 pub const ZERO_BENCH_R_CONTRACT_VERSION_V1: u16 = 1;
@@ -3033,7 +3033,7 @@ mod tests {
     use super::*;
     use std::{borrow::Cow, collections::BTreeSet};
     use zero_cert::{
-        verify, EvidenceCertificate, ObjectId, OperatorLock, Provenance, Resolver, SpanRef, TestId,
+        EvidenceCertificate, ObjectId, OperatorLock, Provenance, Resolver, SpanRef, TestId, verify,
     };
     use zero_gate::{
         FrozenBaselineV1, MetricOrderV1, PointwiseDominanceCertificateV1, ProtectedMetricV1,
@@ -3616,31 +3616,33 @@ mod tests {
     fn regression_and_incomplete_run_block_amplify_release() {
         let registration = make_registration(ZeroBenchIntentV1::Release);
         let case = &registration.cases[0];
-        assert!(QualityPairV1::new(
-            case.task_identity_digest,
-            registration.comparison_identity.digest().unwrap(),
-            registration
-                .included_pin(ZeroBenchArmV1::Raw)
-                .unwrap()
-                .digest()
-                .unwrap(),
-            registration
-                .included_pin(ZeroBenchArmV1::RaccRAmplify)
-                .unwrap()
-                .digest()
-                .unwrap(),
-            zero_bench_protected_outcome_digest_v1(true),
-            zero_bench_protected_outcome_digest_v1(false),
-            d(221),
-            d(222),
-            vec![ProtectedMetricV1 {
-                metric_id: "protected_success".into(),
-                order: MetricOrderV1::AtLeast,
-                baseline_value: 1,
-                candidate_value: 0,
-            }],
-        )
-        .is_err());
+        assert!(
+            QualityPairV1::new(
+                case.task_identity_digest,
+                registration.comparison_identity.digest().unwrap(),
+                registration
+                    .included_pin(ZeroBenchArmV1::Raw)
+                    .unwrap()
+                    .digest()
+                    .unwrap(),
+                registration
+                    .included_pin(ZeroBenchArmV1::RaccRAmplify)
+                    .unwrap()
+                    .digest()
+                    .unwrap(),
+                zero_bench_protected_outcome_digest_v1(true),
+                zero_bench_protected_outcome_digest_v1(false),
+                d(221),
+                d(222),
+                vec![ProtectedMetricV1 {
+                    metric_id: "protected_success".into(),
+                    order: MetricOrderV1::AtLeast,
+                    baseline_value: 1,
+                    candidate_value: 0,
+                }],
+            )
+            .is_err()
+        );
 
         let incomplete =
             compile_zero_bench_report_v1(&registration, run_matrix(&registration, false, true))

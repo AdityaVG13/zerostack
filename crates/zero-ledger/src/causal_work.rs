@@ -7,9 +7,9 @@
 
 use std::{collections::BTreeSet, error::Error, fmt};
 
-use serde::{de, Deserialize, Deserializer, Serialize};
-use serde_json::{json, Value};
-use zero_abi::{canonical_json, sha256, DigestV1};
+use serde::{Deserialize, Deserializer, Serialize, de};
+use serde_json::{Value, json};
+use zero_abi::{DigestV1, canonical_json, sha256};
 
 pub const CAUSAL_WORK_TAXONOMY_VERSION_V1: u16 = 3;
 pub const CAUSAL_WORK_RECEIPT_SCHEMA_V1: u16 = 1;

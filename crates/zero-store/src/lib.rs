@@ -25,37 +25,37 @@ mod store_root;
 mod zbf;
 
 pub use cas::{
-    CasError, PutOutcome, SharedCas, CAS_LAYOUT, CAS_LAYOUT_VERSION, CAS_MAX_OBJECT_BYTES,
-    CAS_QUARANTINE_DIR, CAS_TEMP_REAP_AGE,
+    CAS_LAYOUT, CAS_LAYOUT_VERSION, CAS_MAX_OBJECT_BYTES, CAS_QUARANTINE_DIR, CAS_TEMP_REAP_AGE,
+    CasError, PutOutcome, SharedCas,
 };
 pub use durable_journal::{
-    abort_journal_v1, abort_journal_with_fault_v1, commit_journal_v1, commit_journal_with_fault_v1,
-    durable_journal_contract_v1, initialize_published_root_v1,
+    AbortReasonV1, ContinuationCartridgeV1, DURABLE_BINDING_SCHEMA_VERSION_V1,
+    DURABLE_JOURNAL_MAX_RECORD_BYTES_V1, DURABLE_JOURNAL_SCHEMA_VERSION_V2,
+    DURABLE_RECEIPT_SCHEMA_VERSION_V1, DurableJournalV2, FaultPlanV1, JournalBindingV1,
+    JournalBoundaryV1, JournalErrorV1, JournalFailureCodeV1, JournalPathsV1, JournalRecordV1,
+    JournalStateV1, OwnerDeathReceiptV1, PublishedRootV1, RecoveryOutcomeV1, RecoveryReceiptV1,
+    RootPublicationReceipt, abort_journal_v1, abort_journal_with_fault_v1, commit_journal_v1,
+    commit_journal_with_fault_v1, durable_journal_contract_v1, initialize_published_root_v1,
     initialize_published_root_with_fault_v1, prepare_journal_v1, prepare_journal_with_fault_v1,
     read_continuation_cartridge_v1, read_journal_record_v1, read_published_root_v1,
     record_owner_death_v1, record_owner_death_with_fault_v1, recover_journal_v1,
-    recover_journal_with_fault_v1, AbortReasonV1, ContinuationCartridgeV1, DurableJournalV2,
-    FaultPlanV1, JournalBindingV1, JournalBoundaryV1, JournalErrorV1, JournalFailureCodeV1,
-    JournalPathsV1, JournalRecordV1, JournalStateV1, OwnerDeathReceiptV1, PublishedRootV1,
-    RecoveryOutcomeV1, RecoveryReceiptV1, RootPublicationReceipt,
-    DURABLE_BINDING_SCHEMA_VERSION_V1, DURABLE_JOURNAL_MAX_RECORD_BYTES_V1,
-    DURABLE_JOURNAL_SCHEMA_VERSION_V2, DURABLE_RECEIPT_SCHEMA_VERSION_V1,
+    recover_journal_with_fault_v1,
 };
 pub use fs_replace::{atomic_write_file, replace_file};
 pub use gc_lock::{
-    coordinator_lock_path, LockMode, StoreLock, COORDINATOR_LOCK, GC_DIR, LOCK_DEADLINE,
+    COORDINATOR_LOCK, GC_DIR, LOCK_DEADLINE, LockMode, StoreLock, coordinator_lock_path,
 };
 pub use metadata::ObservationMetadata;
 pub use zbf::{
-    zbf_contract_digest_v1, zbf_contract_manifest_v1, DurableProfileIdV1, DurableProfileV1,
-    ZbfArtifactKindV1, ZbfErrorV1, ZbfFailureCodeV1, ZbfHeaderV1, ZbfObjectV1, ZbfPayloadV1,
-    ZBF_CONTAINER_FLAG_V1, ZBF_CONTRACT_VERSION_V1, ZBF_HEADER_LEN_V1, ZBF_MAGIC_V1,
-    ZBF_MAX_CHILDREN_V1, ZBF_MAX_DEPTH_V1, ZBF_MAX_OBJECT_BYTES_V1, ZBF_SCHEMA_MAJOR_V1,
-    ZBF_SCHEMA_MINOR_V1,
+    DurableProfileIdV1, DurableProfileV1, ZBF_CONTAINER_FLAG_V1, ZBF_CONTRACT_VERSION_V1,
+    ZBF_HEADER_LEN_V1, ZBF_MAGIC_V1, ZBF_MAX_CHILDREN_V1, ZBF_MAX_DEPTH_V1,
+    ZBF_MAX_OBJECT_BYTES_V1, ZBF_SCHEMA_MAJOR_V1, ZBF_SCHEMA_MINOR_V1, ZbfArtifactKindV1,
+    ZbfErrorV1, ZbfFailureCodeV1, ZbfHeaderV1, ZbfObjectV1, ZbfPayloadV1, zbf_contract_digest_v1,
+    zbf_contract_manifest_v1,
 };
 
 pub use store_root::{
-    absolutize, ensure_layout, project_key, store_is_under_project_root, Engine, ResolvedStore,
-    StoreEnv, StoreMode, StoreResolutionReport, BLOBS_DIR, LOCAL_STORE_DIR, PROJECTS_DIR,
-    PROJECT_KEY_HEX_LEN, SHARED_STORE_OPT_IN_ENV, STORE_RESOLUTION_SCHEMA, STORE_ROOT_ENVS,
+    BLOBS_DIR, Engine, LOCAL_STORE_DIR, PROJECT_KEY_HEX_LEN, PROJECTS_DIR, ResolvedStore,
+    SHARED_STORE_OPT_IN_ENV, STORE_RESOLUTION_SCHEMA, STORE_ROOT_ENVS, StoreEnv, StoreMode,
+    StoreResolutionReport, absolutize, ensure_layout, project_key, store_is_under_project_root,
 };

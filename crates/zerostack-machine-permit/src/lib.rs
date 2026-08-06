@@ -1224,8 +1224,8 @@ impl NativeWake {
         use std::os::windows::ffi::OsStrExt;
         use windows_sys::Win32::Foundation::INVALID_HANDLE_VALUE;
         use windows_sys::Win32::Storage::FileSystem::{
-            FindFirstChangeNotificationW, FILE_NOTIFY_CHANGE_ATTRIBUTES,
-            FILE_NOTIFY_CHANGE_DIR_NAME,
+            FILE_NOTIFY_CHANGE_ATTRIBUTES, FILE_NOTIFY_CHANGE_DIR_NAME,
+            FindFirstChangeNotificationW,
         };
 
         let path: Vec<u16> = base.as_os_str().encode_wide().chain(Some(0)).collect();

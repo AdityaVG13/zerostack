@@ -56,18 +56,19 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         os::unix::{fs::PermissionsExt, net::UnixListener},
         path::PathBuf,
         sync::{
+            Arc,
             atomic::{AtomicBool, AtomicUsize, Ordering},
-            mpsc, Arc,
+            mpsc,
         },
         thread,
         time::Duration,
     };
     use zero_codemode::session::{
-        AggregateSession, SessionRequest, SessionResponse, SESSION_PROTOCOL,
-        SESSION_SHUTDOWN_TOKEN_ENV, SESSION_TOKEN_ENV,
+        AggregateSession, SESSION_PROTOCOL, SESSION_SHUTDOWN_TOKEN_ENV, SESSION_TOKEN_ENV,
+        SessionRequest, SessionResponse,
     };
     use zerostack_machine_permit::session_owner::{
-        current_euid, peer_euid, OwnerWatcher, ProcessIdentity,
+        OwnerWatcher, ProcessIdentity, current_euid, peer_euid,
     };
     let mut a = std::env::args().skip(1);
     if a.next().as_deref() != Some("serve") {
@@ -300,7 +301,7 @@ fn handle_client(
     use std::{
         collections::BTreeSet, io::BufReader, path::PathBuf, sync::atomic::Ordering, time::Duration,
     };
-    use zero_codemode::session::{SessionRequest, SessionResponse, SESSION_PROTOCOL};
+    use zero_codemode::session::{SESSION_PROTOCOL, SessionRequest, SessionResponse};
     use zerostack_machine_permit::session_owner::{current_euid, peer_euid};
 
     let generation = session.generation()?;

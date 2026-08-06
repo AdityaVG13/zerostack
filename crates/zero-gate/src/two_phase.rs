@@ -4,31 +4,30 @@
 //! receipts are linear capabilities. Their fields are private, they are not
 //! cloneable, and only the preceding phase can construct the next phase.
 
-use crate::deoptimization::{deoptimization_contract_digest_v1, BaselineExecutionReceiptV1};
+use crate::deoptimization::{BaselineExecutionReceiptV1, deoptimization_contract_digest_v1};
 use crate::quality::{
-    quality_envelope_contract_digest_v1, QualityAdmissionRecordV1, QualityAdmissionV1,
-    QualityEvidenceClassV1, QualityGuaranteeV1, QualitySelectionV1,
+    QualityAdmissionRecordV1, QualityAdmissionV1, QualityEvidenceClassV1, QualityGuaranteeV1,
+    QualitySelectionV1, quality_envelope_contract_digest_v1,
 };
 use crate::semantic_cut::{
-    semantic_cut_contract_digest_v1, SemanticCutCertificateRecordV1, SemanticCutEvidenceV1,
+    SemanticCutCertificateRecordV1, SemanticCutEvidenceV1, semantic_cut_contract_digest_v1,
 };
 use crate::transaction::{
-    transaction_contract_digest_v1, RestorationScopeV1, TransactionDispositionV1,
-    TransactionReceiptV1,
+    RestorationScopeV1, TransactionDispositionV1, TransactionReceiptV1,
+    transaction_contract_digest_v1,
 };
 use serde::{Deserialize, Serialize};
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use sha2::{Digest as _, Sha256};
 use std::collections::BTreeSet;
 use std::fmt;
 use zero_abi::{
-    canonical_json, raw_worker::EffectClass, reasoning_contract_digest_v1,
-    verify_strict_no_downshift_v1, zbf_contract_digest_v1, ArtifactOwnerV1,
-    DigestV1 as AbiDigestV1, DurableProfileV1, ReasoningContractV1, RobustSnapCertificate,
-    SnapLevel, StrictReasoningAdmissionRecordV1, StrictReasoningAdmissionV1, ZbfArtifactKindV1,
-    ZbfObjectV1,
+    ArtifactOwnerV1, DigestV1 as AbiDigestV1, DurableProfileV1, ReasoningContractV1,
+    RobustSnapCertificate, SnapLevel, StrictReasoningAdmissionRecordV1, StrictReasoningAdmissionV1,
+    ZbfArtifactKindV1, ZbfObjectV1, canonical_json, raw_worker::EffectClass,
+    reasoning_contract_digest_v1, verify_strict_no_downshift_v1, zbf_contract_digest_v1,
 };
-use zero_cert::{effect_witness_contract_digest_v1, EffectAcceptedV1, VerifiedEvidence};
+use zero_cert::{EffectAcceptedV1, VerifiedEvidence, effect_witness_contract_digest_v1};
 
 pub const TWO_PHASE_SCHEMA_VERSION: u16 = 5;
 pub const GUARD_COUNT: usize = 10;
@@ -2965,14 +2964,15 @@ mod tests {
     use crate::transaction::RestorationScopeV1;
     use std::{borrow::Cow, collections::BTreeMap};
     use zero_abi::{
-        sha256, CwirVerifierClassV1, EffectProgramV1, EffectRollbackV1, EffectTargetV1,
+        CwirVerifierClassV1, EffectProgramV1, EffectRollbackV1, EffectTargetV1,
         EffectVerificationPlanV1, EffectVerificationStepV1, NativeStatePolicyV1,
-        ProtectedEffectClassV1, ProtectedEffectSet, ProtectedEffectV1, TypedEffectOperationV1,
-        WorldFiberDescriptor, ROBUST_SNAP_MODEL_VERSION,
+        ProtectedEffectClassV1, ProtectedEffectSet, ProtectedEffectV1, ROBUST_SNAP_MODEL_VERSION,
+        TypedEffectOperationV1, WorldFiberDescriptor, sha256,
     };
     use zero_cert::{
-        accept_effect_verification_v1, verify, CompletenessWitness, EffectVerificationOutcomeV1,
-        EvidenceCertificate, ObjectId, OperatorLock, Provenance, Query, Resolver, SpanRef, TestId,
+        CompletenessWitness, EffectVerificationOutcomeV1, EvidenceCertificate, ObjectId,
+        OperatorLock, Provenance, Query, Resolver, SpanRef, TestId, accept_effect_verification_v1,
+        verify,
     };
 
     fn digest(byte: u8) -> DigestV1 {

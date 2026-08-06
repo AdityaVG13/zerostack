@@ -7,9 +7,9 @@
 use std::{collections::BTreeSet, error::Error, fmt};
 
 use serde::{Deserialize, Serialize};
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
-use crate::{canonical_json, sha256, DigestV1};
+use crate::{DigestV1, canonical_json, sha256};
 
 pub const ROBUST_SNAP_MODEL_VERSION: &str = "zerostack.robust_snap.finite.v1";
 pub const ROBUST_SNAP_CONTRACT_VERSION: u16 = 1;

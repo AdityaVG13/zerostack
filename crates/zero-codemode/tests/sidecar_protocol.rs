@@ -4,7 +4,7 @@ use std::io::{BufRead, BufReader, Write};
 use std::process::{Child, ChildStdin, ChildStdout, Command, Stdio};
 use std::time::{Duration, Instant};
 
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 struct Sidecar {
     child: Child,
@@ -104,9 +104,11 @@ fn yielded_cell_can_be_cancelled_while_delegate_is_pending() {
     let first = sidecar.read();
     let second = sidecar.read();
     let frames = [first, second];
-    assert!(frames
-        .iter()
-        .any(|frame| frame["type"] == "delegate_request"));
+    assert!(
+        frames
+            .iter()
+            .any(|frame| frame["type"] == "delegate_request")
+    );
     assert!(frames.iter().any(|frame| frame["kind"] == "yielded"));
 
     sidecar.send(json!({
