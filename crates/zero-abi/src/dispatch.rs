@@ -6,9 +6,13 @@ use std::fmt;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use crate::EffectClass;
+use crate::{
+    digest::{contract_digest as digest_manifest, contract_digest_hex as digest_manifest_hex},
+    schema::normalize_schema,
+    EffectClass,
+};
 
-pub const CANONICAL_DISPATCH_VERSION: &str = "zerostack.canonical_dispatch.v1";
+pub const CANONICAL_DISPATCH_VERSION: &str = "zerostack.canonical_dispatch.v2";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -203,6 +207,44 @@ impl CanonicalRegistry {
             }
         }
         Ok(())
+    }
+
+    /// Canonical manifest for this registry's dispatch contract.
+    ///
+    /// Operation declaration order, aliases, declared error classes, and the
+    /// set-like parts of JSON Schema do not affect dispatch behavior. Sort and
+    /// normalize those fields before hashing, while preserving order inside
+    /// schema arrays whose order is semantically significant. Engine-specific
+    /// semantic manifests remain responsible for their additional fields.
+    pub fn canonical_manifest(&self) -> Result<Value, DispatchContractError> {
+        self.validate()?;
+
+        let mut registry = self.clone();
+        for operation in &mut registry.operations {
+            operation.aliases.sort();
+            operation.args_schema = normalize_schema(&operation.args_schema);
+            operation.errors.sort_unstable();
+        }
+        registry
+            .operations
+            .sort_by(|left, right| left.canonical_id.cmp(&right.canonical_id));
+
+        serde_json::to_value(registry).map_err(|error| {
+            DispatchContractError::new(
+                DispatchErrorClass::InvalidRegistry,
+                format!("failed to encode canonical registry: {error}"),
+            )
+        })
+    }
+
+    /// Raw SHA-256 digest of the canonical dispatch registry manifest.
+    pub fn contract_digest(&self) -> Result<[u8; 32], DispatchContractError> {
+        Ok(digest_manifest(&self.canonical_manifest()?))
+    }
+
+    /// Lowercase hexadecimal SHA-256 of the canonical dispatch registry manifest.
+    pub fn contract_digest_hex(&self) -> Result<String, DispatchContractError> {
+        Ok(digest_manifest_hex(&self.canonical_manifest()?))
     }
 
     pub fn resolve(
@@ -871,6 +913,134 @@ mod tests {
         };
         assert_eq!(
             registry.validate().unwrap_err().class,
+            DispatchErrorClass::InvalidRegistry
+        );
+    }
+
+    #[test]
+    fn registry_digest_ignores_set_like_declaration_order() {
+        let mut read = operation("fs.read", "read");
+        read.aliases = vec!["read_bytes".to_owned(), "cat".to_owned()];
+        read.errors = vec![
+            DispatchErrorClass::UnknownOperation,
+            DispatchErrorClass::InvalidArguments,
+        ];
+        read.args_schema = json!({
+            "type": "object",
+            "properties": {
+                "mode": {
+                    "type": "string",
+                    "enum": ["text", "bytes"],
+                    "default": "text"
+                },
+                "path": {"type": "string"},
+                "priority": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "default": ["first", "second"]
+                }
+            },
+            "required": ["path", "mode"],
+            "additionalProperties": false
+        });
+        let write = operation("fs.write", "write");
+
+        let declared = CanonicalRegistry {
+            version: CANONICAL_DISPATCH_VERSION.to_owned(),
+            engine: RegistryEngine::FsZero,
+            operations: vec![read, write],
+        };
+        let mut permuted = declared.clone();
+        permuted.operations.reverse();
+        for operation in &mut permuted.operations {
+            operation.aliases.reverse();
+            operation.errors.reverse();
+            if let Some(required) = operation
+                .args_schema
+                .get_mut("required")
+                .and_then(Value::as_array_mut)
+            {
+                required.reverse();
+            }
+            if let Some(variants) = operation
+                .args_schema
+                .pointer_mut("/properties/mode/enum")
+                .and_then(Value::as_array_mut)
+            {
+                variants.reverse();
+            }
+        }
+
+        assert_eq!(
+            declared.canonical_manifest().unwrap(),
+            permuted.canonical_manifest().unwrap()
+        );
+        assert_eq!(
+            declared.contract_digest().unwrap(),
+            permuted.contract_digest().unwrap()
+        );
+        assert_eq!(
+            declared.contract_digest_hex().unwrap(),
+            permuted.contract_digest_hex().unwrap()
+        );
+        assert_eq!(
+            declared.contract_digest_hex().unwrap(),
+            "d3749160c2dc4ec5ea6c7038534a4bf8d22e68a5838fde5d4d215348c8bbf924"
+        );
+
+        let mut semantic_change = declared.clone();
+        semantic_change.operations[0].args_schema["properties"]["priority"]["default"] =
+            json!(["second", "first"]);
+        assert_ne!(
+            declared.contract_digest_hex().unwrap(),
+            semantic_change.contract_digest_hex().unwrap()
+        );
+    }
+
+    #[test]
+    fn legacy_registry_version_fails_closed_after_digest_semantics_bump() {
+        let legacy = CanonicalRegistry {
+            version: "zerostack.canonical_dispatch.v1".to_owned(),
+            engine: RegistryEngine::FsZero,
+            operations: vec![operation("fs.read", "read")],
+        };
+        assert_eq!(
+            legacy.contract_digest_hex().unwrap_err().class,
+            DispatchErrorClass::UnknownMetadata
+        );
+    }
+
+    #[test]
+    fn registry_digest_rejects_duplicate_contract_entries() {
+        let mut duplicate_alias = operation("fs.read", "read");
+        duplicate_alias.aliases.push("read".to_owned());
+        let duplicate_alias_registry = CanonicalRegistry {
+            version: CANONICAL_DISPATCH_VERSION.to_owned(),
+            engine: RegistryEngine::FsZero,
+            operations: vec![duplicate_alias],
+        };
+        assert_eq!(
+            duplicate_alias_registry
+                .contract_digest_hex()
+                .unwrap_err()
+                .class,
+            DispatchErrorClass::InvalidRegistry
+        );
+
+        let mut duplicate_error = operation("fs.read", "read");
+        duplicate_error
+            .errors
+            .push(DispatchErrorClass::InvalidStageTransition);
+        let duplicate_error_registry = CanonicalRegistry {
+            version: CANONICAL_DISPATCH_VERSION.to_owned(),
+            engine: RegistryEngine::FsZero,
+            operations: vec![duplicate_error],
+        };
+        assert_eq!(
+            duplicate_error_registry
+                .contract_digest_hex()
+                .unwrap_err()
+                .class,
             DispatchErrorClass::InvalidRegistry
         );
     }

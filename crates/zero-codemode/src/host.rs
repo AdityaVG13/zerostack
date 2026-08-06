@@ -606,6 +606,56 @@ return (call, label) => async (...args) => guard(normalize(call(...args)), label
             .map_err(|error| normalized_js_error(ctx, error))
     }
 
+    /// Guards the aggregate capability tree itself. An unknown surface or
+    /// method is a caller bug, never a reason to degrade to catalog search.
+    const STRICT_CAPABILITY_WRAPPER: &str = r#"(() => {
+"use strict";
+const ignored = new Set(["then", "toJSON", "toString"]);
+const distance = (left, right) => {
+    let row = Array.from({length: right.length + 1}, (_, index) => index);
+    for (let leftIndex = 0; leftIndex < left.length; leftIndex += 1) {
+        const next = [leftIndex + 1];
+        for (let rightIndex = 0; rightIndex < right.length; rightIndex += 1) {
+            next.push(Math.min(
+                next[rightIndex] + 1,
+                row[rightIndex + 1] + 1,
+                row[rightIndex] + (left[leftIndex] === right[rightIndex] ? 0 : 1),
+            ));
+        }
+        row = next;
+    }
+    return row[right.length];
+};
+return (target, label, kind) => new Proxy(target, {
+    get(target, property) {
+        if (typeof property === "symbol") {
+            return Reflect.get(target, property);
+        }
+        if (Object.prototype.hasOwnProperty.call(target, property)) {
+            return target[property];
+        }
+        if (ignored.has(property)) {
+            return undefined;
+        }
+        const closest = Object.keys(target)
+            .map(name => [distance(property, name), name])
+            .sort((left, right) => left[0] - right[0] || (left[1] < right[1] ? -1 : left[1] > right[1] ? 1 : 0))
+            .slice(0, 3)
+            .map(entry => entry[1]);
+        const plural = kind === "method" ? "methods" : "surfaces";
+        throw new TypeError(
+            kind + "_not_found: unknown " + kind + " '" + property + "' on " + label +
+            "; closest " + plural + ": " + (closest.length ? closest.join(", ") : "(none)")
+        );
+    },
+});
+})()"#;
+
+    fn strict_capability_wrapper<'js>(ctx: &Ctx<'js>) -> Result<Function<'js>, HostError> {
+        ctx.eval::<Function<'js>, _>(STRICT_CAPABILITY_WRAPPER)
+            .map_err(|error| normalized_js_error(ctx, error))
+    }
+
     fn alias_literal(aliases: &[&str]) -> String {
         serde_json::to_string(aliases).expect("alias names serialize")
     }
@@ -637,6 +687,7 @@ return (call, label) => async (...args) => guard(normalize(call(...args)), label
     ) -> Result<(), HostError> {
         let root = null_object(&ctx)?;
         let strict_result = strict_result_wrapper(&ctx)?;
+        let strict_capability = strict_capability_wrapper(&ctx)?;
         let mut surfaces: BTreeMap<String, Object<'js>> = BTreeMap::new();
 
         for capability in &registration.capabilities {
@@ -712,10 +763,17 @@ return (call, label) => async (...args) => guard(normalize(call(...args)), label
         }
 
         for (name, surface) in surfaces {
-            root.set(name, surface).map_err(js_error)?;
+            let label = format!("{}.{}", registration.root, name);
+            let guarded: Object<'js> = strict_capability
+                .call((surface, label, "method"))
+                .map_err(|error| normalized_js_error(&ctx, error))?;
+            root.set(name, guarded).map_err(js_error)?;
         }
+        let guarded_root: Object<'js> = strict_capability
+            .call((root, registration.root.clone(), "surface"))
+            .map_err(|error| normalized_js_error(&ctx, error))?;
         ctx.globals()
-            .set(registration.root.as_str(), root)
+            .set(registration.root.as_str(), guarded_root)
             .map_err(js_error)
     }
 

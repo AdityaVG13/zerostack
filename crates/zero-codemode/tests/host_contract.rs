@@ -201,6 +201,69 @@ fn registered_objects_have_no_inherited_to_string() {
 
 #[cfg(feature = "quickjs")]
 #[test]
+fn unknown_surfaces_and_methods_fail_loud_with_closest_names() {
+    let registration = GlobalRegistration::zero(vec![
+        CapabilityDescriptor::new("fs", "read"),
+        CapabilityDescriptor::new("fs", "write"),
+        CapabilityDescriptor::new("token", "shell"),
+    ]);
+    let host = Host::new(lim(), registration).unwrap_or_else(|error| panic!("host: {error}"));
+    let connector = Rc::new(C::ok());
+
+    let method_error = host
+        .execute("return await zero.fs.reed({});", connector.clone())
+        .expect_err("unknown method must fail");
+    assert_eq!(
+        method_error.to_string(),
+        "JavaScript exception: method_not_found: unknown method 'reed' on zero.fs; closest methods: read, write"
+    );
+
+    let surface_error = host
+        .execute("return await zero.graph.read({});", connector.clone())
+        .expect_err("unknown surface must fail");
+    let message = surface_error.to_string();
+    assert!(
+        message.contains("surface_not_found: unknown surface 'graph' on zero"),
+        "unexpected error: {message}"
+    );
+    assert!(
+        message.contains("closest surfaces:"),
+        "unexpected error: {message}"
+    );
+    assert!(
+        connector.calls.borrow().is_empty(),
+        "unknown names must not dispatch or degrade to catalog search"
+    );
+}
+
+#[cfg(feature = "quickjs")]
+#[test]
+fn string_literal_tokens_never_change_capability_routing() {
+    let registration = GlobalRegistration::zero(vec![
+        CapabilityDescriptor::new("fs", "read"),
+        CapabilityDescriptor::new("token", "shell"),
+    ]);
+    let connector = Rc::new(C::ok());
+    let host = Host::new(lim(), registration).unwrap_or_else(|error| panic!("host: {error}"));
+    let command =
+        r#"printf 'zero.fs.read({path:"x"}) zero.graph.query()'; nohup worker & disown background"#;
+    let plan = format!(
+        "const command = {}; return await zero.token.shell({{command}});",
+        serde_json::to_string(command).unwrap_or_else(|error| panic!("encode command: {error}"))
+    );
+
+    let value = host
+        .execute(&plan, connector.clone())
+        .unwrap_or_else(|error| panic!("execute: {error}"));
+    assert_eq!(value, json!({"echo": {"command": command}}));
+    assert_eq!(
+        connector.calls.borrow().as_slice(),
+        &[json!({"command": command})]
+    );
+}
+
+#[cfg(feature = "quickjs")]
+#[test]
 fn connector_error() {
     let connector = Rc::new(C {
         calls: RefCell::new(vec![]),
