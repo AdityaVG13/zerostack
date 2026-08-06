@@ -1302,7 +1302,7 @@ fn require_id(label: &str, actual: DigestV1, expected: DigestV1) -> Result<(), C
     }
 }
 
-fn normalize_unique<T: Ord>(values: &mut Vec<T>, label: &str) -> Result<(), CwirErrorV1> {
+fn normalize_unique<T: Ord>(values: &mut [T], label: &str) -> Result<(), CwirErrorV1> {
     values.sort();
     if values.windows(2).any(|pair| pair[0] == pair[1]) {
         return Err(CwirErrorV1::new(
@@ -1344,7 +1344,7 @@ fn validate_sorted_unique<T: Ord>(
     Ok(())
 }
 
-fn normalize_by_id<T, F>(values: &mut Vec<T>, id: F, label: &str) -> Result<(), CwirErrorV1>
+fn normalize_by_id<T, F>(values: &mut [T], id: F, label: &str) -> Result<(), CwirErrorV1>
 where
     F: Fn(&T) -> DigestV1,
 {

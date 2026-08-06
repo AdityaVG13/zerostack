@@ -306,10 +306,12 @@ impl StrictReasoningAdmissionV1 {
             self.baseline_contract_digest,
             self.candidate_contract_digest,
             self.same_comparison_class,
-            self.max_output_tokens_added,
-            self.reasoning_tokens_added,
-            self.visible_output_tokens_added,
-            self.recovery_tokens_added,
+            AdmissionTokenAdditions {
+                max_output: self.max_output_tokens_added,
+                reasoning: self.reasoning_tokens_added,
+                visible_output: self.visible_output_tokens_added,
+                recovery: self.recovery_tokens_added,
+            },
         )
     }
 
@@ -318,10 +320,12 @@ impl StrictReasoningAdmissionV1 {
             self.baseline_contract_digest,
             self.candidate_contract_digest,
             self.same_comparison_class,
-            self.max_output_tokens_added,
-            self.reasoning_tokens_added,
-            self.visible_output_tokens_added,
-            self.recovery_tokens_added,
+            AdmissionTokenAdditions {
+                max_output: self.max_output_tokens_added,
+                reasoning: self.reasoning_tokens_added,
+                visible_output: self.visible_output_tokens_added,
+                recovery: self.recovery_tokens_added,
+            },
         )?;
         validate_admission_fields(
             self.contract_version,
@@ -366,10 +370,12 @@ impl StrictReasoningAdmissionRecordV1 {
             self.baseline_contract_digest,
             self.candidate_contract_digest,
             self.same_comparison_class,
-            self.max_output_tokens_added,
-            self.reasoning_tokens_added,
-            self.visible_output_tokens_added,
-            self.recovery_tokens_added,
+            AdmissionTokenAdditions {
+                max_output: self.max_output_tokens_added,
+                reasoning: self.reasoning_tokens_added,
+                visible_output: self.visible_output_tokens_added,
+                recovery: self.recovery_tokens_added,
+            },
         )?;
         validate_admission_fields(
             self.contract_version,
@@ -381,10 +387,12 @@ impl StrictReasoningAdmissionRecordV1 {
                 self.baseline_contract_digest,
                 self.candidate_contract_digest,
                 self.same_comparison_class,
-                self.max_output_tokens_added,
-                self.reasoning_tokens_added,
-                self.visible_output_tokens_added,
-                self.recovery_tokens_added,
+                AdmissionTokenAdditions {
+                    max_output: self.max_output_tokens_added,
+                    reasoning: self.reasoning_tokens_added,
+                    visible_output: self.visible_output_tokens_added,
+                    recovery: self.recovery_tokens_added,
+                },
             ),
         )
     }
@@ -568,15 +576,20 @@ pub fn reasoning_contract_digest_v1() -> DigestV1 {
     )
 }
 
+#[derive(Clone, Copy)]
+struct AdmissionTokenAdditions {
+    max_output: u32,
+    reasoning: u32,
+    visible_output: u32,
+    recovery: u32,
+}
+
 fn admission_digest(
     contract_version: u16,
     baseline_contract_digest: DigestV1,
     candidate_contract_digest: DigestV1,
     same_comparison_class: bool,
-    max_output_tokens_added: u32,
-    reasoning_tokens_added: u32,
-    visible_output_tokens_added: u32,
-    recovery_tokens_added: u32,
+    added: AdmissionTokenAdditions,
 ) -> DigestV1 {
     domain_digest(
         ADMISSION_DOMAIN_V1,
@@ -584,11 +597,11 @@ fn admission_digest(
             "baseline_contract_digest": baseline_contract_digest,
             "candidate_contract_digest": candidate_contract_digest,
             "contract_version": contract_version,
-            "max_output_tokens_added": max_output_tokens_added,
-            "reasoning_tokens_added": reasoning_tokens_added,
-            "recovery_tokens_added": recovery_tokens_added,
+            "max_output_tokens_added": added.max_output,
+            "reasoning_tokens_added": added.reasoning,
+            "recovery_tokens_added": added.recovery,
             "same_comparison_class": same_comparison_class,
-            "visible_output_tokens_added": visible_output_tokens_added,
+            "visible_output_tokens_added": added.visible_output,
         }))
         .as_bytes(),
     )
@@ -598,15 +611,12 @@ fn validate_admission_shape(
     baseline_contract_digest: DigestV1,
     candidate_contract_digest: DigestV1,
     same_comparison_class: bool,
-    max_output_tokens_added: u32,
-    reasoning_tokens_added: u32,
-    visible_output_tokens_added: u32,
-    recovery_tokens_added: u32,
+    added: AdmissionTokenAdditions,
 ) -> Result<(), ReasoningContractErrorV1> {
-    let all_zero = max_output_tokens_added == 0
-        && reasoning_tokens_added == 0
-        && visible_output_tokens_added == 0
-        && recovery_tokens_added == 0;
+    let all_zero = added.max_output == 0
+        && added.reasoning == 0
+        && added.visible_output == 0
+        && added.recovery == 0;
     if same_comparison_class != (baseline_contract_digest == candidate_contract_digest)
         || same_comparison_class != all_zero
     {
