@@ -22,6 +22,7 @@ pub mod dispatch;
 pub mod effect;
 pub mod freshness;
 pub mod raw_worker;
+pub mod reasoning;
 pub mod result;
 pub mod robust_snap;
 pub mod schema;
@@ -93,6 +94,16 @@ pub use raw_worker::{
     ShutdownRequest, SnapshotIdentity, WorkerBinding, WorkerCapabilities, WorkerError,
     WorkerRequestFrame, WorkerResponseFrame, WorkerResult, WorkerResultMetadata, WorkerTrace,
     DEFAULT_MAX_FRAME_BYTES, RAW_WORKER_PROTOCOL_VERSION,
+};
+pub use reasoning::{
+    reasoning_contract_digest_v1, reasoning_contract_manifest_v1,
+    reasoning_contract_schema_digest_v1, reasoning_contract_schema_v1,
+    verify_strict_no_downshift_v1, NativeStatePolicyV1, ReasoningContractErrorV1,
+    ReasoningContractFailureCodeV1, ReasoningContractV1, StrictReasoningAdmissionRecordV1,
+    StrictReasoningAdmissionV1, REASONING_CONTRACT_MAX_CANONICAL_BYTES_V1,
+    REASONING_CONTRACT_MAX_EXTENSION_BYTES_V1, REASONING_CONTRACT_MAX_EXTENSION_DEPTH_V1,
+    REASONING_CONTRACT_MAX_EXTENSION_NODES_V1, REASONING_CONTRACT_MAX_ID_BYTES_V1,
+    REASONING_CONTRACT_SCHEMA_VERSION_V1, REASONING_CONTRACT_VERSION_V1,
 };
 pub use result::{
     ZeroResultAccessError, ZeroResultBuildError, ZeroResultV1, MAX_ACK_CHARS, MAX_PREVIEW_CHARS,

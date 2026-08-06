@@ -1747,7 +1747,7 @@ mod tests {
         assert_eq!(manifest_fields, receipt_keys);
         assert_eq!(
             raw_v2_slice_contract_digest_v1().to_hex(),
-            "e53ce3babe7bbcc3fffe7c451fc38baa57ce261b34f2b20755ca55f512b40d14"
+            "b6f9fa14d035ad475944d835ea8ac6387982fc9db798d5d8f75e0a81ea88e249"
         );
     }
 

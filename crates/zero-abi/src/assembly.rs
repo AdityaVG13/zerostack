@@ -16,6 +16,7 @@ use crate::{
     cwir::{cwir_contract_digest_v1, CWIR_CONTRACT_VERSION_V1},
     effect::{effect_ir_contract_digest_v1, EFFECT_IR_CONTRACT_VERSION_V1},
     raw_worker::EngineIdentity,
+    reasoning::{reasoning_contract_digest_v1, REASONING_CONTRACT_VERSION_V1},
     sha256,
     zbf::{zbf_contract_digest_v1, ZBF_CONTRACT_VERSION_V1},
 };
@@ -781,6 +782,8 @@ pub fn assembly_abi_contract_manifest_v1() -> Value {
             "cwir_contract_digest": cwir_contract_digest_v1(),
             "effect_ir_contract_version": EFFECT_IR_CONTRACT_VERSION_V1,
             "effect_ir_contract_digest": effect_ir_contract_digest_v1(),
+            "reasoning_contract_version": REASONING_CONTRACT_VERSION_V1,
+            "reasoning_contract_digest": reasoning_contract_digest_v1(),
             "zbf_contract_version": ZBF_CONTRACT_VERSION_V1,
             "zbf_contract_digest": zbf_contract_digest_v1()
         },
@@ -928,7 +931,7 @@ mod tests {
         assert_eq!(decoded, manifest);
         assert_eq!(
             manifest.digest().unwrap().to_hex(),
-            "d033a950a0f33132d046b32d42fd4a8b60632840bae966ca126f944a1fc7d077"
+            "7a5d8c5a6bfd4e8990510d9f4129f734bd07f4cc3a2603068ce5bb3d80246b92"
         );
     }
 
@@ -941,7 +944,7 @@ mod tests {
         );
         assert_eq!(
             assembly_abi_contract_digest_v1().to_hex(),
-            "a330b854711a378e12f7c4247bc6506611977ff2f0853e27f4e3d7a2c4e8eb06"
+            "f9320787ce17676c1eff1b2e38f1897ca40f9a72a02d5d72ffba37d70aa70d70"
         );
     }
 
