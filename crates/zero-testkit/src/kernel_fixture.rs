@@ -1,17 +1,18 @@
 //! Frozen, proof-carrying fixtures for the ZeroKernel conformance boundary.
 
-use std::borrow::Cow;
+use std::{borrow::Cow, collections::BTreeMap};
 
 use tempfile::tempdir;
 use zero_abi::{
-    raw_worker::EffectClass, sha256, ArtifactOwnerV1, CwirVerifierClassV1, DigestV1,
-    DurableProfileIdV1, DurableProfileV1, EffectProgramV1, EffectRollbackV1, EffectTargetV1,
-    EffectVerificationPlanV1, EffectVerificationStepV1, TypedEffectOperationV1, ZbfArtifactKindV1,
+    raw_worker::EffectClass, sha256, verify_strict_no_downshift_v1, ArtifactOwnerV1,
+    CwirVerifierClassV1, DigestV1, DurableProfileIdV1, DurableProfileV1, EffectProgramV1,
+    EffectRollbackV1, EffectTargetV1, EffectVerificationPlanV1, EffectVerificationStepV1,
+    NativeStatePolicyV1, ReasoningContractV1, TypedEffectOperationV1, ZbfArtifactKindV1,
     ZbfObjectV1,
 };
 use zero_cert::{
     accept_effect_verification_v1, verify, CompletenessWitness, EffectVerificationOutcomeV1,
-    EvidenceCertificate, ObjectId, OperatorLock, Provenance, Query, Resolver, SpanRef,
+    EvidenceCertificate, ObjectId, OperatorLock, Provenance, Query, Resolver, SpanRef, TestId,
 };
 use zero_gate::{
     begin_effect_transaction_v1, candidate_protocol_identity_v1, effect_journal_binding_v1,
@@ -19,10 +20,11 @@ use zero_gate::{
     EffectClosureManifestV1, EffectClosureRequestV1, EffectResourceClosureV1,
     ExactNeutralCertificateV1, ExecutionBinding, ExecutionSurface, FrozenBaselineV1, GuardEvidence,
     PeerArtifactInputV1, PeerOwner, PrepareRequest, QualityAdmissionV1, QualityEvidenceV1,
-    ResourceIsolationModeV1, ResourceRestorationModeV1, SafetyShieldEvidenceV1,
-    SemanticCutEvidenceV1, SnapEvidence, SourceHead, StagedEffect, TransactionAccessV1,
-    TransactionClosure, TransactionResourceKindV1, TransactionResourceRequirementV1,
-    WorkerEnvelope, TWO_PHASE_SCHEMA_VERSION,
+    ReasoningSafepointV1, ReasoningStateStatusV1, ResourceIsolationModeV1,
+    ResourceRestorationModeV1, SafetyShieldEvidenceV1, SemanticCutClaimV1, SemanticCutEvidenceV1,
+    SnapEvidence, SourceHead, StagedEffect, TransactionAccessV1, TransactionClosure,
+    TransactionResourceKindV1, TransactionResourceRequirementV1, WorkerEnvelope,
+    TWO_PHASE_SCHEMA_VERSION,
 };
 use zero_store::{initialize_published_root_v1, JournalPathsV1};
 
@@ -41,7 +43,7 @@ impl Resolver for Resident<'_> {
         (sha256(self.bytes) == object_id.0).then_some(self.bytes)
     }
     fn trusted_operator_version<'a>(&'a self, id: &str) -> Option<&'a str> {
-        (id == "read-span").then_some("1")
+        matches!(id, "read-span" | "semantic-cut-verifier").then_some("1")
     }
     fn trusted_parser_version<'a>(&'a self, id: &str) -> Option<&'a str> {
         (id == "tree-sitter").then_some("1")
@@ -77,6 +79,41 @@ fn certificate(bytes: &[u8]) -> EvidenceCertificate<'_> {
                 operator_id: "read-span".into(),
                 operator_version: "1".into(),
             },
+        },
+        input_token_cost: 1,
+        backend_work_units: 1,
+    }
+}
+
+fn semantic_certificate(bytes: &[u8]) -> EvidenceCertificate<'_> {
+    let object = sha256(bytes);
+    let span = SpanRef {
+        object_id: ObjectId(object),
+        object_digest: object,
+        byte_start: 0,
+        byte_len: bytes.len() as u64,
+        span_digest: object,
+    };
+    EvidenceCertificate {
+        query: Query::TestTrace { test: TestId(74) },
+        spans: vec![span],
+        payload: Cow::Borrowed(bytes),
+        provenance: Provenance {
+            parser_id: "tree-sitter".into(),
+            parser_version: "1".into(),
+            index_id: "zero-index".into(),
+            index_version: "2".into(),
+            operator_id: "semantic-cut-verifier".into(),
+            operator_version: "1".into(),
+        },
+        completeness: CompletenessWitness::TestTrace {
+            operator: OperatorLock {
+                operator_id: "semantic-cut-verifier".into(),
+                operator_version: "1".into(),
+            },
+            test: TestId(74),
+            exit_code: 0,
+            trace_digest: object,
         },
         input_token_cost: 1,
         backend_work_units: 1,
@@ -181,14 +218,11 @@ pub fn kernel_mutation_fixture_v2(
     let state_snapshot = abi(13);
     let program = effect_program(state_snapshot)?;
     let evidence_bytes = b"exact kernel conformance evidence";
-    let certificate = certificate(evidence_bytes);
+    let effect_certificate = certificate(evidence_bytes);
     let resident = Resident {
         bytes: evidence_bytes,
     };
-    let verified = verify(&certificate, &resident).map_err(|error| error.to_string())?;
-    let semantic_cut =
-        SemanticCutEvidenceV1::verify_owner_scoped(plan_digest, digest(15), digest(4), &verified)
-            .map_err(|error| error.to_string())?;
+    let verified = verify(&effect_certificate, &resident).map_err(|error| error.to_string())?;
     let outcome = accept_effect_verification_v1(
         abi(70),
         &program,
@@ -254,6 +288,80 @@ pub fn kernel_mutation_fixture_v2(
 
     let artifacts = artifact_set(assembly_manifest_digest, source_root_digest)?;
     let image_digest = artifacts.image_digest();
+    let baseline_reasoning = ReasoningContractV1::new(
+        abi(15),
+        abi(74),
+        abi(75),
+        abi(76),
+        abi(77),
+        "enabled",
+        "high",
+        8_192,
+        4_096,
+        2_048,
+        1_024,
+        NativeStatePolicyV1::ExactRequired,
+        false,
+        BTreeMap::new(),
+    )
+    .map_err(|error| error.to_string())?;
+    let candidate_reasoning = baseline_reasoning.clone();
+    let reasoning_admission =
+        verify_strict_no_downshift_v1(&baseline_reasoning, &candidate_reasoning)
+            .map_err(|error| error.to_string())?;
+    let baseline_reasoning_contract_digest = *baseline_reasoning
+        .identity_digest()
+        .map_err(|error| error.to_string())?
+        .as_bytes();
+    let reasoning_contract_digest = *candidate_reasoning
+        .identity_digest()
+        .map_err(|error| error.to_string())?
+        .as_bytes();
+    let terminal = |receipt| {
+        ReasoningSafepointV1::new(
+            digest(30),
+            digest(31),
+            digest(32),
+            reasoning_contract_digest,
+            digest(15),
+            digest(33),
+            ReasoningStateStatusV1::ExactPreserved,
+            digest(34),
+            digest(35),
+            digest(36),
+            digest(37),
+            digest(receipt),
+        )
+    };
+    let semantic_claim = SemanticCutClaimV1::new_exact(
+        *state_snapshot.as_bytes(),
+        digest(38),
+        plan_digest,
+        terminal(39).map_err(|error| error.to_string())?,
+        terminal(40).map_err(|error| error.to_string())?,
+        digest(41),
+        digest(41),
+        digest(42),
+        digest(42),
+        digest(43),
+        digest(44),
+        digest(4),
+        digest(14),
+        digest(45),
+    )
+    .map_err(|error| error.to_string())?;
+    let semantic_bytes = semantic_claim
+        .canonical_bytes()
+        .map_err(|error| error.to_string())?;
+    let semantic_certificate = semantic_certificate(&semantic_bytes);
+    let semantic_resident = Resident {
+        bytes: &semantic_bytes,
+    };
+    let semantic_verified =
+        verify(&semantic_certificate, &semantic_resident).map_err(|error| error.to_string())?;
+    let semantic_cut =
+        SemanticCutEvidenceV1::verify_owner_scoped(semantic_claim, &semantic_verified)
+            .map_err(|error| error.to_string())?;
     let binding = ExecutionBinding {
         schema_version: TWO_PHASE_SCHEMA_VERSION,
         assembly_manifest_digest,
@@ -267,7 +375,12 @@ pub fn kernel_mutation_fixture_v2(
         task_fingerprint_digest: digest(14),
         plan_digest,
         fixed_model_digest: digest(15),
+        baseline_reasoning_contract: baseline_reasoning,
+        reasoning_contract: candidate_reasoning,
+        baseline_reasoning_contract_digest,
+        reasoning_contract_digest,
         comparison_identity_digest: digest(4),
+        semantic_cut_verifier_identity_digest: semantic_cut.verifier_identity_digest(),
         predecessor_receipt_head: digest(5),
     };
     let candidate_identity = DigestV1::from_bytes(candidate_protocol_identity_v1(&binding));
@@ -306,6 +419,7 @@ pub fn kernel_mutation_fixture_v2(
         },
         evidence: GuardEvidence {
             artifacts,
+            reasoning_admission,
             semantic_cut,
             snap: SnapEvidence::NotClaimed,
             safety_shield: SafetyShieldEvidenceV1::from_effect_accepted(accepted)

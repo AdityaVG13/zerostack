@@ -417,7 +417,7 @@ impl CommitReceipt {
 
 #[cfg(test)]
 mod tests {
-    use std::borrow::Cow;
+    use std::{borrow::Cow, collections::BTreeMap};
 
     use super::*;
     use tempfile::tempdir;
@@ -434,8 +434,13 @@ mod tests {
     };
     use crate::{
         ExactNeutralCertificateV1, FrozenBaselineV1, QualityAdmissionV1, QualityEvidenceV1,
+        ReasoningSafepointV1, ReasoningStateStatusV1, SemanticCutCertificateRecordV1,
+        SemanticCutClaimV1,
     };
-    use zero_abi::raw_worker::EffectClass;
+    use zero_abi::{
+        raw_worker::EffectClass, verify_strict_no_downshift_v1, NativeStatePolicyV1,
+        ReasoningContractV1,
+    };
 
     fn abi(byte: u8) -> AbiDigestV1 {
         AbiDigestV1::from_bytes([byte; 32])
@@ -450,7 +455,29 @@ mod tests {
         )
         .unwrap()
     }
+    fn reasoning_contract() -> ReasoningContractV1 {
+        ReasoningContractV1::new(
+            abi(1),
+            abi(20),
+            abi(21),
+            abi(22),
+            abi(23),
+            "enabled",
+            "high",
+            8_192,
+            4_096,
+            2_048,
+            1_024,
+            NativeStatePolicyV1::ExactRequired,
+            false,
+            BTreeMap::new(),
+        )
+        .unwrap()
+    }
+
     fn quality_admission() -> crate::QualityAdmissionRecordV1 {
+        let reasoning_contract = reasoning_contract();
+        let reasoning_contract_digest = *reasoning_contract.identity_digest().unwrap().as_bytes();
         let binding = ExecutionBinding {
             schema_version: TWO_PHASE_SCHEMA_VERSION,
             assembly_manifest_digest: [2; 32],
@@ -464,7 +491,12 @@ mod tests {
             task_fingerprint_digest: [1; 32],
             plan_digest: [1; 32],
             fixed_model_digest: [1; 32],
+            baseline_reasoning_contract: reasoning_contract.clone(),
+            reasoning_contract,
+            baseline_reasoning_contract_digest: reasoning_contract_digest,
+            reasoning_contract_digest,
             comparison_identity_digest: [1; 32],
+            semantic_cut_verifier_identity_digest: [1; 32],
             predecessor_receipt_head: [1; 32],
         };
         let certificate = ExactNeutralCertificateV1::verify(
@@ -488,7 +520,58 @@ mod tests {
         .record()
     }
 
+    fn semantic_cut_record() -> SemanticCutCertificateRecordV1 {
+        let terminal = |receipt| {
+            ReasoningSafepointV1::new(
+                [1; 32],
+                [2; 32],
+                [3; 32],
+                [1; 32],
+                [1; 32],
+                [4; 32],
+                ReasoningStateStatusV1::ExactPreserved,
+                [5; 32],
+                [6; 32],
+                [7; 32],
+                [8; 32],
+                [receipt; 32],
+            )
+            .unwrap()
+        };
+        let claim = SemanticCutClaimV1::new_exact(
+            [1; 32],
+            [9; 32],
+            [1; 32],
+            terminal(10),
+            terminal(11),
+            [12; 32],
+            [12; 32],
+            [13; 32],
+            [13; 32],
+            [14; 32],
+            [15; 32],
+            [1; 32],
+            [1; 32],
+            [16; 32],
+        )
+        .unwrap();
+        SemanticCutCertificateRecordV1 {
+            contract_version: 1,
+            claim_digest: claim.digest().unwrap(),
+            claim,
+            evidence_digest: [17; 32],
+            verifier_identity_digest: [1; 32],
+            certificate_digest: [1; 32],
+        }
+    }
+
     fn record() -> ReceiptRecord {
+        let reasoning_contract = reasoning_contract();
+        let reasoning_contract_digest = *reasoning_contract.identity_digest().unwrap().as_bytes();
+        let reasoning_admission =
+            verify_strict_no_downshift_v1(&reasoning_contract, &reasoning_contract)
+                .unwrap()
+                .record();
         ReceiptRecord {
             schema_version: TWO_PHASE_SCHEMA_VERSION,
             kind: ReceiptKind::Commit,
@@ -506,9 +589,17 @@ mod tests {
             task_fingerprint_digest: [1; 32],
             plan_digest: [1; 32],
             fixed_model_digest: [1; 32],
+            baseline_reasoning_contract: reasoning_contract.clone(),
+            reasoning_contract,
+            baseline_reasoning_contract_digest: reasoning_contract_digest,
+            reasoning_contract_digest,
+            reasoning_admission,
             comparison_identity_digest: [1; 32],
+            semantic_cut_verifier_identity_digest: [1; 32],
             artifact_set_digest: [1; 32],
             semantic_cut_certificate_digest: [1; 32],
+            semantic_cut: semantic_cut_record(),
+            terminal_rcq_identity_digest: [1; 32],
             snap_certificate_digest: None,
             safety_shield_digest: [1; 32],
             quality_admission: quality_admission(),

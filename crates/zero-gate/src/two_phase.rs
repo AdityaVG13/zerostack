@@ -8,6 +8,9 @@ use crate::quality::{
     quality_envelope_contract_digest_v1, QualityAdmissionRecordV1, QualityAdmissionV1,
     QualityEvidenceClassV1, QualityGuaranteeV1, QualitySelectionV1,
 };
+use crate::semantic_cut::{
+    semantic_cut_contract_digest_v1, SemanticCutCertificateRecordV1, SemanticCutEvidenceV1,
+};
 use crate::transaction::{
     transaction_contract_digest_v1, RestorationScopeV1, TransactionDispositionV1,
     TransactionReceiptV1,
@@ -18,13 +21,15 @@ use sha2::{Digest as _, Sha256};
 use std::collections::BTreeSet;
 use std::fmt;
 use zero_abi::{
-    canonical_json, raw_worker::EffectClass, zbf_contract_digest_v1, ArtifactOwnerV1,
-    DigestV1 as AbiDigestV1, DurableProfileV1, RobustSnapCertificate, SnapLevel, ZbfArtifactKindV1,
+    canonical_json, raw_worker::EffectClass, reasoning_contract_digest_v1,
+    verify_strict_no_downshift_v1, zbf_contract_digest_v1, ArtifactOwnerV1,
+    DigestV1 as AbiDigestV1, DurableProfileV1, ReasoningContractV1, RobustSnapCertificate,
+    SnapLevel, StrictReasoningAdmissionRecordV1, StrictReasoningAdmissionV1, ZbfArtifactKindV1,
     ZbfObjectV1,
 };
 use zero_cert::{effect_witness_contract_digest_v1, EffectAcceptedV1, VerifiedEvidence};
 
-pub const TWO_PHASE_SCHEMA_VERSION: u16 = 3;
+pub const TWO_PHASE_SCHEMA_VERSION: u16 = 4;
 pub const GUARD_COUNT: usize = 10;
 pub const MAX_SOURCE_REPOSITORIES: usize = 64;
 pub const MAX_CONTROLLER_INSTRUCTIONS: usize = 4_096;
@@ -33,6 +38,7 @@ pub type DigestV1 = [u8; 32];
 
 const TWO_PHASE_CONTRACT_DOMAIN_V2: &[u8] = b"zerostack.kernel.contract.v2\0";
 const TWO_PHASE_CONTRACT_DOMAIN_V3: &[u8] = b"zerostack.kernel.contract.v3\0";
+const TWO_PHASE_CONTRACT_DOMAIN_V4: &[u8] = b"zerostack.kernel.contract.v4\0";
 
 pub fn two_phase_contract_manifest_v2() -> Value {
     json!({
@@ -110,7 +116,7 @@ pub fn two_phase_contract_manifest_v3() -> Value {
             "fixed_model_digest",
             "two_phase_contract_digest_v3",
         ],
-        "contract_version": TWO_PHASE_SCHEMA_VERSION,
+        "contract_version": 3,
         "guard_order": Guard::ALL,
         "linked_contracts": {
             "effect_witness": effect_witness_contract_digest_v1(),
@@ -181,6 +187,101 @@ pub fn two_phase_contract_digest_v3() -> DigestV1 {
     hash_bytes(&bytes)
 }
 
+pub fn two_phase_contract_manifest_v4() -> Value {
+    json!({
+        "artifact_profile": "zbf_1_portable_strict",
+        "candidate_protocol_identity": [
+            "assembly_manifest_digest",
+            "source_tree_digest",
+            "image_digest",
+            "fixed_model_digest",
+            "reasoning_contract_digest",
+            "two_phase_contract_digest_v4",
+        ],
+        "contract_version": TWO_PHASE_SCHEMA_VERSION,
+        "guard_order": Guard::ALL,
+        "linked_contracts": {
+            "effect_witness": effect_witness_contract_digest_v1(),
+            "quality_envelope": quality_envelope_contract_digest_v1(),
+            "reasoning_contract": reasoning_contract_digest_v1(),
+            "semantic_cut": semantic_cut_contract_digest_v1(),
+            "transaction": transaction_contract_digest_v1(),
+            "zbf": zbf_contract_digest_v1(),
+        },
+        "name": "zerostack.two_phase_kernel.v4",
+        "negative_space": [
+            "approximate_continuation_as_exact",
+            "clean_restart_as_exact_continuation",
+            "individual_candidate_claim_from_distributional_evidence",
+            "native_filesystem_durability",
+            "production_worker_contract_enforcement",
+            "semantic_claim_without_verified_exact_payload",
+            "universal_external_state_restoration",
+        ],
+        "quality_modes_admitted": [
+            "exact_neutral",
+            "pointwise_dominance",
+            "scoped_class_dominance",
+            "distributional_baseline_only",
+            "unidentified_baseline",
+        ],
+        "receipt_bindings": [
+            "schema_version",
+            "kind",
+            "permit_id",
+            "binding_digest",
+            "admission_digest",
+            "assembly_manifest_digest",
+            "source_tree_digest",
+            "source_repository_heads",
+            "image_digest",
+            "state_snapshot_digest",
+            "task_fingerprint_digest",
+            "plan_digest",
+            "fixed_model_digest",
+            "baseline_reasoning_contract",
+            "reasoning_contract",
+            "baseline_reasoning_contract_digest",
+            "reasoning_contract_digest",
+            "reasoning_admission",
+            "comparison_identity_digest",
+            "semantic_cut_verifier_identity_digest",
+            "artifact_set_digest",
+            "semantic_cut_certificate",
+            "terminal_rcq_identity_digest",
+            "snap_certificate_digest",
+            "safety_shield_digest",
+            "quality_admission",
+            "final_quality_selection",
+            "transaction_receipt_digest",
+            "attribution_class",
+            "effect_class",
+            "resource_envelope",
+            "surface",
+            "verification_digest",
+            "output_digest",
+            "effects_digest",
+            "resource_usage",
+            "predecessor_receipt_head",
+            "successor_root",
+            "trace_digest",
+            "failure_code",
+            "restoration",
+            "receipt_head",
+        ],
+        "semantic_cut_admission": "exact_rcq_identity_plus_verified_canonical_claim",
+        "transaction_closure": "validated_zero_gate_transaction_receipt_only",
+    })
+}
+
+pub fn two_phase_contract_digest_v4() -> DigestV1 {
+    let canonical = canonical_json(&two_phase_contract_manifest_v4());
+    let mut bytes = Vec::with_capacity(TWO_PHASE_CONTRACT_DOMAIN_V4.len() + canonical.len());
+    bytes.extend_from_slice(TWO_PHASE_CONTRACT_DOMAIN_V4);
+    bytes.extend_from_slice(canonical.as_bytes());
+    hash_bytes(&bytes)
+}
+
 #[derive(Clone, Copy, Debug, Deserialize, Eq, Ord, PartialEq, PartialOrd, Serialize)]
 #[serde(rename_all = "snake_case")]
 #[repr(u8)]
@@ -242,6 +343,7 @@ pub enum FailureCode {
     CoherenceFailure,
     InvalidPlan,
     PlanDigestMismatch,
+    ReasoningContractMismatch,
     SemanticCutCrossing,
     AttributionChanged,
     UnboundedWorker,
@@ -274,6 +376,7 @@ impl FailureCode {
             Self::CoherenceFailure => "coherence_failure",
             Self::InvalidPlan => "invalid_plan",
             Self::PlanDigestMismatch => "plan_digest_mismatch",
+            Self::ReasoningContractMismatch => "reasoning_contract_mismatch",
             Self::SemanticCutCrossing => "semantic_cut_crossing",
             Self::AttributionChanged => "attribution_changed",
             Self::UnboundedWorker => "unbounded_worker",
@@ -563,7 +666,7 @@ impl ExecutionTrace {
 
     pub fn digest(&self) -> DigestV1 {
         let mut bytes = Vec::with_capacity(96 + self.events.len() * 3);
-        bytes.extend_from_slice(b"zerostack.kernel.trace.v3\0");
+        bytes.extend_from_slice(b"zerostack.kernel.trace.v4\0");
         bytes.extend_from_slice(&TWO_PHASE_SCHEMA_VERSION.to_be_bytes());
         for event in &self.events {
             bytes.push(event.guard as u8);
@@ -600,14 +703,19 @@ pub struct ExecutionBinding {
     pub task_fingerprint_digest: DigestV1,
     pub plan_digest: DigestV1,
     pub fixed_model_digest: DigestV1,
+    pub baseline_reasoning_contract: ReasoningContractV1,
+    pub reasoning_contract: ReasoningContractV1,
+    pub baseline_reasoning_contract_digest: DigestV1,
+    pub reasoning_contract_digest: DigestV1,
     pub comparison_identity_digest: DigestV1,
+    pub semantic_cut_verifier_identity_digest: DigestV1,
     pub predecessor_receipt_head: DigestV1,
 }
 
 impl ExecutionBinding {
     pub fn digest(&self) -> DigestV1 {
         let mut bytes = Vec::new();
-        bytes.extend_from_slice(b"zerostack.kernel.binding.v3\0");
+        bytes.extend_from_slice(b"zerostack.kernel.binding.v4\0");
         bytes.extend_from_slice(&self.schema_version.to_be_bytes());
         bytes.extend_from_slice(&self.assembly_manifest_digest);
         bytes.extend_from_slice(&self.source_tree_digest);
@@ -621,19 +729,23 @@ impl ExecutionBinding {
         bytes.extend_from_slice(&self.task_fingerprint_digest);
         bytes.extend_from_slice(&self.plan_digest);
         bytes.extend_from_slice(&self.fixed_model_digest);
+        bytes.extend_from_slice(&self.baseline_reasoning_contract_digest);
+        bytes.extend_from_slice(&self.reasoning_contract_digest);
         bytes.extend_from_slice(&self.comparison_identity_digest);
+        bytes.extend_from_slice(&self.semantic_cut_verifier_identity_digest);
         bytes.extend_from_slice(&self.predecessor_receipt_head);
         hash_bytes(&bytes)
     }
 }
 
 pub fn candidate_protocol_identity_v1(binding: &ExecutionBinding) -> DigestV1 {
-    let mut bytes = Vec::with_capacity(32 * 5);
+    let mut bytes = Vec::with_capacity(32 * 6);
     bytes.extend_from_slice(&binding.assembly_manifest_digest);
     bytes.extend_from_slice(&binding.source_tree_digest);
     bytes.extend_from_slice(&binding.image_digest);
     bytes.extend_from_slice(&binding.fixed_model_digest);
-    bytes.extend_from_slice(&two_phase_contract_digest_v3());
+    bytes.extend_from_slice(&binding.reasoning_contract_digest);
+    bytes.extend_from_slice(&two_phase_contract_digest_v4());
     let mut framed = b"ZERO.TWO_PHASE.CANDIDATE_PROTOCOL.V1\0".to_vec();
     framed.extend_from_slice(&bytes);
     hash_bytes(&framed)
@@ -700,7 +812,7 @@ pub struct ControllerPlan {
 impl ControllerPlan {
     pub fn digest(&self) -> DigestV1 {
         let mut bytes = Vec::with_capacity(40 + self.instructions.len());
-        bytes.extend_from_slice(b"zerostack.kernel.plan.v3\0");
+        bytes.extend_from_slice(b"zerostack.kernel.plan.v4\0");
         bytes.extend_from_slice(&(self.instructions.len() as u64).to_be_bytes());
         bytes.extend(
             self.instructions
@@ -752,67 +864,9 @@ impl ResourceUsage {
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
-pub enum SemanticAuthority {
-    OwnerScoped,
-    HiddenTaskSelector,
-}
-
-#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
-#[serde(rename_all = "snake_case")]
 pub enum AttributionClass {
     Fixed,
     Changed,
-}
-
-/// Opaque G3 evidence binding the semantic cut to the frozen comparison identity.
-#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
-#[serde(deny_unknown_fields)]
-pub struct SemanticCutEvidenceV1 {
-    certificate_digest: DigestV1,
-    plan_digest: DigestV1,
-    fixed_model_digest: DigestV1,
-    comparison_identity_digest: DigestV1,
-    semantic_authority: SemanticAuthority,
-    attribution_class: AttributionClass,
-}
-
-impl SemanticCutEvidenceV1 {
-    pub fn verify_owner_scoped(
-        plan_digest: DigestV1,
-        fixed_model_digest: DigestV1,
-        comparison_identity_digest: DigestV1,
-        evidence: &VerifiedEvidence<'_, '_>,
-    ) -> Result<Self, KernelError> {
-        if [plan_digest, fixed_model_digest, comparison_identity_digest]
-            .iter()
-            .any(is_zero)
-        {
-            return Err(KernelError::at(
-                FailureCode::SemanticCutCrossing,
-                Guard::G3Attribution,
-                "semantic-cut identity bindings must be nonzero",
-            ));
-        }
-        let certificate_digest = evidence.certificate().canonical_digest().map_err(|error| {
-            KernelError::at(
-                FailureCode::SemanticCutCrossing,
-                Guard::G3Attribution,
-                format!("semantic-cut evidence is not canonical: {error}"),
-            )
-        })?;
-        Ok(Self {
-            certificate_digest,
-            plan_digest,
-            fixed_model_digest,
-            comparison_identity_digest,
-            semantic_authority: SemanticAuthority::OwnerScoped,
-            attribution_class: AttributionClass::Fixed,
-        })
-    }
-
-    pub const fn certificate_digest(&self) -> DigestV1 {
-        self.certificate_digest
-    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
@@ -958,6 +1012,7 @@ pub type PerformanceAdmission = QualityAdmissionV1;
 #[serde(deny_unknown_fields)]
 pub struct GuardEvidence {
     pub artifacts: CanonicalArtifactSetV1,
+    pub reasoning_admission: StrictReasoningAdmissionV1,
     pub semantic_cut: SemanticCutEvidenceV1,
     pub snap: SnapEvidence,
     pub safety_shield: SafetyShieldEvidenceV1,
@@ -981,7 +1036,7 @@ impl PrepareRequest {
     /// Canonical commitment to every G0-G7 admission input.
     pub fn admission_digest(&self) -> DigestV1 {
         let mut bytes = Vec::new();
-        bytes.extend_from_slice(b"zerostack.kernel.admission.v3\0");
+        bytes.extend_from_slice(b"zerostack.kernel.admission.v4\0");
         bytes.extend_from_slice(&self.binding.digest());
         bytes.push(self.surface as u8);
         bytes.push(effect_class_tag(self.effect_class));
@@ -999,15 +1054,10 @@ impl PrepareRequest {
 
         let evidence = &self.evidence;
         bytes.extend_from_slice(&evidence.artifacts.artifact_set_digest);
-        bytes.extend_from_slice(&evidence.semantic_cut.certificate_digest);
-        bytes.push(match evidence.semantic_cut.semantic_authority {
-            SemanticAuthority::OwnerScoped => 0,
-            SemanticAuthority::HiddenTaskSelector => 1,
-        });
-        bytes.push(match evidence.semantic_cut.attribution_class {
-            AttributionClass::Fixed => 0,
-            AttributionClass::Changed => 1,
-        });
+        bytes.extend_from_slice(evidence.reasoning_admission.digest().as_bytes());
+        bytes.extend_from_slice(&evidence.semantic_cut.certificate_digest());
+        bytes.extend_from_slice(&evidence.semantic_cut.verifier_identity_digest());
+        bytes.extend_from_slice(&evidence.semantic_cut.terminal_rcq_identity_digest());
         match &evidence.snap {
             SnapEvidence::NotClaimed => bytes.push(0),
             SnapEvidence::Verified { certificate } => {
@@ -1140,7 +1190,7 @@ pub fn validate_permit_record(record: &PermitRecord) -> Result<(), KernelError> 
         ));
     }
     let mut bytes = Vec::new();
-    bytes.extend_from_slice(b"zerostack.kernel.permit.v3\0");
+    bytes.extend_from_slice(b"zerostack.kernel.permit.v4\0");
     bytes.extend_from_slice(&record.admission_digest);
     bytes.extend_from_slice(&record.trace.digest());
     if record.permit_id != hash_bytes(&bytes) {
@@ -1168,7 +1218,10 @@ fn validate_g0(request: &PrepareRequest) -> Result<(), KernelError> {
         request.binding.task_fingerprint_digest,
         request.binding.plan_digest,
         request.binding.fixed_model_digest,
+        request.binding.baseline_reasoning_contract_digest,
+        request.binding.reasoning_contract_digest,
         request.binding.comparison_identity_digest,
+        request.binding.semantic_cut_verifier_identity_digest,
         request.binding.predecessor_receipt_head,
         request.evidence.artifacts.artifact_set_digest,
     ]
@@ -1179,6 +1232,49 @@ fn validate_g0(request: &PrepareRequest) -> Result<(), KernelError> {
             FailureCode::MissingBinding,
             Guard::G0Canonical,
             "required canonical artifact, state, task, model, or receipt binding is zero",
+        ));
+    }
+    let reasoning_contract_valid = request
+        .binding
+        .baseline_reasoning_contract
+        .validate()
+        .is_ok()
+        && request
+            .binding
+            .baseline_reasoning_contract
+            .identity_digest()
+            .is_ok_and(|digest| {
+                *digest.as_bytes() == request.binding.baseline_reasoning_contract_digest
+            })
+        && request.binding.reasoning_contract.validate().is_ok()
+        && request
+            .binding
+            .reasoning_contract
+            .identity_digest()
+            .is_ok_and(|digest| *digest.as_bytes() == request.binding.reasoning_contract_digest)
+        && *request
+            .binding
+            .reasoning_contract
+            .model_identity()
+            .as_bytes()
+            == request.binding.fixed_model_digest
+        && !request.binding.reasoning_contract.allow_effort_downshift();
+    let reasoning_admission = &request.evidence.reasoning_admission;
+    let reasoning_admission_valid = reasoning_admission.validate().is_ok()
+        && *reasoning_admission.baseline_contract_digest().as_bytes()
+            == request.binding.baseline_reasoning_contract_digest
+        && *reasoning_admission.candidate_contract_digest().as_bytes()
+            == request.binding.reasoning_contract_digest
+        && verify_strict_no_downshift_v1(
+            &request.binding.baseline_reasoning_contract,
+            &request.binding.reasoning_contract,
+        )
+        .is_ok_and(|recomputed| recomputed.record() == reasoning_admission.record());
+    if !reasoning_contract_valid || !reasoning_admission_valid {
+        return Err(KernelError::at(
+            FailureCode::ReasoningContractMismatch,
+            Guard::G0Canonical,
+            "reasoning contract or strict no-downshift admission is invalid",
         ));
     }
     if request.evidence.artifacts.artifact_identities.len() != 3
@@ -1287,23 +1383,27 @@ fn validate_g2(request: &PrepareRequest) -> Result<(), KernelError> {
 
 fn validate_g3(request: &PrepareRequest) -> Result<(), KernelError> {
     let cut = &request.evidence.semantic_cut;
-    if is_zero(&cut.certificate_digest)
-        || cut.plan_digest != request.binding.plan_digest
-        || cut.fixed_model_digest != request.binding.fixed_model_digest
-        || cut.comparison_identity_digest != request.binding.comparison_identity_digest
-        || cut.semantic_authority != SemanticAuthority::OwnerScoped
+    cut.validate().map_err(|error| {
+        KernelError::at(
+            FailureCode::SemanticCutCrossing,
+            Guard::G3Attribution,
+            format!("semantic-cut certificate failed validation: {error}"),
+        )
+    })?;
+    let claim = cut.claim();
+    if is_zero(&cut.certificate_digest())
+        || claim.input_project_control_root() != request.binding.state_snapshot_digest
+        || claim.compiled_plan_digest() != request.binding.plan_digest
+        || claim.fixed_model_digest() != request.binding.fixed_model_digest
+        || claim.reasoning_contract_digest() != request.binding.reasoning_contract_digest
+        || claim.comparison_identity_digest() != request.binding.comparison_identity_digest
+        || claim.certificate_scope_digest() != request.binding.task_fingerprint_digest
+        || cut.verifier_identity_digest() != request.binding.semantic_cut_verifier_identity_digest
     {
         return Err(KernelError::at(
             FailureCode::SemanticCutCrossing,
             Guard::G3Attribution,
-            "semantic cut does not bind the plan, model, comparison identity, or owner scope",
-        ));
-    }
-    if cut.attribution_class != AttributionClass::Fixed {
-        return Err(KernelError::at(
-            FailureCode::AttributionChanged,
-            Guard::G3Attribution,
-            "comparison attribution class changed",
+            "semantic cut binds another input, plan, model, reasoning contract, comparison, scope, or verifier",
         ));
     }
     Ok(())
@@ -1565,7 +1665,7 @@ fn validate_source_heads(heads: &[SourceHead]) -> Result<(), KernelError> {
 
 fn permit_digest(request: &PrepareRequest, trace: &ExecutionTrace) -> DigestV1 {
     let mut bytes = Vec::new();
-    bytes.extend_from_slice(b"zerostack.kernel.permit.v3\0");
+    bytes.extend_from_slice(b"zerostack.kernel.permit.v4\0");
     bytes.extend_from_slice(&request.admission_digest());
     bytes.extend_from_slice(&trace.digest());
     hash_bytes(&bytes)
@@ -1954,9 +2054,17 @@ pub struct ReceiptRecord {
     pub task_fingerprint_digest: DigestV1,
     pub plan_digest: DigestV1,
     pub fixed_model_digest: DigestV1,
+    pub baseline_reasoning_contract: ReasoningContractV1,
+    pub reasoning_contract: ReasoningContractV1,
+    pub baseline_reasoning_contract_digest: DigestV1,
+    pub reasoning_contract_digest: DigestV1,
+    pub reasoning_admission: StrictReasoningAdmissionRecordV1,
     pub comparison_identity_digest: DigestV1,
+    pub semantic_cut_verifier_identity_digest: DigestV1,
     pub artifact_set_digest: DigestV1,
     pub semantic_cut_certificate_digest: DigestV1,
+    pub semantic_cut: SemanticCutCertificateRecordV1,
+    pub terminal_rcq_identity_digest: DigestV1,
     pub snap_certificate_digest: Option<DigestV1>,
     pub safety_shield_digest: DigestV1,
     pub quality_admission: QualityAdmissionRecordV1,
@@ -1997,7 +2105,12 @@ pub fn validate_receipt_record(record: &ReceiptRecord) -> Result<(), KernelError
         task_fingerprint_digest: record.task_fingerprint_digest,
         plan_digest: record.plan_digest,
         fixed_model_digest: record.fixed_model_digest,
+        baseline_reasoning_contract: record.baseline_reasoning_contract.clone(),
+        reasoning_contract: record.reasoning_contract.clone(),
+        baseline_reasoning_contract_digest: record.baseline_reasoning_contract_digest,
+        reasoning_contract_digest: record.reasoning_contract_digest,
         comparison_identity_digest: record.comparison_identity_digest,
+        semantic_cut_verifier_identity_digest: record.semantic_cut_verifier_identity_digest,
         predecessor_receipt_head: record.predecessor_receipt_head,
     };
     let required = [
@@ -2011,9 +2124,14 @@ pub fn validate_receipt_record(record: &ReceiptRecord) -> Result<(), KernelError
         record.task_fingerprint_digest,
         record.plan_digest,
         record.fixed_model_digest,
+        record.baseline_reasoning_contract_digest,
+        record.reasoning_contract_digest,
+        *record.reasoning_admission.admission_digest.as_bytes(),
         record.comparison_identity_digest,
+        record.semantic_cut_verifier_identity_digest,
         record.artifact_set_digest,
         record.semantic_cut_certificate_digest,
+        record.terminal_rcq_identity_digest,
         record.safety_shield_digest,
         *record.quality_admission.admission_digest.as_bytes(),
         record.transaction_receipt_digest,
@@ -2034,6 +2152,8 @@ pub fn validate_receipt_record(record: &ReceiptRecord) -> Result<(), KernelError
         || binding.digest() != record.binding_digest
         || record.attribution_class != AttributionClass::Fixed
         || envelope_has_zero(record.resource_envelope)
+        || !reasoning_receipt_fields_valid(record)
+        || !semantic_cut_receipt_fields_valid(record)
         || !quality_receipt_fields_valid(record)
     {
         return Err(KernelError::execution(
@@ -2065,7 +2185,9 @@ pub fn validate_receipt_record(record: &ReceiptRecord) -> Result<(), KernelError
         &binding,
         record.admission_digest,
         record.artifact_set_digest,
+        *record.reasoning_admission.admission_digest.as_bytes(),
         record.semantic_cut_certificate_digest,
+        record.terminal_rcq_identity_digest,
         record.snap_certificate_digest,
         record.safety_shield_digest,
         &record.quality_admission,
@@ -2091,6 +2213,52 @@ pub fn validate_receipt_record(record: &ReceiptRecord) -> Result<(), KernelError
         ));
     }
     Ok(())
+}
+
+fn reasoning_receipt_fields_valid(record: &ReceiptRecord) -> bool {
+    record.baseline_reasoning_contract.validate().is_ok()
+        && record
+            .baseline_reasoning_contract
+            .identity_digest()
+            .is_ok_and(|digest| *digest.as_bytes() == record.baseline_reasoning_contract_digest)
+        && record.reasoning_contract.validate().is_ok()
+        && record
+            .reasoning_contract
+            .identity_digest()
+            .is_ok_and(|digest| *digest.as_bytes() == record.reasoning_contract_digest)
+        && *record.reasoning_contract.model_identity().as_bytes() == record.fixed_model_digest
+        && !record.reasoning_contract.allow_effort_downshift()
+        && record.reasoning_admission.validate().is_ok()
+        && *record
+            .reasoning_admission
+            .baseline_contract_digest
+            .as_bytes()
+            == record.baseline_reasoning_contract_digest
+        && *record
+            .reasoning_admission
+            .candidate_contract_digest
+            .as_bytes()
+            == record.reasoning_contract_digest
+        && verify_strict_no_downshift_v1(
+            &record.baseline_reasoning_contract,
+            &record.reasoning_contract,
+        )
+        .is_ok_and(|recomputed| recomputed.record() == record.reasoning_admission)
+}
+
+fn semantic_cut_receipt_fields_valid(record: &ReceiptRecord) -> bool {
+    let claim = &record.semantic_cut.claim;
+    record.semantic_cut.validate().is_ok()
+        && record.semantic_cut.certificate_digest == record.semantic_cut_certificate_digest
+        && record.semantic_cut.verifier_identity_digest
+            == record.semantic_cut_verifier_identity_digest
+        && claim.terminal_rcq_identity_digest() == record.terminal_rcq_identity_digest
+        && claim.input_project_control_root() == record.state_snapshot_digest
+        && claim.compiled_plan_digest() == record.plan_digest
+        && claim.fixed_model_digest() == record.fixed_model_digest
+        && claim.reasoning_contract_digest() == record.reasoning_contract_digest
+        && claim.comparison_identity_digest() == record.comparison_identity_digest
+        && claim.certificate_scope_digest() == record.task_fingerprint_digest
 }
 
 fn quality_receipt_fields_valid(record: &ReceiptRecord) -> bool {
@@ -2121,7 +2289,12 @@ fn quality_receipt_fields_valid(record: &ReceiptRecord) -> bool {
                 task_fingerprint_digest: record.task_fingerprint_digest,
                 plan_digest: record.plan_digest,
                 fixed_model_digest: record.fixed_model_digest,
+                baseline_reasoning_contract: record.baseline_reasoning_contract.clone(),
+                reasoning_contract: record.reasoning_contract.clone(),
+                baseline_reasoning_contract_digest: record.baseline_reasoning_contract_digest,
+                reasoning_contract_digest: record.reasoning_contract_digest,
                 comparison_identity_digest: record.comparison_identity_digest,
+                semantic_cut_verifier_identity_digest: record.semantic_cut_verifier_identity_digest,
                 predecessor_receipt_head: record.predecessor_receipt_head,
             })))
         && matches!(
@@ -2168,7 +2341,15 @@ impl ReadyToFinalize {
         };
         let admission_digest = self.request.admission_digest();
         let artifact_set_digest = self.request.evidence.artifacts.artifact_set_digest;
-        let semantic_cut_certificate_digest = self.request.evidence.semantic_cut.certificate_digest;
+        let reasoning_admission = self.request.evidence.reasoning_admission.record();
+        let semantic_cut_certificate_digest =
+            self.request.evidence.semantic_cut.certificate_digest();
+        let semantic_cut = self.request.evidence.semantic_cut.record();
+        let terminal_rcq_identity_digest = self
+            .request
+            .evidence
+            .semantic_cut
+            .terminal_rcq_identity_digest();
         let snap_certificate_digest = match &self.request.evidence.snap {
             SnapEvidence::NotClaimed => None,
             SnapEvidence::Verified { certificate } => {
@@ -2182,7 +2363,7 @@ impl ReadyToFinalize {
             ReceiptKind::Fallback => QualitySelectionV1::FrozenBaseline,
         };
         let transaction_receipt_digest = self.closure.transaction_receipt_digest;
-        let attribution_class = self.request.evidence.semantic_cut.attribution_class;
+        let attribution_class = AttributionClass::Fixed;
         let effect_class = self.request.effect_class;
         let resource_envelope = self.request.envelope;
         let receipt_head = receipt_digest(
@@ -2191,7 +2372,9 @@ impl ReadyToFinalize {
             &self.request.binding,
             admission_digest,
             artifact_set_digest,
+            *reasoning_admission.admission_digest.as_bytes(),
             semantic_cut_certificate_digest,
+            terminal_rcq_identity_digest,
             snap_certificate_digest,
             safety_shield_digest,
             &quality_admission,
@@ -2216,7 +2399,10 @@ impl ReadyToFinalize {
             binding: self.request.binding,
             admission_digest,
             artifact_set_digest,
+            reasoning_admission,
             semantic_cut_certificate_digest,
+            semantic_cut,
+            terminal_rcq_identity_digest,
             snap_certificate_digest,
             safety_shield_digest,
             quality_admission,
@@ -2253,7 +2439,10 @@ struct ReceiptCommon {
     binding: ExecutionBinding,
     admission_digest: DigestV1,
     artifact_set_digest: DigestV1,
+    reasoning_admission: StrictReasoningAdmissionRecordV1,
     semantic_cut_certificate_digest: DigestV1,
+    semantic_cut: SemanticCutCertificateRecordV1,
+    terminal_rcq_identity_digest: DigestV1,
     snap_certificate_digest: Option<DigestV1>,
     safety_shield_digest: DigestV1,
     quality_admission: QualityAdmissionRecordV1,
@@ -2290,9 +2479,19 @@ impl ReceiptCommon {
             task_fingerprint_digest: self.binding.task_fingerprint_digest,
             plan_digest: self.binding.plan_digest,
             fixed_model_digest: self.binding.fixed_model_digest,
+            baseline_reasoning_contract: self.binding.baseline_reasoning_contract.clone(),
+            reasoning_contract: self.binding.reasoning_contract.clone(),
+            baseline_reasoning_contract_digest: self.binding.baseline_reasoning_contract_digest,
+            reasoning_contract_digest: self.binding.reasoning_contract_digest,
+            reasoning_admission: self.reasoning_admission.clone(),
             comparison_identity_digest: self.binding.comparison_identity_digest,
+            semantic_cut_verifier_identity_digest: self
+                .binding
+                .semantic_cut_verifier_identity_digest,
             artifact_set_digest: self.artifact_set_digest,
             semantic_cut_certificate_digest: self.semantic_cut_certificate_digest,
+            semantic_cut: self.semantic_cut.clone(),
+            terminal_rcq_identity_digest: self.terminal_rcq_identity_digest,
             snap_certificate_digest: self.snap_certificate_digest,
             safety_shield_digest: self.safety_shield_digest,
             quality_admission: self.quality_admission.clone(),
@@ -2394,7 +2593,9 @@ fn receipt_digest(
     binding: &ExecutionBinding,
     admission_digest: DigestV1,
     artifact_set_digest: DigestV1,
+    reasoning_admission_digest: DigestV1,
     semantic_cut_certificate_digest: DigestV1,
+    terminal_rcq_identity_digest: DigestV1,
     snap_certificate_digest: Option<DigestV1>,
     safety_shield_digest: DigestV1,
     quality_admission: &QualityAdmissionRecordV1,
@@ -2414,14 +2615,16 @@ fn receipt_digest(
     restoration: RestorationAccounting,
 ) -> DigestV1 {
     let mut bytes = Vec::new();
-    bytes.extend_from_slice(b"zerostack.kernel.receipt.v3\0");
+    bytes.extend_from_slice(b"zerostack.kernel.receipt.v4\0");
     bytes.extend_from_slice(&TWO_PHASE_SCHEMA_VERSION.to_be_bytes());
     bytes.push(kind as u8);
     bytes.extend_from_slice(&permit_id);
     bytes.extend_from_slice(&binding.digest());
     bytes.extend_from_slice(&admission_digest);
     bytes.extend_from_slice(&artifact_set_digest);
+    bytes.extend_from_slice(&reasoning_admission_digest);
     bytes.extend_from_slice(&semantic_cut_certificate_digest);
+    bytes.extend_from_slice(&terminal_rcq_identity_digest);
     append_optional_digest(&mut bytes, snap_certificate_digest);
     bytes.extend_from_slice(&safety_shield_digest);
     bytes.extend_from_slice(quality_admission.admission_digest.as_bytes());
@@ -2466,7 +2669,7 @@ fn receipt_digest(
 
 fn effect_list_digest(effects: &[StagedEffect]) -> DigestV1 {
     let mut bytes = Vec::new();
-    bytes.extend_from_slice(b"zerostack.kernel.effects.v3\0");
+    bytes.extend_from_slice(b"zerostack.kernel.effects.v4\0");
     bytes.extend_from_slice(&(effects.len() as u64).to_be_bytes());
     for effect in effects {
         bytes.extend_from_slice(&effect.effect_digest);
@@ -2510,17 +2713,20 @@ mod tests {
         FrozenBaselineV1, MetricOrderV1, PointwiseDominanceCertificateV1, ProtectedMetricV1,
         QualityEvidenceV1, QualityPairV1,
     };
+    use crate::semantic_cut::{
+        ReasoningSafepointV1, ReasoningStateStatusV1, SemanticCutClaimV1, SemanticCutFailureCodeV1,
+    };
     use crate::transaction::RestorationScopeV1;
-    use std::borrow::Cow;
+    use std::{borrow::Cow, collections::BTreeMap};
     use zero_abi::{
         sha256, CwirVerifierClassV1, EffectProgramV1, EffectRollbackV1, EffectTargetV1,
-        EffectVerificationPlanV1, EffectVerificationStepV1, ProtectedEffectClassV1,
-        ProtectedEffectSet, ProtectedEffectV1, TypedEffectOperationV1, WorldFiberDescriptor,
-        ROBUST_SNAP_MODEL_VERSION,
+        EffectVerificationPlanV1, EffectVerificationStepV1, NativeStatePolicyV1,
+        ProtectedEffectClassV1, ProtectedEffectSet, ProtectedEffectV1, TypedEffectOperationV1,
+        WorldFiberDescriptor, ROBUST_SNAP_MODEL_VERSION,
     };
     use zero_cert::{
         accept_effect_verification_v1, verify, CompletenessWitness, EffectVerificationOutcomeV1,
-        EvidenceCertificate, ObjectId, OperatorLock, Provenance, Query, Resolver, SpanRef,
+        EvidenceCertificate, ObjectId, OperatorLock, Provenance, Query, Resolver, SpanRef, TestId,
     };
 
     fn digest(byte: u8) -> DigestV1 {
@@ -2540,7 +2746,7 @@ mod tests {
             (sha256(self.bytes) == object_id.0).then_some(self.bytes)
         }
         fn trusted_operator_version<'a>(&'a self, id: &str) -> Option<&'a str> {
-            (id == "read-span").then_some("1")
+            matches!(id, "read-span" | "semantic-cut-verifier").then_some("1")
         }
         fn trusted_parser_version<'a>(&'a self, id: &str) -> Option<&'a str> {
             (id == "tree-sitter").then_some("1")
@@ -2576,6 +2782,41 @@ mod tests {
                     operator_id: "read-span".into(),
                     operator_version: "1".into(),
                 },
+            },
+            input_token_cost: 1,
+            backend_work_units: 1,
+        }
+    }
+
+    fn semantic_certificate(bytes: &[u8]) -> EvidenceCertificate<'_> {
+        let object = sha256(bytes);
+        let span = SpanRef {
+            object_id: ObjectId(object),
+            object_digest: object,
+            byte_start: 0,
+            byte_len: bytes.len() as u64,
+            span_digest: object,
+        };
+        EvidenceCertificate {
+            query: Query::TestTrace { test: TestId(74) },
+            spans: vec![span],
+            payload: Cow::Borrowed(bytes),
+            provenance: Provenance {
+                parser_id: "tree-sitter".into(),
+                parser_version: "1".into(),
+                index_id: "zero-index".into(),
+                index_version: "2".into(),
+                operator_id: "semantic-cut-verifier".into(),
+                operator_version: "1".into(),
+            },
+            completeness: CompletenessWitness::TestTrace {
+                operator: OperatorLock {
+                    operator_id: "semantic-cut-verifier".into(),
+                    operator_version: "1".into(),
+                },
+                test: TestId(74),
+                exit_code: 0,
+                trace_digest: object,
             },
             input_token_cost: 1,
             backend_work_units: 1,
@@ -2643,13 +2884,76 @@ mod tests {
         SafetyShieldEvidenceV1::from_read_only_verified(digest(13), digest(72), &verified).unwrap()
     }
 
-    fn semantic_cut(plan_digest: DigestV1) -> SemanticCutEvidenceV1 {
-        let bytes = b"verified semantic-cut evidence";
-        let certificate = certificate(bytes);
-        let resident = Resident { bytes };
-        let verified = verify(&certificate, &resident).unwrap();
-        SemanticCutEvidenceV1::verify_owner_scoped(plan_digest, digest(15), digest(4), &verified)
+    fn reasoning_contract() -> ReasoningContractV1 {
+        ReasoningContractV1::new(
+            abi(15),
+            abi(74),
+            abi(75),
+            abi(76),
+            abi(77),
+            "enabled",
+            "high",
+            8_192,
+            4_096,
+            2_048,
+            1_024,
+            NativeStatePolicyV1::ExactRequired,
+            false,
+            BTreeMap::new(),
+        )
+        .unwrap()
+    }
+
+    fn semantic_claim(
+        plan_digest: DigestV1,
+        reasoning_contract_digest: DigestV1,
+    ) -> SemanticCutClaimV1 {
+        let terminal = |receipt| {
+            ReasoningSafepointV1::new(
+                digest(30),
+                digest(31),
+                digest(32),
+                reasoning_contract_digest,
+                digest(15),
+                digest(33),
+                ReasoningStateStatusV1::ExactPreserved,
+                digest(34),
+                digest(35),
+                digest(36),
+                digest(37),
+                digest(receipt),
+            )
             .unwrap()
+        };
+        SemanticCutClaimV1::new_exact(
+            digest(13),
+            digest(38),
+            plan_digest,
+            terminal(39),
+            terminal(40),
+            digest(41),
+            digest(41),
+            digest(42),
+            digest(42),
+            digest(43),
+            digest(44),
+            digest(4),
+            digest(14),
+            digest(45),
+        )
+        .unwrap()
+    }
+
+    fn semantic_cut(
+        plan_digest: DigestV1,
+        reasoning_contract_digest: DigestV1,
+    ) -> SemanticCutEvidenceV1 {
+        let claim = semantic_claim(plan_digest, reasoning_contract_digest);
+        let bytes = claim.canonical_bytes().unwrap();
+        let certificate = semantic_certificate(&bytes);
+        let resident = Resident { bytes: &bytes };
+        let verified = verify(&certificate, &resident).unwrap();
+        SemanticCutEvidenceV1::verify_owner_scoped(claim, &verified).unwrap()
     }
 
     fn artifacts() -> CanonicalArtifactSetV1 {
@@ -2792,6 +3096,15 @@ mod tests {
         } else {
             SafetyShieldEvidenceV1::from_effect_accepted(accepted_effect()).unwrap()
         };
+        let baseline_reasoning = reasoning_contract();
+        let candidate_reasoning = baseline_reasoning.clone();
+        let reasoning_admission =
+            zero_abi::verify_strict_no_downshift_v1(&baseline_reasoning, &candidate_reasoning)
+                .unwrap();
+        let baseline_reasoning_contract_digest =
+            *baseline_reasoning.identity_digest().unwrap().as_bytes();
+        let reasoning_contract_digest = *candidate_reasoning.identity_digest().unwrap().as_bytes();
+        let semantic_cut = semantic_cut(plan_digest, reasoning_contract_digest);
         let binding = ExecutionBinding {
             schema_version: TWO_PHASE_SCHEMA_VERSION,
             assembly_manifest_digest: digest(1),
@@ -2805,7 +3118,12 @@ mod tests {
             task_fingerprint_digest: digest(14),
             plan_digest,
             fixed_model_digest: digest(15),
+            baseline_reasoning_contract: baseline_reasoning,
+            reasoning_contract: candidate_reasoning,
+            baseline_reasoning_contract_digest,
+            reasoning_contract_digest,
             comparison_identity_digest: digest(4),
+            semantic_cut_verifier_identity_digest: semantic_cut.verifier_identity_digest(),
             predecessor_receipt_head: digest(5),
         };
         let candidate_identity = AbiDigestV1::from_bytes(candidate_protocol_identity_v1(&binding));
@@ -2826,7 +3144,8 @@ mod tests {
             },
             evidence: GuardEvidence {
                 artifacts,
-                semantic_cut: semantic_cut(plan_digest),
+                reasoning_admission,
+                semantic_cut,
                 snap: SnapEvidence::NotClaimed,
                 safety_shield,
                 approval_grant_digest: (effect_class == EffectClass::ApprovalRequiredMutation)
@@ -2982,6 +3301,15 @@ mod tests {
                 0x12, 0x18, 0x25, 0xd4, 0x3e, 0xee, 0x2a, 0xbc, 0xe2, 0x6a, 0x88, 0x6b, 0x67, 0xd5,
                 0xde, 0xf6, 0x44, 0x03, 0x74, 0xc3, 0x98, 0xe8, 0x4b, 0x77, 0x4d, 0x77, 0x28, 0xd0,
                 0x32, 0x13, 0x99, 0x34
+            ]
+        );
+        // 8eeb16e18c46470fd3fdec732adb249da648ba0e978e10f0f9763cfdfbce18c7
+        assert_eq!(
+            two_phase_contract_digest_v4(),
+            [
+                0x8e, 0xeb, 0x16, 0xe1, 0x8c, 0x46, 0x47, 0x0f, 0xd3, 0xfd, 0xec, 0x73, 0x2a, 0xdb,
+                0x24, 0x9d, 0xa6, 0x48, 0xba, 0x0e, 0x97, 0x8e, 0x10, 0xf0, 0xf9, 0x76, 0x3c, 0xfd,
+                0xfb, 0xce, 0x18, 0xc7,
             ]
         );
     }
@@ -3169,6 +3497,20 @@ mod tests {
 
     #[test]
     fn state_machine_forged_permit_unbounded_worker_semantic_cut_and_image_fail() {
+        let contract = reasoning_contract();
+        let reasoning_digest = *contract.identity_digest().unwrap().as_bytes();
+        let claim = semantic_claim(plan(EffectClass::ReadOnly).digest(), reasoning_digest);
+        let bytes = claim.canonical_bytes().unwrap();
+        let read_certificate = certificate(&bytes);
+        let resident = Resident { bytes: &bytes };
+        let verified_read = verify(&read_certificate, &resident).unwrap();
+        assert_eq!(
+            SemanticCutEvidenceV1::verify_owner_scoped(claim, &verified_read)
+                .unwrap_err()
+                .failure_code(),
+            SemanticCutFailureCodeV1::UnsupportedEvidenceClass
+        );
+
         let permit = prepare(request(ExecutionSurface::Pi, EffectClass::ReadOnly)).unwrap();
         let mut record = permit.record();
         record.permit_id[0] ^= 1;
@@ -3182,8 +3524,14 @@ mod tests {
             prepare(unbounded).unwrap_err().error().code,
             FailureCode::UnboundedWorker
         );
+        let mut reasoning = request(ExecutionSurface::Pi, EffectClass::ReadOnly);
+        reasoning.binding.baseline_reasoning_contract_digest[0] ^= 1;
+        assert_eq!(
+            prepare(reasoning).unwrap_err().error().code,
+            FailureCode::ReasoningContractMismatch
+        );
         let mut cut = request(ExecutionSurface::Pi, EffectClass::ReadOnly);
-        cut.evidence.semantic_cut.semantic_authority = SemanticAuthority::HiddenTaskSelector;
+        cut.binding.semantic_cut_verifier_identity_digest = digest(99);
         assert_eq!(
             prepare(cut).unwrap_err().error().code,
             FailureCode::SemanticCutCrossing
@@ -3211,7 +3559,6 @@ mod tests {
         let mut order = request(ExecutionSurface::Pi, EffectClass::ReversibleMutation);
         order.plan.instructions.swap(2, 3);
         order.binding.plan_digest = order.plan.digest();
-        order.evidence.semantic_cut.plan_digest = order.binding.plan_digest;
         assert_eq!(
             prepare(order).unwrap_err().error().code,
             FailureCode::InvalidPlan
@@ -3352,6 +3699,18 @@ mod tests {
         receipt_record.transaction_receipt_digest[0] ^= 1;
         assert_eq!(
             validate_receipt_record(&receipt_record).unwrap_err().code,
+            FailureCode::ForgedReceipt
+        );
+        let mut reasoning_tamper = receipt.record();
+        reasoning_tamper.reasoning_admission.reasoning_tokens_added = 1;
+        assert_eq!(
+            validate_receipt_record(&reasoning_tamper).unwrap_err().code,
+            FailureCode::ForgedReceipt
+        );
+        let mut semantic_tamper = receipt.record();
+        semantic_tamper.semantic_cut.claim_digest[0] ^= 1;
+        assert_eq!(
+            validate_receipt_record(&semantic_tamper).unwrap_err().code,
             FailureCode::ForgedReceipt
         );
         let mut quality_tamper = receipt.record();

@@ -22,10 +22,12 @@ use zero_cert::{CommandId, VerifiedEvidence};
 
 pub mod durable_publication;
 pub mod quality;
+pub mod semantic_cut;
 pub mod transaction;
 pub mod two_phase;
 pub use durable_publication::*;
 pub use quality::*;
+pub use semantic_cut::*;
 pub use transaction::*;
 pub use two_phase::*;
 
