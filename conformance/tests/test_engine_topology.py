@@ -9,6 +9,7 @@ from typing import Any
 ROOT=Path(__file__).parents[2]
 SCHEMA_PATH=ROOT/'conformance/schemas/engine-topology-v1.schema.json'
 MANIFEST_PATH=ROOT/'conformance/engine-topology-v1.json'
+CLEANUP_PATH=ROOT/'docs/release-cleanup-manifest-v1.json'
 class SchemaFailure(AssertionError): pass
 def resolve(s:dict[str,Any], root:dict[str,Any])->dict[str,Any]:
     ref=s.get('$ref')
@@ -74,7 +75,9 @@ def enumerate_live_inventory(root:Path)->set[str]:
 
 class TopologyTests(unittest.TestCase):
     @classmethod
-    def setUpClass(cls)->None: cls.schema,cls.manifest=load(SCHEMA_PATH),load(MANIFEST_PATH)
+    def setUpClass(cls)->None:
+        cls.schema,cls.manifest=load(SCHEMA_PATH),load(MANIFEST_PATH)
+        cls.cleanup=load(CLEANUP_PATH)
     def test_schema_refs_and_manifest(self)->None:
         self.assertEqual(self.schema['$schema'],'https://json-schema.org/draft/2020-12/schema'); self.assertEqual(self.schema['$id'],'https://zerostack.local/schemas/engine-topology-v1.schema.json')
         refs=[]
@@ -159,4 +162,46 @@ class TopologyTests(unittest.TestCase):
             if isinstance(v,dict): return [y for x in v.values() for y in walk(x)]
             return []
         for value in walk(self.manifest): self.assertFalse(value.startswith(('/', '~')) or '/Users/' in value or '\\\\Users\\\\' in value,value)
+    def test_cleanup_inventory_scope_and_authority(self)->None:
+        cleanup=self.cleanup
+        scope=["zerostack","tokenzero","fszero","graphzero","prime-zerostack"]
+        self.assertEqual(cleanup["scope"],scope)
+        repositories={item["id"]:item for item in cleanup["repositories"]}
+        self.assertEqual(set(repositories),set(scope))
+        for repository_id,item in repositories.items():
+            baseline=item["baseline"]
+            self.assertGreater(baseline["inventory_files"],0,repository_id)
+            self.assertGreater(baseline["inventory_bytes"],0,repository_id)
+            self.assertGreater(baseline["source_and_doc_lines"],0,repository_id)
+            if repository_id=="prime-zerostack":
+                self.assertEqual(baseline["vcs_state"],"untracked-package")
+                self.assertEqual(baseline["tracked_files"],0)
+            else: self.assertRegex(baseline["source_head"],r"^[0-9a-f]{40}$")
+        self.assertEqual(cleanup["status"],"inventory-only-no-deletion-authority")
+        self.assertFalse(cleanup["rules"]["history_rewrite"])
+        self.assertFalse(cleanup["rules"]["deletions_performed"])
+        self.assertEqual(cleanup["rules"]["operator_approval_granted_batches"],[])
+
+    def test_cleanup_engine_candidates_equal_topology(self)->None:
+        batches={item["id"]:item for item in self.cleanup["batches"]}
+        dispositions={"move":"move","merge":"consolidate","retire-from-release":"archive"}
+        for engine in self.manifest["engines"]:
+            expected={(item["path"],item["kind"],item["name"],dispositions[item["disposition"]],item["target_package"],item["target_binary"]) for item in engine["current_to_target"] if item["disposition"]!="keep"}
+            actual={(item["path"],item["kind"],item["current_name"],item["classification"],item["replacement_package"],item["replacement_binary"]) for item in batches[f"{engine['id']}-topology-migration"]["entries"]}
+            self.assertEqual(actual,expected,engine["id"])
+
+    def test_cleanup_batches_are_relative_and_non_authorizing(self)->None:
+        allowed={"keep","move","consolidate","archive","generate","delete-from-public-release","delete-before-first-track"}
+        for batch in self.cleanup["batches"]:
+            self.assertFalse(batch["delete_now"],batch["id"])
+            self.assertNotEqual(batch["approval_state"],"granted",batch["id"])
+            self.assertTrue(batch["entries"],batch["id"])
+            for item in batch["entries"]:
+                self.assertIn(item["classification"],allowed)
+                path=item["path"]
+                self.assertTrue(path and not path.startswith(("/","~","\\")))
+                self.assertNotIn("..",Path(path).parts)
+                self.assertNotIn("\\",path)
+        encoded=json.dumps(self.cleanup,sort_keys=True)
+        for forbidden in ("/Users/","\\Users\\","aditya"): self.assertNotIn(forbidden,encoded)
 if __name__=='__main__': unittest.main()
