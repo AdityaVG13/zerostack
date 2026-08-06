@@ -1,0 +1,37 @@
+# PROPOSAL ONLY -- do not copy into .gitignore without operator approval.
+# Applying these rules does not untrack files that Git already tracks.
+
+# Private harness and issue memory
+/AGENTS.md
+/CLAUDE.md
+/.beads/
+/.papercuts.jsonl
+/.mcp.json
+
+# Local evidence indexes and research scratch
+/.ee/
+/.research-*
+/.g[0-9]*.txt
+/.r[0-9]*.txt
+/AGENTS.md.pre-*.bak
+
+# Detached source experiments
+/cmd-group-*
+/pw-*
+
+# Generated OS and runtime state
+.DS_Store
+**/.DS_Store
+/conformance/reports/
+
+# Historical and generated output
+/archive/
+/beads_compliance_audit/
+/blobs/
+/dist/
+/target/
+/tmp/
+/videos/
+
+# Intentionally omitted pending operator decision:
+# /docs/adr/
