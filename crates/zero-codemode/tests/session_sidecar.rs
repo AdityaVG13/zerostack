@@ -529,6 +529,52 @@ fn ten_thousand_calls_settle_once_without_generation_drift() {
 }
 
 #[test]
+#[ignore = "native timing gate; run explicitly on an idle release-gate host"]
+fn warm_session_entry_latency_meets_p50_and_p95_gates() {
+    let (d, mut session, token, shutdown_token, _) = start(ProcessIdentity::current().unwrap());
+    let socket = d.path().join("runtime/session.sock");
+    let (mut stream, mut reader, generation) = connect_authenticated(&socket, &token);
+    for id in 1..=100_u64 {
+        send(
+            &mut stream,
+            json!({
+                "type":"execute","id":id,"generation":generation,
+                "root":d.path(),"source":"return 1;","timeout_ms":1000
+            }),
+        );
+        assert_eq!(read(&mut reader)["ok"], true);
+    }
+
+    let mut samples_us = Vec::with_capacity(1_000);
+    for id in 101..=1_100_u64 {
+        let started = Instant::now();
+        send(
+            &mut stream,
+            json!({
+                "type":"execute","id":id,"generation":generation,
+                "root":d.path(),"source":"return 1;","timeout_ms":1000
+            }),
+        );
+        let settled = read(&mut reader);
+        samples_us.push(started.elapsed().as_micros());
+        assert_eq!(settled["ok"], true, "request {id}: {settled}");
+    }
+    samples_us.sort_unstable();
+    let p50_us = samples_us[499];
+    let p95_us = samples_us[949];
+    println!("warm_session_latency p50_us={p50_us} p95_us={p95_us}");
+    assert!(p50_us <= 1_000, "warm p50 {p50_us}us exceeds 1000us");
+    assert!(p95_us <= 2_000, "warm p95 {p95_us}us exceeds 2000us");
+
+    send(
+        &mut stream,
+        json!({"type":"shutdown","id":1_101,"token":shutdown_token}),
+    );
+    assert_eq!(read(&mut reader)["ok"], true);
+    assert!(session.wait().unwrap().success());
+}
+
+#[test]
 fn quickjs_globals_do_not_cross_model_visible_plans() {
     let (d, mut session, token, shutdown_token, _) = start(ProcessIdentity::current().unwrap());
     let socket = d.path().join("runtime/session.sock");
@@ -611,6 +657,10 @@ fn terminal_cancellation_rejects_queued_execution() {
     // spawns threads and cargo test isolates the process per test binary.
     unsafe {
         std::env::set_var("ZEROSTACK_SESSION_ROOT", d.path());
+        std::env::set_var(
+            zero_codemode::worker::SESSION_ID_ENV,
+            "test-terminal-cancel",
+        );
         std::env::set_var("ZEROSTACK_TEST_MODE", "1");
         for engine in ["FSZERO", "GRAPHZERO", "TOKENZERO"] {
             std::env::set_var(
@@ -859,15 +909,123 @@ fn unknown_authenticated_request_is_typed_and_connection_survives() {
 }
 
 #[test]
-fn malformed_and_oversize_frames_are_rejected() {
-    let (d, mut c, _, _, _) = start(ProcessIdentity::current().unwrap());
-    let sock = d.path().join("runtime/session.sock");
-    let mut s = UnixStream::connect(&sock).unwrap();
-    s.write_all(b"not-json\n").unwrap();
-    drop(s);
-    let mut s = UnixStream::connect(&sock).unwrap();
-    let _ = s.write_all(&vec![b'x'; zero_codemode::session::MAX_SESSION_FRAME + 2]);
-    drop(s);
-    c.kill().unwrap();
-    let _ = c.wait();
+fn authenticated_idle_connection_survives_and_shutdown_interrupts_it() {
+    let (d, mut session, token, shutdown_token, _) = start(ProcessIdentity::current().unwrap());
+    let socket = d.path().join("runtime/session.sock");
+    let (mut idle_stream, mut idle_reader, generation) = connect_authenticated(&socket, &token);
+    let (mut control, mut control_reader, control_generation) =
+        connect_authenticated(&socket, &token);
+    assert_eq!(control_generation, generation);
+
+    thread::sleep(Duration::from_millis(600));
+    send(
+        &mut idle_stream,
+        json!({
+            "type":"execute","id":750,"generation":generation,
+            "root":d.path(),"source":"return 750;","timeout_ms":1000
+        }),
+    );
+    let settlement = read(&mut idle_reader);
+    assert_eq!(settlement["ok"], true, "{settlement}");
+    assert_eq!(settlement["result"], 750);
+
+    let started = Instant::now();
+    send(
+        &mut control,
+        json!({"type":"shutdown","id":751,"token":shutdown_token}),
+    );
+    assert_eq!(read(&mut control_reader)["ok"], true);
+    assert!(session.wait().unwrap().success());
+    assert!(
+        started.elapsed() < Duration::from_millis(250),
+        "normal shutdown took {:?}",
+        started.elapsed()
+    );
+}
+
+#[test]
+fn plan_failure_is_typed_and_connection_survives() {
+    let (d, mut session, token, shutdown_token, _) = start(ProcessIdentity::current().unwrap());
+    let socket = d.path().join("runtime/session.sock");
+    let (mut stream, mut reader, generation) = connect_authenticated(&socket, &token);
+    send(
+        &mut stream,
+        json!({
+            "type":"execute",
+            "id":800,
+            "generation":generation,
+            "root":d.path(),
+            "source":"return (",
+            "timeout_ms":1000
+        }),
+    );
+    let failure = read(&mut reader);
+    assert_eq!(failure["ok"], false, "{failure}");
+    assert_eq!(failure["id"], 800);
+    assert_eq!(failure["code"], "backend_execution");
+
+    send(
+        &mut stream,
+        json!({
+            "type":"execute",
+            "id":801,
+            "generation":generation,
+            "root":d.path(),
+            "source":"return 801;",
+            "timeout_ms":1000
+        }),
+    );
+    let settlement = read(&mut reader);
+    assert_eq!(settlement["ok"], true, "{settlement}");
+    assert_eq!(settlement["result"], 801);
+    send(
+        &mut stream,
+        json!({"type":"shutdown","id":802,"token":shutdown_token}),
+    );
+    assert_eq!(read(&mut reader)["ok"], true);
+    assert!(session.wait().unwrap().success());
+}
+
+#[test]
+fn malformed_and_oversize_frames_return_typed_errors() {
+    let (d, mut session, token, shutdown_token, _) = start(ProcessIdentity::current().unwrap());
+    let socket = d.path().join("runtime/session.sock");
+    let (mut stream, mut reader, generation) = connect_authenticated(&socket, &token);
+    stream.write_all(b"not-json\n").unwrap();
+    stream.flush().unwrap();
+    let malformed = read(&mut reader);
+    assert_eq!(malformed["ok"], false, "{malformed}");
+    assert_eq!(malformed["code"], "invalid_frame");
+
+    send(
+        &mut stream,
+        json!({
+            "type":"execute",
+            "id":900,
+            "generation":generation,
+            "root":d.path(),
+            "source":"return 900;",
+            "timeout_ms":1000
+        }),
+    );
+    let current = read(&mut reader);
+    assert_eq!(current["ok"], true, "{current}");
+    assert_eq!(current["result"], 900);
+
+    let (mut oversized_stream, mut oversized_reader, oversized_generation) =
+        connect_authenticated(&socket, &token);
+    assert_eq!(oversized_generation, generation);
+    let oversized = vec![b'x'; zero_codemode::session::MAX_SESSION_FRAME + 2];
+    oversized_stream.write_all(&oversized).unwrap();
+    oversized_stream.flush().unwrap();
+    let rejection = read(&mut oversized_reader);
+    assert_eq!(rejection["ok"], false, "{rejection}");
+    assert_eq!(rejection["code"], "oversized_frame");
+
+    send(
+        &mut stream,
+        json!({"type":"shutdown","id":901,"token":shutdown_token}),
+    );
+    assert_eq!(read(&mut reader)["ok"], true);
+    assert!(session.wait().unwrap().success());
 }

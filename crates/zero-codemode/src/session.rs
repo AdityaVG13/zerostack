@@ -821,12 +821,20 @@ pub struct SessionExecutor {
 }
 impl SessionExecutor {
     pub fn new() -> Result<Self, HostError> {
-        let root = std::env::var("ZEROSTACK_SESSION_ROOT")
-            .map(PathBuf::from)
-            .unwrap_or_else(|_| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
+        let configured_root = std::env::var("ZEROSTACK_SESSION_ROOT").map_err(|_| {
+            HostError::Connector("missing explicit ZEROSTACK_SESSION_ROOT authorization".into())
+        })?;
+        let root = PathBuf::from(configured_root)
+            .canonicalize()
+            .map_err(|error| {
+                HostError::Connector(format!("cannot resolve authorized session root: {error}"))
+            })?;
         let session_id = current_session_id()
             .or_else(|| std::env::var(crate::worker::SESSION_ID_ENV).ok())
-            .unwrap_or_else(|| format!("session-{}", std::process::id()));
+            .filter(|value| !value.is_empty())
+            .ok_or_else(|| {
+                HostError::Connector("missing explicit ZeroStack session identity".into())
+            })?;
         let cancellation = CancellationSignal::new();
         let connector = Rc::new(AggregateConnector::new(
             root,

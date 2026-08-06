@@ -42,6 +42,12 @@ enum SessionEvent {
 struct ActiveClientGuard(std::sync::Arc<std::sync::atomic::AtomicUsize>);
 
 #[cfg(unix)]
+struct ClientHandler {
+    join: std::thread::JoinHandle<()>,
+    control: std::os::unix::net::UnixStream,
+}
+
+#[cfg(unix)]
 impl Drop for ActiveClientGuard {
     fn drop(&mut self) {
         self.0.fetch_sub(1, std::sync::atomic::Ordering::AcqRel);
@@ -246,7 +252,8 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 let handler_terminating = Arc::clone(&terminating);
                 let handler_events = handler_tx.clone();
                 let active = Arc::clone(&active_clients);
-                handlers.push(thread::spawn(move || {
+                let control = stream.try_clone()?;
+                let join = thread::spawn(move || {
                     let _guard = ActiveClientGuard(active);
                     if let Err(error) = handle_client(
                         stream,
@@ -259,11 +266,12 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                     ) {
                         eprintln!("session client failed: {error}");
                     }
-                }));
+                });
+                handlers.push(ClientHandler { join, control });
                 let mut pending = Vec::with_capacity(handlers.len());
                 for handler in handlers.drain(..) {
-                    if handler.is_finished() {
-                        let _ = handler.join();
+                    if handler.join.is_finished() {
+                        let _ = handler.join.join();
                     } else {
                         pending.push(handler);
                     }
@@ -273,8 +281,11 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         }
     };
     let shutdown_result = exec.shutdown();
+    for handler in &handlers {
+        let _ = handler.control.shutdown(std::net::Shutdown::Both);
+    }
     for handler in handlers {
-        let _ = handler.join();
+        let _ = handler.join.join();
     }
     if let Err(error) = shutdown_result {
         if fatal_error.is_none() {
@@ -363,6 +374,9 @@ fn handle_client(
         );
         return Ok(());
     }
+    // The authenticated session is long-lived. Teardown interrupts this blocking
+    // read through the supervisor-held stream clone instead of a polling timeout.
+    stream.set_read_timeout(None)?;
     let active_generation = session.generation()?;
     write_frame(
         &mut stream,
@@ -382,7 +396,22 @@ fn handle_client(
         }
         let raw_request = match read_value_frame(&mut reader) {
             Ok(value) => value,
-            Err(_) => break,
+            Err(error) if error.connection_closed => break,
+            Err(error) => {
+                write_frame(
+                    &mut stream,
+                    &SessionResponse::typed_error(
+                        None,
+                        active_generation,
+                        error.code,
+                        error.to_string(),
+                    ),
+                )?;
+                if error.recoverable && !terminating.load(Ordering::Acquire) {
+                    continue;
+                }
+                break;
+            }
         };
         let request_id = raw_request.get("id").and_then(Value::as_u64);
         let request = match serde_json::from_value::<SessionRequest>(raw_request.clone()) {
@@ -646,22 +675,61 @@ fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
     d == 0
 }
 #[cfg(unix)]
-fn read_value_frame(
-    r: &mut impl std::io::BufRead,
-) -> Result<serde_json::Value, Box<dyn std::error::Error>> {
+#[derive(Debug)]
+struct SessionFrameError {
+    code: &'static str,
+    message: String,
+    recoverable: bool,
+    connection_closed: bool,
+}
+
+#[cfg(unix)]
+impl std::fmt::Display for SessionFrameError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(&self.message)
+    }
+}
+
+#[cfg(unix)]
+impl std::error::Error for SessionFrameError {}
+
+#[cfg(unix)]
+fn read_value_frame(r: &mut impl std::io::BufRead) -> Result<serde_json::Value, SessionFrameError> {
     let mut bytes = Vec::new();
     let mut limited = std::io::Read::take(
         &mut *r,
         (zero_codemode::session::MAX_SESSION_FRAME + 1) as u64,
     );
-    let count = std::io::BufRead::read_until(&mut limited, b'\n', &mut bytes)?;
-    if count == 0
-        || bytes.len() > zero_codemode::session::MAX_SESSION_FRAME
-        || bytes.last() != Some(&b'\n')
-    {
-        return Err("invalid or oversized frame".into());
+    let count = std::io::BufRead::read_until(&mut limited, b'\n', &mut bytes).map_err(|error| {
+        SessionFrameError {
+            code: "frame_io_error",
+            message: format!("request frame read failed: {error}"),
+            recoverable: false,
+            connection_closed: false,
+        }
+    })?;
+    if count == 0 {
+        return Err(SessionFrameError {
+            code: "connection_closed",
+            message: "connection closed".into(),
+            recoverable: false,
+            connection_closed: true,
+        });
     }
-    Ok(serde_json::from_slice(&bytes)?)
+    if bytes.len() > zero_codemode::session::MAX_SESSION_FRAME || bytes.last() != Some(&b'\n') {
+        return Err(SessionFrameError {
+            code: "oversized_frame",
+            message: "request frame exceeds the session limit".into(),
+            recoverable: false,
+            connection_closed: false,
+        });
+    }
+    serde_json::from_slice(&bytes).map_err(|error| SessionFrameError {
+        code: "invalid_frame",
+        message: format!("request frame is not valid JSON: {error}"),
+        recoverable: true,
+        connection_closed: false,
+    })
 }
 
 #[cfg(unix)]
