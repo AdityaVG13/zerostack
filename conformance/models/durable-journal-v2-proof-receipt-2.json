@@ -1,0 +1,33 @@
+{
+  "bead_key": "zerostack-z3fs",
+  "claim_or_freeze_ids": [
+    "Z6",
+    "zerostack-racc-frontier-86qk.21"
+  ],
+  "correction": {
+    "embedded_nul_bytes": 0,
+    "path": "crates/zero-gate/src/durable_publication.rs",
+    "runtime_domain_semantics": "unchanged_textual_escape",
+    "sha256": "326187c732ba378f3c086947ca230767fa60de44860dfbb16801230750b8a36b"
+  },
+  "exact_commands": [
+    "rch exec -- env CARGO_TARGET_DIR=/tmp/rch_target_zerostack_z6 cargo test -p zero-gate durable_publication -- --test-threads=1"
+  ],
+  "failure_code": null,
+  "final_z6_promotion": "OPEN_PENDING_NATIVE_PROFILE_RECEIPTS",
+  "generated_at": "2026-08-06T08:30:25.925784Z",
+  "predecessor_receipt": {
+    "path": "conformance/models/durable-journal-v2-proof-receipt.json",
+    "sha256": "771221292c34b0350b542a5367b199c8791607e0ed9c29e98af2ba617bc1d2fa"
+  },
+  "result": {
+    "operational_durability_claim": false,
+    "status": "passed_rch_correction",
+    "tests_passed": 4
+  },
+  "schema_version": 1,
+  "source_repository_heads": {
+    "ZeroStack_base": "78d9e79913883fa6e69bf239ec58fb1a7c582c1a"
+  },
+  "source_tree_digest": "3315d485dbbb8463c5b3019a1738f6a363601fcd0f49a3e3581e3b04b871671f"
+}
