@@ -4,18 +4,96 @@
 //! receipts are linear capabilities. Their fields are private, they are not
 //! cloneable, and only the preceding phase can construct the next phase.
 
+use crate::transaction::{
+    transaction_contract_digest_v1, RestorationScopeV1, TransactionDispositionV1,
+    TransactionReceiptV1,
+};
 use serde::{Deserialize, Serialize};
+use serde_json::{json, Value};
 use sha2::{Digest as _, Sha256};
 use std::collections::BTreeSet;
 use std::fmt;
-use zero_abi::raw_worker::EffectClass;
+use zero_abi::{
+    canonical_json, raw_worker::EffectClass, zbf_contract_digest_v1, ArtifactOwnerV1,
+    DigestV1 as AbiDigestV1, DurableProfileV1, RobustSnapCertificate, SnapLevel, ZbfArtifactKindV1,
+    ZbfObjectV1,
+};
+use zero_cert::{effect_witness_contract_digest_v1, EffectAcceptedV1, VerifiedEvidence};
 
-pub const TWO_PHASE_SCHEMA_VERSION: u16 = 1;
+pub const TWO_PHASE_SCHEMA_VERSION: u16 = 2;
 pub const GUARD_COUNT: usize = 10;
 pub const MAX_SOURCE_REPOSITORIES: usize = 64;
 pub const MAX_CONTROLLER_INSTRUCTIONS: usize = 4_096;
 
 pub type DigestV1 = [u8; 32];
+
+const TWO_PHASE_CONTRACT_DOMAIN_V2: &[u8] = b"zerostack.kernel.contract.v2\0";
+
+pub fn two_phase_contract_manifest_v2() -> Value {
+    json!({
+        "artifact_profile": "zbf_1_portable_strict",
+        "contract_version": TWO_PHASE_SCHEMA_VERSION,
+        "guard_order": Guard::ALL,
+        "linked_contracts": {
+            "effect_witness": effect_witness_contract_digest_v1(),
+            "transaction": transaction_contract_digest_v1(),
+            "zbf": zbf_contract_digest_v1(),
+        },
+        "name": "zerostack.two_phase_kernel.v2",
+        "negative_space": [
+            "native_filesystem_durability",
+            "production_worker_contract_enforcement",
+            "quality_modes_without_proof",
+            "universal_external_state_restoration",
+        ],
+        "quality_modes_admitted": ["exact_neutral", "baseline_fallback"],
+        "receipt_bindings": [
+            "schema_version",
+            "kind",
+            "permit_id",
+            "binding_digest",
+            "admission_digest",
+            "assembly_manifest_digest",
+            "source_tree_digest",
+            "source_repository_heads",
+            "image_digest",
+            "state_snapshot_digest",
+            "task_fingerprint_digest",
+            "plan_digest",
+            "fixed_model_digest",
+            "comparison_identity_digest",
+            "artifact_set_digest",
+            "semantic_cut_certificate_digest",
+            "snap_certificate_digest",
+            "safety_shield_digest",
+            "quality_decision_digest",
+            "transaction_receipt_digest",
+            "attribution_class",
+            "effect_class",
+            "resource_envelope",
+            "surface",
+            "verification_digest",
+            "output_digest",
+            "effects_digest",
+            "resource_usage",
+            "predecessor_receipt_head",
+            "successor_root",
+            "trace_digest",
+            "failure_code",
+            "restoration",
+            "receipt_head",
+        ],
+        "transaction_closure": "validated_zero_gate_transaction_receipt_only",
+    })
+}
+
+pub fn two_phase_contract_digest_v2() -> DigestV1 {
+    let canonical = canonical_json(&two_phase_contract_manifest_v2());
+    let mut bytes = Vec::with_capacity(TWO_PHASE_CONTRACT_DOMAIN_V2.len() + canonical.len());
+    bytes.extend_from_slice(TWO_PHASE_CONTRACT_DOMAIN_V2);
+    bytes.extend_from_slice(canonical.as_bytes());
+    hash_bytes(&bytes)
+}
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, Ord, PartialEq, PartialOrd, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -167,6 +245,141 @@ impl fmt::Display for KernelError {
 }
 impl std::error::Error for KernelError {}
 
+#[derive(Clone, Debug)]
+pub struct PeerArtifactInputV1 {
+    pub bytes: Vec<u8>,
+    pub expected_owner: ArtifactOwnerV1,
+    pub expected_kind: ZbfArtifactKindV1,
+    pub expected_producer_contract_digest: DigestV1,
+}
+
+/// Opaque G0/G1 evidence minted only by strict ZBF decode and coherence checks.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct CanonicalArtifactSetV1 {
+    assembly_manifest_digest: DigestV1,
+    source_root_digest: DigestV1,
+    image_digest: DigestV1,
+    artifact_set_digest: DigestV1,
+    artifact_identities: Vec<DigestV1>,
+    producer_contract_digests: Vec<DigestV1>,
+}
+
+impl CanonicalArtifactSetV1 {
+    pub fn verify(
+        assembly_manifest_digest: DigestV1,
+        source_root_digest: DigestV1,
+        artifacts: Vec<PeerArtifactInputV1>,
+    ) -> Result<Self, KernelError> {
+        if is_zero(&assembly_manifest_digest) || is_zero(&source_root_digest) {
+            return Err(KernelError::at(
+                FailureCode::MissingBinding,
+                Guard::G0Canonical,
+                "artifact assembly and source-root bindings must be nonzero",
+            ));
+        }
+        let expected = [
+            (ArtifactOwnerV1::FsZero, ZbfArtifactKindV1::FsPack),
+            (ArtifactOwnerV1::GraphZero, ZbfArtifactKindV1::GraphPack),
+            (ArtifactOwnerV1::TokenZero, ZbfArtifactKindV1::TokenPack),
+        ];
+        if artifacts.len() != expected.len() {
+            return Err(KernelError::at(
+                FailureCode::InvalidSourceIdentity,
+                Guard::G1Coherence,
+                "canonical Zero Image requires exactly one FS, graph, and token pack",
+            ));
+        }
+        let assembly = AbiDigestV1::from_bytes(assembly_manifest_digest);
+        let source_root = AbiDigestV1::from_bytes(source_root_digest);
+        let profile = DurableProfileV1::portable_strict();
+        let mut artifact_identities = Vec::with_capacity(expected.len());
+        let mut producer_contract_digests = Vec::with_capacity(expected.len());
+        for (index, (input, (owner, kind))) in artifacts.into_iter().zip(expected).enumerate() {
+            if input.expected_owner != owner || input.expected_kind != kind {
+                return Err(KernelError::at(
+                    FailureCode::InvalidSourceIdentity,
+                    Guard::G1Coherence,
+                    format!("peer artifact {index} is not in canonical FS/graph/token order"),
+                ));
+            }
+            if is_zero(&input.expected_producer_contract_digest) {
+                return Err(KernelError::at(
+                    FailureCode::MissingBinding,
+                    Guard::G1Coherence,
+                    format!("peer artifact {index} has a zero producer contract"),
+                ));
+            }
+            let object =
+                ZbfObjectV1::from_bytes(&input.bytes, assembly, profile).map_err(|error| {
+                    KernelError::at(
+                        FailureCode::CanonicalDigestMismatch,
+                        Guard::G0Canonical,
+                        format!("peer artifact {index} failed strict ZBF decode: {error}"),
+                    )
+                })?;
+            if object.header.owner != owner
+                || object.header.kind != kind
+                || object.header.source_root_digest != source_root
+                || object.header.producer_contract_digest
+                    != AbiDigestV1::from_bytes(input.expected_producer_contract_digest)
+            {
+                return Err(KernelError::at(
+                    FailureCode::CoherenceFailure,
+                    Guard::G1Coherence,
+                    format!("peer artifact {index} owner/kind/source/producer binding differs"),
+                ));
+            }
+            let identity = object.identity(profile).map_err(|error| {
+                KernelError::at(
+                    FailureCode::CanonicalDigestMismatch,
+                    Guard::G0Canonical,
+                    format!("peer artifact {index} identity failed: {error}"),
+                )
+            })?;
+            artifact_identities.push(*identity.as_bytes());
+            producer_contract_digests.push(input.expected_producer_contract_digest);
+        }
+        let image_digest = image_digest_v1(source_root_digest, &artifact_identities);
+        let mut commitment = Vec::new();
+        commitment.extend_from_slice(b"zerostack.kernel.artifact_set.v2\0");
+        commitment.extend_from_slice(&assembly_manifest_digest);
+        commitment.extend_from_slice(&source_root_digest);
+        commitment.extend_from_slice(&image_digest);
+        for (identity, producer) in artifact_identities.iter().zip(&producer_contract_digests) {
+            commitment.extend_from_slice(identity);
+            commitment.extend_from_slice(producer);
+        }
+        Ok(Self {
+            assembly_manifest_digest,
+            source_root_digest,
+            image_digest,
+            artifact_set_digest: hash_bytes(&commitment),
+            artifact_identities,
+            producer_contract_digests,
+        })
+    }
+
+    pub const fn image_digest(&self) -> DigestV1 {
+        self.image_digest
+    }
+
+    pub const fn artifact_set_digest(&self) -> DigestV1 {
+        self.artifact_set_digest
+    }
+}
+
+fn image_digest_v1(source_root: DigestV1, artifacts: &[DigestV1]) -> DigestV1 {
+    let mut bytes = Vec::with_capacity(64 + artifacts.len() * 32);
+    bytes.extend_from_slice(b"zerostack.kernel.image.v2\0");
+    bytes.extend_from_slice(&source_root);
+    bytes.extend_from_slice(&(artifacts.len() as u64).to_be_bytes());
+    for artifact in artifacts {
+        bytes.extend_from_slice(artifact);
+    }
+    hash_bytes(&bytes)
+}
+
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct ExecutionTrace {
@@ -263,7 +476,8 @@ impl ExecutionTrace {
     }
 
     pub fn digest(&self) -> DigestV1 {
-        let mut bytes = Vec::with_capacity(64 + self.events.len() * 3);
+        let mut bytes = Vec::with_capacity(96 + self.events.len() * 3);
+        bytes.extend_from_slice(b"zerostack.kernel.trace.v2\0");
         bytes.extend_from_slice(&TWO_PHASE_SCHEMA_VERSION.to_be_bytes());
         for event in &self.events {
             bytes.push(event.guard as u8);
@@ -296,7 +510,10 @@ pub struct ExecutionBinding {
     pub source_tree_digest: DigestV1,
     pub source_repository_heads: Vec<SourceHead>,
     pub image_digest: DigestV1,
+    pub state_snapshot_digest: DigestV1,
+    pub task_fingerprint_digest: DigestV1,
     pub plan_digest: DigestV1,
+    pub fixed_model_digest: DigestV1,
     pub comparison_identity_digest: DigestV1,
     pub predecessor_receipt_head: DigestV1,
 }
@@ -304,15 +521,20 @@ pub struct ExecutionBinding {
 impl ExecutionBinding {
     pub fn digest(&self) -> DigestV1 {
         let mut bytes = Vec::new();
+        bytes.extend_from_slice(b"zerostack.kernel.binding.v2\0");
         bytes.extend_from_slice(&self.schema_version.to_be_bytes());
         bytes.extend_from_slice(&self.assembly_manifest_digest);
         bytes.extend_from_slice(&self.source_tree_digest);
+        bytes.extend_from_slice(&(self.source_repository_heads.len() as u64).to_be_bytes());
         for source in &self.source_repository_heads {
             append_bounded(&mut bytes, source.repository.as_bytes());
             append_bounded(&mut bytes, source.head.as_bytes());
         }
         bytes.extend_from_slice(&self.image_digest);
+        bytes.extend_from_slice(&self.state_snapshot_digest);
+        bytes.extend_from_slice(&self.task_fingerprint_digest);
         bytes.extend_from_slice(&self.plan_digest);
+        bytes.extend_from_slice(&self.fixed_model_digest);
         bytes.extend_from_slice(&self.comparison_identity_digest);
         bytes.extend_from_slice(&self.predecessor_receipt_head);
         hash_bytes(&bytes)
@@ -379,7 +601,8 @@ pub struct ControllerPlan {
 }
 impl ControllerPlan {
     pub fn digest(&self) -> DigestV1 {
-        let mut bytes = Vec::with_capacity(8 + self.instructions.len());
+        let mut bytes = Vec::with_capacity(40 + self.instructions.len());
+        bytes.extend_from_slice(b"zerostack.kernel.plan.v2\0");
         bytes.extend_from_slice(&(self.instructions.len() as u64).to_be_bytes());
         bytes.extend(
             self.instructions
@@ -443,44 +666,280 @@ pub enum AttributionClass {
     Changed,
 }
 
-#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+/// Opaque G3 evidence binding the semantic cut to the frozen comparison identity.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct SemanticCutEvidenceV1 {
+    certificate_digest: DigestV1,
+    plan_digest: DigestV1,
+    fixed_model_digest: DigestV1,
+    comparison_identity_digest: DigestV1,
+    semantic_authority: SemanticAuthority,
+    attribution_class: AttributionClass,
+}
+
+impl SemanticCutEvidenceV1 {
+    pub fn verify_owner_scoped(
+        plan_digest: DigestV1,
+        fixed_model_digest: DigestV1,
+        comparison_identity_digest: DigestV1,
+        evidence: &VerifiedEvidence<'_, '_>,
+    ) -> Result<Self, KernelError> {
+        if [plan_digest, fixed_model_digest, comparison_identity_digest]
+            .iter()
+            .any(is_zero)
+        {
+            return Err(KernelError::at(
+                FailureCode::SemanticCutCrossing,
+                Guard::G3Attribution,
+                "semantic-cut identity bindings must be nonzero",
+            ));
+        }
+        let certificate_digest = evidence.certificate().canonical_digest().map_err(|error| {
+            KernelError::at(
+                FailureCode::SemanticCutCrossing,
+                Guard::G3Attribution,
+                format!("semantic-cut evidence is not canonical: {error}"),
+            )
+        })?;
+        Ok(Self {
+            certificate_digest,
+            plan_digest,
+            fixed_model_digest,
+            comparison_identity_digest,
+            semantic_authority: SemanticAuthority::OwnerScoped,
+            attribution_class: AttributionClass::Fixed,
+        })
+    }
+
+    pub const fn certificate_digest(&self) -> DigestV1 {
+        self.certificate_digest
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case", tag = "status")]
 pub enum SnapEvidence {
     NotClaimed,
-    Verified { certificate_digest: DigestV1 },
-    ClaimedWithoutCertificate,
+    Verified { certificate: RobustSnapCertificate },
 }
 
-#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
-#[serde(rename_all = "snake_case", tag = "status")]
-pub enum PerformanceAdmission {
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+enum SafetyShieldKindV1 {
+    ReadOnly,
+    AcceptedEffect,
+}
+
+/// Opaque G6 evidence minted from verified zero-cert evidence or EffectAcceptedV1.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct SafetyShieldEvidenceV1 {
+    kind: SafetyShieldKindV1,
+    shield_digest: DigestV1,
+    state_snapshot: DigestV1,
+    action_digest: Option<DigestV1>,
+    evidence_digest: DigestV1,
+    verifier_digest: DigestV1,
+    acceptance_digest: Option<DigestV1>,
+    accepted_effect: Option<EffectAcceptedV1>,
+}
+
+impl SafetyShieldEvidenceV1 {
+    pub fn from_read_only_verified(
+        state_snapshot: DigestV1,
+        verifier_digest: DigestV1,
+        evidence: &VerifiedEvidence<'_, '_>,
+    ) -> Result<Self, KernelError> {
+        if is_zero(&state_snapshot) || is_zero(&verifier_digest) {
+            return Err(KernelError::at(
+                FailureCode::MissingSafetyShield,
+                Guard::G6SafetyShield,
+                "read-only shield state and verifier bindings must be nonzero",
+            ));
+        }
+        let evidence_digest = evidence.certificate().canonical_digest().map_err(|error| {
+            KernelError::at(
+                FailureCode::MissingSafetyShield,
+                Guard::G6SafetyShield,
+                format!("verified read-only evidence is not canonical: {error}"),
+            )
+        })?;
+        let shield_digest = safety_shield_digest_v1(
+            SafetyShieldKindV1::ReadOnly,
+            state_snapshot,
+            None,
+            evidence_digest,
+            verifier_digest,
+            None,
+        );
+        Ok(Self {
+            kind: SafetyShieldKindV1::ReadOnly,
+            shield_digest,
+            state_snapshot,
+            action_digest: None,
+            evidence_digest,
+            verifier_digest,
+            acceptance_digest: None,
+            accepted_effect: None,
+        })
+    }
+
+    pub fn from_effect_accepted(accepted: EffectAcceptedV1) -> Result<Self, KernelError> {
+        accepted.validate().map_err(|error| {
+            KernelError::at(
+                FailureCode::MissingSafetyShield,
+                Guard::G6SafetyShield,
+                format!("effect acceptance is invalid: {error}"),
+            )
+        })?;
+        let state_snapshot = *accepted.state_snapshot().as_bytes();
+        let action_digest = *accepted.action_digest().as_bytes();
+        let evidence_digest = *accepted.evidence_digest().as_bytes();
+        let verifier_digest = *accepted.verifier_digest().as_bytes();
+        let acceptance_digest = *accepted.acceptance_digest().as_bytes();
+        let shield_digest = safety_shield_digest_v1(
+            SafetyShieldKindV1::AcceptedEffect,
+            state_snapshot,
+            Some(action_digest),
+            evidence_digest,
+            verifier_digest,
+            Some(acceptance_digest),
+        );
+        Ok(Self {
+            kind: SafetyShieldKindV1::AcceptedEffect,
+            shield_digest,
+            state_snapshot,
+            action_digest: Some(action_digest),
+            evidence_digest,
+            verifier_digest,
+            acceptance_digest: Some(acceptance_digest),
+            accepted_effect: Some(accepted),
+        })
+    }
+
+    pub const fn shield_digest(&self) -> DigestV1 {
+        self.shield_digest
+    }
+
+    pub const fn action_digest(&self) -> Option<DigestV1> {
+        self.action_digest
+    }
+
+    pub const fn acceptance_digest(&self) -> Option<DigestV1> {
+        self.acceptance_digest
+    }
+}
+
+fn safety_shield_digest_v1(
+    kind: SafetyShieldKindV1,
+    state_snapshot: DigestV1,
+    action_digest: Option<DigestV1>,
+    evidence_digest: DigestV1,
+    verifier_digest: DigestV1,
+    acceptance_digest: Option<DigestV1>,
+) -> DigestV1 {
+    let mut bytes = Vec::new();
+    bytes.extend_from_slice(b"zerostack.kernel.safety_shield.v2\0");
+    bytes.push(match kind {
+        SafetyShieldKindV1::ReadOnly => 0,
+        SafetyShieldKindV1::AcceptedEffect => 1,
+    });
+    bytes.extend_from_slice(&state_snapshot);
+    append_optional_digest(&mut bytes, action_digest);
+    bytes.extend_from_slice(&evidence_digest);
+    bytes.extend_from_slice(&verifier_digest);
+    append_optional_digest(&mut bytes, acceptance_digest);
+    hash_bytes(&bytes)
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+#[repr(u8)]
+pub enum QualityModeV1 {
     ExactNeutral,
-    PointwiseDominance { evidence_digest: DigestV1 },
-    ScopedCertificate { evidence_digest: DigestV1 },
-    Distributional { evidence_digest: DigestV1 },
+    PointwiseDominance,
+    ScopedCertificate,
+    Distributional,
     BaselineFallback,
     Unknown,
 }
 
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+/// G7 evidence. The current kernel admits equality only by exact outcome digest;
+/// richer quality constructors land in the ordered quality-envelope bead.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct PerformanceAdmission {
+    mode: QualityModeV1,
+    baseline_outcome_digest: DigestV1,
+    candidate_outcome_digest: Option<DigestV1>,
+    evidence_digest: DigestV1,
+}
+
+impl PerformanceAdmission {
+    pub fn exact_neutral(outcome_digest: DigestV1) -> Result<Self, KernelError> {
+        if is_zero(&outcome_digest) {
+            return Err(KernelError::at(
+                FailureCode::PerformanceUnknown,
+                Guard::G7Performance,
+                "exact-neutral outcome digest must be nonzero",
+            ));
+        }
+        Ok(Self {
+            mode: QualityModeV1::ExactNeutral,
+            baseline_outcome_digest: outcome_digest,
+            candidate_outcome_digest: Some(outcome_digest),
+            evidence_digest: outcome_digest,
+        })
+    }
+
+    pub fn baseline_fallback(
+        baseline_outcome_digest: DigestV1,
+        baseline_receipt_digest: DigestV1,
+    ) -> Result<Self, KernelError> {
+        if is_zero(&baseline_outcome_digest) || is_zero(&baseline_receipt_digest) {
+            return Err(KernelError::at(
+                FailureCode::PerformanceUnknown,
+                Guard::G7Performance,
+                "baseline fallback outcome and receipt digests must be nonzero",
+            ));
+        }
+        Ok(Self {
+            mode: QualityModeV1::BaselineFallback,
+            baseline_outcome_digest,
+            candidate_outcome_digest: None,
+            evidence_digest: baseline_receipt_digest,
+        })
+    }
+
+    pub const fn mode(&self) -> QualityModeV1 {
+        self.mode
+    }
+
+    pub fn digest(&self) -> DigestV1 {
+        let mut bytes = Vec::new();
+        bytes.extend_from_slice(b"zerostack.kernel.quality.v2\0");
+        bytes.push(self.mode as u8);
+        bytes.extend_from_slice(&self.baseline_outcome_digest);
+        append_optional_digest(&mut bytes, self.candidate_outcome_digest);
+        bytes.extend_from_slice(&self.evidence_digest);
+        hash_bytes(&bytes)
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct GuardEvidence {
-    pub canonical_object_digest: DigestV1,
-    pub decoded_object_digest: DigestV1,
-    pub owner_coherent: bool,
-    pub producer_coherent: bool,
-    pub schema_coherent: bool,
-    pub source_root_coherent: bool,
-    pub semantic_authority: SemanticAuthority,
-    pub attribution_class: AttributionClass,
+    pub artifacts: CanonicalArtifactSetV1,
+    pub semantic_cut: SemanticCutEvidenceV1,
     pub snap: SnapEvidence,
-    pub safety_shield_digest: DigestV1,
+    pub safety_shield: SafetyShieldEvidenceV1,
     pub approval_grant_digest: Option<DigestV1>,
     pub irreversible_pre_action_evidence_digest: Option<DigestV1>,
     pub performance: PerformanceAdmission,
 }
 
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct PrepareRequest {
     pub binding: ExecutionBinding,
@@ -495,6 +954,7 @@ impl PrepareRequest {
     /// Canonical commitment to every G0-G7 admission input.
     pub fn admission_digest(&self) -> DigestV1 {
         let mut bytes = Vec::new();
+        bytes.extend_from_slice(b"zerostack.kernel.admission.v2\0");
         bytes.extend_from_slice(&self.binding.digest());
         bytes.push(self.surface as u8);
         bytes.push(effect_class_tag(self.effect_class));
@@ -511,48 +971,27 @@ impl PrepareRequest {
         bytes.extend_from_slice(&envelope.worker_steps.to_be_bytes());
 
         let evidence = &self.evidence;
-        bytes.extend_from_slice(&evidence.canonical_object_digest);
-        bytes.extend_from_slice(&evidence.decoded_object_digest);
-        bytes.push(evidence.owner_coherent as u8);
-        bytes.push(evidence.producer_coherent as u8);
-        bytes.push(evidence.schema_coherent as u8);
-        bytes.push(evidence.source_root_coherent as u8);
-        bytes.push(match evidence.semantic_authority {
+        bytes.extend_from_slice(&evidence.artifacts.artifact_set_digest);
+        bytes.extend_from_slice(&evidence.semantic_cut.certificate_digest);
+        bytes.push(match evidence.semantic_cut.semantic_authority {
             SemanticAuthority::OwnerScoped => 0,
             SemanticAuthority::HiddenTaskSelector => 1,
         });
-        bytes.push(match evidence.attribution_class {
+        bytes.push(match evidence.semantic_cut.attribution_class {
             AttributionClass::Fixed => 0,
             AttributionClass::Changed => 1,
         });
-        match evidence.snap {
+        match &evidence.snap {
             SnapEvidence::NotClaimed => bytes.push(0),
-            SnapEvidence::Verified { certificate_digest } => {
+            SnapEvidence::Verified { certificate } => {
                 bytes.push(1);
-                bytes.extend_from_slice(&certificate_digest);
+                bytes.extend_from_slice(certificate.certificate_digest.as_bytes());
             }
-            SnapEvidence::ClaimedWithoutCertificate => bytes.push(2),
         }
-        bytes.extend_from_slice(&evidence.safety_shield_digest);
+        bytes.extend_from_slice(&evidence.safety_shield.shield_digest);
         append_optional_digest(&mut bytes, evidence.approval_grant_digest);
         append_optional_digest(&mut bytes, evidence.irreversible_pre_action_evidence_digest);
-        match evidence.performance {
-            PerformanceAdmission::ExactNeutral => bytes.push(0),
-            PerformanceAdmission::PointwiseDominance { evidence_digest } => {
-                bytes.push(1);
-                bytes.extend_from_slice(&evidence_digest);
-            }
-            PerformanceAdmission::ScopedCertificate { evidence_digest } => {
-                bytes.push(2);
-                bytes.extend_from_slice(&evidence_digest);
-            }
-            PerformanceAdmission::Distributional { evidence_digest } => {
-                bytes.push(3);
-                bytes.extend_from_slice(&evidence_digest);
-            }
-            PerformanceAdmission::BaselineFallback => bytes.push(4),
-            PerformanceAdmission::Unknown => bytes.push(5),
-        }
+        bytes.extend_from_slice(&evidence.performance.digest());
         hash_bytes(&bytes)
     }
 }
@@ -674,6 +1113,7 @@ pub fn validate_permit_record(record: &PermitRecord) -> Result<(), KernelError> 
         ));
     }
     let mut bytes = Vec::new();
+    bytes.extend_from_slice(b"zerostack.kernel.permit.v2\0");
     bytes.extend_from_slice(&record.admission_digest);
     bytes.extend_from_slice(&record.trace.digest());
     if record.permit_id != hash_bytes(&bytes) {
@@ -690,44 +1130,55 @@ fn validate_g0(request: &PrepareRequest) -> Result<(), KernelError> {
         return Err(KernelError::at(
             FailureCode::SchemaVersionMismatch,
             Guard::G0Canonical,
-            "unsupported two-phase schema version",
+            "unsupported trusted-kernel schema version",
         ));
     }
-    if is_zero(&request.binding.assembly_manifest_digest)
-        || is_zero(&request.binding.source_tree_digest)
-        || is_zero(&request.binding.image_digest)
-        || is_zero(&request.binding.comparison_identity_digest)
-        || is_zero(&request.binding.plan_digest)
-        || is_zero(&request.binding.predecessor_receipt_head)
+    if [
+        request.binding.assembly_manifest_digest,
+        request.binding.source_tree_digest,
+        request.binding.image_digest,
+        request.binding.state_snapshot_digest,
+        request.binding.task_fingerprint_digest,
+        request.binding.plan_digest,
+        request.binding.fixed_model_digest,
+        request.binding.comparison_identity_digest,
+        request.binding.predecessor_receipt_head,
+        request.evidence.artifacts.artifact_set_digest,
+    ]
+    .iter()
+    .any(is_zero)
     {
         return Err(KernelError::at(
             FailureCode::MissingBinding,
             Guard::G0Canonical,
-            "required digest binding is zero",
+            "required canonical artifact, state, task, model, or receipt binding is zero",
         ));
     }
-    if is_zero(&request.evidence.canonical_object_digest)
-        || request.evidence.canonical_object_digest != request.evidence.decoded_object_digest
+    if request.evidence.artifacts.artifact_identities.len() != 3
+        || request.evidence.artifacts.producer_contract_digests.len() != 3
     {
         return Err(KernelError::at(
             FailureCode::CanonicalDigestMismatch,
             Guard::G0Canonical,
-            "full-object digest differs from canonical decoded object",
+            "verified artifact set no longer contains exactly three peer packs",
         ));
     }
     Ok(())
 }
 
 fn validate_g1(request: &PrepareRequest) -> Result<(), KernelError> {
-    if !(request.evidence.owner_coherent
-        && request.evidence.producer_coherent
-        && request.evidence.schema_coherent
-        && request.evidence.source_root_coherent)
+    let artifacts = &request.evidence.artifacts;
+    if artifacts.assembly_manifest_digest != request.binding.assembly_manifest_digest
+        || artifacts.source_root_digest != request.binding.source_tree_digest
+        || artifacts.image_digest != request.binding.image_digest
+        || artifacts.image_digest
+            != image_digest_v1(artifacts.source_root_digest, &artifacts.artifact_identities)
+        || artifacts.producer_contract_digests.iter().any(is_zero)
     {
         return Err(KernelError::at(
             FailureCode::CoherenceFailure,
             Guard::G1Coherence,
-            "owner, producer, schema, and source root must all cohere",
+            "peer assembly, producer, source-root, or recomputed image identity differs",
         ));
     }
     validate_source_heads(&request.binding.source_repository_heads)
@@ -742,34 +1193,46 @@ fn validate_g2(request: &PrepareRequest) -> Result<(), KernelError> {
             "plan length is zero or exceeds the frozen controller bound",
         ));
     }
+    let count = |needle: fn(&ControllerInstruction) -> bool| {
+        instructions.iter().filter(|step| needle(step)).count()
+    };
     if !matches!(
         instructions.last(),
         Some(ControllerInstruction::CloseTransaction)
-    ) || instructions[..instructions.len() - 1]
-        .iter()
-        .any(|step| matches!(step, ControllerInstruction::CloseTransaction))
+    ) || count(|step| matches!(step, ControllerInstruction::CloseTransaction)) != 1
+        || count(|step| matches!(step, ControllerInstruction::Verify)) != 1
+        || count(|step| matches!(step, ControllerInstruction::BufferVisible)) != 1
+        || count(|step| matches!(step, ControllerInstruction::Dispatch { .. })) == 0
     {
         return Err(KernelError::at(
             FailureCode::InvalidPlan,
             Guard::G2FinitePlan,
-            "close_transaction must occur exactly once and last",
+            "plan requires dispatch, one verify, one buffer, and one final close_transaction",
         ));
     }
-    if !instructions
+    let verify = instructions
         .iter()
-        .any(|step| matches!(step, ControllerInstruction::Dispatch { .. }))
-    {
+        .position(|step| matches!(step, ControllerInstruction::Verify))
+        .expect("verify count checked");
+    let visible = instructions
+        .iter()
+        .position(|step| matches!(step, ControllerInstruction::BufferVisible))
+        .expect("buffer count checked");
+    if verify >= visible {
         return Err(KernelError::at(
             FailureCode::InvalidPlan,
             Guard::G2FinitePlan,
-            "plan has no bounded worker dispatch",
+            "verification must precede any candidate-visible buffer",
         ));
     }
-    if request.effect_class == EffectClass::ReadOnly
-        && instructions
-            .iter()
-            .any(|step| matches!(step, ControllerInstruction::StageEffect))
-    {
+    let staged = instructions
+        .iter()
+        .enumerate()
+        .filter_map(|(index, step)| {
+            matches!(step, ControllerInstruction::StageEffect).then_some(index)
+        })
+        .collect::<Vec<_>>();
+    if request.effect_class == EffectClass::ReadOnly && !staged.is_empty() {
         return Err(KernelError::at(
             FailureCode::InvalidPlan,
             Guard::G2FinitePlan,
@@ -777,14 +1240,12 @@ fn validate_g2(request: &PrepareRequest) -> Result<(), KernelError> {
         ));
     }
     if request.effect_class != EffectClass::ReadOnly
-        && !instructions
-            .iter()
-            .any(|step| matches!(step, ControllerInstruction::StageEffect))
+        && (staged.len() != 1 || staged[0] <= verify || staged[0] >= visible)
     {
         return Err(KernelError::at(
             FailureCode::InvalidPlan,
             Guard::G2FinitePlan,
-            "mutation plan contains no staged effect",
+            "mutating plan requires one staged effect after verification and before visibility",
         ));
     }
     if request.plan.digest() != request.binding.plan_digest {
@@ -798,14 +1259,20 @@ fn validate_g2(request: &PrepareRequest) -> Result<(), KernelError> {
 }
 
 fn validate_g3(request: &PrepareRequest) -> Result<(), KernelError> {
-    if request.evidence.semantic_authority != SemanticAuthority::OwnerScoped {
+    let cut = &request.evidence.semantic_cut;
+    if is_zero(&cut.certificate_digest)
+        || cut.plan_digest != request.binding.plan_digest
+        || cut.fixed_model_digest != request.binding.fixed_model_digest
+        || cut.comparison_identity_digest != request.binding.comparison_identity_digest
+        || cut.semantic_authority != SemanticAuthority::OwnerScoped
+    {
         return Err(KernelError::at(
             FailureCode::SemanticCutCrossing,
             Guard::G3Attribution,
-            "infrastructure may not choose task semantics",
+            "semantic cut does not bind the plan, model, comparison identity, or owner scope",
         ));
     }
-    if request.evidence.attribution_class != AttributionClass::Fixed {
+    if cut.attribution_class != AttributionClass::Fixed {
         return Err(KernelError::at(
             FailureCode::AttributionChanged,
             Guard::G3Attribution,
@@ -825,37 +1292,105 @@ fn validate_g4(request: &PrepareRequest) -> Result<(), KernelError> {
         || envelope.processes == 0
         || envelope.risk_units == 0
         || envelope.worker_steps == 0
+        || request.plan.instructions.len() > envelope.worker_steps as usize
     {
         return Err(KernelError::at(
             FailureCode::UnboundedWorker,
             Guard::G4Resources,
-            "every worker resource and risk bound must be nonzero",
+            "every resource/risk bound must be positive and cover all controller steps",
         ));
     }
     Ok(())
 }
 
 fn validate_g5(request: &PrepareRequest) -> Result<(), KernelError> {
-    match request.evidence.snap {
-        SnapEvidence::NotClaimed => Ok(()),
-        SnapEvidence::Verified { certificate_digest } if !is_zero(&certificate_digest) => Ok(()),
-        SnapEvidence::Verified { .. } | SnapEvidence::ClaimedWithoutCertificate => {
-            Err(KernelError::at(
+    let SnapEvidence::Verified { certificate } = &request.evidence.snap else {
+        return Ok(());
+    };
+    certificate.validate().map_err(|error| {
+        KernelError::at(
+            FailureCode::MissingSnapCertificate,
+            Guard::G5RobustSnap,
+            format!("Robust Snap certificate failed: {error}"),
+        )
+    })?;
+    if *certificate.fiber.assembly_manifest_digest.as_bytes()
+        != request.binding.assembly_manifest_digest
+        || *certificate.fiber.source_image_digest.as_bytes() != request.binding.image_digest
+        || *certificate.fiber.task_fingerprint.as_bytes() != request.binding.task_fingerprint_digest
+    {
+        return Err(KernelError::at(
+            FailureCode::MissingSnapCertificate,
+            Guard::G5RobustSnap,
+            "Robust Snap certificate binds another assembly, image, or task",
+        ));
+    }
+    if certificate.snap_level == SnapLevel::S0 {
+        let selected = certificate.selected_effect.as_ref().ok_or_else(|| {
+            KernelError::at(
                 FailureCode::MissingSnapCertificate,
                 Guard::G5RobustSnap,
-                "S0 claim lacks a nonzero Robust Snap certificate",
-            ))
+                "S0 certificate has no selected effect",
+            )
+        })?;
+        if request.evidence.safety_shield.action_digest != Some(*selected.effect_digest.as_bytes())
+        {
+            return Err(KernelError::at(
+                FailureCode::MissingSnapCertificate,
+                Guard::G5RobustSnap,
+                "S0 selected effect differs from the shielded action",
+            ));
         }
     }
+    Ok(())
 }
 
 fn validate_g6(request: &PrepareRequest) -> Result<(), KernelError> {
-    if is_zero(&request.evidence.safety_shield_digest) {
+    let shield = &request.evidence.safety_shield;
+    if is_zero(&shield.shield_digest)
+        || shield.state_snapshot != request.binding.state_snapshot_digest
+        || shield.shield_digest
+            != safety_shield_digest_v1(
+                shield.kind,
+                shield.state_snapshot,
+                shield.action_digest,
+                shield.evidence_digest,
+                shield.verifier_digest,
+                shield.acceptance_digest,
+            )
+    {
         return Err(KernelError::at(
             FailureCode::MissingSafetyShield,
             Guard::G6SafetyShield,
-            "V2 safety shield is absent",
+            "V2 shield identity or state binding is invalid",
         ));
+    }
+    match (request.effect_class, shield.kind) {
+        (EffectClass::ReadOnly, SafetyShieldKindV1::ReadOnly) => {}
+        (EffectClass::ReadOnly, SafetyShieldKindV1::AcceptedEffect)
+        | (_, SafetyShieldKindV1::ReadOnly) => {
+            return Err(KernelError::at(
+                FailureCode::MissingSafetyShield,
+                Guard::G6SafetyShield,
+                "shield kind does not match the admitted effect class",
+            ));
+        }
+        (_, SafetyShieldKindV1::AcceptedEffect) => {
+            let accepted = shield.accepted_effect.as_ref().ok_or_else(|| {
+                KernelError::at(
+                    FailureCode::MissingSafetyShield,
+                    Guard::G6SafetyShield,
+                    "accepted-effect shield lost its zero-cert handle",
+                )
+            })?;
+            accepted.validate().map_err(|error| {
+                KernelError::at(
+                    FailureCode::MissingSafetyShield,
+                    Guard::G6SafetyShield,
+                    format!("accepted effect failed validation: {error}"),
+                )
+            })?;
+        }
     }
     if request.effect_class == EffectClass::ApprovalRequiredMutation
         && request
@@ -873,7 +1408,7 @@ fn validate_g6(request: &PrepareRequest) -> Result<(), KernelError> {
         && request
             .evidence
             .irreversible_pre_action_evidence_digest
-            .map_or(true, |digest| is_zero(&digest))
+            .is_none_or(|digest| is_zero(&digest))
     {
         return Err(KernelError::at(
             FailureCode::IrreversiblePreEvidenceEffect,
@@ -885,12 +1420,22 @@ fn validate_g6(request: &PrepareRequest) -> Result<(), KernelError> {
 }
 
 fn validate_g7(request: &PrepareRequest) -> Result<(), KernelError> {
-    let valid = match request.evidence.performance {
-        PerformanceAdmission::ExactNeutral | PerformanceAdmission::BaselineFallback => true,
-        PerformanceAdmission::PointwiseDominance { evidence_digest }
-        | PerformanceAdmission::ScopedCertificate { evidence_digest }
-        | PerformanceAdmission::Distributional { evidence_digest } => !is_zero(&evidence_digest),
-        PerformanceAdmission::Unknown => false,
+    let performance = &request.evidence.performance;
+    let valid = match performance.mode {
+        QualityModeV1::ExactNeutral => {
+            performance.candidate_outcome_digest == Some(performance.baseline_outcome_digest)
+                && !is_zero(&performance.baseline_outcome_digest)
+                && performance.evidence_digest == performance.baseline_outcome_digest
+        }
+        QualityModeV1::BaselineFallback => {
+            performance.candidate_outcome_digest.is_none()
+                && !is_zero(&performance.baseline_outcome_digest)
+                && !is_zero(&performance.evidence_digest)
+        }
+        QualityModeV1::PointwiseDominance
+        | QualityModeV1::ScopedCertificate
+        | QualityModeV1::Distributional
+        | QualityModeV1::Unknown => false,
     };
     if valid {
         Ok(())
@@ -898,7 +1443,7 @@ fn validate_g7(request: &PrepareRequest) -> Result<(), KernelError> {
         Err(KernelError::at(
             FailureCode::PerformanceUnknown,
             Guard::G7Performance,
-            "candidate performance is not admissible; select a proven baseline",
+            "quality mode lacks a current exact proof; select the frozen raw baseline",
         ))
     }
 }
@@ -947,6 +1492,7 @@ fn validate_source_heads(heads: &[SourceHead]) -> Result<(), KernelError> {
 
 fn permit_digest(request: &PrepareRequest, trace: &ExecutionTrace) -> DigestV1 {
     let mut bytes = Vec::new();
+    bytes.extend_from_slice(b"zerostack.kernel.permit.v2\0");
     bytes.extend_from_slice(&request.admission_digest());
     bytes.extend_from_slice(&trace.digest());
     hash_bytes(&bytes)
@@ -957,6 +1503,7 @@ fn permit_digest(request: &PrepareRequest, trace: &ExecutionTrace) -> DigestV1 {
 pub struct StagedEffect {
     pub effect_digest: DigestV1,
     pub effect_class: EffectClass,
+    pub acceptance_digest: Option<DigestV1>,
     pub approval_grant_digest: Option<DigestV1>,
     pub pre_action_evidence_digest: Option<DigestV1>,
 }
@@ -1008,10 +1555,14 @@ impl BrokeredExecution {
 
     pub fn stage_effect(&mut self, effect: StagedEffect) -> Result<(), KernelError> {
         self.expect(ControllerInstruction::StageEffect)?;
-        if effect.effect_class != self.request.effect_class || is_zero(&effect.effect_digest) {
+        if effect.effect_class != self.request.effect_class
+            || is_zero(&effect.effect_digest)
+            || self.request.evidence.safety_shield.action_digest != Some(effect.effect_digest)
+            || self.request.evidence.safety_shield.acceptance_digest != effect.acceptance_digest
+        {
             return Err(KernelError::execution(
                 FailureCode::PlanStepMismatch,
-                "staged effect does not match the admitted effect class",
+                "staged effect does not match the admitted class, action, or acceptance",
             ));
         }
         if effect.effect_class == EffectClass::ApprovalRequiredMutation {
@@ -1144,6 +1695,7 @@ impl BrokeredExecution {
     }
 
     fn check_usage(&self, usage: ResourceUsage) -> Result<(), KernelError> {
+        // Model-visible output is enforced separately by buffer_visible.
         let envelope = self.request.envelope;
         let within = usage.fuel <= envelope.fuel
             && usage.elapsed_ms <= envelope.deadline_ms
@@ -1170,7 +1722,7 @@ pub enum ClosureKind {
     Fallback,
 }
 
-#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct RestorationAccounting {
     pub attempted: u64,
@@ -1178,49 +1730,71 @@ pub struct RestorationAccounting {
     pub debt: u64,
 }
 
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+/// G8 closure derived only from a validated zero-gate transaction receipt.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct TransactionClosure {
     kind: ClosureKind,
     root: DigestV1,
-    publication_closed: bool,
+    transaction_receipt_digest: DigestV1,
+    action_digest: DigestV1,
+    acceptance_digest: Option<DigestV1>,
+    baseline_state: DigestV1,
+    candidate_state: DigestV1,
+    restoration_scope: RestorationScopeV1,
+    external_restoration_debt_count: u16,
     restoration: RestorationAccounting,
 }
 
 impl TransactionClosure {
-    pub fn commit(candidate_root: DigestV1, publication_closed: bool) -> Self {
-        Self {
-            kind: ClosureKind::Commit,
-            root: candidate_root,
-            publication_closed,
-            restoration: RestorationAccounting {
-                attempted: 0,
-                completed: 0,
-                debt: 0,
+    pub fn from_receipt(receipt: TransactionReceiptV1) -> Result<Self, KernelError> {
+        receipt.canonical_bytes().map_err(|error| {
+            KernelError::at(
+                FailureCode::IncompleteTransactionClosure,
+                Guard::G8TransactionClosure,
+                format!("transaction receipt failed validation: {error}"),
+            )
+        })?;
+        let kind = match receipt.disposition() {
+            TransactionDispositionV1::CandidateCommitted => ClosureKind::Commit,
+            TransactionDispositionV1::BaselineRootRecovered => ClosureKind::Fallback,
+        };
+        let restoration = match kind {
+            ClosureKind::Commit => RestorationAccounting::default(),
+            ClosureKind::Fallback => RestorationAccounting {
+                attempted: u64::from(receipt.resource_count()),
+                completed: u64::from(
+                    receipt
+                        .resource_count()
+                        .saturating_sub(receipt.external_restoration_debt_count()),
+                ),
+                debt: u64::from(receipt.external_restoration_debt_count()),
             },
-        }
-    }
-
-    pub fn fallback(
-        baseline_root: DigestV1,
-        publication_closed: bool,
-        restoration: RestorationAccounting,
-    ) -> Self {
-        Self {
-            kind: ClosureKind::Fallback,
-            root: baseline_root,
-            publication_closed,
+        };
+        Ok(Self {
+            kind,
+            root: *receipt.observed_root().as_bytes(),
+            transaction_receipt_digest: *receipt.receipt_digest().as_bytes(),
+            action_digest: *receipt.action_digest().as_bytes(),
+            acceptance_digest: receipt.acceptance_digest().map(|digest| *digest.as_bytes()),
+            baseline_state: *receipt.baseline_state().as_bytes(),
+            candidate_state: *receipt.candidate_state().as_bytes(),
+            restoration_scope: receipt.restoration_scope(),
+            external_restoration_debt_count: receipt.external_restoration_debt_count(),
             restoration,
-        }
+        })
     }
 
-    pub fn kind(&self) -> ClosureKind {
+    pub const fn kind(&self) -> ClosureKind {
         self.kind
     }
-    pub fn root(&self) -> DigestV1 {
+    pub const fn root(&self) -> DigestV1 {
         self.root
     }
-    pub fn restoration(&self) -> RestorationAccounting {
+    pub const fn transaction_receipt_digest(&self) -> DigestV1 {
+        self.transaction_receipt_digest
+    }
+    pub const fn restoration(&self) -> RestorationAccounting {
         self.restoration
     }
 }
@@ -1230,59 +1804,54 @@ fn validate_closure(
     closure: &TransactionClosure,
     failure: Option<FailureCode>,
 ) -> Result<(), KernelError> {
-    if is_zero(&closure.root) || !closure.publication_closed {
+    if is_zero(&closure.root)
+        || is_zero(&closure.transaction_receipt_digest)
+        || is_zero(&closure.action_digest)
+        || closure.baseline_state != execution.request.binding.state_snapshot_digest
+        || closure.external_restoration_debt_count != 0
+        || closure.restoration.debt != 0
+    {
         return Err(KernelError::at(
             FailureCode::IncompleteTransactionClosure,
             Guard::G8TransactionClosure,
-            "transaction root is missing or publication boundary was not closed",
-        ));
-    }
-    let accounted = closure
-        .restoration
-        .completed
-        .checked_add(closure.restoration.debt);
-    if accounted != Some(closure.restoration.attempted) {
-        return Err(KernelError::at(
-            FailureCode::UnaccountedFallback,
-            Guard::G8TransactionClosure,
-            "restoration attempted work is not conserved",
+            "transaction receipt, state binding, or restoration debt is not closed",
         ));
     }
     match closure.kind {
         ClosureKind::Commit => {
             if failure.is_some()
-                || closure.restoration
-                    != (RestorationAccounting {
-                        attempted: 0,
-                        completed: 0,
-                        debt: 0,
-                    })
+                || closure.restoration != RestorationAccounting::default()
+                || closure.root != closure.candidate_state
+                || closure.restoration_scope != RestorationScopeV1::NotApplicableCandidateCommit
+                || closure.acceptance_digest
+                    != execution.request.evidence.safety_shield.acceptance_digest
+                || execution.request.evidence.safety_shield.action_digest
+                    != Some(closure.action_digest)
+                || matches!(
+                    execution.request.evidence.performance.mode,
+                    QualityModeV1::BaselineFallback | QualityModeV1::Unknown
+                )
             {
                 return Err(KernelError::at(
                     FailureCode::IncompleteTransactionClosure,
                     Guard::G8TransactionClosure,
-                    "commit closure contains failure or restoration work",
-                ));
-            }
-            if matches!(
-                execution.request.evidence.performance,
-                PerformanceAdmission::BaselineFallback
-            ) {
-                return Err(KernelError::at(
-                    FailureCode::PerformanceUnknown,
-                    Guard::G8TransactionClosure,
-                    "baseline-only admission cannot commit candidate output",
+                    "candidate commit is not bound to its accepted action, quality, and root",
                 ));
             }
         }
         ClosureKind::Fallback => {
-            if closure.restoration.debt != 0
+            if closure.root != closure.baseline_state
+                || closure.restoration.attempted == 0
                 || closure.restoration.completed != closure.restoration.attempted
+                || closure.restoration_scope != RestorationScopeV1::DeclaredEffectClosure
+                || (failure.is_none()
+                    && execution.request.evidence.performance.mode
+                        != QualityModeV1::BaselineFallback)
             {
                 return Err(KernelError::at(
                     FailureCode::UnaccountedFallback,
                     Guard::G8TransactionClosure,
-                    "fallback restoration has residual debt",
+                    "fallback did not recover the declared baseline closure",
                 ));
             }
         }
@@ -1310,8 +1879,20 @@ pub struct ReceiptRecord {
     pub source_tree_digest: DigestV1,
     pub source_repository_heads: Vec<SourceHead>,
     pub image_digest: DigestV1,
+    pub state_snapshot_digest: DigestV1,
+    pub task_fingerprint_digest: DigestV1,
     pub plan_digest: DigestV1,
+    pub fixed_model_digest: DigestV1,
     pub comparison_identity_digest: DigestV1,
+    pub artifact_set_digest: DigestV1,
+    pub semantic_cut_certificate_digest: DigestV1,
+    pub snap_certificate_digest: Option<DigestV1>,
+    pub safety_shield_digest: DigestV1,
+    pub quality_decision_digest: DigestV1,
+    pub transaction_receipt_digest: DigestV1,
+    pub attribution_class: AttributionClass,
+    pub effect_class: EffectClass,
+    pub resource_envelope: WorkerEnvelope,
     pub surface: ExecutionSurface,
     pub verification_digest: Option<DigestV1>,
     pub output_digest: DigestV1,
@@ -1340,7 +1921,10 @@ pub fn validate_receipt_record(record: &ReceiptRecord) -> Result<(), KernelError
         source_tree_digest: record.source_tree_digest,
         source_repository_heads: record.source_repository_heads.clone(),
         image_digest: record.image_digest,
+        state_snapshot_digest: record.state_snapshot_digest,
+        task_fingerprint_digest: record.task_fingerprint_digest,
         plan_digest: record.plan_digest,
+        fixed_model_digest: record.fixed_model_digest,
         comparison_identity_digest: record.comparison_identity_digest,
         predecessor_receipt_head: record.predecessor_receipt_head,
     };
@@ -1351,8 +1935,16 @@ pub fn validate_receipt_record(record: &ReceiptRecord) -> Result<(), KernelError
         record.assembly_manifest_digest,
         record.source_tree_digest,
         record.image_digest,
+        record.state_snapshot_digest,
+        record.task_fingerprint_digest,
         record.plan_digest,
+        record.fixed_model_digest,
         record.comparison_identity_digest,
+        record.artifact_set_digest,
+        record.semantic_cut_certificate_digest,
+        record.safety_shield_digest,
+        record.quality_decision_digest,
+        record.transaction_receipt_digest,
         record.output_digest,
         record.effects_digest,
         record.predecessor_receipt_head,
@@ -1364,11 +1956,16 @@ pub fn validate_receipt_record(record: &ReceiptRecord) -> Result<(), KernelError
         || record
             .verification_digest
             .is_some_and(|digest| is_zero(&digest))
+        || record
+            .snap_certificate_digest
+            .is_some_and(|digest| is_zero(&digest))
         || binding.digest() != record.binding_digest
+        || record.attribution_class != AttributionClass::Fixed
+        || envelope_has_zero(record.resource_envelope)
     {
         return Err(KernelError::execution(
             FailureCode::ForgedReceipt,
-            "receipt contains a zero, noncanonical, or mismatched binding",
+            "receipt contains a zero, noncanonical, changed-attribution, or mismatched binding",
         ));
     }
     let accounted = record
@@ -1377,13 +1974,7 @@ pub fn validate_receipt_record(record: &ReceiptRecord) -> Result<(), KernelError
         .checked_add(record.restoration.debt);
     let closure_valid = match record.kind {
         ReceiptKind::Commit => {
-            record.failure_code.is_none()
-                && record.restoration
-                    == (RestorationAccounting {
-                        attempted: 0,
-                        completed: 0,
-                        debt: 0,
-                    })
+            record.failure_code.is_none() && record.restoration == RestorationAccounting::default()
         }
         ReceiptKind::Fallback => {
             record.restoration.debt == 0 && accounted == Some(record.restoration.attempted)
@@ -1400,6 +1991,15 @@ pub fn validate_receipt_record(record: &ReceiptRecord) -> Result<(), KernelError
         record.permit_id,
         &binding,
         record.admission_digest,
+        record.artifact_set_digest,
+        record.semantic_cut_certificate_digest,
+        record.snap_certificate_digest,
+        record.safety_shield_digest,
+        record.quality_decision_digest,
+        record.transaction_receipt_digest,
+        record.attribution_class,
+        record.effect_class,
+        record.resource_envelope,
         record.surface,
         record.verification_digest,
         record.output_digest,
@@ -1417,6 +2017,17 @@ pub fn validate_receipt_record(record: &ReceiptRecord) -> Result<(), KernelError
         ));
     }
     Ok(())
+}
+
+fn envelope_has_zero(envelope: WorkerEnvelope) -> bool {
+    envelope.fuel == 0
+        || envelope.deadline_ms == 0
+        || envelope.io_bytes == 0
+        || envelope.output_bytes == 0
+        || envelope.memory_bytes == 0
+        || envelope.processes == 0
+        || envelope.risk_units == 0
+        || envelope.worker_steps == 0
 }
 
 #[derive(Debug)]
@@ -1442,11 +2053,34 @@ impl ReadyToFinalize {
             ClosureKind::Fallback => ReceiptKind::Fallback,
         };
         let admission_digest = self.request.admission_digest();
+        let artifact_set_digest = self.request.evidence.artifacts.artifact_set_digest;
+        let semantic_cut_certificate_digest = self.request.evidence.semantic_cut.certificate_digest;
+        let snap_certificate_digest = match &self.request.evidence.snap {
+            SnapEvidence::NotClaimed => None,
+            SnapEvidence::Verified { certificate } => {
+                Some(*certificate.certificate_digest.as_bytes())
+            }
+        };
+        let safety_shield_digest = self.request.evidence.safety_shield.shield_digest;
+        let quality_decision_digest = self.request.evidence.performance.digest();
+        let transaction_receipt_digest = self.closure.transaction_receipt_digest;
+        let attribution_class = self.request.evidence.semantic_cut.attribution_class;
+        let effect_class = self.request.effect_class;
+        let resource_envelope = self.request.envelope;
         let receipt_head = receipt_digest(
             kind,
             self.permit_id,
             &self.request.binding,
             admission_digest,
+            artifact_set_digest,
+            semantic_cut_certificate_digest,
+            snap_certificate_digest,
+            safety_shield_digest,
+            quality_decision_digest,
+            transaction_receipt_digest,
+            attribution_class,
+            effect_class,
+            resource_envelope,
             self.request.surface,
             self.verification_digest,
             output_digest,
@@ -1462,6 +2096,15 @@ impl ReadyToFinalize {
             permit_id: self.permit_id,
             binding: self.request.binding,
             admission_digest,
+            artifact_set_digest,
+            semantic_cut_certificate_digest,
+            snap_certificate_digest,
+            safety_shield_digest,
+            quality_decision_digest,
+            transaction_receipt_digest,
+            attribution_class,
+            effect_class,
+            resource_envelope,
             surface: self.request.surface,
             verification_digest: self.verification_digest,
             output_digest,
@@ -1489,6 +2132,15 @@ struct ReceiptCommon {
     permit_id: DigestV1,
     binding: ExecutionBinding,
     admission_digest: DigestV1,
+    artifact_set_digest: DigestV1,
+    semantic_cut_certificate_digest: DigestV1,
+    snap_certificate_digest: Option<DigestV1>,
+    safety_shield_digest: DigestV1,
+    quality_decision_digest: DigestV1,
+    transaction_receipt_digest: DigestV1,
+    attribution_class: AttributionClass,
+    effect_class: EffectClass,
+    resource_envelope: WorkerEnvelope,
     surface: ExecutionSurface,
     verification_digest: Option<DigestV1>,
     output_digest: DigestV1,
@@ -1513,8 +2165,20 @@ impl ReceiptCommon {
             source_tree_digest: self.binding.source_tree_digest,
             source_repository_heads: self.binding.source_repository_heads.clone(),
             image_digest: self.binding.image_digest,
+            state_snapshot_digest: self.binding.state_snapshot_digest,
+            task_fingerprint_digest: self.binding.task_fingerprint_digest,
             plan_digest: self.binding.plan_digest,
+            fixed_model_digest: self.binding.fixed_model_digest,
             comparison_identity_digest: self.binding.comparison_identity_digest,
+            artifact_set_digest: self.artifact_set_digest,
+            semantic_cut_certificate_digest: self.semantic_cut_certificate_digest,
+            snap_certificate_digest: self.snap_certificate_digest,
+            safety_shield_digest: self.safety_shield_digest,
+            quality_decision_digest: self.quality_decision_digest,
+            transaction_receipt_digest: self.transaction_receipt_digest,
+            attribution_class: self.attribution_class,
+            effect_class: self.effect_class,
+            resource_envelope: self.resource_envelope,
             surface: self.surface,
             verification_digest: self.verification_digest,
             output_digest: self.output_digest,
@@ -1557,7 +2221,9 @@ impl CommitReceipt {
             approved_effects: self.staged_effects,
             receipt_head: self.common.receipt_head,
             successor_root: self.common.successor_root,
-            durability: PublicationDurabilityV1::BufferedOnly,
+            durability: PublicationDurabilityV1::JournalRootCommitted {
+                transaction_receipt_digest: self.common.transaction_receipt_digest,
+            },
         }
     }
 }
@@ -1580,6 +2246,10 @@ impl FallbackReceipt {
 #[serde(rename_all = "snake_case")]
 pub enum PublicationDurabilityV1 {
     BufferedOnly,
+    /// A zero-store journal root commit. This is not a native filesystem durability claim.
+    JournalRootCommitted {
+        transaction_receipt_digest: DigestV1,
+    },
     JournalVerified {
         evidence_digest: DigestV1,
         durable_profile_digest: DigestV1,
@@ -1595,11 +2265,21 @@ pub struct PublishedCommit {
     pub durability: PublicationDurabilityV1,
 }
 
+#[allow(clippy::too_many_arguments)]
 fn receipt_digest(
     kind: ReceiptKind,
     permit_id: DigestV1,
     binding: &ExecutionBinding,
     admission_digest: DigestV1,
+    artifact_set_digest: DigestV1,
+    semantic_cut_certificate_digest: DigestV1,
+    snap_certificate_digest: Option<DigestV1>,
+    safety_shield_digest: DigestV1,
+    quality_decision_digest: DigestV1,
+    transaction_receipt_digest: DigestV1,
+    attribution_class: AttributionClass,
+    effect_class: EffectClass,
+    envelope: WorkerEnvelope,
     surface: ExecutionSurface,
     verification_digest: Option<DigestV1>,
     output_digest: DigestV1,
@@ -1611,13 +2291,33 @@ fn receipt_digest(
     restoration: RestorationAccounting,
 ) -> DigestV1 {
     let mut bytes = Vec::new();
+    bytes.extend_from_slice(b"zerostack.kernel.receipt.v2\0");
     bytes.extend_from_slice(&TWO_PHASE_SCHEMA_VERSION.to_be_bytes());
     bytes.push(kind as u8);
     bytes.extend_from_slice(&permit_id);
     bytes.extend_from_slice(&binding.digest());
     bytes.extend_from_slice(&admission_digest);
+    bytes.extend_from_slice(&artifact_set_digest);
+    bytes.extend_from_slice(&semantic_cut_certificate_digest);
+    append_optional_digest(&mut bytes, snap_certificate_digest);
+    bytes.extend_from_slice(&safety_shield_digest);
+    bytes.extend_from_slice(&quality_decision_digest);
+    bytes.extend_from_slice(&transaction_receipt_digest);
+    bytes.push(match attribution_class {
+        AttributionClass::Fixed => 0,
+        AttributionClass::Changed => 1,
+    });
+    bytes.push(effect_class_tag(effect_class));
+    bytes.extend_from_slice(&envelope.fuel.to_be_bytes());
+    bytes.extend_from_slice(&envelope.deadline_ms.to_be_bytes());
+    bytes.extend_from_slice(&envelope.io_bytes.to_be_bytes());
+    bytes.extend_from_slice(&envelope.output_bytes.to_be_bytes());
+    bytes.extend_from_slice(&envelope.memory_bytes.to_be_bytes());
+    bytes.extend_from_slice(&envelope.processes.to_be_bytes());
+    bytes.extend_from_slice(&envelope.risk_units.to_be_bytes());
+    bytes.extend_from_slice(&envelope.worker_steps.to_be_bytes());
     bytes.push(surface as u8);
-    bytes.extend_from_slice(&verification_digest.unwrap_or([0; 32]));
+    append_optional_digest(&mut bytes, verification_digest);
     bytes.extend_from_slice(&output_digest);
     bytes.extend_from_slice(&effects_digest);
     bytes.extend_from_slice(&usage.fuel.to_be_bytes());
@@ -1639,6 +2339,7 @@ fn receipt_digest(
 
 fn effect_list_digest(effects: &[StagedEffect]) -> DigestV1 {
     let mut bytes = Vec::new();
+    bytes.extend_from_slice(b"zerostack.kernel.effects.v2\0");
     bytes.extend_from_slice(&(effects.len() as u64).to_be_bytes());
     for effect in effects {
         bytes.extend_from_slice(&effect.effect_digest);
@@ -1648,6 +2349,7 @@ fn effect_list_digest(effects: &[StagedEffect]) -> DigestV1 {
             EffectClass::ApprovalRequiredMutation => 2,
             EffectClass::Irreversible => 3,
         });
+        append_optional_digest(&mut bytes, effect.acceptance_digest);
         append_optional_digest(&mut bytes, effect.approval_grant_digest);
         append_optional_digest(&mut bytes, effect.pre_action_evidence_digest);
     }
@@ -1676,9 +2378,178 @@ fn is_zero(digest: &DigestV1) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::transaction::RestorationScopeV1;
+    use std::borrow::Cow;
+    use zero_abi::{
+        sha256, CwirVerifierClassV1, EffectProgramV1, EffectRollbackV1, EffectTargetV1,
+        EffectVerificationPlanV1, EffectVerificationStepV1, ProtectedEffectClassV1,
+        ProtectedEffectSet, ProtectedEffectV1, TypedEffectOperationV1, WorldFiberDescriptor,
+        ROBUST_SNAP_MODEL_VERSION,
+    };
+    use zero_cert::{
+        accept_effect_verification_v1, verify, CompletenessWitness, EffectVerificationOutcomeV1,
+        EvidenceCertificate, ObjectId, OperatorLock, Provenance, Query, Resolver, SpanRef,
+    };
 
     fn digest(byte: u8) -> DigestV1 {
         [byte; 32]
+    }
+
+    fn abi(byte: u8) -> AbiDigestV1 {
+        AbiDigestV1::from_bytes(digest(byte))
+    }
+
+    struct Resident<'a> {
+        bytes: &'a [u8],
+    }
+
+    impl Resolver for Resident<'_> {
+        fn resolve<'a>(&'a self, object_id: &ObjectId) -> Option<&'a [u8]> {
+            (sha256(self.bytes) == object_id.0).then_some(self.bytes)
+        }
+        fn trusted_operator_version<'a>(&'a self, id: &str) -> Option<&'a str> {
+            (id == "read-span").then_some("1")
+        }
+        fn trusted_parser_version<'a>(&'a self, id: &str) -> Option<&'a str> {
+            (id == "tree-sitter").then_some("1")
+        }
+        fn trusted_index_version<'a>(&'a self, id: &str) -> Option<&'a str> {
+            (id == "zero-index").then_some("2")
+        }
+    }
+
+    fn certificate(bytes: &[u8]) -> EvidenceCertificate<'_> {
+        let object = sha256(bytes);
+        let span = SpanRef {
+            object_id: ObjectId(object),
+            object_digest: object,
+            byte_start: 0,
+            byte_len: bytes.len() as u64,
+            span_digest: object,
+        };
+        EvidenceCertificate {
+            query: Query::ReadSpan(span.clone()),
+            spans: vec![span],
+            payload: Cow::Borrowed(bytes),
+            provenance: Provenance {
+                parser_id: "tree-sitter".into(),
+                parser_version: "1".into(),
+                index_id: "zero-index".into(),
+                index_version: "2".into(),
+                operator_id: "read-span".into(),
+                operator_version: "1".into(),
+            },
+            completeness: CompletenessWitness::ReadSpan {
+                operator: OperatorLock {
+                    operator_id: "read-span".into(),
+                    operator_version: "1".into(),
+                },
+            },
+            input_token_cost: 1,
+            backend_work_units: 1,
+        }
+    }
+
+    fn effect_program(snapshot: DigestV1) -> EffectProgramV1 {
+        let snapshot = AbiDigestV1::from_bytes(snapshot);
+        let target = EffectTargetV1 {
+            owner: ArtifactOwnerV1::FsZero,
+            target_digest: abi(10),
+            required_snapshot: snapshot,
+        };
+        EffectProgramV1::new(
+            snapshot,
+            "kernel_test",
+            vec![target],
+            vec![],
+            vec![TypedEffectOperationV1::ReplaceExactFile {
+                target: abi(10),
+                expected_before: abi(11),
+                replacement: abi(12),
+            }],
+            vec![],
+            EffectVerificationPlanV1::new(vec![EffectVerificationStepV1 {
+                verifier_digest: abi(20),
+                predicate_digest: abi(21),
+                environment_digest: abi(22),
+                required_snapshot: snapshot,
+                verifier_class: CwirVerifierClassV1::ExactChecker,
+            }])
+            .unwrap(),
+            EffectRollbackV1::Journaled,
+        )
+        .unwrap()
+    }
+
+    fn accepted_effect() -> EffectAcceptedV1 {
+        let bytes = b"exact kernel evidence";
+        let certificate = certificate(bytes);
+        let resident = Resident { bytes };
+        let verified = verify(&certificate, &resident).unwrap();
+        let program = effect_program(digest(13));
+        let outcome = accept_effect_verification_v1(
+            abi(70),
+            &program,
+            abi(71),
+            abi(21),
+            abi(13),
+            abi(20),
+            &verified,
+        )
+        .unwrap();
+        let EffectVerificationOutcomeV1::Accepted(accepted) = outcome else {
+            panic!("expected accepted effect")
+        };
+        accepted
+    }
+
+    fn read_only_shield() -> SafetyShieldEvidenceV1 {
+        let bytes = b"verified read-only kernel evidence";
+        let certificate = certificate(bytes);
+        let resident = Resident { bytes };
+        let verified = verify(&certificate, &resident).unwrap();
+        SafetyShieldEvidenceV1::from_read_only_verified(digest(13), digest(72), &verified).unwrap()
+    }
+
+    fn semantic_cut(plan_digest: DigestV1) -> SemanticCutEvidenceV1 {
+        let bytes = b"verified semantic-cut evidence";
+        let certificate = certificate(bytes);
+        let resident = Resident { bytes };
+        let verified = verify(&certificate, &resident).unwrap();
+        SemanticCutEvidenceV1::verify_owner_scoped(plan_digest, digest(15), digest(4), &verified)
+            .unwrap()
+    }
+
+    fn artifacts() -> CanonicalArtifactSetV1 {
+        let assembly = abi(1);
+        let source = abi(2);
+        let profile = DurableProfileV1::portable_strict();
+        let specifications = [
+            (ArtifactOwnerV1::FsZero, ZbfArtifactKindV1::FsPack, 31),
+            (ArtifactOwnerV1::GraphZero, ZbfArtifactKindV1::GraphPack, 32),
+            (ArtifactOwnerV1::TokenZero, ZbfArtifactKindV1::TokenPack, 33),
+        ];
+        let inputs = specifications
+            .into_iter()
+            .map(|(owner, kind, producer)| PeerArtifactInputV1 {
+                bytes: ZbfObjectV1::new_leaf(
+                    kind,
+                    owner,
+                    assembly,
+                    profile,
+                    source,
+                    abi(producer),
+                    vec![producer],
+                )
+                .unwrap()
+                .to_bytes(profile)
+                .unwrap(),
+                expected_owner: owner,
+                expected_kind: kind,
+                expected_producer_contract_digest: digest(producer),
+            })
+            .collect();
+        CanonicalArtifactSetV1::verify(digest(1), digest(2), inputs).unwrap()
     }
 
     fn plan(effect_class: EffectClass) -> ControllerPlan {
@@ -1699,6 +2570,14 @@ mod tests {
 
     fn request(surface: ExecutionSurface, effect_class: EffectClass) -> PrepareRequest {
         let plan = plan(effect_class);
+        let plan_digest = plan.digest();
+        let artifacts = artifacts();
+        let image_digest = artifacts.image_digest;
+        let safety_shield = if effect_class == EffectClass::ReadOnly {
+            read_only_shield()
+        } else {
+            SafetyShieldEvidenceV1::from_effect_accepted(accepted_effect()).unwrap()
+        };
         PrepareRequest {
             binding: ExecutionBinding {
                 schema_version: TWO_PHASE_SCHEMA_VERSION,
@@ -1708,8 +2587,11 @@ mod tests {
                     repository: "ZeroStack".into(),
                     head: "87c8ef5df0699b6345e4a829876b3f086f9c3ae5".into(),
                 }],
-                image_digest: digest(3),
-                plan_digest: plan.digest(),
+                image_digest,
+                state_snapshot_digest: digest(13),
+                task_fingerprint_digest: digest(14),
+                plan_digest,
+                fixed_model_digest: digest(15),
                 comparison_identity_digest: digest(4),
                 predecessor_receipt_head: digest(5),
             },
@@ -1727,16 +2609,10 @@ mod tests {
                 worker_steps: 8,
             },
             evidence: GuardEvidence {
-                canonical_object_digest: digest(6),
-                decoded_object_digest: digest(6),
-                owner_coherent: true,
-                producer_coherent: true,
-                schema_coherent: true,
-                source_root_coherent: true,
-                semantic_authority: SemanticAuthority::OwnerScoped,
-                attribution_class: AttributionClass::Fixed,
+                artifacts,
+                semantic_cut: semantic_cut(plan_digest),
                 snap: SnapEvidence::NotClaimed,
-                safety_shield_digest: digest(7),
+                safety_shield,
                 approval_grant_digest: (effect_class == EffectClass::ApprovalRequiredMutation)
                     .then(|| digest(12)),
                 irreversible_pre_action_evidence_digest: if effect_class
@@ -1746,8 +2622,93 @@ mod tests {
                 } else {
                     None
                 },
-                performance: PerformanceAdmission::ExactNeutral,
+                performance: PerformanceAdmission::exact_neutral(digest(16)).unwrap(),
             },
+        }
+    }
+
+    fn snap_certificate(effect_digest: DigestV1, image_digest: DigestV1) -> RobustSnapCertificate {
+        let selected = ProtectedEffectV1 {
+            effect_digest: AbiDigestV1::from_bytes(effect_digest),
+            effect_class: ProtectedEffectClassV1::ReversibleMutation,
+        };
+        let worlds = vec![abi(40), abi(41)];
+        RobustSnapCertificate::create_s0(
+            WorldFiberDescriptor {
+                model_version: ROBUST_SNAP_MODEL_VERSION.into(),
+                assembly_manifest_digest: abi(1),
+                source_image_digest: AbiDigestV1::from_bytes(image_digest),
+                task_fingerprint: abi(14),
+                assumptions: vec!["fixed inputs".into()],
+                worlds: worlds.clone(),
+            },
+            worlds
+                .into_iter()
+                .map(|world_id| ProtectedEffectSet {
+                    world_id,
+                    effects: vec![selected.clone()],
+                })
+                .collect(),
+            vec![selected.clone()],
+            vec![selected.clone()],
+            selected,
+        )
+        .unwrap()
+    }
+
+    fn action_and_acceptance() -> (DigestV1, DigestV1) {
+        let accepted = accepted_effect();
+        (
+            *accepted.action_digest().as_bytes(),
+            *accepted.acceptance_digest().as_bytes(),
+        )
+    }
+
+    fn commit_closure() -> TransactionClosure {
+        let (action_digest, acceptance_digest) = action_and_acceptance();
+        TransactionClosure {
+            kind: ClosureKind::Commit,
+            root: digest(11),
+            transaction_receipt_digest: digest(17),
+            action_digest,
+            acceptance_digest: Some(acceptance_digest),
+            baseline_state: digest(13),
+            candidate_state: digest(11),
+            restoration_scope: RestorationScopeV1::NotApplicableCandidateCommit,
+            external_restoration_debt_count: 0,
+            restoration: RestorationAccounting::default(),
+        }
+    }
+
+    fn fallback_closure() -> TransactionClosure {
+        TransactionClosure {
+            kind: ClosureKind::Fallback,
+            root: digest(13),
+            transaction_receipt_digest: digest(18),
+            action_digest: digest(19),
+            acceptance_digest: None,
+            baseline_state: digest(13),
+            candidate_state: digest(11),
+            restoration_scope: RestorationScopeV1::DeclaredEffectClosure,
+            external_restoration_debt_count: 0,
+            restoration: RestorationAccounting {
+                attempted: 1,
+                completed: 1,
+                debt: 0,
+            },
+        }
+    }
+
+    fn staged(effect_class: EffectClass) -> StagedEffect {
+        let (effect_digest, acceptance_digest) = action_and_acceptance();
+        StagedEffect {
+            effect_digest,
+            effect_class,
+            acceptance_digest: Some(acceptance_digest),
+            approval_grant_digest: (effect_class == EffectClass::ApprovalRequiredMutation)
+                .then(|| digest(12)),
+            pre_action_evidence_digest: (effect_class == EffectClass::Irreversible)
+                .then(|| digest(8)),
         }
     }
 
@@ -1772,21 +2733,26 @@ mod tests {
         execution.deterministic_transform().unwrap();
         execution.record_verification(digest(9)).unwrap();
         execution
-            .stage_effect(StagedEffect {
-                effect_digest: digest(10),
-                effect_class: EffectClass::ReversibleMutation,
-                approval_grant_digest: None,
-                pre_action_evidence_digest: None,
-            })
+            .stage_effect(staged(EffectClass::ReversibleMutation))
             .unwrap();
         assert_eq!(
             execution.reject_early_publish().code,
             FailureCode::EarlyVisibleByte
         );
         execution.buffer_visible(b"accepted").unwrap();
-        execution
-            .close_transaction(TransactionClosure::commit(digest(11), true))
-            .unwrap()
+        execution.close_transaction(commit_closure()).unwrap()
+    }
+
+    #[test]
+    fn state_machine_contract_digest_is_stable() {
+        assert_eq!(
+            two_phase_contract_digest_v2(),
+            [
+                0xe8, 0x4b, 0x6e, 0xe8, 0x08, 0x63, 0x79, 0xc6, 0x37, 0xcf, 0x50, 0x65, 0x1e, 0x16,
+                0x6a, 0x2e, 0xca, 0x62, 0x58, 0xfc, 0x49, 0xaa, 0xdb, 0x40, 0x52, 0x69, 0x68, 0xf7,
+                0xa5, 0x30, 0xa6, 0x87,
+            ]
+        );
     }
 
     #[test]
@@ -1807,10 +2773,18 @@ mod tests {
         );
         let record = receipt.record();
         assert_eq!(record.assembly_manifest_digest, digest(1));
+        assert_eq!(record.state_snapshot_digest, digest(13));
         assert_eq!(record.predecessor_receipt_head, digest(5));
         assert_eq!(record.successor_root, digest(11));
+        assert_eq!(record.transaction_receipt_digest, digest(17));
+        validate_receipt_record(&record).unwrap();
         let published = receipt.publish();
-        assert_eq!(published.durability, PublicationDurabilityV1::BufferedOnly);
+        assert_eq!(
+            published.durability,
+            PublicationDurabilityV1::JournalRootCommitted {
+                transaction_receipt_digest: digest(17)
+            }
+        );
         assert_eq!(published.visible_bytes, b"accepted");
         assert_eq!(published.approved_effects.len(), 1);
     }
@@ -1832,7 +2806,20 @@ mod tests {
     }
 
     #[test]
-    fn state_machine_omitted_guards_and_forged_predecessors_fail_typed() {
+    fn state_machine_strict_artifacts_omitted_guards_and_forged_predecessors_fail() {
+        let malformed = vec![PeerArtifactInputV1 {
+            bytes: b"not-zbf".to_vec(),
+            expected_owner: ArtifactOwnerV1::FsZero,
+            expected_kind: ZbfArtifactKindV1::FsPack,
+            expected_producer_contract_digest: digest(31),
+        }];
+        assert_eq!(
+            CanonicalArtifactSetV1::verify(digest(1), digest(2), malformed)
+                .unwrap_err()
+                .code,
+            FailureCode::InvalidSourceIdentity
+        );
+
         let FinalReceipt::Commit(receipt) = run_to_ready(ExecutionSurface::Cli).finalize().unwrap()
         else {
             panic!("expected commit")
@@ -1855,7 +2842,7 @@ mod tests {
     }
 
     #[test]
-    fn state_machine_forged_permit_unbounded_worker_and_semantic_cut_fail() {
+    fn state_machine_forged_permit_unbounded_worker_semantic_cut_and_image_fail() {
         let permit = prepare(request(ExecutionSurface::Pi, EffectClass::ReadOnly)).unwrap();
         let mut record = permit.record();
         record.permit_id[0] ^= 1;
@@ -1870,15 +2857,43 @@ mod tests {
             FailureCode::UnboundedWorker
         );
         let mut cut = request(ExecutionSurface::Pi, EffectClass::ReadOnly);
-        cut.evidence.semantic_authority = SemanticAuthority::HiddenTaskSelector;
+        cut.evidence.semantic_cut.semantic_authority = SemanticAuthority::HiddenTaskSelector;
         assert_eq!(
             prepare(cut).unwrap_err().error().code,
             FailureCode::SemanticCutCrossing
         );
+        let mut image = request(ExecutionSurface::Pi, EffectClass::ReadOnly);
+        image.binding.image_digest = digest(99);
+        assert_eq!(
+            prepare(image).unwrap_err().error().code,
+            FailureCode::CoherenceFailure
+        );
+        let mut snap = request(ExecutionSurface::Pi, EffectClass::ReversibleMutation);
+        snap.evidence.snap = SnapEvidence::Verified {
+            certificate: snap_certificate(digest(99), snap.binding.image_digest),
+        };
+        assert_eq!(
+            prepare(snap).unwrap_err().error().code,
+            FailureCode::MissingSnapCertificate
+        );
+        let mut snap = request(ExecutionSurface::Pi, EffectClass::ReversibleMutation);
+        let action = snap.evidence.safety_shield.action_digest.unwrap();
+        snap.evidence.snap = SnapEvidence::Verified {
+            certificate: snap_certificate(action, snap.binding.image_digest),
+        };
+        prepare(snap).unwrap();
+        let mut order = request(ExecutionSurface::Pi, EffectClass::ReversibleMutation);
+        order.plan.instructions.swap(2, 3);
+        order.binding.plan_digest = order.plan.digest();
+        order.evidence.semantic_cut.plan_digest = order.binding.plan_digest;
+        assert_eq!(
+            prepare(order).unwrap_err().error().code,
+            FailureCode::InvalidPlan
+        );
     }
 
     #[test]
-    fn state_machine_buffer_overflow_falls_back_only_after_full_restoration() {
+    fn state_machine_buffer_overflow_falls_back_only_to_bound_baseline() {
         let permit = prepare(request(ExecutionSurface::ClaudeCode, EffectClass::ReadOnly)).unwrap();
         let mut execution = permit.start();
         execution
@@ -1894,15 +2909,8 @@ mod tests {
         execution.record_verification(digest(9)).unwrap();
         let error = execution.buffer_visible(&[0; 33]).unwrap_err();
         assert_eq!(error.code, FailureCode::BufferOverflow);
-        let bad = TransactionClosure::fallback(
-            digest(12),
-            true,
-            RestorationAccounting {
-                attempted: 2,
-                completed: 1,
-                debt: 0,
-            },
-        );
+        let mut bad = fallback_closure();
+        bad.root = digest(12);
         assert_eq!(
             execution.abort(error.code, bad).unwrap_err().code,
             FailureCode::UnaccountedFallback
@@ -1911,18 +2919,7 @@ mod tests {
         let permit = prepare(request(ExecutionSurface::ClaudeCode, EffectClass::ReadOnly)).unwrap();
         let execution = permit.start();
         let ready = execution
-            .abort(
-                FailureCode::BufferOverflow,
-                TransactionClosure::fallback(
-                    digest(12),
-                    true,
-                    RestorationAccounting {
-                        attempted: 2,
-                        completed: 2,
-                        debt: 0,
-                    },
-                ),
-            )
+            .abort(FailureCode::BufferOverflow, fallback_closure())
             .unwrap();
         let FinalReceipt::Fallback(receipt) = ready.finalize().unwrap() else {
             panic!("expected fallback")
@@ -1932,11 +2929,12 @@ mod tests {
             receipt.record().failure_code,
             Some(FailureCode::BufferOverflow)
         );
-        assert_eq!(receipt.record().restoration.completed, 2);
+        assert_eq!(receipt.record().successor_root, digest(13));
+        validate_receipt_record(&receipt.record()).unwrap();
     }
 
     #[test]
-    fn state_machine_irreversible_effect_requires_matching_pre_action_evidence() {
+    fn state_machine_effects_require_matching_acceptance_and_pre_action_evidence() {
         let permit = prepare(request(ExecutionSurface::Mcp, EffectClass::Irreversible)).unwrap();
         let mut execution = permit.start();
         execution
@@ -1950,64 +2948,11 @@ mod tests {
             .unwrap();
         execution.deterministic_transform().unwrap();
         execution.record_verification(digest(9)).unwrap();
-        let error = execution
-            .stage_effect(StagedEffect {
-                effect_digest: digest(10),
-                effect_class: EffectClass::Irreversible,
-                approval_grant_digest: None,
-                pre_action_evidence_digest: Some(digest(99)),
-            })
-            .unwrap_err();
-        assert_eq!(error.code, FailureCode::IrreversiblePreEvidenceEffect);
-    }
-
-    #[test]
-    fn state_machine_admission_and_receipt_commitments_reject_tampering() {
-        let mut missing_predecessor = request(ExecutionSurface::Mcp, EffectClass::ReadOnly);
-        missing_predecessor.binding.predecessor_receipt_head = [0; 32];
+        let mut effect = staged(EffectClass::Irreversible);
+        effect.pre_action_evidence_digest = Some(digest(99));
         assert_eq!(
-            prepare(missing_predecessor).unwrap_err().error().code,
-            FailureCode::MissingBinding
-        );
-
-        let base = request(ExecutionSurface::Mcp, EffectClass::ReversibleMutation);
-        let base_digest = base.admission_digest();
-        let mut changed_envelope = base.clone();
-        changed_envelope.envelope.fuel += 1;
-        assert_ne!(base_digest, changed_envelope.admission_digest());
-        let mut changed_evidence = base.clone();
-        changed_evidence.evidence.safety_shield_digest = digest(99);
-        assert_ne!(base_digest, changed_evidence.admission_digest());
-
-        let permit = prepare(base).unwrap();
-        let mut permit_record = permit.record();
-        validate_permit_record(&permit_record).unwrap();
-        permit_record.admission_digest[0] ^= 1;
-        assert_eq!(
-            validate_permit_record(&permit_record).unwrap_err().code,
-            FailureCode::ForgedPermit
-        );
-
-        let FinalReceipt::Commit(receipt) = run_to_ready(ExecutionSurface::Mcp).finalize().unwrap()
-        else {
-            panic!("expected commit")
-        };
-        let mut receipt_record = receipt.record();
-        validate_receipt_record(&receipt_record).unwrap();
-        receipt_record.output_digest[0] ^= 1;
-        assert_eq!(
-            validate_receipt_record(&receipt_record).unwrap_err().code,
-            FailureCode::ForgedReceipt
-        );
-    }
-
-    #[test]
-    fn state_machine_approval_required_effect_binds_validated_grant() {
-        let mut missing = request(ExecutionSurface::Mcp, EffectClass::ApprovalRequiredMutation);
-        missing.evidence.approval_grant_digest = None;
-        assert_eq!(
-            prepare(missing).unwrap_err().error().code,
-            FailureCode::MissingApprovalGrant
+            execution.stage_effect(effect).unwrap_err().code,
+            FailureCode::IrreversiblePreEvidenceEffect
         );
 
         let permit = prepare(request(
@@ -2027,22 +2972,55 @@ mod tests {
             .unwrap();
         execution.deterministic_transform().unwrap();
         execution.record_verification(digest(9)).unwrap();
-        let error = execution
-            .stage_effect(StagedEffect {
-                effect_digest: digest(10),
-                effect_class: EffectClass::ApprovalRequiredMutation,
-                approval_grant_digest: Some(digest(99)),
-                pre_action_evidence_digest: None,
-            })
-            .unwrap_err();
-        assert_eq!(error.code, FailureCode::MissingApprovalGrant);
-        execution
-            .stage_effect(StagedEffect {
-                effect_digest: digest(10),
-                effect_class: EffectClass::ApprovalRequiredMutation,
-                approval_grant_digest: Some(digest(12)),
-                pre_action_evidence_digest: None,
-            })
-            .unwrap();
+        let mut effect = staged(EffectClass::ApprovalRequiredMutation);
+        effect.approval_grant_digest = Some(digest(99));
+        assert_eq!(
+            execution.stage_effect(effect).unwrap_err().code,
+            FailureCode::MissingApprovalGrant
+        );
+    }
+
+    #[test]
+    fn state_machine_admission_and_receipt_commitments_reject_tampering() {
+        let mut missing = request(ExecutionSurface::Mcp, EffectClass::ReadOnly);
+        missing.binding.predecessor_receipt_head = [0; 32];
+        assert_eq!(
+            prepare(missing).unwrap_err().error().code,
+            FailureCode::MissingBinding
+        );
+
+        let base = request(ExecutionSurface::Mcp, EffectClass::ReversibleMutation);
+        let base_digest = base.admission_digest();
+        let mut changed_envelope = base.clone();
+        changed_envelope.envelope.fuel += 1;
+        assert_ne!(base_digest, changed_envelope.admission_digest());
+        let mut changed_evidence = base.clone();
+        changed_evidence.evidence.safety_shield.shield_digest = digest(99);
+        assert_ne!(base_digest, changed_evidence.admission_digest());
+        assert_eq!(
+            prepare(changed_evidence).unwrap_err().error().code,
+            FailureCode::MissingSafetyShield
+        );
+
+        let permit = prepare(base).unwrap();
+        let mut permit_record = permit.record();
+        validate_permit_record(&permit_record).unwrap();
+        permit_record.admission_digest[0] ^= 1;
+        assert_eq!(
+            validate_permit_record(&permit_record).unwrap_err().code,
+            FailureCode::ForgedPermit
+        );
+
+        let FinalReceipt::Commit(receipt) = run_to_ready(ExecutionSurface::Mcp).finalize().unwrap()
+        else {
+            panic!("expected commit")
+        };
+        let mut receipt_record = receipt.record();
+        validate_receipt_record(&receipt_record).unwrap();
+        receipt_record.transaction_receipt_digest[0] ^= 1;
+        assert_eq!(
+            validate_receipt_record(&receipt_record).unwrap_err().code,
+            FailureCode::ForgedReceipt
+        );
     }
 }

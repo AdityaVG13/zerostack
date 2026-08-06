@@ -921,6 +921,15 @@ impl TransactionReceiptV1 {
     pub const fn disposition(&self) -> TransactionDispositionV1 {
         self.disposition
     }
+    pub const fn action_digest(&self) -> DigestV1 {
+        self.action_digest
+    }
+    pub const fn baseline_state(&self) -> DigestV1 {
+        self.baseline_state
+    }
+    pub const fn candidate_state(&self) -> DigestV1 {
+        self.candidate_state
+    }
     pub const fn acceptance_digest(&self) -> Option<DigestV1> {
         self.acceptance_digest
     }

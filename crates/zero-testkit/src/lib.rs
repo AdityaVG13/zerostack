@@ -22,6 +22,7 @@ pub mod assembly_kat;
 pub mod authority;
 pub mod invalidation_contract;
 pub mod journal_fault_matrix;
+pub mod kernel_fixture;
 pub mod ledger_conservation;
 pub mod raw_v2_slice;
 pub mod robust_snap_model;

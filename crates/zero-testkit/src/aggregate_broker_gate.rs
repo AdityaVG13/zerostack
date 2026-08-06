@@ -10,12 +10,11 @@ mod tests {
     use std::{collections::BTreeMap, fs, path::PathBuf, process::Command};
     use zero_abi::{raw_worker::EffectClass, sha256_hex};
     use zero_gate::{
-        prepare, validate_receipt_record, AttributionClass, ControllerInstruction, ControllerPlan,
-        ExecutionBinding, ExecutionSurface, ExecutionTrace, FailureCode, FinalReceipt, Guard,
-        GuardEvidence, PeerOwner, PerformanceAdmission, PrepareRequest, ResourceUsage,
-        SemanticAuthority, SnapEvidence, SourceHead, StagedEffect, TransactionClosure,
-        WorkerEnvelope, TWO_PHASE_SCHEMA_VERSION,
+        prepare, validate_receipt_record, ExecutionSurface, ExecutionTrace, FailureCode,
+        FinalReceipt, Guard, PerformanceAdmission, ResourceUsage,
     };
+
+    use crate::kernel_fixture::{kernel_mutation_fixture_v2, KernelMutationFixtureV2};
 
     #[derive(Deserialize)]
     struct Vectors {
@@ -59,69 +58,23 @@ mod tests {
         }
     }
 
-    fn request(surface: ExecutionSurface) -> PrepareRequest {
-        let plan = ControllerPlan {
-            instructions: vec![
-                ControllerInstruction::Dispatch {
-                    owner: PeerOwner::ZeroStack,
-                },
-                ControllerInstruction::Verify,
-                ControllerInstruction::StageEffect,
-                ControllerInstruction::BufferVisible,
-                ControllerInstruction::CloseTransaction,
-            ],
-        };
-        PrepareRequest {
-            binding: ExecutionBinding {
-                schema_version: TWO_PHASE_SCHEMA_VERSION,
-                assembly_manifest_digest: digest(1),
-                source_tree_digest: digest(2),
-                source_repository_heads: vec![SourceHead {
-                    repository: "ZeroStack".into(),
-                    head: "87c8ef5df0699b6345e4a829876b3f086f9c3ae5".into(),
-                }],
-                image_digest: digest(3),
-                plan_digest: plan.digest(),
-                comparison_identity_digest: digest(4),
-                predecessor_receipt_head: digest(5),
-            },
+    fn fixture(surface: ExecutionSurface) -> KernelMutationFixtureV2 {
+        kernel_mutation_fixture_v2(
             surface,
-            effect_class: EffectClass::ReversibleMutation,
-            plan,
-            envelope: WorkerEnvelope {
-                fuel: 100,
-                deadline_ms: 1_000,
-                io_bytes: 1_024,
-                output_bytes: 128,
-                memory_bytes: 16 * 1_024 * 1_024,
-                processes: 1,
-                risk_units: 10,
-                worker_steps: 4,
-            },
-            evidence: GuardEvidence {
-                canonical_object_digest: digest(6),
-                decoded_object_digest: digest(6),
-                owner_coherent: true,
-                producer_coherent: true,
-                schema_coherent: true,
-                source_root_coherent: true,
-                semantic_authority: SemanticAuthority::OwnerScoped,
-                attribution_class: AttributionClass::Fixed,
-                snap: SnapEvidence::NotClaimed,
-                safety_shield_digest: digest(7),
-                approval_grant_digest: None,
-                irreversible_pre_action_evidence_digest: None,
-                performance: PerformanceAdmission::ExactNeutral,
-            },
-        }
+            digest(1),
+            digest(2),
+            "87c8ef5df0699b6345e4a829876b3f086f9c3ae5".into(),
+        )
+        .unwrap()
     }
 
     fn execute(surface: ExecutionSurface) -> zero_gate::CommitReceipt {
-        let permit = prepare(request(surface)).unwrap();
+        let fixture = fixture(surface);
+        let permit = prepare(fixture.request).unwrap();
         let mut execution = permit.start();
         execution
             .dispatch(
-                PeerOwner::ZeroStack,
+                zero_gate::PeerOwner::ZeroStack,
                 ResourceUsage {
                     fuel: 20,
                     elapsed_ms: 10,
@@ -134,21 +87,14 @@ mod tests {
             )
             .unwrap();
         execution.record_verification(digest(8)).unwrap();
-        execution
-            .stage_effect(StagedEffect {
-                effect_digest: digest(9),
-                effect_class: EffectClass::ReversibleMutation,
-                approval_grant_digest: None,
-                pre_action_evidence_digest: None,
-            })
-            .unwrap();
+        execution.stage_effect(fixture.staged_effect).unwrap();
         assert_eq!(
             execution.reject_early_publish().code,
             FailureCode::EarlyVisibleByte
         );
         execution.buffer_visible(b"brokered result").unwrap();
         let ready = execution
-            .close_transaction(TransactionClosure::commit(digest(10), true))
+            .close_transaction(fixture.transaction_closure)
             .unwrap();
         let FinalReceipt::Commit(receipt) = ready.finalize().unwrap() else {
             panic!("expected commit receipt")
@@ -269,28 +215,21 @@ mod tests {
 
     #[test]
     fn aggregate_broker_gate_runtime_mutants_fail_closed() {
-        let mut hidden_selector = request(ExecutionSurface::Mcp);
-        hidden_selector.evidence.semantic_authority = SemanticAuthority::HiddenTaskSelector;
-        assert_eq!(
-            prepare(hidden_selector).unwrap_err().error().code,
-            FailureCode::SemanticCutCrossing
-        );
-
-        let mut unbounded = request(ExecutionSurface::Mcp);
+        let mut unbounded = fixture(ExecutionSurface::Mcp).request;
         unbounded.envelope.processes = 0;
         assert_eq!(
             prepare(unbounded).unwrap_err().error().code,
             FailureCode::UnboundedWorker
         );
 
-        let mut unknown = request(ExecutionSurface::Mcp);
-        unknown.evidence.performance = PerformanceAdmission::Unknown;
         assert_eq!(
-            prepare(unknown).unwrap_err().error().code,
+            PerformanceAdmission::exact_neutral([0; 32])
+                .unwrap_err()
+                .code,
             FailureCode::PerformanceUnknown
         );
 
-        let mut missing_approval = request(ExecutionSurface::Mcp);
+        let mut missing_approval = fixture(ExecutionSurface::Mcp).request;
         missing_approval.effect_class = EffectClass::ApprovalRequiredMutation;
         assert_eq!(
             prepare(missing_approval).unwrap_err().error().code,

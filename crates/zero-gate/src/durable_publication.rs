@@ -428,7 +428,11 @@ mod tests {
         commit_journal_v1, initialize_published_root_v1, prepare_journal_v1, JournalPathsV1,
     };
 
-    use crate::two_phase::{ExecutionSurface, ResourceUsage, RestorationAccounting, SourceHead};
+    use crate::two_phase::{
+        AttributionClass, ExecutionSurface, ResourceUsage, RestorationAccounting, SourceHead,
+        WorkerEnvelope, TWO_PHASE_SCHEMA_VERSION,
+    };
+    use zero_abi::raw_worker::EffectClass;
 
     fn abi(byte: u8) -> AbiDigestV1 {
         AbiDigestV1::from_bytes([byte; 32])
@@ -445,7 +449,7 @@ mod tests {
     }
     fn record() -> ReceiptRecord {
         ReceiptRecord {
-            schema_version: 1,
+            schema_version: TWO_PHASE_SCHEMA_VERSION,
             kind: ReceiptKind::Commit,
             permit_id: [1; 32],
             binding_digest: [1; 32],
@@ -457,8 +461,29 @@ mod tests {
                 head: "87c8ef5df0699b6345e4a829876b3f086f9c3ae5".into(),
             }],
             image_digest: [1; 32],
+            state_snapshot_digest: [1; 32],
+            task_fingerprint_digest: [1; 32],
             plan_digest: [1; 32],
+            fixed_model_digest: [1; 32],
             comparison_identity_digest: [1; 32],
+            artifact_set_digest: [1; 32],
+            semantic_cut_certificate_digest: [1; 32],
+            snap_certificate_digest: None,
+            safety_shield_digest: [1; 32],
+            quality_decision_digest: [1; 32],
+            transaction_receipt_digest: [1; 32],
+            attribution_class: AttributionClass::Fixed,
+            effect_class: EffectClass::ReversibleMutation,
+            resource_envelope: WorkerEnvelope {
+                fuel: 1,
+                deadline_ms: 1,
+                io_bytes: 1,
+                output_bytes: 1,
+                memory_bytes: 1,
+                processes: 1,
+                risk_units: 1,
+                worker_steps: 1,
+            },
             surface: ExecutionSurface::Mcp,
             verification_digest: Some([1; 32]),
             output_digest: [1; 32],
