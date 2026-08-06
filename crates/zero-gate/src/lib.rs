@@ -20,7 +20,9 @@ use std::fmt;
 use zero_abi::raw_worker::EffectClass;
 use zero_cert::{CommandId, VerifiedEvidence};
 
+pub mod durable_publication;
 pub mod two_phase;
+pub use durable_publication::*;
 pub use two_phase::*;
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]

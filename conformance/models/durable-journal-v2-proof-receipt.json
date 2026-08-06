@@ -1,0 +1,80 @@
+{
+  "bead_key": "zerostack-tu9u",
+  "claim_or_freeze_ids": [
+    "Z6",
+    "zerostack-racc-frontier-86qk.21"
+  ],
+  "exact_commands": [
+    "rch exec -- env CARGO_TARGET_DIR=/tmp/rch_target_zerostack_z6 cargo test -p zero-store journal_ -- --test-threads=1",
+    "rch exec -- env CARGO_TARGET_DIR=/tmp/rch_target_zerostack_z6 cargo test -p zero-gate durable_publication -- --test-threads=1",
+    "rch exec -- env CARGO_TARGET_DIR=/tmp/rch_target_zerostack_z6 cargo test -p zero-testkit journal_fault_matrix -- --test-threads=1",
+    "rch exec -- env CARGO_TARGET_DIR=/tmp/rch_target_zerostack_z6 cargo test -p zero-testkit --bin z6-native-journal -- --test-threads=1"
+  ],
+  "failure_code": null,
+  "final_z6_promotion": "OPEN_PENDING_NATIVE_PROFILE_RECEIPTS",
+  "generated_at": "2026-08-06T08:25:28.410127Z",
+  "model_or_spec_version": "zerostack.durable-journal.v2",
+  "mutants_run": [
+    "all 32 unique journal barriers across 40 recovery contexts",
+    "torn journal",
+    "foreign continuation cartridge",
+    "owner identity substitution",
+    "profile substitution",
+    "journal/root disagreement",
+    "rename-only native receipt",
+    "not-run native receipt",
+    "schema/kind/assembly/root/profile publication mismatches"
+  ],
+  "output_artifact_hashes": {
+    "conformance/models/durable-journal-v2.json": "7c9df63f14e4601e2df2595dcbb3bc6a13e1dd8afe172e90d873dd273172aded",
+    "crates/zero-gate/Cargo.toml": "e6571361d33a51a98afee468b8dd04e50b12cbf7e859ed5117dc091b21d2e2bb",
+    "crates/zero-gate/src/durable_publication.rs": "724d33d9c82716c9c7e7cf5a8a7af54a271b2d768a75fceb5e0c3dfbb62d5be1",
+    "crates/zero-gate/src/lib.rs": "8f1916874003d39588dae8514c5c718cdcd946a1e1c87bc897686f2f9b5a85ea",
+    "crates/zero-gate/src/two_phase.rs": "d6463684c2e1876f4daf1a99e079aaa0095ebbfdf492a1b26244f0e751e9c238",
+    "crates/zero-store/src/durable_journal.rs": "8643463b844248d963cea0bf3099ae492a96895e6f2b2b1fb83caa601d17c6f8",
+    "crates/zero-store/src/lib.rs": "e7c1536a1a2f01423e84c89e39fff6df49f5c4bbe899fa2d6f6fceb3fed902a6",
+    "crates/zero-testkit/Cargo.toml": "751145443195463ab57299206edfb9eaff57dfe564374cbc8e37e6eeadb593f1",
+    "crates/zero-testkit/examples/native_durable_journal.rs": "76607167dd6ba8e85f59544fdd29422612f30337bcce112e96b2aaf703839261",
+    "crates/zero-testkit/src/journal_fault_matrix.rs": "54962f8319be2fd2ba148f40e1b04c996d29fadc59eee76cb17addbbad26d4ac",
+    "crates/zero-testkit/src/lib.rs": "89c873b3edb0517743cfac91b9cccc74c53df1dfed4b9d0a76e60998fdd5b27c"
+  },
+  "platform_profiles": {
+    "linux_ext4": {
+      "reason": "rch cargo-run execution observed macOS, so it did not constitute Linux native evidence",
+      "status": "NOT_RUN"
+    },
+    "linux_xfs": {
+      "reason": "no preregistered XFS native host was available",
+      "status": "NOT_RUN"
+    },
+    "macos_apfs": {
+      "reason": "native runner filesystem discovery failed before the mount-device fix; the fixed runner is RCH-compiled but native execution was not retried after three failed evidence attempts",
+      "status": "NOT_RUN"
+    },
+    "windows_ntfs": {
+      "reason": "operator instruction keeps Windows/NTFS unavailable for this carrier",
+      "status": "NOT_RUN"
+    }
+  },
+  "residual_assumptions": [
+    "RCH compilation and test execution do not prove APFS, ext4, XFS, or NTFS power-loss durability",
+    "process-abort crash injection is not power-loss evidence",
+    "the carrier is single-root local publication only",
+    "filesystem rollback is not complete external-state restoration"
+  ],
+  "result": {
+    "fault_contexts": 40,
+    "native_runner_compiled": true,
+    "operational_durability_claim": false,
+    "status": "passed_rch_carrier",
+    "unique_journal_boundaries": 32,
+    "zero_gate_tests": 4,
+    "zero_store_tests": 7,
+    "zero_testkit_tests": 4
+  },
+  "schema_version": 1,
+  "source_repository_heads": {
+    "ZeroStack_base": "95b0b2de735884ec35934c62b34d999f1aa04003"
+  },
+  "source_tree_digest": "f986413d393f7d924c2947b773b1d4503ba61194da5dd465a1322a671b2da682"
+}

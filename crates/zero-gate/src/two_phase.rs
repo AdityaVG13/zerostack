@@ -1550,12 +1550,14 @@ impl CommitReceipt {
     pub fn trace(&self) -> &ExecutionTrace {
         &self.common.trace
     }
+    /// Releases buffered output without making a filesystem durability claim.
     pub fn publish(self) -> PublishedCommit {
         PublishedCommit {
             visible_bytes: self.buffered_visible,
             approved_effects: self.staged_effects,
             receipt_head: self.common.receipt_head,
             successor_root: self.common.successor_root,
+            durability: PublicationDurabilityV1::BufferedOnly,
         }
     }
 }
@@ -1574,12 +1576,23 @@ impl FallbackReceipt {
     }
 }
 
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PublicationDurabilityV1 {
+    BufferedOnly,
+    JournalVerified {
+        evidence_digest: DigestV1,
+        durable_profile_digest: DigestV1,
+    },
+}
+
 #[derive(Debug)]
 pub struct PublishedCommit {
     pub visible_bytes: Vec<u8>,
     pub approved_effects: Vec<StagedEffect>,
     pub receipt_head: DigestV1,
     pub successor_root: DigestV1,
+    pub durability: PublicationDurabilityV1,
 }
 
 fn receipt_digest(
@@ -1797,6 +1810,7 @@ mod tests {
         assert_eq!(record.predecessor_receipt_head, digest(5));
         assert_eq!(record.successor_root, digest(11));
         let published = receipt.publish();
+        assert_eq!(published.durability, PublicationDurabilityV1::BufferedOnly);
         assert_eq!(published.visible_bytes, b"accepted");
         assert_eq!(published.approved_effects.len(), 1);
     }

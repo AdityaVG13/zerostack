@@ -17,6 +17,7 @@
 //! its unlink cannot be split by a concurrent publisher.
 
 mod cas;
+mod durable_journal;
 mod fs_replace;
 mod gc_lock;
 mod metadata;
@@ -26,6 +27,19 @@ mod zbf;
 pub use cas::{
     CasError, PutOutcome, SharedCas, CAS_LAYOUT, CAS_LAYOUT_VERSION, CAS_MAX_OBJECT_BYTES,
     CAS_QUARANTINE_DIR, CAS_TEMP_REAP_AGE,
+};
+pub use durable_journal::{
+    abort_journal_v1, abort_journal_with_fault_v1, commit_journal_v1, commit_journal_with_fault_v1,
+    durable_journal_contract_v1, initialize_published_root_v1,
+    initialize_published_root_with_fault_v1, prepare_journal_v1, prepare_journal_with_fault_v1,
+    read_continuation_cartridge_v1, read_journal_record_v1, read_published_root_v1,
+    record_owner_death_v1, record_owner_death_with_fault_v1, recover_journal_v1,
+    recover_journal_with_fault_v1, AbortReasonV1, ContinuationCartridgeV1, DurableJournalV2,
+    FaultPlanV1, JournalBindingV1, JournalBoundaryV1, JournalErrorV1, JournalFailureCodeV1,
+    JournalPathsV1, JournalRecordV1, JournalStateV1, OwnerDeathReceiptV1, PublishedRootV1,
+    RecoveryOutcomeV1, RecoveryReceiptV1, RootPublicationReceipt,
+    DURABLE_BINDING_SCHEMA_VERSION_V1, DURABLE_JOURNAL_MAX_RECORD_BYTES_V1,
+    DURABLE_JOURNAL_SCHEMA_VERSION_V2, DURABLE_RECEIPT_SCHEMA_VERSION_V1,
 };
 pub use fs_replace::{atomic_write_file, replace_file};
 pub use gc_lock::{

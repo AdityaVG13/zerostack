@@ -13,8 +13,6 @@ zero-abi = { path = "../zero-abi" }
 zero-gate = { path = "../zero-gate" }
 zero-ledger = { path = "../zero-ledger" }
 zero-store = { path = "../zero-store" }
-
-[dev-dependencies]
 tempfile = "3"
 
 [[bin]]
@@ -24,3 +22,7 @@ path = "examples/native_counter_correspondence.rs"
 [[bin]]
 name = "z5-native-broker"
 path = "examples/native_broker_boundary.rs"
+
+[[bin]]
+name = "z6-native-journal"
+path = "examples/native_durable_journal.rs"

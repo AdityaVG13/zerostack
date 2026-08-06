@@ -8,10 +8,13 @@ description = "Proof-carrying deterministic decision gate for ZeroStack"
 [dependencies]
 sha2 = { workspace = true }
 serde = { workspace = true }
+serde_json = { workspace = true }
 zero-abi = { path = "../zero-abi" }
 zero-cert = { path = "../zero-cert" }
+zero-store = { path = "../zero-store" }
 
 [dev-dependencies]
+tempfile = "3"
 criterion = "0.5"
 proptest = "1"
 stats_alloc = "0.1"

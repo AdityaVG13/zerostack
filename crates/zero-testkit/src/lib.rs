@@ -21,6 +21,7 @@ pub mod aggregate_broker_gate;
 pub mod assembly_kat;
 pub mod authority;
 pub mod invalidation_contract;
+pub mod journal_fault_matrix;
 pub mod ledger_conservation;
 pub mod robust_snap_model;
 
