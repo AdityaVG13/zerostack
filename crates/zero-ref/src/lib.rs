@@ -224,7 +224,12 @@ pub fn is_full_lower_hex(s: &str) -> bool {
 pub fn content_hash_hex(bytes: &[u8]) -> String {
     let mut h = Sha256::new();
     h.update(bytes);
-    format!("{:x}", h.finalize())
+    let digest: [u8; 32] = h.finalize().into();
+    digest.iter().fold(String::with_capacity(64), |mut out, b| {
+        use std::fmt::Write;
+        let _ = write!(out, "{b:02x}");
+        out
+    })
 }
 
 /// Binary SHA-256 digest used by structured identities and span references.

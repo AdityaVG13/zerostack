@@ -454,7 +454,12 @@ pub fn project_key(repo_root: &Path) -> String {
     let abs = absolutize(repo_root);
     let mut h = Sha256::new();
     h.update(abs.to_string_lossy().as_bytes());
-    let full = format!("{:x}", h.finalize());
+    let digest: [u8; 32] = h.finalize().into();
+    let full = digest.iter().fold(String::with_capacity(64), |mut out, b| {
+        use std::fmt::Write;
+        let _ = write!(out, "{b:02x}");
+        out
+    });
     full[..PROJECT_KEY_HEX_LEN].to_string()
 }
 

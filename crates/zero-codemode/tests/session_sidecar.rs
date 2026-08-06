@@ -607,13 +607,17 @@ fn owner_sigkill_reaps_worker_descendants_before_socket_cleanup() {
 #[test]
 fn terminal_cancellation_rejects_queued_execution() {
     let d = TempDir::new().unwrap();
-    std::env::set_var("ZEROSTACK_SESSION_ROOT", d.path());
-    std::env::set_var("ZEROSTACK_TEST_MODE", "1");
-    for engine in ["FSZERO", "GRAPHZERO", "TOKENZERO"] {
-        std::env::set_var(
-            format!("ZERO_{engine}_RAW_BIN"),
-            env!("CARGO_BIN_EXE_zero-codemode-worker-fixture"),
-        );
+    // SAFETY: edition-2024 set_var; this #[test] runs before the executor
+    // spawns threads and cargo test isolates the process per test binary.
+    unsafe {
+        std::env::set_var("ZEROSTACK_SESSION_ROOT", d.path());
+        std::env::set_var("ZEROSTACK_TEST_MODE", "1");
+        for engine in ["FSZERO", "GRAPHZERO", "TOKENZERO"] {
+            std::env::set_var(
+                format!("ZERO_{engine}_RAW_BIN"),
+                env!("CARGO_BIN_EXE_zero-codemode-worker-fixture"),
+            );
+        }
     }
     let exec = SessionExecutor::new().unwrap();
     assert_eq!(

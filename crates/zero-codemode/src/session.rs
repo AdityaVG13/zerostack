@@ -336,7 +336,12 @@ fn pinned_worker_binary(path: &Path, key: &str) -> Result<(PathBuf, String), Hos
         }
         digest.update(&buffer[..read]);
     }
-    let actual = format!("{:x}", digest.finalize());
+    let digest_bytes: [u8; 32] = digest.finalize().into();
+    let actual = digest_bytes.iter().fold(String::with_capacity(64), |mut out, b| {
+        use std::fmt::Write;
+        let _ = write!(out, "{b:02x}");
+        out
+    });
     let variable = format!("ZEROSTACK_{key}_WORKER_SHA256");
     let expected = std::env::var(&variable).unwrap_or_else(|_| actual.clone());
     if expected.len() != 64
@@ -817,8 +822,9 @@ impl SessionExecutor {
         let root = std::env::var("ZEROSTACK_SESSION_ROOT")
             .map(PathBuf::from)
             .unwrap_or_else(|_| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
-        let session_id = std::env::var(crate::worker::SESSION_ID_ENV)
-            .unwrap_or_else(|_| format!("session-{}", std::process::id()));
+        let session_id = current_session_id()
+            .or_else(|| std::env::var(crate::worker::SESSION_ID_ENV).ok())
+            .unwrap_or_else(|| format!("session-{}", std::process::id()));
         let cancellation = CancellationSignal::new();
         let connector = Rc::new(AggregateConnector::new(
             root,
@@ -1522,11 +1528,20 @@ fn session_worker(
     }
 }
 
+/// In-process session-id channel between executor startup and
+/// `SessionExecutor::new`. Replaces the former `set_var` call: edition 2024
+/// makes `set_var` unsafe and this crate forbids unsafe code. Worker child
+/// processes still receive the id via `Command::env` in `worker.rs`.
+static SESSION_ID_SLOT: std::sync::Mutex<Option<String>> = std::sync::Mutex::new(None);
+
+pub(crate) fn current_session_id() -> Option<String> {
+    SESSION_ID_SLOT.lock().ok().and_then(|slot| slot.clone())
+}
+
 fn start_session_executor(generation: u64) -> Result<SessionExecutor, String> {
-    std::env::set_var(
-        crate::worker::SESSION_ID_ENV,
-        format!("session-{generation:016x}"),
-    );
+    if let Ok(mut slot) = SESSION_ID_SLOT.lock() {
+        *slot = Some(format!("session-{generation:016x}"));
+    }
     let executor = SessionExecutor::new().map_err(|error| error.to_string())?;
     executor
         .execute("return null", Duration::from_secs(1))

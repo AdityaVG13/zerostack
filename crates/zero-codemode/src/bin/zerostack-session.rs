@@ -1,4 +1,7 @@
-#![forbid(unsafe_code)]
+// Edition 2024 makes env::set_var/remove_var unsafe; the four startup env
+// operations below predate any thread spawn. deny (not forbid) permits the
+// scoped SAFETY-commented allows; bead tracks the proper env-elimination.
+#![deny(unsafe_code)]
 #[cfg(unix)]
 fn main() {
     if let Err(e) = run() {
@@ -93,8 +96,13 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     if constant_time_eq(token.as_bytes(), shutdown_token.as_bytes()) {
         return Err("session capabilities must be distinct".into());
     }
-    std::env::remove_var(SESSION_TOKEN_ENV);
-    std::env::remove_var(SESSION_SHUTDOWN_TOKEN_ENV);
+    // SAFETY: single-threaded startup (no threads spawned yet); scrubs the
+    // capability tokens from the process env before any worker inherits it.
+    #[allow(unsafe_code)]
+    unsafe {
+        std::env::remove_var(SESSION_TOKEN_ENV);
+        std::env::remove_var(SESSION_SHUTDOWN_TOKEN_ENV);
+    }
     prepare_runtime(&dir, current_euid())?;
     let socket = dir.join("session.sock");
     if socket.exists() {
@@ -106,10 +114,18 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         dir: dir.clone(),
     };
     fs::set_permissions(&socket, fs::Permissions::from_mode(0o600))?;
-    std::env::set_var("ZEROSTACK_SESSION_ROOT", &root);
+    // SAFETY: single-threaded startup; consumed by SessionExecutor::new.
+    #[allow(unsafe_code)]
+    unsafe {
+        std::env::set_var("ZEROSTACK_SESSION_ROOT", &root);
+    }
     let generation = entropy_u64()?;
     let session_id = format!("session-{generation:016x}");
-    std::env::set_var("ZEROSTACK_SESSION_ID", &session_id);
+    // SAFETY: single-threaded startup; fallback channel for SessionExecutor.
+    #[allow(unsafe_code)]
+    unsafe {
+        std::env::set_var("ZEROSTACK_SESSION_ID", &session_id);
+    }
     let exec = Arc::new(AggregateSession::new(generation)?);
     let watcher = OwnerWatcher::new(owner)?;
     let (tx, rx) = mpsc::sync_channel(8);

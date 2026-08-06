@@ -211,7 +211,12 @@ fn canonical_event_digest(name: &str) -> Option<&str> {
 fn hash_hex(bytes: &[u8]) -> String {
     let mut hash = Sha256::new();
     hash.update(bytes);
-    format!("{:x}", hash.finalize())
+    let digest: [u8; 32] = hash.finalize().into();
+    digest.iter().fold(String::with_capacity(64), |mut out, b| {
+        use std::fmt::Write;
+        let _ = write!(out, "{b:02x}");
+        out
+    })
 }
 
 fn io_err(context: &str, error: impl std::fmt::Display) -> CasError {
