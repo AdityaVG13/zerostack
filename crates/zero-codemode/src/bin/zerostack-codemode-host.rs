@@ -545,24 +545,23 @@ fn flush_deadlines(
         })
         .collect();
     for cell_id in expired {
-        if let Some(cell) = cells.get_mut(&cell_id) {
-            if let Some(waiter) = cell.waiter.take() {
-                let elapsed_ms =
-                    u64::try_from(cell.started.elapsed().as_millis()).unwrap_or(u64::MAX);
-                if cell.cancelled.load(Ordering::Relaxed) {
-                    write_outcome(
-                        writer,
-                        waiter.request_id,
-                        &cell_id,
-                        CellOutcome::Terminated,
-                        Some(elapsed_ms),
-                    )?;
-                } else {
-                    write_frame(
-                        writer,
-                        &json!({"type":"response","id":waiter.request_id,"ok":true,"kind":"yielded","cellId":cell_id,"durationMs":elapsed_ms,"contentItems":[]}),
-                    )?;
-                }
+        if let Some(cell) = cells.get_mut(&cell_id)
+            && let Some(waiter) = cell.waiter.take()
+        {
+            let elapsed_ms = u64::try_from(cell.started.elapsed().as_millis()).unwrap_or(u64::MAX);
+            if cell.cancelled.load(Ordering::Relaxed) {
+                write_outcome(
+                    writer,
+                    waiter.request_id,
+                    &cell_id,
+                    CellOutcome::Terminated,
+                    Some(elapsed_ms),
+                )?;
+            } else {
+                write_frame(
+                    writer,
+                    &json!({"type":"response","id":waiter.request_id,"ok":true,"kind":"yielded","cellId":cell_id,"durationMs":elapsed_ms,"contentItems":[]}),
+                )?;
             }
         }
     }

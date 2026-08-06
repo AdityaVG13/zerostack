@@ -165,13 +165,15 @@ impl WorkerRegistry {
     }
 }
 
+pub type WorkerObserver = Arc<dyn Fn(&WorkerObservation) + Send + Sync>;
+
 #[derive(Clone)]
 pub struct WorkerClientConfig {
     pub limits: ProtocolLimits,
     pub handshake_timeout: Duration,
     pub shutdown_timeout: Duration,
     pub max_stderr_bytes: usize,
-    pub observer: Option<Arc<dyn Fn(&WorkerObservation) + Send + Sync>>,
+    pub observer: Option<WorkerObserver>,
 }
 
 impl Default for WorkerClientConfig {
@@ -1007,21 +1009,21 @@ impl WorkerClient {
             },
             deadline,
         );
-        if sent.is_ok() {
-            if matches!(
+        if sent.is_ok()
+            && matches!(
                 self.receive_until(deadline, None),
                 Ok(WorkerResponseFrame::ShutdownAck)
-            ) && self.reap_until(deadline)
-            {
-                self.observe(
-                    WorkerEvent::Shutdown,
-                    None,
-                    started.elapsed(),
-                    0,
-                    self.last_output_bytes,
-                );
-                return Ok(());
-            }
+            )
+            && self.reap_until(deadline)
+        {
+            self.observe(
+                WorkerEvent::Shutdown,
+                None,
+                started.elapsed(),
+                0,
+                self.last_output_bytes,
+            );
+            return Ok(());
         }
         self.kill_and_reap();
         Err(WorkerAdapterError::Deadline { request_id: None })

@@ -586,10 +586,10 @@ fn positional_args(input: &Value, first_key: &str, second_key: Option<&str>) -> 
     if let Some(first) = items.first() {
         object.insert(first_key.into(), first.clone());
     }
-    if let (Some(key), Some(second)) = (second_key, items.get(1)) {
-        if !second.is_object() {
-            object.insert(key.into(), second.clone());
-        }
+    if let (Some(key), Some(second)) = (second_key, items.get(1))
+        && !second.is_object()
+    {
+        object.insert(key.into(), second.clone());
     }
     Value::Object(object)
 }
@@ -1612,17 +1612,17 @@ impl AggregateSession {
                 )
             })?;
         }
-        if let Ok(mut worker) = self.worker.lock() {
-            if let Some(handle) = worker.take() {
-                handle.join().map_err(|_| {
-                    AggregateSessionError::new(
-                        AggregateSessionFailureCode::BackendUnavailable,
-                        generation,
-                        None,
-                        "session executor panicked during shutdown",
-                    )
-                })?;
-            }
+        if let Ok(mut worker) = self.worker.lock()
+            && let Some(handle) = worker.take()
+        {
+            handle.join().map_err(|_| {
+                AggregateSessionError::new(
+                    AggregateSessionFailureCode::BackendUnavailable,
+                    generation,
+                    None,
+                    "session executor panicked during shutdown",
+                )
+            })?;
         }
         if let Ok(mut state) = self.state.lock() {
             state.worker_stopped = true;
@@ -1660,11 +1660,11 @@ impl AggregateSession {
     }
 
     fn finish_failed_replacement(&self, generation: u64) {
-        if let Ok(mut state) = self.state.lock() {
-            if state.generation == generation {
-                state.replacing = false;
-                state.accepting = false;
-            }
+        if let Ok(mut state) = self.state.lock()
+            && state.generation == generation
+        {
+            state.replacing = false;
+            state.accepting = false;
         }
     }
 }
@@ -1672,10 +1672,10 @@ impl AggregateSession {
 impl Drop for AggregateSession {
     fn drop(&mut self) {
         self.cancellation().cancel();
-        if let Ok(state) = self.state.lock() {
-            if state.shutdown_sent || state.worker_stopped {
-                return;
-            }
+        if let Ok(state) = self.state.lock()
+            && (state.shutdown_sent || state.worker_stopped)
+        {
+            return;
         }
         let (reply, _) = mpsc::sync_channel(1);
         let _ = self.commands.try_send(SessionCommand::Shutdown { reply });
@@ -1709,10 +1709,10 @@ fn send_control_with_deadline(
 }
 
 fn cancel_backend(cancellation: &Arc<Mutex<Option<SessionCancellation>>>) {
-    if let Ok(slot) = cancellation.lock() {
-        if let Some(signal) = slot.as_ref() {
-            signal.cancel();
-        }
+    if let Ok(slot) = cancellation.lock()
+        && let Some(signal) = slot.as_ref()
+    {
+        signal.cancel();
     }
 }
 

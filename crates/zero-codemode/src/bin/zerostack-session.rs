@@ -131,32 +131,26 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                         if peer_euid(&stream).ok() == Some(current_euid()) {
                             let _ = stream.set_read_timeout(Some(Duration::from_millis(100)));
                             let _ = stream.set_write_timeout(Some(Duration::from_millis(100)));
-                            if let Ok(cloned) = stream.try_clone() {
-                                if let Ok(SessionRequest::Hello {
+                            if let Ok(cloned) = stream.try_clone()
+                                && let Ok(SessionRequest::Hello {
                                     protocol,
                                     token: provided,
                                 }) = read_frame(&mut BufReader::new(cloned))
-                                {
-                                    if protocol == SESSION_PROTOCOL
-                                        && constant_time_eq(
-                                            provided.as_bytes(),
-                                            admission_token.as_bytes(),
-                                        )
-                                    {
-                                        let active_generation =
-                                            listener_exec.generation().unwrap_or(generation);
-                                        let _ = write_frame(
-                                            &mut stream,
-                                            &SessionResponse::typed_error_with_retry(
-                                                None,
-                                                active_generation,
-                                                "backpressure",
-                                                "session client queue is full",
-                                                Some(1),
-                                            ),
-                                        );
-                                    }
-                                }
+                                && protocol == SESSION_PROTOCOL
+                                && constant_time_eq(provided.as_bytes(), admission_token.as_bytes())
+                            {
+                                let active_generation =
+                                    listener_exec.generation().unwrap_or(generation);
+                                let _ = write_frame(
+                                    &mut stream,
+                                    &SessionResponse::typed_error_with_retry(
+                                        None,
+                                        active_generation,
+                                        "backpressure",
+                                        "session client queue is full",
+                                        Some(1),
+                                    ),
+                                );
                             }
                         }
                     }
@@ -266,10 +260,10 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     for handler in handlers {
         let _ = handler.join.join();
     }
-    if let Err(error) = shutdown_result {
-        if fatal_error.is_none() {
-            return Err(error.into());
-        }
+    if let Err(error) = shutdown_result
+        && fatal_error.is_none()
+    {
+        return Err(error.into());
     }
     if let Some(error) = fatal_error {
         return Err(error.into());

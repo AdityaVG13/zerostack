@@ -404,6 +404,10 @@ fn result(request: CallRequest) -> WorkerResult {
     }
 }
 
+#[allow(
+    clippy::zombie_processes,
+    reason = "fixture deliberately leaves a descendant for process-tree reap mutants"
+)]
 fn spawn_descendant() {
     let child = Command::new(std::env::current_exe().unwrap())
         .arg("tree-descendant")

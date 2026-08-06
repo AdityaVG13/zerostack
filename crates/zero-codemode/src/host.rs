@@ -1060,15 +1060,15 @@ return (target, label, kind) => new Proxy(target, {
     fn normalized_js_error(ctx: &Ctx<'_>, error: rquickjs::Error) -> HostError {
         if matches!(error, rquickjs::Error::Exception) {
             let caught = ctx.catch();
-            if let Some(object) = caught.as_object() {
-                if let Ok(message) = object.get::<_, String>("message") {
-                    return classified_js_error(message);
-                }
+            if let Some(object) = caught.as_object()
+                && let Ok(message) = object.get::<_, String>("message")
+            {
+                return classified_js_error(message);
             }
-            if let Some(string) = caught.as_string() {
-                if let Ok(message) = string.to_string() {
-                    return classified_js_error(message);
-                }
+            if let Some(string) = caught.as_string()
+                && let Ok(message) = string.to_string()
+            {
+                return classified_js_error(message);
             }
         }
         js_error(error)
