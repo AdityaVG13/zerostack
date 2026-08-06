@@ -745,6 +745,7 @@ pub fn run_raw_v2_slice_v1(
             deadline_unix_ms: Some(30_000),
             trace: reference_trace(raw_worker_protocol_digest),
             approval_grant: None,
+            telemetry_request: None,
         },
     };
     let call_request_bytes =
@@ -1200,6 +1201,8 @@ fn execute_reference_worker(
                 trace: request.trace,
             },
         },
+        engine_timeline: None,
+        worker_token_accounting: None,
     };
     encode_frame(&response, DEFAULT_MAX_FRAME_BYTES).map_err(stage_error("worker_encode"))
 }
@@ -1209,9 +1212,10 @@ fn decode_reference_output(
     input: &RawV2SliceInputV1,
     edit: &ExactEditV1,
 ) -> Result<(Vec<u8>, EffectProgramV1), RawV2SliceErrorV1> {
-    let WorkerResponseFrame::Result { request_id, result } =
-        decode_response_frame(response_bytes, DEFAULT_MAX_FRAME_BYTES)
-            .map_err(stage_error("response_decode"))?
+    let WorkerResponseFrame::Result {
+        request_id, result, ..
+    } = decode_response_frame(response_bytes, DEFAULT_MAX_FRAME_BYTES)
+        .map_err(stage_error("response_decode"))?
     else {
         return Err(RawV2SliceErrorV1::new(
             RawV2SliceFailureCodeV1::WorkerProtocol,
@@ -1747,7 +1751,7 @@ mod tests {
         assert_eq!(manifest_fields, receipt_keys);
         assert_eq!(
             raw_v2_slice_contract_digest_v1().to_hex(),
-            "b6f9fa14d035ad475944d835ea8ac6387982fc9db798d5d8f75e0a81ea88e249"
+            "cbb1d09fe7b1322b1147212b16270dd7a80be5661608070e56b3ffe4eab79434"
         );
     }
 

@@ -26,6 +26,8 @@ pub const RAW_WORKER_PROTOCOL_VERSION: &str = "zerostack.raw_worker.v2";
 
 /// Default maximum encoded NDJSON frame, excluding the trailing newline.
 pub const DEFAULT_MAX_FRAME_BYTES: usize = 1_048_576;
+pub const ENGINE_TIMELINE_MAX_SPANS_V1: usize = 128;
+pub const TIMELINE_CLOSURE_TOLERANCE_NS_V1: u64 = 250_000;
 
 /// Closed identity set shared by all raw-worker protocol frames.
 /// Canonical writes use stable names. Aliases are deliberate legacy reads;
@@ -188,6 +190,50 @@ pub struct HandshakeAck {
     pub protocol_digest: String,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct TelemetryRequestV1 {
+    pub engine_stage_timeline: bool,
+    pub worker_token_accounting: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum WorkerTokenCountKind {
+    Exact,
+    ConservativeUpperBound,
+    Estimate,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct WorkerTokenAccountingV1 {
+    pub tokenizer_id: String,
+    pub count_kind: WorkerTokenCountKind,
+    pub raw_tokens: u64,
+    pub visible_tokens: u64,
+    pub recovery_tokens: u64,
+    pub billed_tokens: u64,
+    pub cached_tokens: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub exact_ref_tokens: Option<u64>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct EngineStageSpanV1 {
+    pub stage: String,
+    pub start_ns: u64,
+    pub duration_ns: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct EngineStageTimelineV1 {
+    pub total_ns: u64,
+    pub spans: Vec<EngineStageSpanV1>,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct CallRequest {
@@ -200,6 +246,10 @@ pub struct CallRequest {
     /// Additive v2 field: absent remains valid for non-approval operations.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub approval_grant: Option<ApprovalGrant>,
+    /// Default-disabled transport telemetry request. Domain arguments never
+    /// carry this bit, so disabled request bytes remain byte-identical.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub telemetry_request: Option<TelemetryRequestV1>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -355,6 +405,10 @@ pub enum WorkerResponseFrame {
     Result {
         request_id: String,
         result: WorkerResult,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        engine_timeline: Option<EngineStageTimelineV1>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        worker_token_accounting: Option<WorkerTokenAccountingV1>,
     },
     Error {
         #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -362,6 +416,10 @@ pub enum WorkerResponseFrame {
         error: WorkerError,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         trace: Option<WorkerTrace>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        engine_timeline: Option<EngineStageTimelineV1>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        worker_token_accounting: Option<WorkerTokenAccountingV1>,
     },
     CancelAck {
         request_id: String,
@@ -444,7 +502,10 @@ pub fn decode_response_frame(
             maximum: max_frame_bytes,
         });
     }
-    serde_json::from_slice(line).map_err(|error| FrameCodecError::InvalidJson(error.to_string()))
+    let frame: WorkerResponseFrame = serde_json::from_slice(line)
+        .map_err(|error| FrameCodecError::InvalidJson(error.to_string()))?;
+    validate_response_frame(&frame)?;
+    Ok(frame)
 }
 
 fn require_nonempty(field: &str, value: &str) -> Result<(), FrameCodecError> {
@@ -476,6 +537,145 @@ fn validate_trace(trace: &WorkerTrace) -> Result<(), FrameCodecError> {
     require_nonempty("trace.trace_id", &trace.trace_id)?;
     require_nonempty("trace.worker_revision", &trace.worker_revision)?;
     require_hex_digest("trace.contract_digest", &trace.contract_digest)
+}
+
+pub fn validate_engine_stage_timeline_v1(
+    timeline: &EngineStageTimelineV1,
+) -> Result<(), FrameCodecError> {
+    if timeline.total_ns == 0 || timeline.spans.is_empty() {
+        return Err(FrameCodecError::InvalidContract(
+            "engine timeline requires non-zero total_ns and at least one span".into(),
+        ));
+    }
+    if timeline.spans.len() > ENGINE_TIMELINE_MAX_SPANS_V1 {
+        return Err(FrameCodecError::InvalidContract(format!(
+            "engine timeline has {} spans; maximum is {ENGINE_TIMELINE_MAX_SPANS_V1}",
+            timeline.spans.len()
+        )));
+    }
+    let mut prior_end = 0_u64;
+    let mut duration_sum = 0_u64;
+    for span in &timeline.spans {
+        require_nonempty("engine_timeline.spans.stage", &span.stage)?;
+        if span.duration_ns == 0 {
+            return Err(FrameCodecError::InvalidContract(format!(
+                "engine timeline span {} has zero duration_ns",
+                span.stage
+            )));
+        }
+        if span.start_ns < prior_end {
+            return Err(FrameCodecError::InvalidContract(format!(
+                "engine timeline span {} overlaps or is out of order",
+                span.stage
+            )));
+        }
+        prior_end = span.start_ns.checked_add(span.duration_ns).ok_or_else(|| {
+            FrameCodecError::InvalidContract("engine timeline span end overflow".into())
+        })?;
+        duration_sum = duration_sum.checked_add(span.duration_ns).ok_or_else(|| {
+            FrameCodecError::InvalidContract("engine timeline duration sum overflow".into())
+        })?;
+    }
+    if duration_sum.abs_diff(timeline.total_ns) > TIMELINE_CLOSURE_TOLERANCE_NS_V1
+        || prior_end
+            > timeline
+                .total_ns
+                .saturating_add(TIMELINE_CLOSURE_TOLERANCE_NS_V1)
+    {
+        return Err(FrameCodecError::InvalidContract(format!(
+            "engine timeline does not close: total_ns={} duration_sum={} final_end_ns={} tolerance_ns={TIMELINE_CLOSURE_TOLERANCE_NS_V1}",
+            timeline.total_ns, duration_sum, prior_end
+        )));
+    }
+    Ok(())
+}
+
+pub fn validate_worker_token_accounting_v1(
+    accounting: &WorkerTokenAccountingV1,
+) -> Result<(), FrameCodecError> {
+    let tokenizer_id = accounting.tokenizer_id.trim();
+    if tokenizer_id.is_empty() || tokenizer_id.len() > 256 {
+        return Err(FrameCodecError::InvalidContract(
+            "worker token accounting tokenizer_id must be 1..=256 bytes".into(),
+        ));
+    }
+    if accounting.cached_tokens > accounting.billed_tokens {
+        return Err(FrameCodecError::InvalidContract(
+            "worker token accounting cached_tokens exceeds billed_tokens".into(),
+        ));
+    }
+    if tokenizer_id.starts_with("estimator:")
+        && accounting.count_kind != WorkerTokenCountKind::Estimate
+    {
+        return Err(FrameCodecError::InvalidContract(
+            "estimator tokenizer identities require count_kind=estimate".into(),
+        ));
+    }
+    Ok(())
+}
+
+pub fn validate_response_frame(frame: &WorkerResponseFrame) -> Result<(), FrameCodecError> {
+    match frame {
+        WorkerResponseFrame::HandshakeAck { .. } | WorkerResponseFrame::ShutdownAck => Ok(()),
+        WorkerResponseFrame::Result {
+            request_id,
+            result,
+            engine_timeline,
+            worker_token_accounting,
+        } => {
+            require_nonempty("result.request_id", request_id)?;
+            validate_trace(&result.metadata.trace)?;
+            if result.metadata.trace.request_id != request_id.as_str() {
+                return Err(handshake_field_mismatch(
+                    "result.trace.request_id",
+                    request_id,
+                    &result.metadata.trace.request_id,
+                ));
+            }
+            if let Some(timeline) = engine_timeline {
+                validate_engine_stage_timeline_v1(timeline)?;
+            }
+            if let Some(accounting) = worker_token_accounting {
+                validate_worker_token_accounting_v1(accounting)?;
+            }
+            Ok(())
+        }
+        WorkerResponseFrame::Error {
+            request_id,
+            error,
+            trace,
+            engine_timeline,
+            worker_token_accounting,
+        } => {
+            require_nonempty("error.kind", &error.kind)?;
+            require_nonempty("error.message", &error.message)?;
+            if let Some(request_id) = request_id {
+                require_nonempty("error.request_id", request_id)?;
+            }
+            if let Some(trace) = trace {
+                validate_trace(trace)?;
+                if let Some(request_id) = request_id
+                    && trace.request_id != request_id.as_str()
+                {
+                    return Err(handshake_field_mismatch(
+                        "error.trace.request_id",
+                        request_id,
+                        &trace.request_id,
+                    ));
+                }
+            }
+            if let Some(timeline) = engine_timeline {
+                validate_engine_stage_timeline_v1(timeline)?;
+            }
+            if let Some(accounting) = worker_token_accounting {
+                validate_worker_token_accounting_v1(accounting)?;
+            }
+            Ok(())
+        }
+        WorkerResponseFrame::CancelAck { request_id, .. } => {
+            require_nonempty("cancel_ack.request_id", request_id)
+        }
+    }
 }
 
 /// Structural rules from raw-worker-v2.schema.json that serde alone cannot express.
@@ -579,10 +779,10 @@ fn check_optional_eq(
     expected: Option<&str>,
     actual: &str,
 ) -> Result<(), FrameCodecError> {
-    if let Some(expected) = expected {
-        if expected != actual {
-            return Err(handshake_field_mismatch(field, expected, actual));
-        }
+    if let Some(expected) = expected
+        && expected != actual
+    {
+        return Err(handshake_field_mismatch(field, expected, actual));
     }
     Ok(())
 }
@@ -670,6 +870,10 @@ pub fn raw_worker_protocol_manifest() -> Value {
         deadline_unix_ms: Some(0),
         trace: manifest_trace(),
         approval_grant: None,
+        telemetry_request: Some(TelemetryRequestV1 {
+            engine_stage_timeline: true,
+            worker_token_accounting: true,
+        }),
     };
     let result_metadata = WorkerResultMetadata {
         effect: EffectClass::ReadOnly,
@@ -711,6 +915,45 @@ pub fn raw_worker_protocol_manifest() -> Value {
         revert: false,
         snapshots: false,
     };
+    let timeline = EngineStageTimelineV1 {
+        total_ns: 1,
+        spans: vec![EngineStageSpanV1 {
+            stage: String::new(),
+            start_ns: 0,
+            duration_ns: 1,
+        }],
+    };
+    let token_accounting = WorkerTokenAccountingV1 {
+        tokenizer_id: String::new(),
+        count_kind: WorkerTokenCountKind::Exact,
+        raw_tokens: 0,
+        visible_tokens: 0,
+        recovery_tokens: 0,
+        billed_tokens: 0,
+        cached_tokens: 0,
+        exact_ref_tokens: Some(0),
+    };
+    let result_frame = WorkerResponseFrame::Result {
+        request_id: String::new(),
+        result: WorkerResult {
+            value: Value::Null,
+            metadata: result_metadata.clone(),
+        },
+        engine_timeline: Some(timeline.clone()),
+        worker_token_accounting: Some(token_accounting.clone()),
+    };
+    let error_frame = WorkerResponseFrame::Error {
+        request_id: Some(String::new()),
+        error: WorkerError {
+            kind: String::new(),
+            message: String::new(),
+            retryable: false,
+            details: Some(Value::Null),
+        },
+        trace: Some(manifest_trace()),
+        engine_timeline: Some(timeline.clone()),
+        worker_token_accounting: Some(token_accounting.clone()),
+    };
 
     json!({
         "protocol_version": RAW_WORKER_PROTOCOL_VERSION,
@@ -731,6 +974,16 @@ pub fn raw_worker_protocol_manifest() -> Value {
         "capabilities": field_names(&capabilities),
         "limits": field_names(&ProtocolLimits::default()),
         "call": field_names(&call),
+        "telemetry_request": field_names(&TelemetryRequestV1 {
+            engine_stage_timeline: true,
+            worker_token_accounting: true,
+        }),
+        "engine_stage_span": field_names(&timeline.spans[0]),
+        "engine_stage_timeline": field_names(&timeline),
+        "worker_token_accounting": field_names(&token_accounting),
+        "worker_token_count_kinds": ["exact", "conservative_upper_bound", "estimate"],
+        "result_frame": field_names(&result_frame),
+        "error_frame": field_names(&error_frame),
         "trace": field_names(&manifest_trace()),
         "result_metadata": field_names(&result_metadata),
         "negative_space": ["planner", "javascript_runtime", "mcp_catalog", "nested_codemode"],
@@ -799,6 +1052,7 @@ mod tests {
                 deadline_unix_ms: Some(100),
                 trace: trace(),
                 approval_grant: None,
+                telemetry_request: None,
             },
         };
         let encoded = encode_frame(&call, DEFAULT_MAX_FRAME_BYTES).unwrap();
@@ -821,6 +1075,7 @@ mod tests {
                 deadline_unix_ms: Some(100),
                 trace: trace(),
                 approval_grant: None,
+                telemetry_request: None,
             },
         };
         let encoded = encode_frame(&call, DEFAULT_MAX_FRAME_BYTES).unwrap();
@@ -852,6 +1107,7 @@ mod tests {
                     deadline_unix_ms: deadline,
                     trace: trace(),
                     approval_grant: None,
+                    telemetry_request: None,
                 },
             },
             DEFAULT_MAX_FRAME_BYTES,
@@ -995,6 +1251,114 @@ mod tests {
     }
 
     #[test]
+    fn optional_transport_telemetry_is_absent_by_default_and_round_trips_when_enabled() {
+        let mut call = CallRequest {
+            request_id: "request-1".into(),
+            op: "read".into(),
+            args: json!({"path":"README.md"}),
+            deadline_unix_ms: Some(100),
+            trace: trace(),
+            approval_grant: None,
+            telemetry_request: None,
+        };
+        let disabled = encode_frame(
+            &WorkerRequestFrame::Call {
+                request: call.clone(),
+            },
+            DEFAULT_MAX_FRAME_BYTES,
+        )
+        .unwrap();
+        let disabled_text = std::str::from_utf8(&disabled).unwrap();
+        assert!(!disabled_text.contains("telemetry_request"));
+        assert!(!disabled_text.contains("engine_timeline"));
+        assert!(!disabled_text.contains("worker_token_accounting"));
+
+        call.telemetry_request = Some(TelemetryRequestV1 {
+            engine_stage_timeline: true,
+            worker_token_accounting: true,
+        });
+        let enabled = encode_frame(
+            &WorkerRequestFrame::Call {
+                request: call.clone(),
+            },
+            DEFAULT_MAX_FRAME_BYTES,
+        )
+        .unwrap();
+        let decoded = decode_request_frame(&enabled, DEFAULT_MAX_FRAME_BYTES).unwrap();
+        assert_eq!(decoded, WorkerRequestFrame::Call { request: call });
+        let enabled_json: Value = serde_json::from_slice(trim_frame(&enabled)).unwrap();
+        assert_eq!(enabled_json["request"]["args"], json!({"path":"README.md"}));
+        assert_eq!(
+            enabled_json["request"]["telemetry_request"],
+            json!({"engine_stage_timeline":true,"worker_token_accounting":true})
+        );
+    }
+
+    #[test]
+    fn engine_timeline_validation_enforces_order_disjointness_and_closure() {
+        let valid = EngineStageTimelineV1 {
+            total_ns: 300,
+            spans: vec![
+                EngineStageSpanV1 {
+                    stage: "decode".into(),
+                    start_ns: 0,
+                    duration_ns: 100,
+                },
+                EngineStageSpanV1 {
+                    stage: "execute".into(),
+                    start_ns: 100,
+                    duration_ns: 200,
+                },
+            ],
+        };
+        validate_engine_stage_timeline_v1(&valid).unwrap();
+        let mut overlap = valid.clone();
+        overlap.spans[1].start_ns = 99;
+        assert!(matches!(
+            validate_engine_stage_timeline_v1(&overlap),
+            Err(FrameCodecError::InvalidContract(message)) if message.contains("overlaps")
+        ));
+        let mut open = valid.clone();
+        open.total_ns = 1_000_000;
+        assert!(matches!(
+            validate_engine_stage_timeline_v1(&open),
+            Err(FrameCodecError::InvalidContract(message)) if message.contains("does not close")
+        ));
+        let mut overflow = valid;
+        overflow.spans[1].start_ns = u64::MAX;
+        assert!(matches!(
+            validate_engine_stage_timeline_v1(&overflow),
+            Err(FrameCodecError::InvalidContract(message)) if message.contains("overflow")
+        ));
+    }
+
+    #[test]
+    fn worker_token_accounting_is_typed_and_never_inferred_from_bytes() {
+        let exact = WorkerTokenAccountingV1 {
+            tokenizer_id: "tokenizer-v1".into(),
+            count_kind: WorkerTokenCountKind::Exact,
+            raw_tokens: 100,
+            visible_tokens: 40,
+            recovery_tokens: 80,
+            billed_tokens: 120,
+            cached_tokens: 20,
+            exact_ref_tokens: None,
+        };
+        validate_worker_token_accounting_v1(&exact).unwrap();
+        let mut bad_cache = exact.clone();
+        bad_cache.cached_tokens = 121;
+        assert!(validate_worker_token_accounting_v1(&bad_cache).is_err());
+        let mut estimator = exact.clone();
+        estimator.tokenizer_id = "estimator:fixture".into();
+        assert!(validate_worker_token_accounting_v1(&estimator).is_err());
+        estimator.count_kind = WorkerTokenCountKind::Estimate;
+        validate_worker_token_accounting_v1(&estimator).unwrap();
+        let mut empty = exact;
+        empty.tokenizer_id = " ".into();
+        assert!(validate_worker_token_accounting_v1(&empty).is_err());
+    }
+
+    #[test]
     fn protocol_manifest_covers_type_level_binding_surface() {
         let manifest = raw_worker_protocol_manifest();
         let binding = manifest["binding"].as_array().unwrap();
@@ -1008,6 +1372,22 @@ mod tests {
                 .iter()
                 .any(|value| value == "parent_span_id")
         );
+        for (section, field) in [
+            ("call", "telemetry_request"),
+            ("result_frame", "engine_timeline"),
+            ("result_frame", "worker_token_accounting"),
+            ("error_frame", "engine_timeline"),
+            ("error_frame", "worker_token_accounting"),
+        ] {
+            assert!(
+                manifest[section]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .any(|value| value == field),
+                "{section}.{field}"
+            );
+        }
         assert_eq!(
             manifest["linked_contracts"]["assembly_abi_contract_digest"],
             assembly_abi_contract_digest_v1().to_hex()
@@ -1076,6 +1456,7 @@ mod tests {
             deadline_unix_ms: Some(100),
             trace: trace(),
             approval_grant: None,
+            telemetry_request: None,
         };
         assert!(!call.deadline_expired(99));
         assert!(call.deadline_expired(100));
@@ -1083,7 +1464,7 @@ mod tests {
         assert_eq!(digest.len(), 64);
         assert_eq!(
             digest,
-            "f2fbee8779a25ae6e0a3141d775e022215cbd7e66c6b5e8479863b5c2651c7d2"
+            "e2daca4d95cbd2780f2e10b30b823e9398747bfe15e38ca0810f634a387aeace"
         );
         assert_eq!(digest, raw_worker_protocol_digest_hex());
     }

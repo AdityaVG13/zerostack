@@ -8,7 +8,10 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use serde_json::json;
 use zero_abi::raw_worker::EngineIdentity;
-use zero_abi::{CallRequest, DEFAULT_MAX_FRAME_BYTES, FrameCodecError, WorkerTrace, encode_frame};
+use zero_abi::{
+    CallRequest, DEFAULT_MAX_FRAME_BYTES, FrameCodecError, TIMELINE_CLOSURE_TOLERANCE_NS_V1,
+    TelemetryRequestV1, WorkerTokenCountKind, WorkerTrace, encode_frame,
+};
 use zero_codemode::worker::{
     CancellationSignal, StaticWorkerFactory, WorkerAdapterError, WorkerClient, WorkerClientConfig,
     WorkerContext, WorkerEvent, WorkerFactory, WorkerRegistry, WorkerSpec,
@@ -82,6 +85,7 @@ fn request(id: &str, args: serde_json::Value, deadline: Option<u64>) -> CallRequ
             contract_digest: CONTRACT.into(),
         },
         approval_grant: None,
+        telemetry_request: None,
     }
 }
 
@@ -122,7 +126,8 @@ fn race_completion_bytes(mode: &str) -> u64 {
             "error": {
                 "kind": "fixture",
                 "message": "remote error before cancel ack",
-                "retryable": false
+                "retryable": false,
+                "details": {"fixture_detail":"preserved"}
             },
             "trace": trace
         })
@@ -411,7 +416,7 @@ fn mismatched_result_error_and_cancel_ids_fail_closed_and_reap() {
             .unwrap();
         assert!(matches!(
             client.dispatch(request("expected", json!({}), None)),
-            Err(WorkerAdapterError::Handshake(_))
+            Err(WorkerAdapterError::Handshake(_) | WorkerAdapterError::Protocol(_))
         ));
         assert_terminal_and_rejects(&mut client);
     }
@@ -455,6 +460,216 @@ fn matching_remote_error_emits_dispatch_observation() {
                 && event.request_id.as_deref() == Some("remote"))
     );
     client.shutdown().unwrap();
+}
+
+#[test]
+fn enabled_transport_telemetry_closes_and_preserves_worker_token_units() {
+    let events = Arc::new(Mutex::new(Vec::new()));
+    let sink = events.clone();
+    let config = WorkerClientConfig {
+        observer: Some(Arc::new(move |event| {
+            sink.lock().unwrap().push(event.clone())
+        })),
+        ..WorkerClientConfig::default()
+    };
+    let mut client = registry("normal")
+        .launch(context(EngineIdentity::TokenZero), config)
+        .unwrap();
+    let mut call = request("telemetry", json!({"payload":"domain"}), None);
+    call.telemetry_request = Some(TelemetryRequestV1 {
+        engine_stage_timeline: true,
+        worker_token_accounting: true,
+    });
+    let result = client.dispatch(call).unwrap();
+    assert_eq!(result.value["args"], json!({"payload":"domain"}));
+    let events = events.lock().unwrap();
+    let receipt = events
+        .iter()
+        .find(|event| {
+            event.event == WorkerEvent::Dispatch && event.request_id.as_deref() == Some("telemetry")
+        })
+        .and_then(|event| event.settlement.as_ref())
+        .expect("dispatch settlement receipt");
+    let timeline = receipt.engine_timeline.as_ref().expect("engine timeline");
+    let partitioned_ns = u128::from(timeline.total_ns)
+        + u128::from(receipt.raw_worker_result_settlement_ns)
+        + u128::from(receipt.residual_transport_ns);
+    assert_eq!(
+        u128::from(receipt.total_ns).abs_diff(partitioned_ns),
+        u128::from(receipt.closure_error_ns)
+    );
+    assert!(receipt.closure_error_ns <= TIMELINE_CLOSURE_TOLERANCE_NS_V1);
+    assert_eq!(timeline.total_ns, 300);
+    assert_eq!(timeline.spans[0].stage, "fixture_decode");
+    assert_eq!(timeline.spans[1].start_ns, 100);
+    let accounting = receipt
+        .worker_token_accounting
+        .as_ref()
+        .expect("worker token accounting");
+    assert_eq!(accounting.tokenizer_id, "fixture-tokenizer-v1");
+    assert_eq!(accounting.count_kind, WorkerTokenCountKind::Exact);
+    assert_eq!(accounting.visible_tokens, 4);
+    assert_eq!(accounting.exact_ref_tokens, Some(0));
+    drop(events);
+    client.shutdown().unwrap();
+}
+
+#[test]
+fn remote_failure_preserves_details_trace_and_transport_receipt() {
+    let events = Arc::new(Mutex::new(Vec::new()));
+    let sink = events.clone();
+    let config = WorkerClientConfig {
+        observer: Some(Arc::new(move |event| {
+            sink.lock().unwrap().push(event.clone())
+        })),
+        ..WorkerClientConfig::default()
+    };
+    let mut client = registry("remote-error")
+        .launch(context(EngineIdentity::FsZero), config)
+        .unwrap();
+    let mut call = request("remote-telemetry", json!({}), None);
+    call.telemetry_request = Some(TelemetryRequestV1 {
+        engine_stage_timeline: true,
+        worker_token_accounting: true,
+    });
+    match client.dispatch(call) {
+        Err(WorkerAdapterError::Remote {
+            details,
+            trace,
+            retryable,
+            ..
+        }) => {
+            assert_eq!(
+                details.as_deref(),
+                Some(&json!({"fixture_detail":"preserved"}))
+            );
+            assert_eq!(trace.unwrap().request_id, "remote-telemetry");
+            assert!(!retryable);
+        }
+        other => panic!("expected typed remote failure, got {other:?}"),
+    }
+    let events = events.lock().unwrap();
+    let receipt = events
+        .iter()
+        .find(|event| event.request_id.as_deref() == Some("remote-telemetry"))
+        .and_then(|event| event.settlement.as_ref())
+        .expect("failure settlement receipt");
+    assert!(receipt.engine_timeline.is_some());
+    assert!(receipt.worker_token_accounting.is_some());
+    assert!(receipt.closure_error_ns <= TIMELINE_CLOSURE_TOLERANCE_NS_V1);
+    drop(events);
+    client.shutdown().unwrap();
+}
+
+#[test]
+fn telemetry_is_request_scoped_and_does_not_leak_to_default_calls() {
+    let events = Arc::new(Mutex::new(Vec::new()));
+    let sink = events.clone();
+    let config = WorkerClientConfig {
+        observer: Some(Arc::new(move |event| {
+            sink.lock().unwrap().push(event.clone())
+        })),
+        ..WorkerClientConfig::default()
+    };
+    let mut client = registry("normal")
+        .launch(context(EngineIdentity::GraphZero), config)
+        .unwrap();
+    let mut enabled = request("enabled", json!({}), None);
+    enabled.telemetry_request = Some(TelemetryRequestV1 {
+        engine_stage_timeline: true,
+        worker_token_accounting: true,
+    });
+    client.dispatch(enabled).unwrap();
+    client
+        .dispatch(request("disabled", json!({}), None))
+        .unwrap();
+    let events = events.lock().unwrap();
+    let receipt = |id: &str| {
+        events
+            .iter()
+            .find(|event| event.request_id.as_deref() == Some(id))
+            .and_then(|event| event.settlement.as_ref())
+            .unwrap()
+    };
+    assert!(receipt("enabled").engine_timeline.is_some());
+    assert!(receipt("enabled").worker_token_accounting.is_some());
+    assert!(receipt("disabled").engine_timeline.is_none());
+    assert!(receipt("disabled").worker_token_accounting.is_none());
+    drop(events);
+    client.shutdown().unwrap();
+}
+
+#[test]
+fn concurrent_clients_do_not_cross_contaminate_transport_telemetry() {
+    let handles = (0..4)
+        .map(|index| {
+            std::thread::spawn(move || {
+                let events = Arc::new(Mutex::new(Vec::new()));
+                let sink = events.clone();
+                let config = WorkerClientConfig {
+                    observer: Some(Arc::new(move |event| {
+                        sink.lock().unwrap().push(event.clone())
+                    })),
+                    ..WorkerClientConfig::default()
+                };
+                let mut client = registry("normal")
+                    .launch(context(EngineIdentity::FsZero), config)
+                    .unwrap();
+                let id = format!("concurrent-{index}");
+                let enabled = index % 2 == 0;
+                let mut call = request(&id, json!({}), None);
+                if enabled {
+                    call.telemetry_request = Some(TelemetryRequestV1 {
+                        engine_stage_timeline: true,
+                        worker_token_accounting: true,
+                    });
+                }
+                client.dispatch(call).unwrap();
+                let receipt = events
+                    .lock()
+                    .unwrap()
+                    .iter()
+                    .find(|event| event.request_id.as_deref() == Some(id.as_str()))
+                    .and_then(|event| event.settlement.clone())
+                    .unwrap();
+                client.shutdown().unwrap();
+                (enabled, receipt)
+            })
+        })
+        .collect::<Vec<_>>();
+    for handle in handles {
+        let (enabled, receipt) = handle.join().unwrap();
+        assert_eq!(receipt.engine_timeline.is_some(), enabled);
+        assert_eq!(receipt.worker_token_accounting.is_some(), enabled);
+    }
+}
+
+#[test]
+fn missing_or_unsolicited_transport_telemetry_fails_closed() {
+    for mode in [
+        "omit-telemetry",
+        "unsolicited-telemetry",
+        "unclosable-telemetry",
+    ] {
+        let mut client = registry(mode)
+            .launch(
+                context(EngineIdentity::FsZero),
+                WorkerClientConfig::default(),
+            )
+            .unwrap();
+        let mut call = request("telemetry-skew", json!({}), None);
+        if mode != "unsolicited-telemetry" {
+            call.telemetry_request = Some(TelemetryRequestV1 {
+                engine_stage_timeline: true,
+                worker_token_accounting: true,
+            });
+        }
+        assert!(matches!(
+            client.dispatch(call),
+            Err(WorkerAdapterError::Handshake(_))
+        ));
+        assert_terminal_and_rejects(&mut client);
+    }
 }
 
 #[cfg(unix)]

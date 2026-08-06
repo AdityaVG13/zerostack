@@ -758,6 +758,7 @@ impl Connector for AggregateConnector {
             ),
             trace,
             approval_grant: None,
+            telemetry_request: None,
         };
         let mut workers = self
             .workers

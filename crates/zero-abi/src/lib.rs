@@ -88,12 +88,15 @@ pub use freshness::{
 };
 pub use raw_worker::{
     ApprovalMetadata, ApprovalState, CallRequest, CancelRequest, DEFAULT_MAX_FRAME_BYTES,
-    EffectClass, EngineIdentity, FrameCodecError, HandshakeAck, HandshakeRequest, ProtocolLimits,
+    ENGINE_TIMELINE_MAX_SPANS_V1, EffectClass, EngineIdentity, EngineStageSpanV1,
+    EngineStageTimelineV1, FrameCodecError, HandshakeAck, HandshakeRequest, ProtocolLimits,
     RAW_WORKER_PROTOCOL_VERSION, RefOwnership, RevertMetadata, ShutdownRequest, SnapshotIdentity,
-    WorkerBinding, WorkerCapabilities, WorkerError, WorkerRequestFrame, WorkerResponseFrame,
-    WorkerResult, WorkerResultMetadata, WorkerTrace, decode_request_frame, decode_response_frame,
-    encode_frame, raw_worker_protocol_digest_hex, raw_worker_protocol_manifest,
-    validate_handshake_request, validate_request_frame,
+    TIMELINE_CLOSURE_TOLERANCE_NS_V1, TelemetryRequestV1, WorkerBinding, WorkerCapabilities,
+    WorkerError, WorkerRequestFrame, WorkerResponseFrame, WorkerResult, WorkerResultMetadata,
+    WorkerTokenAccountingV1, WorkerTokenCountKind, WorkerTrace, decode_request_frame,
+    decode_response_frame, encode_frame, raw_worker_protocol_digest_hex,
+    raw_worker_protocol_manifest, validate_engine_stage_timeline_v1, validate_handshake_request,
+    validate_request_frame, validate_response_frame, validate_worker_token_accounting_v1,
 };
 pub use reasoning::{
     NativeStatePolicyV1, REASONING_CONTRACT_MAX_CANONICAL_BYTES_V1,

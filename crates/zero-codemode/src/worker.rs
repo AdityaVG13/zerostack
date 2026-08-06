@@ -14,10 +14,11 @@ use command_group::{CommandGroup, GroupChild};
 
 use zero_abi::raw_worker::EngineIdentity;
 use zero_abi::{
-    CallRequest, CancelRequest, FrameCodecError, HandshakeAck, HandshakeRequest, ProtocolLimits,
-    RAW_WORKER_PROTOCOL_VERSION, ShutdownRequest, WorkerRequestFrame, WorkerResponseFrame,
-    WorkerResult, decode_response_frame, encode_frame, raw_worker_protocol_digest_hex,
-    validate_handshake_request,
+    CallRequest, CancelRequest, EngineStageTimelineV1, FrameCodecError, HandshakeAck,
+    HandshakeRequest, ProtocolLimits, RAW_WORKER_PROTOCOL_VERSION, ShutdownRequest,
+    TIMELINE_CLOSURE_TOLERANCE_NS_V1, TelemetryRequestV1, WorkerRequestFrame, WorkerResponseFrame,
+    WorkerResult, WorkerTokenAccountingV1, decode_response_frame, encode_frame,
+    raw_worker_protocol_digest_hex, validate_handshake_request,
 };
 
 pub const STORE_ROOT_ENV: &str = "ZEROSTACK_STORE_ROOT";
@@ -199,6 +200,16 @@ pub enum WorkerEvent {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WorkerSettlementReceiptV1 {
+    pub raw_worker_result_settlement_ns: u64,
+    pub residual_transport_ns: u64,
+    pub total_ns: u64,
+    pub closure_error_ns: u64,
+    pub engine_timeline: Option<EngineStageTimelineV1>,
+    pub worker_token_accounting: Option<WorkerTokenAccountingV1>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct WorkerObservation {
     pub event: WorkerEvent,
     pub engine: EngineIdentity,
@@ -207,6 +218,7 @@ pub struct WorkerObservation {
     pub input_bytes: u64,
     pub output_bytes: u64,
     pub stderr_bytes: u64,
+    pub settlement: Option<WorkerSettlementReceiptV1>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -269,6 +281,8 @@ pub enum WorkerAdapterError {
         kind: String,
         message: String,
         retryable: bool,
+        details: Option<Box<serde_json::Value>>,
+        trace: Option<Box<zero_abi::WorkerTrace>>,
     },
 }
 
@@ -306,7 +320,7 @@ impl fmt::Display for WorkerAdapterError {
 impl std::error::Error for WorkerAdapterError {}
 
 enum OutputEvent {
-    Frame(Vec<u8>),
+    Frame { bytes: Vec<u8>, arrived_at: Instant },
     Bounds(usize),
     Eof,
     Io(std::io::Error),
@@ -344,6 +358,12 @@ struct StderrState {
     complete: bool,
 }
 
+struct SettlementSeed {
+    arrived_at: Instant,
+    engine_timeline: Option<EngineStageTimelineV1>,
+    worker_token_accounting: Option<WorkerTokenAccountingV1>,
+}
+
 pub struct WorkerClient {
     engine: EngineIdentity,
     child: GroupChild,
@@ -354,6 +374,7 @@ pub struct WorkerClient {
     negotiated_limits: ProtocolLimits,
     accounting: WorkerAccounting,
     last_output_bytes: u64,
+    last_frame_arrival: Option<Instant>,
     terminal_status: Option<ExitStatus>,
     terminal: bool,
     shutdown: bool,
@@ -443,7 +464,13 @@ impl WorkerClient {
                             let _ = tx.send(OutputEvent::Bounds(actual));
                             break;
                         }
-                        if tx.send(OutputEvent::Frame(line)).is_err() {
+                        if tx
+                            .send(OutputEvent::Frame {
+                                bytes: line,
+                                arrived_at: Instant::now(),
+                            })
+                            .is_err()
+                        {
                             break;
                         }
                     }
@@ -498,6 +525,7 @@ impl WorkerClient {
                             input_bytes: 0,
                             output_bytes: 0,
                             stderr_bytes: state.total,
+                            settlement: None,
                         });
                     }
                 }
@@ -514,6 +542,7 @@ impl WorkerClient {
             negotiated_limits: config.limits.clone(),
             accounting: WorkerAccounting::default(),
             last_output_bytes: 0,
+            last_frame_arrival: None,
             terminal_status: None,
             terminal: false,
             shutdown: false,
@@ -658,6 +687,7 @@ impl WorkerClient {
                 self.negotiated_limits.default_deadline_ms,
             ));
         let id = request.request_id.clone();
+        let telemetry_request = request.telemetry_request.clone();
         let deadline = match checked_deadline(timeout, Some(id.clone())) {
             Ok(deadline) => deadline,
             Err(error) => return self.terminate_with(error),
@@ -669,7 +699,11 @@ impl WorkerClient {
         let started = Instant::now();
         let mut cancel_sent = false;
         let mut cancel_rejected = false;
-        let mut pending_completion: Option<(Result<WorkerResult, WorkerAdapterError>, u64)> = None;
+        let mut pending_completion: Option<(
+            Result<WorkerResult, WorkerAdapterError>,
+            u64,
+            SettlementSeed,
+        )> = None;
         loop {
             if cancellation.is_some_and(CancellationSignal::is_cancelled) && !cancel_sent {
                 if let Err(error) = self.send(
@@ -708,12 +742,34 @@ impl WorkerClient {
                 Err(error) => return self.terminate_with(error),
             };
             match response {
-                WorkerResponseFrame::Result { request_id, result } if request_id == id => {
+                WorkerResponseFrame::Result {
+                    request_id,
+                    result,
+                    engine_timeline,
+                    worker_token_accounting,
+                } if request_id == id => {
+                    if let Some(message) = telemetry_response_mismatch(
+                        telemetry_request.as_ref(),
+                        engine_timeline.as_ref(),
+                        worker_token_accounting.as_ref(),
+                        true,
+                    ) {
+                        return self.protocol_terminate(message);
+                    }
+                    let Some(arrived_at) = self.last_frame_arrival.take() else {
+                        return self
+                            .protocol_terminate("result frame missing arrival timestamp".into());
+                    };
+                    let seed = SettlementSeed {
+                        arrived_at,
+                        engine_timeline,
+                        worker_token_accounting,
+                    };
                     let completion = Ok(result);
                     let completion_bytes = self.last_output_bytes;
                     if cancel_sent && !cancel_rejected {
                         if pending_completion
-                            .replace((completion, completion_bytes))
+                            .replace((completion, completion_bytes, seed))
                             .is_some()
                         {
                             return self.protocol_terminate(
@@ -723,12 +779,17 @@ impl WorkerClient {
                         continue;
                     }
                     self.accounting.requests = self.accounting.requests.saturating_add(1);
-                    self.observe(
+                    let settlement = match finalize_settlement(seed, started) {
+                        Ok(receipt) => receipt,
+                        Err(message) => return self.protocol_terminate(message),
+                    };
+                    self.observe_with_settlement(
                         WorkerEvent::Dispatch,
                         Some(id),
                         started.elapsed(),
                         input,
                         self.last_output_bytes,
+                        Some(settlement),
                     );
                     return completion;
                 }
@@ -736,22 +797,43 @@ impl WorkerClient {
                     request_id: Some(request_id),
                     error,
                     trace,
+                    engine_timeline,
+                    worker_token_accounting,
                 } if request_id == id => {
                     if trace.as_ref().is_some_and(|trace| trace.request_id != id) {
                         return self.protocol_terminate(
                             "mismatched dispatch error trace request id".into(),
                         );
                     }
+                    if let Some(message) = telemetry_response_mismatch(
+                        telemetry_request.as_ref(),
+                        engine_timeline.as_ref(),
+                        worker_token_accounting.as_ref(),
+                        false,
+                    ) {
+                        return self.protocol_terminate(message);
+                    }
+                    let Some(arrived_at) = self.last_frame_arrival.take() else {
+                        return self
+                            .protocol_terminate("error frame missing arrival timestamp".into());
+                    };
+                    let seed = SettlementSeed {
+                        arrived_at,
+                        engine_timeline,
+                        worker_token_accounting,
+                    };
                     let completion = Err(WorkerAdapterError::Remote {
                         request_id: Some(request_id),
                         kind: error.kind,
                         message: error.message,
                         retryable: error.retryable,
+                        details: error.details.map(Box::new),
+                        trace: trace.map(Box::new),
                     });
                     let completion_bytes = self.last_output_bytes;
                     if cancel_sent && !cancel_rejected {
                         if pending_completion
-                            .replace((completion, completion_bytes))
+                            .replace((completion, completion_bytes, seed))
                             .is_some()
                         {
                             return self.protocol_terminate(
@@ -761,12 +843,17 @@ impl WorkerClient {
                         continue;
                     }
                     self.accounting.requests = self.accounting.requests.saturating_add(1);
-                    self.observe(
+                    let settlement = match finalize_settlement(seed, started) {
+                        Ok(receipt) => receipt,
+                        Err(message) => return self.protocol_terminate(message),
+                    };
+                    self.observe_with_settlement(
                         WorkerEvent::Dispatch,
                         Some(id),
                         started.elapsed(),
                         input,
                         self.last_output_bytes,
+                        Some(settlement),
                     );
                     return completion;
                 }
@@ -788,14 +875,19 @@ impl WorkerClient {
                     cancelled: false,
                 } if cancel_sent && request_id == id && !cancel_rejected => {
                     cancel_rejected = true;
-                    if let Some((completion, completion_bytes)) = pending_completion.take() {
+                    if let Some((completion, completion_bytes, seed)) = pending_completion.take() {
                         self.accounting.requests = self.accounting.requests.saturating_add(1);
-                        self.observe(
+                        let settlement = match finalize_settlement(seed, started) {
+                            Ok(receipt) => receipt,
+                            Err(message) => return self.protocol_terminate(message),
+                        };
+                        self.observe_with_settlement(
                             WorkerEvent::Dispatch,
                             Some(id),
                             started.elapsed(),
                             input,
                             completion_bytes,
+                            Some(settlement),
                         );
                         return completion;
                     }
@@ -1003,7 +1095,8 @@ impl WorkerClient {
         request_id: Option<String>,
     ) -> Result<Option<WorkerResponseFrame>, WorkerAdapterError> {
         match self.output.recv_timeout(timeout) {
-            Ok(OutputEvent::Frame(bytes)) => {
+            Ok(OutputEvent::Frame { bytes, arrived_at }) => {
+                self.last_frame_arrival = Some(arrived_at);
                 let payload = bytes.strip_suffix(b"\n").unwrap_or(&bytes);
                 let maximum =
                     self.negotiated_limits
@@ -1190,6 +1283,18 @@ impl WorkerClient {
         input_bytes: u64,
         output_bytes: u64,
     ) {
+        self.observe_with_settlement(event, request_id, elapsed, input_bytes, output_bytes, None);
+    }
+
+    fn observe_with_settlement(
+        &self,
+        event: WorkerEvent,
+        request_id: Option<String>,
+        elapsed: Duration,
+        input_bytes: u64,
+        output_bytes: u64,
+        settlement: Option<WorkerSettlementReceiptV1>,
+    ) {
         if let Some(observer) = &self.config.observer {
             let stderr_bytes = self
                 .stderr
@@ -1205,6 +1310,7 @@ impl WorkerClient {
                 input_bytes,
                 output_bytes,
                 stderr_bytes,
+                settlement,
             });
         }
     }
@@ -1287,6 +1393,66 @@ fn cleanup_partial(
     terminate_process_tree(child);
     let _ = child.wait();
     WorkerAdapterError::Configuration(message.into())
+}
+
+fn telemetry_response_mismatch(
+    request: Option<&TelemetryRequestV1>,
+    engine_timeline: Option<&EngineStageTimelineV1>,
+    worker_token_accounting: Option<&WorkerTokenAccountingV1>,
+    require_requested_accounting: bool,
+) -> Option<String> {
+    let timeline_requested = request.is_some_and(|value| value.engine_stage_timeline);
+    if timeline_requested != engine_timeline.is_some() {
+        return Some(format!(
+            "engine timeline presence mismatch: requested={timeline_requested} present={}",
+            engine_timeline.is_some()
+        ));
+    }
+    let accounting_requested = request.is_some_and(|value| value.worker_token_accounting);
+    if worker_token_accounting.is_some() && !accounting_requested {
+        return Some("unsolicited worker token accounting".into());
+    }
+    if require_requested_accounting && accounting_requested && worker_token_accounting.is_none() {
+        return Some("requested worker token accounting is missing".into());
+    }
+    None
+}
+
+fn duration_ns(value: Duration) -> u64 {
+    value.as_nanos().min(u128::from(u64::MAX)) as u64
+}
+
+fn finalize_settlement(
+    seed: SettlementSeed,
+    call_started: Instant,
+) -> Result<WorkerSettlementReceiptV1, String> {
+    let raw_worker_result_settlement_ns = duration_ns(seed.arrived_at.elapsed());
+    let engine_internal_ns = seed
+        .engine_timeline
+        .as_ref()
+        .map_or(0, |timeline| timeline.total_ns);
+    let total_ns = duration_ns(call_started.elapsed());
+    let known_ns = u128::from(engine_internal_ns) + u128::from(raw_worker_result_settlement_ns);
+    let residual_transport_ns = u128::from(total_ns)
+        .saturating_sub(known_ns)
+        .min(u128::from(u64::MAX)) as u64;
+    let partitioned_ns = known_ns + u128::from(residual_transport_ns);
+    let closure_error_ns = u128::from(total_ns)
+        .abs_diff(partitioned_ns)
+        .min(u128::from(u64::MAX)) as u64;
+    if closure_error_ns > TIMELINE_CLOSURE_TOLERANCE_NS_V1 {
+        return Err(format!(
+            "worker settlement does not close: engine_internal_ns={engine_internal_ns} raw_worker_result_settlement_ns={raw_worker_result_settlement_ns} residual_transport_ns={residual_transport_ns} total_ns={total_ns} closure_error_ns={closure_error_ns} tolerance_ns={TIMELINE_CLOSURE_TOLERANCE_NS_V1}"
+        ));
+    }
+    Ok(WorkerSettlementReceiptV1 {
+        raw_worker_result_settlement_ns,
+        residual_transport_ns,
+        total_ns,
+        closure_error_ns,
+        engine_timeline: seed.engine_timeline,
+        worker_token_accounting: seed.worker_token_accounting,
+    })
 }
 
 fn checked_deadline(

@@ -8,9 +8,10 @@ use serde_json::json;
 use zero_abi::raw_worker::EngineIdentity;
 use zero_abi::{
     ApprovalMetadata, ApprovalState, CallRequest, DEFAULT_MAX_FRAME_BYTES, EffectClass,
-    HandshakeAck, ProtocolLimits, RAW_WORKER_PROTOCOL_VERSION, RefOwnership, RevertMetadata,
-    WorkerBinding, WorkerCapabilities, WorkerError, WorkerRequestFrame, WorkerResponseFrame,
-    WorkerResult, WorkerResultMetadata, decode_request_frame, encode_frame,
+    EngineStageSpanV1, EngineStageTimelineV1, HandshakeAck, ProtocolLimits,
+    RAW_WORKER_PROTOCOL_VERSION, RefOwnership, RevertMetadata, WorkerBinding, WorkerCapabilities,
+    WorkerError, WorkerRequestFrame, WorkerResponseFrame, WorkerResult, WorkerResultMetadata,
+    WorkerTokenAccountingV1, WorkerTokenCountKind, decode_request_frame, encode_frame,
     raw_worker_protocol_digest_hex,
 };
 use zero_codemode::worker::{ENGINE_ENV, SESSION_ID_ENV, STORE_ROOT_ENV};
@@ -134,6 +135,8 @@ fn main() {
                     continue;
                 }
                 if mode == "remote-error" {
+                    let (engine_timeline, worker_token_accounting) =
+                        transport_telemetry(&request, &mode);
                     send(
                         &mut stdout,
                         &WorkerResponseFrame::Error {
@@ -142,9 +145,11 @@ fn main() {
                                 kind: "fixture".into(),
                                 message: "remote error".into(),
                                 retryable: false,
-                                details: None,
+                                details: Some(json!({"fixture_detail":"preserved"})),
                             },
                             trace: Some(request.trace),
+                            engine_timeline,
+                            worker_token_accounting,
                         },
                     );
                     continue;
@@ -161,6 +166,8 @@ fn main() {
                                 details: None,
                             },
                             trace: Some(request.trace),
+                            engine_timeline: None,
+                            worker_token_accounting: None,
                         },
                     );
                     continue;
@@ -179,6 +186,8 @@ fn main() {
                                 details: None,
                             },
                             trace: Some(trace),
+                            engine_timeline: None,
+                            worker_token_accounting: None,
                         },
                     );
                     continue;
@@ -188,11 +197,15 @@ fn main() {
                 } else {
                     request.request_id.clone()
                 };
+                let (engine_timeline, worker_token_accounting) =
+                    transport_telemetry(&request, &mode);
                 send(
                     &mut stdout,
                     &WorkerResponseFrame::Result {
                         request_id: response_id,
                         result: result(request),
+                        engine_timeline,
+                        worker_token_accounting,
                     },
                 );
             }
@@ -209,14 +222,20 @@ fn main() {
                     let call = pending.take().expect("pending cancellation race");
                     if mode == "result-first-cancel-false" {
                         let request_id = call.request_id.clone();
+                        let (engine_timeline, worker_token_accounting) =
+                            transport_telemetry(&call, &mode);
                         send(
                             &mut stdout,
                             &WorkerResponseFrame::Result {
                                 request_id,
                                 result: result(call),
+                                engine_timeline,
+                                worker_token_accounting,
                             },
                         );
                     } else {
+                        let (engine_timeline, worker_token_accounting) =
+                            transport_telemetry(&call, &mode);
                         send(
                             &mut stdout,
                             &WorkerResponseFrame::Error {
@@ -225,9 +244,11 @@ fn main() {
                                     kind: "fixture".into(),
                                     message: "remote error before cancel ack".into(),
                                     retryable: false,
-                                    details: None,
+                                    details: Some(json!({"fixture_detail":"preserved"})),
                                 },
                                 trace: Some(call.trace),
+                                engine_timeline,
+                                worker_token_accounting,
                             },
                         );
                     }
@@ -251,11 +272,15 @@ fn main() {
                     );
                     if let Some(call) = pending.take() {
                         let request_id = call.request_id.clone();
+                        let (engine_timeline, worker_token_accounting) =
+                            transport_telemetry(&call, &mode);
                         send(
                             &mut stdout,
                             &WorkerResponseFrame::Result {
                                 request_id,
                                 result: result(call),
+                                engine_timeline,
+                                worker_token_accounting,
                             },
                         );
                     }
@@ -286,6 +311,60 @@ fn main() {
             }
         }
     }
+}
+
+fn transport_telemetry(
+    request: &CallRequest,
+    mode: &str,
+) -> (
+    Option<EngineStageTimelineV1>,
+    Option<WorkerTokenAccountingV1>,
+) {
+    let requested_timeline = request
+        .telemetry_request
+        .as_ref()
+        .is_some_and(|value| value.engine_stage_timeline);
+    let requested_accounting = request
+        .telemetry_request
+        .as_ref()
+        .is_some_and(|value| value.worker_token_accounting);
+    let emit_timeline =
+        mode == "unsolicited-telemetry" || (mode != "omit-telemetry" && requested_timeline);
+    let emit_accounting =
+        mode == "unsolicited-telemetry" || (mode != "omit-telemetry" && requested_accounting);
+    let timeline = emit_timeline.then(|| {
+        let total_ns = if mode == "unclosable-telemetry" {
+            1_000_000_000
+        } else {
+            300
+        };
+        EngineStageTimelineV1 {
+            total_ns,
+            spans: vec![
+                EngineStageSpanV1 {
+                    stage: "fixture_decode".into(),
+                    start_ns: 0,
+                    duration_ns: 100,
+                },
+                EngineStageSpanV1 {
+                    stage: "fixture_execute".into(),
+                    start_ns: 100,
+                    duration_ns: total_ns - 100,
+                },
+            ],
+        }
+    });
+    let accounting = emit_accounting.then(|| WorkerTokenAccountingV1 {
+        tokenizer_id: "fixture-tokenizer-v1".into(),
+        count_kind: WorkerTokenCountKind::Exact,
+        raw_tokens: 8,
+        visible_tokens: 4,
+        recovery_tokens: 0,
+        billed_tokens: 8,
+        cached_tokens: 2,
+        exact_ref_tokens: Some(0),
+    });
+    (timeline, accounting)
 }
 
 fn result(request: CallRequest) -> WorkerResult {
