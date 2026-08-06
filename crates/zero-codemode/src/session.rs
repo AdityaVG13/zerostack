@@ -911,6 +911,8 @@ pub enum AggregateSessionFailureCode {
     Terminating,
     GenerationExhausted,
     BackendUnavailable,
+    MethodNotFound,
+    SurfaceNotFound,
     BackendExecution,
     Internal,
 }
@@ -926,9 +928,19 @@ impl AggregateSessionFailureCode {
             Self::Terminating => "session_terminating",
             Self::GenerationExhausted => "generation_exhausted",
             Self::BackendUnavailable => "backend_unavailable",
+            Self::MethodNotFound => "method_not_found",
+            Self::SurfaceNotFound => "surface_not_found",
             Self::BackendExecution => "backend_execution",
             Self::Internal => "internal",
         }
+    }
+}
+
+fn backend_failure_code(error: &HostError) -> AggregateSessionFailureCode {
+    match error {
+        HostError::MethodNotFound(_) => AggregateSessionFailureCode::MethodNotFound,
+        HostError::SurfaceNotFound(_) => AggregateSessionFailureCode::SurfaceNotFound,
+        _ => AggregateSessionFailureCode::BackendExecution,
     }
 }
 
@@ -1009,7 +1021,7 @@ enum SessionCommand {
     Execute {
         source: String,
         timeout: Duration,
-        reply: SyncSender<Result<Value, String>>,
+        reply: SyncSender<Result<Value, HostError>>,
     },
     Replace {
         generation: u64,
@@ -1215,12 +1227,12 @@ impl AggregateSession {
                 "execution settled after its generation was replaced",
             ));
         }
-        let value = backend_result?.map_err(|detail| {
+        let value = backend_result?.map_err(|error| {
             AggregateSessionError::new(
-                AggregateSessionFailureCode::BackendExecution,
+                backend_failure_code(&error),
                 generation,
                 Some(request_id),
-                detail,
+                error.to_string(),
             )
         })?;
         Ok(SessionExecutionResult {
@@ -1512,12 +1524,8 @@ fn session_worker(
             } => {
                 let result = executor
                     .as_ref()
-                    .ok_or_else(|| "session executor is unavailable".to_owned())
-                    .and_then(|executor| {
-                        executor
-                            .execute(&source, timeout)
-                            .map_err(|error| error.to_string())
-                    });
+                    .ok_or_else(|| HostError::Runtime("session executor is unavailable".into()))
+                    .and_then(|executor| executor.execute(&source, timeout));
                 let _ = reply.send(result);
             }
             SessionCommand::Replace { generation, reply } => {

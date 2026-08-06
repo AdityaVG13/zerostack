@@ -324,6 +324,8 @@ pub enum HostError {
     Plan(PlanError),
     Runtime(String),
     JavaScript(String),
+    MethodNotFound(String),
+    SurfaceNotFound(String),
     Connector(String),
     Json(String),
     ResultTooLarge { actual: usize, maximum: usize },
@@ -342,7 +344,9 @@ impl fmt::Display for HostError {
             Self::Registration(error) => write!(f, "invalid registration: {error}"),
             Self::Plan(error) => write!(f, "invalid plan: {error}"),
             Self::Runtime(message) => write!(f, "runtime error: {message}"),
-            Self::JavaScript(message) => write!(f, "JavaScript exception: {message}"),
+            Self::JavaScript(message)
+            | Self::MethodNotFound(message)
+            | Self::SurfaceNotFound(message) => write!(f, "JavaScript exception: {message}"),
             Self::Connector(message) => write!(f, "connector error: {message}"),
             Self::Json(message) => write!(f, "JSON error: {message}"),
             Self::ResultTooLarge { actual, maximum } => {
@@ -858,17 +862,27 @@ return (target, label, kind) => new Proxy(target, {
         HostError::JavaScript(error.to_string())
     }
 
+    fn classified_js_error(message: String) -> HostError {
+        if message.starts_with("method_not_found:") {
+            HostError::MethodNotFound(message)
+        } else if message.starts_with("surface_not_found:") {
+            HostError::SurfaceNotFound(message)
+        } else {
+            HostError::JavaScript(message)
+        }
+    }
+
     fn normalized_js_error(ctx: &Ctx<'_>, error: rquickjs::Error) -> HostError {
         if matches!(error, rquickjs::Error::Exception) {
             let caught = ctx.catch();
             if let Some(object) = caught.as_object() {
                 if let Ok(message) = object.get::<_, String>("message") {
-                    return HostError::JavaScript(message);
+                    return classified_js_error(message);
                 }
             }
             if let Some(string) = caught.as_string() {
                 if let Ok(message) = string.to_string() {
-                    return HostError::JavaScript(message);
+                    return classified_js_error(message);
                 }
             }
         }

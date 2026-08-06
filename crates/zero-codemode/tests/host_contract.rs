@@ -216,6 +216,7 @@ fn unknown_surfaces_and_methods_fail_loud_with_closest_names() {
     let method_error = host
         .execute("return await zero.fs.reed({});", connector.clone())
         .expect_err("unknown method must fail");
+    assert!(matches!(method_error, HostError::MethodNotFound(_)));
     assert_eq!(
         method_error.to_string(),
         "JavaScript exception: method_not_found: unknown method 'reed' on zero.fs; closest methods: read, write"
@@ -224,6 +225,7 @@ fn unknown_surfaces_and_methods_fail_loud_with_closest_names() {
     let surface_error = host
         .execute("return await zero.graph.read({});", connector.clone())
         .expect_err("unknown surface must fail");
+    assert!(matches!(surface_error, HostError::SurfaceNotFound(_)));
     let message = surface_error.to_string();
     assert!(
         message.contains("surface_not_found: unknown surface 'graph' on zero"),

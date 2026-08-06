@@ -999,6 +999,65 @@ fn plan_failure_is_typed_and_connection_survives() {
 }
 
 #[test]
+fn catalog_failures_preserve_canonical_codes_and_connection_continuity() {
+    let (d, mut session, token, shutdown_token, _) = start(ProcessIdentity::current().unwrap());
+    let socket = d.path().join("runtime/session.sock");
+    let (mut stream, mut reader, generation) = connect_authenticated(&socket, &token);
+    for (id, source, code, suggestion) in [
+        (
+            820,
+            "return await zero.token.missing({});",
+            "method_not_found",
+            "closest methods:",
+        ),
+        (
+            821,
+            "return await zero.missing.read({});",
+            "surface_not_found",
+            "closest surfaces:",
+        ),
+    ] {
+        send(
+            &mut stream,
+            json!({
+                "type":"execute",
+                "id":id,
+                "generation":generation,
+                "root":d.path(),
+                "source":source,
+                "timeout_ms":1000
+            }),
+        );
+        let failure = read(&mut reader);
+        assert_eq!(failure["ok"], false, "{failure}");
+        assert_eq!(failure["id"], id, "{failure}");
+        assert_eq!(failure["code"], code, "{failure}");
+        assert!(
+            failure["error"]
+                .as_str()
+                .is_some_and(|message| message.contains(suggestion)),
+            "{failure}"
+        );
+    }
+    send(
+        &mut stream,
+        json!({
+            "type":"execute","id":822,"generation":generation,
+            "root":d.path(),"source":"return 822;","timeout_ms":1000
+        }),
+    );
+    let settlement = read(&mut reader);
+    assert_eq!(settlement["ok"], true, "{settlement}");
+    assert_eq!(settlement["result"], 822);
+    send(
+        &mut stream,
+        json!({"type":"shutdown","id":823,"token":shutdown_token}),
+    );
+    assert_eq!(read(&mut reader)["ok"], true);
+    assert!(session.wait().unwrap().success());
+}
+
+#[test]
 fn aggregate_sidecar_spills_arbitrary_oversize_results_to_the_authorized_store() {
     let (d, mut session, token, shutdown_token, _) = start(ProcessIdentity::current().unwrap());
     let socket = d.path().join("runtime/session.sock");
