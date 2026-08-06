@@ -10,6 +10,7 @@ autoexamples = false
 serde.workspace = true
 serde_json.workspace = true
 zero-abi = { path = "../zero-abi" }
+zero-cert = { path = "../zero-cert" }
 zero-gate = { path = "../zero-gate" }
 zero-ledger = { path = "../zero-ledger" }
 zero-store = { path = "../zero-store" }
@@ -26,3 +27,7 @@ path = "examples/native_broker_boundary.rs"
 [[bin]]
 name = "z6-native-journal"
 path = "examples/native_durable_journal.rs"
+
+[[bin]]
+name = "z-v2-raw-baseline"
+path = "examples/raw_v2_baseline.rs"

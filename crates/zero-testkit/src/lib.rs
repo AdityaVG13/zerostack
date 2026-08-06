@@ -23,6 +23,7 @@ pub mod authority;
 pub mod invalidation_contract;
 pub mod journal_fault_matrix;
 pub mod ledger_conservation;
+pub mod raw_v2_slice;
 pub mod robust_snap_model;
 
 use serde::{Deserialize, Serialize};
