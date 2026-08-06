@@ -11,6 +11,7 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 zero-abi = { path = "../zero-abi" }
 zero-cert = { path = "../zero-cert" }
+zero-ledger = { path = "../zero-ledger" }
 zero-store = { path = "../zero-store" }
 
 [dev-dependencies]

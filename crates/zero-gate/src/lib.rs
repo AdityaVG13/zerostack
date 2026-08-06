@@ -22,6 +22,7 @@ use zero_cert::{CommandId, VerifiedEvidence};
 
 pub mod deoptimization;
 pub mod durable_publication;
+pub mod q99;
 pub mod quality;
 pub mod recovery;
 pub mod semantic_cut;
@@ -29,6 +30,7 @@ pub mod transaction;
 pub mod two_phase;
 pub use deoptimization::*;
 pub use durable_publication::*;
+pub use q99::*;
 pub use quality::*;
 pub use recovery::*;
 pub use semantic_cut::*;
