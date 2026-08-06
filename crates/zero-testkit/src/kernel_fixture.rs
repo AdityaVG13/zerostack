@@ -14,10 +14,11 @@ use zero_cert::{
     EvidenceCertificate, ObjectId, OperatorLock, Provenance, Query, Resolver, SpanRef,
 };
 use zero_gate::{
-    begin_effect_transaction_v1, effect_journal_binding_v1, validate_effect_closure_v1,
-    CanonicalArtifactSetV1, ControllerInstruction, ControllerPlan, EffectClosureManifestV1,
-    EffectClosureRequestV1, EffectResourceClosureV1, ExecutionBinding, ExecutionSurface,
-    GuardEvidence, PeerArtifactInputV1, PeerOwner, PerformanceAdmission, PrepareRequest,
+    begin_effect_transaction_v1, candidate_protocol_identity_v1, effect_journal_binding_v1,
+    validate_effect_closure_v1, CanonicalArtifactSetV1, ControllerInstruction, ControllerPlan,
+    EffectClosureManifestV1, EffectClosureRequestV1, EffectResourceClosureV1,
+    ExactNeutralCertificateV1, ExecutionBinding, ExecutionSurface, FrozenBaselineV1, GuardEvidence,
+    PeerArtifactInputV1, PeerOwner, PrepareRequest, QualityAdmissionV1, QualityEvidenceV1,
     ResourceIsolationModeV1, ResourceRestorationModeV1, SafetyShieldEvidenceV1,
     SemanticCutEvidenceV1, SnapEvidence, SourceHead, StagedEffect, TransactionAccessV1,
     TransactionClosure, TransactionResourceKindV1, TransactionResourceRequirementV1,
@@ -253,23 +254,43 @@ pub fn kernel_mutation_fixture_v2(
 
     let artifacts = artifact_set(assembly_manifest_digest, source_root_digest)?;
     let image_digest = artifacts.image_digest();
+    let binding = ExecutionBinding {
+        schema_version: TWO_PHASE_SCHEMA_VERSION,
+        assembly_manifest_digest,
+        source_tree_digest: source_root_digest,
+        source_repository_heads: vec![SourceHead {
+            repository: "ZeroStack".into(),
+            head: source_head,
+        }],
+        image_digest,
+        state_snapshot_digest: *state_snapshot.as_bytes(),
+        task_fingerprint_digest: digest(14),
+        plan_digest,
+        fixed_model_digest: digest(15),
+        comparison_identity_digest: digest(4),
+        predecessor_receipt_head: digest(5),
+    };
+    let candidate_identity = DigestV1::from_bytes(candidate_protocol_identity_v1(&binding));
+    let quality_certificate = ExactNeutralCertificateV1::verify(
+        abi(14),
+        abi(4),
+        abi(16),
+        candidate_identity,
+        abi(17),
+        abi(17),
+        abi(18),
+        abi(18),
+        abi(19),
+        abi(19),
+    )
+    .map_err(|error| error.to_string())?;
+    let quality_admission = QualityAdmissionV1::admit_strict(
+        QualityEvidenceV1::ExactNeutral(quality_certificate),
+        FrozenBaselineV1::new(abi(16), abi(19), abi(20)).map_err(|error| error.to_string())?,
+    )
+    .map_err(|error| error.to_string())?;
     let request = PrepareRequest {
-        binding: ExecutionBinding {
-            schema_version: TWO_PHASE_SCHEMA_VERSION,
-            assembly_manifest_digest,
-            source_tree_digest: source_root_digest,
-            source_repository_heads: vec![SourceHead {
-                repository: "ZeroStack".into(),
-                head: source_head,
-            }],
-            image_digest,
-            state_snapshot_digest: *state_snapshot.as_bytes(),
-            task_fingerprint_digest: digest(14),
-            plan_digest,
-            fixed_model_digest: digest(15),
-            comparison_identity_digest: digest(4),
-            predecessor_receipt_head: digest(5),
-        },
+        binding,
         surface,
         effect_class: EffectClass::ReversibleMutation,
         plan,
@@ -291,8 +312,7 @@ pub fn kernel_mutation_fixture_v2(
                 .map_err(|error| error.to_string())?,
             approval_grant_digest: None,
             irreversible_pre_action_evidence_digest: None,
-            performance: PerformanceAdmission::exact_neutral(digest(16))
-                .map_err(|error| error.to_string())?,
+            performance: quality_admission,
         },
     };
     Ok(KernelMutationFixtureV2 {

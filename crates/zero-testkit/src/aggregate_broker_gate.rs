@@ -8,10 +8,10 @@ mod tests {
     use super::TWO_PHASE_GATE_VECTORS_V1;
     use serde::Deserialize;
     use std::{collections::BTreeMap, fs, path::PathBuf, process::Command};
-    use zero_abi::{raw_worker::EffectClass, sha256_hex};
+    use zero_abi::{raw_worker::EffectClass, sha256_hex, DigestV1};
     use zero_gate::{
         prepare, validate_receipt_record, ExecutionSurface, ExecutionTrace, FailureCode,
-        FinalReceipt, Guard, PerformanceAdmission, ResourceUsage,
+        FinalReceipt, FrozenBaselineV1, Guard, QualityEnvelopeFailureCodeV1, ResourceUsage,
     };
 
     use crate::kernel_fixture::{kernel_mutation_fixture_v2, KernelMutationFixtureV2};
@@ -223,10 +223,10 @@ mod tests {
         );
 
         assert_eq!(
-            PerformanceAdmission::exact_neutral([0; 32])
+            FrozenBaselineV1::new(DigestV1::ZERO, DigestV1::ZERO, DigestV1::ZERO)
                 .unwrap_err()
-                .code,
-            FailureCode::PerformanceUnknown
+                .failure_code(),
+            QualityEnvelopeFailureCodeV1::MissingBinding
         );
 
         let mut missing_approval = fixture(ExecutionSurface::Mcp).request;

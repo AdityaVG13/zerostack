@@ -4,6 +4,10 @@
 //! receipts are linear capabilities. Their fields are private, they are not
 //! cloneable, and only the preceding phase can construct the next phase.
 
+use crate::quality::{
+    quality_envelope_contract_digest_v1, QualityAdmissionRecordV1, QualityAdmissionV1,
+    QualityEvidenceClassV1, QualityGuaranteeV1, QualitySelectionV1,
+};
 use crate::transaction::{
     transaction_contract_digest_v1, RestorationScopeV1, TransactionDispositionV1,
     TransactionReceiptV1,
@@ -20,7 +24,7 @@ use zero_abi::{
 };
 use zero_cert::{effect_witness_contract_digest_v1, EffectAcceptedV1, VerifiedEvidence};
 
-pub const TWO_PHASE_SCHEMA_VERSION: u16 = 2;
+pub const TWO_PHASE_SCHEMA_VERSION: u16 = 3;
 pub const GUARD_COUNT: usize = 10;
 pub const MAX_SOURCE_REPOSITORIES: usize = 64;
 pub const MAX_CONTROLLER_INSTRUCTIONS: usize = 4_096;
@@ -28,11 +32,12 @@ pub const MAX_CONTROLLER_INSTRUCTIONS: usize = 4_096;
 pub type DigestV1 = [u8; 32];
 
 const TWO_PHASE_CONTRACT_DOMAIN_V2: &[u8] = b"zerostack.kernel.contract.v2\0";
+const TWO_PHASE_CONTRACT_DOMAIN_V3: &[u8] = b"zerostack.kernel.contract.v3\0";
 
 pub fn two_phase_contract_manifest_v2() -> Value {
     json!({
         "artifact_profile": "zbf_1_portable_strict",
-        "contract_version": TWO_PHASE_SCHEMA_VERSION,
+        "contract_version": 2,
         "guard_order": Guard::ALL,
         "linked_contracts": {
             "effect_witness": effect_witness_contract_digest_v1(),
@@ -91,6 +96,87 @@ pub fn two_phase_contract_digest_v2() -> DigestV1 {
     let canonical = canonical_json(&two_phase_contract_manifest_v2());
     let mut bytes = Vec::with_capacity(TWO_PHASE_CONTRACT_DOMAIN_V2.len() + canonical.len());
     bytes.extend_from_slice(TWO_PHASE_CONTRACT_DOMAIN_V2);
+    bytes.extend_from_slice(canonical.as_bytes());
+    hash_bytes(&bytes)
+}
+
+pub fn two_phase_contract_manifest_v3() -> Value {
+    json!({
+        "artifact_profile": "zbf_1_portable_strict",
+        "candidate_protocol_identity": [
+            "assembly_manifest_digest",
+            "source_tree_digest",
+            "image_digest",
+            "fixed_model_digest",
+            "two_phase_contract_digest_v3",
+        ],
+        "contract_version": TWO_PHASE_SCHEMA_VERSION,
+        "guard_order": Guard::ALL,
+        "linked_contracts": {
+            "effect_witness": effect_witness_contract_digest_v1(),
+            "quality_envelope": quality_envelope_contract_digest_v1(),
+            "transaction": transaction_contract_digest_v1(),
+            "zbf": zbf_contract_digest_v1(),
+        },
+        "name": "zerostack.two_phase_kernel.v3",
+        "negative_space": [
+            "individual_candidate_claim_from_distributional_evidence",
+            "native_filesystem_durability",
+            "production_worker_contract_enforcement",
+            "universal_external_state_restoration",
+        ],
+        "quality_modes_admitted": [
+            "exact_neutral",
+            "pointwise_dominance",
+            "scoped_class_dominance",
+            "distributional_baseline_only",
+            "unidentified_baseline",
+        ],
+        "receipt_bindings": [
+            "schema_version",
+            "kind",
+            "permit_id",
+            "binding_digest",
+            "admission_digest",
+            "assembly_manifest_digest",
+            "source_tree_digest",
+            "source_repository_heads",
+            "image_digest",
+            "state_snapshot_digest",
+            "task_fingerprint_digest",
+            "plan_digest",
+            "fixed_model_digest",
+            "comparison_identity_digest",
+            "artifact_set_digest",
+            "semantic_cut_certificate_digest",
+            "snap_certificate_digest",
+            "safety_shield_digest",
+            "quality_admission",
+            "final_quality_selection",
+            "transaction_receipt_digest",
+            "attribution_class",
+            "effect_class",
+            "resource_envelope",
+            "surface",
+            "verification_digest",
+            "output_digest",
+            "effects_digest",
+            "resource_usage",
+            "predecessor_receipt_head",
+            "successor_root",
+            "trace_digest",
+            "failure_code",
+            "restoration",
+            "receipt_head",
+        ],
+        "transaction_closure": "validated_zero_gate_transaction_receipt_only",
+    })
+}
+
+pub fn two_phase_contract_digest_v3() -> DigestV1 {
+    let canonical = canonical_json(&two_phase_contract_manifest_v3());
+    let mut bytes = Vec::with_capacity(TWO_PHASE_CONTRACT_DOMAIN_V3.len() + canonical.len());
+    bytes.extend_from_slice(TWO_PHASE_CONTRACT_DOMAIN_V3);
     bytes.extend_from_slice(canonical.as_bytes());
     hash_bytes(&bytes)
 }
@@ -477,7 +563,7 @@ impl ExecutionTrace {
 
     pub fn digest(&self) -> DigestV1 {
         let mut bytes = Vec::with_capacity(96 + self.events.len() * 3);
-        bytes.extend_from_slice(b"zerostack.kernel.trace.v2\0");
+        bytes.extend_from_slice(b"zerostack.kernel.trace.v3\0");
         bytes.extend_from_slice(&TWO_PHASE_SCHEMA_VERSION.to_be_bytes());
         for event in &self.events {
             bytes.push(event.guard as u8);
@@ -521,7 +607,7 @@ pub struct ExecutionBinding {
 impl ExecutionBinding {
     pub fn digest(&self) -> DigestV1 {
         let mut bytes = Vec::new();
-        bytes.extend_from_slice(b"zerostack.kernel.binding.v2\0");
+        bytes.extend_from_slice(b"zerostack.kernel.binding.v3\0");
         bytes.extend_from_slice(&self.schema_version.to_be_bytes());
         bytes.extend_from_slice(&self.assembly_manifest_digest);
         bytes.extend_from_slice(&self.source_tree_digest);
@@ -539,6 +625,18 @@ impl ExecutionBinding {
         bytes.extend_from_slice(&self.predecessor_receipt_head);
         hash_bytes(&bytes)
     }
+}
+
+pub fn candidate_protocol_identity_v1(binding: &ExecutionBinding) -> DigestV1 {
+    let mut bytes = Vec::with_capacity(32 * 5);
+    bytes.extend_from_slice(&binding.assembly_manifest_digest);
+    bytes.extend_from_slice(&binding.source_tree_digest);
+    bytes.extend_from_slice(&binding.image_digest);
+    bytes.extend_from_slice(&binding.fixed_model_digest);
+    bytes.extend_from_slice(&two_phase_contract_digest_v3());
+    let mut framed = b"ZERO.TWO_PHASE.CANDIDATE_PROTOCOL.V1\0".to_vec();
+    framed.extend_from_slice(&bytes);
+    hash_bytes(&framed)
 }
 
 fn effect_class_tag(effect_class: EffectClass) -> u8 {
@@ -602,7 +700,7 @@ pub struct ControllerPlan {
 impl ControllerPlan {
     pub fn digest(&self) -> DigestV1 {
         let mut bytes = Vec::with_capacity(40 + self.instructions.len());
-        bytes.extend_from_slice(b"zerostack.kernel.plan.v2\0");
+        bytes.extend_from_slice(b"zerostack.kernel.plan.v3\0");
         bytes.extend_from_slice(&(self.instructions.len() as u64).to_be_bytes());
         bytes.extend(
             self.instructions
@@ -853,79 +951,8 @@ fn safety_shield_digest_v1(
     hash_bytes(&bytes)
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
-#[serde(rename_all = "snake_case")]
-#[repr(u8)]
-pub enum QualityModeV1 {
-    ExactNeutral,
-    PointwiseDominance,
-    ScopedCertificate,
-    Distributional,
-    BaselineFallback,
-    Unknown,
-}
-
-/// G7 evidence. The current kernel admits equality only by exact outcome digest;
-/// richer quality constructors land in the ordered quality-envelope bead.
-#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
-#[serde(deny_unknown_fields)]
-pub struct PerformanceAdmission {
-    mode: QualityModeV1,
-    baseline_outcome_digest: DigestV1,
-    candidate_outcome_digest: Option<DigestV1>,
-    evidence_digest: DigestV1,
-}
-
-impl PerformanceAdmission {
-    pub fn exact_neutral(outcome_digest: DigestV1) -> Result<Self, KernelError> {
-        if is_zero(&outcome_digest) {
-            return Err(KernelError::at(
-                FailureCode::PerformanceUnknown,
-                Guard::G7Performance,
-                "exact-neutral outcome digest must be nonzero",
-            ));
-        }
-        Ok(Self {
-            mode: QualityModeV1::ExactNeutral,
-            baseline_outcome_digest: outcome_digest,
-            candidate_outcome_digest: Some(outcome_digest),
-            evidence_digest: outcome_digest,
-        })
-    }
-
-    pub fn baseline_fallback(
-        baseline_outcome_digest: DigestV1,
-        baseline_receipt_digest: DigestV1,
-    ) -> Result<Self, KernelError> {
-        if is_zero(&baseline_outcome_digest) || is_zero(&baseline_receipt_digest) {
-            return Err(KernelError::at(
-                FailureCode::PerformanceUnknown,
-                Guard::G7Performance,
-                "baseline fallback outcome and receipt digests must be nonzero",
-            ));
-        }
-        Ok(Self {
-            mode: QualityModeV1::BaselineFallback,
-            baseline_outcome_digest,
-            candidate_outcome_digest: None,
-            evidence_digest: baseline_receipt_digest,
-        })
-    }
-
-    pub const fn mode(&self) -> QualityModeV1 {
-        self.mode
-    }
-
-    pub fn digest(&self) -> DigestV1 {
-        let mut bytes = Vec::new();
-        bytes.extend_from_slice(b"zerostack.kernel.quality.v2\0");
-        bytes.push(self.mode as u8);
-        bytes.extend_from_slice(&self.baseline_outcome_digest);
-        append_optional_digest(&mut bytes, self.candidate_outcome_digest);
-        bytes.extend_from_slice(&self.evidence_digest);
-        hash_bytes(&bytes)
-    }
-}
+/// Backward-compatible kernel name for the proof-carrying quality decision.
+pub type PerformanceAdmission = QualityAdmissionV1;
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
@@ -954,7 +981,7 @@ impl PrepareRequest {
     /// Canonical commitment to every G0-G7 admission input.
     pub fn admission_digest(&self) -> DigestV1 {
         let mut bytes = Vec::new();
-        bytes.extend_from_slice(b"zerostack.kernel.admission.v2\0");
+        bytes.extend_from_slice(b"zerostack.kernel.admission.v3\0");
         bytes.extend_from_slice(&self.binding.digest());
         bytes.push(self.surface as u8);
         bytes.push(effect_class_tag(self.effect_class));
@@ -991,7 +1018,7 @@ impl PrepareRequest {
         bytes.extend_from_slice(&evidence.safety_shield.shield_digest);
         append_optional_digest(&mut bytes, evidence.approval_grant_digest);
         append_optional_digest(&mut bytes, evidence.irreversible_pre_action_evidence_digest);
-        bytes.extend_from_slice(&evidence.performance.digest());
+        bytes.extend_from_slice(evidence.performance.digest().as_bytes());
         hash_bytes(&bytes)
     }
 }
@@ -1113,7 +1140,7 @@ pub fn validate_permit_record(record: &PermitRecord) -> Result<(), KernelError> 
         ));
     }
     let mut bytes = Vec::new();
-    bytes.extend_from_slice(b"zerostack.kernel.permit.v2\0");
+    bytes.extend_from_slice(b"zerostack.kernel.permit.v3\0");
     bytes.extend_from_slice(&record.admission_digest);
     bytes.extend_from_slice(&record.trace.digest());
     if record.permit_id != hash_bytes(&bytes) {
@@ -1421,29 +1448,75 @@ fn validate_g6(request: &PrepareRequest) -> Result<(), KernelError> {
 
 fn validate_g7(request: &PrepareRequest) -> Result<(), KernelError> {
     let performance = &request.evidence.performance;
-    let valid = match performance.mode {
-        QualityModeV1::ExactNeutral => {
-            performance.candidate_outcome_digest == Some(performance.baseline_outcome_digest)
-                && !is_zero(&performance.baseline_outcome_digest)
-                && performance.evidence_digest == performance.baseline_outcome_digest
-        }
-        QualityModeV1::BaselineFallback => {
-            performance.candidate_outcome_digest.is_none()
-                && !is_zero(&performance.baseline_outcome_digest)
-                && !is_zero(&performance.evidence_digest)
-        }
-        QualityModeV1::PointwiseDominance
-        | QualityModeV1::ScopedCertificate
-        | QualityModeV1::Distributional
-        | QualityModeV1::Unknown => false,
-    };
-    if valid {
+    performance.validate().map_err(|error| {
+        KernelError::at(
+            FailureCode::PerformanceUnknown,
+            Guard::G7Performance,
+            format!("quality admission failed validation: {error}"),
+        )
+    })?;
+    if *performance.comparison_identity_digest().as_bytes()
+        != request.binding.comparison_identity_digest
+        || (performance.evidence_class() != QualityEvidenceClassV1::Distributional
+            && *performance.scope_digest().as_bytes() != request.binding.task_fingerprint_digest)
+    {
+        return Err(KernelError::at(
+            FailureCode::PerformanceUnknown,
+            Guard::G7Performance,
+            "quality evidence binds another comparison identity or task",
+        ));
+    }
+    if matches!(
+        performance.evidence_class(),
+        QualityEvidenceClassV1::ExactNeutral
+            | QualityEvidenceClassV1::PointwiseDominance
+            | QualityEvidenceClassV1::ScopedClassDominance
+    ) && performance
+        .candidate_identity_digest()
+        .map(|digest| *digest.as_bytes())
+        != Some(candidate_protocol_identity_v1(&request.binding))
+    {
+        return Err(KernelError::at(
+            FailureCode::PerformanceUnknown,
+            Guard::G7Performance,
+            "quality evidence binds another candidate protocol identity",
+        ));
+    }
+    let coherent = matches!(
+        (
+            performance.evidence_class(),
+            performance.selection(),
+            performance.guarantee(),
+        ),
+        (
+            QualityEvidenceClassV1::ExactNeutral,
+            QualitySelectionV1::Candidate,
+            QualityGuaranteeV1::ExactSubstitution,
+        ) | (
+            QualityEvidenceClassV1::PointwiseDominance,
+            QualitySelectionV1::Candidate,
+            QualityGuaranteeV1::PointwiseNoWorse,
+        ) | (
+            QualityEvidenceClassV1::ScopedClassDominance,
+            QualitySelectionV1::Candidate,
+            QualityGuaranteeV1::ScopedClassNoWorse,
+        ) | (
+            QualityEvidenceClassV1::Distributional,
+            QualitySelectionV1::FrozenBaseline,
+            QualityGuaranteeV1::DistributionalOnly,
+        ) | (
+            QualityEvidenceClassV1::Unidentified,
+            QualitySelectionV1::FrozenBaseline,
+            QualityGuaranteeV1::Unidentified,
+        )
+    );
+    if coherent {
         Ok(())
     } else {
         Err(KernelError::at(
             FailureCode::PerformanceUnknown,
             Guard::G7Performance,
-            "quality mode lacks a current exact proof; select the frozen raw baseline",
+            "quality evidence cannot authorize this strict candidate selection",
         ))
     }
 }
@@ -1492,7 +1565,7 @@ fn validate_source_heads(heads: &[SourceHead]) -> Result<(), KernelError> {
 
 fn permit_digest(request: &PrepareRequest, trace: &ExecutionTrace) -> DigestV1 {
     let mut bytes = Vec::new();
-    bytes.extend_from_slice(b"zerostack.kernel.permit.v2\0");
+    bytes.extend_from_slice(b"zerostack.kernel.permit.v3\0");
     bytes.extend_from_slice(&request.admission_digest());
     bytes.extend_from_slice(&trace.digest());
     hash_bytes(&bytes)
@@ -1827,10 +1900,8 @@ fn validate_closure(
                     != execution.request.evidence.safety_shield.acceptance_digest
                 || execution.request.evidence.safety_shield.action_digest
                     != Some(closure.action_digest)
-                || matches!(
-                    execution.request.evidence.performance.mode,
-                    QualityModeV1::BaselineFallback | QualityModeV1::Unknown
-                )
+                || execution.request.evidence.performance.selection()
+                    != QualitySelectionV1::Candidate
             {
                 return Err(KernelError::at(
                     FailureCode::IncompleteTransactionClosure,
@@ -1845,8 +1916,8 @@ fn validate_closure(
                 || closure.restoration.completed != closure.restoration.attempted
                 || closure.restoration_scope != RestorationScopeV1::DeclaredEffectClosure
                 || (failure.is_none()
-                    && execution.request.evidence.performance.mode
-                        != QualityModeV1::BaselineFallback)
+                    && execution.request.evidence.performance.selection()
+                        != QualitySelectionV1::FrozenBaseline)
             {
                 return Err(KernelError::at(
                     FailureCode::UnaccountedFallback,
@@ -1888,7 +1959,8 @@ pub struct ReceiptRecord {
     pub semantic_cut_certificate_digest: DigestV1,
     pub snap_certificate_digest: Option<DigestV1>,
     pub safety_shield_digest: DigestV1,
-    pub quality_decision_digest: DigestV1,
+    pub quality_admission: QualityAdmissionRecordV1,
+    pub final_quality_selection: QualitySelectionV1,
     pub transaction_receipt_digest: DigestV1,
     pub attribution_class: AttributionClass,
     pub effect_class: EffectClass,
@@ -1943,7 +2015,7 @@ pub fn validate_receipt_record(record: &ReceiptRecord) -> Result<(), KernelError
         record.artifact_set_digest,
         record.semantic_cut_certificate_digest,
         record.safety_shield_digest,
-        record.quality_decision_digest,
+        *record.quality_admission.admission_digest.as_bytes(),
         record.transaction_receipt_digest,
         record.output_digest,
         record.effects_digest,
@@ -1962,6 +2034,7 @@ pub fn validate_receipt_record(record: &ReceiptRecord) -> Result<(), KernelError
         || binding.digest() != record.binding_digest
         || record.attribution_class != AttributionClass::Fixed
         || envelope_has_zero(record.resource_envelope)
+        || !quality_receipt_fields_valid(record)
     {
         return Err(KernelError::execution(
             FailureCode::ForgedReceipt,
@@ -1995,7 +2068,8 @@ pub fn validate_receipt_record(record: &ReceiptRecord) -> Result<(), KernelError
         record.semantic_cut_certificate_digest,
         record.snap_certificate_digest,
         record.safety_shield_digest,
-        record.quality_decision_digest,
+        &record.quality_admission,
+        record.final_quality_selection,
         record.transaction_receipt_digest,
         record.attribution_class,
         record.effect_class,
@@ -2017,6 +2091,46 @@ pub fn validate_receipt_record(record: &ReceiptRecord) -> Result<(), KernelError
         ));
     }
     Ok(())
+}
+
+fn quality_receipt_fields_valid(record: &ReceiptRecord) -> bool {
+    record.quality_admission.validate().is_ok()
+        && *record
+            .quality_admission
+            .comparison_identity_digest
+            .as_bytes()
+            == record.comparison_identity_digest
+        && (record.quality_admission.evidence_class == QualityEvidenceClassV1::Distributional
+            || *record.quality_admission.scope_digest.as_bytes() == record.task_fingerprint_digest)
+        && (!matches!(
+            record.quality_admission.evidence_class,
+            QualityEvidenceClassV1::ExactNeutral
+                | QualityEvidenceClassV1::PointwiseDominance
+                | QualityEvidenceClassV1::ScopedClassDominance
+        ) || record
+            .quality_admission
+            .candidate_identity_digest
+            .map(|digest| *digest.as_bytes())
+            == Some(candidate_protocol_identity_v1(&ExecutionBinding {
+                schema_version: record.schema_version,
+                assembly_manifest_digest: record.assembly_manifest_digest,
+                source_tree_digest: record.source_tree_digest,
+                source_repository_heads: record.source_repository_heads.clone(),
+                image_digest: record.image_digest,
+                state_snapshot_digest: record.state_snapshot_digest,
+                task_fingerprint_digest: record.task_fingerprint_digest,
+                plan_digest: record.plan_digest,
+                fixed_model_digest: record.fixed_model_digest,
+                comparison_identity_digest: record.comparison_identity_digest,
+                predecessor_receipt_head: record.predecessor_receipt_head,
+            })))
+        && matches!(
+            (record.kind, record.final_quality_selection),
+            (ReceiptKind::Commit, QualitySelectionV1::Candidate)
+                | (ReceiptKind::Fallback, QualitySelectionV1::FrozenBaseline)
+        )
+        && (record.kind != ReceiptKind::Commit
+            || record.quality_admission.selection == QualitySelectionV1::Candidate)
 }
 
 fn envelope_has_zero(envelope: WorkerEnvelope) -> bool {
@@ -2062,7 +2176,11 @@ impl ReadyToFinalize {
             }
         };
         let safety_shield_digest = self.request.evidence.safety_shield.shield_digest;
-        let quality_decision_digest = self.request.evidence.performance.digest();
+        let quality_admission = self.request.evidence.performance.record();
+        let final_quality_selection = match kind {
+            ReceiptKind::Commit => QualitySelectionV1::Candidate,
+            ReceiptKind::Fallback => QualitySelectionV1::FrozenBaseline,
+        };
         let transaction_receipt_digest = self.closure.transaction_receipt_digest;
         let attribution_class = self.request.evidence.semantic_cut.attribution_class;
         let effect_class = self.request.effect_class;
@@ -2076,7 +2194,8 @@ impl ReadyToFinalize {
             semantic_cut_certificate_digest,
             snap_certificate_digest,
             safety_shield_digest,
-            quality_decision_digest,
+            &quality_admission,
+            final_quality_selection,
             transaction_receipt_digest,
             attribution_class,
             effect_class,
@@ -2100,7 +2219,8 @@ impl ReadyToFinalize {
             semantic_cut_certificate_digest,
             snap_certificate_digest,
             safety_shield_digest,
-            quality_decision_digest,
+            quality_admission,
+            final_quality_selection,
             transaction_receipt_digest,
             attribution_class,
             effect_class,
@@ -2136,7 +2256,8 @@ struct ReceiptCommon {
     semantic_cut_certificate_digest: DigestV1,
     snap_certificate_digest: Option<DigestV1>,
     safety_shield_digest: DigestV1,
-    quality_decision_digest: DigestV1,
+    quality_admission: QualityAdmissionRecordV1,
+    final_quality_selection: QualitySelectionV1,
     transaction_receipt_digest: DigestV1,
     attribution_class: AttributionClass,
     effect_class: EffectClass,
@@ -2174,7 +2295,8 @@ impl ReceiptCommon {
             semantic_cut_certificate_digest: self.semantic_cut_certificate_digest,
             snap_certificate_digest: self.snap_certificate_digest,
             safety_shield_digest: self.safety_shield_digest,
-            quality_decision_digest: self.quality_decision_digest,
+            quality_admission: self.quality_admission.clone(),
+            final_quality_selection: self.final_quality_selection,
             transaction_receipt_digest: self.transaction_receipt_digest,
             attribution_class: self.attribution_class,
             effect_class: self.effect_class,
@@ -2275,7 +2397,8 @@ fn receipt_digest(
     semantic_cut_certificate_digest: DigestV1,
     snap_certificate_digest: Option<DigestV1>,
     safety_shield_digest: DigestV1,
-    quality_decision_digest: DigestV1,
+    quality_admission: &QualityAdmissionRecordV1,
+    final_quality_selection: QualitySelectionV1,
     transaction_receipt_digest: DigestV1,
     attribution_class: AttributionClass,
     effect_class: EffectClass,
@@ -2291,7 +2414,7 @@ fn receipt_digest(
     restoration: RestorationAccounting,
 ) -> DigestV1 {
     let mut bytes = Vec::new();
-    bytes.extend_from_slice(b"zerostack.kernel.receipt.v2\0");
+    bytes.extend_from_slice(b"zerostack.kernel.receipt.v3\0");
     bytes.extend_from_slice(&TWO_PHASE_SCHEMA_VERSION.to_be_bytes());
     bytes.push(kind as u8);
     bytes.extend_from_slice(&permit_id);
@@ -2301,7 +2424,11 @@ fn receipt_digest(
     bytes.extend_from_slice(&semantic_cut_certificate_digest);
     append_optional_digest(&mut bytes, snap_certificate_digest);
     bytes.extend_from_slice(&safety_shield_digest);
-    bytes.extend_from_slice(&quality_decision_digest);
+    bytes.extend_from_slice(quality_admission.admission_digest.as_bytes());
+    bytes.push(match final_quality_selection {
+        QualitySelectionV1::Candidate => 0,
+        QualitySelectionV1::FrozenBaseline => 1,
+    });
     bytes.extend_from_slice(&transaction_receipt_digest);
     bytes.push(match attribution_class {
         AttributionClass::Fixed => 0,
@@ -2339,7 +2466,7 @@ fn receipt_digest(
 
 fn effect_list_digest(effects: &[StagedEffect]) -> DigestV1 {
     let mut bytes = Vec::new();
-    bytes.extend_from_slice(b"zerostack.kernel.effects.v2\0");
+    bytes.extend_from_slice(b"zerostack.kernel.effects.v3\0");
     bytes.extend_from_slice(&(effects.len() as u64).to_be_bytes());
     for effect in effects {
         bytes.extend_from_slice(&effect.effect_digest);
@@ -2378,6 +2505,11 @@ fn is_zero(digest: &DigestV1) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::quality::{
+        DistributionalCertificateV1, DistributionalClaimV1, ExactNeutralCertificateV1,
+        FrozenBaselineV1, MetricOrderV1, PointwiseDominanceCertificateV1, ProtectedMetricV1,
+        QualityEvidenceV1, QualityPairV1,
+    };
     use crate::transaction::RestorationScopeV1;
     use std::borrow::Cow;
     use zero_abi::{
@@ -2568,6 +2700,88 @@ mod tests {
         ControllerPlan { instructions }
     }
 
+    fn quality_admission(candidate_identity: AbiDigestV1) -> PerformanceAdmission {
+        let certificate = ExactNeutralCertificateV1::verify(
+            abi(14),
+            abi(4),
+            abi(16),
+            candidate_identity,
+            abi(17),
+            abi(17),
+            abi(18),
+            abi(18),
+            abi(19),
+            abi(19),
+        )
+        .unwrap();
+        QualityAdmissionV1::admit_strict(
+            QualityEvidenceV1::ExactNeutral(certificate),
+            FrozenBaselineV1::new(abi(16), abi(19), abi(20)).unwrap(),
+        )
+        .unwrap()
+    }
+
+    fn pointwise_quality_admission(candidate_identity: AbiDigestV1) -> PerformanceAdmission {
+        let pair = QualityPairV1::new(
+            abi(14),
+            abi(4),
+            abi(16),
+            candidate_identity,
+            abi(19),
+            abi(21),
+            abi(22),
+            abi(26),
+            vec![ProtectedMetricV1 {
+                metric_id: "protected_outcome".into(),
+                order: MetricOrderV1::AtLeast,
+                baseline_value: 1,
+                candidate_value: 2,
+            }],
+        )
+        .unwrap();
+        let bytes = pair.canonical_bytes().unwrap();
+        let evidence_certificate = certificate(&bytes);
+        let resident = Resident { bytes: &bytes };
+        let verified = verify(&evidence_certificate, &resident).unwrap();
+        let dominance = PointwiseDominanceCertificateV1::verify(&pair, abi(23), &verified).unwrap();
+        QualityAdmissionV1::admit_strict(
+            QualityEvidenceV1::PointwiseDominance(dominance),
+            FrozenBaselineV1::new(abi(16), abi(19), abi(20)).unwrap(),
+        )
+        .unwrap()
+    }
+
+    fn distributional_quality_admission() -> PerformanceAdmission {
+        let claim = DistributionalClaimV1::new(
+            abi(24),
+            abi(4),
+            abi(25),
+            abi(16),
+            abi(19),
+            abi(22),
+            abi(26),
+            abi(27),
+            100,
+            10,
+            2,
+            88,
+            80_000,
+            50_000,
+            950_000,
+        )
+        .unwrap();
+        let bytes = claim.canonical_bytes().unwrap();
+        let evidence_certificate = certificate(&bytes);
+        let resident = Resident { bytes: &bytes };
+        let verified = verify(&evidence_certificate, &resident).unwrap();
+        let distributional = DistributionalCertificateV1::verify(&claim, &verified).unwrap();
+        QualityAdmissionV1::admit_strict(
+            QualityEvidenceV1::Distributional(distributional),
+            FrozenBaselineV1::new(abi(16), abi(19), abi(20)).unwrap(),
+        )
+        .unwrap()
+    }
+
     fn request(surface: ExecutionSurface, effect_class: EffectClass) -> PrepareRequest {
         let plan = plan(effect_class);
         let plan_digest = plan.digest();
@@ -2578,23 +2792,25 @@ mod tests {
         } else {
             SafetyShieldEvidenceV1::from_effect_accepted(accepted_effect()).unwrap()
         };
+        let binding = ExecutionBinding {
+            schema_version: TWO_PHASE_SCHEMA_VERSION,
+            assembly_manifest_digest: digest(1),
+            source_tree_digest: digest(2),
+            source_repository_heads: vec![SourceHead {
+                repository: "ZeroStack".into(),
+                head: "87c8ef5df0699b6345e4a829876b3f086f9c3ae5".into(),
+            }],
+            image_digest,
+            state_snapshot_digest: digest(13),
+            task_fingerprint_digest: digest(14),
+            plan_digest,
+            fixed_model_digest: digest(15),
+            comparison_identity_digest: digest(4),
+            predecessor_receipt_head: digest(5),
+        };
+        let candidate_identity = AbiDigestV1::from_bytes(candidate_protocol_identity_v1(&binding));
         PrepareRequest {
-            binding: ExecutionBinding {
-                schema_version: TWO_PHASE_SCHEMA_VERSION,
-                assembly_manifest_digest: digest(1),
-                source_tree_digest: digest(2),
-                source_repository_heads: vec![SourceHead {
-                    repository: "ZeroStack".into(),
-                    head: "87c8ef5df0699b6345e4a829876b3f086f9c3ae5".into(),
-                }],
-                image_digest,
-                state_snapshot_digest: digest(13),
-                task_fingerprint_digest: digest(14),
-                plan_digest,
-                fixed_model_digest: digest(15),
-                comparison_identity_digest: digest(4),
-                predecessor_receipt_head: digest(5),
-            },
+            binding,
             surface,
             effect_class,
             plan,
@@ -2622,7 +2838,7 @@ mod tests {
                 } else {
                     None
                 },
-                performance: PerformanceAdmission::exact_neutral(digest(16)).unwrap(),
+                performance: quality_admission(candidate_identity),
             },
         }
     }
@@ -2712,35 +2928,42 @@ mod tests {
         }
     }
 
-    fn run_to_ready(surface: ExecutionSurface) -> ReadyToFinalize {
-        let permit = prepare(request(surface, EffectClass::ReversibleMutation)).unwrap();
-        validate_permit_record(&permit.record()).unwrap();
+    fn execute_request(
+        request: PrepareRequest,
+        closure: TransactionClosure,
+    ) -> Result<ReadyToFinalize, KernelError> {
+        let permit = prepare(request).map_err(|failure| failure.into_parts().0)?;
+        validate_permit_record(&permit.record())?;
         let mut execution = permit.start();
-        execution
-            .dispatch(
-                PeerOwner::FsZero,
-                ResourceUsage {
-                    fuel: 10,
-                    elapsed_ms: 4,
-                    io_bytes: 8,
-                    memory_bytes: 64,
-                    processes: 1,
-                    risk_units: 1,
-                    worker_steps: 1,
-                },
-            )
-            .unwrap();
-        execution.deterministic_transform().unwrap();
-        execution.record_verification(digest(9)).unwrap();
-        execution
-            .stage_effect(staged(EffectClass::ReversibleMutation))
-            .unwrap();
+        execution.dispatch(
+            PeerOwner::FsZero,
+            ResourceUsage {
+                fuel: 10,
+                elapsed_ms: 4,
+                io_bytes: 8,
+                memory_bytes: 64,
+                processes: 1,
+                risk_units: 1,
+                worker_steps: 1,
+            },
+        )?;
+        execution.deterministic_transform()?;
+        execution.record_verification(digest(9))?;
+        execution.stage_effect(staged(EffectClass::ReversibleMutation))?;
         assert_eq!(
             execution.reject_early_publish().code,
             FailureCode::EarlyVisibleByte
         );
-        execution.buffer_visible(b"accepted").unwrap();
-        execution.close_transaction(commit_closure()).unwrap()
+        execution.buffer_visible(b"accepted")?;
+        execution.close_transaction(closure)
+    }
+
+    fn run_to_ready(surface: ExecutionSurface) -> ReadyToFinalize {
+        execute_request(
+            request(surface, EffectClass::ReversibleMutation),
+            commit_closure(),
+        )
+        .unwrap()
     }
 
     #[test]
@@ -2752,6 +2975,109 @@ mod tests {
                 0x6a, 0x2e, 0xca, 0x62, 0x58, 0xfc, 0x49, 0xaa, 0xdb, 0x40, 0x52, 0x69, 0x68, 0xf7,
                 0xa5, 0x30, 0xa6, 0x87,
             ]
+        );
+        assert_eq!(
+            two_phase_contract_digest_v3(),
+            [
+                0x12, 0x18, 0x25, 0xd4, 0x3e, 0xee, 0x2a, 0xbc, 0xe2, 0x6a, 0x88, 0x6b, 0x67, 0xd5,
+                0xde, 0xf6, 0x44, 0x03, 0x74, 0xc3, 0x98, 0xe8, 0x4b, 0x77, 0x4d, 0x77, 0x28, 0xd0,
+                0x32, 0x13, 0x99, 0x34
+            ]
+        );
+    }
+
+    #[test]
+    fn state_machine_quality_envelope_guards_candidate_and_distributional_fallback() {
+        let mut pointwise = request(ExecutionSurface::Mcp, EffectClass::ReversibleMutation);
+        let candidate_identity =
+            AbiDigestV1::from_bytes(candidate_protocol_identity_v1(&pointwise.binding));
+        pointwise.evidence.performance = pointwise_quality_admission(candidate_identity);
+        let FinalReceipt::Commit(receipt) = execute_request(pointwise, commit_closure())
+            .unwrap()
+            .finalize()
+            .unwrap()
+        else {
+            panic!("pointwise candidate must commit")
+        };
+        let record = receipt.record();
+        assert_eq!(
+            record.quality_admission.evidence_class,
+            QualityEvidenceClassV1::PointwiseDominance
+        );
+        assert_eq!(
+            record.quality_admission.selection,
+            QualitySelectionV1::Candidate
+        );
+        assert_eq!(
+            record.final_quality_selection,
+            QualitySelectionV1::Candidate
+        );
+        assert_eq!(
+            record.quality_admission.guarantee,
+            QualityGuaranteeV1::PointwiseNoWorse
+        );
+        assert!(record.quality_admission.strict_improvement);
+        validate_receipt_record(&record).unwrap();
+
+        let mut distributional = request(ExecutionSurface::Mcp, EffectClass::ReversibleMutation);
+        distributional.evidence.performance = distributional_quality_admission();
+        let FinalReceipt::Fallback(receipt) = execute_request(distributional, fallback_closure())
+            .unwrap()
+            .finalize()
+            .unwrap()
+        else {
+            panic!("distributional evidence must select the frozen baseline")
+        };
+        let record = receipt.record();
+        assert_eq!(
+            record.quality_admission.evidence_class,
+            QualityEvidenceClassV1::Distributional
+        );
+        assert_eq!(
+            record.quality_admission.selection,
+            QualitySelectionV1::FrozenBaseline
+        );
+        assert_eq!(
+            record.final_quality_selection,
+            QualitySelectionV1::FrozenBaseline
+        );
+        assert_eq!(
+            record.quality_admission.guarantee,
+            QualityGuaranteeV1::DistributionalOnly
+        );
+        assert!(!record.quality_admission.strict_improvement);
+        validate_receipt_record(&record).unwrap();
+
+        let mut candidate_mismatch =
+            request(ExecutionSurface::Mcp, EffectClass::ReversibleMutation);
+        candidate_mismatch.evidence.performance = quality_admission(abi(99));
+        assert_eq!(
+            prepare(candidate_mismatch).unwrap_err().error().code,
+            FailureCode::PerformanceUnknown
+        );
+
+        let mismatched = ExactNeutralCertificateV1::verify(
+            abi(14),
+            abi(99),
+            abi(16),
+            abi(28),
+            abi(17),
+            abi(17),
+            abi(18),
+            abi(18),
+            abi(19),
+            abi(19),
+        )
+        .unwrap();
+        let mut request = request(ExecutionSurface::Mcp, EffectClass::ReversibleMutation);
+        request.evidence.performance = QualityAdmissionV1::admit_strict(
+            QualityEvidenceV1::ExactNeutral(mismatched),
+            FrozenBaselineV1::new(abi(16), abi(19), abi(20)).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(
+            prepare(request).unwrap_err().error().code,
+            FailureCode::PerformanceUnknown
         );
     }
 
@@ -2925,12 +3251,18 @@ mod tests {
             panic!("expected fallback")
         };
         receipt.trace().verify_complete().unwrap();
+        let record = receipt.record();
+        assert_eq!(record.failure_code, Some(FailureCode::BufferOverflow));
+        assert_eq!(record.successor_root, digest(13));
         assert_eq!(
-            receipt.record().failure_code,
-            Some(FailureCode::BufferOverflow)
+            record.quality_admission.selection,
+            QualitySelectionV1::Candidate
         );
-        assert_eq!(receipt.record().successor_root, digest(13));
-        validate_receipt_record(&receipt.record()).unwrap();
+        assert_eq!(
+            record.final_quality_selection,
+            QualitySelectionV1::FrozenBaseline
+        );
+        validate_receipt_record(&record).unwrap();
     }
 
     #[test]
@@ -3020,6 +3352,12 @@ mod tests {
         receipt_record.transaction_receipt_digest[0] ^= 1;
         assert_eq!(
             validate_receipt_record(&receipt_record).unwrap_err().code,
+            FailureCode::ForgedReceipt
+        );
+        let mut quality_tamper = receipt.record();
+        quality_tamper.quality_admission.selection = QualitySelectionV1::FrozenBaseline;
+        assert_eq!(
+            validate_receipt_record(&quality_tamper).unwrap_err().code,
             FailureCode::ForgedReceipt
         );
     }

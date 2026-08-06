@@ -13,12 +13,12 @@ use std::{
 use serde_json::json;
 use zero_abi::{canonical_json, sha256, DigestV1};
 use zero_gate::{
-    prepare, two_phase_contract_digest_v2, ExecutionSurface, FinalReceipt, PeerOwner, ResourceUsage,
+    prepare, two_phase_contract_digest_v3, ExecutionSurface, FinalReceipt, PeerOwner, ResourceUsage,
 };
 use zero_testkit::kernel_fixture::kernel_mutation_fixture_v2;
 
 const RECEIPT_MARKER: &str = "ZEROSTACK_Z5_NATIVE_RECEIPT=";
-const SOURCE_INPUTS: [(&str, &[u8]); 17] = [
+const SOURCE_INPUTS: [(&str, &[u8]); 18] = [
     (
         "crates/zero-gate/Cargo.toml",
         include_bytes!(concat!(
@@ -38,6 +38,13 @@ const SOURCE_INPUTS: [(&str, &[u8]); 17] = [
         include_bytes!(concat!(
             env!("CARGO_MANIFEST_DIR"),
             "/../zero-gate/src/two_phase.rs"
+        )),
+    ),
+    (
+        "crates/zero-gate/src/quality.rs",
+        include_bytes!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../zero-gate/src/quality.rs"
         )),
     ),
     (
@@ -293,8 +300,8 @@ fn main() -> Result<(), Box<dyn Error>> {
         "claim_or_freeze_ids": ["Z5", "zerostack-racc-frontier-86qk.20"],
         "assembly_manifest_digest": assembly,
         "source_repository_heads": {"ZeroStack": source_head},
-        "model_or_spec_version": "zerostack.two_phase_kernel.v2",
-        "kernel_contract_digest": DigestV1::from_bytes(two_phase_contract_digest_v2()),
+        "model_or_spec_version": "zerostack.two_phase_kernel.v3",
+        "kernel_contract_digest": DigestV1::from_bytes(two_phase_contract_digest_v3()),
         "toolchain_identities": [{"tool":"rustc","verbose_version":String::from_utf8(rustc.stdout)?}],
         "exact_commands": [exact_command],
         "input_fixture_hashes": {"native_broker_request": DigestV1::from_bytes(sha256(b"native broker request"))},

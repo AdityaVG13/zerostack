@@ -429,8 +429,11 @@ mod tests {
     };
 
     use crate::two_phase::{
-        AttributionClass, ExecutionSurface, ResourceUsage, RestorationAccounting, SourceHead,
-        WorkerEnvelope, TWO_PHASE_SCHEMA_VERSION,
+        candidate_protocol_identity_v1, AttributionClass, ExecutionBinding, ExecutionSurface,
+        ResourceUsage, RestorationAccounting, SourceHead, WorkerEnvelope, TWO_PHASE_SCHEMA_VERSION,
+    };
+    use crate::{
+        ExactNeutralCertificateV1, FrozenBaselineV1, QualityAdmissionV1, QualityEvidenceV1,
     };
     use zero_abi::raw_worker::EffectClass;
 
@@ -447,6 +450,44 @@ mod tests {
         )
         .unwrap()
     }
+    fn quality_admission() -> crate::QualityAdmissionRecordV1 {
+        let binding = ExecutionBinding {
+            schema_version: TWO_PHASE_SCHEMA_VERSION,
+            assembly_manifest_digest: [2; 32],
+            source_tree_digest: [1; 32],
+            source_repository_heads: vec![SourceHead {
+                repository: "ZeroStack".into(),
+                head: "87c8ef5df0699b6345e4a829876b3f086f9c3ae5".into(),
+            }],
+            image_digest: [1; 32],
+            state_snapshot_digest: [1; 32],
+            task_fingerprint_digest: [1; 32],
+            plan_digest: [1; 32],
+            fixed_model_digest: [1; 32],
+            comparison_identity_digest: [1; 32],
+            predecessor_receipt_head: [1; 32],
+        };
+        let certificate = ExactNeutralCertificateV1::verify(
+            abi(1),
+            abi(1),
+            abi(3),
+            zero_abi::DigestV1::from_bytes(candidate_protocol_identity_v1(&binding)),
+            abi(6),
+            abi(6),
+            abi(7),
+            abi(7),
+            abi(4),
+            abi(4),
+        )
+        .unwrap();
+        QualityAdmissionV1::admit_strict(
+            QualityEvidenceV1::ExactNeutral(certificate),
+            FrozenBaselineV1::new(abi(3), abi(4), abi(5)).unwrap(),
+        )
+        .unwrap()
+        .record()
+    }
+
     fn record() -> ReceiptRecord {
         ReceiptRecord {
             schema_version: TWO_PHASE_SCHEMA_VERSION,
@@ -470,7 +511,8 @@ mod tests {
             semantic_cut_certificate_digest: [1; 32],
             snap_certificate_digest: None,
             safety_shield_digest: [1; 32],
-            quality_decision_digest: [1; 32],
+            quality_admission: quality_admission(),
+            final_quality_selection: crate::QualitySelectionV1::Candidate,
             transaction_receipt_digest: [1; 32],
             attribution_class: AttributionClass::Fixed,
             effect_class: EffectClass::ReversibleMutation,
