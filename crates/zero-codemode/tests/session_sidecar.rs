@@ -9,6 +9,7 @@ use std::{
 };
 use tempfile::TempDir;
 use zero_codemode::session::SessionExecutor;
+use zero_store::{Engine, ResolvedStore, SharedCas, ensure_layout};
 use zerostack_machine_permit::session_owner::ProcessIdentity;
 fn start(owner: ProcessIdentity) -> (TempDir, std::process::Child, String, String, u64) {
     start_configured(owner, |_, _| {})
@@ -104,6 +105,19 @@ fn read(r: &mut BufReader<UnixStream>) -> Value {
     r.read_line(&mut s).unwrap();
     serde_json::from_str(&s).unwrap()
 }
+fn exact_result(root: &std::path::Path, response: &Value) -> Value {
+    let result = &response["result"];
+    if result["spilled"] != true {
+        return result.clone();
+    }
+    let sha = result["sha256"].as_str().expect("spill sha256");
+    let resolved = ResolvedStore::resolve_from_process(root, Engine::TokenZero, &[]);
+    ensure_layout(&resolved).unwrap();
+    let stored = SharedCas::open(resolved.cas_host())
+        .get_verified(sha)
+        .unwrap();
+    serde_json::from_slice(&stored).unwrap()
+}
 fn read_rejection(r: &mut BufReader<UnixStream>) -> Option<Value> {
     let mut s = String::new();
     r.read_line(&mut s).unwrap();
@@ -162,14 +176,12 @@ fn authenticated_cross_surface_and_rejections() {
         json!({"type":"execute","id":1,"generation":generation,"root":d.path(),"source":source}),
     );
     let out = read(&mut r);
-    assert_eq!(out["result"]["a"]["value"]["args"]["x"], 1);
+    let exact = exact_result(d.path(), &out);
+    assert_eq!(exact["a"]["value"]["args"]["x"], 1);
+    assert_eq!(exact["b"]["value"]["args"]["command"], "echo fixture");
     assert_eq!(
-        out["result"]["b"]["value"]["args"]["command"],
-        "echo fixture"
-    );
-    assert_eq!(
-        out["result"]["a"]["metadata"]["ownership"]["session_id"],
-        out["result"]["b"]["metadata"]["ownership"]["session_id"]
+        exact["a"]["metadata"]["ownership"]["session_id"],
+        exact["b"]["metadata"]["ownership"]["session_id"]
     );
     send(
         &mut s,
@@ -224,9 +236,9 @@ fn all_public_methods_preserve_arguments_and_ref_owners() {
         &mut stream,
         json!({"type":"execute","id":1,"generation":generation,"root":d.path(),"source":source}),
     );
-    let result = read(&mut reader);
-    assert_eq!(result["ok"], true, "{result}");
-    let result = &result["result"];
+    let response = read(&mut reader);
+    assert_eq!(response["ok"], true, "{response}");
+    let result = exact_result(d.path(), &response);
     assert_eq!(result["fsPlan"]["value"]["args"]["queries"][0], "widget");
     assert_eq!(result["fsReadMany"]["value"]["args"]["paths"][0], "a.rs");
     assert_eq!(
@@ -981,6 +993,48 @@ fn plan_failure_is_typed_and_connection_survives() {
     send(
         &mut stream,
         json!({"type":"shutdown","id":802,"token":shutdown_token}),
+    );
+    assert_eq!(read(&mut reader)["ok"], true);
+    assert!(session.wait().unwrap().success());
+}
+
+#[test]
+fn aggregate_sidecar_spills_arbitrary_oversize_results_to_the_authorized_store() {
+    let (d, mut session, token, shutdown_token, _) = start(ProcessIdentity::current().unwrap());
+    let socket = d.path().join("runtime/session.sock");
+    let (mut stream, mut reader, generation) = connect_authenticated(&socket, &token);
+    send(
+        &mut stream,
+        json!({
+            "type":"execute",
+            "id":850,
+            "generation":generation,
+            "root":d.path(),
+            "source":"const payload=Array.from({length:4096},(_,i)=>i%256);return {contract:{payload},env:{status:'ok'}};",
+            "timeout_ms":1000
+        }),
+    );
+    let settlement = read(&mut reader);
+    assert_eq!(settlement["ok"], true, "{settlement}");
+    let result = &settlement["result"];
+    assert_eq!(result["spilled"], true, "{settlement}");
+    assert!(serde_json::to_vec(result).unwrap().len() <= 2_000);
+    assert_eq!(
+        result["receipt"]["rawResultJsonBytes"],
+        result["receipt"]["omittedBehindExactRefBytes"]
+    );
+    let sha = result["sha256"].as_str().unwrap();
+    let resolved = ResolvedStore::resolve_from_process(d.path(), Engine::TokenZero, &[]);
+    ensure_layout(&resolved).unwrap();
+    let stored = SharedCas::open(resolved.cas_host())
+        .get_verified(sha)
+        .unwrap();
+    let exact: Value = serde_json::from_slice(&stored).unwrap();
+    assert_eq!(exact["contract"]["payload"].as_array().unwrap().len(), 4096);
+
+    send(
+        &mut stream,
+        json!({"type":"shutdown","id":851,"token":shutdown_token}),
     );
     assert_eq!(read(&mut reader)["ok"], true);
     assert!(session.wait().unwrap().success());

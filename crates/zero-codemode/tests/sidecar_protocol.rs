@@ -129,6 +129,22 @@ fn yielded_cell_can_be_cancelled_while_delegate_is_pending() {
 }
 
 #[test]
+fn model_visible_error_text_is_bounded() {
+    let mut sidecar = Sidecar::spawn();
+    sidecar.send(json!({
+        "type":"execute",
+        "id":1,
+        "cell_id":"cell-error-budget",
+        "source":"throw new Error('x'.repeat(10000));"
+    }));
+    let result = sidecar.read();
+    assert_eq!(result["kind"], "result");
+    let error = result["errorText"].as_str().unwrap();
+    assert!(error.len() <= 1_024, "{}", error.len());
+    assert!(error.ends_with("... [truncated]"));
+}
+
+#[test]
 fn result_frame_reports_wall_clock_duration() {
     let mut sidecar = Sidecar::spawn();
     sidecar.send(json!({

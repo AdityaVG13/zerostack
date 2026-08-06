@@ -28,6 +28,7 @@ use std::{
 };
 use zero_abi::raw_worker::EngineIdentity;
 use zero_abi::{ApprovalState, CallRequest, WorkerResult, WorkerTrace};
+use zero_store::{Engine, ResolvedStore, ensure_layout};
 
 pub const SESSION_PROTOCOL: &str = "zerostack-session/v1";
 pub const MAX_SESSION_FRAME: usize = 1_048_576;
@@ -132,13 +133,14 @@ impl SessionResponse {
         error: impl Into<String>,
         retry_after_ms: Option<u64>,
     ) -> Self {
+        let error = error.into();
         Self {
             protocol: SESSION_PROTOCOL.into(),
             id,
             ok: false,
             generation,
             result: None,
-            error: Some(error.into()),
+            error: Some(crate::finalize_visible_error(&error)),
             code: Some(error_code.into()),
             retry_after_ms,
         }
@@ -835,6 +837,11 @@ impl SessionExecutor {
             .ok_or_else(|| {
                 HostError::Connector("missing explicit ZeroStack session identity".into())
             })?;
+        let resolved_store = ResolvedStore::resolve_from_process(&root, Engine::TokenZero, &[]);
+        ensure_layout(&resolved_store).map_err(|error| {
+            HostError::Connector(format!("cannot prepare session result store: {error}"))
+        })?;
+        let result_spill_root = resolved_store.cas_host().to_path_buf();
         let cancellation = CancellationSignal::new();
         let connector = Rc::new(AggregateConnector::new(
             root,
@@ -857,7 +864,9 @@ impl SessionExecutor {
             16 * 1024 * 1024,
         )
         .map_err(HostError::Limits)?;
-        let host = Host::new(limits, registration)?;
+        let host = Host::new(limits, registration)?
+            .with_visible_result_budget(crate::DEFAULT_MAX_VISIBLE_RESULT_BYTES)?
+            .with_result_spill(result_spill_root);
         Ok(Self {
             host,
             connector,
@@ -1563,6 +1572,15 @@ fn start_session_executor(generation: u64) -> Result<SessionExecutor, String> {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn typed_error_text_is_bounded_before_wire_serialization() {
+        let response =
+            SessionResponse::typed_error(Some(1), 2, "backend_execution", "é".repeat(2_000));
+        let error = response.error.unwrap();
+        assert!(error.len() <= crate::MAX_VISIBLE_ERROR_BYTES);
+        assert!(error.ends_with("... [truncated]"));
+    }
 
     fn assert_lower(
         surface: &str,

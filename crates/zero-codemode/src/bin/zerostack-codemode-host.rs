@@ -14,10 +14,10 @@ use std::{
 };
 use zero_codemode::node::{NODE_SCHEMA, NodeEnv, node_report};
 use zero_codemode::{
-    ArtifactEnv, CapabilityDescriptor, Connector, ConnectorError, DISCOVERY_SCHEMA, DiscoveryEnv,
-    DispatchContext, GlobalRegistration, Host, HostError, HostLimits, MANIFEST_SCHEMA,
-    ManifestFacts, StorePaths, is_executable_file, is_readable_file, locate_manifest,
-    locate_report,
+    ArtifactEnv, CapabilityDescriptor, Connector, ConnectorError, DEFAULT_MAX_VISIBLE_RESULT_BYTES,
+    DISCOVERY_SCHEMA, DiscoveryEnv, DispatchContext, GlobalRegistration, Host, HostError,
+    HostLimits, MANIFEST_SCHEMA, ManifestFacts, StorePaths, finalize_visible_error,
+    is_executable_file, is_readable_file, locate_manifest, locate_report,
 };
 use zero_store::{Engine, ResolvedStore, ensure_layout};
 
@@ -491,6 +491,7 @@ fn spawn_cell(
                     capabilities: vec![CapabilityDescriptor::new("host", "call")],
                 },
             )?;
+            host = host.with_visible_result_budget(DEFAULT_MAX_VISIBLE_RESULT_BYTES)?;
             if let Some(cas_root) = spill_root() {
                 host = host.with_result_spill(cas_root);
             }
@@ -602,6 +603,7 @@ fn write_outcome(
             json!({"type":"response","id":id,"ok":true,"kind":"result","cellId":cell_id,"contentItems":[{"type":"input_text","text":text}]})
         }
         CellOutcome::Error(message) => {
+            let message = finalize_visible_error(&message);
             json!({"type":"response","id":id,"ok":true,"kind":"result","cellId":cell_id,"errorText":message,"contentItems":[]})
         }
         CellOutcome::Terminated => {
@@ -630,7 +632,7 @@ fn write_error(
 ) -> io::Result<()> {
     write_frame(
         writer,
-        &json!({"type":"response","id":id,"ok":false,"error":message}),
+        &json!({"type":"response","id":id,"ok":false,"error":finalize_visible_error(message)}),
     )
 }
 fn write_frame(writer: &mut impl Write, value: &Value) -> io::Result<()> {

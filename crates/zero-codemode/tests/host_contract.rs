@@ -24,7 +24,10 @@ use zero_codemode::{
     RegistrationError, wrap_plan,
 };
 #[cfg(feature = "quickjs")]
-use zero_codemode::{RESULT_SPILL_PREVIEW_BYTES, RESULT_SPILL_SCHEMA};
+use zero_codemode::{
+    DEFAULT_MAX_VISIBLE_RESULT_BYTES, MAX_RESULT_SPILL_ENVELOPE_BYTES, MAX_VISIBLE_ERROR_BYTES,
+    RESULT_SPILL_PREVIEW_BYTES, RESULT_SPILL_SCHEMA, finalize_visible_error,
+};
 #[cfg(feature = "quickjs")]
 use zero_store::SharedCas;
 
@@ -547,6 +550,21 @@ fn oversized_result_spills_to_a_ref_with_a_bounded_preview() {
     let preview = value["preview"].as_str().expect("preview text");
     assert!(preview.len() <= RESULT_SPILL_PREVIEW_BYTES);
     assert_eq!(value["previewBytes"], preview.len());
+    let visible_bytes = serde_json::to_vec(&value).unwrap().len();
+    assert!(visible_bytes <= MAX_RESULT_SPILL_ENVELOPE_BYTES);
+    assert_eq!(value["receipt"]["finalizedValueJsonBytes"], visible_bytes);
+    assert_eq!(value["receipt"]["rawResultJsonBytes"], 20_971_522);
+    assert_eq!(value["receipt"]["inlineResultBytes"], 0);
+    assert_eq!(value["receipt"]["omittedBehindExactRefBytes"], 20_971_522);
+    assert_eq!(
+        value["receipt"]["savingsBytes"],
+        20_971_522_usize.saturating_sub(visible_bytes)
+    );
+    assert_eq!(
+        value["receipt"]["visibleTokenCountStatus"],
+        "requires_tokenzero_certification"
+    );
+    assert!(value["receipt"]["visibleTokenCount"].is_null());
 
     let sha = value["sha256"].as_str().expect("sha256");
     assert_eq!(value["ref"], format!("tz://blob/{sha}"));
@@ -554,6 +572,94 @@ fn oversized_result_spills_to_a_ref_with_a_bounded_preview() {
         .get_verified(sha)
         .unwrap_or_else(|error| panic!("verify spilled object: {error}"));
     assert_eq!(stored.len(), 20_971_522);
+}
+
+#[cfg(feature = "quickjs")]
+#[test]
+fn model_visible_error_text_is_bounded_without_splitting_utf8() {
+    let error = "é".repeat(MAX_VISIBLE_ERROR_BYTES);
+    let visible = finalize_visible_error(&error);
+    assert!(visible.len() <= MAX_VISIBLE_ERROR_BYTES);
+    assert!(visible.ends_with("... [truncated]"));
+    assert!(std::str::from_utf8(visible.as_bytes()).is_ok());
+    assert_eq!(finalize_visible_error("short"), "short");
+}
+
+#[cfg(feature = "quickjs")]
+#[test]
+fn arbitrary_decimal_byte_arrays_finalize_once_behind_an_exact_ref() {
+    let store = tempfile::tempdir().unwrap_or_else(|error| panic!("tempdir: {error}"));
+    let mut limits = lim();
+    limits.max_json_bytes = 16 * 1024 * 1024;
+    limits.memory_bytes = 128 * 1024 * 1024;
+    limits.instruction_budget = 10_000_000;
+    let host = Host::new(limits, reg())
+        .unwrap_or_else(|error| panic!("host: {error}"))
+        .with_visible_result_budget(DEFAULT_MAX_VISIBLE_RESULT_BYTES)
+        .unwrap_or_else(|error| panic!("result budget: {error}"))
+        .with_result_spill(store.path());
+    let value = host
+        .execute(
+            "const payload=Array.from({length:4096},(_,i)=>i%256); return {contract:{payload},env:{status:'ok'},refs:['tz://blob/a','tz://blob/b']};",
+            Rc::new(C::ok()),
+        )
+        .unwrap_or_else(|error| panic!("finalize: {error}"));
+
+    assert_eq!(value["spilled"], true);
+    let visible = serde_json::to_string(&value).unwrap();
+    assert!(visible.len() <= MAX_RESULT_SPILL_ENVELOPE_BYTES);
+    assert!(!visible.contains("\"payload\":[0,1,2"));
+    assert_eq!(value["receipt"]["finalizedValueJsonBytes"], visible.len());
+    let raw_bytes = value["receipt"]["rawResultJsonBytes"].as_u64().unwrap() as usize;
+    assert!(raw_bytes > DEFAULT_MAX_VISIBLE_RESULT_BYTES);
+    assert_eq!(value["receipt"]["omittedBehindExactRefBytes"], raw_bytes);
+    let sha = value["sha256"].as_str().unwrap();
+    let stored = SharedCas::open(store.path()).get_verified(sha).unwrap();
+    let exact: Value = serde_json::from_slice(&stored).unwrap();
+    assert_eq!(exact["contract"]["payload"].as_array().unwrap().len(), 4096);
+    assert_eq!(exact["refs"].as_array().unwrap().len(), 2);
+}
+
+#[cfg(feature = "quickjs")]
+#[test]
+fn result_finalizer_bounds_nested_width_cycle_ref_and_connector_shapes() {
+    let store = tempfile::tempdir().unwrap_or_else(|error| panic!("tempdir: {error}"));
+    let mut limits = lim();
+    limits.max_json_bytes = 16 * 1024 * 1024;
+    limits.memory_bytes = 128 * 1024 * 1024;
+    limits.instruction_budget = 20_000_000;
+    let host = Host::new(limits, reg())
+        .unwrap_or_else(|error| panic!("host: {error}"))
+        .with_visible_result_budget(DEFAULT_MAX_VISIBLE_RESULT_BYTES)
+        .unwrap_or_else(|error| panic!("result budget: {error}"))
+        .with_result_spill(store.path());
+    let plans = [
+        "return {nested:{value:'x'.repeat(4096)}};",
+        "return Array.from({length:256},(_,i)=>'tz://blob/'+String(i).padStart(64,'0'));",
+        "const value={};for(let i=0;i<512;i++)value['field'+i]=i;return value;",
+        "let value='x'.repeat(2048);for(let i=0;i<64;i++)value={child:value};return value;",
+        "const value={payload:Array.from({length:1024},(_,i)=>i%256)};value.cycle=value;return value;",
+        "const connector=await zero.fs.read({path:'a'});return {connector,payload:'x'.repeat(4096)};",
+        "return 'x'.repeat(1024);",
+        "return 'x'.repeat(1025);",
+    ];
+    for plan in plans {
+        let value = host
+            .execute(plan, Rc::new(C::ok()))
+            .unwrap_or_else(|error| panic!("finalize {plan:?}: {error}"));
+        let visible_bytes = serde_json::to_vec(&value).unwrap().len();
+        assert!(
+            visible_bytes <= MAX_RESULT_SPILL_ENVELOPE_BYTES,
+            "{visible_bytes} visible bytes for {plan:?}"
+        );
+        if value["spilled"] == true {
+            assert_eq!(value["receipt"]["finalizedValueJsonBytes"], visible_bytes);
+            let sha = value["sha256"].as_str().unwrap();
+            SharedCas::open(store.path()).get_verified(sha).unwrap();
+        } else {
+            assert!(visible_bytes <= DEFAULT_MAX_VISIBLE_RESULT_BYTES);
+        }
+    }
 }
 
 #[cfg(feature = "quickjs")]

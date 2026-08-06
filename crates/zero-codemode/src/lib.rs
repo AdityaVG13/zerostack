@@ -20,8 +20,10 @@ pub use edit_protocol::{
 };
 pub use host::{
     CANONICAL_REF_ALIASES, CANONICAL_RESULT_FIELDS, CANONICAL_TEXT_ALIASES, CapabilityDescriptor,
-    Connector, ConnectorError, DispatchContext, GlobalRegistration, Host, HostError,
-    RESULT_SPILL_PREVIEW_BYTES, RESULT_SPILL_SCHEMA, RegistrationError, runtime_creation_count,
+    Connector, ConnectorError, DEFAULT_MAX_VISIBLE_RESULT_BYTES, DispatchContext,
+    GlobalRegistration, Host, HostError, MAX_RESULT_SPILL_ENVELOPE_BYTES, MAX_VISIBLE_ERROR_BYTES,
+    RESULT_SPILL_PREVIEW_BYTES, RESULT_SPILL_SCHEMA, RegistrationError, finalize_visible_error,
+    runtime_creation_count,
 };
 pub use limits::{HostLimits, LimitError};
 pub use manifest::{

@@ -140,7 +140,33 @@ impl std::error::Error for ConnectorError {}
 pub const RESULT_SPILL_SCHEMA: &str = "zerostack.codemode.result_spill.v1";
 
 /// Upper bound on the inline preview carried beside a spilled result ref.
-pub const RESULT_SPILL_PREVIEW_BYTES: usize = 8 * 1024;
+pub const RESULT_SPILL_PREVIEW_BYTES: usize = 256;
+
+/// Conservative byte ceiling for aggregate values shown directly to a model.
+/// Receipts label bytes only; tokenizer-specific visible-token certification
+/// remains a separate TokenZero boundary.
+pub const DEFAULT_MAX_VISIBLE_RESULT_BYTES: usize = 1_024;
+
+/// Hard ceiling for the serialized spill envelope itself, including its
+/// exact-byte receipt. Crossing this bound fails typed instead of leaking text.
+pub const MAX_RESULT_SPILL_ENVELOPE_BYTES: usize = 2_000;
+
+/// Bound for typed error text emitted by a model-facing adapter.
+pub const MAX_VISIBLE_ERROR_BYTES: usize = 1_024;
+
+/// Bound untrusted error text without splitting UTF-8. The typed error code
+/// remains the authority; the human text is diagnostic only.
+pub fn finalize_visible_error(value: &str) -> String {
+    if value.len() <= MAX_VISIBLE_ERROR_BYTES {
+        return value.to_owned();
+    }
+    const SUFFIX: &str = "... [truncated]";
+    let mut end = MAX_VISIBLE_ERROR_BYTES.saturating_sub(SUFFIX.len());
+    while end > 0 && !value.is_char_boundary(end) {
+        end -= 1;
+    }
+    format!("{}{}", &value[..end], SUFFIX)
+}
 
 /// Fields every capability result exposes for inline output and for ref-ed
 /// output, whichever route produced the result.
@@ -159,6 +185,7 @@ pub struct Host {
     limits: HostLimits,
     registration: GlobalRegistration,
     spill_root: Option<PathBuf>,
+    max_visible_result_bytes: usize,
 }
 
 impl Host {
@@ -173,6 +200,7 @@ impl Host {
         #[cfg(feature = "quickjs")]
         {
             Ok(Self {
+                max_visible_result_bytes: limits.max_json_bytes,
                 limits,
                 registration,
                 spill_root: None,
@@ -186,6 +214,18 @@ impl Host {
     pub fn with_result_spill(mut self, cas_root: impl Into<PathBuf>) -> Self {
         self.spill_root = Some(cas_root.into());
         self
+    }
+
+    /// Set the finalized result byte budget independently from connector frame
+    /// bounds. A zero budget is rejected loudly.
+    pub fn with_visible_result_budget(mut self, max_bytes: usize) -> Result<Self, HostError> {
+        if max_bytes == 0 {
+            return Err(HostError::Limits(LimitError::Zero(
+                "max_visible_result_bytes",
+            )));
+        }
+        self.max_visible_result_bytes = max_bytes;
+        Ok(self)
     }
 
     pub fn limits(&self) -> HostLimits {
@@ -327,30 +367,63 @@ fn spill_result(cas_root: &Path, encoded: &str) -> Result<JsonValue, HostError> 
     let hash = cas
         .put(encoded.as_bytes())
         .map_err(|error| HostError::ResultSpill(error.to_string()))?;
-    let preview_end = preview_boundary(encoded, RESULT_SPILL_PREVIEW_BYTES);
-    Ok(serde_json::json!({
+    let reference = format!("tz://blob/{hash}");
+    let preview = "[exact result omitted; expand ref]";
+    debug_assert!(preview.len() <= RESULT_SPILL_PREVIEW_BYTES);
+    let raw_bytes = encoded.len();
+    let mut envelope = serde_json::json!({
         "schema": RESULT_SPILL_SCHEMA,
         "spilled": true,
-        "ref": format!("tz://blob/{hash}"),
+        "ref": reference,
         "sha256": hash,
-        "bytes": encoded.len(),
-        "preview": &encoded[..preview_end],
-        "previewBytes": preview_end,
-        "previewTruncated": preview_end < encoded.len(),
-    }))
-}
-
-/// Largest index no greater than the limit that is a char boundary, so a
-/// preview never splits a UTF-8 sequence.
-fn preview_boundary(value: &str, limit: usize) -> usize {
-    if limit >= value.len() {
-        return value.len();
+        "bytes": raw_bytes,
+        "preview": preview,
+        "previewBytes": preview.len(),
+        "previewTruncated": true,
+        "receipt": {
+            "schema": "zerostack.codemode.result_finalization_receipt.v1",
+            "rawResultJsonBytes": raw_bytes,
+            "inlineResultBytes": 0,
+            "omittedBehindExactRefBytes": raw_bytes,
+            "typedFailureBytes": 0,
+            "finalizedValueJsonBytes": 0,
+            "visibleTokenCount": JsonValue::Null,
+            "visibleTokenCountStatus": "requires_tokenzero_certification",
+            "savingsBytes": 0,
+            "integrity": "sha256-cas",
+        },
+    });
+    for _ in 0..16 {
+        let visible_bytes = serde_json::to_vec(&envelope)
+            .map_err(|error| HostError::ResultSpill(error.to_string()))?
+            .len();
+        let savings_bytes = raw_bytes.saturating_sub(visible_bytes);
+        let receipt = envelope
+            .get_mut("receipt")
+            .and_then(JsonValue::as_object_mut)
+            .ok_or_else(|| HostError::ResultSpill("missing finalization receipt".into()))?;
+        let prior_visible = receipt
+            .get("finalizedValueJsonBytes")
+            .and_then(JsonValue::as_u64)
+            .unwrap_or(0) as usize;
+        let prior_savings = receipt
+            .get("savingsBytes")
+            .and_then(JsonValue::as_u64)
+            .unwrap_or(0) as usize;
+        if prior_visible == visible_bytes && prior_savings == savings_bytes {
+            if visible_bytes > MAX_RESULT_SPILL_ENVELOPE_BYTES {
+                return Err(HostError::ResultSpill(format!(
+                    "finalized spill envelope is {visible_bytes} bytes; maximum is {MAX_RESULT_SPILL_ENVELOPE_BYTES}"
+                )));
+            }
+            return Ok(envelope);
+        }
+        receipt.insert("finalizedValueJsonBytes".into(), visible_bytes.into());
+        receipt.insert("savingsBytes".into(), savings_bytes.into());
     }
-    let mut end = limit;
-    while end > 0 && !value.is_char_boundary(end) {
-        end -= 1;
-    }
-    end
+    Err(HostError::ResultSpill(
+        "finalized spill receipt length did not converge".into(),
+    ))
 }
 
 #[cfg(feature = "quickjs")]
@@ -499,12 +572,12 @@ mod quickjs {
                 )),
             }
         })?;
-        if encoded.len() > host.limits.max_json_bytes {
+        if encoded.len() > host.max_visible_result_bytes {
             return match host.spill_root.as_deref() {
                 Some(root) => spill_result(root, &encoded),
                 None => Err(HostError::ResultTooLarge {
                     actual: encoded.len(),
-                    maximum: host.limits.max_json_bytes,
+                    maximum: host.max_visible_result_bytes,
                 }),
             };
         }
