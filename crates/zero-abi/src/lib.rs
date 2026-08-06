@@ -19,6 +19,7 @@ pub mod capability;
 pub mod cwir;
 pub mod digest;
 pub mod dispatch;
+pub mod effect;
 pub mod freshness;
 pub mod raw_worker;
 pub mod result;
@@ -63,6 +64,17 @@ pub use dispatch::{
     DispatchContractError, DispatchErrorClass, DispatchMachine, DispatchStage, EffectGrant,
     EffectPolicy, PermitGrant, PermitRequirement, RegistryEngine, SourceDiagnostic, SourceForm,
     ALL_DISPATCH_ERROR_CLASSES, CANONICAL_DISPATCH_VERSION,
+};
+pub use effect::{
+    effect_ir_contract_digest_v1, effect_ir_contract_manifest_v1, EffectAdmissionV1,
+    EffectCapabilityBindingV1, EffectExceptionV1, EffectIrErrorV1, EffectIrFailureCodeV1,
+    EffectPredicateV1, EffectProgramV1, EffectRollbackV1, EffectTargetV1, EffectVerificationPlanV1,
+    EffectVerificationStepV1, TypedEffectOperationV1, EFFECT_IR_ACTION_DOMAIN_V1,
+    EFFECT_IR_CONTRACT_VERSION_V1, EFFECT_IR_MAX_CANONICAL_BYTES_V1, EFFECT_IR_MAX_CAPABILITIES_V1,
+    EFFECT_IR_MAX_EXCEPTIONS_V1, EFFECT_IR_MAX_INTENTS_V1, EFFECT_IR_MAX_LITERAL_BYTES_V1,
+    EFFECT_IR_MAX_OPERATIONS_V1, EFFECT_IR_MAX_PRECONDITIONS_V1,
+    EFFECT_IR_MAX_REFS_PER_OPERATION_V1, EFFECT_IR_MAX_STRING_BYTES_V1, EFFECT_IR_MAX_TARGETS_V1,
+    EFFECT_IR_MAX_VERIFICATION_STEPS_V1,
 };
 pub use freshness::{
     decide_freshness_v1, freshness_contract_digest_v1, freshness_contract_manifest_v1,

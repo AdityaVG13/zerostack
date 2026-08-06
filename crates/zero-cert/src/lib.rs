@@ -10,6 +10,19 @@
 //! }
 //! ~~~
 
+pub mod effect_witness;
+
+pub use effect_witness::{
+    accept_effect_verification_v1, effect_witness_contract_digest_v1,
+    effect_witness_contract_manifest_v1, incomplete_effect_verification_v1,
+    reject_effect_verification_v1, EffectAcceptedV1, EffectLocalizationClassV1,
+    EffectLocalizationV1, EffectVerificationOutcomeV1, EffectWitnessErrorV1,
+    EffectWitnessFailureCodeV1, EffectWitnessKindV1, EffectWitnessV1, EFFECT_ACCEPTED_DOMAIN_V1,
+    EFFECT_EVIDENCE_REF_DOMAIN_V1, EFFECT_WITNESS_CONTRACT_VERSION_V1, EFFECT_WITNESS_DOMAIN_V1,
+    EFFECT_WITNESS_MAX_CANONICAL_BYTES_V1, EFFECT_WITNESS_MAX_EVIDENCE_REFS_V1,
+    EFFECT_WITNESS_MAX_EXPANSIONS_V1,
+};
+
 use serde::{Deserialize, Serialize};
 use std::{borrow::Cow, fmt};
 
