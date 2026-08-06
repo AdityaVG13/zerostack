@@ -233,30 +233,30 @@ impl ResolvedStore {
             };
         }
 
-        if env.shared_opt_in {
-            if let Some(store) = pin_value.clone() {
-                let inside = store_is_under_project_root(&store, &repo_root);
-                let (mode, project_key, engine_dir) = if inside {
-                    (
-                        StoreMode::PinnedInsideProject,
-                        None,
-                        store.join(engine.dir_name()),
-                    )
-                } else {
-                    let key = project_key(&repo_root);
-                    let dir = store.join(PROJECTS_DIR).join(&key).join(engine.dir_name());
-                    (StoreMode::SharedNamespaced, Some(key), dir)
-                };
-                return Self {
-                    unified_root: Some(store),
-                    mode,
-                    project_key,
-                    engine_dir,
-                    repo_root,
-                    engine,
-                    pin_value,
-                };
-            }
+        if env.shared_opt_in
+            && let Some(store) = pin_value.clone()
+        {
+            let inside = store_is_under_project_root(&store, &repo_root);
+            let (mode, project_key, engine_dir) = if inside {
+                (
+                    StoreMode::PinnedInsideProject,
+                    None,
+                    store.join(engine.dir_name()),
+                )
+            } else {
+                let key = project_key(&repo_root);
+                let dir = store.join(PROJECTS_DIR).join(&key).join(engine.dir_name());
+                (StoreMode::SharedNamespaced, Some(key), dir)
+            };
+            return Self {
+                unified_root: Some(store),
+                mode,
+                project_key,
+                engine_dir,
+                repo_root,
+                engine,
+                pin_value,
+            };
         }
 
         Self {

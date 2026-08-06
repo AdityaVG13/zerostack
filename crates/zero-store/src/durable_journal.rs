@@ -292,8 +292,7 @@ impl JournalBindingV1 {
             self.new_root,
             self.owner_identity_digest,
         ]
-        .iter()
-        .any(|digest| *digest == DigestV1::ZERO)
+        .contains(&DigestV1::ZERO)
         {
             return Err(JournalErrorV1::new(
                 JournalFailureCodeV1::InvalidBinding,
@@ -1225,13 +1224,13 @@ fn existing_recovery(
         return Ok(None);
     };
     read.value.canonical_bytes()?;
-    if let Some(binding) = expected {
-        if read.value.binding_digest != binding.digest()? {
-            return Err(JournalErrorV1::new(
-                JournalFailureCodeV1::ImmutableReceiptConflict,
-                "existing recovery receipt belongs to another binding",
-            ));
-        }
+    if let Some(binding) = expected
+        && read.value.binding_digest != binding.digest()?
+    {
+        return Err(JournalErrorV1::new(
+            JournalFailureCodeV1::ImmutableReceiptConflict,
+            "existing recovery receipt belongs to another binding",
+        ));
     }
     Ok(Some(read.value))
 }
