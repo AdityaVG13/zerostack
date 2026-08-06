@@ -130,6 +130,8 @@ conformance/schemas/*
 !conformance/schemas/exact-deoptimization-plan-v1.schema.json
 !conformance/schemas/q99-causal-cache-component-v1.schema.json
 !conformance/schemas/q99-claim-v1.schema.json
+!conformance/schemas/robust-snap-intake-v1.schema.json
+!conformance/schemas/causal-artifact-intake-v1.schema.json
 !conformance/tests/
 conformance/tests/*
 !conformance/tests/test_engine_topology.py

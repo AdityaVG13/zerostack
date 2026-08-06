@@ -12,7 +12,10 @@ use zero_abi::{canonical_json, reasoning_contract_digest_v1, sha256, ArtifactOwn
 use zero_cert::{CompletenessWitness, Query, VerifiedEvidence};
 use zero_ledger::{causal_work_contract_digest_v1, CausalCounterUnitV1, CausalWorkReceiptV1};
 
+use crate::invalidation::BoundCausalCacheInvalidationV1;
+
 pub const Q99_CONTRACT_VERSION_V1: u16 = 1;
+pub const Q99_CONTRACT_VERSION_V2: u16 = 2;
 pub const Q99_CACHE_SCHEMA_VERSION_V1: &str = "zerostack.q99.causal_cache_component.v1";
 pub const Q99_METRIC_SCHEMA_VERSION_V1: &str = "zerostack.q99.metric_receipt.v1";
 pub const Q99_TASK_PAIR_SCHEMA_VERSION_V1: &str = "zerostack.q99.task_pair.v1";
@@ -357,8 +360,10 @@ pub struct CausalCacheAssessmentRecordV1 {
 impl CausalCacheAssessmentRecordV1 {
     pub fn validate(&self) -> Result<(), Q99ErrorV1> {
         self.binding.validate()?;
-        if self.contract_version != Q99_CONTRACT_VERSION_V1
-            || self.components.len() != Q99_COMPONENT_COUNT_V1
+        if !matches!(
+            self.contract_version,
+            Q99_CONTRACT_VERSION_V1 | Q99_CONTRACT_VERSION_V2
+        ) || self.components.len() != Q99_COMPONENT_COUNT_V1
         {
             return Err(q99_error(
                 Q99FailureCodeV1::IncompleteCoordinateSet,
@@ -463,6 +468,7 @@ pub enum CausalCacheDecisionV1 {
 
 pub fn validate_causal_cache_v1(
     components: Vec<VerifiedCausalCacheComponentV1>,
+    invalidation: &BoundCausalCacheInvalidationV1,
 ) -> Result<CausalCacheDecisionV1, Q99ErrorV1> {
     if components.len() != Q99_COMPONENT_COUNT_V1 {
         return Err(q99_error(
@@ -471,6 +477,17 @@ pub fn validate_causal_cache_v1(
         ));
     }
     let binding = components[0].claim.binding.clone();
+    if !invalidation.authorizes(&binding).map_err(|error| {
+        q99_error(
+            Q99FailureCodeV1::InvalidationAuthorityMismatch,
+            error.to_string(),
+        )
+    })? {
+        return Err(q99_error(
+            Q99FailureCodeV1::InvalidationAuthorityMismatch,
+            "proof-carrying invalidation authority does not bind this cache line",
+        ));
+    }
     let mut records = components
         .into_iter()
         .map(|component| component.record())
@@ -496,7 +513,7 @@ pub fn validate_causal_cache_v1(
             && record.claim.validity == CacheValidityV1::ExactReasoningContinuation
     });
     let mut record = CausalCacheAssessmentRecordV1 {
-        contract_version: Q99_CONTRACT_VERSION_V1,
+        contract_version: Q99_CONTRACT_VERSION_V2,
         binding,
         components: records,
         admission_class,
@@ -1352,28 +1369,32 @@ pub fn generate_q99_total_claim_v1(
     })
 }
 
-pub fn q99_contract_manifest_v1() -> Value {
-    json!({
+fn q99_contract_manifest(version: u16, require_invalidation: bool) -> Value {
+    let mut negative_space = vec![
+        "component_ratio_as_total_ratio",
+        "provider_eligibility_as_hit",
+        "provider_hit_as_semantic_validity",
+        "prefix_reuse_as_reasoning_continuation",
+        "cache_or_token_metric_as_quality",
+        "unknown_or_approximate_as_strict_reuse",
+        "unlabeled_percentage_claim",
+        "unmeasured_or_unpaired_total_denominator",
+    ];
+    if require_invalidation {
+        negative_space.insert(1, "component_receipts_without_bound_invalidation_authority");
+    }
+    let mut manifest = json!({
         "cache_coordinates": CacheCoordinateV1::ALL,
         "canonical_encoding": "sorted_key_json_no_whitespace",
         "claim_labels": ["Q99-State", "Q99-Input", "Q99-Total"],
-        "contract_version": Q99_CONTRACT_VERSION_V1,
+        "contract_version": version,
         "economic_state_never_implies": ["semantic_validity", "quality", "reasoning_continuation"],
         "finite_q99_total": "100*(preparation+sum_complete_task_work)<=sum_raw_baseline_task_work",
         "linked_contracts": {
             "causal_work": causal_work_contract_digest_v1(),
             "reasoning_contract": reasoning_contract_digest_v1(),
         },
-        "negative_space": [
-            "component_ratio_as_total_ratio",
-            "provider_eligibility_as_hit",
-            "provider_hit_as_semantic_validity",
-            "prefix_reuse_as_reasoning_continuation",
-            "cache_or_token_metric_as_quality",
-            "unknown_or_approximate_as_strict_reuse",
-            "unlabeled_percentage_claim",
-            "unmeasured_or_unpaired_total_denominator",
-        ],
+        "negative_space": negative_space,
         "proof_carrier": "zero_cert::VerifiedEvidence_successful_build_or_test_exact_payload",
         "published_cache_schema_sha256": Q99_CACHE_SCHEMA_SHA256_V1,
         "published_claim_schema_sha256": Q99_CLAIM_SCHEMA_SHA256_V1,
@@ -1384,11 +1405,34 @@ pub fn q99_contract_manifest_v1() -> Value {
             "guards", "rejection", "restoration", "deoptimization", "fallback", "residue"
         ],
         "resource_arithmetic": "checked_integer_native_counter_coordinates_only",
-    })
+    });
+    if require_invalidation {
+        if let Value::Object(fields) = &mut manifest {
+            fields.insert(
+                "strict_reuse_requires".into(),
+                Value::String(
+                    "proof_carrying_invalidation_authority_bound_to_complete_cache_line".into(),
+                ),
+            );
+        }
+    }
+    manifest
+}
+
+pub fn q99_contract_manifest_v1() -> Value {
+    q99_contract_manifest(Q99_CONTRACT_VERSION_V1, false)
 }
 
 pub fn q99_contract_digest_v1() -> DigestV1 {
     digest_value(CONTRACT_DOMAIN_V1, &q99_contract_manifest_v1())
+}
+
+pub fn q99_contract_manifest_v2() -> Value {
+    q99_contract_manifest(Q99_CONTRACT_VERSION_V2, true)
+}
+
+pub fn q99_contract_digest_v2() -> DigestV1 {
+    digest_value(CONTRACT_DOMAIN_V1, &q99_contract_manifest_v2())
 }
 
 fn work_profile(receipt: &CausalWorkReceiptV1) -> WorkProfileV1 {
@@ -1512,7 +1556,7 @@ fn require_nonzero(label: &'static str, values: &[DigestV1]) -> Result<(), Q99Er
     }
 }
 
-fn verify_exact_successful_payload(
+pub(crate) fn verify_exact_successful_payload(
     expected: &[u8],
     evidence: &VerifiedEvidence<'_, '_>,
 ) -> Result<(), Q99ErrorV1> {
@@ -1535,7 +1579,7 @@ fn verify_exact_successful_payload(
     Ok(())
 }
 
-fn q99_verifier_identity_v1(evidence: &VerifiedEvidence<'_, '_>) -> DigestV1 {
+pub(crate) fn q99_verifier_identity_v1(evidence: &VerifiedEvidence<'_, '_>) -> DigestV1 {
     let provenance = &evidence.certificate().provenance;
     digest_value(
         VERIFIER_DOMAIN_V1,
@@ -1550,7 +1594,9 @@ fn q99_verifier_identity_v1(evidence: &VerifiedEvidence<'_, '_>) -> DigestV1 {
     )
 }
 
-fn verified_evidence_digest(evidence: &VerifiedEvidence<'_, '_>) -> Result<DigestV1, Q99ErrorV1> {
+pub(crate) fn verified_evidence_digest(
+    evidence: &VerifiedEvidence<'_, '_>,
+) -> Result<DigestV1, Q99ErrorV1> {
     let certificate = evidence.certificate();
     let value = serde_json::to_value(json!({
         "completeness": certificate.completeness,
@@ -1576,6 +1622,7 @@ pub enum Q99FailureCodeV1 {
     InvalidTelemetry,
     IncompleteCoordinateSet,
     BindingMismatch,
+    InvalidationAuthorityMismatch,
     UnsupportedEvidenceClass,
     EvidencePayloadMismatch,
     VerifierIdentityMismatch,
@@ -1733,6 +1780,10 @@ mod tests {
         }
     }
 
+    fn bound_invalidation() -> BoundCausalCacheInvalidationV1 {
+        BoundCausalCacheInvalidationV1::test_only(&binding())
+    }
+
     fn component_specs() -> Vec<(CacheCoordinateV1, ArtifactOwnerV1, CacheValidityV1)> {
         vec![
             (
@@ -1814,10 +1865,11 @@ mod tests {
     #[test]
     fn aggregate_cache_validation_keeps_semantics_telemetry_and_reasoning_distinct() {
         let CausalCacheDecisionV1::StrictReuse(admission) =
-            validate_causal_cache_v1(verified_components(None)).unwrap()
+            validate_causal_cache_v1(verified_components(None), &bound_invalidation()).unwrap()
         else {
             panic!("complete exact coordinates must admit strict reuse")
         };
+        assert_eq!(admission.record().contract_version, Q99_CONTRACT_VERSION_V2);
         assert_eq!(admission.record().provider_reported_hit_tokens, Some(123));
         assert!(admission.record().provider_eligible);
         assert!(admission.record().exact_reasoning_continuation);
@@ -1850,19 +1902,21 @@ mod tests {
             *admission.record()
         );
 
-        let CausalCacheDecisionV1::TelemetryOnly(prefix) =
-            validate_causal_cache_v1(verified_components(Some((
+        let CausalCacheDecisionV1::TelemetryOnly(prefix) = validate_causal_cache_v1(
+            verified_components(Some((
                 CacheCoordinateV1::Rendering,
                 CacheValidityV1::ByteIdenticalPrefix,
-            ))))
-            .unwrap()
-        else {
+            ))),
+            &bound_invalidation(),
+        )
+        .unwrap() else {
             panic!("prefix reuse is telemetry, not exact semantic reuse")
         };
         assert_eq!(prefix.admission_class, CacheAdmissionClassV1::TelemetryOnly);
 
         let CausalCacheDecisionV1::ReuseProhibited(unknown) = validate_causal_cache_v1(
             verified_components(Some((CacheCoordinateV1::Quality, CacheValidityV1::Unknown))),
+            &bound_invalidation(),
         )
         .unwrap() else {
             panic!("Unknown must fail closed")
@@ -1875,13 +1929,14 @@ mod tests {
 
     #[test]
     fn provider_eligibility_is_never_reported_as_a_hit_or_semantic_proof() {
-        let CausalCacheDecisionV1::StrictReuse(admission) =
-            validate_causal_cache_v1(verified_components(Some((
+        let CausalCacheDecisionV1::StrictReuse(admission) = validate_causal_cache_v1(
+            verified_components(Some((
                 CacheCoordinateV1::ProviderCache,
                 CacheValidityV1::ProviderEligible,
-            ))))
-            .unwrap()
-        else {
+            ))),
+            &bound_invalidation(),
+        )
+        .unwrap() else {
             panic!("provider eligibility is orthogonal to semantic coordinates")
         };
         assert!(admission.record().provider_eligible);
@@ -1911,10 +1966,20 @@ mod tests {
         let mut components = verified_components(None);
         components.pop();
         assert_eq!(
-            validate_causal_cache_v1(components)
+            validate_causal_cache_v1(components, &bound_invalidation())
                 .unwrap_err()
                 .failure_code(),
             Q99FailureCodeV1::IncompleteCoordinateSet
+        );
+
+        let mut unrelated_binding = binding();
+        unrelated_binding.artifact_digest = d(99);
+        let unrelated = BoundCausalCacheInvalidationV1::test_only(&unrelated_binding);
+        assert_eq!(
+            validate_causal_cache_v1(verified_components(None), &unrelated)
+                .unwrap_err()
+                .failure_code(),
+            Q99FailureCodeV1::InvalidationAuthorityMismatch
         );
 
         let claim = CausalCacheComponentClaimV1::new(
@@ -2213,6 +2278,15 @@ mod tests {
                 0xb0, 0x6a, 0x25, 0x50, 0xcc, 0xb1, 0xb2, 0xf2, 0xd5, 0x8c, 0x7a, 0xdb, 0x0d, 0xef,
                 0x2d, 0x80, 0x4d, 0x30, 0x0a, 0x7e, 0xc9, 0x8d, 0xaf, 0x12, 0xd8, 0x7b, 0x59, 0x26,
                 0xde, 0x5f, 0x11, 0xa7,
+            ])
+        );
+        // ae0fa6885e08f28bd68613eb6430be3c904874946336a0fae5da5f8cf2df8236
+        assert_eq!(
+            q99_contract_digest_v2(),
+            DigestV1::from_bytes([
+                0xae, 0x0f, 0xa6, 0x88, 0x5e, 0x08, 0xf2, 0x8b, 0xd6, 0x86, 0x13, 0xeb, 0x64, 0x30,
+                0xbe, 0x3c, 0x90, 0x48, 0x74, 0x94, 0x63, 0x36, 0xa0, 0xfa, 0xe5, 0xda, 0x5f, 0x8c,
+                0xf2, 0xdf, 0x82, 0x36,
             ])
         );
         assert_eq!(

@@ -1,0 +1,142 @@
+{
+  "$defs": {
+    "derivation_authority": {
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "const": "witness"
+            },
+            "witness_digest": {
+              "$ref": "#/$defs/digest"
+            }
+          },
+          "required": [
+            "kind",
+            "witness_digest"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "const": "replay_recipe"
+            },
+            "recipe_digest": {
+              "$ref": "#/$defs/digest"
+            }
+          },
+          "required": [
+            "kind",
+            "recipe_digest"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "const": "opaque_whole_unit"
+            },
+            "unit_root_digest": {
+              "$ref": "#/$defs/digest"
+            }
+          },
+          "required": [
+            "kind",
+            "unit_root_digest"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "digest": {
+      "pattern": "^[0-9a-f]{64}$",
+      "type": "string"
+    }
+  },
+  "$id": "https://zerostack.dev/schemas/racc-r/causal-artifact-intake-v1.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "artifact_digest": {
+      "$ref": "#/$defs/digest"
+    },
+    "artifact_owner": {
+      "enum": [
+        "zero_stack",
+        "fs_zero",
+        "graph_zero",
+        "token_zero",
+        "pi_zero_stack"
+      ]
+    },
+    "declared_support_roots": {
+      "items": {
+        "$ref": "#/$defs/digest"
+      },
+      "maxItems": 4096,
+      "minItems": 1,
+      "type": "array",
+      "uniqueItems": true
+    },
+    "derivation_authority": {
+      "$ref": "#/$defs/derivation_authority"
+    },
+    "invalidation_predicate_digest": {
+      "$ref": "#/$defs/digest"
+    },
+    "producer_identity_digest": {
+      "$ref": "#/$defs/digest"
+    },
+    "protected_use_scope_digest": {
+      "$ref": "#/$defs/digest"
+    },
+    "recovery_route_digest": {
+      "$ref": "#/$defs/digest"
+    },
+    "schema_version": {
+      "const": "zerostack.causal_artifact.intake_claim.v1"
+    },
+    "support_class": {
+      "enum": [
+        "exact",
+        "sound_overapproximation",
+        "heuristic",
+        "unknown"
+      ]
+    },
+    "support_closure_digest": {
+      "$ref": "#/$defs/digest"
+    },
+    "validation_cost_profile_digest": {
+      "$ref": "#/$defs/digest"
+    },
+    "verifier_identity_digest": {
+      "$ref": "#/$defs/digest"
+    },
+    "verifier_scope_digest": {
+      "$ref": "#/$defs/digest"
+    }
+  },
+  "required": [
+    "schema_version",
+    "artifact_digest",
+    "artifact_owner",
+    "producer_identity_digest",
+    "declared_support_roots",
+    "support_closure_digest",
+    "support_class",
+    "derivation_authority",
+    "invalidation_predicate_digest",
+    "protected_use_scope_digest",
+    "verifier_scope_digest",
+    "validation_cost_profile_digest",
+    "recovery_route_digest",
+    "verifier_identity_digest"
+  ],
+  "title": "RACC-R proof-carrying causal artifact intake claim V1",
+  "type": "object"
+}
