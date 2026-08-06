@@ -26,6 +26,7 @@ pub mod kernel_fixture;
 pub mod ledger_conservation;
 pub mod raw_v2_slice;
 pub mod robust_snap_model;
+pub mod zero_bench_r;
 
 use serde::{Deserialize, Serialize};
 use std::fmt;

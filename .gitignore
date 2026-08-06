@@ -134,6 +134,8 @@ conformance/schemas/*
 !conformance/schemas/causal-artifact-intake-v1.schema.json
 !conformance/schemas/reinvestment-plan-v1.schema.json
 !conformance/schemas/reinvestment-selection-v1.schema.json
+!conformance/schemas/zerobench-r-run-v1.schema.json
+!conformance/schemas/zerobench-r-report-v1.schema.json
 !conformance/tests/
 conformance/tests/*
 !conformance/tests/test_engine_topology.py
