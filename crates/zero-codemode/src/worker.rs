@@ -23,6 +23,7 @@ use zero_abi::{
 pub const STORE_ROOT_ENV: &str = "ZEROSTACK_STORE_ROOT";
 pub const SESSION_ID_ENV: &str = "ZEROSTACK_SESSION_ID";
 pub const ENGINE_ENV: &str = "ZEROSTACK_ENGINE";
+const GRAPHZERO_REPO_ENV: &str = "GRAPHZERO_REPO";
 const CANCEL_POLL: Duration = Duration::from_millis(10);
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -103,11 +104,18 @@ impl StaticWorkerFactory {
 
 impl WorkerFactory for StaticWorkerFactory {
     fn spec(&self, context: &WorkerContext) -> Result<WorkerSpec, WorkerAdapterError> {
+        let mut env = self.env.clone();
+        if context.engine == EngineIdentity::GraphZero {
+            let root = context.store_root.to_str().ok_or_else(|| {
+                WorkerAdapterError::Configuration("store_root must be valid UTF-8".into())
+            })?;
+            env.insert(GRAPHZERO_REPO_ENV.into(), root.into());
+        }
         Ok(WorkerSpec {
             engine: context.engine,
             program: self.program.clone(),
             args: self.args.clone(),
-            env: self.env.clone(),
+            env,
             store_root: context.store_root.clone(),
             session_id: context.session_id.clone(),
             expected_worker_revision: self.revision.clone(),

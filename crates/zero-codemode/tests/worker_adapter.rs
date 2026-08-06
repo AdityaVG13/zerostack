@@ -11,7 +11,7 @@ use zero_abi::raw_worker::EngineIdentity;
 use zero_abi::{CallRequest, DEFAULT_MAX_FRAME_BYTES, FrameCodecError, WorkerTrace, encode_frame};
 use zero_codemode::worker::{
     CancellationSignal, StaticWorkerFactory, WorkerAdapterError, WorkerClient, WorkerClientConfig,
-    WorkerContext, WorkerEvent, WorkerRegistry, WorkerSpec,
+    WorkerContext, WorkerEvent, WorkerFactory, WorkerRegistry, WorkerSpec,
 };
 
 const CONTRACT: &str = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
@@ -136,6 +136,19 @@ fn race_cancel_ack_bytes() -> u64 {
         "request_id": "race-first",
         "cancelled": false
     }))
+}
+
+#[test]
+fn graphzero_spec_binds_repo_env_to_handshake_root() {
+    let context = context(EngineIdentity::GraphZero);
+    let spec = StaticWorkerFactory::new(binary(), REVISION, CONTRACT, REGISTRY)
+        .env("GRAPHZERO_REPO", "/wrong/root")
+        .spec(&context)
+        .unwrap();
+    assert_eq!(
+        spec.env.get("GRAPHZERO_REPO").map(String::as_str),
+        context.store_root.to_str()
+    );
 }
 
 #[test]
