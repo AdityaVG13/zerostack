@@ -622,6 +622,7 @@ mod quickjs {
 "use strict";
 const TEXT_ALIASES = __TEXT_ALIASES__;
 const REF_ALIASES = __REF_ALIASES__;
+const OPTIONAL_RESULT_FIELDS = new Set(REF_ALIASES);
 const firstString = (target, names) => {
     for (const name of names) {
         if (Object.prototype.hasOwnProperty.call(target, name) && typeof target[name] === "string") {
@@ -658,7 +659,11 @@ const guard = (value, label) => {
             if (Object.prototype.hasOwnProperty.call(target, property)) {
                 return guard(target[property], label + "." + property);
             }
-            if (property === "then" || property === "toJSON") {
+            if (
+                property === "then" ||
+                property === "toJSON" ||
+                OPTIONAL_RESULT_FIELDS.has(property)
+            ) {
                 return undefined;
             }
             const keys = Object.keys(target);

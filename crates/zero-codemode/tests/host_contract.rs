@@ -204,6 +204,34 @@ fn registered_objects_have_no_inherited_to_string() {
 
 #[cfg(feature = "quickjs")]
 #[test]
+fn absent_optional_ref_is_undefined_without_weakening_unknown_field_errors() {
+    let registration = GlobalRegistration::zero(vec![CapabilityDescriptor::new("graph", "blast")]);
+    let host = Host::new(lim(), registration).unwrap_or_else(|error| panic!("host: {error}"));
+    let connector = Rc::new(C {
+        calls: RefCell::new(vec![]),
+        fail: false,
+        delay: Duration::ZERO,
+        result: Some(r#"{"ack":"C","found":false}"#.into()),
+    });
+    let value = host
+        .execute(
+            "const result=await zero.graph.blast('missing');return {optionalRefIsUndefined:result.ref===undefined};",
+            connector.clone(),
+        )
+        .unwrap_or_else(|error| panic!("execute: {error}"));
+    assert_eq!(value, json!({"optionalRefIsUndefined":true}));
+
+    let error = host
+        .execute(
+            "const result=await zero.graph.blast('missing');return result.fabricated;",
+            connector,
+        )
+        .expect_err("unadvertised fields remain typed failures");
+    assert!(error.to_string().contains("unknown property 'fabricated'"));
+}
+
+#[cfg(feature = "quickjs")]
+#[test]
 fn unknown_surfaces_and_methods_fail_loud_with_closest_names() {
     let registration = GlobalRegistration::zero(vec![
         CapabilityDescriptor::new("fs", "read"),
