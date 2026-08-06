@@ -16,6 +16,7 @@
 pub mod assembly;
 pub mod cache_entry;
 pub mod capability;
+pub mod cwir;
 pub mod digest;
 pub mod dispatch;
 pub mod freshness;
@@ -42,6 +43,19 @@ pub use cache_entry::{
 pub use capability::{
     CapabilityMismatch, CapabilitySchema, CasLayout, FragmentBehavior, FragmentPolicy,
     HashAlgorithm, HashCapability, LayoutVersion, SharedCapability, SharedCasCapability,
+};
+pub use cwir::{
+    cwir_contract_digest_v1, cwir_contract_manifest_v1, CausalWorkIrV1, CwirCoverageV1,
+    CwirDeterminismV1, CwirEdgeKindV1, CwirEffectSpaceV1, CwirEpistemicProductV1, CwirErrorV1,
+    CwirExpansionCostV1, CwirExpansionV1, CwirFailureCodeV1, CwirFreshnessV1, CwirHyperEdgeV1,
+    CwirNodeKindV1, CwirNodeV1, CwirObligationKindV1, CwirObligationStatusV1, CwirObligationV1,
+    CwirSoundnessV1, CwirStateAnchorV1, CwirTaskContractV1, CwirVerificationContractV1,
+    CwirVerifierClassV1, CWIR_CONTRACT_VERSION_V1, CWIR_EDGE_DOMAIN_V1, CWIR_EXPANSION_DOMAIN_V1,
+    CWIR_MAX_CANONICAL_BYTES_V1, CWIR_MAX_CAPABILITIES_V1, CWIR_MAX_EDGES_V1, CWIR_MAX_EFFECTS_V1,
+    CWIR_MAX_EXPANSIONS_V1, CWIR_MAX_EXPANSION_INPUT_BYTES_V1, CWIR_MAX_EXPANSION_OUTPUT_BYTES_V1,
+    CWIR_MAX_EXPANSION_WORK_UNITS_V1, CWIR_MAX_IDENTITY_BYTES_V1, CWIR_MAX_NODES_V1,
+    CWIR_MAX_OBLIGATIONS_V1, CWIR_MAX_REFS_PER_ITEM_V1, CWIR_MODEL_VERSION_V1, CWIR_NODE_DOMAIN_V1,
+    CWIR_OBLIGATION_DOMAIN_V1, CWIR_SEMANTIC_DOMAIN_V1, CWIR_TASK_DOMAIN_V1,
 };
 pub use digest::{contract_digest, contract_digest_hex, sha256, sha256_hex};
 pub use dispatch::{

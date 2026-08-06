@@ -13,6 +13,7 @@ use serde_json::{json, Value};
 
 use crate::{
     canonical_json,
+    cwir::{cwir_contract_digest_v1, CWIR_CONTRACT_VERSION_V1},
     raw_worker::EngineIdentity,
     sha256,
     zbf::{zbf_contract_digest_v1, ZBF_CONTRACT_VERSION_V1},
@@ -775,6 +776,8 @@ pub fn assembly_abi_contract_manifest_v1() -> Value {
         "digest": {"algorithm": "sha256", "domain": "zerostack.assembly_manifest.v1\u{0}"},
         "encoding": "rfc8259_json_sorted_object_keys_no_whitespace",
         "linked_contracts": {
+            "cwir_contract_version": CWIR_CONTRACT_VERSION_V1,
+            "cwir_contract_digest": cwir_contract_digest_v1(),
             "zbf_contract_version": ZBF_CONTRACT_VERSION_V1,
             "zbf_contract_digest": zbf_contract_digest_v1()
         },
@@ -922,7 +925,7 @@ mod tests {
         assert_eq!(decoded, manifest);
         assert_eq!(
             manifest.digest().unwrap().to_hex(),
-            "33d6d0efb61a8f7ae55a28bc8abc0ba1caaed89b4ba5026ab6bc4ccd690fbd8a"
+            "2734ec875ef3842dae77768967d0c52f9a11d5bec777056d8f04fbf075ae55ca"
         );
     }
 
@@ -935,7 +938,7 @@ mod tests {
         );
         assert_eq!(
             assembly_abi_contract_digest_v1().to_hex(),
-            "81d1b7c2dd9d2feada998dfd2abcc5e9aa8d6be55064c80eca6e6d0fd0a62ba7"
+            "d46ffe6208c1b8a93b7478467308616141dd32c35678febc2ee366656f4f1c7f"
         );
     }
 
