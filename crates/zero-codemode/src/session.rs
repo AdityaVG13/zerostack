@@ -35,6 +35,7 @@ pub const MAX_SESSION_FRAME: usize = 1_048_576;
 pub const SESSION_SOCKET_ENV: &str = "ZEROSTACK_SESSION_SOCKET";
 pub const SESSION_TOKEN_ENV: &str = "ZEROSTACK_SESSION_TOKEN";
 pub const SESSION_SHUTDOWN_TOKEN_ENV: &str = "ZEROSTACK_SESSION_SHUTDOWN_TOKEN";
+const RAW_WORKER_PROTOCOL_ENV: &str = "ZEROSTACK_RAW_WORKER_PROTOCOL";
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -359,11 +360,21 @@ fn pinned_worker_binary(path: &Path, key: &str) -> Result<(PathBuf, String), Hos
     Ok((canonical, actual))
 }
 
-fn probe_output(program: &Path, args: &[&str], key: &str) -> Result<String, HostError> {
-    let mut child = Command::new(program)
+fn probe_output(
+    program: &Path,
+    args: &[&str],
+    key: &str,
+    remove_env: Option<&str>,
+) -> Result<String, HostError> {
+    let mut command = Command::new(program);
+    command
         .args(args)
         .env_remove(SESSION_TOKEN_ENV)
-        .env_remove(SESSION_SHUTDOWN_TOKEN_ENV)
+        .env_remove(SESSION_SHUTDOWN_TOKEN_ENV);
+    if let Some(name) = remove_env {
+        command.env_remove(name);
+    }
+    let mut child = command
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -438,15 +449,26 @@ fn probe_contract(
     }
     let key = engine.as_str().to_ascii_uppercase();
     let digest = match engine {
-        EngineIdentity::FsZero => {
-            fszero_contract_from_json(&probe_output(binary, &["capabilities", "--json"], &key)?)
-        }
+        EngineIdentity::FsZero => fszero_contract_from_json(&probe_output(
+            binary,
+            &["capabilities", "--json"],
+            &key,
+            None,
+        )?),
         EngineIdentity::TokenZero => {
-            digest_from_json(&probe_output(binary, &["raw-worker", "--handshake"], &key)?)
+            // TokenZero uses this selector to enter the long-lived v2 serve loop.
+            // The one-shot capability probe must not inherit it; the later worker
+            // launch still inherits the selector through StaticWorkerFactory.
+            digest_from_json(&probe_output(
+                binary,
+                &["raw-worker", "--handshake"],
+                &key,
+                Some(RAW_WORKER_PROTOCOL_ENV),
+            )?)
         }
         EngineIdentity::GraphZero => {
             let sibling = binary.with_file_name("graphzero-codemode");
-            let output = probe_output(&sibling, &["--help"], &key)?;
+            let output = probe_output(&sibling, &["--help"], &key, None)?;
             output.lines().find_map(|line| {
                 line.trim()
                     .strip_prefix("semantic_contract_digest:")
