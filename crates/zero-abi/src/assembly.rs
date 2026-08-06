@@ -11,7 +11,12 @@ use std::{error::Error, fmt};
 use serde::{de, Deserialize, Deserializer, Serialize, Serializer};
 use serde_json::{json, Value};
 
-use crate::{canonical_json, raw_worker::EngineIdentity, sha256};
+use crate::{
+    canonical_json,
+    raw_worker::EngineIdentity,
+    sha256,
+    zbf::{zbf_contract_digest_v1, ZBF_CONTRACT_VERSION_V1},
+};
 
 pub const ASSEMBLY_MANIFEST_SCHEMA_VERSION: u16 = 1;
 pub const ASSEMBLY_ABI_CONTRACT_VERSION: u16 = 1;
@@ -769,6 +774,10 @@ pub fn assembly_abi_contract_manifest_v1() -> Value {
         "manifest_schema_version": ASSEMBLY_MANIFEST_SCHEMA_VERSION,
         "digest": {"algorithm": "sha256", "domain": "zerostack.assembly_manifest.v1\u{0}"},
         "encoding": "rfc8259_json_sorted_object_keys_no_whitespace",
+        "linked_contracts": {
+            "zbf_contract_version": ZBF_CONTRACT_VERSION_V1,
+            "zbf_contract_digest": zbf_contract_digest_v1()
+        },
         "bounds": {
             "max_manifest_bytes": MAX_ASSEMBLY_MANIFEST_BYTES,
             "max_items_per_vector": MAX_ASSEMBLY_ITEMS,
@@ -913,15 +922,20 @@ mod tests {
         assert_eq!(decoded, manifest);
         assert_eq!(
             manifest.digest().unwrap().to_hex(),
-            "6312a10ac50df63e315ae3f271c4a520665dc5c8bbf57484df523412101ceba8"
+            "33d6d0efb61a8f7ae55a28bc8abc0ba1caaed89b4ba5026ab6bc4ccd690fbd8a"
         );
     }
 
     #[test]
     fn assembly_manifest_contract_digest_is_stable() {
+        let contract = assembly_abi_contract_manifest_v1();
+        assert_eq!(
+            contract["linked_contracts"]["zbf_contract_digest"],
+            zbf_contract_digest_v1().to_hex()
+        );
         assert_eq!(
             assembly_abi_contract_digest_v1().to_hex(),
-            "1e625406f8659b6e38b4e384bb26dda112022681ae378b89cb09487a4f21e386"
+            "81d1b7c2dd9d2feada998dfd2abcc5e9aa8d6be55064c80eca6e6d0fd0a62ba7"
         );
     }
 

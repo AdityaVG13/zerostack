@@ -1081,7 +1081,7 @@ mod tests {
         assert_eq!(digest.len(), 64);
         assert_eq!(
             digest,
-            "f4988ffa04c60607e232ffbdbfc965c13e52e09e938280c2dffbc303da87352e"
+            "be64bcac7467ed6144d65bd2f287d437f3b3feff19c15e782af4f82d83faa0c0"
         );
         assert_eq!(digest, raw_worker_protocol_digest_hex());
     }

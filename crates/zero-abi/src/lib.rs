@@ -24,6 +24,7 @@ pub mod result;
 pub mod robust_snap;
 pub mod schema;
 pub mod telemetry;
+pub mod zbf;
 
 pub use assembly::{
     assembly_abi_contract_digest_v1, assembly_abi_contract_manifest_v1,
@@ -85,3 +86,10 @@ pub use schema::{
     schema_property_keys, schema_required_keys, schemas_structurally_equal,
 };
 pub use telemetry::{TelemetryCounter, TelemetryOverflow, TelemetrySchema, ZeroTelemetryV1};
+pub use zbf::{
+    zbf_contract_digest_v1, zbf_contract_manifest_v1, DurableProfileIdV1, DurableProfileV1,
+    ZbfArtifactKindV1, ZbfErrorV1, ZbfFailureCodeV1, ZbfHeaderV1, ZbfObjectV1, ZbfPayloadV1,
+    ZBF_CONTAINER_FLAG_V1, ZBF_CONTRACT_VERSION_V1, ZBF_HEADER_LEN_V1, ZBF_MAGIC_V1,
+    ZBF_MAX_CHILDREN_V1, ZBF_MAX_DEPTH_V1, ZBF_MAX_OBJECT_BYTES_V1, ZBF_SCHEMA_MAJOR_V1,
+    ZBF_SCHEMA_MINOR_V1,
+};
