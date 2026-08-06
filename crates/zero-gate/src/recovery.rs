@@ -867,6 +867,9 @@ pub struct RecoveryUnknownDecisionV1 {
 }
 
 impl RecoveryUnknownDecisionV1 {
+    pub const fn problem_digest(&self) -> DigestV1 {
+        self.problem_digest
+    }
     pub const fn reason(&self) -> RecoveryUnknownReasonV1 {
         self.reason
     }

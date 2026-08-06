@@ -605,6 +605,7 @@ mod tests {
             quality_admission: quality_admission(),
             final_quality_selection: crate::QualitySelectionV1::Candidate,
             transaction_receipt_digest: [1; 32],
+            deoptimization_execution_receipt_digest: None,
             attribution_class: AttributionClass::Fixed,
             effect_class: EffectClass::ReversibleMutation,
             resource_envelope: WorkerEnvelope {

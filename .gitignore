@@ -125,6 +125,9 @@ conformance/schemas/*
 !conformance/schemas/engine-topology-v1.schema.json
 !conformance/schemas/reasoning-contract-v1.schema.json
 !conformance/schemas/dominance-complete-recovery-v1.schema.json
+!conformance/schemas/exact-deoptimization-resume-v1.schema.json
+!conformance/schemas/exact-deoptimization-execution-v1.schema.json
+!conformance/schemas/exact-deoptimization-plan-v1.schema.json
 !conformance/tests/
 conformance/tests/*
 !conformance/tests/test_engine_topology.py

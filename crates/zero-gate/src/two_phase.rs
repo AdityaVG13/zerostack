@@ -4,6 +4,7 @@
 //! receipts are linear capabilities. Their fields are private, they are not
 //! cloneable, and only the preceding phase can construct the next phase.
 
+use crate::deoptimization::{deoptimization_contract_digest_v1, BaselineExecutionReceiptV1};
 use crate::quality::{
     quality_envelope_contract_digest_v1, QualityAdmissionRecordV1, QualityAdmissionV1,
     QualityEvidenceClassV1, QualityGuaranteeV1, QualitySelectionV1,
@@ -29,7 +30,7 @@ use zero_abi::{
 };
 use zero_cert::{effect_witness_contract_digest_v1, EffectAcceptedV1, VerifiedEvidence};
 
-pub const TWO_PHASE_SCHEMA_VERSION: u16 = 4;
+pub const TWO_PHASE_SCHEMA_VERSION: u16 = 5;
 pub const GUARD_COUNT: usize = 10;
 pub const MAX_SOURCE_REPOSITORIES: usize = 64;
 pub const MAX_CONTROLLER_INSTRUCTIONS: usize = 4_096;
@@ -39,6 +40,7 @@ pub type DigestV1 = [u8; 32];
 const TWO_PHASE_CONTRACT_DOMAIN_V2: &[u8] = b"zerostack.kernel.contract.v2\0";
 const TWO_PHASE_CONTRACT_DOMAIN_V3: &[u8] = b"zerostack.kernel.contract.v3\0";
 const TWO_PHASE_CONTRACT_DOMAIN_V4: &[u8] = b"zerostack.kernel.contract.v4\0";
+const TWO_PHASE_CONTRACT_DOMAIN_V5: &[u8] = b"zerostack.kernel.contract.v5\0";
 
 pub fn two_phase_contract_manifest_v2() -> Value {
     json!({
@@ -198,7 +200,7 @@ pub fn two_phase_contract_manifest_v4() -> Value {
             "reasoning_contract_digest",
             "two_phase_contract_digest_v4",
         ],
-        "contract_version": TWO_PHASE_SCHEMA_VERSION,
+        "contract_version": 4,
         "guard_order": Guard::ALL,
         "linked_contracts": {
             "effect_witness": effect_witness_contract_digest_v1(),
@@ -278,6 +280,106 @@ pub fn two_phase_contract_digest_v4() -> DigestV1 {
     let canonical = canonical_json(&two_phase_contract_manifest_v4());
     let mut bytes = Vec::with_capacity(TWO_PHASE_CONTRACT_DOMAIN_V4.len() + canonical.len());
     bytes.extend_from_slice(TWO_PHASE_CONTRACT_DOMAIN_V4);
+    bytes.extend_from_slice(canonical.as_bytes());
+    hash_bytes(&bytes)
+}
+
+pub fn two_phase_contract_manifest_v5() -> Value {
+    json!({
+        "artifact_profile": "zbf_1_portable_strict",
+        "candidate_protocol_identity": [
+            "assembly_manifest_digest",
+            "source_tree_digest",
+            "image_digest",
+            "fixed_model_digest",
+            "reasoning_contract_digest",
+            "two_phase_contract_digest_v5",
+        ],
+        "contract_version": TWO_PHASE_SCHEMA_VERSION,
+        "guard_order": Guard::ALL,
+        "linked_contracts": {
+            "deoptimization": deoptimization_contract_digest_v1(),
+            "effect_witness": effect_witness_contract_digest_v1(),
+            "quality_envelope": quality_envelope_contract_digest_v1(),
+            "reasoning_contract": reasoning_contract_digest_v1(),
+            "semantic_cut": semantic_cut_contract_digest_v1(),
+            "transaction": transaction_contract_digest_v1(),
+            "zbf": zbf_contract_digest_v1(),
+        },
+        "name": "zerostack.two_phase_kernel.v5",
+        "negative_space": [
+            "approximate_continuation_as_exact",
+            "journal_root_recovery_as_exact_deoptimization",
+            "clean_restart_as_exact_continuation",
+            "cross_execution_deoptimization_receipt_replay",
+            "individual_candidate_claim_from_distributional_evidence",
+            "native_filesystem_durability",
+            "production_worker_contract_enforcement",
+            "resume_permit_as_baseline_execution_or_publication",
+            "semantic_claim_without_verified_exact_payload",
+            "universal_external_state_restoration",
+        ],
+        "quality_modes_admitted": [
+            "exact_neutral",
+            "pointwise_dominance",
+            "scoped_class_dominance",
+            "distributional_baseline_only",
+            "unidentified_baseline",
+        ],
+        "receipt_bindings": [
+            "schema_version",
+            "kind",
+            "permit_id",
+            "binding_digest",
+            "admission_digest",
+            "assembly_manifest_digest",
+            "source_tree_digest",
+            "source_repository_heads",
+            "image_digest",
+            "state_snapshot_digest",
+            "task_fingerprint_digest",
+            "plan_digest",
+            "fixed_model_digest",
+            "baseline_reasoning_contract",
+            "reasoning_contract",
+            "baseline_reasoning_contract_digest",
+            "reasoning_contract_digest",
+            "reasoning_admission",
+            "comparison_identity_digest",
+            "semantic_cut_verifier_identity_digest",
+            "artifact_set_digest",
+            "semantic_cut_certificate",
+            "terminal_rcq_identity_digest",
+            "snap_certificate_digest",
+            "safety_shield_digest",
+            "quality_admission",
+            "final_quality_selection",
+            "transaction_receipt_digest",
+            "deoptimization_execution_receipt_digest",
+            "attribution_class",
+            "effect_class",
+            "resource_envelope",
+            "surface",
+            "verification_digest",
+            "output_digest",
+            "effects_digest",
+            "resource_usage",
+            "predecessor_receipt_head",
+            "successor_root",
+            "trace_digest",
+            "failure_code",
+            "restoration",
+            "receipt_head",
+        ],
+        "semantic_cut_admission": "exact_rcq_identity_plus_verified_canonical_claim",
+        "transaction_closure": "candidate_commit_from_validated_transaction_receipt; fallback_from_verified_exact_raw_baseline_execution_receipt",
+    })
+}
+
+pub fn two_phase_contract_digest_v5() -> DigestV1 {
+    let canonical = canonical_json(&two_phase_contract_manifest_v5());
+    let mut bytes = Vec::with_capacity(TWO_PHASE_CONTRACT_DOMAIN_V5.len() + canonical.len());
+    bytes.extend_from_slice(TWO_PHASE_CONTRACT_DOMAIN_V5);
     bytes.extend_from_slice(canonical.as_bytes());
     hash_bytes(&bytes)
 }
@@ -666,7 +768,7 @@ impl ExecutionTrace {
 
     pub fn digest(&self) -> DigestV1 {
         let mut bytes = Vec::with_capacity(96 + self.events.len() * 3);
-        bytes.extend_from_slice(b"zerostack.kernel.trace.v4\0");
+        bytes.extend_from_slice(b"zerostack.kernel.trace.v5\0");
         bytes.extend_from_slice(&TWO_PHASE_SCHEMA_VERSION.to_be_bytes());
         for event in &self.events {
             bytes.push(event.guard as u8);
@@ -715,7 +817,7 @@ pub struct ExecutionBinding {
 impl ExecutionBinding {
     pub fn digest(&self) -> DigestV1 {
         let mut bytes = Vec::new();
-        bytes.extend_from_slice(b"zerostack.kernel.binding.v4\0");
+        bytes.extend_from_slice(b"zerostack.kernel.binding.v5\0");
         bytes.extend_from_slice(&self.schema_version.to_be_bytes());
         bytes.extend_from_slice(&self.assembly_manifest_digest);
         bytes.extend_from_slice(&self.source_tree_digest);
@@ -745,7 +847,7 @@ pub fn candidate_protocol_identity_v1(binding: &ExecutionBinding) -> DigestV1 {
     bytes.extend_from_slice(&binding.image_digest);
     bytes.extend_from_slice(&binding.fixed_model_digest);
     bytes.extend_from_slice(&binding.reasoning_contract_digest);
-    bytes.extend_from_slice(&two_phase_contract_digest_v4());
+    bytes.extend_from_slice(&two_phase_contract_digest_v5());
     let mut framed = b"ZERO.TWO_PHASE.CANDIDATE_PROTOCOL.V1\0".to_vec();
     framed.extend_from_slice(&bytes);
     hash_bytes(&framed)
@@ -812,7 +914,7 @@ pub struct ControllerPlan {
 impl ControllerPlan {
     pub fn digest(&self) -> DigestV1 {
         let mut bytes = Vec::with_capacity(40 + self.instructions.len());
-        bytes.extend_from_slice(b"zerostack.kernel.plan.v4\0");
+        bytes.extend_from_slice(b"zerostack.kernel.plan.v5\0");
         bytes.extend_from_slice(&(self.instructions.len() as u64).to_be_bytes());
         bytes.extend(
             self.instructions
@@ -1036,7 +1138,7 @@ impl PrepareRequest {
     /// Canonical commitment to every G0-G7 admission input.
     pub fn admission_digest(&self) -> DigestV1 {
         let mut bytes = Vec::new();
-        bytes.extend_from_slice(b"zerostack.kernel.admission.v4\0");
+        bytes.extend_from_slice(b"zerostack.kernel.admission.v5\0");
         bytes.extend_from_slice(&self.binding.digest());
         bytes.push(self.surface as u8);
         bytes.push(effect_class_tag(self.effect_class));
@@ -1190,7 +1292,7 @@ pub fn validate_permit_record(record: &PermitRecord) -> Result<(), KernelError> 
         ));
     }
     let mut bytes = Vec::new();
-    bytes.extend_from_slice(b"zerostack.kernel.permit.v4\0");
+    bytes.extend_from_slice(b"zerostack.kernel.permit.v5\0");
     bytes.extend_from_slice(&record.admission_digest);
     bytes.extend_from_slice(&record.trace.digest());
     if record.permit_id != hash_bytes(&bytes) {
@@ -1665,7 +1767,7 @@ fn validate_source_heads(heads: &[SourceHead]) -> Result<(), KernelError> {
 
 fn permit_digest(request: &PrepareRequest, trace: &ExecutionTrace) -> DigestV1 {
     let mut bytes = Vec::new();
-    bytes.extend_from_slice(b"zerostack.kernel.permit.v4\0");
+    bytes.extend_from_slice(b"zerostack.kernel.permit.v5\0");
     bytes.extend_from_slice(&request.admission_digest());
     bytes.extend_from_slice(&trace.digest());
     hash_bytes(&bytes)
@@ -1910,6 +2012,9 @@ pub struct TransactionClosure {
     kind: ClosureKind,
     root: DigestV1,
     transaction_receipt_digest: DigestV1,
+    deoptimization_execution_receipt_digest: Option<DigestV1>,
+    deoptimization_kernel_binding_digest: Option<DigestV1>,
+    deoptimization_kernel_admission_digest: Option<DigestV1>,
     action_digest: DigestV1,
     acceptance_digest: Option<DigestV1>,
     baseline_state: DigestV1,
@@ -1930,7 +2035,13 @@ impl TransactionClosure {
         })?;
         let kind = match receipt.disposition() {
             TransactionDispositionV1::CandidateCommitted => ClosureKind::Commit,
-            TransactionDispositionV1::BaselineRootRecovered => ClosureKind::Fallback,
+            TransactionDispositionV1::BaselineRootRecovered => {
+                return Err(KernelError::at(
+                    FailureCode::UnaccountedFallback,
+                    Guard::G8TransactionClosure,
+                    "baseline recovery requires a verified exact baseline execution receipt",
+                ));
+            }
         };
         let restoration = match kind {
             ClosureKind::Commit => RestorationAccounting::default(),
@@ -1948,6 +2059,9 @@ impl TransactionClosure {
             kind,
             root: *receipt.observed_root().as_bytes(),
             transaction_receipt_digest: *receipt.receipt_digest().as_bytes(),
+            deoptimization_execution_receipt_digest: None,
+            deoptimization_kernel_binding_digest: None,
+            deoptimization_kernel_admission_digest: None,
             action_digest: *receipt.action_digest().as_bytes(),
             acceptance_digest: receipt.acceptance_digest().map(|digest| *digest.as_bytes()),
             baseline_state: *receipt.baseline_state().as_bytes(),
@@ -1955,6 +2069,54 @@ impl TransactionClosure {
             restoration_scope: receipt.restoration_scope(),
             external_restoration_debt_count: receipt.external_restoration_debt_count(),
             restoration,
+        })
+    }
+
+    pub fn from_baseline_execution(
+        execution_receipt: BaselineExecutionReceiptV1,
+    ) -> Result<Self, KernelError> {
+        execution_receipt.validate().map_err(|error| {
+            KernelError::at(
+                FailureCode::UnaccountedFallback,
+                Guard::G8TransactionClosure,
+                format!("baseline execution receipt failed validation: {error}"),
+            )
+        })?;
+        let execution_receipt_digest = *execution_receipt.receipt_digest().as_bytes();
+        let baseline_successor_root = *execution_receipt.baseline_successor_root().as_bytes();
+        let baseline_transaction_receipt_digest = *execution_receipt
+            .baseline_transaction_receipt_digest()
+            .as_bytes();
+        let baseline_action_digest = *execution_receipt.baseline_action_digest().as_bytes();
+        let baseline_acceptance_digest = *execution_receipt.baseline_acceptance_digest().as_bytes();
+        let kernel_binding_digest = *execution_receipt.kernel_binding_digest().as_bytes();
+        let kernel_admission_digest = *execution_receipt.kernel_admission_digest().as_bytes();
+        let restored = execution_receipt.restored_transaction();
+        if restored.resource_count == 0 {
+            return Err(KernelError::at(
+                FailureCode::IncompleteTransactionClosure,
+                Guard::G8TransactionClosure,
+                "deoptimization receipt restored no preregistered resources",
+            ));
+        }
+        Ok(Self {
+            kind: ClosureKind::Fallback,
+            root: baseline_successor_root,
+            transaction_receipt_digest: baseline_transaction_receipt_digest,
+            deoptimization_execution_receipt_digest: Some(execution_receipt_digest),
+            deoptimization_kernel_binding_digest: Some(kernel_binding_digest),
+            deoptimization_kernel_admission_digest: Some(kernel_admission_digest),
+            action_digest: baseline_action_digest,
+            acceptance_digest: Some(baseline_acceptance_digest),
+            baseline_state: *restored.baseline_state.as_bytes(),
+            candidate_state: *restored.candidate_state.as_bytes(),
+            restoration_scope: RestorationScopeV1::DeclaredEffectClosure,
+            external_restoration_debt_count: 0,
+            restoration: RestorationAccounting {
+                attempted: u64::from(restored.resource_count),
+                completed: u64::from(restored.resource_count),
+                debt: 0,
+            },
         })
     }
 
@@ -1983,6 +2145,15 @@ fn validate_closure(
         || closure.baseline_state != execution.request.binding.state_snapshot_digest
         || closure.external_restoration_debt_count != 0
         || closure.restoration.debt != 0
+        || closure
+            .deoptimization_execution_receipt_digest
+            .is_some_and(|digest| is_zero(&digest))
+        || closure
+            .deoptimization_kernel_binding_digest
+            .is_some_and(|digest| is_zero(&digest))
+        || closure
+            .deoptimization_kernel_admission_digest
+            .is_some_and(|digest| is_zero(&digest))
     {
         return Err(KernelError::at(
             FailureCode::IncompleteTransactionClosure,
@@ -1993,6 +2164,9 @@ fn validate_closure(
     match closure.kind {
         ClosureKind::Commit => {
             if failure.is_some()
+                || closure.deoptimization_execution_receipt_digest.is_some()
+                || closure.deoptimization_kernel_binding_digest.is_some()
+                || closure.deoptimization_kernel_admission_digest.is_some()
                 || closure.restoration != RestorationAccounting::default()
                 || closure.root != closure.candidate_state
                 || closure.restoration_scope != RestorationScopeV1::NotApplicableCandidateCommit
@@ -2011,7 +2185,11 @@ fn validate_closure(
             }
         }
         ClosureKind::Fallback => {
-            if closure.root != closure.baseline_state
+            if closure.deoptimization_execution_receipt_digest.is_none()
+                || closure.deoptimization_kernel_binding_digest
+                    != Some(execution.request.binding.digest())
+                || closure.deoptimization_kernel_admission_digest
+                    != Some(execution.request.admission_digest())
                 || closure.restoration.attempted == 0
                 || closure.restoration.completed != closure.restoration.attempted
                 || closure.restoration_scope != RestorationScopeV1::DeclaredEffectClosure
@@ -2070,6 +2248,7 @@ pub struct ReceiptRecord {
     pub quality_admission: QualityAdmissionRecordV1,
     pub final_quality_selection: QualitySelectionV1,
     pub transaction_receipt_digest: DigestV1,
+    pub deoptimization_execution_receipt_digest: Option<DigestV1>,
     pub attribution_class: AttributionClass,
     pub effect_class: EffectClass,
     pub resource_envelope: WorkerEnvelope,
@@ -2149,6 +2328,9 @@ pub fn validate_receipt_record(record: &ReceiptRecord) -> Result<(), KernelError
         || record
             .snap_certificate_digest
             .is_some_and(|digest| is_zero(&digest))
+        || record
+            .deoptimization_execution_receipt_digest
+            .is_some_and(|digest| is_zero(&digest))
         || binding.digest() != record.binding_digest
         || record.attribution_class != AttributionClass::Fixed
         || envelope_has_zero(record.resource_envelope)
@@ -2167,10 +2349,14 @@ pub fn validate_receipt_record(record: &ReceiptRecord) -> Result<(), KernelError
         .checked_add(record.restoration.debt);
     let closure_valid = match record.kind {
         ReceiptKind::Commit => {
-            record.failure_code.is_none() && record.restoration == RestorationAccounting::default()
+            record.deoptimization_execution_receipt_digest.is_none()
+                && record.failure_code.is_none()
+                && record.restoration == RestorationAccounting::default()
         }
         ReceiptKind::Fallback => {
-            record.restoration.debt == 0 && accounted == Some(record.restoration.attempted)
+            record.deoptimization_execution_receipt_digest.is_some()
+                && record.restoration.debt == 0
+                && accounted == Some(record.restoration.attempted)
         }
     };
     if !closure_valid {
@@ -2193,6 +2379,7 @@ pub fn validate_receipt_record(record: &ReceiptRecord) -> Result<(), KernelError
         &record.quality_admission,
         record.final_quality_selection,
         record.transaction_receipt_digest,
+        record.deoptimization_execution_receipt_digest,
         record.attribution_class,
         record.effect_class,
         record.resource_envelope,
@@ -2363,6 +2550,8 @@ impl ReadyToFinalize {
             ReceiptKind::Fallback => QualitySelectionV1::FrozenBaseline,
         };
         let transaction_receipt_digest = self.closure.transaction_receipt_digest;
+        let deoptimization_execution_receipt_digest =
+            self.closure.deoptimization_execution_receipt_digest;
         let attribution_class = AttributionClass::Fixed;
         let effect_class = self.request.effect_class;
         let resource_envelope = self.request.envelope;
@@ -2380,6 +2569,7 @@ impl ReadyToFinalize {
             &quality_admission,
             final_quality_selection,
             transaction_receipt_digest,
+            deoptimization_execution_receipt_digest,
             attribution_class,
             effect_class,
             resource_envelope,
@@ -2408,6 +2598,7 @@ impl ReadyToFinalize {
             quality_admission,
             final_quality_selection,
             transaction_receipt_digest,
+            deoptimization_execution_receipt_digest,
             attribution_class,
             effect_class,
             resource_envelope,
@@ -2448,6 +2639,7 @@ struct ReceiptCommon {
     quality_admission: QualityAdmissionRecordV1,
     final_quality_selection: QualitySelectionV1,
     transaction_receipt_digest: DigestV1,
+    deoptimization_execution_receipt_digest: Option<DigestV1>,
     attribution_class: AttributionClass,
     effect_class: EffectClass,
     resource_envelope: WorkerEnvelope,
@@ -2497,6 +2689,7 @@ impl ReceiptCommon {
             quality_admission: self.quality_admission.clone(),
             final_quality_selection: self.final_quality_selection,
             transaction_receipt_digest: self.transaction_receipt_digest,
+            deoptimization_execution_receipt_digest: self.deoptimization_execution_receipt_digest,
             attribution_class: self.attribution_class,
             effect_class: self.effect_class,
             resource_envelope: self.resource_envelope,
@@ -2601,6 +2794,7 @@ fn receipt_digest(
     quality_admission: &QualityAdmissionRecordV1,
     final_quality_selection: QualitySelectionV1,
     transaction_receipt_digest: DigestV1,
+    deoptimization_execution_receipt_digest: Option<DigestV1>,
     attribution_class: AttributionClass,
     effect_class: EffectClass,
     envelope: WorkerEnvelope,
@@ -2615,7 +2809,7 @@ fn receipt_digest(
     restoration: RestorationAccounting,
 ) -> DigestV1 {
     let mut bytes = Vec::new();
-    bytes.extend_from_slice(b"zerostack.kernel.receipt.v4\0");
+    bytes.extend_from_slice(b"zerostack.kernel.receipt.v5\0");
     bytes.extend_from_slice(&TWO_PHASE_SCHEMA_VERSION.to_be_bytes());
     bytes.push(kind as u8);
     bytes.extend_from_slice(&permit_id);
@@ -2633,6 +2827,7 @@ fn receipt_digest(
         QualitySelectionV1::FrozenBaseline => 1,
     });
     bytes.extend_from_slice(&transaction_receipt_digest);
+    append_optional_digest(&mut bytes, deoptimization_execution_receipt_digest);
     bytes.push(match attribution_class {
         AttributionClass::Fixed => 0,
         AttributionClass::Changed => 1,
@@ -2669,7 +2864,7 @@ fn receipt_digest(
 
 fn effect_list_digest(effects: &[StagedEffect]) -> DigestV1 {
     let mut bytes = Vec::new();
-    bytes.extend_from_slice(b"zerostack.kernel.effects.v4\0");
+    bytes.extend_from_slice(b"zerostack.kernel.effects.v5\0");
     bytes.extend_from_slice(&(effects.len() as u64).to_be_bytes());
     for effect in effects {
         bytes.extend_from_slice(&effect.effect_digest);
@@ -3205,6 +3400,9 @@ mod tests {
             kind: ClosureKind::Commit,
             root: digest(11),
             transaction_receipt_digest: digest(17),
+            deoptimization_execution_receipt_digest: None,
+            deoptimization_kernel_binding_digest: None,
+            deoptimization_kernel_admission_digest: None,
             action_digest,
             acceptance_digest: Some(acceptance_digest),
             baseline_state: digest(13),
@@ -3215,11 +3413,14 @@ mod tests {
         }
     }
 
-    fn fallback_closure() -> TransactionClosure {
+    fn fallback_closure(request: &PrepareRequest) -> TransactionClosure {
         TransactionClosure {
             kind: ClosureKind::Fallback,
             root: digest(13),
             transaction_receipt_digest: digest(18),
+            deoptimization_execution_receipt_digest: Some(digest(20)),
+            deoptimization_kernel_binding_digest: Some(request.binding.digest()),
+            deoptimization_kernel_admission_digest: Some(request.admission_digest()),
             action_digest: digest(19),
             acceptance_digest: None,
             baseline_state: digest(13),
@@ -3312,6 +3513,15 @@ mod tests {
                 0xfb, 0xce, 0x18, 0xc7,
             ]
         );
+        // 0b1a537463ac9556d4340a5c2387e14fef50cac5d49a4c4eda1e6d78ffb2607e
+        assert_eq!(
+            two_phase_contract_digest_v5(),
+            [
+                0x0b, 0x1a, 0x53, 0x74, 0x63, 0xac, 0x95, 0x56, 0xd4, 0x34, 0x0a, 0x5c, 0x23, 0x87,
+                0xe1, 0x4f, 0xef, 0x50, 0xca, 0xc5, 0xd4, 0x9a, 0x4c, 0x4e, 0xda, 0x1e, 0x6d, 0x78,
+                0xff, 0xb2, 0x60, 0x7e,
+            ]
+        );
     }
 
     #[test]
@@ -3349,7 +3559,8 @@ mod tests {
 
         let mut distributional = request(ExecutionSurface::Mcp, EffectClass::ReversibleMutation);
         distributional.evidence.performance = distributional_quality_admission();
-        let FinalReceipt::Fallback(receipt) = execute_request(distributional, fallback_closure())
+        let fallback = fallback_closure(&distributional);
+        let FinalReceipt::Fallback(receipt) = execute_request(distributional, fallback)
             .unwrap()
             .finalize()
             .unwrap()
@@ -3566,8 +3777,25 @@ mod tests {
     }
 
     #[test]
-    fn state_machine_buffer_overflow_falls_back_only_to_bound_baseline() {
-        let permit = prepare(request(ExecutionSurface::ClaudeCode, EffectClass::ReadOnly)).unwrap();
+    fn state_machine_rejects_cross_execution_deoptimization_receipt_replay() {
+        let bound = request(ExecutionSurface::Mcp, EffectClass::ReadOnly);
+        let closure = fallback_closure(&bound);
+        let other = request(ExecutionSurface::Pi, EffectClass::ReadOnly);
+        let execution = prepare(other).unwrap().start();
+        assert_eq!(
+            execution
+                .abort(FailureCode::PerformanceUnknown, closure)
+                .unwrap_err()
+                .code,
+            FailureCode::UnaccountedFallback
+        );
+    }
+
+    #[test]
+    fn state_machine_buffer_overflow_requires_verified_baseline_execution() {
+        let bound_request = request(ExecutionSurface::ClaudeCode, EffectClass::ReadOnly);
+        let mut bad = fallback_closure(&bound_request);
+        let permit = prepare(bound_request).unwrap();
         let mut execution = permit.start();
         execution
             .dispatch(
@@ -3582,17 +3810,18 @@ mod tests {
         execution.record_verification(digest(9)).unwrap();
         let error = execution.buffer_visible(&[0; 33]).unwrap_err();
         assert_eq!(error.code, FailureCode::BufferOverflow);
-        let mut bad = fallback_closure();
-        bad.root = digest(12);
+        bad.deoptimization_execution_receipt_digest = Some([0; 32]);
         assert_eq!(
             execution.abort(error.code, bad).unwrap_err().code,
-            FailureCode::UnaccountedFallback
+            FailureCode::IncompleteTransactionClosure
         );
 
-        let permit = prepare(request(ExecutionSurface::ClaudeCode, EffectClass::ReadOnly)).unwrap();
+        let request = request(ExecutionSurface::ClaudeCode, EffectClass::ReadOnly);
+        let fallback = fallback_closure(&request);
+        let permit = prepare(request).unwrap();
         let execution = permit.start();
         let ready = execution
-            .abort(FailureCode::BufferOverflow, fallback_closure())
+            .abort(FailureCode::BufferOverflow, fallback)
             .unwrap();
         let FinalReceipt::Fallback(receipt) = ready.finalize().unwrap() else {
             panic!("expected fallback")

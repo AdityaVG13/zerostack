@@ -1,0 +1,207 @@
+{
+  "$defs": {
+    "digest": {
+      "pattern": "^[0-9a-f]{64}$",
+      "type": "string"
+    },
+    "racc_work": {
+      "additionalProperties": false,
+      "properties": {
+        "cached_input_tokens": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "fallback_work": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "latency_micros": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "logical_input_tokens": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "peak_memory_bytes": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "reasoning_tokens": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "tool_calls": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "uncached_input_tokens": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "verifier_work": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "visible_output_tokens": {
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "logical_input_tokens",
+        "uncached_input_tokens",
+        "cached_input_tokens",
+        "reasoning_tokens",
+        "visible_output_tokens",
+        "tool_calls",
+        "verifier_work",
+        "fallback_work",
+        "latency_micros",
+        "peak_memory_bytes"
+      ],
+      "type": "object"
+    },
+    "route_usage": {
+      "additionalProperties": false,
+      "properties": {
+        "elapsed_ms": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "fuel": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "io_bytes": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "memory_bytes": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "output_bytes": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "processes": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "risk_units": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "work": {
+          "$ref": "#/$defs/racc_work"
+        },
+        "worker_steps": {
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "fuel",
+        "elapsed_ms",
+        "io_bytes",
+        "output_bytes",
+        "memory_bytes",
+        "processes",
+        "risk_units",
+        "worker_steps",
+        "work"
+      ],
+      "type": "object"
+    }
+  },
+  "$id": "https://zerostack.dev/schemas/racc-r/exact-deoptimization-execution-v1.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "baseline_acceptance_digest": {
+      "$ref": "#/$defs/digest"
+    },
+    "baseline_action_digest": {
+      "$ref": "#/$defs/digest"
+    },
+    "baseline_reasoning_contract_digest": {
+      "$ref": "#/$defs/digest"
+    },
+    "baseline_successor_root": {
+      "$ref": "#/$defs/digest"
+    },
+    "baseline_transaction_receipt_digest": {
+      "$ref": "#/$defs/digest"
+    },
+    "effects_digest": {
+      "$ref": "#/$defs/digest"
+    },
+    "execution_verifier_identity_digest": {
+      "$ref": "#/$defs/digest"
+    },
+    "invocation_digest": {
+      "$ref": "#/$defs/digest"
+    },
+    "output_digest": {
+      "$ref": "#/$defs/digest"
+    },
+    "predecessor_receipt_head_digest": {
+      "$ref": "#/$defs/digest"
+    },
+    "project_snapshot_root": {
+      "$ref": "#/$defs/digest"
+    },
+    "raw_baseline_identity_digest": {
+      "$ref": "#/$defs/digest"
+    },
+    "raw_baseline_input_digest": {
+      "$ref": "#/$defs/digest"
+    },
+    "raw_baseline_usage": {
+      "$ref": "#/$defs/route_usage"
+    },
+    "raw_decision_view_digest": {
+      "$ref": "#/$defs/digest"
+    },
+    "reasoning_entry_digest": {
+      "$ref": "#/$defs/digest"
+    },
+    "resume_permit_digest": {
+      "$ref": "#/$defs/digest"
+    },
+    "schema_version": {
+      "const": "zerostack.baseline_execution.v1"
+    },
+    "successor_receipt_head_digest": {
+      "$ref": "#/$defs/digest"
+    },
+    "transaction_receipt_digest": {
+      "$ref": "#/$defs/digest"
+    }
+  },
+  "required": [
+    "baseline_reasoning_contract_digest",
+    "effects_digest",
+    "execution_verifier_identity_digest",
+    "invocation_digest",
+    "output_digest",
+    "predecessor_receipt_head_digest",
+    "project_snapshot_root",
+    "raw_baseline_identity_digest",
+    "raw_baseline_input_digest",
+    "raw_baseline_usage",
+    "raw_decision_view_digest",
+    "reasoning_entry_digest",
+    "resume_permit_digest",
+    "schema_version",
+    "successor_receipt_head_digest",
+    "transaction_receipt_digest",
+    "baseline_action_digest",
+    "baseline_acceptance_digest",
+    "baseline_successor_root",
+    "baseline_transaction_receipt_digest"
+  ],
+  "title": "RACC-R exact frozen raw baseline execution claim V1",
+  "type": "object"
+}
