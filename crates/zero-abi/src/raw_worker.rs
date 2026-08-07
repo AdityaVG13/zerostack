@@ -675,14 +675,14 @@ pub fn validate_response_frame(frame: &WorkerResponseFrame) -> Result<(), FrameC
             }
             if let Some(trace) = trace {
                 validate_trace(trace)?;
-                if let Some(request_id) = request_id
-                    && trace.request_id != request_id.as_str()
-                {
-                    return Err(handshake_field_mismatch(
-                        "error.trace.request_id",
-                        request_id,
-                        &trace.request_id,
-                    ));
+                if let Some(request_id) = request_id {
+                    if trace.request_id != request_id.as_str() {
+                        return Err(handshake_field_mismatch(
+                            "error.trace.request_id",
+                            request_id,
+                            &trace.request_id,
+                        ));
+                    }
                 }
             }
             if let Some(timeline) = engine_timeline {
@@ -800,10 +800,10 @@ fn check_optional_eq(
     expected: Option<&str>,
     actual: &str,
 ) -> Result<(), FrameCodecError> {
-    if let Some(expected) = expected
-        && expected != actual
-    {
-        return Err(handshake_field_mismatch(field, expected, actual));
+    if let Some(expected) = expected {
+        if expected != actual {
+            return Err(handshake_field_mismatch(field, expected, actual));
+        }
     }
     Ok(())
 }
