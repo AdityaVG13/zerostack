@@ -406,6 +406,89 @@ impl fmt::Display for HostError {
 
 impl std::error::Error for HostError {}
 
+fn is_canonical_spill_ref(reference: &str) -> bool {
+    let Some(digest) = reference.strip_prefix("tz://blob/") else {
+        return false;
+    };
+    digest.len() == 64
+        && digest
+            .bytes()
+            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+}
+
+/// Explicit expansion is the one intentional escape from the default visible
+/// result budget. Keep the authorization narrow: one direct aggregate call,
+/// one canonical spill ref, and no surrounding plan work.
+fn directly_expands_one_spill_ref(plan: &str) -> bool {
+    let trimmed = plan.trim();
+    let trimmed = trimmed.strip_suffix(';').unwrap_or(trimmed).trim();
+    let argument = [
+        "return await zero.token.expand(",
+        "return zero.token.expand(",
+    ]
+    .into_iter()
+    .find_map(|prefix| trimmed.strip_prefix(prefix))
+    .and_then(|tail| tail.strip_suffix(')'))
+    .map(str::trim);
+    let Some(argument) = argument else {
+        return false;
+    };
+    let reference = if argument.starts_with('"') {
+        serde_json::from_str::<String>(argument).ok()
+    } else {
+        argument
+            .strip_prefix('\'')
+            .and_then(|value| value.strip_suffix('\''))
+            .filter(|value| !value.contains('\\') && !value.contains('\''))
+            .map(str::to_owned)
+    };
+    reference.as_deref().is_some_and(is_canonical_spill_ref)
+}
+
+fn is_terminal_exact_token_expansion(value: &JsonValue) -> bool {
+    let Some(root) = value.as_object().filter(|root| root.len() == 2) else {
+        return false;
+    };
+    let Some(metadata) = root.get("metadata") else {
+        return false;
+    };
+    if metadata
+        .pointer("/ownership/engine")
+        .and_then(JsonValue::as_str)
+        != Some("tokenzero")
+    {
+        return false;
+    }
+    let Some(result) = root.get("value") else {
+        return false;
+    };
+    let visible = result.get("visible").and_then(JsonValue::as_str);
+    visible.is_some()
+        && result.get("op").and_then(JsonValue::as_str) == Some("tz_expand")
+        && result.get("status").and_then(JsonValue::as_str) == Some("ok")
+        && result.get("mode").and_then(JsonValue::as_str) == Some("exact")
+        && result
+            .pointer("/tool_response/tool")
+            .and_then(JsonValue::as_str)
+            == Some("expand")
+        && result
+            .pointer("/tool_response/recovery/do_not_recompact")
+            .and_then(JsonValue::as_bool)
+            == Some(true)
+        && result
+            .pointer("/tool_response/recovery/exact_bytes")
+            .and_then(JsonValue::as_bool)
+            == Some(true)
+        && result
+            .pointer("/tool_response/recovery/terminal")
+            .and_then(JsonValue::as_bool)
+            == Some(true)
+        && result
+            .pointer("/tool_response/visible/text")
+            .and_then(JsonValue::as_str)
+            == visible
+}
+
 /// Publish an oversized encoded result into the CAS and describe it with a ref
 /// plus a bounded preview, so a large final value degrades to a fetchable
 /// reference instead of a hard framing error.
@@ -679,16 +762,29 @@ mod quickjs {
                 )),
             }
         })?;
-        if encoded.len() > host.max_visible_result_bytes {
+        let value: JsonValue =
+            serde_json::from_str(&encoded).map_err(|error| HostError::Json(error.to_string()))?;
+        if encoded.len() > host.max_visible_result_bytes
+            && !(directly_expands_one_spill_ref(plan) && is_terminal_exact_token_expansion(&value))
+        {
             return match host.spill_root.as_deref() {
-                Some(root) => spill_result(root, &encoded),
+                Some(root)
+                    if host.registration.capabilities.iter().any(|capability| {
+                        capability.surface == "token" && capability.method == "expand"
+                    }) =>
+                {
+                    spill_result(root, &encoded)
+                }
+                Some(_) => Err(HostError::ResultSpill(
+                    "token.expand capability is required before publishing a result ref".into(),
+                )),
                 None => Err(HostError::ResultTooLarge {
                     actual: encoded.len(),
                     maximum: host.max_visible_result_bytes,
                 }),
             };
         }
-        serde_json::from_str(&encoded).map_err(|error| HostError::Json(error.to_string()))
+        Ok(value)
     }
 
     fn drain_ready_completions(

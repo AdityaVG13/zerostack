@@ -138,6 +138,13 @@ fn reg() -> GlobalRegistration {
     GlobalRegistration::zero(vec![CapabilityDescriptor::new("fs", "read")])
 }
 
+fn reg_with_expand() -> GlobalRegistration {
+    GlobalRegistration::zero(vec![
+        CapabilityDescriptor::new("fs", "read"),
+        CapabilityDescriptor::new("token", "expand"),
+    ])
+}
+
 fn lim() -> HostLimits {
     HostLimits::new(
         16 * 1024 * 1024,
@@ -614,7 +621,7 @@ fn oversized_result_spills_to_a_ref_with_a_bounded_preview() {
     limits.memory_bytes = 512 * 1024 * 1024;
     limits.instruction_budget = 100_000_000;
     limits.wall_timeout = Duration::from_secs(60);
-    let host = Host::new(limits, reg())
+    let host = Host::new(limits, reg_with_expand())
         .unwrap_or_else(|error| panic!("host: {error}"))
         .with_result_spill(store.path());
 
@@ -674,7 +681,7 @@ fn arbitrary_decimal_byte_arrays_finalize_once_behind_an_exact_ref() {
     limits.max_json_bytes = 16 * 1024 * 1024;
     limits.memory_bytes = 128 * 1024 * 1024;
     limits.instruction_budget = 10_000_000;
-    let host = Host::new(limits, reg())
+    let host = Host::new(limits, reg_with_expand())
         .unwrap_or_else(|error| panic!("host: {error}"))
         .with_visible_result_budget(DEFAULT_MAX_VISIBLE_RESULT_BYTES)
         .unwrap_or_else(|error| panic!("result budget: {error}"))
@@ -709,7 +716,7 @@ fn result_finalizer_bounds_nested_width_cycle_ref_and_connector_shapes() {
     limits.max_json_bytes = 16 * 1024 * 1024;
     limits.memory_bytes = 128 * 1024 * 1024;
     limits.instruction_budget = 20_000_000;
-    let host = Host::new(limits, reg())
+    let host = Host::new(limits, reg_with_expand())
         .unwrap_or_else(|error| panic!("host: {error}"))
         .with_visible_result_budget(DEFAULT_MAX_VISIBLE_RESULT_BYTES)
         .unwrap_or_else(|error| panic!("result budget: {error}"))
@@ -741,6 +748,112 @@ fn result_finalizer_bounds_nested_width_cycle_ref_and_connector_shapes() {
             assert!(visible_bytes <= DEFAULT_MAX_VISIBLE_RESULT_BYTES);
         }
     }
+}
+
+#[cfg(feature = "quickjs")]
+#[test]
+fn one_direct_exact_expand_bypasses_budget_but_broad_parent_cannot() {
+    let store = tempfile::tempdir().unwrap_or_else(|error| panic!("tempdir: {error}"));
+    let reference = format!("tz://blob/{}", "a".repeat(64));
+    let text = "exact expansion bytes\n".repeat(256);
+    let worker_result = json!({
+        "metadata": {
+            "effect":"read_only",
+            "approval":{"state":"not_required"},
+            "revert":{"supported":false},
+            "ownership":{"engine":"tokenzero","session_id":"session-1","refs":[]},
+            "trace":{}
+        },
+        "value": {
+            "op":"tz_expand",
+            "status":"ok",
+            "mode":"exact",
+            "visible":text,
+            "tool_response": {
+                "tool":"expand",
+                "status":"ok",
+                "mode":"exact",
+                "visible":{"kind":"capsule","text":text},
+                "recovery":{"do_not_recompact":true,"exact_bytes":true,"terminal":true}
+            }
+        }
+    });
+    let encoded = serde_json::to_string(&worker_result).unwrap();
+    let connector = || {
+        Rc::new(C {
+            calls: RefCell::new(Vec::new()),
+            fail: false,
+            delay: Duration::ZERO,
+            result: Some(encoded.clone()),
+        })
+    };
+    let registration = GlobalRegistration::zero(vec![CapabilityDescriptor::new("token", "expand")]);
+    let host = Host::new(lim(), registration)
+        .unwrap_or_else(|error| panic!("host: {error}"))
+        .with_visible_result_budget(512)
+        .unwrap_or_else(|error| panic!("result budget: {error}"))
+        .with_result_spill(store.path());
+    let reference_literal = serde_json::to_string(&reference).unwrap();
+
+    let exact = host
+        .execute(
+            &format!("return await zero.token.expand({reference_literal});"),
+            connector(),
+        )
+        .unwrap_or_else(|error| panic!("direct expand: {error}"));
+    assert_ne!(exact["spilled"], true);
+    assert_eq!(exact["value"]["visible"], text);
+    assert!(serde_json::to_vec(&exact).unwrap().len() > 512);
+
+    let broad = host
+        .execute(
+            &format!(
+                "const expanded=await zero.token.expand({reference_literal});return {{expanded}};"
+            ),
+            connector(),
+        )
+        .unwrap_or_else(|error| panic!("broad parent: {error}"));
+    assert_eq!(broad["spilled"], true);
+    let sha = broad["sha256"].as_str().unwrap();
+    let stored = SharedCas::open(store.path()).get_verified(sha).unwrap();
+    let recovered: Value = serde_json::from_slice(&stored).unwrap();
+    assert_eq!(recovered["expanded"]["value"]["visible"], text);
+
+    let noncanonical = host
+        .execute(
+            r#"return await zero.token.expand("tz://blob/short");"#,
+            connector(),
+        )
+        .unwrap_or_else(|error| panic!("noncanonical ref: {error}"));
+    assert_eq!(noncanonical["spilled"], true);
+
+    let forged = host
+        .execute(&format!("return {encoded};"), Rc::new(C::ok()))
+        .unwrap_or_else(|error| panic!("forged expansion shape: {error}"));
+    assert_eq!(forged["spilled"], true);
+}
+
+#[cfg(feature = "quickjs")]
+#[test]
+fn spill_root_without_expand_capability_fails_before_publication() {
+    let store = tempfile::tempdir().unwrap_or_else(|error| panic!("tempdir: {error}"));
+    let mut limits = lim();
+    limits.max_json_bytes = 16 * 1024;
+    let host = Host::new(limits, reg())
+        .unwrap_or_else(|error| panic!("host: {error}"))
+        .with_visible_result_budget(64)
+        .unwrap_or_else(|error| panic!("result budget: {error}"))
+        .with_result_spill(store.path());
+    let error = host
+        .execute("return 'x'.repeat(128);", Rc::new(C::ok()))
+        .expect_err("spill without expansion authority");
+    assert!(
+        error
+            .to_string()
+            .contains("token.expand capability is required"),
+        "{error}"
+    );
+    assert_eq!(std::fs::read_dir(store.path()).unwrap().count(), 0);
 }
 
 #[cfg(feature = "quickjs")]
