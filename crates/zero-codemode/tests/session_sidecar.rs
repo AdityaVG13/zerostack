@@ -170,7 +170,10 @@ fn authenticated_cross_surface_and_rejections() {
     let hello = read(&mut r);
     assert_eq!(hello["ok"], true);
     let generation = hello["generation"].as_u64().unwrap();
-    let source = "const a=await zero.fs.compound('read',{x:1});const b=await zero.token.shell('echo fixture');return {a,b};";
+    let source = r#"const a=await zero.fs.compound('read',{x:1});
+        const b=await zero.token.shell('echo fixture');
+        const c=await zero.token.read('Cargo.toml',{raw:true,fresh:true});
+        return {a,b,c};"#;
     send(
         &mut s,
         json!({"type":"execute","id":1,"generation":generation,"root":d.path(),"source":source}),
@@ -179,18 +182,45 @@ fn authenticated_cross_surface_and_rejections() {
     let exact = exact_result(d.path(), &out);
     assert_eq!(exact["a"]["value"]["args"]["x"], 1);
     assert_eq!(exact["b"]["value"]["args"]["command"], "echo fixture");
+    assert_eq!(exact["c"]["value"]["args"]["path"], "Cargo.toml");
+    assert_eq!(exact["c"]["value"]["args"]["raw"], true);
+    assert_eq!(exact["c"]["value"]["args"]["fresh"], true);
     assert_eq!(
         exact["a"]["metadata"]["ownership"]["session_id"],
-        exact["b"]["metadata"]["ownership"]["session_id"]
+        exact["c"]["metadata"]["ownership"]["session_id"]
+    );
+    let invalid_shell = r#"try {
+        await zero.token.shell('touch must-not-run',{raw:true});
+        return {executed:true};
+    } catch (error) {
+        return {name:error.name,message:String(error)};
+    }"#;
+    send(
+        &mut s,
+        json!({"type":"execute","id":2,"generation":generation,"root":d.path(),"source":invalid_shell}),
+    );
+    let invalid_shell = exact_result(d.path(), &read(&mut r));
+    assert_eq!(invalid_shell["name"], "TypeError");
+    assert!(
+        invalid_shell["message"]
+            .as_str()
+            .unwrap()
+            .contains("unknown option 'raw'")
+    );
+    assert!(
+        invalid_shell["message"]
+            .as_str()
+            .unwrap()
+            .contains(r#"mode: "exact""#)
     );
     send(
         &mut s,
-        json!({"type":"execute","id":2,"generation":generation,"root":"/","source":"return 1"}),
+        json!({"type":"execute","id":3,"generation":generation,"root":"/","source":"return 1"}),
     );
     assert_eq!(read(&mut r)["ok"], false);
     send(
         &mut s,
-        json!({"type":"shutdown","id":3,"token":shutdown_token}),
+        json!({"type":"shutdown","id":4,"token":shutdown_token}),
     );
     let _ = read(&mut r);
     c.wait().unwrap();

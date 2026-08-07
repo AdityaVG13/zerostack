@@ -171,6 +171,7 @@ const METHODS: &[(&str, &str)] = &[
     ("token", "compact"),
     ("token", "expand"),
     ("token", "find"),
+    ("token", "read"),
     ("token", "job"),
     ("token", "shell"),
 ];
@@ -616,6 +617,139 @@ fn vector_args(input: &Value, key: &str) -> Value {
     Value::Object(object)
 }
 
+#[derive(Clone, Copy)]
+enum TokenOptionType {
+    Bool,
+    PositiveInteger,
+    String,
+    Mode,
+}
+
+const TOKEN_READ_OPTIONS: &[(&str, TokenOptionType)] = &[
+    ("mode", TokenOptionType::Mode),
+    ("start_line", TokenOptionType::PositiveInteger),
+    ("end_line", TokenOptionType::PositiveInteger),
+    ("raw", TokenOptionType::Bool),
+    ("fresh", TokenOptionType::Bool),
+    ("max_files", TokenOptionType::PositiveInteger),
+    ("max_visible_tokens", TokenOptionType::PositiveInteger),
+];
+
+const TOKEN_SHELL_OPTIONS: &[(&str, TokenOptionType)] = &[
+    ("cwd", TokenOptionType::String),
+    ("mode", TokenOptionType::Mode),
+    ("rewrite", TokenOptionType::String),
+    ("no_rewrite", TokenOptionType::Bool),
+    ("stdin", TokenOptionType::String),
+    ("timeout_ms", TokenOptionType::PositiveInteger),
+    ("timeout_seconds", TokenOptionType::PositiveInteger),
+    ("background", TokenOptionType::Bool),
+];
+
+fn token_method_args(
+    input: &Value,
+    method: &str,
+    first_key: &str,
+    contract: &[(&str, TokenOptionType)],
+) -> Result<Value, ConnectorError> {
+    let mut args = serde_json::Map::new();
+    if let Some(arguments) = input.as_array() {
+        if !arguments.is_empty() && arguments.iter().all(Value::is_string) {
+            // The host preserves a single argument's shape, so a string array is
+            // the first value itself rather than a positional argument list.
+            args.insert(first_key.into(), input.clone());
+        } else {
+            if arguments.is_empty() || arguments.len() > 2 {
+                return Err(ConnectorError::new(format!(
+                    "token.{method} requires one value and an optional options object"
+                )));
+            }
+            args.insert(first_key.into(), arguments[0].clone());
+            if let Some(options) = arguments.get(1) {
+                let options = options.as_object().ok_or_else(|| {
+                    ConnectorError::new(format!("token.{method} options must be an object"))
+                })?;
+                if options.contains_key(first_key) {
+                    return Err(ConnectorError::new(format!(
+                        "token.{method} options must not repeat {first_key}"
+                    )));
+                }
+                args.extend(options.clone());
+            }
+        }
+    } else if let Some(named) = input.as_object() {
+        args = named.clone();
+    } else {
+        args.insert(first_key.into(), input.clone());
+    }
+
+    let first = args
+        .get(first_key)
+        .ok_or_else(|| ConnectorError::new(format!("token.{method} requires {first_key}")))?;
+    let valid_first = first.as_str().is_some_and(|value| !value.is_empty())
+        || first.as_array().is_some_and(|values| {
+            !values.is_empty()
+                && values
+                    .iter()
+                    .all(|value| value.as_str().is_some_and(|value| !value.is_empty()))
+        });
+    if !valid_first {
+        return Err(ConnectorError::new(format!(
+            "token.{method} {first_key} must be a string or non-empty string array"
+        )));
+    }
+
+    for (key, value) in &args {
+        if key == first_key {
+            continue;
+        }
+        let Some((_, expected)) = contract.iter().find(|(name, _)| *name == key) else {
+            let supported = contract
+                .iter()
+                .map(|(name, _)| *name)
+                .collect::<Vec<_>>()
+                .join(", ");
+            let advice = if method == "shell" && key == "raw" {
+                r#"; use { mode: "exact" } for exact shell output"#
+            } else {
+                ""
+            };
+            return Err(ConnectorError::new(format!(
+                "token.{method} unknown option '{key}'; supported options: {supported}{advice}"
+            )));
+        };
+        let valid = match expected {
+            TokenOptionType::Bool => value.is_boolean(),
+            TokenOptionType::PositiveInteger => value.as_u64().is_some_and(|number| number > 0),
+            TokenOptionType::String => value.is_string(),
+            TokenOptionType::Mode => value.as_str().is_some_and(|mode| {
+                matches!(
+                    mode,
+                    "auto"
+                        | "hybrid"
+                        | "passthrough"
+                        | "diagnostic"
+                        | "critical"
+                        | "structured"
+                        | "fidelity"
+                        | "dedupe"
+                        | "diff-aware"
+                        | "diff_aware"
+                        | "diffaware"
+                        | "exact"
+                        | "lossy"
+                )
+            }),
+        };
+        if !valid {
+            return Err(ConnectorError::new(format!(
+                "token.{method} option '{key}' has an invalid value: {value}"
+            )));
+        }
+    }
+    Ok(Value::Object(args))
+}
+
 fn token_job_args(input: &Value) -> Result<Value, ConnectorError> {
     let candidate = if let Some(arguments) = input.as_array() {
         if arguments.is_empty() || arguments.len() > 2 {
@@ -829,8 +963,15 @@ fn lower(
             ("ingest", serde_json::json!({"text":text}))
         }
         "find" => ("find", positional_args(&input, "query", Some("path"))),
+        "read" => (
+            "read",
+            token_method_args(&input, "read", "path", TOKEN_READ_OPTIONS)?,
+        ),
         "job" => (TOKEN_JOB_OPERATION_V1, token_job_args(&input)?),
-        "shell" => ("shell", positional_args(&input, "command", None)),
+        "shell" => (
+            "shell",
+            token_method_args(&input, "shell", "command", TOKEN_SHELL_OPTIONS)?,
+        ),
         _ => return Err(ConnectorError::new("unsupported token method")),
     };
     Ok((engine, op.into(), args))
@@ -1949,6 +2090,69 @@ mod tests {
             "find",
             json!({"query":"Widget"}),
         );
+    }
+
+    #[test]
+    fn token_read_and_shell_options_are_strict_and_forwarded_once() {
+        assert!(METHODS.contains(&("token", "read")));
+        assert_lower(
+            "token",
+            "read",
+            json!(["fresh-raw.txt", {
+                "mode":"exact","start_line":1,"end_line":2,"raw":true,
+                "fresh":true,"max_files":1,"max_visible_tokens":512
+            }]),
+            EngineIdentity::TokenZero,
+            "read",
+            json!({
+                "path":"fresh-raw.txt","mode":"exact","start_line":1,
+                "end_line":2,"raw":true,"fresh":true,"max_files":1,
+                "max_visible_tokens":512
+            }),
+        );
+        assert_lower(
+            "token",
+            "read",
+            json!(["one.txt", "two.txt"]),
+            EngineIdentity::TokenZero,
+            "read",
+            json!({"path":["one.txt","two.txt"]}),
+        );
+        assert_lower(
+            "token",
+            "shell",
+            json!([["printf", "ok"], {
+                "cwd":".","mode":"exact","rewrite":"off","no_rewrite":true,
+                "stdin":"input","timeout_ms":25,"timeout_seconds":1,"background":false
+            }]),
+            EngineIdentity::TokenZero,
+            "shell",
+            json!({
+                "command":["printf","ok"],"cwd":".","mode":"exact",
+                "rewrite":"off","no_rewrite":true,"stdin":"input",
+                "timeout_ms":25,"timeout_seconds":1,"background":false
+            }),
+        );
+
+        for input in [
+            json!(["file", {"unknown":true}]),
+            json!(["file", {"fresh":"yes"}]),
+            json!(["file", {"max_files":0}]),
+            json!(["file", {}, "extra"]),
+        ] {
+            assert!(lower("token", "read", input).is_err());
+        }
+        let shell_raw = lower(
+            "token",
+            "shell",
+            json!(["printf must-not-run", {"raw":true}]),
+        )
+        .unwrap_err()
+        .to_string();
+        assert!(shell_raw.contains("unknown option 'raw'"), "{shell_raw}");
+        assert!(shell_raw.contains(r#"mode: "exact""#), "{shell_raw}");
+        assert!(lower("token", "shell", json!(["printf ok", {"timeout_ms":0}])).is_err());
+        assert!(lower("token", "shell", json!(["printf ok", {}, "extra"])).is_err());
     }
 
     #[test]
