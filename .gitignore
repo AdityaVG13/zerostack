@@ -67,6 +67,9 @@ archive/research/
 archive/
 docs/adr/
 
+# Internal working notes (local only; never published)
+docs/internal/
+
 # Advisory cross-session file locks (scripts/agent_lock.py). Local coordination
 # state between concurrent agent sessions sharing this checkout, not project
 # content. Committing it would publish agent names and churn on every claim.
@@ -152,3 +155,6 @@ tmp/
 videos/
 blobs/
 dist/
+
+# Local agent papercuts log
+.papercuts.jsonl
