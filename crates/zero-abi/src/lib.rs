@@ -21,6 +21,7 @@ pub mod digest;
 pub mod dispatch;
 pub mod effect;
 pub mod freshness;
+pub mod job;
 pub mod raw_worker;
 pub mod reasoning;
 pub mod result;
@@ -85,6 +86,12 @@ pub use freshness::{
     FreshnessHeadV1, FreshnessStatusV1, IndexedThroughCertificate, ProducerDomainV1,
     decide_freshness_v1, freshness_contract_digest_v1, freshness_contract_manifest_v1,
     influence_closure_v1,
+};
+pub use job::{
+    TOKEN_JOB_ABI_VERSION_V1, TOKEN_JOB_DEFAULT_TAIL_BYTES_V1, TOKEN_JOB_DEFAULT_WAIT_MS_V1,
+    TOKEN_JOB_MAX_ID_BYTES_V1, TOKEN_JOB_MAX_TAIL_BYTES_V1, TOKEN_JOB_MAX_WAIT_MS_V1,
+    TOKEN_JOB_OPERATION_V1, TokenJobContractError, TokenJobPollRequestV1, TokenJobPollResultV1,
+    TokenJobStatusV1, token_job_contract_digest_v1, token_job_contract_manifest_v1,
 };
 pub use raw_worker::{
     ApprovalMetadata, ApprovalState, CallRequest, CancelRequest, DEFAULT_MAX_FRAME_BYTES,
