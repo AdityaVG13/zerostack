@@ -496,7 +496,7 @@ fn digest_from_json(output: &str) -> Option<String> {
         .map(str::to_owned)
 }
 
-fn fszero_contract_from_json(output: &str) -> Option<String> {
+fn package_contract_from_json(output: &str) -> Option<String> {
     serde_json::from_str::<Value>(output)
         .ok()?
         .get("package")?
@@ -515,7 +515,7 @@ fn probe_contract(
     }
     let key = engine.as_str().to_ascii_uppercase();
     let digest = match engine {
-        EngineIdentity::FsZero => fszero_contract_from_json(&probe_output(
+        EngineIdentity::FsZero => package_contract_from_json(&probe_output(
             binary,
             &["capabilities", "--json"],
             &key,
@@ -532,16 +532,12 @@ fn probe_contract(
                 Some(RAW_WORKER_PROTOCOL_ENV),
             )?)
         }
-        EngineIdentity::GraphZero => {
-            let sibling = binary.with_file_name("graphzero-codemode");
-            let output = probe_output(&sibling, &["--help"], &key, None)?;
-            output.lines().find_map(|line| {
-                line.trim()
-                    .strip_prefix("semantic_contract_digest:")
-                    .map(str::trim)
-                    .map(str::to_owned)
-            })
-        }
+        EngineIdentity::GraphZero => package_contract_from_json(&probe_output(
+            binary,
+            &["capabilities", "--json"],
+            &key,
+            None,
+        )?),
     }
     .ok_or_else(|| HostError::Connector(format!("{key} probe omitted contract digest")))?;
     if digest.len() != 64
@@ -1992,6 +1988,40 @@ fn start_session_executor(generation: u64, root: &Path) -> Result<SessionExecuto
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[cfg(unix)]
+    #[test]
+    fn graph_contract_probe_uses_typed_capabilities_not_help_scraping() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let directory = tempfile::tempdir().unwrap();
+        let binary = directory.path().join("graphzero-codemode");
+        let digest = "a".repeat(64);
+        let script = format!(
+            "#!/bin/sh\nif [ \"$#\" -eq 2 ] && [ \"$1\" = capabilities ] && [ \"$2\" = --json ]; then\n  printf '%s\n' '{{\"package\":{{\"abi_digest\":\"{digest}\"}}}}'\n  exit 0\nfi\necho forbidden probe arguments >&2\nexit 9\n"
+        );
+        std::fs::write(&binary, script).unwrap();
+        let mut permissions = std::fs::metadata(&binary).unwrap().permissions();
+        permissions.set_mode(0o755);
+        std::fs::set_permissions(&binary, permissions).unwrap();
+
+        assert_eq!(
+            probe_contract(EngineIdentity::GraphZero, &binary, false).unwrap(),
+            digest
+        );
+
+        std::fs::write(
+            &binary,
+            "#!/bin/sh\nprintf '%s\n' '{\"package\":{\"abi_digest\":\"short\"}}'\n",
+        )
+        .unwrap();
+        let error = probe_contract(EngineIdentity::GraphZero, &binary, false)
+            .expect_err("invalid Graph digest must fail closed");
+        assert!(
+            error.to_string().contains("invalid contract digest"),
+            "{error}"
+        );
+    }
 
     #[test]
     fn typed_error_text_is_bounded_before_wire_serialization() {
