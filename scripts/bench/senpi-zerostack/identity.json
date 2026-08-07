@@ -6,7 +6,7 @@
   "comparison": {
     "assembly_manifest": {
       "senpi_revision": "6951fba7a7c86c29b0ad394c934a31680b8d3740",
-      "zerostack_revision": "captured_at_run"
+      "zerostack_revision": "8afee02429fbe97b267412fb50256744426bd224"
     },
     "backend_identity": {
       "kind": "matched_fake_delegate",

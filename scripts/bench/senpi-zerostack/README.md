@@ -14,9 +14,13 @@ cd /tmp/senpi-ymp3
 npm ci --ignore-scripts
 env -u FORCE_COLOR -u NO_COLOR npm run build
 
+git clone /path/to/ZeroStack /tmp/zerostack-ymp3-source
+git -C /tmp/zerostack-ymp3-source checkout 8afee02429fbe97b267412fb50256744426bd224
+
 cd /path/to/ZeroStack
 python3 scripts/bench/senpi-zerostack/run.py \
   --senpi-root /tmp/senpi-ymp3 \
+  --zerostack-root /tmp/zerostack-ymp3-source \
   --zerostack-host /path/to/zerostack-codemode-host \
   --profile quick \
   --output /tmp/senpi-zerostack-quick.json

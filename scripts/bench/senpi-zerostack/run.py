@@ -507,6 +507,8 @@ def main() -> int:
     if senpi_fact["head"] != config["comparison"]["assembly_manifest"]["senpi_revision"]:
         raise RuntimeError("Senpi revision does not match the frozen identity")
     zero_fact = git_fact(args.zerostack_root)
+    if zero_fact["head"] != config["comparison"]["assembly_manifest"]["zerostack_revision"]:
+        raise RuntimeError("ZeroStack revision does not match the frozen identity")
     facts = {
         "host": host_facts(),
         "senpi": senpi_fact,
