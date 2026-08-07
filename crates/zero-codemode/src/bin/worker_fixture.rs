@@ -1,10 +1,13 @@
 #![forbid(unsafe_code)]
 
+use std::fs;
 use std::io::{self, BufRead, Write};
+use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::time::Duration;
 
-use serde_json::json;
+use serde_json::{Value, json};
+use sha2::{Digest, Sha256};
 use zero_abi::raw_worker::EngineIdentity;
 use zero_abi::{
     ApprovalMetadata, ApprovalState, CallRequest, DEFAULT_MAX_FRAME_BYTES, EffectClass,
@@ -375,12 +378,19 @@ fn transport_telemetry(
 }
 
 fn result(request: CallRequest) -> WorkerResult {
+    let engine = parse_engine();
+    let (value, refs) = opaque_chain_result(engine, &request).unwrap_or_else(|| {
+        (
+            json!({
+                "args": request.args,
+                "store_root": std::env::var(STORE_ROOT_ENV).unwrap(),
+                "session_id": std::env::var(SESSION_ID_ENV).unwrap(),
+            }),
+            Vec::new(),
+        )
+    });
     WorkerResult {
-        value: json!({
-            "args": request.args,
-            "store_root": std::env::var(STORE_ROOT_ENV).unwrap(),
-            "session_id": std::env::var(SESSION_ID_ENV).unwrap(),
-        }),
+        value,
         metadata: WorkerResultMetadata {
             effect: EffectClass::ReadOnly,
             approval: ApprovalMetadata {
@@ -394,14 +404,169 @@ fn result(request: CallRequest) -> WorkerResult {
                 rollback_op: None,
             },
             ownership: RefOwnership {
-                engine: parse_engine(),
+                engine,
                 session_id: std::env::var(SESSION_ID_ENV).unwrap(),
-                refs: Vec::new(),
+                refs,
                 snapshot: None,
             },
             trace: request.trace,
         },
     }
+}
+
+fn opaque_chain_result(
+    engine: EngineIdentity,
+    request: &CallRequest,
+) -> Option<(Value, Vec<String>)> {
+    let root = opaque_chain_root();
+    match (engine, request.op.as_str()) {
+        (EngineIdentity::FsZero, "fs.read") if request.args["__opaque_chain_fixture"] == true => {
+            let payload_hex = request.args["payload_hex"]
+                .as_str()
+                .expect("opaque fixture requires payload_hex");
+            let bytes = decode_hex(payload_hex).expect("opaque fixture payload_hex must be exact");
+            let digest = sha256_hex(&bytes);
+            let reference = format!("fz://blob/{digest}");
+            write_exact(&root.join("bytes").join(&digest), &bytes);
+            Some((
+                json!({"ref":reference,"sha256":digest,"length":bytes.len()}),
+                vec![reference],
+            ))
+        }
+        (EngineIdentity::GraphZero, "remember")
+            if request.args["__opaque_chain_fixture"] == true =>
+        {
+            let source = request.args["source_ref"]
+                .as_str()
+                .expect("opaque fixture requires source_ref");
+            let source_digest = canonical_ref_digest(source, "fz://blob/")
+                .expect("opaque fixture requires a canonical fz ref");
+            assert!(
+                root.join("bytes").join(source_digest).is_file(),
+                "opaque fixture fz object is unavailable"
+            );
+            let digest = sha256_hex(source.as_bytes());
+            let reference = format!("gz://blob/{digest}");
+            write_exact(
+                &root.join("graph").join(format!("{digest}.ref")),
+                source.as_bytes(),
+            );
+            Some((json!({"ref":reference}), vec![reference]))
+        }
+        (EngineIdentity::TokenZero, "ingest") => {
+            let envelope: Value = serde_json::from_str(request.args["text"].as_str()?).ok()?;
+            if envelope["__opaque_chain_fixture"] != true {
+                return None;
+            }
+            let source = envelope["source_ref"]
+                .as_str()
+                .expect("opaque fixture requires source_ref");
+            let source_digest = canonical_ref_digest(source, "gz://blob/")
+                .expect("opaque fixture requires a canonical gz ref");
+            assert!(
+                root.join("graph")
+                    .join(format!("{source_digest}.ref"))
+                    .is_file(),
+                "opaque fixture gz object is unavailable"
+            );
+            let digest = sha256_hex(source.as_bytes());
+            let reference = format!("tz://blob/{digest}");
+            write_exact(
+                &root.join("token").join(format!("{digest}.ref")),
+                source.as_bytes(),
+            );
+            Some((json!({"ref":reference}), vec![reference]))
+        }
+        (EngineIdentity::TokenZero, "expand") => {
+            let reference = request.args["ref"].as_str()?;
+            let token_digest = canonical_ref_digest(reference, "tz://blob/")?;
+            let token_path = root.join("token").join(format!("{token_digest}.ref"));
+            if !token_path.exists() {
+                return None;
+            }
+            let graph_ref = fs::read_to_string(token_path).expect("read opaque fixture tz object");
+            assert_eq!(
+                sha256_hex(graph_ref.as_bytes()),
+                token_digest,
+                "opaque fixture tz descriptor digest mismatch"
+            );
+            let graph_digest = canonical_ref_digest(&graph_ref, "gz://blob/")
+                .expect("opaque fixture tz object must contain a canonical gz ref");
+            let fs_ref = fs::read_to_string(root.join("graph").join(format!("{graph_digest}.ref")))
+                .expect("read opaque fixture gz object");
+            assert_eq!(
+                sha256_hex(fs_ref.as_bytes()),
+                graph_digest,
+                "opaque fixture gz descriptor digest mismatch"
+            );
+            let payload_digest = canonical_ref_digest(&fs_ref, "fz://blob/")
+                .expect("opaque fixture gz object must contain a canonical fz ref");
+            let bytes = fs::read(root.join("bytes").join(payload_digest))
+                .expect("read opaque fixture fz object");
+            assert_eq!(
+                sha256_hex(&bytes),
+                payload_digest,
+                "opaque fixture payload digest mismatch"
+            );
+            Some((
+                json!({
+                    "payload_hex":encode_hex(&bytes),
+                    "sha256":payload_digest,
+                    "length":bytes.len(),
+                }),
+                vec![reference.to_owned()],
+            ))
+        }
+        _ => None,
+    }
+}
+
+fn opaque_chain_root() -> PathBuf {
+    Path::new(&std::env::var(STORE_ROOT_ENV).unwrap()).join(".zerostack-opaque-chain-fixture")
+}
+
+fn write_exact(path: &Path, bytes: &[u8]) {
+    if let Ok(existing) = fs::read(path) {
+        assert_eq!(existing, bytes, "opaque fixture digest collision");
+        return;
+    }
+    fs::create_dir_all(path.parent().unwrap()).expect("create opaque fixture directory");
+    fs::write(path, bytes).expect("write opaque fixture object");
+}
+
+fn canonical_ref_digest<'a>(reference: &'a str, prefix: &str) -> Option<&'a str> {
+    let digest = reference.strip_prefix(prefix)?;
+    (digest.len() == 64
+        && digest
+            .bytes()
+            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte)))
+    .then_some(digest)
+}
+
+fn sha256_hex(bytes: &[u8]) -> String {
+    encode_hex(&Sha256::digest(bytes))
+}
+
+fn encode_hex(bytes: &[u8]) -> String {
+    bytes.iter().map(|byte| format!("{byte:02x}")).collect()
+}
+
+#[allow(
+    clippy::manual_is_multiple_of,
+    reason = "integer is_multiple_of requires Rust 1.87; workspace MSRV is 1.85"
+)]
+fn decode_hex(value: &str) -> Option<Vec<u8>> {
+    if value.len() % 2 != 0 {
+        return None;
+    }
+    value
+        .as_bytes()
+        .chunks_exact(2)
+        .map(|pair| {
+            let pair = std::str::from_utf8(pair).ok()?;
+            u8::from_str_radix(pair, 16).ok()
+        })
+        .collect()
 }
 
 #[allow(

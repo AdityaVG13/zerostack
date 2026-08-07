@@ -323,6 +323,111 @@ fn all_public_methods_preserve_arguments_and_ref_owners() {
 }
 
 #[test]
+fn opaque_handles_cross_fszero_graphzero_tokenzero_without_translating_bytes() {
+    let (d, mut session, token, shutdown_token, _) = start(ProcessIdentity::current().unwrap());
+    let socket = d.path().join("runtime/session.sock");
+    let mut stream = UnixStream::connect(&socket).unwrap();
+    let mut reader = BufReader::new(stream.try_clone().unwrap());
+    send(
+        &mut stream,
+        json!({"type":"hello","protocol":"zerostack-session/v1","token":token}),
+    );
+    let generation = read(&mut reader)["generation"].as_u64().unwrap();
+    let source = r#"
+        const fs = await zero.fs.compound('read', {
+            __opaque_chain_fixture:true,
+            payload_hex:'00ff807f0a0d225ce298830041'
+        });
+        const graph = await zero.graph.remember({
+            __opaque_chain_fixture:true,
+            source_ref:fs.value.ref
+        });
+        const token = await zero.token.compact({
+            __opaque_chain_fixture:true,
+            source_ref:graph.value.ref
+        });
+        const expanded = await zero.token.expand(token.value.ref);
+        return {fs,graph,token,expanded};
+    "#;
+    send(
+        &mut stream,
+        json!({"type":"execute","id":1,"generation":generation,"root":d.path(),"source":source}),
+    );
+    let response = read(&mut reader);
+    assert_eq!(response["ok"], true, "{response}");
+    let result = exact_result(d.path(), &response);
+
+    let fs_ref = "fz://blob/bcd20edba0525325b8fdfcfb22adaaf4196def23850e610e79e19722f354ea05";
+    let graph_ref = "gz://blob/e883e99307a4c9d4e5ceb783a46e8bb4653e87d424f225d3906f01632fc7f189";
+    let token_ref = "tz://blob/2f3c9f0c1d762e6bb7f1090ee708f8dff09d772e10a6568e1c7b7a2f607b97f6";
+    assert_eq!(result["fs"]["value"]["ref"], fs_ref);
+    assert_eq!(result["graph"]["value"], json!({"ref":graph_ref}));
+    assert_eq!(result["token"]["value"], json!({"ref":token_ref}));
+    assert_eq!(
+        result["fs"]["metadata"]["ownership"]["refs"],
+        json!([fs_ref])
+    );
+    assert_eq!(
+        result["graph"]["metadata"]["ownership"]["refs"],
+        json!([graph_ref])
+    );
+    assert_eq!(
+        result["token"]["metadata"]["ownership"]["refs"],
+        json!([token_ref])
+    );
+    assert!(!result["graph"].to_string().contains("fz://"));
+    assert!(!result["token"].to_string().contains("gz://"));
+    assert_eq!(
+        result["expanded"]["value"],
+        json!({
+            "payload_hex":"00ff807f0a0d225ce298830041",
+            "sha256":"bcd20edba0525325b8fdfcfb22adaaf4196def23850e610e79e19722f354ea05",
+            "length":13
+        })
+    );
+    assert_eq!(
+        result["expanded"]["metadata"]["ownership"]["engine"],
+        "tokenzero"
+    );
+
+    let fixture = d.path().join(".zerostack-opaque-chain-fixture");
+    assert_eq!(
+        std::fs::read(
+            fixture
+                .join("bytes")
+                .join("bcd20edba0525325b8fdfcfb22adaaf4196def23850e610e79e19722f354ea05")
+        )
+        .unwrap(),
+        [0, 255, 128, 127, 10, 13, 34, 92, 226, 152, 131, 0, 65]
+    );
+    assert_eq!(
+        std::fs::read(
+            fixture
+                .join("graph")
+                .join("e883e99307a4c9d4e5ceb783a46e8bb4653e87d424f225d3906f01632fc7f189.ref")
+        )
+        .unwrap(),
+        fs_ref.as_bytes()
+    );
+    assert_eq!(
+        std::fs::read(
+            fixture
+                .join("token")
+                .join("2f3c9f0c1d762e6bb7f1090ee708f8dff09d772e10a6568e1c7b7a2f607b97f6.ref")
+        )
+        .unwrap(),
+        graph_ref.as_bytes()
+    );
+
+    send(
+        &mut stream,
+        json!({"type":"shutdown","id":2,"token":shutdown_token}),
+    );
+    assert_eq!(read(&mut reader)["ok"], true);
+    assert!(session.wait().unwrap().success());
+}
+
+#[test]
 fn replacement_cancels_inflight_and_suppresses_stale_result() {
     let (d, mut session, token, shutdown_token, initial_generation) =
         start_configured(ProcessIdentity::current().unwrap(), |command, _| {
