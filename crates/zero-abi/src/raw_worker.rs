@@ -851,12 +851,16 @@ pub fn validate_handshake_request(
     Ok(())
 }
 
-/// Serialized field names of an exemplar value, in declaration order.
+/// Serialized field names of an exemplar value, in stable lexical order.
 fn field_names<T: Serialize>(exemplar: &T) -> Vec<String> {
-    match serde_json::to_value(exemplar) {
+    let mut names = match serde_json::to_value(exemplar) {
         Ok(Value::Object(map)) => map.keys().cloned().collect(),
         _ => Vec::new(),
-    }
+    };
+    // serde_json/preserve_order is feature-unified by downstream workspaces.
+    // Contract array order must not depend on whether that feature is enabled.
+    names.sort_unstable();
+    names
 }
 
 /// Exemplar with every optional field populated, so the manifest reflects the
@@ -1503,5 +1507,35 @@ mod tests {
             "e2daca4d95cbd2780f2e10b30b823e9398747bfe15e38ca0810f634a387aeace"
         );
         assert_eq!(digest, raw_worker_protocol_digest_hex());
+    }
+
+    #[test]
+    fn manifest_field_inventories_are_explicitly_order_stable() {
+        let manifest = raw_worker_protocol_manifest();
+        for key in [
+            "binding",
+            "handshake_request",
+            "capabilities",
+            "limits",
+            "call",
+            "telemetry_request",
+            "engine_stage_span",
+            "engine_stage_timeline",
+            "worker_token_accounting",
+            "result_frame",
+            "error_frame",
+            "trace",
+            "result_metadata",
+        ] {
+            let fields = manifest[key]
+                .as_array()
+                .unwrap_or_else(|| panic!("{key} field inventory"));
+            assert!(
+                fields
+                    .windows(2)
+                    .all(|pair| pair[0].as_str() <= pair[1].as_str()),
+                "{key} field inventory is not sorted: {fields:?}"
+            );
+        }
     }
 }
