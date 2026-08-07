@@ -8,6 +8,7 @@ use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
 use serde_json::Value as JsonValue;
+use zero_abi::ZeroResultV1;
 use zero_store::SharedCas;
 
 #[cfg(feature = "quickjs")]
@@ -211,17 +212,9 @@ pub fn finalize_visible_error(value: &str) -> String {
     format!("{}{}", &value[..end], SUFFIX)
 }
 
-/// Fields every capability result exposes for inline output and for ref-ed
-/// output, whichever route produced the result.
-pub const CANONICAL_RESULT_FIELDS: &[&str] = &["text", "ref"];
-
-/// Source fields, in precedence order, that a connector may use for inline
-/// output. The first one present as a string is mirrored onto `text`.
-pub const CANONICAL_TEXT_ALIASES: &[&str] = &["text", "visible", "result", "stdout"];
-
-/// Source fields, in precedence order, that a connector may use for ref-ed
-/// output. The first one present as a string is mirrored onto `ref`.
-pub const CANONICAL_REF_ALIASES: &[&str] = &["ref", "stdout_ref", "combined_ref"];
+/// The complete public capability-result surface. Domain values live under
+/// `content.value`; omitted exact values use `content.ref` instead.
+pub const PUBLIC_RESULT_FIELDS: &[&str] = &["ack", "content"];
 
 #[derive(Clone, Debug)]
 pub struct Host {
@@ -406,6 +399,93 @@ impl fmt::Display for HostError {
 
 impl std::error::Error for HostError {}
 
+fn public_result_ack(value: &JsonValue) -> String {
+    [
+        value.pointer("/value/tool_response/ack"),
+        value.pointer("/value/ack"),
+        value.get("ack"),
+    ]
+    .into_iter()
+    .flatten()
+    .filter_map(JsonValue::as_str)
+    .find(|ack| (1..=zero_abi::MAX_ACK_CHARS).contains(&ack.chars().count()))
+    .unwrap_or("ok")
+    .to_owned()
+}
+
+fn declared_zero_result(value: &JsonValue) -> Result<Option<ZeroResultV1>, HostError> {
+    let declared = (value.get("ack").is_some() && value.get("content").is_some())
+        || value.pointer("/content/kind").is_some();
+    if !declared {
+        return Ok(None);
+    }
+    serde_json::from_value(value.clone())
+        .map(Some)
+        .map_err(|error| HostError::Json(format!("invalid declared zero-result/v1: {error}")))
+}
+
+fn explicit_result_reference(
+    value: &JsonValue,
+) -> Result<Option<(&str, Option<String>)>, HostError> {
+    let candidates = [
+        (
+            value.pointer("/value/tool_response/visible/kind"),
+            value.pointer("/value/tool_response/visible/ref"),
+            value.pointer("/value/tool_response/visible/preview"),
+        ),
+        (
+            value.pointer("/value/content/kind"),
+            value.pointer("/value/content/ref"),
+            value.pointer("/value/content/preview"),
+        ),
+    ];
+    for (kind, reference, preview) in candidates {
+        if kind.and_then(JsonValue::as_str) != Some("ref") {
+            continue;
+        }
+        let reference = reference.and_then(JsonValue::as_str).ok_or_else(|| {
+            HostError::Json("explicit ref result requires a string ref".to_owned())
+        })?;
+        let preview = preview
+            .map(|value| {
+                value.as_str().map(str::to_owned).ok_or_else(|| {
+                    HostError::Json("explicit ref result preview must be a string".to_owned())
+                })
+            })
+            .transpose()?;
+        return Ok(Some((reference, preview)));
+    }
+    Ok(None)
+}
+
+/// Normalize the transport-owned worker result before JavaScript can observe it.
+/// Raw WorkerResponseFrame metadata stays inside inline content; a producer may
+/// request ref content only through an explicit typed `kind: "ref"` value.
+fn normalize_public_result(encoded: &str) -> Result<String, HostError> {
+    let value: JsonValue = serde_json::from_str(encoded)
+        .map_err(|error| HostError::Json(format!("connector returned invalid JSON: {error}")))?;
+    if let Some(result) = declared_zero_result(&value)? {
+        return serde_json::to_string(&result).map_err(|error| HostError::Json(error.to_string()));
+    }
+    if let Some(result) = value
+        .get("value")
+        .map(declared_zero_result)
+        .transpose()?
+        .flatten()
+        .filter(|result| result.kind() == "ref")
+    {
+        return serde_json::to_string(&result).map_err(|error| HostError::Json(error.to_string()));
+    }
+    let ack = public_result_ack(&value);
+    let result = match explicit_result_reference(&value)? {
+        Some((reference, preview)) => ZeroResultV1::reference(&ack, reference, preview)
+            .map_err(|error| HostError::Json(format!("invalid explicit ref result: {error}")))?,
+        None => ZeroResultV1::inline(ack, value)
+            .expect("validated fallback ack always constructs zero-result/v1"),
+    };
+    serde_json::to_string(&result).map_err(|error| HostError::Json(error.to_string()))
+}
+
 fn is_canonical_spill_ref(reference: &str) -> bool {
     let Some(digest) = reference.strip_prefix("tz://blob/") else {
         return false;
@@ -446,6 +526,10 @@ fn directly_expands_one_spill_ref(plan: &str) -> bool {
 }
 
 fn is_terminal_exact_token_expansion(value: &JsonValue) -> bool {
+    let inline = serde_json::from_value::<ZeroResultV1>(value.clone())
+        .ok()
+        .and_then(|result| result.inline_value().ok().cloned());
+    let value = inline.as_ref().unwrap_or(value);
     let Some(root) = value.as_object().filter(|root| root.len() == 2) else {
         return false;
     };
@@ -841,8 +925,18 @@ mod quickjs {
                     "connector result exceeds JSON limit".to_owned(),
                 ),
                 Ok(encoded) => {
-                    let value = ctx.json_parse(encoded).map_err(|error| {
-                        HostError::Json(format!("connector returned invalid JSON: {error}"))
+                    let normalized = normalize_public_result(&encoded)?;
+                    if normalized.len() > dispatch_context.max_json_bytes {
+                        return reject_error(
+                            &ctx,
+                            &reject,
+                            "normalized connector result exceeds JSON limit".to_owned(),
+                        );
+                    }
+                    let value = ctx.json_parse(normalized).map_err(|error| {
+                        HostError::Json(format!(
+                            "normalized connector result is invalid JSON: {error}"
+                        ))
                     })?;
                     resolve.call::<_, ()>((value,)).map_err(js_error)
                 }
@@ -893,35 +987,11 @@ mod quickjs {
     /// caller bug worth one error, not a silent empty value.
     const STRICT_RESULT_WRAPPER: &str = r#"(() => {
 "use strict";
-const TEXT_ALIASES = __TEXT_ALIASES__;
-const REF_ALIASES = __REF_ALIASES__;
-const OPTIONAL_RESULT_FIELDS = new Set(REF_ALIASES);
-const firstString = (target, names) => {
-    for (const name of names) {
-        if (Object.prototype.hasOwnProperty.call(target, name) && typeof target[name] === "string") {
-            return target[name];
-        }
-    }
-    return undefined;
-};
-// Mirrors whichever alias the producing route used onto the canonical field,
-// so a plan reads output identically whichever route served the call.
-const normalize = (value) => {
-    if (value === null || typeof value !== "object" || Array.isArray(value)) {
-        return value;
-    }
-    const text = firstString(value, TEXT_ALIASES);
-    if (text !== undefined && !Object.prototype.hasOwnProperty.call(value, "text")) {
-        value.text = text;
-    }
-    const reference = firstString(value, REF_ALIASES);
-    if (reference !== undefined && !Object.prototype.hasOwnProperty.call(value, "ref")) {
-        value.ref = reference;
-    }
-    return value;
-};
 const guard = (value, label) => {
-    if (value === null || typeof value !== "object" || Array.isArray(value)) {
+    if (Array.isArray(value)) {
+        return value.map((entry, index) => guard(entry, `${label}[${index}]`));
+    }
+    if (value === null || typeof value !== "object") {
         return value;
     }
     return new Proxy(value, {
@@ -932,11 +1002,7 @@ const guard = (value, label) => {
             if (Object.prototype.hasOwnProperty.call(target, property)) {
                 return guard(target[property], label + "." + property);
             }
-            if (
-                property === "then" ||
-                property === "toJSON" ||
-                OPTIONAL_RESULT_FIELDS.has(property)
-            ) {
+            if (property === "then" || property === "toJSON") {
                 return undefined;
             }
             const keys = Object.keys(target);
@@ -948,15 +1014,12 @@ const guard = (value, label) => {
     });
 };
 // Every capability returns a real Promise. The native call only enqueues
-// bounded work; normalization and guarding happen after its completion.
-return (call, label) => async (...args) => guard(normalize(await call(...args)), label);
+// bounded work; the native completion boundary supplies zero-result/v1.
+return (call, label) => async (...args) => guard(await call(...args), label);
 })()"#;
 
     fn strict_result_wrapper<'js>(ctx: &Ctx<'js>) -> Result<Function<'js>, HostError> {
-        let source = STRICT_RESULT_WRAPPER
-            .replace("__TEXT_ALIASES__", &alias_literal(CANONICAL_TEXT_ALIASES))
-            .replace("__REF_ALIASES__", &alias_literal(CANONICAL_REF_ALIASES));
-        ctx.eval::<Function<'js>, _>(source)
+        ctx.eval::<Function<'js>, _>(STRICT_RESULT_WRAPPER)
             .map_err(|error| normalized_js_error(ctx, error))
     }
 
@@ -1008,10 +1071,6 @@ return (target, label, kind) => new Proxy(target, {
     fn strict_capability_wrapper<'js>(ctx: &Ctx<'js>) -> Result<Function<'js>, HostError> {
         ctx.eval::<Function<'js>, _>(STRICT_CAPABILITY_WRAPPER)
             .map_err(|error| normalized_js_error(ctx, error))
-    }
-
-    fn alias_literal(aliases: &[&str]) -> String {
-        serde_json::to_string(aliases).expect("alias names serialize")
     }
 
     /// Encodes a capability call's argument list for the connector. A single

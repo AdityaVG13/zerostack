@@ -118,6 +118,12 @@ fn exact_result(root: &std::path::Path, response: &Value) -> Value {
         .unwrap();
     serde_json::from_slice(&stored).unwrap()
 }
+
+fn inline_public(result: &Value) -> &Value {
+    assert_eq!(result["content"]["kind"], "inline", "{result}");
+    &result["content"]["value"]
+}
+
 fn read_rejection(r: &mut BufReader<UnixStream>) -> Option<Value> {
     let mut s = String::new();
     r.read_line(&mut s).unwrap();
@@ -180,14 +186,27 @@ fn authenticated_cross_surface_and_rejections() {
     );
     let out = read(&mut r);
     let exact = exact_result(d.path(), &out);
-    assert_eq!(exact["a"]["value"]["args"]["x"], 1);
-    assert_eq!(exact["b"]["value"]["args"]["command"], "echo fixture");
-    assert_eq!(exact["c"]["value"]["args"]["path"], "Cargo.toml");
-    assert_eq!(exact["c"]["value"]["args"]["raw"], true);
-    assert_eq!(exact["c"]["value"]["args"]["fresh"], true);
+    for name in ["a", "b", "c"] {
+        serde_json::from_value::<zero_abi::ZeroResultV1>(exact[name].clone())
+            .unwrap_or_else(|error| panic!("{name} did not emit zero-result/v1: {error}"));
+    }
+    assert_eq!(exact["a"]["content"]["value"]["value"]["args"]["x"], 1);
     assert_eq!(
-        exact["a"]["metadata"]["ownership"]["session_id"],
-        exact["c"]["metadata"]["ownership"]["session_id"]
+        exact["b"]["content"]["value"]["value"]["args"]["command"],
+        "echo fixture"
+    );
+    assert_eq!(
+        exact["c"]["content"]["value"]["value"]["args"]["path"],
+        "Cargo.toml"
+    );
+    assert_eq!(exact["c"]["content"]["value"]["value"]["args"]["raw"], true);
+    assert_eq!(
+        exact["c"]["content"]["value"]["value"]["args"]["fresh"],
+        true
+    );
+    assert_eq!(
+        exact["a"]["content"]["value"]["metadata"]["ownership"]["session_id"],
+        exact["c"]["content"]["value"]["metadata"]["ownership"]["session_id"]
     );
     let invalid_shell = r#"try {
         await zero.token.shell('touch must-not-run',{raw:true});
@@ -246,7 +265,7 @@ fn aggregate_promise_all_dispatches_slow_calls_in_parallel() {
             "generation":generation,
             "root":directory.path(),
             "source":r#"const calls = Array.from({length: 6}, (_, sequence) =>
-                zero.token.shell(`sleep-${sequence}`).then(value => value.value.args.command));
+                zero.token.shell(`sleep-${sequence}`).then(value => value.content.value.value.args.command));
                 return await Promise.all(calls);"#,
         }),
     );
@@ -315,33 +334,75 @@ fn all_public_methods_preserve_arguments_and_ref_owners() {
     let response = read(&mut reader);
     assert_eq!(response["ok"], true, "{response}");
     let result = exact_result(d.path(), &response);
-    assert_eq!(result["fsPlan"]["value"]["args"]["queries"][0], "widget");
-    assert_eq!(result["fsReadMany"]["value"]["args"]["paths"][0], "a.rs");
+    for name in [
+        "fsPlan",
+        "fsStructural",
+        "fsCompound",
+        "fsReadMany",
+        "fsListMany",
+        "fsSearchMany",
+        "fsAstMany",
+        "graphBlast",
+        "graphQuery",
+        "graphOrient",
+        "graphRecall",
+        "graphVerify",
+        "graphSnap",
+        "graphReserve",
+        "graphIndex",
+        "graphRemember",
+        "tokenCompact",
+        "fsExpand",
+        "graphExpand",
+        "tokenExpand",
+        "tokenFind",
+        "tokenShell",
+    ] {
+        serde_json::from_value::<zero_abi::ZeroResultV1>(result[name].clone())
+            .unwrap_or_else(|error| panic!("{name} did not emit zero-result/v1: {error}"));
+    }
     assert_eq!(
-        result["fsSearchMany"]["value"]["args"]["queries"][0],
+        inline_public(&result["fsPlan"])["value"]["args"]["queries"][0],
+        "widget"
+    );
+    assert_eq!(
+        inline_public(&result["fsReadMany"])["value"]["args"]["paths"][0],
+        "a.rs"
+    );
+    assert_eq!(
+        inline_public(&result["fsSearchMany"])["value"]["args"]["queries"][0],
         "Widget"
     );
-    assert_eq!(result["graphRecall"]["value"]["args"]["query"], "Widget");
     assert_eq!(
-        result["tokenShell"]["value"]["args"]["command"],
+        inline_public(&result["graphRecall"])["value"]["args"]["query"],
+        "Widget"
+    );
+    assert_eq!(
+        inline_public(&result["tokenShell"])["value"]["args"]["command"],
         "printf ok"
     );
     assert_eq!(
-        result["fsStructural"]["value"]["args"]["query"],
+        inline_public(&result["fsStructural"])["value"]["args"]["query"],
         "callers:Widget"
     );
-    assert_eq!(result["graphBlast"]["value"]["args"]["depth"], 2);
-    assert_eq!(result["graphQuery"]["value"]["args"]["surface"], "symbol");
     assert_eq!(
-        result["fsExpand"]["metadata"]["ownership"]["engine"],
+        inline_public(&result["graphBlast"])["value"]["args"]["depth"],
+        2
+    );
+    assert_eq!(
+        inline_public(&result["graphQuery"])["value"]["args"]["surface"],
+        "symbol"
+    );
+    assert_eq!(
+        inline_public(&result["fsExpand"])["metadata"]["ownership"]["engine"],
         "fszero"
     );
     assert_eq!(
-        result["graphExpand"]["metadata"]["ownership"]["engine"],
+        inline_public(&result["graphExpand"])["metadata"]["ownership"]["engine"],
         "graphzero"
     );
     assert_eq!(
-        result["tokenExpand"]["metadata"]["ownership"]["engine"],
+        inline_public(&result["tokenExpand"])["metadata"]["ownership"]["engine"],
         "tokenzero"
     );
     send(
@@ -370,13 +431,13 @@ fn opaque_handles_cross_fszero_graphzero_tokenzero_without_translating_bytes() {
         });
         const graph = await zero.graph.remember({
             __opaque_chain_fixture:true,
-            source_ref:fs.value.ref
+            source_ref:fs.content.value.value.ref
         });
         const token = await zero.token.compact({
             __opaque_chain_fixture:true,
-            source_ref:graph.value.ref
+            source_ref:graph.content.value.value.ref
         });
-        const expanded = await zero.token.expand(token.value.ref);
+        const expanded = await zero.token.expand(token.content.value.value.ref);
         return {fs,graph,token,expanded};
     "#;
     send(
@@ -390,25 +451,31 @@ fn opaque_handles_cross_fszero_graphzero_tokenzero_without_translating_bytes() {
     let fs_ref = "fz://blob/bcd20edba0525325b8fdfcfb22adaaf4196def23850e610e79e19722f354ea05";
     let graph_ref = "gz://blob/e883e99307a4c9d4e5ceb783a46e8bb4653e87d424f225d3906f01632fc7f189";
     let token_ref = "tz://blob/2f3c9f0c1d762e6bb7f1090ee708f8dff09d772e10a6568e1c7b7a2f607b97f6";
-    assert_eq!(result["fs"]["value"]["ref"], fs_ref);
-    assert_eq!(result["graph"]["value"], json!({"ref":graph_ref}));
-    assert_eq!(result["token"]["value"], json!({"ref":token_ref}));
+    assert_eq!(inline_public(&result["fs"])["value"]["ref"], fs_ref);
     assert_eq!(
-        result["fs"]["metadata"]["ownership"]["refs"],
+        inline_public(&result["graph"])["value"],
+        json!({"ref":graph_ref})
+    );
+    assert_eq!(
+        inline_public(&result["token"])["value"],
+        json!({"ref":token_ref})
+    );
+    assert_eq!(
+        inline_public(&result["fs"])["metadata"]["ownership"]["refs"],
         json!([fs_ref])
     );
     assert_eq!(
-        result["graph"]["metadata"]["ownership"]["refs"],
+        inline_public(&result["graph"])["metadata"]["ownership"]["refs"],
         json!([graph_ref])
     );
     assert_eq!(
-        result["token"]["metadata"]["ownership"]["refs"],
+        inline_public(&result["token"])["metadata"]["ownership"]["refs"],
         json!([token_ref])
     );
     assert!(!result["graph"].to_string().contains("fz://"));
     assert!(!result["token"].to_string().contains("gz://"));
     assert_eq!(
-        result["expanded"]["value"],
+        inline_public(&result["expanded"])["value"],
         json!({
             "payload_hex":"00ff807f0a0d225ce298830041",
             "sha256":"bcd20edba0525325b8fdfcfb22adaaf4196def23850e610e79e19722f354ea05",
@@ -416,7 +483,7 @@ fn opaque_handles_cross_fszero_graphzero_tokenzero_without_translating_bytes() {
         })
     );
     assert_eq!(
-        result["expanded"]["metadata"]["ownership"]["engine"],
+        inline_public(&result["expanded"])["metadata"]["ownership"]["engine"],
         "tokenzero"
     );
 
@@ -970,15 +1037,15 @@ fn real_workers_execute_one_cross_surface_plan() {
     let response: Value = serde_json::from_slice(&output.stdout).unwrap();
     assert_eq!(response["ok"], true, "{response}");
     assert_eq!(
-        response["result"]["fs"]["metadata"]["ownership"]["engine"],
+        inline_public(&response["result"]["fs"])["metadata"]["ownership"]["engine"],
         "fszero"
     );
     assert_eq!(
-        response["result"]["graph"]["metadata"]["ownership"]["engine"],
+        inline_public(&response["result"]["graph"])["metadata"]["ownership"]["engine"],
         "graphzero"
     );
     assert_eq!(
-        response["result"]["token"]["metadata"]["ownership"]["engine"],
+        inline_public(&response["result"]["token"])["metadata"]["ownership"]["engine"],
         "tokenzero"
     );
 }
@@ -1013,7 +1080,10 @@ fn zsx_fallback_executes_and_rejects_partial_inherited_endpoint() {
     );
     let response: Value = serde_json::from_slice(&output.stdout).unwrap();
     assert_eq!(response["ok"], true, "{response}");
-    assert_eq!(response["result"]["value"]["args"]["command"], "printf zsx");
+    assert_eq!(
+        inline_public(&response["result"])["value"]["args"]["command"],
+        "printf zsx"
+    );
 
     let output = Command::new(env!("CARGO_BIN_EXE_zsx"))
         .args(["exec", "-C", d.path().to_str().unwrap()])

@@ -15,7 +15,7 @@ use std::{
 
 #[cfg(feature = "quickjs")]
 use serde_json::{Value, json};
-use zero_codemode::{CANONICAL_REF_ALIASES, CANONICAL_RESULT_FIELDS, CANONICAL_TEXT_ALIASES};
+use zero_codemode::PUBLIC_RESULT_FIELDS;
 #[cfg(feature = "quickjs")]
 use zero_codemode::{
     Connector, ConnectorCompletion, ConnectorError, DispatchContext, runtime_creation_count,
@@ -230,7 +230,7 @@ fn hello_dispatch_and_counter() {
         .unwrap_or_else(|error| panic!("execute: {error}"));
     assert_eq!(
         value,
-        json!({ "hello": "world", "call": { "echo": { "path": "a" } } })
+        json!({ "hello": "world", "call": { "ack":"ok", "content": {"kind":"inline", "value": { "echo": { "path": "a" } } } } })
     );
     assert_eq!(connector.calls.borrow().len(), 1);
     assert!(
@@ -262,7 +262,7 @@ fn registered_objects_have_no_inherited_to_string() {
 
 #[cfg(feature = "quickjs")]
 #[test]
-fn absent_optional_ref_is_undefined_without_weakening_unknown_field_errors() {
+fn inline_results_expose_only_the_typed_inline_variant() {
     let registration = GlobalRegistration::zero(vec![CapabilityDescriptor::new("graph", "blast")]);
     let host = Host::new(lim(), registration).unwrap_or_else(|error| panic!("host: {error}"));
     let connector = Rc::new(C {
@@ -273,19 +273,25 @@ fn absent_optional_ref_is_undefined_without_weakening_unknown_field_errors() {
     });
     let value = host
         .execute(
-            "const result=await zero.graph.blast('missing');return {optionalRefIsUndefined:result.ref===undefined};",
+            "const r=await zero.graph.blast('missing');return [r.ack,r.content.kind,r.content.value.found];",
             connector.clone(),
         )
         .unwrap_or_else(|error| panic!("execute: {error}"));
-    assert_eq!(value, json!({"optionalRefIsUndefined":true}));
+    assert_eq!(value, json!(["C", "inline", false]));
 
-    let error = host
-        .execute(
-            "const result=await zero.graph.blast('missing');return result.fabricated;",
-            connector,
-        )
-        .expect_err("unadvertised fields remain typed failures");
-    assert!(error.to_string().contains("unknown property 'fabricated'"));
+    for property in ["ref", "fabricated"] {
+        let error = host
+            .execute(
+                &format!("const r=await zero.graph.blast('missing');return r.{property};"),
+                connector.clone(),
+            )
+            .expect_err("unadvertised fields remain typed failures");
+        assert!(
+            error
+                .to_string()
+                .contains(&format!("unknown property '{property}'"))
+        );
+    }
 }
 
 #[cfg(feature = "quickjs")]
@@ -346,7 +352,10 @@ fn string_literal_tokens_never_change_capability_routing() {
     let value = host
         .execute(&plan, connector.clone())
         .unwrap_or_else(|error| panic!("execute: {error}"));
-    assert_eq!(value, json!({"echo": {"command": command}}));
+    assert_eq!(
+        value,
+        json!({"ack":"ok","content":{"kind":"inline","value":{"echo":{"command":command}}}})
+    );
     assert_eq!(
         connector.calls.borrow().as_slice(),
         &[json!({"command": command})]
@@ -567,8 +576,30 @@ fn unknown_property_on_a_connector_result_throws() {
         "message must name the property: {message}"
     );
     assert!(
-        message.contains("available properties: echo"),
+        message.contains("available properties: ack, content"),
         "message must list the real shape: {message}"
+    );
+}
+
+#[cfg(feature = "quickjs")]
+#[test]
+fn wrong_property_inside_a_domain_array_fails_loud() {
+    let connector = Rc::new(C {
+        calls: RefCell::new(vec![]),
+        fail: false,
+        delay: Duration::ZERO,
+        result: Some(r#"{"items":[{"name":"x"}]}"#.into()),
+    });
+    let host = Host::new(lim(), reg()).unwrap_or_else(|error| panic!("host: {error}"));
+    let error = host
+        .execute(
+            "const r=await zero.fs.read({});return r.content.value.items[0].missing;",
+            connector,
+        )
+        .expect_err("nested wrong property must fail");
+    assert!(
+        error.to_string().contains("unknown property 'missing'"),
+        "{error}"
     );
 }
 
@@ -584,7 +615,7 @@ fn known_properties_stay_readable_through_the_strict_guard() {
     let host = Host::new(lim(), reg()).unwrap_or_else(|error| panic!("host: {error}"));
     let value = host
         .execute(
-            "const r = await zero['fs'].read({}); return [r.result, r.nested.visible, r.list.length];",
+            "const r=await zero.fs.read({});const v=r.content.value;return [v.result,v.nested.visible,v.list.length];",
             connector,
         )
         .unwrap_or_else(|error| panic!("execute: {error}"));
@@ -802,7 +833,8 @@ fn one_direct_exact_expand_bypasses_budget_but_broad_parent_cannot() {
         )
         .unwrap_or_else(|error| panic!("direct expand: {error}"));
     assert_ne!(exact["spilled"], true);
-    assert_eq!(exact["value"]["visible"], text);
+    assert_eq!(exact["content"]["kind"], "inline");
+    assert_eq!(exact["content"]["value"]["value"]["visible"], text);
     assert!(serde_json::to_vec(&exact).unwrap().len() > 512);
 
     let broad = host
@@ -817,7 +849,10 @@ fn one_direct_exact_expand_bypasses_budget_but_broad_parent_cannot() {
     let sha = broad["sha256"].as_str().unwrap();
     let stored = SharedCas::open(store.path()).get_verified(sha).unwrap();
     let recovered: Value = serde_json::from_slice(&stored).unwrap();
-    assert_eq!(recovered["expanded"]["value"]["visible"], text);
+    assert_eq!(
+        recovered["expanded"]["content"]["value"]["value"]["visible"],
+        text
+    );
 
     let noncanonical = host
         .execute(
@@ -872,101 +907,126 @@ fn oversized_result_without_a_spill_root_still_reports_the_limit() {
 
 #[cfg(feature = "quickjs")]
 #[test]
-fn both_routes_expose_the_same_canonical_result_fields() {
-    // Shape A: the single-surface route names inline output `text` and the
-    // ref-ed output `stdout_ref`. Shape B: the cross-surface route names them
-    // `visible`/`result` and `ref`. A plan must read both identically.
+fn every_route_emits_only_zero_result_v1_without_alias_synthesis() {
     let route_shapes = [
-        r#"{"text":"hi\n","stdout_ref":"tz://blob/a","combined_ref":"tz://blob/c","exit_code":0}"#,
-        r#"{"visible":"hi\n","result":"hi\n","ref":"tz://blob/a","status":"ok"}"#,
+        (
+            json!({"text":"hi\n","stdout_ref":"tz://blob/a","exit_code":0}),
+            "ok",
+        ),
+        (
+            json!({"visible":"hi\n","result":"hi\n","ref":"tz://blob/a","status":"ok"}),
+            "ok",
+        ),
+        (
+            json!({"value":{"ack":"R","content":{"kind":"inline","value":{"text":"hi\n"}}},"metadata":{"engine":"tokenzero"}}),
+            "R",
+        ),
     ];
-    for shape in route_shapes {
+    for (shape, expected_ack) in route_shapes {
         let connector = Rc::new(C {
             calls: RefCell::new(vec![]),
             fail: false,
             delay: Duration::ZERO,
-            result: Some(shape.to_owned()),
+            result: Some(serde_json::to_string(&shape).unwrap()),
         });
         let host = Host::new(lim(), reg()).unwrap_or_else(|error| panic!("host: {error}"));
         let value = host
             .execute(
-                "const r = await zero['fs'].read({}); return [r.text, r.ref];",
+                "const r=await zero.fs.read({});return {keys:Object.keys(r).sort(),ack:r.ack,kind:r.content.kind,value:r.content.value};",
                 connector,
             )
             .unwrap_or_else(|error| panic!("execute {shape}: {error}"));
-        assert_eq!(
-            value,
-            json!(["hi\n", "tz://blob/a"]),
-            "canonical fields must be identical for {shape}"
-        );
+        assert_eq!(value["keys"], json!(["ack", "content"]));
+        assert_eq!(value["ack"], expected_ack);
+        assert_eq!(value["kind"], "inline");
+        assert_eq!(value["value"], shape);
     }
 }
 
 #[cfg(feature = "quickjs")]
 #[test]
-fn canonical_fields_never_shadow_what_the_connector_returned() {
+fn explicit_ref_content_stays_ref_content() {
+    let reference = format!("tz://blob/{}", "a".repeat(64));
     let connector = Rc::new(C {
         calls: RefCell::new(vec![]),
         fail: false,
         delay: Duration::ZERO,
         result: Some(
-            r#"{"text":"own","visible":"other","ref":"tz://blob/own","stdout_ref":"tz://blob/other"}"#
-                .to_owned(),
+            serde_json::to_string(&json!({
+                "value": {
+                    "tool_response": {
+                        "ack":"R",
+                        "visible":{"kind":"ref","ref":reference,"preview":"bounded"}
+                    }
+                }
+            }))
+            .unwrap(),
         ),
     });
     let host = Host::new(lim(), reg()).unwrap_or_else(|error| panic!("host: {error}"));
     let value = host
-        .execute(
-            "const r = await zero['fs'].read({}); return [r.text, r.ref, r.visible, r.stdout_ref];",
-            connector,
-        )
+        .execute("return await zero.fs.read({});", connector)
         .unwrap_or_else(|error| panic!("execute: {error}"));
     assert_eq!(
         value,
-        json!(["own", "tz://blob/own", "other", "tz://blob/other"])
+        json!({"ack":"R","content":{"kind":"ref","ref":reference,"preview":"bounded"}})
     );
 }
 
 #[cfg(feature = "quickjs")]
 #[test]
-fn canonical_fields_pass_the_strict_guard_and_are_enumerable() {
-    let connector = Rc::new(C {
-        calls: RefCell::new(vec![]),
-        fail: false,
-        delay: Duration::ZERO,
-        result: Some(r#"{"visible":"hi","stdout_ref":"tz://blob/a"}"#.to_owned()),
-    });
-    let host = Host::new(lim(), reg()).unwrap_or_else(|error| panic!("host: {error}"));
-    let value = host
-        .execute(
-            "const r = await zero['fs'].read({}); return Object.keys(r).sort();",
-            connector,
-        )
-        .unwrap_or_else(|error| panic!("execute: {error}"));
-    assert_eq!(value, json!(["ref", "stdout_ref", "text", "visible"]));
+fn malformed_declared_or_explicit_ref_results_fail_closed() {
+    let shapes = [
+        json!({"ack":"","content":{"kind":"inline","value":1}}),
+        json!({"ack":"R","content":{"kind":"bogus","ref":format!("tz://blob/{}", "a".repeat(64))}}),
+        json!({"ack":"R","content":{"ref":format!("tz://blob/{}", "a".repeat(64))}}),
+        json!({"content":{"kind":"inline","value":1}}),
+        json!({"value":{"ack":"","content":{"kind":"inline","value":1}}}),
+        json!({"value":{"content":{"kind":"bogus","value":1}}}),
+        json!({"value":{"tool_response":{"ack":"R","visible":{"kind":"ref"}}}}),
+        json!({"value":{"tool_response":{"ack":"R","visible":{"kind":"ref","ref":7}}}}),
+        json!({"value":{"tool_response":{"ack":"R","visible":{"kind":"ref","ref":format!("tz://blob/{}", "a".repeat(64)),"preview":7}}}}),
+        json!({"value":{"tool_response":{"ack":"R","visible":{"kind":"ref","ref":"not-a-ref"}}}}),
+        json!({"value":{"tool_response":{"ack":"R","visible":{"kind":"ref","ref":format!("tz://blob/{}", "a".repeat(64)),"preview":"x".repeat(zero_abi::MAX_PREVIEW_CHARS + 1)}}}}),
+    ];
+    for shape in shapes {
+        let connector = Rc::new(C {
+            calls: RefCell::new(vec![]),
+            fail: false,
+            delay: Duration::ZERO,
+            result: Some(serde_json::to_string(&shape).unwrap()),
+        });
+        let host = Host::new(lim(), reg()).unwrap_or_else(|error| panic!("host: {error}"));
+        let error = host
+            .execute("return await zero.fs.read({});", connector)
+            .expect_err("malformed public result must fail");
+        assert!(matches!(error, HostError::Json(_)), "{error}");
+    }
 }
 
 #[cfg(feature = "quickjs")]
 #[test]
-fn a_result_without_any_output_alias_gains_no_canonical_fields() {
+fn legacy_or_wrong_result_access_fails_loud() {
     let host = Host::new(lim(), reg()).unwrap_or_else(|error| panic!("host: {error}"));
-    let error = host
-        .execute(
-            "const r = await zero['fs'].read({path:'a'}); return r.text;",
-            Rc::new(C::ok()),
-        )
-        .expect_err("normalization must not invent output fields");
-    assert!(
-        error.to_string().contains("unknown property 'text'"),
-        "{error}"
-    );
+    for property in ["text", "ref", "visible", "stdout_ref"] {
+        let error = host
+            .execute(
+                &format!("const r=await zero.fs.read({{}});return r.{property};"),
+                Rc::new(C::ok()),
+            )
+            .expect_err("legacy accessor must fail");
+        assert!(
+            error
+                .to_string()
+                .contains(&format!("unknown property '{property}'")),
+            "{error}"
+        );
+    }
 }
 
 #[test]
-fn canonical_field_names_are_published() {
-    assert_eq!(CANONICAL_RESULT_FIELDS, &["text", "ref"]);
-    assert_eq!(CANONICAL_TEXT_ALIASES[0], "text");
-    assert_eq!(CANONICAL_REF_ALIASES[0], "ref");
+fn public_result_field_names_are_published() {
+    assert_eq!(PUBLIC_RESULT_FIELDS, &["ack", "content"]);
 }
 
 #[cfg(feature = "quickjs")]
@@ -980,7 +1040,7 @@ fn capability_calls_return_thenables_usable_with_promise_all() {
              const b = zero["fs"].read({path:"b"});
              const thenable = typeof a.then === "function";
              const [ra, rb] = await Promise.all([a, b]);
-             return {thenable, a: ra.echo.path, b: rb.echo.path};"#,
+             return {thenable, a: ra.content.value.echo.path, b: rb.content.value.echo.path};"#,
             connector.clone(),
         )
         .unwrap_or_else(|error| panic!("promise.all plan: {error}"));
@@ -1002,8 +1062,8 @@ fn promise_all_dispatches_concurrently_and_settles_fifo_completions() {
             r#"const completionOrder = [];
                const calls = Array.from({length: 6}, (_, sequence) =>
                  zero.fs.read({sequence}).then(value => {
-                   completionOrder.push(value.sequence);
-                   return value.sequence;
+                   completionOrder.push(value.content.value.sequence);
+                   return value.content.value.sequence;
                  }));
                const values = await Promise.all(calls);
                return {completionOrder, values};"#,

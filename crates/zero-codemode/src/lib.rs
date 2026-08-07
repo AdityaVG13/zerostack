@@ -19,11 +19,11 @@ pub use edit_protocol::{
     EDIT_PROTOCOL_VERSION, EditError, EditErrorClass, EditOp, EditPlan, RefKind, Side, classify_ref,
 };
 pub use host::{
-    CANONICAL_REF_ALIASES, CANONICAL_RESULT_FIELDS, CANONICAL_TEXT_ALIASES, CapabilityDescriptor,
-    Connector, ConnectorCompletion, ConnectorError, DEFAULT_MAX_VISIBLE_RESULT_BYTES,
-    DispatchContext, GlobalRegistration, Host, HostError, MAX_INFLIGHT_CONNECTOR_CALLS,
-    MAX_RESULT_SPILL_ENVELOPE_BYTES, MAX_VISIBLE_ERROR_BYTES, RESULT_SPILL_PREVIEW_BYTES,
-    RESULT_SPILL_SCHEMA, RegistrationError, finalize_visible_error, runtime_creation_count,
+    CapabilityDescriptor, Connector, ConnectorCompletion, ConnectorError,
+    DEFAULT_MAX_VISIBLE_RESULT_BYTES, DispatchContext, GlobalRegistration, Host, HostError,
+    MAX_INFLIGHT_CONNECTOR_CALLS, MAX_RESULT_SPILL_ENVELOPE_BYTES, MAX_VISIBLE_ERROR_BYTES,
+    PUBLIC_RESULT_FIELDS, RESULT_SPILL_PREVIEW_BYTES, RESULT_SPILL_SCHEMA, RegistrationError,
+    finalize_visible_error, runtime_creation_count,
 };
 pub use limits::{HostLimits, LimitError};
 pub use manifest::{

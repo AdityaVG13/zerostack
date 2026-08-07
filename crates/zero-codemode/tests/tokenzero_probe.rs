@@ -143,11 +143,10 @@ fn tokenzero_probe_drops_serve_selector_but_worker_launch_keeps_it() {
     );
     let response = read(&mut reader);
     assert_eq!(response["ok"], true, "{response}");
-    assert_eq!(response["result"]["value"]["args"]["query"], "needle");
-    assert_eq!(
-        response["result"]["metadata"]["ownership"]["engine"],
-        "tokenzero"
-    );
+    let result = &response["result"]["content"]["value"];
+    assert_eq!(response["result"]["content"]["kind"], "inline");
+    assert_eq!(result["value"]["args"]["query"], "needle");
+    assert_eq!(result["metadata"]["ownership"]["engine"], "tokenzero");
 
     send(
         &mut stream,

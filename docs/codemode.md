@@ -16,35 +16,35 @@ const [files, graph] = await Promise.all([
   zero.graph.orient("architecture", "ref flow"),
 ]);
 
-return { files: files.ref, graph: graph.ref };
+return { files: files.content, graph: graph.content };
 ~~~
 
 This Cloudflare-style execution model reduces protocol round trips and keeps intermediate values inside the sandbox rather than exposing each one to model context.
 
 ### Capability result shape
 
-Every capability call resolves to the JSON object the connector returned, plus two canonical fields the host normalizes onto it so a plan reads output the same way whichever route served the call. The single-surface (Rust sandbox) and cross-surface (QuickJS sidecar) routes name their output fields differently; the host reconciles that at the boundary:
+Every public `zero.*` capability returns `zero-result/v1` with exactly two top-level fields:
 
-- `text` — inline output. Mirrored from the first string present among `text`, `visible`, `result`, `stdout`.
-- `ref` — ref-ed output. Mirrored from the first string present among `ref`, `stdout_ref`, `combined_ref`.
+- `ack` -- a bounded status atom.
+- `content` -- either `{kind:"inline", value:...}` or `{kind:"ref", ref:"<canonical ref>", preview?:"..."}`.
 
-A field the connector returned itself is never overwritten, and a result carrying none of the aliases gains neither field — normalization mirrors output, it does not invent it. The route-specific names stay readable, so existing plans keep working.
+The aggregate host normalizes the transport-owned worker result before JavaScript observes it. It never synthesizes legacy `text`, `visible`, `stdout_ref`, or flat `ref` aliases. Inline content retains the complete validated worker result, including its domain value and transport metadata. A producer selects ref content only with an explicit typed `kind:"ref"` result.
 
 ~~~js
-// Single-surface route returns {text, stdout_ref, exit_code, ...}
-// Cross-surface route returns {visible, result, ref, status, ...}
 const run = await zero.token.shell("echo hi");
-run.text;  // "hi\n"  - both routes
-run.ref;   // "tz://blob/..." - both routes, when output was ref-ed
+if (run.content.kind === "inline") {
+  return run.content.value;
+}
+return await zero.token.expand(run.content.ref);
 ~~~
 
-Reading a property neither the connector nor normalization produced throws a `TypeError` naming the property and listing the available ones, so a mistyped field fails loudly instead of yielding `undefined`:
+Reading any field outside the active typed shape throws a `TypeError` instead of yielding a silent `undefined`:
 
 ~~~js
-run.stdout;  // TypeError: unknown property 'stdout' on token.shell result; available properties: text, ref, visible, ...
+run.text;  // TypeError: unknown property 'text' ... available properties: ack, content
 ~~~
 
-Use `Object.keys(value)` to inspect an unfamiliar result; enumeration is unaffected by the guard and includes the canonical fields.
+Use `Object.keys(value)` to inspect an unfamiliar nested domain value. The strict guard applies recursively.
 
 ## Install the `zs` wrapper
 
