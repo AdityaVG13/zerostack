@@ -1,4 +1,44 @@
-# Generated ZeroStack state
+# =============================================================================
+# ZeroStack — .gitignore (public hub)
+# Keep issues.jsonl tracked under .beads/; everything else below is local-only.
+# =============================================================================
+
+# --- Build / test output ---
+target/
+dist/
+build/
+node_modules/
+coverage/
+tmp/
+.tmp/
+*.log
+*.samply
+**/Cargo.lock
+
+# --- Secrets ---
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+credentials*
+secrets*
+.secrets/
+
+# --- OS / editors / harnesses ---
+.DS_Store
+**/.DS_Store
+.idea/
+.vscode/
+.cursor/
+.claude/
+.pi-subagents/
+slate.json
+videos/
+log.txt
+.ubsignore
+
+# --- Engine / CodeMode local stores (never publish) ---
 .zerostack/
 .fszero/
 .graphzero/
@@ -16,107 +56,63 @@ blobs/
 **/tool-metrics.json
 **/session-memory.json
 
-# Build and test output
-node_modules/
-target/
-dist/
-build/
-coverage/
-*.log
-*.samply
-tmp/
-.tmp/
-# Private local runtime evidence; not a repository/CI attestation.
-conformance/reports/
-**/Cargo.lock
+# --- Agent law (private; live on disk, never remote) ---
+AGENTS.md
+Agents.md
+CLAUDE.md
+Claude.md
+AGENTS.md.*
+CLAUDE.md.*
+.papercuts.jsonl
+.skill-loop-progress.md
 
-# Secrets
-.env
-.env.*
-!.env.example
-*.pem
-*.key
-credentials*
-secrets*
-.secrets/
-
-# Editors, harnesses, and OS files
-.DS_Store
-**/.DS_Store
-.idea/
-.vscode/
-.cursor/
-.pi-subagents/
-slate.json
-videos/
-
-# Historical local-only archive collections
-archive/2026-06-27-codedb-snapshot
-archive/2026-06-28-test-codemode-prompt.txt
-archive/2026-06-28-tmp-tokenzero-smoke/
-archive/2026-07-02-skill-loop-progress-DONE.md
-archive/audits/
-archive/benchmarks/
-archive/docs-research/
-archive/pilots/
-archive/profiling-2026-07/
-archive/prompts/
-archive/research/
-
-# Internal historical material (local only)
-archive/
-docs/adr/
-
-# Internal working notes (local only; never published)
-docs/internal/
-
-# Advisory cross-session file locks (scripts/agent_lock.py). Local coordination
-# state between concurrent agent sessions sharing this checkout, not project
-# content. Committing it would publish agent names and churn on every claim.
-.agent-locks.json
-.agent-locks.json.tmp
-
-# Beads / Dolt files (added by bd init)
+# --- Beads runtime (track issues.jsonl + small config; ignore DB/dolt/backups) ---
 .dolt/
-*.db
 .beads-credential-key
 .beads/proxieddb/
-
-# bv (beads viewer) local config and caches
+.beads/*.db
+.beads/*.db-*
+.beads/dolt*
+.beads/beads.base.jsonl
+.beads/backup/
+.beads/embeddeddolt/
+.beads/.br_history/
+.beads/.fszero/
+.beads/.*.lock
+.beads/*.bak*
+.beads/*.jsonl.bak*
 .bv/
 
-# Private rust-unsafe-code-exorcist audit artifacts
+# --- Local audit / campaign workspaces ---
+.agent-locks.json
+.agent-locks.json.tmp
 .unsafe-audit/
-
-# UBS private scan artifacts (local audit only)
 .ubs/
-
-# cut-branches (cyclomatic-reduction) local campaign books
-.cut-branches/
-
-# Local UB-exorcist audit workspaces (private)
 .ub-exorcism/
-
-# Adversarial review / prosecution run books (local only)
+.cut-branches/
 .prosecution/
+/beads_compliance_audit/
+beads_compliance_audit/
 
-# Python bytecode
+# --- Historical / internal (local only) ---
+archive/
+docs/adr/
+docs/internal/
+benchmarks/
+packages/
+reports/
+fuzz/
+scripts/dev/
+scripts/__pycache__/
 __pycache__/
 *.py[cod]
-AGENTS.md
-CLAUDE.md
 
-# Beads compliance audit dir (managed by /beads-compliance-and-completion-verification skill)
-/beads_compliance_audit/
+# Private local runtime evidence; not a repository/CI attestation.
+conformance/reports/
 
-# local-only (pruned from public repo 2026-07-30)
-.bench-history/
-.claude/
-.codex/
-benchmarks/
-conformance/
-!conformance/
+# Conformance allowlist: ship contracts/schemas/models + topology suite only
 conformance/*
+!conformance/
 !conformance/CONTRACT.md
 !conformance/authority/
 !conformance/authority/**
@@ -142,23 +138,6 @@ conformance/schemas/*
 !conformance/tests/
 conformance/tests/*
 !conformance/tests/test_engine_topology.py
-fuzz/
-packages/
-reports/
-archive/
-.ubsignore
-log.txt
-scripts/dev/
-scripts/__pycache__/
-beads_compliance_audit/
-tmp/
-videos/
-blobs/
-dist/
 
-# Local agent papercuts log
-.papercuts.jsonl
-
-.beads/dolt*
-.beads/beads.base.jsonl
-.beads/*.db-*
+# Local bench history
+.bench-history/
