@@ -27,7 +27,10 @@ use std::{
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 use zero_abi::raw_worker::EngineIdentity;
-use zero_abi::{ApprovalState, CallRequest, WorkerResult, WorkerTrace};
+use zero_abi::{
+    ApprovalState, CallRequest, TOKEN_JOB_OPERATION_V1, TokenJobPollRequestV1,
+    TokenJobPollResultV1, WorkerResult, WorkerTrace,
+};
 use zero_store::{Engine, ResolvedStore, ensure_layout};
 
 pub const SESSION_PROTOCOL: &str = "zerostack-session/v1";
@@ -168,6 +171,7 @@ const METHODS: &[(&str, &str)] = &[
     ("token", "compact"),
     ("token", "expand"),
     ("token", "find"),
+    ("token", "job"),
     ("token", "shell"),
 ];
 
@@ -612,6 +616,41 @@ fn vector_args(input: &Value, key: &str) -> Value {
     Value::Object(object)
 }
 
+fn token_job_args(input: &Value) -> Result<Value, ConnectorError> {
+    let candidate = if let Some(arguments) = input.as_array() {
+        if arguments.is_empty() || arguments.len() > 2 {
+            return Err(ConnectorError::new(
+                "token.job requires an id and optional options object",
+            ));
+        }
+        let id = arguments[0]
+            .as_str()
+            .ok_or_else(|| ConnectorError::new("token.job id must be a string"))?;
+        let mut object = match arguments.get(1) {
+            Some(Value::Object(options)) if !options.contains_key("id") => options.clone(),
+            Some(Value::Object(_)) => {
+                return Err(ConnectorError::new("token.job options must not repeat id"));
+            }
+            Some(_) => {
+                return Err(ConnectorError::new("token.job options must be an object"));
+            }
+            None => serde_json::Map::new(),
+        };
+        object.insert("id".into(), Value::String(id.to_owned()));
+        Value::Object(object)
+    } else if let Some(id) = input.as_str() {
+        serde_json::json!({"id":id})
+    } else {
+        input.clone()
+    };
+    let request: TokenJobPollRequestV1 = serde_json::from_value(candidate)
+        .map_err(|error| ConnectorError::new(format!("invalid token.job arguments: {error}")))?;
+    request
+        .validate()
+        .map_err(|error| ConnectorError::new(format!("invalid token.job arguments: {error}")))?;
+    serde_json::to_value(request).map_err(|error| ConnectorError::new(error.to_string()))
+}
+
 fn lower(
     surface: &str,
     method: &str,
@@ -790,6 +829,7 @@ fn lower(
             ("ingest", serde_json::json!({"text":text}))
         }
         "find" => ("find", positional_args(&input, "query", Some("path"))),
+        "job" => (TOKEN_JOB_OPERATION_V1, token_job_args(&input)?),
         "shell" => ("shell", positional_args(&input, "command", None)),
         _ => return Err(ConnectorError::new("unsupported token method")),
     };
@@ -890,6 +930,22 @@ fn aggregate_dispatch_loop(
     }
 }
 
+fn normalize_aggregate_result_value(
+    engine: EngineIdentity,
+    operation: &str,
+    value: Value,
+) -> Result<Value, ConnectorError> {
+    if engine != EngineIdentity::TokenZero || operation != TOKEN_JOB_OPERATION_V1 {
+        return Ok(value);
+    }
+    let result: TokenJobPollResultV1 = serde_json::from_value(value)
+        .map_err(|error| ConnectorError::new(format!("invalid token.job result: {error}")))?;
+    result
+        .validate()
+        .map_err(|error| ConnectorError::new(format!("invalid token.job result: {error}")))?;
+    serde_json::to_value(result).map_err(|error| ConnectorError::new(error.to_string()))
+}
+
 fn run_aggregate_dispatch(
     state: &AggregateWorkerState,
     dispatch: &AggregateDispatch,
@@ -929,7 +985,9 @@ fn run_aggregate_dispatch(
     {
         return Err(ConnectorError::new("worker result binding mismatch"));
     }
-    serde_json::to_string(&serde_json::json!({"value": result.value, "metadata": result.metadata}))
+    let value =
+        normalize_aggregate_result_value(dispatch.engine, &dispatch.request.op, result.value)?;
+    serde_json::to_string(&serde_json::json!({"value": value, "metadata": result.metadata}))
         .map_err(|error| ConnectorError::new(error.to_string()))
 }
 
@@ -1890,6 +1948,72 @@ mod tests {
             EngineIdentity::TokenZero,
             "find",
             json!({"query":"Widget"}),
+        );
+    }
+
+    #[test]
+    fn token_job_lowering_uses_the_shared_typed_request() {
+        assert!(METHODS.contains(&("token", "job")));
+        assert_lower(
+            "token",
+            "job",
+            json!("tzjob-7"),
+            EngineIdentity::TokenZero,
+            "job",
+            json!({"id":"tzjob-7","waitMs":30000,"since":0,"tailBytes":8192}),
+        );
+        assert_lower(
+            "token",
+            "job",
+            json!(["tzjob-7", {"waitMs":25,"since":9,"tailBytes":64}]),
+            EngineIdentity::TokenZero,
+            "job",
+            json!({"id":"tzjob-7","waitMs":25,"since":9,"tailBytes":64}),
+        );
+        assert!(lower("token", "job", json!(["tzjob-7", {"extra":true}])).is_err());
+        assert!(lower("token", "job", json!(["tzjob-7", {"tailBytes":0}])).is_err());
+        assert!(lower("token", "job", json!(["tzjob-7", {}, "extra"])).is_err());
+    }
+
+    #[test]
+    fn token_job_result_is_revalidated_at_the_aggregate_boundary() {
+        let canonical = json!({
+            "id":"tzjob-7","status":"running","pid":42,"tail":"ok\n",
+            "tailUtf8Lossless":true,"tailBytes":3,"logBytes":3,"cursor":3,
+            "version":2,"changed":true,"nextPollMs":20000
+        });
+        assert_eq!(
+            normalize_aggregate_result_value(
+                EngineIdentity::TokenZero,
+                TOKEN_JOB_OPERATION_V1,
+                canonical.clone(),
+            )
+            .unwrap(),
+            canonical
+        );
+
+        let mut unknown = canonical.clone();
+        unknown["log"] = json!("/private/session.log");
+        assert!(
+            normalize_aggregate_result_value(
+                EngineIdentity::TokenZero,
+                TOKEN_JOB_OPERATION_V1,
+                unknown,
+            )
+            .is_err()
+        );
+
+        let mut false_exactness = canonical;
+        false_exactness["tailBytes"] = json!(2);
+        false_exactness["cursor"] = json!(2);
+        false_exactness["logBytes"] = json!(2);
+        assert!(
+            normalize_aggregate_result_value(
+                EngineIdentity::TokenZero,
+                TOKEN_JOB_OPERATION_V1,
+                false_exactness,
+            )
+            .is_err()
         );
     }
 
