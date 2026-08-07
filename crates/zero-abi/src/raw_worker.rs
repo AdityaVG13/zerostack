@@ -504,8 +504,29 @@ pub fn decode_response_frame(
     }
     let frame: WorkerResponseFrame = serde_json::from_slice(line)
         .map_err(|error| FrameCodecError::InvalidJson(error.to_string()))?;
+    reject_shutdown_ack_unknown_fields(line, &frame)?;
     validate_response_frame(&frame)?;
     Ok(frame)
+}
+
+// Serde's internally tagged unit variants accept and discard extra object
+// fields even when the enum uses `deny_unknown_fields`. Keep the public Rust
+// variant and frozen wire shape unchanged, but enforce the empty payload here.
+fn reject_shutdown_ack_unknown_fields(
+    line: &[u8],
+    frame: &WorkerResponseFrame,
+) -> Result<(), FrameCodecError> {
+    if !matches!(frame, WorkerResponseFrame::ShutdownAck) {
+        return Ok(());
+    }
+    let fields: serde_json::Map<String, Value> = serde_json::from_slice(line)
+        .map_err(|error| FrameCodecError::InvalidJson(error.to_string()))?;
+    if let Some(field) = fields.keys().find(|field| field.as_str() != "kind") {
+        return Err(FrameCodecError::InvalidJson(format!(
+            "unknown field `{field}` in shutdown_ack frame"
+        )));
+    }
+    Ok(())
 }
 
 fn require_nonempty(field: &str, value: &str) -> Result<(), FrameCodecError> {
@@ -1248,6 +1269,21 @@ mod tests {
             decode_response_frame(b"\n", DEFAULT_MAX_FRAME_BYTES),
             Err(FrameCodecError::Empty)
         ));
+    }
+
+    #[test]
+    fn shutdown_ack_accepts_only_the_canonical_empty_payload() {
+        assert_eq!(
+            decode_response_frame(br#"{"kind":"shutdown_ack"}"#, DEFAULT_MAX_FRAME_BYTES).unwrap(),
+            WorkerResponseFrame::ShutdownAck
+        );
+        let error = decode_response_frame(
+            br#"{"kind":"shutdown_ack","extra":true}"#,
+            DEFAULT_MAX_FRAME_BYTES,
+        )
+        .unwrap_err();
+        assert_eq!(error.kind(), "invalid_frame");
+        assert!(error.to_string().contains("unknown field `extra`"));
     }
 
     #[test]
