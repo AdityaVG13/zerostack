@@ -158,3 +158,7 @@ dist/
 
 # Local agent papercuts log
 .papercuts.jsonl
+
+.beads/dolt*
+.beads/beads.base.jsonl
+.beads/*.db-*
