@@ -1,6 +1,5 @@
 # =============================================================================
 # ZeroStack — .gitignore (public hub)
-# Keep issues.jsonl tracked under .beads/; everything else below is local-only.
 # =============================================================================
 
 # --- Build / test output ---
@@ -66,21 +65,8 @@ CLAUDE.md.*
 .papercuts.jsonl
 .skill-loop-progress.md
 
-# --- Beads runtime (track issues.jsonl + small config; ignore DB/dolt/backups) ---
 .dolt/
 .beads-credential-key
-.beads/proxieddb/
-.beads/*.db
-.beads/*.db-*
-.beads/dolt*
-.beads/beads.base.jsonl
-.beads/backup/
-.beads/embeddeddolt/
-.beads/.br_history/
-.beads/.fszero/
-.beads/.*.lock
-.beads/*.bak*
-.beads/*.jsonl.bak*
 .bv/
 
 # --- Local audit / campaign workspaces ---
@@ -141,3 +127,7 @@ conformance/tests/*
 
 # Local bench history
 .bench-history/
+
+# --- Beads (local only; never publish tracker state) ---
+.beads/
+.bv/

@@ -43,7 +43,7 @@ ALLOWLIST_FILES: dict[str, str] = {
 }
 
 # Line-scoped allowlist: host-path lines are OK only when they match a doc pattern.
-# Real username paths (e.g. /Users/aditya/...) must not match these.
+# Real username paths (e.g. ${HOME}/...) must not match these.
 ALLOWLIST_LINE_RES: dict[str, list[re.Pattern[str]]] = {
     "AGENTS.md": [
         # Privacy check recipe listing scan strings (not a personal path).
