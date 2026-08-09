@@ -26,6 +26,7 @@ fn registry_for(engine: RegistryEngine, operation: CanonicalOperation) -> Canoni
         version: CANONICAL_DISPATCH_VERSION.to_owned(),
         engine,
         operations: vec![operation],
+        resources: vec![],
     }
 }
 
@@ -132,12 +133,15 @@ fn golden_vectors_cover_every_effect_and_error_class() {
 
         let operation = CanonicalOperation {
             canonical_id: "fixture.operation".to_owned(),
+            description: String::new(),
             aliases: vec!["fixture_alias".to_owned()],
             args_schema: json!({
                 "type": "object",
                 "properties": {},
                 "additionalProperties": false
             }),
+            output_schema: None,
+            mcp_tool_name: None,
             effect_policy: policy,
             errors: ALL_DISPATCH_ERROR_CLASSES.to_vec(),
         };
@@ -188,12 +192,15 @@ fn authority_grants_are_bound_to_operation_and_effect() {
     let fixture = fixture();
     let operation = CanonicalOperation {
         canonical_id: "fixture.operation".to_owned(),
+        description: String::new(),
         aliases: vec!["fixture_alias".to_owned()],
         args_schema: json!({
             "type": "object",
             "properties": {},
             "additionalProperties": false
         }),
+        output_schema: None,
+        mcp_tool_name: None,
         effect_policy: EffectPolicy {
             effect_class: zero_abi::EffectClass::Irreversible,
             permit: zero_abi::PermitRequirement::Required,

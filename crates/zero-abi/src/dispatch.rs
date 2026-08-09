@@ -156,10 +156,32 @@ impl std::error::Error for DispatchContractError {}
 #[serde(deny_unknown_fields)]
 pub struct CanonicalOperation {
     pub canonical_id: String,
+    /// Engine-owned prose. Empty means no description was declared and is
+    /// omitted from legacy wire manifests.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub description: String,
     pub aliases: Vec<String>,
     pub args_schema: Value,
+    /// Engine-owned JSON Schema for successful results.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub output_schema: Option<Value>,
+    /// Primary name exposed by an MCP catalog. Dispatch still resolves the
+    /// canonical id and aliases independently.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mcp_tool_name: Option<String>,
     pub effect_policy: EffectPolicy,
     pub errors: Vec<DispatchErrorClass>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CanonicalResource {
+    pub uri: String,
+    pub name: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub description: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mime_type: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -168,6 +190,8 @@ pub struct CanonicalRegistry {
     pub version: String,
     pub engine: RegistryEngine,
     pub operations: Vec<CanonicalOperation>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub resources: Vec<CanonicalResource>,
 }
 
 impl CanonicalRegistry {
@@ -206,6 +230,25 @@ impl CanonicalRegistry {
                 register_name(&mut names, alias, &operation.canonical_id)?;
             }
         }
+        for operation in &self.operations {
+            if let Some(tool_name) = operation.mcp_tool_name.as_deref() {
+                // The default primary MCP name is the canonical id. It is the
+                // only intentional duplicate in the shared name namespace.
+                if tool_name != operation.canonical_id {
+                    register_name(&mut names, tool_name, &operation.canonical_id)?;
+                }
+            }
+        }
+        let mut resources = BTreeSet::new();
+        for resource in &self.resources {
+            validate_resource(resource)?;
+            if !resources.insert(resource.uri.as_str()) {
+                return Err(DispatchContractError::new(
+                    DispatchErrorClass::InvalidRegistry,
+                    format!("duplicate resource URI {:?}", resource.uri),
+                ));
+            }
+        }
         Ok(())
     }
 
@@ -223,11 +266,15 @@ impl CanonicalRegistry {
         for operation in &mut registry.operations {
             operation.aliases.sort();
             operation.args_schema = normalize_schema(&operation.args_schema);
+            if let Some(output_schema) = &mut operation.output_schema {
+                *output_schema = normalize_schema(output_schema);
+            }
             operation.errors.sort_unstable();
         }
         registry
             .operations
             .sort_by(|left, right| left.canonical_id.cmp(&right.canonical_id));
+        registry.resources.sort_by(|left, right| left.uri.cmp(&right.uri));
 
         serde_json::to_value(registry).map_err(|error| {
             DispatchContractError::new(
@@ -280,6 +327,17 @@ fn classify_decode_error(error: serde_json::Error) -> DispatchContractError {
 
 fn validate_operation(operation: &CanonicalOperation) -> Result<(), DispatchContractError> {
     validate_name(&operation.canonical_id, "canonical operation id")?;
+    if let Some(tool_name) = operation.mcp_tool_name.as_deref() {
+        validate_name(tool_name, "MCP tool name")?;
+    }
+    if let Some(output_schema) = &operation.output_schema {
+        if !output_schema.is_object() {
+            return Err(DispatchContractError::new(
+                DispatchErrorClass::InvalidRegistry,
+                format!("{} output_schema must be an object", operation.canonical_id),
+            ));
+        }
+    }
     operation.effect_policy.validate()?;
     if !operation.args_schema.is_object() {
         return Err(DispatchContractError::new(
@@ -312,6 +370,12 @@ fn validate_operation(operation: &CanonicalOperation) -> Result<(), DispatchCont
     for alias in &operation.aliases {
         validate_name(alias, "operation alias")?;
     }
+    Ok(())
+}
+
+fn validate_resource(resource: &CanonicalResource) -> Result<(), DispatchContractError> {
+    validate_name(&resource.uri, "resource URI")?;
+    validate_name(&resource.name, "resource name")?;
     Ok(())
 }
 
@@ -886,7 +950,10 @@ mod tests {
     fn operation(canonical_id: &str, alias: &str) -> CanonicalOperation {
         CanonicalOperation {
             canonical_id: canonical_id.to_owned(),
+            description: String::new(),
             aliases: vec![alias.to_owned()],
+            output_schema: None,
+            mcp_tool_name: None,
             args_schema: json!({
                 "type": "object",
                 "properties": {},
@@ -902,6 +969,134 @@ mod tests {
     }
 
     #[test]
+    fn legacy_manifest_omits_optional_surface_metadata_and_keeps_digest() {
+        let registry = CanonicalRegistry {
+            version: CANONICAL_DISPATCH_VERSION.to_owned(),
+            engine: RegistryEngine::FsZero,
+            operations: vec![operation("fs.read", "read")],
+            resources: vec![],
+        };
+        let manifest = registry.canonical_manifest().unwrap();
+        assert_eq!(
+            manifest,
+            json!({
+                "version": CANONICAL_DISPATCH_VERSION,
+                "engine": "fs_zero",
+                "operations": [{
+                    "canonical_id": "fs.read",
+                    "aliases": ["read"],
+                    "args_schema": {
+                        "additionalProperties": false,
+                        "properties": {},
+                        "type": "object"
+                    },
+                    "effect_policy": {
+                        "approval": "not_required",
+                        "effect_class": "read_only",
+                        "permit": "not_required"
+                    },
+                    "errors": ["invalid_stage_transition"]
+                }]
+            })
+        );
+        assert!(manifest["operations"][0].get("description").is_none());
+        assert!(manifest["operations"][0].get("output_schema").is_none());
+        assert!(manifest["operations"][0].get("mcp_tool_name").is_none());
+        assert!(manifest.get("resources").is_none());
+    }
+
+    #[test]
+    fn populated_surface_metadata_round_trips_and_resources_sort_by_uri() {
+        let mut registry = CanonicalRegistry {
+            version: CANONICAL_DISPATCH_VERSION.to_owned(),
+            engine: RegistryEngine::FsZero,
+            operations: vec![operation("fs.read", "read")],
+            resources: vec![
+                CanonicalResource {
+                    uri: "resource://z".into(),
+                    name: "Z".into(),
+                    description: "last".into(),
+                    mime_type: Some("text/plain".into()),
+                },
+                CanonicalResource {
+                    uri: "resource://a".into(),
+                    name: "A".into(),
+                    description: "first".into(),
+                    mime_type: None,
+                },
+            ],
+        };
+        registry.operations[0].description = "Read bytes".into();
+        registry.operations[0].output_schema = Some(json!({
+            "type": "object",
+            "properties": {"bytes": {"type": "integer"}}
+        }));
+        registry.operations[0].mcp_tool_name = Some("read_bytes".into());
+
+        let encoded = serde_json::to_value(&registry).unwrap();
+        let decoded = CanonicalRegistry::decode(&encoded).unwrap();
+        assert_eq!(decoded, registry);
+        let manifest = registry.canonical_manifest().unwrap();
+        assert_eq!(manifest["operations"][0]["description"], "Read bytes");
+        assert_eq!(manifest["operations"][0]["output_schema"]["type"], "object");
+        assert_eq!(manifest["operations"][0]["mcp_tool_name"], "read_bytes");
+        assert_eq!(manifest["resources"][0]["uri"], "resource://a");
+        assert_eq!(manifest["resources"][1]["uri"], "resource://z");
+    }
+
+    #[test]
+    fn surface_metadata_validation_rejects_invalid_schema_resource_and_name_collisions() {
+        let mut invalid_schema = CanonicalRegistry {
+            version: CANONICAL_DISPATCH_VERSION.to_owned(),
+            engine: RegistryEngine::FsZero,
+            operations: vec![operation("fs.read", "read")],
+            resources: vec![],
+        };
+        invalid_schema.operations[0].output_schema = Some(json!("string"));
+        assert_eq!(
+            invalid_schema.validate().unwrap_err().class,
+            DispatchErrorClass::InvalidRegistry
+        );
+
+        let mut duplicate_resources = invalid_schema.clone();
+        duplicate_resources.operations[0].output_schema = None;
+        duplicate_resources.resources = vec![
+            CanonicalResource {
+                uri: "resource://same".into(),
+                name: "one".into(),
+                description: String::new(),
+                mime_type: None,
+            },
+            CanonicalResource {
+                uri: "resource://same".into(),
+                name: "two".into(),
+                description: String::new(),
+                mime_type: None,
+            },
+        ];
+        assert_eq!(
+            duplicate_resources.validate().unwrap_err().class,
+            DispatchErrorClass::InvalidRegistry
+        );
+
+        let mut primary_collision = duplicate_resources.clone();
+        primary_collision.resources.clear();
+        primary_collision.operations[0].mcp_tool_name = Some("read".into());
+        assert_eq!(
+            primary_collision.validate().unwrap_err().class,
+            DispatchErrorClass::InvalidRegistry
+        );
+
+        let mut canonical_collision = primary_collision.clone();
+        canonical_collision.operations[0].mcp_tool_name = Some("fs.other".into());
+        canonical_collision.operations.push(operation("fs.other", "other"));
+        assert_eq!(
+            canonical_collision.validate().unwrap_err().class,
+            DispatchErrorClass::InvalidRegistry
+        );
+    }
+
+    #[test]
     fn registry_rejects_alias_collisions() {
         let registry = CanonicalRegistry {
             version: CANONICAL_DISPATCH_VERSION.to_owned(),
@@ -910,6 +1105,7 @@ mod tests {
                 operation("fs.first", "shared"),
                 operation("fs.second", "shared"),
             ],
+            resources: vec![],
         };
         assert_eq!(
             registry.validate().unwrap_err().class,
@@ -949,6 +1145,7 @@ mod tests {
             version: CANONICAL_DISPATCH_VERSION.to_owned(),
             engine: RegistryEngine::FsZero,
             operations: vec![read, write],
+            resources: vec![],
         };
         let mut permuted = declared.clone();
         permuted.operations.reverse();
@@ -1003,6 +1200,7 @@ mod tests {
             version: "zerostack.canonical_dispatch.v1".to_owned(),
             engine: RegistryEngine::FsZero,
             operations: vec![operation("fs.read", "read")],
+            resources: vec![],
         };
         assert_eq!(
             legacy.contract_digest_hex().unwrap_err().class,
@@ -1018,6 +1216,7 @@ mod tests {
             version: CANONICAL_DISPATCH_VERSION.to_owned(),
             engine: RegistryEngine::FsZero,
             operations: vec![duplicate_alias],
+            resources: vec![],
         };
         assert_eq!(
             duplicate_alias_registry
@@ -1035,6 +1234,7 @@ mod tests {
             version: CANONICAL_DISPATCH_VERSION.to_owned(),
             engine: RegistryEngine::FsZero,
             operations: vec![duplicate_error],
+            resources: vec![],
         };
         assert_eq!(
             duplicate_error_registry
@@ -1051,6 +1251,7 @@ mod tests {
             version: CANONICAL_DISPATCH_VERSION.to_owned(),
             engine: RegistryEngine::FsZero,
             operations: vec![operation("fs.read", "read")],
+            resources: vec![],
         };
         let mut machine = DispatchMachine::new(registry).unwrap();
         assert_eq!(
@@ -1072,6 +1273,7 @@ mod tests {
             version: CANONICAL_DISPATCH_VERSION.to_owned(),
             engine: RegistryEngine::TokenZero,
             operations: vec![operation],
+            resources: vec![],
         };
         let mut machine = DispatchMachine::new(registry).unwrap();
         machine.resolve("fixture_alias").unwrap();

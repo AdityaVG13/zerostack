@@ -41,8 +41,8 @@ pub use manifest::{
 pub use mcp_transport::FastMcpTransport;
 pub use mcp_transport::{
     DEFAULT_MCP_MAX_INFLIGHT, DEFAULT_MCP_TOOL_TIMEOUT, MAX_MCP_MAX_INFLIGHT, MAX_MCP_TOOL_TIMEOUT,
-    McpCallContext, McpDispatchError, McpDispatcher, McpTransportConfig, McpTransportError,
-    execute_call, execute_call_with_cancel, validate_mcp_registration,
+    McpCallContext, McpDispatchError, McpDispatcher, McpResourceReader, McpTransportConfig,
+    McpTransportError, execute_call, execute_call_with_cancel, validate_mcp_registration,
 };
 pub use node::{
     FNM_DEFAULT_ALIAS_SUBDIR, FNM_DIR_ENV, NODE_ORDER, NODE_SCHEMA, NodeCandidate, NodeEnv,

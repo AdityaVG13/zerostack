@@ -41,8 +41,12 @@ REQUIRED_HUB_MARKERS = (
     "#[serde(deny_unknown_fields)]",
 )
 WORKER_PACKAGES = {
+    "fs-zero",
+    "fszero-mcp",
     "fszero-worker",
+    "graphzero-mcp-compat",
     "graphzero-worker",
+    "tokenzero-mcp-compat",
     "tokenzero-worker",
 }
 WORKER_PATH_MARKERS = ("-worker", "-codemode")

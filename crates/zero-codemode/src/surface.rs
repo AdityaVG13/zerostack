@@ -127,6 +127,8 @@ pub struct SurfaceRegistration {
     pub contract_version: String,
     pub surface: SurfaceKind,
     pub root: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub instructions: Option<String>,
     pub adapter: DomainAdapterRegistration,
 }
 
@@ -140,6 +142,7 @@ impl SurfaceRegistration {
             contract_version: SURFACE_CONTRACT_VERSION.to_owned(),
             surface,
             root: root.into(),
+            instructions: None,
             adapter,
         }
     }
@@ -289,8 +292,11 @@ mod tests {
                 engine: RegistryEngine::FsZero,
                 operations: vec![zero_abi::CanonicalOperation {
                     canonical_id: "fs.read".into(),
+                    description: String::new(),
                     aliases: vec!["read".into()],
                     args_schema: json!({"type": "object", "additionalProperties": false}),
+                    output_schema: None,
+                    mcp_tool_name: None,
                     effect_policy: EffectPolicy {
                         effect_class: EffectClass::ReadOnly,
                         permit: PermitRequirement::NotRequired,
@@ -298,6 +304,7 @@ mod tests {
                     },
                     errors: ALL_DISPATCH_ERROR_CLASSES.to_vec(),
                 }],
+                resources: vec![],
             },
             ref_ownership: zero_abi::RefOwnership {
                 engine: EngineIdentity::FsZero,

@@ -64,8 +64,9 @@ pub use cwir::{
 pub use digest::{contract_digest, contract_digest_hex, sha256, sha256_hex};
 pub use dispatch::{
     ALL_DISPATCH_ERROR_CLASSES, ApprovalGrant, ApprovalRequirement, CANONICAL_DISPATCH_VERSION,
-    CanonicalOperation, CanonicalRegistry, DispatchContractError, DispatchErrorClass,
-    DispatchMachine, DispatchStage, EffectGrant, EffectPolicy, PermitGrant, PermitRequirement,
+    CanonicalOperation, CanonicalRegistry, CanonicalResource, DispatchContractError,
+    DispatchErrorClass, DispatchMachine, DispatchStage, EffectGrant, EffectPolicy, PermitGrant,
+    PermitRequirement,
     RegistryEngine, SourceDiagnostic, SourceForm,
 };
 pub use effect::{
