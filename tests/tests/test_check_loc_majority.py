@@ -55,6 +55,41 @@ class LocMajorityTests(unittest.TestCase):
         self.assertFalse(module._threshold(50, 100))
         self.assertTrue(module._threshold(51, 100))
 
+    def test_shared_candidate_rules_are_conservative(self) -> None:
+        domain_local = (
+            ("fszero", "src/core/session.rs"),
+            ("graphzero", "crates/graphzero-store/src/store/session.rs"),
+            ("tokenzero", "crates/tokenzero-codemode/src/journal.rs"),
+            ("fszero", "src/packaging/release_smoke.rs"),
+            ("graphzero", "crates/graphzero-cli/src/packaging.rs"),
+            ("tokenzero", "crates/tokenzero-mcp-compat/src/capability_descriptor.rs"),
+        )
+        for repo, path in domain_local:
+            with self.subTest(repo=repo, path=path):
+                classification = module.classify_path(repo, path)
+                self.assertEqual(classification.kind, "domain-local")
+                self.assertEqual(classification.hub_target, None)
+                self.assertTrue(classification.justification)
+
+        shared = (
+            ("fszero", "src/session_persist.rs", "session-discovery"),
+            ("graphzero", "src/discovery.rs", "session-discovery"),
+            ("fszero", "src/durable_journal.rs", "store-cas"),
+            ("graphzero", "src/journal_helper.rs", "store-cas"),
+            ("graphzero", "src/codemode/host.rs", "codemode-host"),
+        )
+        for repo, path, rule in shared:
+            with self.subTest(repo=repo, path=path):
+                classification = module.classify_path(repo, path)
+                self.assertEqual(classification.kind, "shared-candidate")
+                self.assertEqual(classification.rule, rule)
+
+    def test_hub_docs_and_formal_target_zero_testkit(self) -> None:
+        for path in ("docs/evidence.rs", "formal/proof.py"):
+            with self.subTest(path=path):
+                classification = module.classify_path("zerostack", path)
+                self.assertEqual(classification.hub_target, "zero-testkit")
+
     def test_missing_or_omitted_denominator_fails_closed(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)

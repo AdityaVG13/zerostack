@@ -122,7 +122,6 @@ SHARED_RULES: tuple[tuple[str, tuple[str, ...], str], ...] = (
             "/zerostack_store.rs",
             "/store_root.rs",
             "/fs_replace.rs",
-            "/journal.rs",
             "/journal_",
             "/durable_journal.rs",
             "/store_migration.rs",
@@ -139,7 +138,7 @@ SHARED_RULES: tuple[tuple[str, tuple[str, ...], str], ...] = (
     ),
     (
         "session-discovery",
-        ("/session.rs", "/session_persist.rs", "/discovery.rs", "/packaging"),
+        ("/session_persist.rs", "/discovery.rs"),
         "zero-codemode",
     ),
     (
@@ -150,7 +149,21 @@ SHARED_RULES: tuple[tuple[str, tuple[str, ...], str], ...] = (
 )
 THIN_ADAPTER_RULE = "surface-entrypoint"
 DOMAIN_RULE = "engine-domain-default"
+DOMAIN_EXCEPTION_RULE = "engine-domain-exception"
 EXCLUDED_RULE = "excluded-path-or-generated"
+
+# These engine files have names that resemble reusable substrate, but their
+# semantics remain engine-local.  Keep the exceptions exact and justified.
+DOMAIN_EXCEPTIONS: dict[tuple[str, str], str] = {
+    (
+        "tokenzero",
+        "crates/tokenzero-codemode/src/journal.rs",
+    ): "TokenZero CodeMode journal is engine-domain state, not shared store substrate",
+    (
+        "tokenzero",
+        "crates/tokenzero-mcp-compat/src/capability_descriptor.rs",
+    ): "TokenZero capability descriptor preserves engine-specific MCP compatibility semantics",
+}
 
 
 class GateError(ValueError):
@@ -270,6 +283,8 @@ def _path_reason(path: str, content: bytes) -> str | None:
 
 def _canonical_hub_target(path: str) -> str:
     parts = Path(path).parts
+    if parts and parts[0] in {"docs", "formal"}:
+        return "zero-testkit"
     if len(parts) >= 2 and parts[0] == "crates":
         return parts[1]
     if path.startswith("tests/") or path.startswith("scripts/"):
@@ -285,6 +300,9 @@ def classify_path(repo: str, path: str, content: bytes = b"") -> Classification:
     reason = _path_reason(path, content)
     if reason:
         return Classification("excluded", EXCLUDED_RULE, None, reason)
+    exception = DOMAIN_EXCEPTIONS.get((repo, path))
+    if exception is not None:
+        return Classification("domain-local", DOMAIN_EXCEPTION_RULE, None, exception)
     if repo == "zerostack":
         target = _canonical_hub_target(path)
         return Classification(
