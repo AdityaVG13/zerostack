@@ -2,10 +2,10 @@
   "schema": "zerostack.loc-ownership.v1",
   "version": 1,
   "generated_from_heads": {
-    "zerostack": "9a2660f7b109b17eb5f3dac3f909b084a7690ad1",
+    "zerostack": "858c5c2bd404b3db27f52f2d24aab7e4338d92c5",
     "fszero": "82fd21a75e34d5d0666e4f5a6a63ac686ab35557",
     "graphzero": "bd354a5d112a32ca395647c6264a361e82947b65",
-    "tokenzero": "b90cc1d4a669d0ea10eccd3eee61a77628af7ffc"
+    "tokenzero": "56d10770b7f0b950708f75716007d6aa3217f776"
   },
   "languages": [
     "Rust",
@@ -1158,9 +1158,9 @@
       "language": "Python",
       "classification": "shared-candidate",
       "rule": "hub-owned-substrate",
-      "justification": "hub implementation already owned by zero-codemode",
+      "justification": "hub implementation already owned by zero-testkit",
       "blob_digest": "37becd719a8354059281d7270a9325c46d4a30f3",
-      "hub_target": "zero-codemode"
+      "hub_target": "zero-testkit"
     },
     {
       "repo": "zerostack",
@@ -1168,9 +1168,9 @@
       "language": "Rust",
       "classification": "shared-candidate",
       "rule": "hub-owned-substrate",
-      "justification": "hub implementation already owned by zero-codemode",
+      "justification": "hub implementation already owned by zero-testkit",
       "blob_digest": "18dd5e0ae27647676d4726cb2cc980b41d0f09f7",
-      "hub_target": "zero-codemode"
+      "hub_target": "zero-testkit"
     },
     {
       "repo": "zerostack",
@@ -1178,9 +1178,9 @@
       "language": "Python",
       "classification": "shared-candidate",
       "rule": "hub-owned-substrate",
-      "justification": "hub implementation already owned by zero-codemode",
+      "justification": "hub implementation already owned by zero-testkit",
       "blob_digest": "aae76fa066c9b875f16993dbef2d0bbb0c7bfb21",
-      "hub_target": "zero-codemode"
+      "hub_target": "zero-testkit"
     },
     {
       "repo": "zerostack",
@@ -1188,9 +1188,9 @@
       "language": "C++",
       "classification": "shared-candidate",
       "rule": "hub-owned-substrate",
-      "justification": "hub implementation already owned by zero-codemode",
+      "justification": "hub implementation already owned by zero-testkit",
       "blob_digest": "0e8d0c9ca299ef79c84e362ec873b98c2c9e9253",
-      "hub_target": "zero-codemode"
+      "hub_target": "zero-testkit"
     },
     {
       "repo": "zerostack",
@@ -1198,9 +1198,9 @@
       "language": "Python",
       "classification": "shared-candidate",
       "rule": "hub-owned-substrate",
-      "justification": "hub implementation already owned by zero-codemode",
+      "justification": "hub implementation already owned by zero-testkit",
       "blob_digest": "f0a5816f1480abf4c6b6a1b00371917656e1e71c",
-      "hub_target": "zero-codemode"
+      "hub_target": "zero-testkit"
     },
     {
       "repo": "zerostack",
@@ -1355,7 +1355,7 @@
       "classification": "shared-candidate",
       "rule": "hub-owned-substrate",
       "justification": "hub implementation already owned by zero-testkit",
-      "blob_digest": "6ef89dd0c7a55e277c955a501d7f893d69234942",
+      "blob_digest": "a3e5f47e7cb22ab8616795fe4c402d2f47089671",
       "hub_target": "zero-testkit"
     },
     {
@@ -1605,7 +1605,7 @@
       "classification": "shared-candidate",
       "rule": "hub-owned-substrate",
       "justification": "hub implementation already owned by zero-testkit",
-      "blob_digest": "819a2a2cc5deea3406defbc6abf01dd703b9bafb",
+      "blob_digest": "eacfff6bba77846de9dd3758715f9fff3cce37b7",
       "hub_target": "zero-testkit"
     },
     {
@@ -1625,7 +1625,7 @@
       "classification": "shared-candidate",
       "rule": "hub-owned-substrate",
       "justification": "hub implementation already owned by zero-testkit",
-      "blob_digest": "c7da4ab594bf5e2ab7591cdb04f775c69702f4e4",
+      "blob_digest": "f48af9fe883aeca5899773867267065120bbe181",
       "hub_target": "zero-testkit"
     },
     {
@@ -1854,81 +1854,73 @@
       "repo": "fszero",
       "path": "packaging/check_config_show.sh",
       "language": "Shell",
-      "classification": "shared-candidate",
-      "rule": "session-discovery",
-      "justification": "path matches reviewed reusable-substrate rule session-discovery",
-      "blob_digest": "57b0c5148682deaf6b6ff0ee5cc9a1c93f7dfa93",
-      "hub_target": "zero-codemode"
+      "classification": "domain-local",
+      "rule": "engine-domain-default",
+      "justification": "fszero domain implementation has no reviewed shared-substrate signal",
+      "blob_digest": "57b0c5148682deaf6b6ff0ee5cc9a1c93f7dfa93"
     },
     {
       "repo": "fszero",
       "path": "packaging/check_cut_branches_partial_gate.sh",
       "language": "Shell",
-      "classification": "shared-candidate",
-      "rule": "session-discovery",
-      "justification": "path matches reviewed reusable-substrate rule session-discovery",
-      "blob_digest": "2f25993b62273d34a389ce91725dcc42a6b82165",
-      "hub_target": "zero-codemode"
+      "classification": "domain-local",
+      "rule": "engine-domain-default",
+      "justification": "fszero domain implementation has no reviewed shared-substrate signal",
+      "blob_digest": "2f25993b62273d34a389ce91725dcc42a6b82165"
     },
     {
       "repo": "fszero",
       "path": "packaging/check_install_agent_contract.sh",
       "language": "Shell",
-      "classification": "shared-candidate",
-      "rule": "session-discovery",
-      "justification": "path matches reviewed reusable-substrate rule session-discovery",
-      "blob_digest": "e7d972f489fa4ed5240c31dd8ccab359c1680aac",
-      "hub_target": "zero-codemode"
+      "classification": "domain-local",
+      "rule": "engine-domain-default",
+      "justification": "fszero domain implementation has no reviewed shared-substrate signal",
+      "blob_digest": "e7d972f489fa4ed5240c31dd8ccab359c1680aac"
     },
     {
       "repo": "fszero",
       "path": "packaging/completions/fszero.bash",
       "language": "Shell",
-      "classification": "shared-candidate",
-      "rule": "session-discovery",
-      "justification": "path matches reviewed reusable-substrate rule session-discovery",
-      "blob_digest": "ecbecbf3e47ddd4c74ffd952a66d258a23b9eb46",
-      "hub_target": "zero-codemode"
+      "classification": "domain-local",
+      "rule": "engine-domain-default",
+      "justification": "fszero domain implementation has no reviewed shared-substrate signal",
+      "blob_digest": "ecbecbf3e47ddd4c74ffd952a66d258a23b9eb46"
     },
     {
       "repo": "fszero",
       "path": "packaging/completions/fszero.zsh",
       "language": "Zsh",
-      "classification": "shared-candidate",
-      "rule": "session-discovery",
-      "justification": "path matches reviewed reusable-substrate rule session-discovery",
-      "blob_digest": "d97342d226a33355c5df85ef6b915bd7f8ee3eb3",
-      "hub_target": "zero-codemode"
+      "classification": "domain-local",
+      "rule": "engine-domain-default",
+      "justification": "fszero domain implementation has no reviewed shared-substrate signal",
+      "blob_digest": "d97342d226a33355c5df85ef6b915bd7f8ee3eb3"
     },
     {
       "repo": "fszero",
       "path": "packaging/config_show.sh",
       "language": "Shell",
-      "classification": "shared-candidate",
-      "rule": "session-discovery",
-      "justification": "path matches reviewed reusable-substrate rule session-discovery",
-      "blob_digest": "d57198ff011c8d19417f6b052197a57b391db4d4",
-      "hub_target": "zero-codemode"
+      "classification": "domain-local",
+      "rule": "engine-domain-default",
+      "justification": "fszero domain implementation has no reviewed shared-substrate signal",
+      "blob_digest": "d57198ff011c8d19417f6b052197a57b391db4d4"
     },
     {
       "repo": "fszero",
       "path": "packaging/install.sh",
       "language": "Shell",
-      "classification": "shared-candidate",
-      "rule": "session-discovery",
-      "justification": "path matches reviewed reusable-substrate rule session-discovery",
-      "blob_digest": "f9661ac59bcdded16d19566c62fd32ada675b980",
-      "hub_target": "zero-codemode"
+      "classification": "domain-local",
+      "rule": "engine-domain-default",
+      "justification": "fszero domain implementation has no reviewed shared-substrate signal",
+      "blob_digest": "f9661ac59bcdded16d19566c62fd32ada675b980"
     },
     {
       "repo": "fszero",
       "path": "packaging/man/generate_fszero_1.py",
       "language": "Python",
-      "classification": "shared-candidate",
-      "rule": "session-discovery",
-      "justification": "path matches reviewed reusable-substrate rule session-discovery",
-      "blob_digest": "04a2eada8fb85364768a0d1456005f679dc53c89",
-      "hub_target": "zero-codemode"
+      "classification": "domain-local",
+      "rule": "engine-domain-default",
+      "justification": "fszero domain implementation has no reviewed shared-substrate signal",
+      "blob_digest": "04a2eada8fb85364768a0d1456005f679dc53c89"
     },
     {
       "repo": "fszero",
@@ -3128,11 +3120,10 @@
       "repo": "fszero",
       "path": "src/core/session.rs",
       "language": "Rust",
-      "classification": "shared-candidate",
-      "rule": "session-discovery",
-      "justification": "path matches reviewed reusable-substrate rule session-discovery",
-      "blob_digest": "c7c696f0c3a9e6baab0e9e7617f9a31b16f6189f",
-      "hub_target": "zero-codemode"
+      "classification": "domain-local",
+      "rule": "engine-domain-default",
+      "justification": "fszero domain implementation has no reviewed shared-substrate signal",
+      "blob_digest": "c7c696f0c3a9e6baab0e9e7617f9a31b16f6189f"
     },
     {
       "repo": "fszero",
@@ -3456,51 +3447,46 @@
       "repo": "fszero",
       "path": "src/packaging/completions.rs",
       "language": "Rust",
-      "classification": "shared-candidate",
-      "rule": "session-discovery",
-      "justification": "path matches reviewed reusable-substrate rule session-discovery",
-      "blob_digest": "99ffaec098d7d4842a0548475154e365cfea1e33",
-      "hub_target": "zero-codemode"
+      "classification": "domain-local",
+      "rule": "engine-domain-default",
+      "justification": "fszero domain implementation has no reviewed shared-substrate signal",
+      "blob_digest": "99ffaec098d7d4842a0548475154e365cfea1e33"
     },
     {
       "repo": "fszero",
       "path": "src/packaging/mod.rs",
       "language": "Rust",
-      "classification": "shared-candidate",
-      "rule": "session-discovery",
-      "justification": "path matches reviewed reusable-substrate rule session-discovery",
-      "blob_digest": "278bd5383086403d4a0b8d43a99ff58d093e5a5d",
-      "hub_target": "zero-codemode"
+      "classification": "domain-local",
+      "rule": "engine-domain-default",
+      "justification": "fszero domain implementation has no reviewed shared-substrate signal",
+      "blob_digest": "278bd5383086403d4a0b8d43a99ff58d093e5a5d"
     },
     {
       "repo": "fszero",
       "path": "src/packaging/release_smoke.rs",
       "language": "Rust",
-      "classification": "shared-candidate",
-      "rule": "session-discovery",
-      "justification": "path matches reviewed reusable-substrate rule session-discovery",
-      "blob_digest": "a02bea8fabc13934c2f320d4aaea0e661a34534d",
-      "hub_target": "zero-codemode"
+      "classification": "domain-local",
+      "rule": "engine-domain-default",
+      "justification": "fszero domain implementation has no reviewed shared-substrate signal",
+      "blob_digest": "a02bea8fabc13934c2f320d4aaea0e661a34534d"
     },
     {
       "repo": "fszero",
       "path": "src/packaging/surface_bin.rs",
       "language": "Rust",
-      "classification": "shared-candidate",
-      "rule": "session-discovery",
-      "justification": "path matches reviewed reusable-substrate rule session-discovery",
-      "blob_digest": "5b7525362d29722fc1f08e4bbcb6704f1ba34e07",
-      "hub_target": "zero-codemode"
+      "classification": "domain-local",
+      "rule": "engine-domain-default",
+      "justification": "fszero domain implementation has no reviewed shared-substrate signal",
+      "blob_digest": "5b7525362d29722fc1f08e4bbcb6704f1ba34e07"
     },
     {
       "repo": "fszero",
       "path": "src/packaging/waiver.rs",
       "language": "Rust",
-      "classification": "shared-candidate",
-      "rule": "session-discovery",
-      "justification": "path matches reviewed reusable-substrate rule session-discovery",
-      "blob_digest": "7f1c4b1ff44528a0cd5b2d4cbb8dfa87aa4c95d5",
-      "hub_target": "zero-codemode"
+      "classification": "domain-local",
+      "rule": "engine-domain-default",
+      "justification": "fszero domain implementation has no reviewed shared-substrate signal",
+      "blob_digest": "7f1c4b1ff44528a0cd5b2d4cbb8dfa87aa4c95d5"
     },
     {
       "repo": "fszero",
@@ -4009,31 +3995,28 @@
       "repo": "fszero",
       "path": "tests/packaging_e2e.rs",
       "language": "Rust",
-      "classification": "shared-candidate",
-      "rule": "session-discovery",
-      "justification": "path matches reviewed reusable-substrate rule session-discovery",
-      "blob_digest": "c565f87448975e2b20912ae2dedd220c5184f753",
-      "hub_target": "zero-codemode"
+      "classification": "domain-local",
+      "rule": "engine-domain-default",
+      "justification": "fszero domain implementation has no reviewed shared-substrate signal",
+      "blob_digest": "c565f87448975e2b20912ae2dedd220c5184f753"
     },
     {
       "repo": "fszero",
       "path": "tests/packaging_lifecycle.rs",
       "language": "Rust",
-      "classification": "shared-candidate",
-      "rule": "session-discovery",
-      "justification": "path matches reviewed reusable-substrate rule session-discovery",
-      "blob_digest": "d014a256998ffe1803280894f6aafda1f03994fa",
-      "hub_target": "zero-codemode"
+      "classification": "domain-local",
+      "rule": "engine-domain-default",
+      "justification": "fszero domain implementation has no reviewed shared-substrate signal",
+      "blob_digest": "d014a256998ffe1803280894f6aafda1f03994fa"
     },
     {
       "repo": "fszero",
       "path": "tests/packaging_unit.rs",
       "language": "Rust",
-      "classification": "shared-candidate",
-      "rule": "session-discovery",
-      "justification": "path matches reviewed reusable-substrate rule session-discovery",
-      "blob_digest": "8748c2806b7391f7a1cfc2127796c710ba4a873f",
-      "hub_target": "zero-codemode"
+      "classification": "domain-local",
+      "rule": "engine-domain-default",
+      "justification": "fszero domain implementation has no reviewed shared-substrate signal",
+      "blob_digest": "8748c2806b7391f7a1cfc2127796c710ba4a873f"
     },
     {
       "repo": "fszero",
@@ -4896,11 +4879,10 @@
       "repo": "graphzero",
       "path": "crates/graphzero-cli/src/packaging.rs",
       "language": "Rust",
-      "classification": "shared-candidate",
-      "rule": "session-discovery",
-      "justification": "path matches reviewed reusable-substrate rule session-discovery",
-      "blob_digest": "c9c5dc86b22f32259a132e1cfdf49dcf507e5399",
-      "hub_target": "zero-codemode"
+      "classification": "domain-local",
+      "rule": "engine-domain-default",
+      "justification": "graphzero domain implementation has no reviewed shared-substrate signal",
+      "blob_digest": "c9c5dc86b22f32259a132e1cfdf49dcf507e5399"
     },
     {
       "repo": "graphzero",
@@ -5123,21 +5105,19 @@
       "repo": "graphzero",
       "path": "crates/graphzero-cli/tests/packaging_e2e.rs",
       "language": "Rust",
-      "classification": "shared-candidate",
-      "rule": "session-discovery",
-      "justification": "path matches reviewed reusable-substrate rule session-discovery",
-      "blob_digest": "042af8f33047b7ff6c6c7f02d2783001846f542a",
-      "hub_target": "zero-codemode"
+      "classification": "domain-local",
+      "rule": "engine-domain-default",
+      "justification": "graphzero domain implementation has no reviewed shared-substrate signal",
+      "blob_digest": "042af8f33047b7ff6c6c7f02d2783001846f542a"
     },
     {
       "repo": "graphzero",
       "path": "crates/graphzero-cli/tests/packaging_lifecycle.rs",
       "language": "Rust",
-      "classification": "shared-candidate",
-      "rule": "session-discovery",
-      "justification": "path matches reviewed reusable-substrate rule session-discovery",
-      "blob_digest": "a4c069f3bb2f096cadcf0b97209d8f146a003632",
-      "hub_target": "zero-codemode"
+      "classification": "domain-local",
+      "rule": "engine-domain-default",
+      "justification": "graphzero domain implementation has no reviewed shared-substrate signal",
+      "blob_digest": "a4c069f3bb2f096cadcf0b97209d8f146a003632"
     },
     {
       "repo": "graphzero",
@@ -7424,11 +7404,10 @@
       "repo": "graphzero",
       "path": "crates/graphzero-store/src/store/session.rs",
       "language": "Rust",
-      "classification": "shared-candidate",
-      "rule": "session-discovery",
-      "justification": "path matches reviewed reusable-substrate rule session-discovery",
-      "blob_digest": "5b64a672882cfc468ab3962755924d5e25977a37",
-      "hub_target": "zero-codemode"
+      "classification": "domain-local",
+      "rule": "engine-domain-default",
+      "justification": "graphzero domain implementation has no reviewed shared-substrate signal",
+      "blob_digest": "5b64a672882cfc468ab3962755924d5e25977a37"
     },
     {
       "repo": "graphzero",
@@ -8373,11 +8352,10 @@
       "repo": "graphzero",
       "path": "packaging/install.sh",
       "language": "Shell",
-      "classification": "shared-candidate",
-      "rule": "session-discovery",
-      "justification": "path matches reviewed reusable-substrate rule session-discovery",
-      "blob_digest": "c67435417bfcbe67db0eb68ebd20c602744c5e46",
-      "hub_target": "zero-codemode"
+      "classification": "domain-local",
+      "rule": "engine-domain-default",
+      "justification": "graphzero domain implementation has no reviewed shared-substrate signal",
+      "blob_digest": "c67435417bfcbe67db0eb68ebd20c602744c5e46"
     },
     {
       "repo": "graphzero",
@@ -8824,11 +8802,10 @@
       "repo": "tokenzero",
       "path": "crates/tokenzero-codemode/src/journal.rs",
       "language": "Rust",
-      "classification": "shared-candidate",
-      "rule": "store-cas",
-      "justification": "path matches reviewed reusable-substrate rule store-cas",
-      "blob_digest": "9e29f4b05ecddc058ec70156bc2d580cb115a3b2",
-      "hub_target": "zero-store"
+      "classification": "domain-local",
+      "rule": "engine-domain-exception",
+      "justification": "TokenZero CodeMode journal is engine-domain state, not shared store substrate",
+      "blob_digest": "9e29f4b05ecddc058ec70156bc2d580cb115a3b2"
     },
     {
       "repo": "tokenzero",
@@ -9676,11 +9653,10 @@
       "repo": "tokenzero",
       "path": "crates/tokenzero-engine/src/session.rs",
       "language": "Rust",
-      "classification": "shared-candidate",
-      "rule": "session-discovery",
-      "justification": "path matches reviewed reusable-substrate rule session-discovery",
-      "blob_digest": "7eee964188f76ed0ddcae2159459e69392c7238b",
-      "hub_target": "zero-codemode"
+      "classification": "domain-local",
+      "rule": "engine-domain-default",
+      "justification": "tokenzero domain implementation has no reviewed shared-substrate signal",
+      "blob_digest": "7eee964188f76ed0ddcae2159459e69392c7238b"
     },
     {
       "repo": "tokenzero",
@@ -9736,7 +9712,7 @@
       "classification": "domain-local",
       "rule": "engine-domain-default",
       "justification": "tokenzero domain implementation has no reviewed shared-substrate signal",
-      "blob_digest": "a91a4550c7c1a670755b62c2efd52a9fc88a05d8"
+      "blob_digest": "887322965825c16556857c92d8ad19b9cc284e28"
     },
     {
       "repo": "tokenzero",
@@ -10061,21 +10037,19 @@
       "repo": "tokenzero",
       "path": "crates/tokenzero-install/src/packaging.rs",
       "language": "Rust",
-      "classification": "shared-candidate",
-      "rule": "session-discovery",
-      "justification": "path matches reviewed reusable-substrate rule session-discovery",
-      "blob_digest": "30360b8d8b53bffb0ca0ae632ea0015013c1c7a3",
-      "hub_target": "zero-codemode"
+      "classification": "domain-local",
+      "rule": "engine-domain-default",
+      "justification": "tokenzero domain implementation has no reviewed shared-substrate signal",
+      "blob_digest": "30360b8d8b53bffb0ca0ae632ea0015013c1c7a3"
     },
     {
       "repo": "tokenzero",
       "path": "crates/tokenzero-install/src/packaging_inline_tests.rs",
       "language": "Rust",
-      "classification": "shared-candidate",
-      "rule": "session-discovery",
-      "justification": "path matches reviewed reusable-substrate rule session-discovery",
-      "blob_digest": "aec1004fdeb8c39767cd53ab357a64fdbdb2f243",
-      "hub_target": "zero-codemode"
+      "classification": "domain-local",
+      "rule": "engine-domain-default",
+      "justification": "tokenzero domain implementation has no reviewed shared-substrate signal",
+      "blob_digest": "aec1004fdeb8c39767cd53ab357a64fdbdb2f243"
     },
     {
       "repo": "tokenzero",
@@ -10230,17 +10204,16 @@
       "classification": "domain-local",
       "rule": "engine-domain-default",
       "justification": "tokenzero domain implementation has no reviewed shared-substrate signal",
-      "blob_digest": "e09e1b8332360ffa20f308d44c7b12fae18d2cd1"
+      "blob_digest": "b57f2d891647f86747a4b7f52aaf6e555437c397"
     },
     {
       "repo": "tokenzero",
       "path": "crates/tokenzero-mcp-compat/src/capability_descriptor.rs",
       "language": "Rust",
-      "classification": "shared-candidate",
-      "rule": "capability",
-      "justification": "path matches reviewed reusable-substrate rule capability",
-      "blob_digest": "1d0ce65e3507914bc8af1423bb2782c4d46b8250",
-      "hub_target": "zero-abi"
+      "classification": "domain-local",
+      "rule": "engine-domain-exception",
+      "justification": "TokenZero capability descriptor preserves engine-specific MCP compatibility semantics",
+      "blob_digest": "1d0ce65e3507914bc8af1423bb2782c4d46b8250"
     },
     {
       "repo": "tokenzero",
@@ -10404,11 +10377,10 @@
       "repo": "tokenzero",
       "path": "crates/tokenzero-mcp-compat/src/tests/session.rs",
       "language": "Rust",
-      "classification": "shared-candidate",
-      "rule": "session-discovery",
-      "justification": "path matches reviewed reusable-substrate rule session-discovery",
-      "blob_digest": "dab6a89d937b28ceb82679628c477a99f18390af",
-      "hub_target": "zero-codemode"
+      "classification": "domain-local",
+      "rule": "engine-domain-default",
+      "justification": "tokenzero domain implementation has no reviewed shared-substrate signal",
+      "blob_digest": "dab6a89d937b28ceb82679628c477a99f18390af"
     },
     {
       "repo": "tokenzero",
@@ -11109,31 +11081,28 @@
       "repo": "tokenzero",
       "path": "crates/tokenzero/tests/packaging_e2e.rs",
       "language": "Rust",
-      "classification": "shared-candidate",
-      "rule": "session-discovery",
-      "justification": "path matches reviewed reusable-substrate rule session-discovery",
-      "blob_digest": "e777d1cce00797dc4865e70f2619e43f81e7fa26",
-      "hub_target": "zero-codemode"
+      "classification": "domain-local",
+      "rule": "engine-domain-default",
+      "justification": "tokenzero domain implementation has no reviewed shared-substrate signal",
+      "blob_digest": "e777d1cce00797dc4865e70f2619e43f81e7fa26"
     },
     {
       "repo": "tokenzero",
       "path": "crates/tokenzero/tests/packaging_lifecycle.rs",
       "language": "Rust",
-      "classification": "shared-candidate",
-      "rule": "session-discovery",
-      "justification": "path matches reviewed reusable-substrate rule session-discovery",
-      "blob_digest": "e7fab5ebee059ca420f1024327a4a0a289e60bc0",
-      "hub_target": "zero-codemode"
+      "classification": "domain-local",
+      "rule": "engine-domain-default",
+      "justification": "tokenzero domain implementation has no reviewed shared-substrate signal",
+      "blob_digest": "e7fab5ebee059ca420f1024327a4a0a289e60bc0"
     },
     {
       "repo": "tokenzero",
       "path": "crates/tokenzero/tests/packaging_static_evidence.rs",
       "language": "Rust",
-      "classification": "shared-candidate",
-      "rule": "session-discovery",
-      "justification": "path matches reviewed reusable-substrate rule session-discovery",
-      "blob_digest": "9db59d9dec343f9276fd2179f119d67b29566c13",
-      "hub_target": "zero-codemode"
+      "classification": "domain-local",
+      "rule": "engine-domain-default",
+      "justification": "tokenzero domain implementation has no reviewed shared-substrate signal",
+      "blob_digest": "9db59d9dec343f9276fd2179f119d67b29566c13"
     },
     {
       "repo": "tokenzero",
@@ -11284,21 +11253,19 @@
       "repo": "tokenzero",
       "path": "packaging/homebrew/tokenzero.rb",
       "language": "Ruby",
-      "classification": "shared-candidate",
-      "rule": "session-discovery",
-      "justification": "path matches reviewed reusable-substrate rule session-discovery",
-      "blob_digest": "cfff194a4798835d14ad09580d1db09354213689",
-      "hub_target": "zero-codemode"
+      "classification": "domain-local",
+      "rule": "engine-domain-default",
+      "justification": "tokenzero domain implementation has no reviewed shared-substrate signal",
+      "blob_digest": "cfff194a4798835d14ad09580d1db09354213689"
     },
     {
       "repo": "tokenzero",
       "path": "packaging/install.sh",
       "language": "Shell",
-      "classification": "shared-candidate",
-      "rule": "session-discovery",
-      "justification": "path matches reviewed reusable-substrate rule session-discovery",
-      "blob_digest": "2e8061312f21faff1913eafa218c4bc23402299b",
-      "hub_target": "zero-codemode"
+      "classification": "domain-local",
+      "rule": "engine-domain-default",
+      "justification": "tokenzero domain implementation has no reviewed shared-substrate signal",
+      "blob_digest": "2e8061312f21faff1913eafa218c4bc23402299b"
     },
     {
       "repo": "tokenzero",
