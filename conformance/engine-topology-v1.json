@@ -1371,6 +1371,46 @@
           "target_role": "verification",
           "target_package": "graphzero-test-support",
           "target_binary": "gen-fixture"
+        },
+        {
+          "kind": "crate",
+          "path": "fuzz/Cargo.toml",
+          "package": "graphzero-fuzz",
+          "name": "graphzero-fuzz",
+          "disposition": "keep",
+          "target_role": "verification",
+          "target_package": "graphzero-fuzz",
+          "target_binary": null
+        },
+        {
+          "kind": "binary",
+          "path": "fuzz/fuzz_targets/delta_codec.rs",
+          "package": "graphzero-fuzz",
+          "name": "delta_codec",
+          "disposition": "keep",
+          "target_role": "verification",
+          "target_package": "graphzero-fuzz",
+          "target_binary": null
+        },
+        {
+          "kind": "binary",
+          "path": "fuzz/fuzz_targets/pack_sign.rs",
+          "package": "graphzero-fuzz",
+          "name": "pack_sign",
+          "disposition": "keep",
+          "target_role": "verification",
+          "target_package": "graphzero-fuzz",
+          "target_binary": null
+        },
+        {
+          "kind": "binary",
+          "path": "fuzz/fuzz_targets/scip_parse.rs",
+          "package": "graphzero-fuzz",
+          "name": "scip_parse",
+          "disposition": "keep",
+          "target_role": "verification",
+          "target_package": "graphzero-fuzz",
+          "target_binary": null
         }
       ]
     }
