@@ -2,7 +2,8 @@
 """Run the canonical shared suite against reference or explicitly located binaries.
 
 The runner is intentionally transport-neutral: the Rust conformance binary owns
-MCP framing and the adapter descriptor supplies only the executable and namespace.
+the selected raw-worker, planner, or MCP framing, while the adapter descriptor
+supplies only the executable, namespace, and surface.
 """
 from __future__ import annotations
 

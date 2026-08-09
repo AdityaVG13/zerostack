@@ -24,7 +24,7 @@ mod tests {
         let report = crate::ConformanceReport::new(
             Ns::Gz,
             "fake-graphzero",
-            Surface::Codemode,
+            Surface::Planner,
             (1..=10)
                 .map(|gate| CheckResult::pass(&format!("G{gate}"), "semantic"))
                 .collect(),

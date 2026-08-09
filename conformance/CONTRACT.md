@@ -2,9 +2,15 @@
 
 ## Conformance report completion
 
-Each gate reports a machine-readable status of pass, fail, or skipped; a skipped gate MUST include a stable skip_reason. The authoritative required set is G1-G10 for CodeMode and G1 for MCP. Report completion is failed when a required gate fails, partial when required evidence is missing/skipped or the full G1-G10 evidence scope was not run, and complete only when the full scope ran and every required gate passed. The backward-compatible passed field is true only for a complete pass. In particular, an MCP G1-only run is partial with passed=false; skipped non-required gates do not make it failed. The CLI exits 0 for a complete pass, 1 for failed, and 2 for partial.
+Conformance runs in two distinct, non-overlapping layers with disjoint gate vocabularies:
 
-The canonical harness report shape is defined by `schemas/harness-report.schema.json`; `schemas/harness_report.schema.json` is its deterministic resolved snapshot. Gate IDs serialize exactly as `G1` through `G10`, while each check carries its semantic label separately in `name`. The sole retained legacy compatibility spelling, `G4LEAKPROOF`, is deserialize-only and MUST NOT be emitted. A report MUST reject unknown fields, unknown gate IDs, and duplicate gate IDs. RACC gate names are a separate namespace and are not remapped by this table.
+- **Plan-level G1-G10** (`surface = planner`): the canonical planner gates driving `{ns}_execute_code` (ctx.step, coalescing, sandbox). `contract_version = 1.0`.
+- **Raw-worker RW1-RW10** (`surface = codemode`): worker-boundary invariants for a planner-free raw-worker v2 binary. `contract_version = raw-worker-v2`. These are NOT aliases of G1-G10.
+- **MCP exposure** (`surface = mcp`): only G1 exposure applies.
+
+Each gate reports a machine-readable status of pass, fail, or skipped; a skipped gate MUST include a stable skip_reason. The authoritative required set is surface-specific: G1-G10 for planner, RW1-RW10 for codemode, and G1 for mcp. Report completion is failed when a required gate fails, partial when required evidence is missing/skipped or the surface-specific evidence scope was not fully run, and complete only when the full surface scope ran and every required gate passed. The backward-compatible passed field is true only for a complete pass. A codemode report carrying plan-level G ids is partial (not complete), because its scope is RW1-RW10; conversely a planner report carrying RW ids cannot be complete. In particular, an MCP G1-only run is partial with passed=false; skipped non-required gates do not make it failed. The CLI exits 0 for a complete pass, 1 for failed, and 2 for partial.
+
+The canonical harness report shape is defined by `schemas/harness-report.schema.json`; `schemas/harness_report.schema.json` is its deterministic resolved snapshot. Gate IDs serialize exactly as `G1` through `G10` for the plan layer and `RW1` through `RW10` for the raw-worker layer, while each check carries its semantic label separately in `name`. The two vocabularies never overlap and a single report must not mix them. The sole retained legacy compatibility spelling, `G4LEAKPROOF`, is deserialize-only and MUST NOT be emitted. A report MUST reject unknown fields, unknown gate IDs, and duplicate gate IDs. RACC gate names are a separate namespace and are not remapped by this table.
 
 Status: normative. This document supersedes prior prose specs for conformance purposes. Durable step-log/replay is explicitly deferred and is not part of v1.0.
 
@@ -335,7 +341,11 @@ Capability-scoped bindings are primary. Substring scanners MAY remain as defense
 
 ## 13. Conformance checks
 
-The conformance crate names these checks G1-G10:
+The conformance crate defines two distinct, non-overlapping check vocabularies.
+
+### 13.1 Plan-level G1-G10 (planner surface, `contract_version` 1.0)
+
+These drive a planner host serving `{ns}_execute_code` and check plan semantics:
 
 | Check | Maps audit gap(s) | Requirement |
 |---|---|---|
@@ -351,6 +361,23 @@ The conformance crate names these checks G1-G10:
 | G10 sandbox denial | #7 | Every denial category in §12 fails with `kind = "sandbox"`. |
 
 Durable step-log/replay is deferred and is not mapped to a v1.0 conformance check.
+
+### 13.2 Raw-worker RW1-RW10 (codemode surface, `contract_version` raw-worker-v2)
+
+These drive a planner-free raw-worker v2 binary over the hub raw-v2 wire protocol and check worker-boundary invariants. They are NOT aliases of G1-G10: a raw worker cannot own planner semantics (the literal ctx.step primitive, aggregate op coalescing, or an in-planner JS sandbox).
+
+| Check | Requirement |
+|---|---|
+| RW1 artifact_exposure | `capabilities --json` probe + wire handshake + opposite-surface refusal. |
+| RW2 recoverable_refs | op result carries engine-scoped refs that resolve via the owning engine's expand op, plus echoed trace ids. |
+| RW3 telemetry_accounting | telemetry_request yields engine timeline; worker token accounting is REQUIRED for TokenZero and OPTIONAL for FSZero/GraphZero. |
+| RW4 output_bounds | oversize op output stays within negotiated frame/output bounds. |
+| RW5 typed_errors | validation/forbidden/substrate failures are typed WorkerError; host authorization is NOT a raw-worker gate. |
+| RW6 session_continuity | distinct calls on one worker process keep continuity and per-call ref/trace ownership (not a literal ctx.step primitive). |
+| RW7 frame_limits | negotiated protocol limits are nonzero and enforced. |
+| RW8 domain_mutation | domain-authority mutation op succeeds at the worker boundary; the engine owns mutation, the hub owns authorization. |
+| RW9 process_reuse | many sequential ops settle in one worker process (not aggregate plan-level op coalescing). |
+| RW10 planner_refusal | planner/JS/MCP ops are denied with typed errors and the worker stays alive. |
 
 ## 14. Reports
 

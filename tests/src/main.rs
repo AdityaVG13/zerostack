@@ -9,12 +9,14 @@ use zerostack_shared_tests::{
 
 /// Infer the served surface from the artifact filename.
 ///
-/// Engines ship `<name>-codemode` and `<name>-mcp`, so the filename carries the
-/// install-time choice. Returns None for anything else, including the bare
-/// compatibility shim, which is a selected symlink whose target we must not
-/// assume.
+/// Engines ship `<name>-codemode` (raw worker), `<name>-planner` (planner
+/// host), and `<name>-mcp` (MCP server), so the filename carries the
+/// install-time choice. Returns None for anything else.
 fn infer_surface(bin: &std::path::Path) -> Option<Surface> {
     let stem = bin.file_name()?.to_string_lossy().to_ascii_lowercase();
+    if stem.contains("planner") || stem.contains("plan-mode") {
+        return Some(Surface::Planner);
+    }
     if stem.contains("codemode") || stem.contains("code-mode") {
         return Some(Surface::Codemode);
     }
@@ -26,7 +28,7 @@ fn infer_surface(bin: &std::path::Path) -> Option<Surface> {
 
 #[derive(Debug, Parser)]
 #[command(name = "zerostack-codemode-conformance")]
-#[command(about = "Run ZeroStack CodeMode v1.0 G1-G10 conformance checks")]
+#[command(about = "Run ZeroStack conformance: plan G1-G10 (planner), raw-worker RW1-RW10 (codemode), or G1 exposure (mcp)")]
 struct Args {
     /// Substrate namespace: fz, tz, or gz.
     #[arg(long)]
@@ -36,10 +38,11 @@ struct Args {
     #[arg(long)]
     bin: Option<PathBuf>,
 
-    /// Which surface that artifact serves: 'codemode' or 'mcp'.
+    /// Which surface that artifact serves: 'planner', 'codemode', or 'mcp'.
     ///
-    /// Surfaces are mutually exclusive; you install one or the other. Inferred
-    /// from the artifact filename when omitted.
+    /// Distinct layers: planner runs plan-level G1-G10; codemode runs raw-worker
+    /// RW1-RW10; mcp runs G1 exposure only. Inferred from the artifact filename
+    /// when omitted.
     #[arg(long)]
     surface: Option<String>,
 
@@ -127,7 +130,7 @@ fn build_run_config(args: Args) -> Result<RunConfig> {
         Some(value) => Surface::parse(value)?,
         None => infer_surface(&bin).with_context(|| {
             format!(
-                "cannot tell which surface {:?} serves; pass --surface codemode or --surface mcp",
+                "cannot tell which surface {:?} serves; pass --surface planner|codemode|mcp",
                 bin.file_name().unwrap_or_default()
             )
         })?,

@@ -4,7 +4,9 @@ pub mod checks;
 pub mod fake_substrate;
 pub mod oracle;
 pub mod patterns;
+pub mod plan;
 pub mod racc;
+pub mod raw_worker;
 pub mod report;
 pub mod schema;
 pub mod testkit_bridge;
@@ -21,8 +23,18 @@ use std::process::{Child, ChildStdin, Command, Stdio};
 use std::time::{Duration, Instant};
 
 pub const CONTRACT_VERSION: &str = "1.0";
-/// Stable compatibility projection of the authoritative GATE_MAPPINGS table.
+/// Raw-worker v2 conformance contract label, distinct from the plan-level
+/// `CONTRACT_VERSION`. A `*-codemode` report carries this so a report cannot
+/// overclaim plan-level scope.
+pub const RAW_WORKER_CONTRACT_VERSION: &str = "raw-worker-v2";
+/// Stable compatibility projection of the authoritative GATE_MAPPINGS table
+/// (plan-level G1-G10).
 pub const CHECK_IDS: [&str; 10] = ["G1", "G2", "G3", "G4", "G5", "G6", "G7", "G8", "G9", "G10"];
+/// Stable projection of the authoritative RAW_GATE_MAPPINGS table
+/// (raw-worker v2 RW1-RW10).
+pub const RAW_CHECK_IDS: [&str; 10] = [
+    "RW1", "RW2", "RW3", "RW4", "RW5", "RW6", "RW7", "RW8", "RW9", "RW10",
+];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -186,11 +198,33 @@ impl CheckResult {
 
 pub fn required_gate_ids(surface: Surface) -> Vec<&'static str> {
     match surface {
-        Surface::Codemode => checks::GATE_MAPPINGS
-            .iter()
-            .map(|mapping| mapping.id.as_str())
-            .collect(),
+        // Plan-level G1-G10 require every plan gate.
+        Surface::Planner => CHECK_IDS.to_vec(),
+        // Raw-worker RW1-RW10 require every raw gate (distinct from G1-G10).
+        Surface::Codemode => RAW_CHECK_IDS.to_vec(),
+        // MCP only exercises exposure.
         Surface::Mcp => vec!["G1"],
+    }
+}
+
+/// Full-conformance scope ids for a surface. `Complete` requires every id in
+/// this set to be present and non-skipped (in addition to all required ids
+/// passing). MCP is capped at Partial because it only exercises exposure:
+/// its emitted G2-G10 skips never satisfy the plan-level scope.
+fn scope_gate_ids(surface: Surface) -> &'static [&'static str] {
+    match surface {
+        Surface::Planner => &CHECK_IDS,
+        Surface::Codemode => &RAW_CHECK_IDS,
+        Surface::Mcp => &CHECK_IDS,
+    }
+}
+
+/// Report contract_version label per surface so a report cannot overclaim
+/// plan-level scope when it only ran raw-worker gates.
+fn surface_contract_version(surface: Surface) -> &'static str {
+    match surface {
+        Surface::Codemode => RAW_WORKER_CONTRACT_VERSION,
+        Surface::Planner | Surface::Mcp => CONTRACT_VERSION,
     }
 }
 
@@ -217,10 +251,13 @@ impl ConformanceReport {
                 .iter()
                 .any(|c| c.id == *id && c.status == GateStatus::Pass)
         });
-        let full_scope = checks::GATE_MAPPINGS.iter().all(|mapping| {
+        // Full scope is surface-specific: it never assumes the plan-level G
+        // mapping for a raw-worker (codemode) report.
+        let scope = scope_gate_ids(surface);
+        let full_scope = scope.iter().all(|id| {
             checks
                 .iter()
-                .any(|check| check.id == mapping.id.as_str() && check.status != GateStatus::Skipped)
+                .any(|check| check.id == *id && check.status != GateStatus::Skipped)
         });
         let completion_status = if required_failed {
             CompletionStatus::Failed
@@ -233,7 +270,7 @@ impl ConformanceReport {
         Self {
             ns: ns.as_str().into(),
             bin: bin.into(),
-            contract_version: CONTRACT_VERSION.into(),
+            contract_version: surface_contract_version(surface).into(),
             surface: surface.as_str().into(),
             completion_status,
             passed,
@@ -480,12 +517,16 @@ fn validate_object_keys(
     errors
 }
 
-/// The one surface an installed artifact serves.
-///
-/// Not a mode you pass at runtime. You install EITHER the CodeMode artifact
-/// OR the MCP artifact, never both, and the choice is baked into the binary.
+/// The surface an installed artifact serves. Three distinct conformance
+/// layers:
+/// - `Planner`: a planner host serving `{ns}_execute_code` over JSON-RPC; driven
+///   by the plan-level G1-G10 gates (`plan`).
+/// - `Codemode`: a planner-free raw-worker v2 binary; driven by the raw-worker
+///   RW1-RW10 gates (`raw_worker`).
+/// - `Mcp`: an MCP server; only G1 exposure applies.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Surface {
+    Planner,
     Codemode,
     Mcp,
 }
@@ -493,6 +534,7 @@ pub enum Surface {
 impl Surface {
     pub fn as_str(self) -> &'static str {
         match self {
+            Self::Planner => "planner",
             Self::Codemode => "codemode",
             Self::Mcp => "mcp",
         }
@@ -501,7 +543,7 @@ impl Surface {
     /// The surface this artifact must NOT serve.
     pub fn opposite(self) -> Self {
         match self {
-            Self::Codemode => Self::Mcp,
+            Self::Codemode | Self::Planner => Self::Mcp,
             Self::Mcp => Self::Codemode,
         }
     }
@@ -509,8 +551,9 @@ impl Surface {
     pub fn parse(value: &str) -> Result<Self> {
         match value {
             "codemode" | "code-mode" | "code_mode" => Ok(Self::Codemode),
+            "planner" | "plan" => Ok(Self::Planner),
             "mcp" => Ok(Self::Mcp),
-            other => bail!("unknown surface {other:?}; expected 'codemode' or 'mcp'"),
+            other => bail!("unknown surface {other:?}; expected 'planner', 'codemode', or 'mcp'"),
         }
     }
 }
@@ -547,16 +590,13 @@ impl RunConfig {
 }
 
 pub fn run_conformance(config: &RunConfig) -> ConformanceReport {
-    let mut checks = Vec::new();
-    checks.push(match check_exposure(config) {
-        Ok(check) => check,
-        Err(err) => CheckResult::fail("G1", "exposure", err.to_string()),
-    });
-
-    // G2-G10 exercise CodeMode execution semantics, so they only apply to a
-    // CodeMode artifact. Against an MCP artifact there is no execute_code to
-    // drive, and reporting them as failures would be a category error.
+    // MCP: JSON-RPC exposure only; G2-G10 are skipped (plan execution required).
     if config.surface == Surface::Mcp {
+        let mut checks = Vec::new();
+        checks.push(match check_exposure(config) {
+            Ok(check) => check,
+            Err(err) => CheckResult::fail("G1", "exposure", err.to_string()),
+        });
         for (id, name) in [
             ("G2", "refs"),
             ("G3", "telemetry"),
@@ -571,60 +611,21 @@ pub fn run_conformance(config: &RunConfig) -> ConformanceReport {
             checks.push(CheckResult::skip(
                 id,
                 name,
-                "not applicable to MCP surface; requires CodeMode execution",
+                "not applicable to the MCP surface; requires planner execution",
             ));
         }
         return ConformanceReport::new(config.ns, substrate_label(config), config.surface, checks);
     }
 
-    let codemode = match McpClient::spawn(&config.bin, None, config.timeout) {
-        Ok(mut client) => {
-            let init = client.initialize();
-            if let Err(err) = init {
-                checks.push(CheckResult::fail(
-                    "G2",
-                    "refs",
-                    format!("codemode initialize failed: {err}"),
-                ));
-                None
-            } else {
-                Some(client)
-            }
-        }
-        Err(err) => {
-            checks.push(CheckResult::fail(
-                "G2",
-                "refs",
-                format!("could not spawn codemode server: {err}"),
-            ));
-            None
-        }
-    };
-
-    if let Some(mut client) = codemode {
-        let mut more = run_live_checks(config.ns, &mut client);
-        checks.append(&mut more);
-    } else {
-        for (id, name) in [
-            ("G3", "telemetry"),
-            ("G4", "leak-proof"),
-            ("G5", "errors"),
-            ("G6", "ctx.step"),
-            ("G7", "limits"),
-            ("G8", "mutation"),
-            ("G9", "coalescing"),
-            ("G10", "sandbox-denial"),
-        ] {
-            checks.push(CheckResult::skip(
-                id,
-                name,
-                "CodeMode server did not initialize",
-            ));
-        }
+    // Planner: the canonical plan-level G1-G10 layer (drives execute_code).
+    if config.surface == Surface::Planner {
+        let checks = crate::plan::run_conformance(config.ns, &config.bin, config.timeout);
+        return ConformanceReport::new(config.ns, substrate_label(config), config.surface, checks);
     }
 
-    // Basename only: an absolute path from the authoring machine is a local
-    // layout leak, not evidence. See conformance/reports/ATTESTATION.md.
+    // Codemode: a planner-free raw-worker v2 binary, driven by RW1-RW10. It is
+    // NEVER driven by MCP framing and NEVER by the plan-level G gates.
+    let checks = crate::raw_worker::run_conformance(config.ns, &config.bin, config.timeout);
     ConformanceReport::new(config.ns, substrate_label(config), config.surface, checks)
 }
 
@@ -679,10 +680,11 @@ fn check_own_tool_catalog(
 ) -> Vec<String> {
     let mut details = Vec::new();
     match surface {
-        Surface::Codemode => {
+        // A planner host serves exactly the three CodeMode tools.
+        Surface::Planner | Surface::Codemode => {
             if &served != codemode_tools {
                 details.push(format!(
-                    "codemode artifact served {served:?}, expected exactly {codemode_tools:?}"
+                    "artifact served {served:?}, expected exactly {codemode_tools:?}"
                 ));
             }
         }
@@ -725,501 +727,6 @@ fn check_opposite_surface_refused(
     }
 }
 
-fn run_live_checks(ns: Ns, client: &mut McpClient) -> Vec<CheckResult> {
-    let mut checks = Vec::new();
-    let describe_tool = format!("{}_codemode_describe", ns.as_str());
-    let execute_tool = format!("{}_execute_code", ns.as_str());
-
-    let capabilities = client.call_tool(&describe_tool, json!({ "name": "capabilities" }));
-    let manifest = match capabilities {
-        Ok(response) => match extract_json_payload(&response) {
-            Some(manifest) => Some(manifest),
-            None => {
-                checks.push(CheckResult::fail(
-                    "G7",
-                    "limits",
-                    "capabilities probe returned no JSON payload",
-                ));
-                None
-            }
-        },
-        Err(err) => {
-            checks.push(CheckResult::fail(
-                "G7",
-                "limits",
-                format!("capabilities probe failed at MCP layer: {err}"),
-            ));
-            None
-        }
-    };
-    let mut g7_limits = BTreeMap::new();
-    if let Some(value) = manifest.as_ref() {
-        let details = validate_capability_manifest(ns, value);
-        if let Some(limits) = value.get("limits").and_then(Value::as_object) {
-            for (name, value) in limits {
-                if let Some(value) = value.as_u64() {
-                    g7_limits.insert(name.clone(), value);
-                }
-            }
-        }
-        if !details.is_empty() {
-            checks.push(CheckResult::with_details("G7", "limits", details));
-        }
-    }
-
-    let basic = client.call_tool(
-        &execute_tool,
-        json!({ "plan": "return { ok: true };", "form": "js" }),
-    );
-    let basic_value = basic.as_ref().ok().and_then(extract_json_payload);
-    checks.push(check_refs(ns, basic_value.as_ref()));
-    checks.push(check_telemetry(basic_value.as_ref()));
-    checks.push(check_ctx_step(ns, client, &execute_tool));
-    checks.push(check_leak_proof(ns, client, &execute_tool));
-    checks.push(check_errors(ns, client, &execute_tool));
-    if !checks.iter().any(|check| check.id == "G7") {
-        checks.push(check_limits(ns, client, &execute_tool, &g7_limits));
-    }
-    checks.push(check_mutation(ns, client, &execute_tool, manifest.as_ref()));
-    checks.push(check_coalescing(client, &execute_tool));
-    checks.push(check_sandbox_denial(client, &execute_tool));
-    checks
-}
-
-fn check_refs(ns: Ns, payload: Option<&Value>) -> CheckResult {
-    let Some(payload) = payload else {
-        return CheckResult::fail("G2", "refs", "execute_code did not return JSON payload");
-    };
-    let mut details = Vec::new();
-    if let Some(execution_id) = payload.get("execution_id").and_then(Value::as_str) {
-        if !valid_execution_id(execution_id) {
-            details.push(format!("invalid execution_id {execution_id:?}"));
-        }
-    } else {
-        details.push("missing execution_id".into());
-    }
-    for value in collect_refs(payload) {
-        if !valid_ref(ns, &value) && !valid_execution_id(&value) {
-            details.push(format!("invalid CodeMode ref {value:?}"));
-        }
-    }
-    CheckResult::with_details("G2", "refs", details)
-}
-
-fn check_telemetry(payload: Option<&Value>) -> CheckResult {
-    let Some(payload) = payload else {
-        return CheckResult::fail(
-            "G3",
-            "telemetry",
-            "execute_code did not return JSON payload",
-        );
-    };
-    let Some(telemetry) = payload.get("telemetry") else {
-        return CheckResult::fail("G3", "telemetry", "missing telemetry object");
-    };
-    CheckResult::with_details("G3", "telemetry", validate_telemetry(telemetry))
-}
-
-fn check_leak_proof(ns: Ns, client: &mut McpClient, execute_tool: &str) -> CheckResult {
-    let plan = "return 'x'.repeat(70000);";
-    match client.call_tool(execute_tool, json!({ "plan": plan, "form": "js" })) {
-        Ok(response) => {
-            let visible = response.to_string().len();
-            let payload = extract_json_payload(&response).unwrap_or(response);
-            let refs = collect_refs(&payload);
-            let mut details = Vec::new();
-            if visible > 65_536 {
-                details.push(format!(
-                    "visible response is {visible} bytes, exceeds 64 KiB guard"
-                ));
-            }
-            if !refs.iter().any(|value| valid_ref(ns, value)) {
-                details.push("oversize result did not return a valid result/blob ref".into());
-            }
-            CheckResult::with_details("G4", "leak-proof", details)
-        }
-        Err(err) => CheckResult::fail("G4", "leak-proof", err.to_string()),
-    }
-}
-
-fn check_errors(_ns: Ns, client: &mut McpClient, execute_tool: &str) -> CheckResult {
-    let cases = [
-        (
-            "validation",
-            json!({ "plan": "{ definitely invalid json", "form": "json" }),
-        ),
-        (
-            "sandbox",
-            json!({ "plan": "return fetch('https://example.com');", "form": "js" }),
-        ),
-        (
-            "runtime",
-            json!({ "plan": "throw new Error('boom');", "form": "js" }),
-        ),
-        (
-            "substrate",
-            json!({ "plan": "return zero.read('__zerostack_missing_target__');", "form": "js" }),
-        ),
-        (
-            "policy",
-            json!({ "plan": "return zero.edit('x', 'y');", "form": "js" }),
-        ),
-    ];
-    let mut details = Vec::new();
-    for (kind, args) in cases {
-        match client.call_tool(execute_tool, args) {
-            Ok(response) => {
-                let payload = extract_json_payload(&response).unwrap_or(response);
-                let error = payload
-                    .get("error")
-                    .or_else(|| payload.get("content").and_then(|v| v.get("error")));
-                match error {
-                    Some(error) => {
-                        let error_details = validate_error(error);
-                        if !error_details.is_empty() {
-                            details.push(format!("{kind} case invalid error: {error_details:?}"));
-                        }
-                        if error.get("kind").and_then(Value::as_str) != Some(kind) {
-                            details.push(format!("{kind} case returned wrong kind: {error}"));
-                        }
-                    }
-                    None => details.push(format!(
-                        "{kind} case did not return structured error: {payload}"
-                    )),
-                }
-            }
-            Err(err) => details.push(format!("{kind} case MCP call failed: {err}")),
-        }
-    }
-    CheckResult::with_details("G5", "errors", details)
-}
-
-fn check_ctx_step(ns: Ns, client: &mut McpClient, execute_tool: &str) -> CheckResult {
-    let plan = "return ctx.step('x', () => ({value: 42}));";
-    match client.call_tool(execute_tool, json!({ "plan": plan, "form": "js" })) {
-        Ok(response) => {
-            let payload = extract_json_payload(&response).unwrap_or(response);
-            let mut details = check_refs(ns, Some(&payload)).details;
-            let refs = collect_refs(&payload);
-            if !refs.iter().any(|value| value.ends_with("/steps")) {
-                details.push("no steps ref returned for ctx.step execution".into());
-            }
-            CheckResult::with_details("G6", "ctx.step", details)
-        }
-        Err(err) => CheckResult::fail("G6", "ctx.step", err.to_string()),
-    }
-}
-
-fn limit_probe_plan(name: &str, limit: u64) -> Option<String> {
-    let above = limit.checked_add(1)?;
-    match name {
-        "max_code_bytes" => usize::try_from(above).ok().map(|size| "x".repeat(size)),
-        "max_microtasks" => Some(format!(
-            "let p = Promise.resolve(); for (let i=0;i<{above};i++) p = p.then(() => 1); return p;"
-        )),
-        "max_output_bytes" => Some(format!("return 'x'.repeat({above});")),
-        "max_logical_ops" => Some(format!(
-            "for (let i=0;i<{above};i++) {{ ctx.ref(i); }} return 1;"
-        )),
-        "max_parallel_width" => Some(format!(
-            "return zero.queryMany ? zero.queryMany(Array.from({{length: {above}}}, (_, i) => String(i))) : 1;"
-        )),
-        "max_wall_ms" | "hard_max_wall_ms" | "max_memory_bytes" | "max_physical_ops"
-        | "max_result_ref_bytes" | "max_refs_emitted" => None,
-        _ => None,
-    }
-}
-
-fn check_limits(
-    _ns: Ns,
-    client: &mut McpClient,
-    execute_tool: &str,
-    limits: &BTreeMap<String, u64>,
-) -> CheckResult {
-    let mut details = Vec::new();
-    for (name, limit) in limits {
-        if let Some(plan) = limit_probe_plan(name, *limit) {
-            match client.call_tool(execute_tool, json!({ "plan": plan, "form": "js" })) {
-                Ok(response) => {
-                    let payload = extract_json_payload(&response).unwrap_or(response);
-                    let enforced = payload.get("ack").and_then(Value::as_str) == Some("X0")
-                        || payload.get("error").is_some()
-                        || (name == "max_output_bytes"
-                            && payload.to_string().len() <= *limit as usize);
-                    if !enforced {
-                        details.push(format!("echoed limit {name} was not observably enforced"));
-                    }
-                }
-                Err(err) => details.push(format!(
-                    "echoed limit {name} probe failed at MCP layer: {err}"
-                )),
-            }
-        } else {
-            details.push(format!("echoed limit {name} has no generic violation probe; substrate must add one or omit the limit"));
-        }
-    }
-    CheckResult::with_details("G7", "limits", details)
-}
-
-/// Namespace default for G8 mutation capability (lookup table, not match arms in check).
-fn expected_mutation(ns: Ns) -> &'static str {
-    match ns {
-        Ns::Fz => "allowed",
-        Ns::Tz => "denied",
-        Ns::Gz => "store_only",
-    }
-}
-
-/// Pure interpret of a mutation probe response: `(declared × ack × error_kind)`.
-///
-/// Extracted so a unit matrix can pin accept/reject cells without an MCP client.
-fn interpret_mutation_probe(
-    declared: &str,
-    ack: Option<&str>,
-    error_kind: Option<&str>,
-    payload: &Value,
-) -> Vec<String> {
-    let mut details = Vec::new();
-    match declared {
-        "allowed" => {
-            if ack == Some("X0") && error_kind == Some("policy") {
-                details.push("allowed mutation capability rejected mutation with policy".into());
-            }
-        }
-        "denied" | "readonly" | "store_only" => {
-            if error_kind != Some("policy") {
-                details.push(format!(
-                    "{declared} mutation capability did not reject with policy: {payload}"
-                ));
-            }
-        }
-        _ => details.push(format!("unknown mutation capability {declared:?}")),
-    }
-    details
-}
-
-fn check_mutation(
-    ns: Ns,
-    client: &mut McpClient,
-    execute_tool: &str,
-    manifest: Option<&Value>,
-) -> CheckResult {
-    let expected = expected_mutation(ns);
-    let declared = manifest
-        .and_then(|value| value.get("mutation"))
-        .and_then(Value::as_str)
-        .unwrap_or(expected);
-    let mut details = Vec::new();
-    if declared != expected {
-        details.push(format!(
-            "declared mutation {declared:?} does not match required namespace default"
-        ));
-    }
-    match client.call_tool(
-        execute_tool,
-        json!({ "plan": "return zero.edit('x', 'y');", "form": "js" }),
-    ) {
-        Ok(response) => {
-            let payload = extract_json_payload(&response).unwrap_or(response);
-            let ack = payload.get("ack").and_then(Value::as_str);
-            let error_kind = payload.pointer("/error/kind").and_then(Value::as_str);
-            details.extend(interpret_mutation_probe(
-                declared, ack, error_kind, &payload,
-            ));
-        }
-        Err(err) => details.push(format!("mutation probe failed at MCP layer: {err}")),
-    }
-    CheckResult::with_details("G8", "mutation", details)
-}
-
-fn check_coalescing(client: &mut McpClient, execute_tool: &str) -> CheckResult {
-    let plan = "return zero.queryMany ? zero.queryMany(Array.from({length: 100}, (_, i) => String(i))) : ctx.step('batch', () => Array.from({length: 100}, (_, i) => ctx.ref(i)));";
-    match client.call_tool(execute_tool, json!({ "plan": plan, "form": "js" })) {
-        Ok(response) => {
-            let payload = extract_json_payload(&response).unwrap_or(response);
-            let telemetry = payload.get("telemetry");
-            let mut details = Vec::new();
-            match telemetry {
-                Some(telemetry) => {
-                    if telemetry
-                        .get("physical_ops")
-                        .and_then(Value::as_u64)
-                        .unwrap_or(100)
-                        >= 100
-                    {
-                        details.push(format!("physical_ops not coalesced below 100: {telemetry}"));
-                    }
-                    if telemetry
-                        .get("batched_ops")
-                        .and_then(Value::as_u64)
-                        .unwrap_or(0)
-                        < 1
-                    {
-                        details.push(format!("batched_ops < 1: {telemetry}"));
-                    }
-                }
-                None => details.push("missing telemetry for coalescing probe".into()),
-            }
-            CheckResult::with_details("G9", "coalescing", details)
-        }
-        Err(err) => CheckResult::fail("G9", "coalescing", err.to_string()),
-    }
-}
-
-fn check_sandbox_denial(client: &mut McpClient, execute_tool: &str) -> CheckResult {
-    let cases = [
-        ("network/fetch", "return fetch('https://example.com');"),
-        ("env", "return process.env.HOME;"),
-        (
-            "process/spawn",
-            "return require('child_process').spawn('true');",
-        ),
-        (
-            "raw host FS",
-            "return require('fs').readFileSync('/etc/passwd', 'utf8');",
-        ),
-        (
-            "direct DB/store",
-            "return globalThis.db || globalThis.store || sqlite;",
-        ),
-        ("native modules", "return require('node:fs');"),
-        ("timers", "return setTimeout(() => 1, 1);"),
-    ];
-    let mut details = Vec::new();
-    for (name, plan) in cases {
-        match client.call_tool(execute_tool, json!({ "plan": plan, "form": "js" })) {
-            Ok(response) => {
-                let payload = extract_json_payload(&response).unwrap_or(response);
-                if payload.pointer("/error/kind").and_then(Value::as_str) != Some("sandbox") {
-                    details.push(format!(
-                        "{name} was not denied with sandbox error: {payload}"
-                    ));
-                }
-            }
-            Err(err) => details.push(format!("{name} probe failed at MCP layer: {err}")),
-        }
-    }
-    CheckResult::with_details("G10", "sandbox-denial", details)
-}
-
-/// Pull the substrate's JSON payload out of an MCP tool response.
-///
-/// MCP lets a server return its structured payload in several places, and the
-/// engines genuinely use different ones. This missed every GraphZero error
-/// envelope until `structuredContent` was handled: GraphZero puts the payload
-/// in a `content[]` entry of type `structuredContent` and repeats it at the
-/// top level, while `content[0].text` holds a human-readable ack line that is
-/// deliberately not JSON. The harness parsed only `json` and `text`, so it
-/// reported "did not return structured error" for responses that were
-/// correctly structured all along. That is a harness bug, not an engine bug,
-/// and it was scoring conformance failures against compliant engines.
-///
-/// # Payload priority (load-bearing — do not reorder)
-///
-/// 1. top-level `structuredContent` (object)
-/// 2. `result.structuredContent` (object)
-/// 3. whole-body markers: `ack` | `contract_version` | `telemetry`
-/// 4. `result.content[]` via [`payload_from_content`] (structured/json before text)
-/// 5. bare `result` object
-/// 6. top-level `content[]` via [`payload_from_content`]
-///
-/// GraphZero class: structuredContent must win over human-readable text ack.
-fn extract_json_payload(response: &Value) -> Option<Value> {
-    for extractor in JSON_PAYLOAD_EXTRACTORS {
-        if let Some(payload) = extractor(response) {
-            return Some(payload);
-        }
-    }
-    None
-}
-
-/// Ordered MCP envelope extractors. Index order IS priority (see module docs above).
-const JSON_PAYLOAD_EXTRACTORS: &[fn(&Value) -> Option<Value>] = &[
-    payload_top_level_structured,
-    payload_result_structured,
-    payload_whole_body_markers,
-    payload_result_content,
-    payload_bare_result,
-    payload_top_level_content,
-];
-
-fn payload_top_level_structured(response: &Value) -> Option<Value> {
-    response
-        .get("structuredContent")
-        .filter(|structured| structured.is_object())
-        .cloned()
-}
-
-fn payload_result_structured(response: &Value) -> Option<Value> {
-    response
-        .get("result")
-        .and_then(|r| r.get("structuredContent"))
-        .filter(|structured| structured.is_object())
-        .cloned()
-}
-
-fn payload_whole_body_markers(response: &Value) -> Option<Value> {
-    if response.get("ack").is_some()
-        || response.get("contract_version").is_some()
-        || response.get("telemetry").is_some()
-    {
-        Some(response.clone())
-    } else {
-        None
-    }
-}
-
-fn payload_result_content(response: &Value) -> Option<Value> {
-    response
-        .get("result")
-        .and_then(|result| result.get("content"))
-        .and_then(Value::as_array)
-        .and_then(|c| payload_from_content(c))
-}
-
-fn payload_bare_result(response: &Value) -> Option<Value> {
-    response
-        .get("result")
-        .filter(|result| result.is_object())
-        .cloned()
-}
-
-fn payload_top_level_content(response: &Value) -> Option<Value> {
-    response
-        .get("content")
-        .and_then(Value::as_array)
-        .and_then(|c| payload_from_content(c))
-}
-
-/// Scan one `content[]` array for a structured payload, preferring explicitly
-/// structured entries over text that merely happens to parse as JSON.
-fn explicit_content_payload(item: &Value) -> Option<Value> {
-    match item.get("structuredContent") {
-        Some(structured) if structured.is_object() => Some(structured.clone()),
-        _ => item.get("json").cloned(),
-    }
-}
-
-/// Scan one content array for a structured payload, preferring explicitly
-/// structured entries over text that merely happens to parse as JSON.
-fn payload_from_content(content: &[Value]) -> Option<Value> {
-    for item in content {
-        if let Some(payload) = explicit_content_payload(item) {
-            return Some(payload);
-        }
-    }
-    for item in content {
-        if let Some(text) = item.get("text").and_then(Value::as_str) {
-            if let Ok(parsed) = serde_json::from_str::<Value>(text) {
-                if matches!(parsed, Value::Object(_) | Value::Array(_)) {
-                    return Some(parsed);
-                }
-            }
-        }
-    }
-    None
-}
-
 #[derive(Debug, PartialEq, Eq)]
 enum ReceiveDeadlineError {
     Timeout,
@@ -1241,7 +748,7 @@ fn recv_until_deadline<T>(
         })
 }
 
-struct McpClient {
+pub(crate) struct McpClient {
     child: Child,
     stdin: ChildStdin,
     stdout_lines: std::sync::mpsc::Receiver<std::io::Result<String>>,
@@ -1268,7 +775,7 @@ fn write_notification<W: Write>(writer: &mut W, method: &str, params: Value) -> 
 }
 
 impl McpClient {
-    fn spawn(bin: &Path, mode: Option<&str>, timeout: Duration) -> Result<Self> {
+    pub(crate) fn spawn(bin: &Path, mode: Option<&str>, timeout: Duration) -> Result<Self> {
         let args = spawn_args(mode);
         let mut command = Command::new(bin);
         command
@@ -1326,7 +833,7 @@ impl McpClient {
         })
     }
 
-    fn initialize(&mut self) -> Result<Value> {
+    pub(crate) fn initialize(&mut self) -> Result<Value> {
         let response = self.request(
             "initialize",
             json!({
@@ -1339,7 +846,7 @@ impl McpClient {
         Ok(response)
     }
 
-    fn list_tools(&mut self) -> Result<Vec<String>> {
+    pub(crate) fn list_tools(&mut self) -> Result<Vec<String>> {
         let response = self.request("tools/list", json!({}))?;
         let tools = response
             .pointer("/result/tools")
@@ -1352,7 +859,7 @@ impl McpClient {
             .collect())
     }
 
-    fn call_tool(&mut self, name: &str, arguments: Value) -> Result<Value> {
+    pub(crate) fn call_tool(&mut self, name: &str, arguments: Value) -> Result<Value> {
         self.request(
             "tools/call",
             json!({ "name": name, "arguments": arguments }),
@@ -1606,7 +1113,7 @@ mod tests {
         let report = ConformanceReport::new(
             Ns::Tz,
             "/tmp/tokenzero",
-            Surface::Codemode,
+            Surface::Planner,
             vec![
                 CheckResult::pass("G1", "exposure"),
                 CheckResult::fail("G2", "refs", "bad ref"),
@@ -1641,38 +1148,5 @@ mod tests {
         assert!(valid_ref(Ns::Fz, &valid));
         assert!(!valid_ref(Ns::Fz, "fz://blob/not-hex"));
         assert!(valid_execution_id("cm://exec/123-abcdefabcdef"));
-    }
-
-    #[test]
-    fn conformance_regression_limit_probes_use_echoed_boundary() {
-        assert!(limit_probe_plan("max_parallel_width", 3)
-            .is_some_and(|plan| plan.contains("length: 4")));
-        assert!(limit_probe_plan("max_logical_ops", u64::MAX).is_none());
-        assert!(limit_probe_plan("max_wall_ms", 10).is_none());
-    }
-
-    #[test]
-    fn store_only_mutation_probe_requires_policy_rejection() {
-        let manifest = json!({
-            "contract_version": "1.0",
-            "ns": "gz",
-            "mutation": "store_only",
-            "plan_forms": ["recipe", "json", "js"],
-            "limits": {}
-        });
-        assert!(validate_capability_manifest(Ns::Gz, &manifest).is_empty());
-
-        let payload = json!({"ack": "X0", "error": {"kind": "policy"}});
-        assert!(
-            interpret_mutation_probe("store_only", Some("X0"), Some("policy"), &payload).is_empty()
-        );
-        let missing = json!({"ack": "C"});
-        let details = interpret_mutation_probe("store_only", Some("C"), None, &missing);
-        assert!(
-            details
-                .iter()
-                .any(|d| d.contains("did not reject with policy")),
-            "{details:?}"
-        );
     }
 }

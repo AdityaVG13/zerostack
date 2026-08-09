@@ -44,8 +44,8 @@
       "kind": "executable-test"
     },
     {
-      "id": "g1-g10",
-      "promise": "G1-G10 executable conformance",
+      "id": "plan-g1-g10",
+      "promise": "Plan-level G1-G10 executable conformance: planner host serving execute_code (ctx.step, coalescing, sandbox). Surface: planner. contract_version 1.0. Distinct from raw RW1-RW10.",
       "applicability": [
         "FSZero",
         "GraphZero",
@@ -54,7 +54,20 @@
         "CLI"
       ],
       "origin": "tests/src/checks.rs::GATE_MAPPINGS",
-      "destination": "tests/src/main.rs",
+      "destination": "tests/src/plan.rs",
+      "kind": "registered-promise"
+    },
+    {
+      "id": "raw-rw1-rw10",
+      "promise": "Raw-worker v2 RW1-RW10 executable conformance: planner-free raw-worker boundary invariants (artifact_exposure, recoverable_refs, telemetry_accounting, output_bounds, typed_errors, session_continuity, frame_limits, domain_mutation, process_reuse, planner_refusal). Surface: codemode. contract_version raw-worker-v2. Not aliases of G1-G10.",
+      "applicability": [
+        "FSZero",
+        "GraphZero",
+        "TokenZero",
+        "CLI"
+      ],
+      "origin": "tests/src/checks.rs::RAW_GATE_MAPPINGS",
+      "destination": "tests/src/raw_worker.rs",
       "kind": "registered-promise"
     },
     {

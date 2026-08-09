@@ -4,29 +4,35 @@
     {
       "id": "fszero",
       "engine": "FSZero",
-      "transport": "process",
+      "transport": "raw-worker-v2",
       "namespace": "fz",
       "surface": "codemode",
       "binary_env": "FSZERO_CODEMODE_BIN",
-      "command": "explicit-binary"
+      "command": "explicit-binary",
+      "probe": "capabilities --json",
+      "serve": "--raw-worker --root <root>"
     },
     {
       "id": "graphzero",
       "engine": "GraphZero",
-      "transport": "process",
+      "transport": "raw-worker-v2",
       "namespace": "gz",
       "surface": "codemode",
       "binary_env": "GRAPHZERO_CODEMODE_BIN",
-      "command": "explicit-binary"
+      "command": "explicit-binary",
+      "probe": "capabilities --json",
+      "serve": "default serve mode (GRAPHZERO_REPO env)"
     },
     {
       "id": "tokenzero",
       "engine": "TokenZero",
-      "transport": "process",
+      "transport": "raw-worker-v2",
       "namespace": "tz",
       "surface": "codemode",
       "binary_env": "TOKENZERO_CODEMODE_BIN",
-      "command": "explicit-binary"
+      "command": "explicit-binary",
+      "probe": "capabilities --json",
+      "serve": "raw-worker --root <root>"
     },
     {
       "id": "reference",

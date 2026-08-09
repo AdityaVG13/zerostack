@@ -13,13 +13,14 @@ jsonschema = "0.26"
 regex = "1"
 serde.workspace = true
 serde_json.workspace = true
+sha2.workspace = true
+tempfile = "3"
 zero-abi = { path = "../crates/zero-abi" }
 zero-codemode = { path = "../crates/zero-codemode" }
 zero-testkit = { path = "../crates/zero-testkit" }
 
 [dev-dependencies]
 proptest = "1"
-tempfile = "3"
 
 [[bin]]
 name = "zerostack-shared-conformance"

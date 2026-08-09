@@ -26,10 +26,14 @@
       "minLength": 1
     },
     "contract_version": {
-      "const": "1.0"
+      "enum": [
+        "1.0",
+        "raw-worker-v2"
+      ]
     },
     "surface": {
       "enum": [
+        "planner",
         "codemode",
         "mcp"
       ]
@@ -68,7 +72,17 @@
               "G7",
               "G8",
               "G9",
-              "G10"
+              "G10",
+              "RW1",
+              "RW2",
+              "RW3",
+              "RW4",
+              "RW5",
+              "RW6",
+              "RW7",
+              "RW8",
+              "RW9",
+              "RW10"
             ]
           },
           "name": {
@@ -146,183 +160,395 @@
   },
   "allOf": [
     {
-      "properties": {
-        "checks": {
-          "contains": {
-            "type": "object",
+      "if": {
+        "properties": {
+          "surface": {
+            "const": "planner"
+          }
+        },
+        "required": [
+          "surface"
+        ]
+      },
+      "then": {
+        "allOf": [
+          {
             "properties": {
-              "id": {
-                "const": "G1"
+              "checks": {
+                "contains": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "const": "G1"
+                    }
+                  },
+                  "required": [
+                    "id"
+                  ]
+                },
+                "maxContains": 1
               }
-            },
-            "required": [
-              "id"
-            ]
+            }
           },
-          "maxContains": 1
-        }
+          {
+            "properties": {
+              "checks": {
+                "contains": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "const": "G2"
+                    }
+                  },
+                  "required": [
+                    "id"
+                  ]
+                },
+                "maxContains": 1
+              }
+            }
+          },
+          {
+            "properties": {
+              "checks": {
+                "contains": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "const": "G3"
+                    }
+                  },
+                  "required": [
+                    "id"
+                  ]
+                },
+                "maxContains": 1
+              }
+            }
+          },
+          {
+            "properties": {
+              "checks": {
+                "contains": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "const": "G4"
+                    }
+                  },
+                  "required": [
+                    "id"
+                  ]
+                },
+                "maxContains": 1
+              }
+            }
+          },
+          {
+            "properties": {
+              "checks": {
+                "contains": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "const": "G5"
+                    }
+                  },
+                  "required": [
+                    "id"
+                  ]
+                },
+                "maxContains": 1
+              }
+            }
+          },
+          {
+            "properties": {
+              "checks": {
+                "contains": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "const": "G6"
+                    }
+                  },
+                  "required": [
+                    "id"
+                  ]
+                },
+                "maxContains": 1
+              }
+            }
+          },
+          {
+            "properties": {
+              "checks": {
+                "contains": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "const": "G7"
+                    }
+                  },
+                  "required": [
+                    "id"
+                  ]
+                },
+                "maxContains": 1
+              }
+            }
+          },
+          {
+            "properties": {
+              "checks": {
+                "contains": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "const": "G8"
+                    }
+                  },
+                  "required": [
+                    "id"
+                  ]
+                },
+                "maxContains": 1
+              }
+            }
+          },
+          {
+            "properties": {
+              "checks": {
+                "contains": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "const": "G9"
+                    }
+                  },
+                  "required": [
+                    "id"
+                  ]
+                },
+                "maxContains": 1
+              }
+            }
+          },
+          {
+            "properties": {
+              "checks": {
+                "contains": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "const": "G10"
+                    }
+                  },
+                  "required": [
+                    "id"
+                  ]
+                },
+                "maxContains": 1
+              }
+            }
+          }
+        ]
       }
     },
     {
-      "properties": {
-        "checks": {
-          "contains": {
-            "type": "object",
+      "if": {
+        "properties": {
+          "surface": {
+            "const": "codemode"
+          }
+        },
+        "required": [
+          "surface"
+        ]
+      },
+      "then": {
+        "allOf": [
+          {
             "properties": {
-              "id": {
-                "const": "G2"
+              "checks": {
+                "contains": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "const": "RW1"
+                    }
+                  },
+                  "required": [
+                    "id"
+                  ]
+                },
+                "maxContains": 1
               }
-            },
-            "required": [
-              "id"
-            ]
+            }
           },
-          "maxContains": 1
-        }
-      }
-    },
-    {
-      "properties": {
-        "checks": {
-          "contains": {
-            "type": "object",
+          {
             "properties": {
-              "id": {
-                "const": "G3"
+              "checks": {
+                "contains": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "const": "RW2"
+                    }
+                  },
+                  "required": [
+                    "id"
+                  ]
+                },
+                "maxContains": 1
               }
-            },
-            "required": [
-              "id"
-            ]
+            }
           },
-          "maxContains": 1
-        }
-      }
-    },
-    {
-      "properties": {
-        "checks": {
-          "contains": {
-            "type": "object",
+          {
             "properties": {
-              "id": {
-                "const": "G4"
+              "checks": {
+                "contains": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "const": "RW3"
+                    }
+                  },
+                  "required": [
+                    "id"
+                  ]
+                },
+                "maxContains": 1
               }
-            },
-            "required": [
-              "id"
-            ]
+            }
           },
-          "maxContains": 1
-        }
-      }
-    },
-    {
-      "properties": {
-        "checks": {
-          "contains": {
-            "type": "object",
+          {
             "properties": {
-              "id": {
-                "const": "G5"
+              "checks": {
+                "contains": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "const": "RW4"
+                    }
+                  },
+                  "required": [
+                    "id"
+                  ]
+                },
+                "maxContains": 1
               }
-            },
-            "required": [
-              "id"
-            ]
+            }
           },
-          "maxContains": 1
-        }
-      }
-    },
-    {
-      "properties": {
-        "checks": {
-          "contains": {
-            "type": "object",
+          {
             "properties": {
-              "id": {
-                "const": "G6"
+              "checks": {
+                "contains": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "const": "RW5"
+                    }
+                  },
+                  "required": [
+                    "id"
+                  ]
+                },
+                "maxContains": 1
               }
-            },
-            "required": [
-              "id"
-            ]
+            }
           },
-          "maxContains": 1
-        }
-      }
-    },
-    {
-      "properties": {
-        "checks": {
-          "contains": {
-            "type": "object",
+          {
             "properties": {
-              "id": {
-                "const": "G7"
+              "checks": {
+                "contains": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "const": "RW6"
+                    }
+                  },
+                  "required": [
+                    "id"
+                  ]
+                },
+                "maxContains": 1
               }
-            },
-            "required": [
-              "id"
-            ]
+            }
           },
-          "maxContains": 1
-        }
-      }
-    },
-    {
-      "properties": {
-        "checks": {
-          "contains": {
-            "type": "object",
+          {
             "properties": {
-              "id": {
-                "const": "G8"
+              "checks": {
+                "contains": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "const": "RW7"
+                    }
+                  },
+                  "required": [
+                    "id"
+                  ]
+                },
+                "maxContains": 1
               }
-            },
-            "required": [
-              "id"
-            ]
+            }
           },
-          "maxContains": 1
-        }
-      }
-    },
-    {
-      "properties": {
-        "checks": {
-          "contains": {
-            "type": "object",
+          {
             "properties": {
-              "id": {
-                "const": "G9"
+              "checks": {
+                "contains": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "const": "RW8"
+                    }
+                  },
+                  "required": [
+                    "id"
+                  ]
+                },
+                "maxContains": 1
               }
-            },
-            "required": [
-              "id"
-            ]
+            }
           },
-          "maxContains": 1
-        }
-      }
-    },
-    {
-      "properties": {
-        "checks": {
-          "contains": {
-            "type": "object",
+          {
             "properties": {
-              "id": {
-                "const": "G10"
+              "checks": {
+                "contains": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "const": "RW9"
+                    }
+                  },
+                  "required": [
+                    "id"
+                  ]
+                },
+                "maxContains": 1
               }
-            },
-            "required": [
-              "id"
-            ]
+            }
           },
-          "maxContains": 1
-        }
+          {
+            "properties": {
+              "checks": {
+                "contains": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "const": "RW10"
+                    }
+                  },
+                  "required": [
+                    "id"
+                  ]
+                },
+                "maxContains": 1
+              }
+            }
+          }
+        ]
       }
     }
   ]

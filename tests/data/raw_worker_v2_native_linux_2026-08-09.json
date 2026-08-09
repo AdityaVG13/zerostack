@@ -1,0 +1,47 @@
+{
+  "schema": "zerostack.raw-worker-native-evidence.v1",
+  "scope": {
+    "contract_version": "raw-worker-v2",
+    "surface": "codemode",
+    "platform": "linux-aarch64",
+    "host": "spark-1672-rch-remap",
+    "planner_gates_included": false,
+    "statement": "Revision-bound native runtime evidence for planner-free engine workers; this is not planner G1-G10 or cross-platform evidence."
+  },
+  "conformance_runner": {
+    "sha256": "3129d03c32b9d37b4495a92a5c6d22c3c8b76e4aae0486a317b29634cea98cc1",
+    "source": "zerostack-shared-conformance release build from the vk62 G/RW split"
+  },
+  "engines": [
+    {
+      "engine": "FSZero",
+      "namespace": "fz",
+      "revision": "0b2aac8d3642277cdab19466ac28aefb2bf51f5a",
+      "artifact_sha256": "3195c7072b5ae0968e7c562729e6965410f8f8d64235b2a1f02ca42aebd8d80b",
+      "report": "fz-2026-08-09-165810.json",
+      "report_sha256": "31f1a7e1abcac27d69076452bd8f15488dc47f7672540016cc3229137ea13406",
+      "passed": true,
+      "gates": ["RW1", "RW2", "RW3", "RW4", "RW5", "RW6", "RW7", "RW8", "RW9", "RW10"]
+    },
+    {
+      "engine": "GraphZero",
+      "namespace": "gz",
+      "revision": "ce64cd8b72065c61c1d99a5594330121f4faeeda",
+      "artifact_sha256": "e7f235e1a02297391eac78c71421e352479670007224d751448603e7b0eb07ab",
+      "report": "gz-2026-08-09-152339.json",
+      "report_sha256": "9649bb915b4cbc1fc04b767bd9171f06522277101c6b115668d7a10e0dcac891",
+      "passed": true,
+      "gates": ["RW1", "RW2", "RW3", "RW4", "RW5", "RW6", "RW7", "RW8", "RW9", "RW10"]
+    },
+    {
+      "engine": "TokenZero",
+      "namespace": "tz",
+      "revision": "9b4df921fe72259975f08768c90f9fdafad539b8",
+      "artifact_sha256": "cc4b131fc4ce2311fc02291318cbb701a8640c6287ac21a9f02fd0369a2dfa18",
+      "report": "tz-2026-08-09-152338.json",
+      "report_sha256": "bed606b0b36e46cae41f1436b85bf76aae9adb92fa4a63b660758adba25870cc",
+      "passed": true,
+      "gates": ["RW1", "RW2", "RW3", "RW4", "RW5", "RW6", "RW7", "RW8", "RW9", "RW10"]
+    }
+  ]
+}

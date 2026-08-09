@@ -182,16 +182,37 @@ fn harness_report_validator() -> jsonschema::Validator {
 }
 
 fn full_harness_report() -> serde_json::Value {
+    // A complete PLANNER report: surface planner, plan contract 1.0, G1-G10.
     json!({
         "ns": "gz",
         "bin": "fake-graphzero",
         "contract_version": "1.0",
-        "surface": "codemode",
+        "surface": "planner",
         "completion_status": "complete",
         "passed": true,
         "checks": (1..=10).map(|gate| json!({
             "id": format!("G{gate}"),
             "name": format!("semantic-{gate}"),
+            "passed": true,
+            "status": "pass",
+            "details": []
+        })).collect::<Vec<_>>()
+    })
+}
+
+fn full_raw_harness_report() -> serde_json::Value {
+    // A complete CODEMODE raw-worker report: surface codemode, raw-worker-v2,
+    // RW1-RW10 (distinct from the plan G1-G10 vocabulary).
+    json!({
+        "ns": "tz",
+        "bin": "fake-tokenzero",
+        "contract_version": "raw-worker-v2",
+        "surface": "codemode",
+        "completion_status": "complete",
+        "passed": true,
+        "checks": (1..=10).map(|gate| json!({
+            "id": format!("RW{gate}"),
+            "name": format!("raw-{gate}"),
             "passed": true,
             "status": "pass",
             "details": []
@@ -210,6 +231,23 @@ fn harness_report_schema_pair_is_deterministic_and_accepts_full_shape() {
         "underscore snapshot must equal the resolved SSOT schema"
     );
     assert!(harness_report_validator().is_valid(&full_harness_report()));
+    assert!(
+        harness_report_validator().is_valid(&full_raw_harness_report()),
+        "a complete codemode raw-worker report (RW1-RW10) must validate"
+    );
+}
+
+#[test]
+fn harness_report_schema_keeps_layers_separate() {
+    let validator = harness_report_validator();
+    // A codemode report carrying plan-level G ids (not RW) must NOT validate.
+    let mut mixed = full_raw_harness_report();
+    mixed["checks"][0]["id"] = json!("G1");
+    assert!(!validator.is_valid(&mixed));
+    // A planner report carrying RW ids must NOT validate.
+    let mut mixed2 = full_harness_report();
+    mixed2["checks"][0]["id"] = json!("RW1");
+    assert!(!validator.is_valid(&mixed2));
 }
 
 #[test]
