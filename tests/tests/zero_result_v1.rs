@@ -4,7 +4,7 @@ use zero_abi::{ZeroResultAccessError, ZeroResultV1};
 
 fn schema() -> Validator {
     let value: Value =
-        serde_json::from_str(include_str!("../schemas/zero-result-v1.schema.json")).unwrap();
+        serde_json::from_str(include_str!("../contracts/zero-result-v1.schema.json")).unwrap();
     jsonschema::validator_for(&value).unwrap()
 }
 fn assert_valid(value: &Value) {

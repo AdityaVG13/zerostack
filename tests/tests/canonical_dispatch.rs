@@ -6,7 +6,7 @@ use zero_abi::{
     DispatchStage, EffectGrant, EffectPolicy, PermitGrant, RegistryEngine, SourceDiagnostic,
     SourceForm, ALL_DISPATCH_ERROR_CLASSES, CANONICAL_DISPATCH_VERSION,
 };
-use zerostack_codemode_conformance::schema::{
+use zerostack_shared_tests::schema::{
     validate_against_schema, SchemaName, CANONICAL_DISPATCH_SCHEMA,
 };
 

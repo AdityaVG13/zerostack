@@ -4,7 +4,7 @@ use zero_abi::{
     decode_request_frame, encode_frame, raw_worker_protocol_digest_hex, CallRequest,
     WorkerRequestFrame, WorkerTrace, DEFAULT_MAX_FRAME_BYTES, RAW_WORKER_PROTOCOL_VERSION,
 };
-use zerostack_codemode_conformance::schema::{validate_against_schema, SchemaName};
+use zerostack_shared_tests::schema::{validate_against_schema, SchemaName};
 
 fn fixture_frames() -> Vec<Value> {
     serde_json::from_str(include_str!("../fixtures/raw_worker_v2_frames.json"))
@@ -52,6 +52,7 @@ proptest! {
                 deadline_unix_ms: deadline,
                 trace,
                 approval_grant: None,
+                telemetry_request: None,
             },
         };
         let encoded = encode_frame(&frame, DEFAULT_MAX_FRAME_BYTES).unwrap();

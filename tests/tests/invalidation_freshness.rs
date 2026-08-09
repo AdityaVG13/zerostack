@@ -8,7 +8,7 @@ use zero_abi::{
     FreshnessFailureCodeV1, FreshnessHeadV1, FreshnessStatusV1, IndexedThroughCertificate,
     ProducerDomainV1,
 };
-use zerostack_codemode_conformance::racc::{
+use zerostack_shared_tests::racc::{
     validate_racc_schema, RACC_INVALIDATION_FRESHNESS_SCHEMA,
 };
 

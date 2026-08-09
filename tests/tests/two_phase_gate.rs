@@ -3,7 +3,7 @@
 use serde_json::{json, Value};
 use std::{collections::BTreeSet, fs, path::PathBuf};
 use zero_abi::sha256_hex;
-use zerostack_codemode_conformance::racc::{validate_racc_schema, RACC_TWO_PHASE_GATE_SCHEMA};
+use zerostack_shared_tests::racc::{validate_racc_schema, RACC_TWO_PHASE_GATE_SCHEMA};
 
 fn root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))

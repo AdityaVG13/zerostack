@@ -1,6 +1,6 @@
 //! G1-G10 canonical IDs and semantic labels are pinned here.
 
-use zerostack_codemode_conformance::checks::{CheckId, GATE_MAPPINGS};
+use zerostack_shared_tests::checks::{CheckId, GATE_MAPPINGS};
 
 #[test]
 fn mapping_table_is_complete_distinct_and_canonical() {

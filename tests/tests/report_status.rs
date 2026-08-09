@@ -1,4 +1,4 @@
-use zerostack_codemode_conformance::{
+use zerostack_shared_tests::{
     CheckResult, CompletionStatus, ConformanceReport, GateStatus, Ns, Surface, CHECK_IDS,
 };
 fn complete_checks() -> Vec<CheckResult> {

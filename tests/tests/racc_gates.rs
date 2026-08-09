@@ -1,6 +1,6 @@
-use zerostack_codemode_conformance::checks::CheckStatus;
-use zerostack_codemode_conformance::fake_substrate::RaccFakeSubstrate;
-use zerostack_codemode_conformance::racc::{
+use zerostack_shared_tests::checks::CheckStatus;
+use zerostack_shared_tests::fake_substrate::RaccFakeSubstrate;
+use zerostack_shared_tests::racc::{
     check_budget, check_cert, check_inline, check_irreversible_gate, check_receipt,
     check_release_aggregate, check_residency, check_task_transaction, digest_hex, run_racc_suite,
     BudgetMutation, CertificateMutation, Charges, ReceiptMutation, RegressionEvidence,
@@ -8,7 +8,7 @@ use zerostack_codemode_conformance::racc::{
     TaskTransactionMutation,
 };
 
-fn assert_fails(result: zerostack_codemode_conformance::racc::RaccCheckResult) {
+fn assert_fails(result: zerostack_shared_tests::racc::RaccCheckResult) {
     assert_eq!(
         result.status,
         CheckStatus::Fail,

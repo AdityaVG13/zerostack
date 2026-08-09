@@ -1,7 +1,7 @@
 //! Golden schema files validate representative contract documents.
 
 use serde_json::json;
-use zerostack_codemode_conformance::schema::{validate_against_schema, SchemaName};
+use zerostack_shared_tests::schema::{validate_against_schema, SchemaName};
 
 fn telemetry() -> serde_json::Value {
     json!({
@@ -89,8 +89,8 @@ fn execution_record_requires_cm_execution_id_and_refs_object() {
 
 #[test]
 fn racc_certificate_schema_is_golden_pinned() {
-    use zerostack_codemode_conformance::fake_substrate::RaccFakeSubstrate;
-    use zerostack_codemode_conformance::racc::{
+    use zerostack_shared_tests::fake_substrate::RaccFakeSubstrate;
+    use zerostack_shared_tests::racc::{
         immutable_query_fixtures, validate_racc_schema, RaccSubstrate, RACC_CERTIFICATE_SCHEMA,
     };
     let certificate = RaccFakeSubstrate::default().certified_query(&immutable_query_fixtures()[1]);
@@ -103,8 +103,8 @@ fn racc_certificate_schema_is_golden_pinned() {
 
 #[test]
 fn racc_receipt_schema_is_golden_pinned() {
-    use zerostack_codemode_conformance::fake_substrate::RaccFakeSubstrate;
-    use zerostack_codemode_conformance::racc::{
+    use zerostack_shared_tests::fake_substrate::RaccFakeSubstrate;
+    use zerostack_shared_tests::racc::{
         validate_racc_schema, RaccSubstrate, RACC_RECEIPT_SCHEMA,
     };
     let receipt = RaccFakeSubstrate::default().dominance_receipt();
@@ -113,7 +113,7 @@ fn racc_receipt_schema_is_golden_pinned() {
 
 #[test]
 fn racc_invalidation_freshness_schema_is_golden_pinned() {
-    use zerostack_codemode_conformance::racc::{
+    use zerostack_shared_tests::racc::{
         validate_racc_schema, RACC_INVALIDATION_FRESHNESS_SCHEMA,
     };
     let vectors: serde_json::Value =
@@ -141,7 +141,7 @@ fn racc_invalidation_freshness_schema_is_golden_pinned() {
 
 #[test]
 fn racc_golden_schemas_reject_shape_drift() {
-    use zerostack_codemode_conformance::racc::{
+    use zerostack_shared_tests::racc::{
         validate_racc_schema, RACC_CERTIFICATE_SCHEMA, RACC_RECEIPT_SCHEMA,
     };
     assert!(validate_racc_schema(RACC_CERTIFICATE_SCHEMA, &json!({"schema_version": 1})).is_err());
@@ -150,7 +150,7 @@ fn racc_golden_schemas_reject_shape_drift() {
 
 #[test]
 fn task_acceptance_receipt_schema_is_golden_pinned() {
-    use zerostack_codemode_conformance::racc::{
+    use zerostack_shared_tests::racc::{
         digest_hex, validate_racc_schema, RACC_TASK_ACCEPTANCE_RECEIPT_SCHEMA,
     };
     let artifact = digest_hex(b"artifact");
@@ -230,13 +230,13 @@ fn canonical_report_serde_rejects_unknown_and_duplicate_fields() {
     let mut unknown = full_harness_report();
     unknown["unexpected"] = json!(true);
     assert!(
-        serde_json::from_value::<zerostack_codemode_conformance::ConformanceReport>(unknown)
+        serde_json::from_value::<zerostack_shared_tests::ConformanceReport>(unknown)
             .is_err()
     );
 
     let duplicate = r#"{"ns":"gz","ns":"fz","bin":"fake","contract_version":"1.0","surface":"mcp","completion_status":"partial","passed":false,"checks":[]}"#;
     assert!(
-        serde_json::from_str::<zerostack_codemode_conformance::ConformanceReport>(duplicate)
+        serde_json::from_str::<zerostack_shared_tests::ConformanceReport>(duplicate)
             .is_err()
     );
 }
