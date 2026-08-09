@@ -250,6 +250,20 @@
       "kind": "validation-script"
     },
     {
+      "id": "test-check-canonical-json-impls",
+      "promise": "shared conformance: test-check-canonical-json-impls",
+      "applicability": [
+        "FSZero",
+        "GraphZero",
+        "TokenZero",
+        "reference",
+        "CLI"
+      ],
+      "origin": "tests/test_check_canonical_json_impls.py",
+      "destination": "tests/scripts/",
+      "kind": "executable-test"
+    },
+    {
       "id": "test-check-freshness",
       "promise": "shared conformance: test-check-freshness",
       "applicability": [
