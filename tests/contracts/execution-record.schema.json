@@ -1,0 +1,27 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://zerostack.local/schemas/execution-record.schema.json",
+  "title": "ZeroStack CodeMode Execution Record v1.0",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["execution_id", "ns", "status", "refs", "telemetry"],
+  "properties": {
+    "execution_id": { "type": "string", "pattern": "^cm://exec/\\d+-[0-9a-f]{12}$" },
+    "ns": { "enum": ["fz", "tz", "gz"] },
+    "status": { "enum": ["ok", "error"] },
+    "refs": {
+      "type": "object",
+      "additionalProperties": { "type": "string" },
+      "required": ["code", "steps", "telemetry"],
+      "properties": {
+        "code": { "type": "string" },
+        "steps": { "type": "string" },
+        "telemetry": { "type": "string" },
+        "result": { "type": "string" },
+        "error": { "type": "string" }
+      }
+    },
+    "telemetry": { "$ref": "telemetry.schema.json" },
+    "error": { "$ref": "error.schema.json" }
+  }
+}

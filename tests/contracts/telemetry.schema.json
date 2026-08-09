@@ -1,0 +1,35 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://zerostack.local/schemas/telemetry.schema.json",
+  "title": "ZeroStack CodeMode Telemetry v1.0",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "kind",
+    "status",
+    "logical_ops",
+    "physical_ops",
+    "batched_ops",
+    "internal_actions",
+    "cache_hits",
+    "cache_misses",
+    "store_writes",
+    "wall_ms",
+    "bytes_materialized"
+  ],
+  "properties": {
+    "kind": { "type": "string", "minLength": 1 },
+    "status": { "enum": ["ok", "error"] },
+    "logical_ops": { "type": "integer", "minimum": 0 },
+    "physical_ops": { "type": "integer", "minimum": 0 },
+    "batched_ops": { "type": "integer", "minimum": 0 },
+    "internal_actions": { "type": "integer", "minimum": 0 },
+    "cache_hits": { "type": "integer", "minimum": 0 },
+    "cache_misses": { "type": "integer", "minimum": 0 },
+    "store_writes": { "type": "integer", "minimum": 0 },
+    "wall_ms": { "type": "integer", "minimum": 0 },
+    "bytes_materialized": { "type": "integer", "minimum": 0 },
+    "extra": { "type": "object" }
+  },
+  "not": { "required": ["raw_leak"] }
+}

@@ -1,0 +1,146 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://zerostack.dev/schemas/canonical-dispatch.schema.json",
+  "title": "ZeroStack canonical dispatch registry projection",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["version", "engine", "operations"],
+  "properties": {
+    "version": { "const": "zerostack.canonical_dispatch.v1" },
+    "engine": { "enum": ["token_zero", "fs_zero", "graph_zero"] },
+    "operations": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/operation" }
+    }
+  },
+  "$defs": {
+    "effectClass": {
+      "enum": [
+        "read_only",
+        "reversible_mutation",
+        "approval_required_mutation",
+        "irreversible"
+      ]
+    },
+    "permitGrant": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["permit_id", "canonical_operation_id", "effect_class"],
+      "properties": {
+        "permit_id": { "type": "string", "minLength": 1, "pattern": "\\S" },
+        "canonical_operation_id": { "type": "string", "minLength": 1 },
+        "effect_class": { "$ref": "#/$defs/effectClass" }
+      }
+    },
+    "approvalGrant": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["approval_id", "canonical_operation_id", "effect_class"],
+      "properties": {
+        "approval_id": { "type": "string", "minLength": 1, "pattern": "\\S" },
+        "canonical_operation_id": { "type": "string", "minLength": 1 },
+        "effect_class": { "$ref": "#/$defs/effectClass" }
+      }
+    },
+    "errorClass": {
+      "enum": [
+        "missing_metadata",
+        "unknown_metadata",
+        "invalid_registry",
+        "unknown_operation",
+        "invalid_arguments",
+        "unauthorized_effect",
+        "permit_required",
+        "approval_required",
+        "dispatch_failed",
+        "journal_failed",
+        "invalid_stage_transition"
+      ]
+    },
+    "effectPolicy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["effect_class", "permit", "approval"],
+      "properties": {
+        "effect_class": { "$ref": "#/$defs/effectClass" },
+        "permit": { "enum": ["not_required", "required"] },
+        "approval": { "enum": ["not_required", "required"] }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "effect_class": { "const": "read_only" } } },
+          "then": {
+            "properties": {
+              "permit": { "const": "not_required" },
+              "approval": { "const": "not_required" }
+            }
+          }
+        },
+        {
+          "if": { "properties": { "effect_class": { "const": "reversible_mutation" } } },
+          "then": {
+            "properties": {
+              "permit": { "const": "required" },
+              "approval": { "const": "not_required" }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "effect_class": {
+                "enum": ["approval_required_mutation", "irreversible"]
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "permit": { "const": "required" },
+              "approval": { "const": "required" }
+            }
+          }
+        }
+      ]
+    },
+    "argsSchema": {
+      "type": "object",
+      "required": ["type"]
+    },
+    "operation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "canonical_id",
+        "aliases",
+        "args_schema",
+        "effect_policy",
+        "errors"
+      ],
+      "properties": {
+        "canonical_id": {
+          "type": "string",
+          "minLength": 1,
+          "pattern": "^\\S+$"
+        },
+        "aliases": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "pattern": "^\\S+$"
+          }
+        },
+        "args_schema": { "$ref": "#/$defs/argsSchema" },
+        "effect_policy": { "$ref": "#/$defs/effectPolicy" },
+        "errors": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": { "$ref": "#/$defs/errorClass" }
+        }
+      }
+    }
+  }
+}

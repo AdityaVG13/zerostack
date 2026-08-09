@@ -1,0 +1,176 @@
+{
+  "schema_version": 1,
+  "model_version": "zerostack.invalidation-freshness.v1",
+  "authority_binding": {
+    "freeze_id": "Z3",
+    "authority_hash": "dc6a8262b0cae49c3aed38f08ce13fb1d6c80acc90c7f05fdff21558243c73af"
+  },
+  "assembly_manifest_digest": "6312a10ac50df63e315ae3f271c4a520665dc5c8bbf57484df523412101ceba8",
+  "required_closure": {
+    "schema_version": 1,
+    "model_version": "zerostack.invalidation-freshness.v1",
+    "assembly_manifest_digest": "6312a10ac50df63e315ae3f271c4a520665dc5c8bbf57484df523412101ceba8",
+    "source_repository_heads": [
+      {
+        "repository": "ZeroStack",
+        "head": "a7d7ccec7f4ca3d4376a215a50e076c1f5bd44f8"
+      }
+    ],
+    "producer_domains": [
+      "filesystem_index",
+      "graph_index"
+    ],
+    "influence_scope": [
+      "fs:file",
+      "graph:symbol"
+    ],
+    "edges": [
+      {
+        "producer": "fs:file",
+        "consumer": "graph:symbol",
+        "kind": "derives"
+      }
+    ],
+    "essential_dependencies": [
+      {
+        "schema_version": 1,
+        "dependency": {
+          "producer": "fs:file",
+          "consumer": "graph:symbol",
+          "kind": "derives"
+        },
+        "witness": {
+          "path": [
+            "fs:file",
+            "graph:symbol"
+          ]
+        },
+        "certificate_digest": "54354c79c4238bb236637db7d6f89e42d1232129e0d2a4ce0ff32975cb2b910f"
+      }
+    ],
+    "certificate_digest": "fd8d7494c75716a168785ed5d6f3bc3876a41d502b26e5219ce03b141a84af47"
+  },
+  "canonical_fresh_certificate": {
+    "schema_version": 1,
+    "model_version": "zerostack.invalidation-freshness.v1",
+    "index_id": "graph-index",
+    "index_generation": 7,
+    "influence": {
+      "schema_version": 1,
+      "model_version": "zerostack.invalidation-freshness.v1",
+      "assembly_manifest_digest": "6312a10ac50df63e315ae3f271c4a520665dc5c8bbf57484df523412101ceba8",
+      "source_repository_heads": [
+        {
+          "repository": "ZeroStack",
+          "head": "a7d7ccec7f4ca3d4376a215a50e076c1f5bd44f8"
+        }
+      ],
+      "producer_domains": [
+        "filesystem_index",
+        "graph_index"
+      ],
+      "influence_scope": [
+        "fs:file",
+        "graph:symbol"
+      ],
+      "edges": [
+        {
+          "producer": "fs:file",
+          "consumer": "graph:symbol",
+          "kind": "derives"
+        }
+      ],
+      "essential_dependencies": [
+        {
+          "schema_version": 1,
+          "dependency": {
+            "producer": "fs:file",
+            "consumer": "graph:symbol",
+            "kind": "derives"
+          },
+          "witness": {
+            "path": [
+              "fs:file",
+              "graph:symbol"
+            ]
+          },
+          "certificate_digest": "54354c79c4238bb236637db7d6f89e42d1232129e0d2a4ce0ff32975cb2b910f"
+        }
+      ],
+      "certificate_digest": "fd8d7494c75716a168785ed5d6f3bc3876a41d502b26e5219ce03b141a84af47"
+    },
+    "replay_identity": "8f336c20dc044a9394953f5b0431434d55a0b84d5613e3d4ec046f1dce44a0af",
+    "certificate_digest": "c564a9ccbf1120764e226daadfc9df1c32858ddac0aa4a5ca8933c97bac48ace"
+  },
+  "canonical_fresh_bytes": "{\"certificate_digest\":\"c564a9ccbf1120764e226daadfc9df1c32858ddac0aa4a5ca8933c97bac48ace\",\"index_generation\":7,\"index_id\":\"graph-index\",\"influence\":{\"assembly_manifest_digest\":\"6312a10ac50df63e315ae3f271c4a520665dc5c8bbf57484df523412101ceba8\",\"certificate_digest\":\"fd8d7494c75716a168785ed5d6f3bc3876a41d502b26e5219ce03b141a84af47\",\"edges\":[{\"consumer\":\"graph:symbol\",\"kind\":\"derives\",\"producer\":\"fs:file\"}],\"essential_dependencies\":[{\"certificate_digest\":\"54354c79c4238bb236637db7d6f89e42d1232129e0d2a4ce0ff32975cb2b910f\",\"dependency\":{\"consumer\":\"graph:symbol\",\"kind\":\"derives\",\"producer\":\"fs:file\"},\"schema_version\":1,\"witness\":{\"path\":[\"fs:file\",\"graph:symbol\"]}}],\"influence_scope\":[\"fs:file\",\"graph:symbol\"],\"model_version\":\"zerostack.invalidation-freshness.v1\",\"producer_domains\":[\"filesystem_index\",\"graph_index\"],\"schema_version\":1,\"source_repository_heads\":[{\"head\":\"a7d7ccec7f4ca3d4376a215a50e076c1f5bd44f8\",\"repository\":\"ZeroStack\"}]},\"model_version\":\"zerostack.invalidation-freshness.v1\",\"replay_identity\":\"8f336c20dc044a9394953f5b0431434d55a0b84d5613e3d4ec046f1dce44a0af\",\"schema_version\":1}",
+  "canonical_fresh_bytes_sha256": "1fadc59499803dba6daea4ffc48bfb96a646f8d4d14b83242711ddfd4025b29d",
+  "cases": [
+    {
+      "case_id": "exact",
+      "indexed_head": "a7d7ccec7f4ca3d4376a215a50e076c1f5bd44f8",
+      "indexed_extra_scope": false,
+      "index_generation": 7,
+      "minimum_generation": 7,
+      "mutate_replay": false,
+      "expected_status": "fresh",
+      "expected_failure_code": null
+    },
+    {
+      "case_id": "missing-edge",
+      "indexed_head": "a7d7ccec7f4ca3d4376a215a50e076c1f5bd44f8",
+      "indexed_extra_scope": true,
+      "indexed_omit_last_edge": true,
+      "index_generation": 7,
+      "minimum_generation": 7,
+      "mutate_replay": false,
+      "expected_status": "index_behind",
+      "expected_failure_code": "MISSING_EDGE",
+      "required_extra_scope": true
+    },
+    {
+      "case_id": "stale-index",
+      "indexed_head": "1c918d27d8eb091925ac87893072137339500c1b",
+      "indexed_extra_scope": false,
+      "index_generation": 7,
+      "minimum_generation": 7,
+      "mutate_replay": false,
+      "expected_status": "index_behind",
+      "expected_failure_code": "SOURCE_HEAD_MISMATCH"
+    },
+    {
+      "case_id": "generation-rollback",
+      "indexed_head": "a7d7ccec7f4ca3d4376a215a50e076c1f5bd44f8",
+      "indexed_extra_scope": false,
+      "index_generation": 6,
+      "minimum_generation": 7,
+      "mutate_replay": false,
+      "expected_status": "index_behind",
+      "expected_failure_code": "GENERATION_ROLLBACK"
+    },
+    {
+      "case_id": "scope-inflation",
+      "indexed_head": "a7d7ccec7f4ca3d4376a215a50e076c1f5bd44f8",
+      "indexed_extra_scope": true,
+      "index_generation": 7,
+      "minimum_generation": 7,
+      "mutate_replay": false,
+      "expected_status": "unknown",
+      "expected_failure_code": "SCOPE_INFLATION"
+    },
+    {
+      "case_id": "replay",
+      "indexed_head": "a7d7ccec7f4ca3d4376a215a50e076c1f5bd44f8",
+      "indexed_extra_scope": false,
+      "index_generation": 7,
+      "minimum_generation": 7,
+      "mutate_replay": true,
+      "expected_status": "unknown",
+      "expected_failure_code": "REPLAY_IDENTITY_MISMATCH"
+    }
+  ],
+  "clock_skew_vector": {
+    "wall_clock_delta_seconds": 315360000,
+    "expected_effect": "none",
+    "reason": "wall clock is not an authority field"
+  }
+}

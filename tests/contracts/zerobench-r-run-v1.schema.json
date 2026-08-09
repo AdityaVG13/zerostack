@@ -1,0 +1,652 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://zerostack.dev/schemas/zerobench-r-run-v1.schema.json",
+  "title": "ZeroBench-R proof-carrying run record v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "contract_version",
+    "claim",
+    "claim_digest",
+    "evidence_digest",
+    "authority_digest"
+  ],
+  "properties": {
+    "contract_version": {
+      "const": 1
+    },
+    "claim": {
+      "$ref": "#/$defs/run_claim"
+    },
+    "claim_digest": {
+      "$ref": "#/$defs/digest"
+    },
+    "evidence_digest": {
+      "$ref": "#/$defs/digest"
+    },
+    "authority_digest": {
+      "$ref": "#/$defs/digest"
+    }
+  },
+  "$defs": {
+    "digest": {
+      "type": "string",
+      "pattern": "^(?!0{64}$)[0-9a-f]{64}$"
+    },
+    "counter_identity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "counter_id",
+        "unit",
+        "boundary_digest",
+        "adapter_digest",
+        "platform_profile_digest"
+      ],
+      "properties": {
+        "counter_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "unit": {
+          "enum": [
+            "tokens",
+            "bytes",
+            "calls",
+            "cpu_nanoseconds",
+            "wall_nanoseconds",
+            "allocated_bytes",
+            "io_bytes"
+          ]
+        },
+        "boundary_digest": {
+          "$ref": "#/$defs/digest"
+        },
+        "adapter_digest": {
+          "$ref": "#/$defs/digest"
+        },
+        "platform_profile_digest": {
+          "$ref": "#/$defs/digest"
+        }
+      }
+    },
+    "reasoning": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "hidden_reasoning_tokens",
+        "visible_output_tokens",
+        "reasoning_turns_before_first_candidate",
+        "incomplete_during_reasoning",
+        "reasoning_state_status",
+        "semantic_reasoning_turns_before_first_candidate",
+        "orchestration_turns_before_first_candidate"
+      ],
+      "properties": {
+        "hidden_reasoning_tokens": {
+          "oneOf": [
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "availability",
+                "value"
+              ],
+              "properties": {
+                "availability": {
+                  "const": "measured"
+                },
+                "value": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 18446744073709551615
+                }
+              }
+            },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "availability"
+              ],
+              "properties": {
+                "availability": {
+                  "const": "unavailable"
+                }
+              }
+            }
+          ]
+        },
+        "visible_output_tokens": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 18446744073709551615
+        },
+        "reasoning_turns_before_first_candidate": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 4294967295
+        },
+        "incomplete_during_reasoning": {
+          "type": "boolean"
+        },
+        "reasoning_state_status": {
+          "enum": [
+            "exact",
+            "scoped",
+            "approximate",
+            "clean_restart",
+            "unavailable"
+          ]
+        },
+        "semantic_reasoning_turns_before_first_candidate": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 4294967295
+        },
+        "orchestration_turns_before_first_candidate": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 4294967295
+        }
+      }
+    },
+    "cache": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "logical_input_tokens",
+        "provider_uncached_input_tokens",
+        "provider_reported_cached_input_tokens",
+        "provider_cache_eligible",
+        "byte_identical_prefix_eligible",
+        "exact_local_artifact_reuse",
+        "exact_reasoning_continuation_reuse",
+        "context_occupancy_tokens"
+      ],
+      "properties": {
+        "logical_input_tokens": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 18446744073709551615
+        },
+        "provider_uncached_input_tokens": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 18446744073709551615
+        },
+        "provider_reported_cached_input_tokens": {
+          "oneOf": [
+            {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 18446744073709551615
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "provider_cache_eligible": {
+          "type": "boolean"
+        },
+        "byte_identical_prefix_eligible": {
+          "type": "boolean"
+        },
+        "exact_local_artifact_reuse": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 18446744073709551615
+        },
+        "exact_reasoning_continuation_reuse": {
+          "type": "boolean"
+        },
+        "context_occupancy_tokens": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 18446744073709551615
+        }
+      }
+    },
+    "agent": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "correct_locus_at_1",
+        "exact_read_at_1",
+        "verified_effect_at_1",
+        "model_calls",
+        "tool_calls",
+        "time_to_first_relevant_byte_micros",
+        "time_to_first_candidate_micros",
+        "time_to_verified_effect_micros"
+      ],
+      "properties": {
+        "correct_locus_at_1": {
+          "type": "boolean"
+        },
+        "exact_read_at_1": {
+          "type": "boolean"
+        },
+        "verified_effect_at_1": {
+          "type": "boolean"
+        },
+        "model_calls": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 4294967295
+        },
+        "tool_calls": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 4294967295
+        },
+        "time_to_first_relevant_byte_micros": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 18446744073709551615
+        },
+        "time_to_first_candidate_micros": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 18446744073709551615
+        },
+        "time_to_verified_effect_micros": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 18446744073709551615
+        }
+      }
+    },
+    "work": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "identity",
+        "class_totals",
+        "observed_total",
+        "receipt_digest"
+      ],
+      "properties": {
+        "identity": {
+          "$ref": "#/$defs/counter_identity"
+        },
+        "observed_total": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 18446744073709551615
+        },
+        "receipt_digest": {
+          "$ref": "#/$defs/digest"
+        },
+        "class_totals": {
+          "$ref": "#/$defs/class_totals"
+        }
+      }
+    },
+    "run_claim": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema_version",
+        "registration_digest",
+        "comparison_identity_digest",
+        "model_identity_digest",
+        "reasoning_contract_digest",
+        "arm",
+        "adapter_pin_digest",
+        "secondary_model_identity_digest",
+        "case_digest",
+        "task_identity_digest",
+        "repository_root_digest",
+        "trial_index",
+        "seed",
+        "status",
+        "failure_or_incomplete_digest",
+        "candidate_success_before_guard",
+        "published_success",
+        "candidate_published",
+        "publication_evidence_class",
+        "fallback_used",
+        "reasoning",
+        "cache",
+        "agent",
+        "measured_work",
+        "novel_causal_tokens",
+        "verifier_identity_digest",
+        "task_stratum",
+        "execution_order_index",
+        "quality_admission_digest",
+        "baseline_paired_outcome_digest",
+        "candidate_protected_outcome_digest",
+        "deoptimization_execution_receipt_digest",
+        "system"
+      ],
+      "properties": {
+        "schema_version": {
+          "const": "zerobench-r-run/v1"
+        },
+        "registration_digest": {
+          "$ref": "#/$defs/digest"
+        },
+        "comparison_identity_digest": {
+          "$ref": "#/$defs/digest"
+        },
+        "arm": {
+          "enum": [
+            "raw",
+            "rtk",
+            "external_ztk",
+            "headroom",
+            "leanctx",
+            "context_mode",
+            "empryo",
+            "racc_r_candidate",
+            "racc_r_strict",
+            "racc_r_amplify"
+          ]
+        },
+        "adapter_pin_digest": {
+          "$ref": "#/$defs/digest"
+        },
+        "secondary_model_identity_digest": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/digest"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "case_digest": {
+          "$ref": "#/$defs/digest"
+        },
+        "status": {
+          "enum": [
+            "complete",
+            "failed",
+            "incomplete"
+          ]
+        },
+        "failure_or_incomplete_digest": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/digest"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "candidate_success_before_guard": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "published_success": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "candidate_published": {
+          "type": "boolean"
+        },
+        "publication_evidence_class": {
+          "enum": [
+            "raw_baseline",
+            "exact_neutral",
+            "pointwise_dominance",
+            "scoped_class_dominance",
+            "distributional_only",
+            "unidentified",
+            "unguarded_candidate",
+            "external_system"
+          ]
+        },
+        "fallback_used": {
+          "type": "boolean"
+        },
+        "reasoning": {
+          "$ref": "#/$defs/reasoning"
+        },
+        "cache": {
+          "$ref": "#/$defs/cache"
+        },
+        "agent": {
+          "$ref": "#/$defs/agent"
+        },
+        "measured_work": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 32,
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/work"
+          }
+        },
+        "novel_causal_tokens": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 18446744073709551615
+        },
+        "verifier_identity_digest": {
+          "$ref": "#/$defs/digest"
+        },
+        "model_identity_digest": {
+          "$ref": "#/$defs/digest"
+        },
+        "reasoning_contract_digest": {
+          "$ref": "#/$defs/digest"
+        },
+        "task_identity_digest": {
+          "$ref": "#/$defs/digest"
+        },
+        "repository_root_digest": {
+          "$ref": "#/$defs/digest"
+        },
+        "trial_index": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 4294967295
+        },
+        "seed": {
+          "oneOf": [
+            {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 18446744073709551615
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "task_stratum": {
+          "enum": [
+            "named_symbol_local_bug",
+            "failing_test_diagnosis",
+            "stack_trace_localization",
+            "cross_file_refactor",
+            "dynamic_dispatch_configuration",
+            "generated_code_schema_migration",
+            "broad_architecture_question",
+            "exact_repository_fact",
+            "long_build_test_output_diagnosis",
+            "ambiguous_task_requiring_evidence",
+            "repeated_prepared_task_family",
+            "resumed_reasoning_continuation",
+            "adversarial_omitted_evidence",
+            "transaction_rollback_fault",
+            "multi_repository_change"
+          ]
+        },
+        "execution_order_index": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 18446744073709551615
+        },
+        "quality_admission_digest": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/digest"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "baseline_paired_outcome_digest": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/digest"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "candidate_protected_outcome_digest": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/digest"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "deoptimization_execution_receipt_digest": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/digest"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "system": {
+          "$ref": "#/$defs/system"
+        }
+      }
+    },
+    "system": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "indexing_preparation_micros",
+        "incremental_update_micros",
+        "peak_rss_bytes",
+        "disk_footprint_bytes",
+        "stale_artifact_count",
+        "crash_recovery_correct",
+        "suite_processes_at_rest"
+      ],
+      "properties": {
+        "indexing_preparation_micros": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 18446744073709551615
+        },
+        "incremental_update_micros": {
+          "oneOf": [
+            {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 18446744073709551615
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "peak_rss_bytes": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 18446744073709551615
+        },
+        "disk_footprint_bytes": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 18446744073709551615
+        },
+        "stale_artifact_count": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 18446744073709551615
+        },
+        "crash_recovery_correct": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "suite_processes_at_rest": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 4294967295
+        }
+      }
+    },
+    "class_totals": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "candidate",
+        "verification",
+        "comparison",
+        "baseline",
+        "fallback",
+        "restoration",
+        "prewarm",
+        "residue"
+      ],
+      "properties": {
+        "candidate": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 18446744073709551615
+        },
+        "verification": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 18446744073709551615
+        },
+        "comparison": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 18446744073709551615
+        },
+        "baseline": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 18446744073709551615
+        },
+        "fallback": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 18446744073709551615
+        },
+        "restoration": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 18446744073709551615
+        },
+        "prewarm": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 18446744073709551615
+        },
+        "residue": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 18446744073709551615
+        }
+      }
+    }
+  }
+}

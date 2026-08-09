@@ -1,0 +1,505 @@
+{
+  "$defs": {
+    "digest": {
+      "items": {
+        "maximum": 255,
+        "minimum": 0,
+        "type": "integer"
+      },
+      "maxItems": 32,
+      "minItems": 32,
+      "type": "array"
+    },
+    "execution_trace": {
+      "additionalProperties": false,
+      "properties": {
+        "buffered_visible_bytes": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "events": {
+          "items": {
+            "$ref": "#/$defs/guard_event"
+          },
+          "maxItems": 10,
+          "type": "array"
+        },
+        "executed_instructions": {
+          "maximum": 4096,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "execution_failure": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "$ref": "#/$defs/failure_code"
+            }
+          ]
+        },
+        "staged_effects": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "worker_steps": {
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "events",
+        "executed_instructions",
+        "worker_steps",
+        "buffered_visible_bytes",
+        "staged_effects",
+        "execution_failure"
+      ],
+      "type": "object"
+    },
+    "failure_code": {
+      "enum": [
+        "schema_version_mismatch",
+        "missing_binding",
+        "invalid_source_identity",
+        "canonical_digest_mismatch",
+        "coherence_failure",
+        "invalid_plan",
+        "plan_digest_mismatch",
+        "semantic_cut_crossing",
+        "attribution_changed",
+        "unbounded_worker",
+        "bound_exceeded",
+        "missing_snap_certificate",
+        "missing_safety_shield",
+        "irreversible_pre_evidence_effect",
+        "performance_unknown",
+        "execute_without_permit",
+        "forged_permit",
+        "plan_step_mismatch",
+        "buffer_overflow",
+        "early_visible_byte",
+        "incomplete_execution",
+        "incomplete_trace",
+        "forged_predecessor",
+        "incomplete_transaction_closure",
+        "unaccounted_fallback",
+        "missing_approval_grant",
+        "forged_receipt"
+      ],
+      "type": "string"
+    },
+    "guard_event": {
+      "additionalProperties": false,
+      "properties": {
+        "guard": {
+          "enum": [
+            "g0_canonical",
+            "g1_coherence",
+            "g2_finite_plan",
+            "g3_attribution",
+            "g4_resources",
+            "g5_robust_snap",
+            "g6_safety_shield",
+            "g7_performance",
+            "g8_transaction_closure",
+            "g9_receipt_commitment"
+          ]
+        },
+        "predecessor": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "enum": [
+                "g0_canonical",
+                "g1_coherence",
+                "g2_finite_plan",
+                "g3_attribution",
+                "g4_resources",
+                "g5_robust_snap",
+                "g6_safety_shield",
+                "g7_performance",
+                "g8_transaction_closure",
+                "g9_receipt_commitment"
+              ]
+            }
+          ]
+        },
+        "status": {
+          "const": "passed"
+        }
+      },
+      "required": [
+        "guard",
+        "predecessor",
+        "status"
+      ],
+      "type": "object"
+    },
+    "permit_record": {
+      "additionalProperties": false,
+      "properties": {
+        "admission_digest": {
+          "$ref": "#/$defs/digest"
+        },
+        "binding_digest": {
+          "$ref": "#/$defs/digest"
+        },
+        "permit_id": {
+          "$ref": "#/$defs/digest"
+        },
+        "schema_version": {
+          "const": 1
+        },
+        "surface": {
+          "enum": [
+            "mcp",
+            "cli",
+            "claude_code",
+            "pi"
+          ]
+        },
+        "trace": {
+          "$ref": "#/$defs/prepare_trace"
+        }
+      },
+      "required": [
+        "schema_version",
+        "permit_id",
+        "binding_digest",
+        "admission_digest",
+        "surface",
+        "trace"
+      ],
+      "type": "object"
+    },
+    "prepare_trace": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/execution_trace"
+        },
+        {
+          "properties": {
+            "events": {
+              "maxItems": 8,
+              "minItems": 8,
+              "prefixItems": [
+                {
+                  "properties": {
+                    "guard": {
+                      "const": "g0_canonical"
+                    }
+                  },
+                  "required": [
+                    "guard"
+                  ],
+                  "type": "object"
+                },
+                {
+                  "properties": {
+                    "guard": {
+                      "const": "g1_coherence"
+                    }
+                  },
+                  "required": [
+                    "guard"
+                  ],
+                  "type": "object"
+                },
+                {
+                  "properties": {
+                    "guard": {
+                      "const": "g2_finite_plan"
+                    }
+                  },
+                  "required": [
+                    "guard"
+                  ],
+                  "type": "object"
+                },
+                {
+                  "properties": {
+                    "guard": {
+                      "const": "g3_attribution"
+                    }
+                  },
+                  "required": [
+                    "guard"
+                  ],
+                  "type": "object"
+                },
+                {
+                  "properties": {
+                    "guard": {
+                      "const": "g4_resources"
+                    }
+                  },
+                  "required": [
+                    "guard"
+                  ],
+                  "type": "object"
+                },
+                {
+                  "properties": {
+                    "guard": {
+                      "const": "g5_robust_snap"
+                    }
+                  },
+                  "required": [
+                    "guard"
+                  ],
+                  "type": "object"
+                },
+                {
+                  "properties": {
+                    "guard": {
+                      "const": "g6_safety_shield"
+                    }
+                  },
+                  "required": [
+                    "guard"
+                  ],
+                  "type": "object"
+                },
+                {
+                  "properties": {
+                    "guard": {
+                      "const": "g7_performance"
+                    }
+                  },
+                  "required": [
+                    "guard"
+                  ],
+                  "type": "object"
+                }
+              ],
+              "type": "array"
+            }
+          },
+          "type": "object"
+        }
+      ]
+    },
+    "receipt_record": {
+      "additionalProperties": false,
+      "properties": {
+        "admission_digest": {
+          "$ref": "#/$defs/digest"
+        },
+        "assembly_manifest_digest": {
+          "$ref": "#/$defs/digest"
+        },
+        "binding_digest": {
+          "$ref": "#/$defs/digest"
+        },
+        "comparison_identity_digest": {
+          "$ref": "#/$defs/digest"
+        },
+        "effects_digest": {
+          "$ref": "#/$defs/digest"
+        },
+        "failure_code": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "$ref": "#/$defs/failure_code"
+            }
+          ]
+        },
+        "image_digest": {
+          "$ref": "#/$defs/digest"
+        },
+        "kind": {
+          "enum": [
+            "commit",
+            "fallback"
+          ]
+        },
+        "output_digest": {
+          "$ref": "#/$defs/digest"
+        },
+        "permit_id": {
+          "$ref": "#/$defs/digest"
+        },
+        "plan_digest": {
+          "$ref": "#/$defs/digest"
+        },
+        "predecessor_receipt_head": {
+          "$ref": "#/$defs/digest"
+        },
+        "receipt_head": {
+          "$ref": "#/$defs/digest"
+        },
+        "resource_usage": {
+          "$ref": "#/$defs/resource_usage"
+        },
+        "restoration": {
+          "$ref": "#/$defs/restoration"
+        },
+        "schema_version": {
+          "const": 1
+        },
+        "source_repository_heads": {
+          "items": {
+            "$ref": "#/$defs/source_head"
+          },
+          "maxItems": 64,
+          "minItems": 1,
+          "type": "array"
+        },
+        "source_tree_digest": {
+          "$ref": "#/$defs/digest"
+        },
+        "successor_root": {
+          "$ref": "#/$defs/digest"
+        },
+        "surface": {
+          "enum": [
+            "mcp",
+            "cli",
+            "claude_code",
+            "pi"
+          ]
+        },
+        "trace_digest": {
+          "$ref": "#/$defs/digest"
+        },
+        "verification_digest": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "$ref": "#/$defs/digest"
+            }
+          ]
+        }
+      },
+      "required": [
+        "schema_version",
+        "kind",
+        "permit_id",
+        "binding_digest",
+        "admission_digest",
+        "assembly_manifest_digest",
+        "source_tree_digest",
+        "source_repository_heads",
+        "image_digest",
+        "plan_digest",
+        "comparison_identity_digest",
+        "surface",
+        "verification_digest",
+        "output_digest",
+        "effects_digest",
+        "resource_usage",
+        "predecessor_receipt_head",
+        "successor_root",
+        "trace_digest",
+        "receipt_head",
+        "failure_code",
+        "restoration"
+      ],
+      "type": "object"
+    },
+    "resource_usage": {
+      "additionalProperties": false,
+      "properties": {
+        "elapsed_ms": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "fuel": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "io_bytes": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "memory_bytes": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "processes": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "risk_units": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "worker_steps": {
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "fuel",
+        "elapsed_ms",
+        "io_bytes",
+        "memory_bytes",
+        "processes",
+        "risk_units",
+        "worker_steps"
+      ],
+      "type": "object"
+    },
+    "restoration": {
+      "additionalProperties": false,
+      "properties": {
+        "attempted": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "completed": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "debt": {
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "attempted",
+        "completed",
+        "debt"
+      ],
+      "type": "object"
+    },
+    "source_head": {
+      "additionalProperties": false,
+      "properties": {
+        "head": {
+          "pattern": "^[0-9a-f]{40,64}$",
+          "type": "string"
+        },
+        "repository": {
+          "pattern": "^[A-Za-z0-9._-]{1,64}$",
+          "type": "string"
+        }
+      },
+      "required": [
+        "repository",
+        "head"
+      ],
+      "type": "object"
+    }
+  },
+  "$id": "https://zerostack.dev/schemas/two-phase-gate-v1.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "oneOf": [
+    {
+      "$ref": "#/$defs/permit_record"
+    },
+    {
+      "$ref": "#/$defs/receipt_record"
+    }
+  ],
+  "title": "ZeroStack two-phase permit and receipt records v1"
+}

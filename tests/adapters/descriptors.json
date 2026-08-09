@@ -1,0 +1,49 @@
+{
+  "version": "zerostack.shared-suite.adapters.v1",
+  "adapters": [
+    {
+      "id": "fszero",
+      "engine": "FSZero",
+      "transport": "process",
+      "namespace": "fz",
+      "surface": "codemode",
+      "binary_env": "FSZERO_CODEMODE_BIN",
+      "command": "explicit-binary"
+    },
+    {
+      "id": "graphzero",
+      "engine": "GraphZero",
+      "transport": "process",
+      "namespace": "gz",
+      "surface": "codemode",
+      "binary_env": "GRAPHZERO_CODEMODE_BIN",
+      "command": "explicit-binary"
+    },
+    {
+      "id": "tokenzero",
+      "engine": "TokenZero",
+      "transport": "process",
+      "namespace": "tz",
+      "surface": "codemode",
+      "binary_env": "TOKENZERO_CODEMODE_BIN",
+      "command": "explicit-binary"
+    },
+    {
+      "id": "reference",
+      "engine": "reference",
+      "transport": "reference-python",
+      "namespace": "reference",
+      "surface": "reference",
+      "command": "scripts/reference_adapter.py"
+    },
+    {
+      "id": "cli",
+      "engine": "CLI",
+      "transport": "process",
+      "namespace": "reference",
+      "surface": "codemode",
+      "binary_env": "ZEROSTACK_CONFORMANCE_BIN",
+      "command": "ZEROSTACK_CONFORMANCE_BIN"
+    }
+  ]
+}

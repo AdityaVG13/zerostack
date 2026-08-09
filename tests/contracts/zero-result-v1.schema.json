@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://zerostack.dev/schemas/zero-result-v1.schema.json",
+  "title": "ZeroResultV1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["ack", "content"],
+  "properties": {
+    "ack": { "type": "string", "minLength": 1, "maxLength": 64 },
+    "content": { "oneOf": [
+      { "type": "object", "additionalProperties": false, "required": ["kind", "value"], "properties": { "kind": { "const": "inline" }, "value": true } },
+      { "type": "object", "additionalProperties": false, "required": ["kind", "ref"], "properties": { "kind": { "const": "ref" }, "ref": { "type": "string", "pattern": "^(fz|gz|tz)://[^\\s]+$" }, "preview": { "type": "string", "maxLength": 1024 } } }
+    ] }
+  }
+}

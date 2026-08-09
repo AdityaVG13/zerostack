@@ -12,6 +12,7 @@ members = [
     "crates/zero-store",
     "crates/zero-testkit",
     "crates/zerostack-machine-permit",
+    "tests",
 ]
 
 [workspace.package]
