@@ -7,6 +7,7 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
+use serde::{Deserialize, Serialize};
 use serde_json::Value as JsonValue;
 use zero_abi::ZeroResultV1;
 use zero_store::SharedCas;
@@ -21,7 +22,8 @@ pub fn runtime_creation_count() -> u64 {
     RUNTIME_CREATIONS.load(Ordering::Relaxed)
 }
 
-#[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd)]
+#[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct CapabilityDescriptor {
     pub surface: String,
     pub method: String,
@@ -36,7 +38,8 @@ impl CapabilityDescriptor {
     }
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct GlobalRegistration {
     pub root: String,
     pub capabilities: Vec<CapabilityDescriptor>,

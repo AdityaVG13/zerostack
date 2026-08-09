@@ -14,6 +14,7 @@ regex = "1"
 serde.workspace = true
 serde_json.workspace = true
 zero-abi = { path = "../crates/zero-abi" }
+zero-codemode = { path = "../crates/zero-codemode" }
 zero-testkit = { path = "../crates/zero-testkit" }
 
 [dev-dependencies]

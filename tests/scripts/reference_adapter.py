@@ -46,17 +46,22 @@ def main(argv: list[str] | None = None) -> int:
         if not origin.is_file():
             raise SystemExit(f"catalog origin missing: {case.get('origin')}")
 
-    budget = subprocess.run(
+    checks = [
         [sys.executable, str(TESTS_ROOT / "scripts" / "check_budget.py"), "--self-test"],
-        cwd=TESTS_ROOT,
-        check=False,
-        text=True,
-        capture_output=True,
-    )
-    if budget.returncode != 0:
-        print(budget.stdout, end="")
-        print(budget.stderr, end="", file=sys.stderr)
-        return budget.returncode
+        [sys.executable, str(TESTS_ROOT / "scripts" / "check_surface_substrate.py")],
+    ]
+    for command in checks:
+        result = subprocess.run(
+            command,
+            cwd=TESTS_ROOT,
+            check=False,
+            text=True,
+            capture_output=True,
+        )
+        if result.returncode != 0:
+            print(result.stdout, end="")
+            print(result.stderr, end="", file=sys.stderr)
+            return result.returncode
     print(json.dumps({"adapter": "reference", "suite": args.suite, "status": "pass", "cases": len(cases)}))
     return 0
 

@@ -131,6 +131,21 @@ CodeMode is not a fourth engine. It is an execution mode over TokenZero, FSZero,
 
 See the [Release-N engine MCP compatibility policy](mcp-compatibility-policy.md) for defaults, maintenance scope, migration, and staged removal gates.
 
+### Shared surface registration
+
+`zero-codemode` exposes `SurfaceRegistration` as the hub-owned install-time
+contract. An engine adapter supplies one `DomainAdapterRegistration` containing
+its `CanonicalRegistry`, effect/approval policy, `RefOwnership`, telemetry
+schema, and capability descriptors. The host converts only a CodeMode
+registration into `GlobalRegistration`; an MCP registration is rejected at that
+boundary. `SurfaceKind` therefore models one selected artifact face, not a
+runtime switch or a dual catalog.
+
+This contract is metadata and validation only. It does not import FastMCP,
+QuickJS, or engine-domain code. An engine compatibility package may provide a
+thin MCP carrier, but that carrier must consume the same registration and must
+not reimplement the registry, result envelope, ref ownership, or telemetry.
+
 ## Harness-neutral raw-worker client
 
 The zero_codemode::worker module is the stable Rust ownership boundary between

@@ -7,6 +7,7 @@ mod limits;
 pub mod manifest;
 pub mod node;
 pub mod session;
+pub mod surface;
 pub mod worker;
 mod wrap;
 
@@ -36,5 +37,9 @@ pub use node::{
     FNM_DEFAULT_ALIAS_SUBDIR, FNM_DIR_ENV, NODE_ORDER, NODE_SCHEMA, NodeCandidate, NodeEnv,
     NodeError, NodeOutcome, NodeRefusal, NodeSource, node_candidates, node_file_name, node_report,
     resolve_node, resolve_node_with,
+};
+pub use surface::{
+    DomainAdapterRegistration, SURFACE_CONTRACT_VERSION, SurfaceContractError, SurfaceKind,
+    SurfaceRegistration,
 };
 pub use wrap::{PlanError, validate_plan, wrap_plan};

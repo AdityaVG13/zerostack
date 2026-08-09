@@ -2,6 +2,20 @@
   "version": "zerostack.shared-suite.catalog.v1",
   "cases": [
     {
+      "id": "surface-registration",
+      "promise": "shared surface registration is exclusive and strict",
+      "applicability": [
+        "FSZero",
+        "GraphZero",
+        "TokenZero",
+        "reference",
+        "CLI"
+      ],
+      "origin": "tests/surface_registration.rs",
+      "destination": "tests/contracts/",
+      "kind": "executable-test"
+    },
+    {
       "id": "canonical-dispatch",
       "promise": "shared conformance: canonical-dispatch",
       "applicability": [
@@ -181,6 +195,31 @@
       ],
       "origin": "tests/schema_golden.rs",
       "destination": "tests/contracts/",
+      "kind": "executable-test"
+    },
+    {
+      "id": "script-check-surface-substrate",
+      "promise": "shared suite validation: check_surface_substrate",
+      "applicability": [
+        "reference",
+        "CLI"
+      ],
+      "origin": "scripts/check_surface_substrate.py",
+      "destination": "scripts/check_surface_substrate.py",
+      "kind": "validation-script"
+    },
+    {
+      "id": "test-check-surface-substrate",
+      "promise": "shared conformance: test-check-surface-substrate",
+      "applicability": [
+        "FSZero",
+        "GraphZero",
+        "TokenZero",
+        "reference",
+        "CLI"
+      ],
+      "origin": "tests/test_check_surface_substrate.py",
+      "destination": "tests/scripts/",
       "kind": "executable-test"
     },
     {
