@@ -123,6 +123,38 @@ class LocMajorityTests(unittest.TestCase):
             self.assertEqual(result["hub"]["implementation_loc"], baseline["hub"]["implementation_loc"])
             self.assertLess(result["hub_share"], baseline["hub_share"])
 
+    def test_inventory_survives_metadata_only_successor_but_rejects_source_changes(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            repos = []
+            for repo_id in module.REPOSITORIES:
+                repo_root = root / repo_id
+                module._tiny_repo(repo_root, {"src/domain.rs": f"fn {repo_id}() {{}}\n"})
+                repos.append(module.Repo(repo_id, repo_root))
+            inventory = module.build_inventory(repos)
+
+            # A successor commit changing only an untracked metadata file must
+            # not invalidate unchanged source bindings.
+            note = repos[0].root / "NOTE.txt"
+            note.write_text("inventory successor\n", encoding="utf-8")
+            module._run(["git", "-C", str(repos[0].root), "add", "NOTE.txt"])
+            module._run(["git", "-C", str(repos[0].root), "commit", "-qm", "metadata-only successor"])
+            self.assertEqual(module.validate_inventory(inventory, repos), [])
+
+            changed = repos[0].root / "src/domain.rs"
+            changed.write_text("fn changed() {}\n", encoding="utf-8")
+            module._run(["git", "-C", str(repos[0].root), "add", "src/domain.rs"])
+            module._run(["git", "-C", str(repos[0].root), "commit", "-qm", "source change"])
+            errors = module.validate_inventory(inventory, repos)
+            self.assertTrue(any("blob digest mismatch" in error for error in errors))
+
+            added = repos[0].root / "src/added.rs"
+            added.write_text("fn added() {}\n", encoding="utf-8")
+            module._run(["git", "-C", str(repos[0].root), "add", "src/added.rs"])
+            module._run(["git", "-C", str(repos[0].root), "commit", "-qm", "source addition"])
+            errors = module.validate_inventory(inventory, repos)
+            self.assertTrue(any("uncovered tracked allowed-language file" in error for error in errors))
+
     def test_untracked_only_gain_does_not_change_head_bound_measurement(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)

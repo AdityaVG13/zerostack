@@ -171,6 +171,7 @@ class Source:
     content: bytes
     code_lines: int
     digest: str
+    blob_digest: str
     path_reason: str | None
 
     @property
@@ -224,6 +225,13 @@ def tracked_paths(root: Path) -> list[str]:
 
 def git_blob(root: Path, path: str) -> bytes:
     return _git(root, "show", f"HEAD:{path}")
+
+
+def git_blob_digest(root: Path, path: str) -> str:
+    digest = _git(root, "rev-parse", f"HEAD:{path}").decode().strip()
+    if not re.fullmatch(r"[0-9a-f]{40}", digest):
+        raise GateError(f"{root}: invalid git blob digest for {path!r}: {digest!r}")
+    return digest
 
 
 def language_for(path: str, content: bytes | None = None) -> str | None:
@@ -405,6 +413,7 @@ def collect_sources(repo: Repo) -> tuple[str, list[Source], str]:
             content=blobs[path],
             code_lines=counts[path],
             digest=hashlib.sha256(blobs[path]).hexdigest(),
+            blob_digest=git_blob_digest(repo.root, path),
             path_reason=_path_reason(path, blobs[path]),
         )
         for path in allowed
@@ -421,6 +430,7 @@ def _inventory_classifications(
 ) -> dict[tuple[str, str], Classification]:
     """Return the deterministic reviewed classification for every source."""
     sources: list[tuple[str, str, bytes, str | None]] = []
+    repo_roots = {repo.id: repo.root for repo in repos}
     for repo in repos:
         for path in tracked_paths(repo.root):
             content = git_blob(repo.root, path)
@@ -435,6 +445,7 @@ def _inventory_classifications(
                 content=content,
                 code_lines=0,
                 digest=hashlib.sha256(content).hexdigest(),
+                blob_digest=git_blob_digest(repo_roots[repo], path),
                 path_reason=path_reason,
             )
             for repo, path, content, path_reason in sources
@@ -491,6 +502,7 @@ def build_inventory(repos: Sequence[Repo]) -> dict[str, Any]:
                 "classification": classification.kind,
                 "rule": classification.rule,
                 "justification": classification.justification,
+                "blob_digest": git_blob_digest(repo.root, path),
             }
             if classification.hub_target is not None:
                 item["hub_target"] = classification.hub_target
@@ -507,6 +519,7 @@ def build_inventory(repos: Sequence[Repo]) -> dict[str, Any]:
             "excluded_segments": sorted(EXCLUDED_SEGMENTS),
             "excluded_path_rules": ["fixture-tree", "fixture-padding", "generated-marker", "generated-filename", "dead-code-filename"],
             "duplicate_policy": "cross-repository exact duplicates remain in the denominator, contribute no duplicated hub LOC, and fail the gate; same-repository duplicates count once",
+            "head_binding_policy": "generated_from_heads records inventory generation provenance; validation binds current paths to current git blob digests and the live report emits current HEADs",
             "domain_policy": "engine algorithms remain domain-local unless an explicit rule marks a candidate",
         },
         "files": entries,
@@ -533,9 +546,6 @@ def validate_inventory(inventory: Mapping[str, Any], repos: Sequence[Repo]) -> l
     seen: dict[str, int] = Counter()
     actual: dict[str, tuple[Repo, str, bytes]] = {}
     reviewed = _inventory_classifications(repos)
-    expected_heads = {repo.id: git_head(repo.root) for repo in repos}
-    if inventory.get("generated_from_heads") != expected_heads:
-        errors.append("inventory generated_from_heads does not match current repository HEADs")
     for repo in repos:
         for path in tracked_paths(repo.root):
             content = git_blob(repo.root, path)
@@ -553,6 +563,8 @@ def validate_inventory(inventory: Mapping[str, Any], repos: Sequence[Repo]) -> l
             errors.append(f"files[{index}] is not a current tracked allowed-language file: {key!r}")
             continue
         expected_language = language_for(path, actual[key][2])
+        if item.get("blob_digest") != git_blob_digest(actual[key][0].root, path):
+            errors.append(f"{key}: git blob digest mismatch")
         if item.get("language") != expected_language:
             errors.append(f"{key}: language mismatch")
         classification = reviewed[(repo, path)]
