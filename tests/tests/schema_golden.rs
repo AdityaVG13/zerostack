@@ -24,7 +24,7 @@ fn capability_manifest_accepts_normative_defaults() {
     let doc = json!({
         "contract_version": "1.0",
         "ns": "gz",
-        "mutation": "readonly",
+        "mutation": "store_only",
         "plan_forms": ["recipe", "json", "js"],
         "limits": {
             "max_logical_ops": 1000,
@@ -36,7 +36,7 @@ fn capability_manifest_accepts_normative_defaults() {
     let missing_js = json!({
         "contract_version": "1.0",
         "ns": "gz",
-        "mutation": "readonly",
+        "mutation": "store_only",
         "plan_forms": ["recipe", "json"],
         "limits": {}
     });

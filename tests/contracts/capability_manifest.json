@@ -26,7 +26,8 @@
       "enum": [
         "allowed",
         "denied",
-        "readonly"
+        "readonly",
+        "store_only"
       ]
     },
     "plan_forms": {

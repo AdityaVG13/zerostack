@@ -30,17 +30,18 @@ Each substrate has one namespace:
 |---|---:|---|
 | FSZero | `fz` | `allowed` |
 | TokenZero | `tz` | `denied` |
-| GraphZero | `gz` | `readonly` |
+| GraphZero | `gz` | `store_only` |
 
 `mutation` semantics:
 
 - `allowed`: mutating CodeMode bindings MAY be present. The substrate MUST wrap a multi-step execution in a cross-step transaction journal. If any later step fails, previously applied mutation in the same execution MUST roll back before the final `X0` response is returned. FSZero's TransactionJournal model is the reference behavior.
 - `denied`: mutating sandbox bindings MUST be absent. Structured or recipe plan operations that request mutation MUST be rejected with `Error.kind = "policy"`. No cross-step transaction journal is required while mutation is denied.
 - `readonly`: same rejection behavior as `denied`, and the substrate additionally declares that no mutating substrate operations exist in CodeMode. Read-only metadata/ref writes needed to store execution records are not domain mutation.
+- `store_only`: caller-triggered durable engine-store writes (memory, reservations, index shards, blob storage) MAY be present. Repository/workspace file mutation MUST be absent and MUST be rejected with `Error.kind = "policy"`; the generic `zero.edit` probe MUST reject with `policy` like `denied`/`readonly`.
 
 ## 3. Capability manifest
 
-Every substrate MUST serve `{ns}.codemode.describe("capabilities")` and `{ns}_codemode_describe` with `name = "capabilities"` returning a JSON object matching `schemas/capability-manifest.schema.json`:
+Every substrate MUST serve `{ns}.codemode.describe("capabilities")` and `{ns}_codemode_describe` with `name = "capabilities"` returning a JSON object matching `tests/contracts/capability-manifest.schema.json` (canonical; `conformance/schemas/capability-manifest.schema.json` is a legacy mirror and MUST NOT be treated as authoritative):
 
 ```json
 {
@@ -68,7 +69,7 @@ Required fields:
 
 - `contract_version`: exactly `"1.0"`.
 - `ns`: one of `"fz"`, `"tz"`, `"gz"`.
-- `mutation`: one of `"allowed"`, `"denied"`, `"readonly"`.
+- `mutation`: one of `"allowed"`, `"denied"`, `"readonly"`, `"store_only"`.
 - `plan_forms`: MUST contain `"recipe"`, `"json"`, and `"js"`.
 - `limits`: object containing only enforced limits. Echoed means enforced. A substrate MAY omit a limit it cannot enforce, but MUST NOT echo a dead limit.
 
@@ -343,7 +344,7 @@ The conformance crate names these checks G1-G10:
 | G5 errors | #10 | One failure for each error kind validates the taxonomy. |
 | G6 ctx.step | #8 | `ctx.step(name, () => value)` executes callback and records the step. |
 | G7 limits | #6 | Every echoed limit is violated once and enforcement is observed. |
-| G8 mutation capability | #3 | Behavior matches `allowed`, `denied`, or `readonly`. |
+| G8 mutation capability | #3 | Behavior matches `allowed`, `denied`, `readonly`, or `store_only`. |
 | G9 coalescing | #4, #9 | N=100 logical batch reads coalesce: `physical_ops` is much less than 100 and `batched_ops >= 1`. |
 | G10 sandbox denial | #7 | Every denial category in §12 fails with `kind = "sandbox"`. |
 

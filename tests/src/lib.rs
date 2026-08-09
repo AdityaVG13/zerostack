@@ -298,7 +298,7 @@ pub fn validate_capability_manifest(ns: Ns, value: &Value) -> Vec<String> {
     );
     if !matches!(
         manifest.mutation.as_str(),
-        "allowed" | "denied" | "readonly"
+        "allowed" | "denied" | "readonly" | "store_only"
     ) {
         errors.push(format!("invalid mutation {:?}", manifest.mutation));
     }
@@ -966,7 +966,7 @@ fn expected_mutation(ns: Ns) -> &'static str {
     match ns {
         Ns::Fz => "allowed",
         Ns::Tz => "denied",
-        Ns::Gz => "readonly",
+        Ns::Gz => "store_only",
     }
 }
 
@@ -986,7 +986,7 @@ fn interpret_mutation_probe(
                 details.push("allowed mutation capability rejected mutation with policy".into());
             }
         }
-        "denied" | "readonly" => {
+        "denied" | "readonly" | "store_only" => {
             if error_kind != Some("policy") {
                 details.push(format!(
                     "{declared} mutation capability did not reject with policy: {payload}"
@@ -1649,5 +1649,30 @@ mod tests {
             .is_some_and(|plan| plan.contains("length: 4")));
         assert!(limit_probe_plan("max_logical_ops", u64::MAX).is_none());
         assert!(limit_probe_plan("max_wall_ms", 10).is_none());
+    }
+
+    #[test]
+    fn store_only_mutation_probe_requires_policy_rejection() {
+        let manifest = json!({
+            "contract_version": "1.0",
+            "ns": "gz",
+            "mutation": "store_only",
+            "plan_forms": ["recipe", "json", "js"],
+            "limits": {}
+        });
+        assert!(validate_capability_manifest(Ns::Gz, &manifest).is_empty());
+
+        let payload = json!({"ack": "X0", "error": {"kind": "policy"}});
+        assert!(
+            interpret_mutation_probe("store_only", Some("X0"), Some("policy"), &payload).is_empty()
+        );
+        let missing = json!({"ack": "C"});
+        let details = interpret_mutation_probe("store_only", Some("C"), None, &missing);
+        assert!(
+            details
+                .iter()
+                .any(|d| d.contains("did not reject with policy")),
+            "{details:?}"
+        );
     }
 }
