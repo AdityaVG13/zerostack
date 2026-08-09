@@ -76,16 +76,6 @@ EXCLUSIVITY_GUARD_RE = re.compile(
     """,
     re.DOTALL | re.VERBOSE,
 )
-CODEMODE_FEATURE_GUARD_RE = re.compile(
-    r"""
-    \#\[\s*cfg\s*\(\s*all\s*\(
-      (?=[^)]*feature\s*=\s*[\"']fastmcp[\"'])
-      (?=[^)]*feature\s*=\s*[\"']quickjs[\"'])
-      [^)]*
-    \)\s*\)\s*\]\s*compile_error\s*!\s*\(
-    """,
-    re.DOTALL | re.VERBOSE,
-)
 
 
 class SurfaceGateError(AssertionError):
@@ -138,18 +128,6 @@ def rust_files(root: Path):
         if any(part in {".git", "target", ".ee"} for part in path.parts):
             continue
         yield path
-
-
-def check_codemode_feature_exclusivity(root: Path) -> list[str]:
-    path = root / "crates" / "zero-codemode" / "src" / "lib.rs"
-    if not path.is_file():
-        return [f"missing CodeMode feature guard source: {path}"]
-    text = path.read_text(encoding="utf-8", errors="replace")
-    if CODEMODE_FEATURE_GUARD_RE.search(text):
-        return []
-    return [
-        f"{path}: no cfg+compile_error! guard rejects simultaneous fastmcp and quickjs"
-    ]
 
 
 def check_exclusive_features(root: Path) -> list[str]:
@@ -248,7 +226,6 @@ def scan_roots(roots: list[Path], strict_engines: bool = False) -> list[str]:
     # The first root is ZeroStack. Sibling roots do not contain the hub module;
     # they are checked only for worker dependency and feature exclusivity rules.
     errors.extend(check_hub_surface(roots[0]))
-    errors.extend(check_codemode_feature_exclusivity(roots[0]))
     for root in roots[1:]:
         errors.extend(check_exclusive_features(root))
         errors.extend(check_worker_dependencies(root, strict_engines))

@@ -166,20 +166,14 @@ class SurfaceSubstrateGuardTests(unittest.TestCase):
         root = self._root(self.valid_surface(), manifest)
         self.assertTrue(module.check_worker_dependencies(root, False))
 
-    def test_fastmcp_feature_guard_is_required_in_hub(self):
+    def test_removed_quickjs_feature_needs_no_exclusivity_guard(self):
         root = self._root(self.valid_surface())
         codemode = root / "crates/zero-codemode/src/lib.rs"
-        codemode.write_text(
-            '#[cfg(all(feature = "fastmcp", feature = "quickjs"))]\n'
-            'compile_error!("mutually exclusive");',
-            encoding="utf-8",
-        )
-        self.assertEqual(module.check_codemode_feature_exclusivity(root), [])
         codemode.write_text(
             '#[cfg(feature = "fastmcp")]\nfn transport() {}',
             encoding="utf-8",
         )
-        self.assertTrue(module.check_codemode_feature_exclusivity(root))
+        self.assertEqual(module.scan_roots([root]), [])
 
     def test_strict_compatibility_packages_must_use_hub_transport(self):
         temp = tempfile.TemporaryDirectory()

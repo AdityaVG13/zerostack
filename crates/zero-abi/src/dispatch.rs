@@ -375,7 +375,17 @@ fn validate_operation(operation: &CanonicalOperation) -> Result<(), DispatchCont
 
 fn validate_resource(resource: &CanonicalResource) -> Result<(), DispatchContractError> {
     validate_name(&resource.uri, "resource URI")?;
-    validate_name(&resource.name, "resource name")?;
+    validate_display_name(&resource.name, "resource name")?;
+    Ok(())
+}
+
+fn validate_display_name(name: &str, label: &str) -> Result<(), DispatchContractError> {
+    if name.is_empty() || name.trim() != name {
+        return Err(DispatchContractError::new(
+            DispatchErrorClass::InvalidRegistry,
+            format!("invalid {label} {name:?}"),
+        ));
+    }
     Ok(())
 }
 
@@ -1042,6 +1052,19 @@ mod tests {
         assert_eq!(manifest["operations"][0]["mcp_tool_name"], "read_bytes");
         assert_eq!(manifest["resources"][0]["uri"], "resource://a");
         assert_eq!(manifest["resources"][1]["uri"], "resource://z");
+
+        registry.resources[0].name = "TokenZero shell contract".into();
+        assert!(registry.validate().is_ok());
+        registry.resources[0].name = " TokenZero shell contract".into();
+        assert_eq!(
+            registry.validate().unwrap_err().class,
+            DispatchErrorClass::InvalidRegistry
+        );
+        registry.resources[0].name.clear();
+        assert_eq!(
+            registry.validate().unwrap_err().class,
+            DispatchErrorClass::InvalidRegistry
+        );
     }
 
     #[test]

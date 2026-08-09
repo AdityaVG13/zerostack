@@ -44,6 +44,17 @@ impl Default for McpTransportConfig {
     }
 }
 
+/// Alias-specific MCP catalog metadata. The alias name must already be
+/// declared by the canonical operation; this only preserves its visible face.
+#[derive(Clone, Debug, PartialEq)]
+pub struct McpAliasMetadata {
+    pub canonical_id: String,
+    pub name: String,
+    pub description: Option<String>,
+    pub input_schema: Value,
+    pub output_schema: Option<Value>,
+}
+
 impl McpTransportConfig {
     pub fn validate(self) -> Result<Self, McpTransportError> {
         if self.tool_timeout.is_zero() {
@@ -111,6 +122,47 @@ impl McpCallContext {
     }
 }
 
+/// Lossless model-visible text returned by an engine MCP adapter.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct McpTextContent {
+    pub text: String,
+}
+
+impl McpTextContent {
+    pub fn new(text: impl Into<String>) -> Self {
+        Self { text: text.into() }
+    }
+}
+
+/// Engine callback output. `Json` preserves the original compatibility path;
+/// `Text` preserves exact, ordered MCP content entries without reserialization.
+#[derive(Clone, Debug, PartialEq)]
+pub enum McpDispatchOutput {
+    Json(Value),
+    Text(Vec<McpTextContent>),
+}
+
+impl From<Value> for McpDispatchOutput {
+    fn from(value: Value) -> Self {
+        Self::Json(value)
+    }
+}
+
+/// Engine-owned resource output. Text and blob carriers remain byte-visible;
+/// JSON keeps the compatibility behavior used by existing adapters.
+#[derive(Clone, Debug, PartialEq)]
+pub enum McpResourceOutput {
+    Json(Value),
+    Text(String),
+    Blob(String),
+}
+
+impl From<Value> for McpResourceOutput {
+    fn from(value: Value) -> Self {
+        Self::Json(value)
+    }
+}
+
 /// Engine callback used by the generic transport.
 pub trait McpDispatcher: Send + Sync {
     fn dispatch(
@@ -119,12 +171,30 @@ pub trait McpDispatcher: Send + Sync {
         arguments: Value,
         context: &McpCallContext,
     ) -> Result<Value, McpDispatchError>;
+
+    fn dispatch_output(
+        &self,
+        tool: &str,
+        arguments: Value,
+        context: &McpCallContext,
+    ) -> Result<McpDispatchOutput, McpDispatchError> {
+        self.dispatch(tool, arguments, context)
+            .map(McpDispatchOutput::Json)
+    }
 }
 
 /// Engine-owned resource payload seam. The transport owns only bounded
 /// execution and FastMCP serialization; URI meaning stays with the engine.
 pub trait McpResourceReader: Send + Sync {
     fn read(&self, uri: &str, context: &McpCallContext) -> Result<Value, McpDispatchError>;
+
+    fn read_output(
+        &self,
+        uri: &str,
+        context: &McpCallContext,
+    ) -> Result<McpResourceOutput, McpDispatchError> {
+        self.read(uri, context).map(McpResourceOutput::Json)
+    }
 }
 
 impl<F> McpResourceReader for F
@@ -231,6 +301,7 @@ impl std::error::Error for McpDispatchError {}
 #[derive(Debug)]
 pub enum McpTransportError {
     InvalidConfig(String),
+    InvalidAliasMetadata(String),
     Surface(SurfaceContractError),
     WrongSurface(SurfaceKind),
     MissingResourceReader,
@@ -242,6 +313,9 @@ impl fmt::Display for McpTransportError {
             Self::InvalidConfig(message) => {
                 write!(formatter, "invalid MCP transport config: {message}")
             }
+            Self::InvalidAliasMetadata(message) => {
+                write!(formatter, "invalid MCP alias metadata: {message}")
+            }
             Self::Surface(error) => write!(formatter, "invalid MCP surface registration: {error}"),
             Self::WrongSurface(surface) => write!(
                 formatter,
@@ -249,8 +323,11 @@ impl fmt::Display for McpTransportError {
                 surface.as_str()
             ),
             Self::MissingResourceReader => {
-                write!(formatter, "MCP resources require an engine-owned resource reader")
-            },
+                write!(
+                    formatter,
+                    "MCP resources require an engine-owned resource reader"
+                )
+            }
         }
     }
 }
@@ -339,7 +416,70 @@ fn execute_call_with_limiter<F>(
 where
     F: Fn() -> bool,
 {
-    let permit = limiter.acquire(tool)?;
+    let tool_name = tool.to_owned();
+    execute_bounded(
+        tool,
+        config,
+        limiter,
+        move |context| dispatcher.dispatch(&tool_name, arguments, context),
+        externally_cancelled,
+    )
+}
+
+fn execute_output_with_limiter<F>(
+    dispatcher: Arc<dyn McpDispatcher>,
+    tool: &str,
+    arguments: Value,
+    config: McpTransportConfig,
+    limiter: Arc<Inflight>,
+    externally_cancelled: F,
+) -> Result<McpDispatchOutput, McpDispatchError>
+where
+    F: Fn() -> bool,
+{
+    let tool_name = tool.to_owned();
+    execute_bounded(
+        tool,
+        config,
+        limiter,
+        move |context| dispatcher.dispatch_output(&tool_name, arguments, context),
+        externally_cancelled,
+    )
+}
+
+fn execute_resource_with_limiter<F>(
+    reader: Arc<dyn McpResourceReader>,
+    uri: &str,
+    config: McpTransportConfig,
+    limiter: Arc<Inflight>,
+    externally_cancelled: F,
+) -> Result<McpResourceOutput, McpDispatchError>
+where
+    F: Fn() -> bool,
+{
+    let owned_uri = uri.to_owned();
+    execute_bounded(
+        uri,
+        config,
+        limiter,
+        move |context| reader.read_output(&owned_uri, context),
+        externally_cancelled,
+    )
+}
+
+fn execute_bounded<T, D, F>(
+    operation: &str,
+    config: McpTransportConfig,
+    limiter: Arc<Inflight>,
+    dispatch: D,
+    externally_cancelled: F,
+) -> Result<T, McpDispatchError>
+where
+    T: Send + 'static,
+    D: FnOnce(&McpCallContext) -> Result<T, McpDispatchError> + Send + 'static,
+    F: Fn() -> bool,
+{
+    let permit = limiter.acquire(operation)?;
     let cancelled = Arc::new(AtomicBool::new(false));
     let context = McpCallContext {
         deadline: Instant::now() + config.tool_timeout,
@@ -347,12 +487,11 @@ where
     };
     let (sender, receiver) = mpsc::sync_channel(1);
     let deadline = context.deadline;
-    let tool_name = tool.to_owned();
     let _worker = thread::Builder::new()
         .name("zerostack-mcp-tool".into())
         .spawn(move || {
             let _permit = permit;
-            let result = dispatcher.dispatch(&tool_name, arguments, &context);
+            let result = dispatch(&context);
             let _ = sender.send(result);
         })
         .map_err(|error| {
@@ -361,30 +500,30 @@ where
                 format!("failed to start MCP domain callback: {error}"),
                 false,
             )
-            .with_op(tool)
+            .with_op(operation)
         })?;
 
     let started = Instant::now();
     loop {
         if externally_cancelled() {
             cancelled.store(true, Ordering::Release);
-            return Err(McpDispatchError::cancelled().with_op(tool));
+            return Err(McpDispatchError::cancelled().with_op(operation));
         }
         let elapsed = started.elapsed();
         if elapsed >= config.tool_timeout {
             cancelled.store(true, Ordering::Release);
-            return Err(McpDispatchError::timeout(tool, config.tool_timeout));
+            return Err(McpDispatchError::timeout(operation, config.tool_timeout));
         }
         let wait = (config.tool_timeout - elapsed).min(CANCELLATION_POLL);
         match receiver.recv_timeout(wait) {
             Ok(Err(error)) if error.kind == "cancelled" && Instant::now() >= deadline => {
-                return Err(McpDispatchError::timeout(tool, config.tool_timeout));
+                return Err(McpDispatchError::timeout(operation, config.tool_timeout));
             }
             Ok(result) => return result,
             Err(mpsc::RecvTimeoutError::Timeout) => continue,
             Err(mpsc::RecvTimeoutError::Disconnected) => {
                 cancelled.store(true, Ordering::Release);
-                return Err(McpDispatchError::disconnected(tool));
+                return Err(McpDispatchError::disconnected(operation));
             }
         }
     }
@@ -393,10 +532,10 @@ where
 #[cfg(feature = "fastmcp")]
 mod fastmcp {
     use super::*;
+    use fastmcp_rust::ResourceHandler;
     use fastmcp_rust::prelude::{
         Content, McpContext, McpError, Resource, ResourceContent, Server, Tool,
     };
-    use fastmcp_rust::ResourceHandler;
     use fastmcp_rust::{ToolAnnotations, ToolHandler};
     use zero_abi::{CanonicalOperation, EffectClass};
 
@@ -405,22 +544,6 @@ mod fastmcp {
         dispatcher: Arc<dyn McpDispatcher>,
         config: McpTransportConfig,
         limiter: Arc<Inflight>,
-    }
-
-    struct ResourceDispatcher {
-        reader: Arc<dyn McpResourceReader>,
-        uri: String,
-    }
-
-    impl McpDispatcher for ResourceDispatcher {
-        fn dispatch(
-            &self,
-            _tool: &str,
-            _arguments: Value,
-            context: &McpCallContext,
-        ) -> Result<Value, McpDispatchError> {
-            self.reader.read(&self.uri, context)
-        }
     }
 
     pub(super) struct RegisteredResource {
@@ -465,13 +588,9 @@ mod fastmcp {
                 .checkpoint()
                 .map_err(|_| McpError::request_cancelled())?;
             let uri = self.definition.uri.clone();
-            let result = execute_call_with_limiter(
-                Arc::new(ResourceDispatcher {
-                    reader: Arc::clone(&self.reader),
-                    uri: uri.clone(),
-                }),
+            let result = execute_resource_with_limiter(
+                Arc::clone(&self.reader),
                 &uri,
-                Value::Null,
                 self.config,
                 Arc::clone(&self.limiter),
                 || context.is_cancelled(),
@@ -480,12 +599,25 @@ mod fastmcp {
                 .checkpoint()
                 .map_err(|_| McpError::request_cancelled())?;
             match result {
-                Ok(value) => Ok(vec![ResourceContent {
-                    uri,
-                    mime_type: self.definition.mime_type.clone(),
-                    text: Some(serde_json::to_string(&value).expect("JSON values are serializable")),
-                    blob: None,
-                }]),
+                Ok(output) => {
+                    let (text, blob) = match output {
+                        McpResourceOutput::Json(value) => (
+                            Some(
+                                serde_json::to_string(&value)
+                                    .expect("JSON values are serializable"),
+                            ),
+                            None,
+                        ),
+                        McpResourceOutput::Text(text) => (Some(text), None),
+                        McpResourceOutput::Blob(blob) => (None, Some(blob)),
+                    };
+                    Ok(vec![ResourceContent {
+                        uri,
+                        mime_type: self.definition.mime_type.clone(),
+                        text,
+                        blob,
+                    }])
+                }
                 Err(error) => Err(McpError::tool_error(error.wire_text())),
             }
         }
@@ -498,20 +630,76 @@ mod fastmcp {
             config: McpTransportConfig,
             limiter: Arc<Inflight>,
         ) -> Self {
+            let name = operation
+                .mcp_tool_name
+                .clone()
+                .unwrap_or_else(|| operation.canonical_id.clone());
+            let description = Some(if operation.description.is_empty() {
+                format!("{} operation", operation.canonical_id)
+            } else {
+                operation.description.clone()
+            });
+            Self::with_definition(
+                operation,
+                name,
+                description,
+                operation.args_schema.clone(),
+                operation.output_schema.clone(),
+                dispatcher,
+                config,
+                limiter,
+            )
+        }
+
+        fn new_alias(
+            operation: &CanonicalOperation,
+            alias: &str,
+            metadata: Option<&McpAliasMetadata>,
+            dispatcher: Arc<dyn McpDispatcher>,
+            config: McpTransportConfig,
+            limiter: Arc<Inflight>,
+        ) -> Self {
+            let canonical_description = Some(if operation.description.is_empty() {
+                format!("{} operation", operation.canonical_id)
+            } else {
+                operation.description.clone()
+            });
+            Self::with_definition(
+                operation,
+                alias.to_owned(),
+                metadata
+                    .map(|entry| entry.description.clone())
+                    .unwrap_or(canonical_description),
+                metadata
+                    .map(|entry| entry.input_schema.clone())
+                    .unwrap_or_else(|| operation.args_schema.clone()),
+                metadata
+                    .map(|entry| entry.output_schema.clone())
+                    .unwrap_or_else(|| operation.output_schema.clone()),
+                dispatcher,
+                config,
+                limiter,
+            )
+        }
+
+        #[allow(clippy::too_many_arguments)]
+        fn with_definition(
+            operation: &CanonicalOperation,
+            name: String,
+            description: Option<String>,
+            input_schema: Value,
+            output_schema: Option<Value>,
+            dispatcher: Arc<dyn McpDispatcher>,
+            config: McpTransportConfig,
+            limiter: Arc<Inflight>,
+        ) -> Self {
             let read_only = operation.effect_policy.effect_class == EffectClass::ReadOnly;
             Self {
                 definition: Tool {
-                    name: operation
-                        .mcp_tool_name
-                        .clone()
-                        .unwrap_or_else(|| operation.canonical_id.clone()),
-                    description: Some(if operation.description.is_empty() {
-                        format!("{} operation", operation.canonical_id)
-                    } else {
-                        operation.description.clone()
-                    }),
-                    input_schema: operation.args_schema.clone(),
-                    output_schema: operation.output_schema.clone(),
+                    name,
+                    description,
+                    input_schema,
+                    output_schema,
                     icon: None,
                     version: None,
                     tags: Vec::new(),
@@ -542,7 +730,7 @@ mod fastmcp {
             context
                 .checkpoint()
                 .map_err(|_| McpError::request_cancelled())?;
-            let result = execute_call_with_limiter(
+            let result = execute_output_with_limiter(
                 Arc::clone(&self.dispatcher),
                 &self.definition.name,
                 arguments,
@@ -554,9 +742,13 @@ mod fastmcp {
                 .checkpoint()
                 .map_err(|_| McpError::request_cancelled())?;
             match result {
-                Ok(value) => Ok(vec![Content::text(
+                Ok(McpDispatchOutput::Json(value)) => Ok(vec![Content::text(
                     serde_json::to_string(&value).expect("JSON values are serializable"),
                 )]),
+                Ok(McpDispatchOutput::Text(items)) => Ok(items
+                    .into_iter()
+                    .map(|item| Content::text(item.text))
+                    .collect()),
                 Err(error) => Err(McpError::tool_error(error.wire_text())),
             }
         }
@@ -567,6 +759,7 @@ mod fastmcp {
         registration: SurfaceRegistration,
         dispatcher: Arc<dyn McpDispatcher>,
         resource_reader: Option<Arc<dyn McpResourceReader>>,
+        alias_metadata: Vec<McpAliasMetadata>,
         config: McpTransportConfig,
     }
 
@@ -585,6 +778,7 @@ mod fastmcp {
                 registration,
                 dispatcher,
                 resource_reader: None,
+                alias_metadata: Vec::new(),
                 config,
             })
         }
@@ -602,12 +796,84 @@ mod fastmcp {
                 registration,
                 dispatcher,
                 resource_reader: Some(resource_reader),
+                alias_metadata: Vec::new(),
                 config,
             })
         }
 
         pub fn registration(&self) -> &SurfaceRegistration {
             &self.registration
+        }
+
+        /// Add lossless alias-specific catalog metadata. Every entry must bind
+        /// an alias already declared by its canonical operation.
+        pub fn with_alias_metadata(
+            mut self,
+            alias_metadata: Vec<McpAliasMetadata>,
+        ) -> Result<Self, McpTransportError> {
+            for (index, entry) in alias_metadata.iter().enumerate() {
+                if entry.name.is_empty() || entry.name.trim() != entry.name {
+                    return Err(McpTransportError::InvalidAliasMetadata(format!(
+                        "entry {index} has invalid alias name {:?}",
+                        entry.name
+                    )));
+                }
+                if !entry.input_schema.is_object() || entry.input_schema.get("type").is_none() {
+                    return Err(McpTransportError::InvalidAliasMetadata(format!(
+                        "alias {:?} input schema must be an object with type",
+                        entry.name
+                    )));
+                }
+                if entry
+                    .output_schema
+                    .as_ref()
+                    .is_some_and(|schema| !schema.is_object())
+                {
+                    return Err(McpTransportError::InvalidAliasMetadata(format!(
+                        "alias {:?} output schema must be an object",
+                        entry.name
+                    )));
+                }
+                let Some(operation) = self
+                    .registration
+                    .adapter
+                    .registry
+                    .operations
+                    .iter()
+                    .find(|operation| operation.canonical_id == entry.canonical_id)
+                else {
+                    return Err(McpTransportError::InvalidAliasMetadata(format!(
+                        "unknown canonical operation {:?}",
+                        entry.canonical_id
+                    )));
+                };
+                if !operation.aliases.iter().any(|alias| alias == &entry.name) {
+                    return Err(McpTransportError::InvalidAliasMetadata(format!(
+                        "{:?} is not an alias of {:?}",
+                        entry.name, entry.canonical_id
+                    )));
+                }
+                if alias_metadata[..index].iter().any(|prior| {
+                    prior.canonical_id == entry.canonical_id && prior.name == entry.name
+                }) {
+                    return Err(McpTransportError::InvalidAliasMetadata(format!(
+                        "duplicate alias metadata for {:?}",
+                        entry.name
+                    )));
+                }
+            }
+            self.alias_metadata = alias_metadata;
+            Ok(self)
+        }
+
+        fn alias_metadata(
+            &self,
+            operation: &CanonicalOperation,
+            alias: &str,
+        ) -> Option<&McpAliasMetadata> {
+            self.alias_metadata
+                .iter()
+                .find(|entry| entry.canonical_id == operation.canonical_id && entry.name == alias)
         }
 
         /// Return the dynamic tool catalog derived from the canonical registry.
@@ -629,15 +895,24 @@ mod fastmcp {
                     let aliases = operation
                         .aliases
                         .iter()
-                        .map(|alias| Tool {
-                            name: alias.clone(),
-                            description: canonical.description.clone(),
-                            input_schema: canonical.input_schema.clone(),
-                            output_schema: canonical.output_schema.clone(),
-                            icon: None,
-                            version: None,
-                            tags: Vec::new(),
-                            annotations: canonical.annotations.clone(),
+                        .map(|alias| {
+                            let metadata = self.alias_metadata(operation, alias);
+                            Tool {
+                                name: alias.clone(),
+                                description: metadata
+                                    .map(|entry| entry.description.clone())
+                                    .unwrap_or_else(|| canonical.description.clone()),
+                                input_schema: metadata
+                                    .map(|entry| entry.input_schema.clone())
+                                    .unwrap_or_else(|| canonical.input_schema.clone()),
+                                output_schema: metadata
+                                    .map(|entry| entry.output_schema.clone())
+                                    .unwrap_or_else(|| canonical.output_schema.clone()),
+                                icon: None,
+                                version: None,
+                                tags: Vec::new(),
+                                annotations: canonical.annotations.clone(),
+                            }
                         })
                         .collect::<Vec<_>>();
                     std::iter::once(canonical)
@@ -682,12 +957,10 @@ mod fastmcp {
                     Arc::clone(&limiter),
                 ));
                 for alias in &operation.aliases {
-                    let mut alias_operation = operation.clone();
-                    alias_operation.canonical_id = alias.clone();
-                    alias_operation.mcp_tool_name = Some(alias.clone());
-                    alias_operation.aliases.clear();
-                    builder = builder.tool(RegisteredTool::new(
-                        &alias_operation,
+                    builder = builder.tool(RegisteredTool::new_alias(
+                        operation,
+                        alias,
+                        self.alias_metadata(operation, alias),
                         Arc::clone(&self.dispatcher),
                         self.config,
                         Arc::clone(&limiter),
@@ -705,9 +978,12 @@ mod fastmcp {
                 }
             }
             builder
-                .instructions(self.registration.instructions.clone().unwrap_or_else(|| {
-                    "ZeroStack engine MCP compatibility transport".into()
-                }))
+                .instructions(
+                    self.registration
+                        .instructions
+                        .clone()
+                        .unwrap_or_else(|| "ZeroStack engine MCP compatibility transport".into()),
+                )
                 .build()
         }
 
@@ -816,24 +1092,53 @@ mod tests {
             ServerInfo, Session,
         };
 
+        struct TestDispatcher;
+        impl McpDispatcher for TestDispatcher {
+            fn dispatch(
+                &self,
+                _tool: &str,
+                arguments: Value,
+                _: &McpCallContext,
+            ) -> Result<Value, McpDispatchError> {
+                if arguments.get("fail").and_then(Value::as_bool) == Some(true) {
+                    Err(McpDispatchError::new("denied", "approval required", false)
+                        .with_op("fs.read")
+                        .with_data(json!({"approval_id":"a1"})))
+                } else {
+                    Ok(json!({"value": arguments.get("value").cloned()}))
+                }
+            }
+
+            fn dispatch_output(
+                &self,
+                tool: &str,
+                arguments: Value,
+                context: &McpCallContext,
+            ) -> Result<McpDispatchOutput, McpDispatchError> {
+                if arguments.get("lossless").and_then(Value::as_bool) == Some(true) {
+                    return Ok(McpDispatchOutput::Text(vec![
+                        McpTextContent::new("ack:exact"),
+                        McpTextContent::new("metadata:compact"),
+                    ]));
+                }
+                self.dispatch(tool, arguments, context)
+                    .map(McpDispatchOutput::Json)
+            }
+        }
+
         let transport = FastMcpTransport::new(
             test_registration(SurfaceKind::Mcp),
-            {
-                let invoked = Arc::new(std::sync::Mutex::new(Vec::<String>::new()));
-                let seen = Arc::clone(&invoked);
-                Arc::new(move |tool: &str, arguments: Value, _: &McpCallContext| {
-                    seen.lock().unwrap().push(tool.to_owned());
-                    if arguments.get("fail").and_then(Value::as_bool) == Some(true) {
-                        Err(McpDispatchError::new("denied", "approval required", false)
-                            .with_op("fs.read")
-                            .with_data(json!({"approval_id":"a1"})))
-                    } else {
-                        Ok(json!({"value": arguments.get("value").cloned()}))
-                    }
-                })
-            },
+            Arc::new(TestDispatcher),
             McpTransportConfig::default(),
         )
+        .unwrap()
+        .with_alias_metadata(vec![McpAliasMetadata {
+            canonical_id: "fs.read".into(),
+            name: "read".into(),
+            description: Some("Alias summary".into()),
+            input_schema: json!({"type":"object","additionalProperties":true}),
+            output_schema: None,
+        }])
         .unwrap();
         let catalog = transport.catalog();
         assert_eq!(catalog.len(), 2);
@@ -841,10 +1146,19 @@ mod tests {
         assert_eq!(catalog[1].name, "read");
         assert_eq!(catalog[0].description.as_deref(), Some("Read a value"));
         assert_eq!(catalog[0].input_schema, json!({"type":"object"}));
-        assert_eq!(catalog[0].output_schema, Some(json!({
-            "type": "object",
-            "properties": {"value": {"type": "integer"}}
-        })));
+        assert_eq!(
+            catalog[0].output_schema,
+            Some(json!({
+                "type": "object",
+                "properties": {"value": {"type": "integer"}}
+            }))
+        );
+        assert_eq!(catalog[1].description.as_deref(), Some("Alias summary"));
+        assert_eq!(
+            catalog[1].input_schema,
+            json!({"type":"object","additionalProperties":true})
+        );
+        assert_eq!(catalog[1].output_schema, None);
         assert_eq!(
             catalog[0].annotations.as_ref().unwrap().read_only,
             Some(true)
@@ -893,10 +1207,8 @@ mod tests {
                 .unwrap()
         };
 
-        let success: CallToolResult = serde_json::from_value(
-            call("read_value", json!({"value":7})).result.unwrap(),
-        )
-        .unwrap();
+        let success: CallToolResult =
+            serde_json::from_value(call("read_value", json!({"value":7})).result.unwrap()).unwrap();
         assert!(!success.is_error);
         assert_eq!(success.content.len(), 1);
         let Content::Text { text } = &success.content[0] else {
@@ -907,6 +1219,17 @@ mod tests {
         let alias_success: CallToolResult =
             serde_json::from_value(call("read", json!({"value":8})).result.unwrap()).unwrap();
         assert!(!alias_success.is_error);
+        let lossless: CallToolResult =
+            serde_json::from_value(call("read", json!({"lossless":true})).result.unwrap()).unwrap();
+        assert_eq!(lossless.content.len(), 2);
+        let Content::Text { text: primary } = &lossless.content[0] else {
+            panic!("primary lossless content must remain text");
+        };
+        let Content::Text { text: metadata } = &lossless.content[1] else {
+            panic!("secondary lossless content must remain text");
+        };
+        assert_eq!(primary, "ack:exact");
+        assert_eq!(metadata, "metadata:compact");
         let failure: CallToolResult =
             serde_json::from_value(call("read", json!({"fail":true})).result.unwrap()).unwrap();
         assert!(failure.is_error);
@@ -985,17 +1308,19 @@ mod tests {
         };
         let mut registration = test_registration(SurfaceKind::Mcp);
         registration.adapter.registry.resources = vec![resource.clone()];
-        let reader: Arc<dyn McpResourceReader> = Arc::new(
-            |uri: &str, context: &McpCallContext| {
-                if uri == "resource://failure" {
-                    return Err(McpDispatchError::new("resource_failed", "read failed", false));
-                }
-                while !context.is_cancelled() {
-                    thread::sleep(Duration::from_millis(2));
-                }
-                Err(McpDispatchError::cancelled())
-            },
-        );
+        let reader: Arc<dyn McpResourceReader> = Arc::new(|uri: &str, context: &McpCallContext| {
+            if uri == "resource://failure" {
+                return Err(McpDispatchError::new(
+                    "resource_failed",
+                    "read failed",
+                    false,
+                ));
+            }
+            while !context.is_cancelled() {
+                thread::sleep(Duration::from_millis(2));
+            }
+            Err(McpDispatchError::cancelled())
+        });
         let missing_reader = FastMcpTransport::new(
             registration.clone(),
             Arc::new(|_: &str, _: Value, _: &McpCallContext| Ok(json!(null))),
@@ -1023,22 +1348,61 @@ mod tests {
             Arc::new(Inflight::new(1)),
         );
         let success = success_handler
-            .read(&fastmcp_rust::McpContext::new(fastmcp_rust::Cx::for_testing(), 1))
+            .read(&fastmcp_rust::McpContext::new(
+                fastmcp_rust::Cx::for_testing(),
+                1,
+            ))
             .unwrap();
         assert_eq!(success.len(), 1);
         assert_eq!(success[0].uri, resource.uri);
         assert_eq!(success[0].mime_type, resource.mime_type);
         assert_eq!(success[0].text.as_deref(), Some(r#"{"answer":42}"#));
+
+        struct ExactResourceReader;
+        impl McpResourceReader for ExactResourceReader {
+            fn read(&self, _: &str, _: &McpCallContext) -> Result<Value, McpDispatchError> {
+                Ok(Value::Null)
+            }
+
+            fn read_output(
+                &self,
+                _: &str,
+                _: &McpCallContext,
+            ) -> Result<McpResourceOutput, McpDispatchError> {
+                Ok(McpResourceOutput::Text("exact resource text".into()))
+            }
+        }
+        let exact_handler = super::fastmcp::RegisteredResource::new(
+            &resource,
+            Arc::new(ExactResourceReader),
+            McpTransportConfig::default(),
+            Arc::new(Inflight::new(1)),
+        );
+        let exact = exact_handler
+            .read(&fastmcp_rust::McpContext::new(
+                fastmcp_rust::Cx::for_testing(),
+                1,
+            ))
+            .unwrap();
+        assert_eq!(exact[0].text.as_deref(), Some("exact resource text"));
+
         let handler = super::fastmcp::RegisteredResource::new(
             &resource,
             Arc::new(|_: &str, _: &McpCallContext| {
-                Err(McpDispatchError::new("resource_failed", "read failed", false))
+                Err(McpDispatchError::new(
+                    "resource_failed",
+                    "read failed",
+                    false,
+                ))
             }),
             McpTransportConfig::default(),
             Arc::new(Inflight::new(1)),
         );
         let error = handler
-            .read(&fastmcp_rust::McpContext::new(fastmcp_rust::Cx::for_testing(), 1))
+            .read(&fastmcp_rust::McpContext::new(
+                fastmcp_rust::Cx::for_testing(),
+                1,
+            ))
             .unwrap_err();
         assert!(error.message.contains("resource_failed"));
 
@@ -1058,7 +1422,10 @@ mod tests {
         );
         let started = Instant::now();
         let error = timeout_handler
-            .read(&fastmcp_rust::McpContext::new(fastmcp_rust::Cx::for_testing(), 1))
+            .read(&fastmcp_rust::McpContext::new(
+                fastmcp_rust::Cx::for_testing(),
+                1,
+            ))
             .unwrap_err();
         assert!(error.message.contains("timeout") || error.message.contains("cancel"));
         assert!(started.elapsed() < Duration::from_millis(250));
