@@ -23,40 +23,20 @@
           "compatibility_impact": "release topology changes; coordinated reinstall required",
           "current_name": "tokenzero-codemode",
           "evidence": "conformance/engine-topology-v1.json current_to_target; live-inventory equality test",
-          "kind": "crate",
-          "path": "crates/tokenzero-codemode/Cargo.toml",
+          "kind": "binary",
+          "path": "crates/tokenzero-codemode/src/main.rs",
           "replacement_binary": "tokenzero-codemode",
           "replacement_package": "tokenzero-worker"
         },
         {
           "classification": "move",
           "compatibility_impact": "release topology changes; coordinated reinstall required",
-          "current_name": "tokenzero-mcp-compat",
+          "current_name": "tokenzero-worker",
           "evidence": "conformance/engine-topology-v1.json current_to_target; live-inventory equality test",
-          "kind": "crate",
-          "path": "crates/tokenzero-mcp-compat/Cargo.toml",
-          "replacement_binary": "zerostack-mcp",
-          "replacement_package": "zerostack-mcp-adapter"
-        },
-        {
-          "classification": "move",
-          "compatibility_impact": "release topology changes; coordinated reinstall required",
-          "current_name": "tokenzero",
-          "evidence": "conformance/engine-topology-v1.json current_to_target; live-inventory equality test",
-          "kind": "crate",
-          "path": "crates/tokenzero/Cargo.toml",
-          "replacement_binary": "tokenzero",
-          "replacement_package": "tokenzero-cli"
-        },
-        {
-          "classification": "move",
-          "compatibility_impact": "release topology changes; coordinated reinstall required",
-          "current_name": "tokenzero-install",
-          "evidence": "conformance/engine-topology-v1.json current_to_target; live-inventory equality test",
-          "kind": "crate",
-          "path": "crates/tokenzero-install/Cargo.toml",
-          "replacement_binary": null,
-          "replacement_package": "zerostack-artifact-client"
+          "kind": "binary",
+          "path": "crates/tokenzero-codemode/src/main.rs",
+          "replacement_binary": "tokenzero-codemode",
+          "replacement_package": "tokenzero-worker"
         },
         {
           "classification": "move",
@@ -71,22 +51,52 @@
         {
           "classification": "move",
           "compatibility_impact": "release topology changes; coordinated reinstall required",
-          "current_name": "tokenzero-mcp",
+          "current_name": "tokenzero-cli",
           "evidence": "conformance/engine-topology-v1.json current_to_target; live-inventory equality test",
           "kind": "binary",
-          "path": "crates/tokenzero/src/bin/tokenzero_mcp.rs",
+          "path": "crates/tokenzero/src/main.rs",
+          "replacement_binary": "tokenzero",
+          "replacement_package": "tokenzero-cli"
+        },
+        {
+          "classification": "move",
+          "compatibility_impact": "release topology changes; coordinated reinstall required",
+          "current_name": "tokenzero-worker",
+          "evidence": "conformance/engine-topology-v1.json current_to_target; live-inventory equality test",
+          "kind": "crate",
+          "path": "crates/tokenzero-codemode/Cargo.toml",
+          "replacement_binary": "tokenzero-codemode",
+          "replacement_package": "tokenzero-worker"
+        },
+        {
+          "classification": "move",
+          "compatibility_impact": "release topology changes; coordinated reinstall required",
+          "current_name": "tokenzero-install",
+          "evidence": "conformance/engine-topology-v1.json current_to_target; live-inventory equality test",
+          "kind": "crate",
+          "path": "crates/tokenzero-install/Cargo.toml",
+          "replacement_binary": null,
+          "replacement_package": "zerostack-artifact-client"
+        },
+        {
+          "classification": "move",
+          "compatibility_impact": "release topology changes; coordinated reinstall required",
+          "current_name": "tokenzero-mcp-compat",
+          "evidence": "conformance/engine-topology-v1.json current_to_target; live-inventory equality test",
+          "kind": "crate",
+          "path": "crates/tokenzero-mcp-compat/Cargo.toml",
           "replacement_binary": "zerostack-mcp",
           "replacement_package": "zerostack-mcp-adapter"
         },
         {
           "classification": "move",
           "compatibility_impact": "release topology changes; coordinated reinstall required",
-          "current_name": "tokenzero-codemode",
+          "current_name": "tokenzero-cli",
           "evidence": "conformance/engine-topology-v1.json current_to_target; live-inventory equality test",
-          "kind": "binary",
-          "path": "crates/tokenzero/src/bin/tokenzero_codemode.rs",
-          "replacement_binary": "tokenzero-codemode",
-          "replacement_package": "tokenzero-worker"
+          "kind": "crate",
+          "path": "crates/tokenzero/Cargo.toml",
+          "replacement_binary": "tokenzero",
+          "replacement_package": "tokenzero-cli"
         }
       ],
       "id": "tokenzero-topology-migration",
@@ -114,6 +124,66 @@
           "compatibility_impact": "release topology changes; coordinated reinstall required",
           "current_name": "fszero-codemode",
           "evidence": "conformance/engine-topology-v1.json current_to_target; live-inventory equality test",
+          "kind": "binary",
+          "path": "crates/fszero-codemode/src/main.rs",
+          "replacement_binary": "fszero-codemode",
+          "replacement_package": "fszero-worker"
+        },
+        {
+          "classification": "move",
+          "compatibility_impact": "release topology changes; coordinated reinstall required",
+          "current_name": "fszero-worker",
+          "evidence": "conformance/engine-topology-v1.json current_to_target; live-inventory equality test",
+          "kind": "binary",
+          "path": "crates/fszero-codemode/src/main.rs",
+          "replacement_binary": "fszero-codemode",
+          "replacement_package": "fszero-worker"
+        },
+        {
+          "classification": "move",
+          "compatibility_impact": "release topology changes; coordinated reinstall required",
+          "current_name": "fszero-mcp",
+          "evidence": "conformance/engine-topology-v1.json current_to_target; live-inventory equality test",
+          "kind": "binary",
+          "path": "crates/fszero-mcp/src/main.rs",
+          "replacement_binary": "zerostack-mcp",
+          "replacement_package": "zerostack-mcp-adapter"
+        },
+        {
+          "classification": "move",
+          "compatibility_impact": "release topology changes; coordinated reinstall required",
+          "current_name": "fszero",
+          "evidence": "conformance/engine-topology-v1.json current_to_target; live-inventory equality test",
+          "kind": "binary",
+          "path": "crates/fszero-shim/src/main.rs",
+          "replacement_binary": "fszero",
+          "replacement_package": "fszero-cli"
+        },
+        {
+          "classification": "move",
+          "compatibility_impact": "release topology changes; coordinated reinstall required",
+          "current_name": "fszero",
+          "evidence": "conformance/engine-topology-v1.json current_to_target; live-inventory equality test",
+          "kind": "binary",
+          "path": "crates/fszero-shim/src/main.rs",
+          "replacement_binary": "fszero",
+          "replacement_package": "fszero-cli"
+        },
+        {
+          "classification": "move",
+          "compatibility_impact": "release topology changes; coordinated reinstall required",
+          "current_name": "fszero-cli",
+          "evidence": "conformance/engine-topology-v1.json current_to_target; live-inventory equality test",
+          "kind": "binary",
+          "path": "crates/fszero-shim/src/main.rs",
+          "replacement_binary": "fszero",
+          "replacement_package": "fszero-cli"
+        },
+        {
+          "classification": "move",
+          "compatibility_impact": "release topology changes; coordinated reinstall required",
+          "current_name": "fszero-worker",
+          "evidence": "conformance/engine-topology-v1.json current_to_target; live-inventory equality test",
           "kind": "crate",
           "path": "crates/fszero-codemode/Cargo.toml",
           "replacement_binary": "fszero-codemode",
@@ -132,62 +202,12 @@
         {
           "classification": "move",
           "compatibility_impact": "release topology changes; coordinated reinstall required",
-          "current_name": "fszero-shim",
+          "current_name": "fszero-cli",
           "evidence": "conformance/engine-topology-v1.json current_to_target; live-inventory equality test",
           "kind": "crate",
           "path": "crates/fszero-shim/Cargo.toml",
           "replacement_binary": "fszero",
           "replacement_package": "fszero-cli"
-        },
-        {
-          "classification": "move",
-          "compatibility_impact": "release topology changes; coordinated reinstall required",
-          "current_name": "fszero",
-          "evidence": "conformance/engine-topology-v1.json current_to_target; live-inventory equality test",
-          "kind": "binary",
-          "path": "crates/fszero-shim/src/main.rs",
-          "replacement_binary": "fszero",
-          "replacement_package": "fszero-cli"
-        },
-        {
-          "classification": "move",
-          "compatibility_impact": "release topology changes; coordinated reinstall required",
-          "current_name": "fszero-codemode",
-          "evidence": "conformance/engine-topology-v1.json current_to_target; live-inventory equality test",
-          "kind": "binary",
-          "path": "crates/fszero-codemode/src/main.rs",
-          "replacement_binary": "fszero-codemode",
-          "replacement_package": "fszero-worker"
-        },
-        {
-          "classification": "move",
-          "compatibility_impact": "release topology changes; coordinated reinstall required",
-          "current_name": "fszero-mcp",
-          "evidence": "conformance/engine-topology-v1.json current_to_target; live-inventory equality test",
-          "kind": "binary",
-          "path": "crates/fszero-mcp/src/main.rs",
-          "replacement_binary": "zerostack-mcp",
-          "replacement_package": "zerostack-mcp-adapter"
-        },
-        {
-          "classification": "consolidate",
-          "compatibility_impact": "release topology changes; coordinated reinstall required",
-          "current_name": "fszero",
-          "evidence": "conformance/engine-topology-v1.json current_to_target; live-inventory equality test",
-          "kind": "binary",
-          "path": "crates/fszero-shim/src/main.rs",
-          "replacement_binary": "fszero",
-          "replacement_package": "fszero-cli"
-        },
-        {
-          "classification": "archive",
-          "compatibility_impact": "release topology changes; coordinated reinstall required",
-          "current_name": "fszero-shim",
-          "evidence": "conformance/engine-topology-v1.json current_to_target; live-inventory equality test",
-          "kind": "binary",
-          "path": "crates/fszero-shim/src/main.rs",
-          "replacement_binary": null,
-          "replacement_package": "fszero-test-support"
         }
       ],
       "id": "fszero-topology-migration",
@@ -211,14 +231,14 @@
       ],
       "entries": [
         {
-          "classification": "consolidate",
+          "classification": "move",
           "compatibility_impact": "release topology changes; coordinated reinstall required",
-          "current_name": "graphzero-coverage",
+          "current_name": "graphzero-codemode",
           "evidence": "conformance/engine-topology-v1.json current_to_target; live-inventory equality test",
-          "kind": "crate",
-          "path": "crates/graphzero-coverage/Cargo.toml",
-          "replacement_binary": null,
-          "replacement_package": "graphzero-test-support"
+          "kind": "binary",
+          "path": "crates/graphzero-cli/src/bin/graphzero_codemode.rs",
+          "replacement_binary": "graphzero-codemode",
+          "replacement_package": "graphzero-worker"
         },
         {
           "classification": "move",
@@ -233,10 +253,10 @@
         {
           "classification": "move",
           "compatibility_impact": "release topology changes; coordinated reinstall required",
-          "current_name": "graphzero-codemode",
+          "current_name": "gz-raw-worker",
           "evidence": "conformance/engine-topology-v1.json current_to_target; live-inventory equality test",
           "kind": "binary",
-          "path": "crates/graphzero-cli/src/bin/graphzero_codemode.rs",
+          "path": "crates/graphzero-query/src/bin/gz_raw_worker.rs",
           "replacement_binary": "graphzero-codemode",
           "replacement_package": "graphzero-worker"
         },
@@ -251,14 +271,14 @@
           "replacement_package": "graphzero-test-support"
         },
         {
-          "classification": "move",
+          "classification": "consolidate",
           "compatibility_impact": "release topology changes; coordinated reinstall required",
-          "current_name": "gz-raw-worker",
+          "current_name": "graphzero-coverage",
           "evidence": "conformance/engine-topology-v1.json current_to_target; live-inventory equality test",
-          "kind": "binary",
-          "path": "crates/graphzero-query/src/bin/gz_raw_worker.rs",
-          "replacement_binary": "graphzero-codemode",
-          "replacement_package": "graphzero-worker"
+          "kind": "crate",
+          "path": "crates/graphzero-coverage/Cargo.toml",
+          "replacement_binary": null,
+          "replacement_package": "graphzero-test-support"
         }
       ],
       "id": "graphzero-topology-migration",

@@ -636,8 +636,8 @@
         {
           "kind": "crate",
           "path": "crates/tokenzero-codemode/Cargo.toml",
-          "package": "tokenzero-codemode",
-          "name": "tokenzero-codemode",
+          "package": "tokenzero-worker",
+          "name": "tokenzero-worker",
           "disposition": "move",
           "target_role": "raw-worker",
           "target_package": "tokenzero-worker",
@@ -656,8 +656,8 @@
         {
           "kind": "crate",
           "path": "crates/tokenzero/Cargo.toml",
-          "package": "tokenzero",
-          "name": "tokenzero",
+          "package": "tokenzero-cli",
+          "name": "tokenzero-cli",
           "disposition": "move",
           "target_role": "cli",
           "target_package": "tokenzero-cli",
@@ -685,6 +685,16 @@
         },
         {
           "kind": "crate",
+          "path": "crates/tokenzero-test-support/Cargo.toml",
+          "package": "tokenzero-test-support",
+          "name": "tokenzero-test-support",
+          "disposition": "keep",
+          "target_role": "test-support",
+          "target_package": "tokenzero-test-support",
+          "target_binary": null
+        },
+        {
+          "kind": "crate",
           "path": "fuzz/Cargo.toml",
           "package": "tokenzero-fuzz",
           "name": "tokenzero-fuzz",
@@ -694,19 +704,9 @@
           "target_binary": null
         },
         {
-          "kind": "crate",
-          "path": "xtask/Cargo.toml",
-          "package": "tokenzero-xtask",
-          "name": "tokenzero-xtask",
-          "disposition": "keep",
-          "target_role": "optional-developer-tool",
-          "target_package": "tokenzero-xtask",
-          "target_binary": "tokenzero-xtask"
-        },
-        {
           "kind": "binary",
           "path": "crates/tokenzero/src/main.rs",
-          "package": "tokenzero",
+          "package": "tokenzero-cli",
           "name": "tokenzero",
           "disposition": "move",
           "target_role": "cli",
@@ -715,23 +715,13 @@
         },
         {
           "kind": "binary",
-          "path": "crates/tokenzero/src/bin/tokenzero_mcp.rs",
-          "package": "tokenzero",
-          "name": "tokenzero-mcp",
+          "path": "crates/tokenzero/src/main.rs",
+          "package": "tokenzero-cli",
+          "name": "tokenzero-cli",
           "disposition": "move",
-          "target_role": "harness-adapter",
-          "target_package": "zerostack-mcp-adapter",
-          "target_binary": "zerostack-mcp"
-        },
-        {
-          "kind": "binary",
-          "path": "crates/tokenzero/src/bin/tokenzero_codemode.rs",
-          "package": "tokenzero",
-          "name": "tokenzero-codemode",
-          "disposition": "move",
-          "target_role": "raw-worker",
-          "target_package": "tokenzero-worker",
-          "target_binary": "tokenzero-codemode"
+          "target_role": "cli",
+          "target_package": "tokenzero-cli",
+          "target_binary": "tokenzero"
         },
         {
           "kind": "binary",
@@ -745,13 +735,23 @@
         },
         {
           "kind": "binary",
-          "path": "xtask/src/main.rs",
-          "package": "tokenzero-xtask",
-          "name": "tokenzero-xtask",
-          "disposition": "keep",
-          "target_role": "optional-developer-tool",
-          "target_package": "tokenzero-xtask",
-          "target_binary": "tokenzero-xtask"
+          "path": "crates/tokenzero-codemode/src/main.rs",
+          "package": "tokenzero-worker",
+          "name": "tokenzero-codemode",
+          "disposition": "move",
+          "target_role": "raw-worker",
+          "target_package": "tokenzero-worker",
+          "target_binary": "tokenzero-codemode"
+        },
+        {
+          "kind": "binary",
+          "path": "crates/tokenzero-codemode/src/main.rs",
+          "package": "tokenzero-worker",
+          "name": "tokenzero-worker",
+          "disposition": "move",
+          "target_role": "raw-worker",
+          "target_package": "tokenzero-worker",
+          "target_binary": "tokenzero-codemode"
         }
       ]
     },
@@ -861,8 +861,8 @@
         {
           "kind": "crate",
           "path": "crates/fszero-codemode/Cargo.toml",
-          "package": "fszero-codemode",
-          "name": "fszero-codemode",
+          "package": "fszero-worker",
+          "name": "fszero-worker",
           "disposition": "move",
           "target_role": "raw-worker",
           "target_package": "fszero-worker",
@@ -881,12 +881,22 @@
         {
           "kind": "crate",
           "path": "crates/fszero-shim/Cargo.toml",
-          "package": "fszero-shim",
-          "name": "fszero-shim",
+          "package": "fszero-cli",
+          "name": "fszero-cli",
           "disposition": "move",
           "target_role": "cli",
           "target_package": "fszero-cli",
           "target_binary": "fszero"
+        },
+        {
+          "kind": "crate",
+          "path": "crates/fszero-test-support/Cargo.toml",
+          "package": "fszero-test-support",
+          "name": "fszero-test-support",
+          "disposition": "keep",
+          "target_role": "test-support",
+          "target_package": "fszero-test-support",
+          "target_binary": null
         },
         {
           "kind": "crate",
@@ -911,8 +921,18 @@
         {
           "kind": "binary",
           "path": "crates/fszero-codemode/src/main.rs",
-          "package": "fszero-codemode",
+          "package": "fszero-worker",
           "name": "fszero-codemode",
+          "disposition": "move",
+          "target_role": "raw-worker",
+          "target_package": "fszero-worker",
+          "target_binary": "fszero-codemode"
+        },
+        {
+          "kind": "binary",
+          "path": "crates/fszero-codemode/src/main.rs",
+          "package": "fszero-worker",
+          "name": "fszero-worker",
           "disposition": "move",
           "target_role": "raw-worker",
           "target_package": "fszero-worker",
@@ -931,9 +951,19 @@
         {
           "kind": "binary",
           "path": "crates/fszero-shim/src/main.rs",
-          "package": "fszero-shim",
+          "package": "fszero-cli",
           "name": "fszero",
-          "disposition": "merge",
+          "disposition": "move",
+          "target_role": "cli",
+          "target_package": "fszero-cli",
+          "target_binary": "fszero"
+        },
+        {
+          "kind": "binary",
+          "path": "crates/fszero-shim/src/main.rs",
+          "package": "fszero-cli",
+          "name": "fszero-cli",
+          "disposition": "move",
           "target_role": "cli",
           "target_package": "fszero-cli",
           "target_binary": "fszero"
@@ -947,17 +977,6 @@
           "target_role": "optional-developer-tool",
           "target_package": "fszero-xtask",
           "target_binary": "fszero-xtask"
-        },
-        {
-          "kind": "binary",
-          "path": "crates/fszero-shim/src/main.rs",
-          "package": "fszero-shim",
-          "name": "fszero-shim",
-          "disposition": "retire-from-release",
-          "target_role": "verification",
-          "target_package": "fszero-test-support",
-          "target_binary": null,
-          "notes": "Declared/default duplicate binary; keep source until approved cleanup."
         }
       ]
     },
@@ -1065,13 +1084,43 @@
       "current_to_target": [
         {
           "kind": "crate",
+          "path": "benchmarks/foreign_corpora/fixtures/rust-mini/Cargo.toml",
+          "package": "rust-mini",
+          "name": "rust-mini",
+          "disposition": "keep",
+          "target_role": "verification",
+          "target_package": "rust-mini",
+          "target_binary": null
+        },
+        {
+          "kind": "crate",
           "path": "crates/graphzero-cli/Cargo.toml",
-          "package": "graphzero",
-          "name": "graphzero",
+          "package": "graphzero-cli",
+          "name": "graphzero-cli",
           "disposition": "keep",
           "target_role": "cli",
           "target_package": "graphzero-cli",
           "target_binary": "graphzero"
+        },
+        {
+          "kind": "crate",
+          "path": "crates/graphzero-codemode/Cargo.toml",
+          "package": "graphzero-worker",
+          "name": "graphzero-worker",
+          "disposition": "keep",
+          "target_role": "raw-worker",
+          "target_package": "graphzero-worker",
+          "target_binary": "graphzero-codemode"
+        },
+        {
+          "kind": "crate",
+          "path": "crates/graphzero-core/Cargo.toml",
+          "package": "graphzero-core",
+          "name": "graphzero-core",
+          "disposition": "keep",
+          "target_role": "domain-support",
+          "target_package": "graphzero-core",
+          "target_binary": null
         },
         {
           "kind": "crate",
@@ -1091,6 +1140,16 @@
           "disposition": "keep",
           "target_role": "domain-support",
           "target_package": "graphzero-extract",
+          "target_binary": null
+        },
+        {
+          "kind": "crate",
+          "path": "crates/graphzero-mcp-compat/Cargo.toml",
+          "package": "graphzero-mcp-compat",
+          "name": "graphzero-mcp-compat",
+          "disposition": "keep",
+          "target_role": "harness-adapter",
+          "target_package": "graphzero-mcp-compat",
           "target_binary": null
         },
         {
@@ -1195,8 +1254,18 @@
         },
         {
           "kind": "binary",
+          "path": "benchmarks/foreign_corpora/fixtures/rust-mini/src/main.rs",
+          "package": "rust-mini",
+          "name": "rust-mini",
+          "disposition": "keep",
+          "target_role": "verification",
+          "target_package": "rust-mini",
+          "target_binary": null
+        },
+        {
+          "kind": "binary",
           "path": "crates/graphzero-cli/src/main.rs",
-          "package": "graphzero",
+          "package": "graphzero-cli",
           "name": "graphzero",
           "disposition": "keep",
           "target_role": "cli",
@@ -1205,8 +1274,18 @@
         },
         {
           "kind": "binary",
+          "path": "crates/graphzero-cli/src/main.rs",
+          "package": "graphzero-cli",
+          "name": "graphzero-cli",
+          "disposition": "keep",
+          "target_role": "cli",
+          "target_package": "graphzero-cli",
+          "target_binary": "graphzero"
+        },
+        {
+          "kind": "binary",
           "path": "crates/graphzero-cli/src/bin/graphzero_mcp.rs",
-          "package": "graphzero",
+          "package": "graphzero-cli",
           "name": "graphzero-mcp",
           "disposition": "move",
           "target_role": "harness-adapter",
@@ -1216,12 +1295,42 @@
         {
           "kind": "binary",
           "path": "crates/graphzero-cli/src/bin/graphzero_codemode.rs",
-          "package": "graphzero",
+          "package": "graphzero-cli",
           "name": "graphzero-codemode",
           "disposition": "move",
           "target_role": "raw-worker",
           "target_package": "graphzero-worker",
           "target_binary": "graphzero-codemode"
+        },
+        {
+          "kind": "binary",
+          "path": "crates/graphzero-codemode/src/main.rs",
+          "package": "graphzero-worker",
+          "name": "graphzero-codemode",
+          "disposition": "keep",
+          "target_role": "raw-worker",
+          "target_package": "graphzero-worker",
+          "target_binary": "graphzero-codemode"
+        },
+        {
+          "kind": "binary",
+          "path": "crates/graphzero-codemode/src/main.rs",
+          "package": "graphzero-worker",
+          "name": "graphzero-worker",
+          "disposition": "keep",
+          "target_role": "raw-worker",
+          "target_package": "graphzero-worker",
+          "target_binary": "graphzero-codemode"
+        },
+        {
+          "kind": "binary",
+          "path": "crates/graphzero-mcp-compat/src/main.rs",
+          "package": "graphzero-mcp-compat",
+          "name": "graphzero-mcp-compat",
+          "disposition": "keep",
+          "target_role": "harness-adapter",
+          "target_package": "graphzero-mcp-compat",
+          "target_binary": null
         },
         {
           "kind": "binary",
