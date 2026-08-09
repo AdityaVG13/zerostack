@@ -160,6 +160,8 @@ Output on failure:
 }
 ```
 
+When MCP wraps results, the canonical object shown above MUST be top-level `structuredContent`. `content[0].text` MAY remain a compact human/model ack but MUST NOT replace or omit any structured field. Private `zerostack.raw_worker.v2` frames are governed separately and are not subject to this envelope.
+
 ### `{ns}_codemode_search`
 
 Input schema:
