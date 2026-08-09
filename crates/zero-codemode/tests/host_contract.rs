@@ -1,8 +1,6 @@
 use std::time::Duration;
-#[cfg(feature = "quickjs")]
 use std::time::Instant;
 
-#[cfg(feature = "quickjs")]
 use std::{
     cell::RefCell,
     rc::Rc,
@@ -13,10 +11,8 @@ use std::{
     thread,
 };
 
-#[cfg(feature = "quickjs")]
 use serde_json::{Value, json};
 use zero_codemode::PUBLIC_RESULT_FIELDS;
-#[cfg(feature = "quickjs")]
 use zero_codemode::{
     Connector, ConnectorCompletion, ConnectorError, DispatchContext, runtime_creation_count,
 };
@@ -25,22 +21,18 @@ use zero_codemode::{
     CapabilityDescriptor, GlobalRegistration, Host, HostError, HostLimits, PlanError,
     RegistrationError, wrap_plan,
 };
-#[cfg(feature = "quickjs")]
 use zero_codemode::{
     DEFAULT_MAX_VISIBLE_RESULT_BYTES, MAX_INFLIGHT_CONNECTOR_CALLS,
     MAX_RESULT_SPILL_ENVELOPE_BYTES, MAX_VISIBLE_ERROR_BYTES, RESULT_SPILL_PREVIEW_BYTES,
     RESULT_SPILL_SCHEMA, finalize_visible_error,
 };
-#[cfg(feature = "quickjs")]
 use zero_store::SharedCas;
 
-#[cfg(not(feature = "quickjs"))]
 #[test]
-fn cancel_timeout_entrypoint_is_available_without_quickjs() {
+fn cancel_timeout_entrypoint_is_available() {
     let _entrypoint = Host::execute_with_cancel_timeout;
 }
 
-#[cfg(feature = "quickjs")]
 struct C {
     calls: RefCell<Vec<Value>>,
     fail: bool,
@@ -48,7 +40,6 @@ struct C {
     result: Option<String>,
 }
 
-#[cfg(feature = "quickjs")]
 impl C {
     fn ok() -> Self {
         Self {
@@ -60,7 +51,6 @@ impl C {
     }
 }
 
-#[cfg(feature = "quickjs")]
 impl Connector for C {
     fn dispatch(
         &self,
@@ -94,13 +84,11 @@ impl Connector for C {
     }
 }
 
-#[cfg(feature = "quickjs")]
 struct CoordinatedConnector {
     expected: usize,
     completions: RefCell<Vec<(u64, ConnectorCompletion)>>,
 }
 
-#[cfg(feature = "quickjs")]
 impl Connector for CoordinatedConnector {
     fn dispatch(
         &self,
@@ -162,8 +150,7 @@ fn lim() -> HostLimits {
 fn wrap_injection_and_validation() {
     let plan = r#"return "x"; }); globalThis.pwned=true; //"#;
     let wrapped = wrap_plan(plan, 4096).unwrap_or_else(|error| panic!("wrap: {error}"));
-    let quoted = serde_json::to_string(plan).unwrap_or_else(|error| panic!("json: {error}"));
-    assert!(wrapped.contains(&format!("const __source = {quoted};")));
+    assert_eq!(wrapped, plan);
     assert_eq!(wrap_plan(" ", 8), Err(PlanError::Empty));
     assert!(matches!(
         wrap_plan("123", 2),
@@ -207,16 +194,6 @@ fn invalid_duplicate_and_poison_identifiers() {
     }
 }
 
-#[cfg(not(feature = "quickjs"))]
-#[test]
-fn disabled() {
-    assert!(matches!(
-        Host::new(lim(), reg()),
-        Err(HostError::QuickJsDisabled)
-    ));
-}
-
-#[cfg(feature = "quickjs")]
 #[test]
 fn hello_dispatch_and_counter() {
     let connector = Rc::new(C::ok());
@@ -239,7 +216,6 @@ fn hello_dispatch_and_counter() {
     );
 }
 
-#[cfg(feature = "quickjs")]
 #[test]
 fn registered_objects_have_no_inherited_to_string() {
     let host = Host::new(lim(), reg()).unwrap_or_else(|error| panic!("host: {error}"));
@@ -260,7 +236,6 @@ fn registered_objects_have_no_inherited_to_string() {
     );
 }
 
-#[cfg(feature = "quickjs")]
 #[test]
 fn inline_results_expose_only_the_typed_inline_variant() {
     let registration = GlobalRegistration::zero(vec![CapabilityDescriptor::new("graph", "blast")]);
@@ -294,7 +269,6 @@ fn inline_results_expose_only_the_typed_inline_variant() {
     }
 }
 
-#[cfg(feature = "quickjs")]
 #[test]
 fn unknown_surfaces_and_methods_fail_loud_with_closest_names() {
     let registration = GlobalRegistration::zero(vec![
@@ -333,7 +307,6 @@ fn unknown_surfaces_and_methods_fail_loud_with_closest_names() {
     );
 }
 
-#[cfg(feature = "quickjs")]
 #[test]
 fn string_literal_tokens_never_change_capability_routing() {
     let registration = GlobalRegistration::zero(vec![
@@ -362,7 +335,6 @@ fn string_literal_tokens_never_change_capability_routing() {
     );
 }
 
-#[cfg(feature = "quickjs")]
 #[test]
 fn connector_error() {
     let connector = Rc::new(C {
@@ -380,7 +352,6 @@ fn connector_error() {
     );
 }
 
-#[cfg(feature = "quickjs")]
 #[test]
 fn oversized_connector_result_is_rejected_before_parse() {
     let mut limits = lim();
@@ -400,7 +371,6 @@ fn oversized_connector_result_is_rejected_before_parse() {
     );
 }
 
-#[cfg(feature = "quickjs")]
 #[test]
 fn invalid_connector_json_is_rejected() {
     let connector = Rc::new(C {
@@ -416,7 +386,6 @@ fn invalid_connector_json_is_rejected() {
     );
 }
 
-#[cfg(feature = "quickjs")]
 #[test]
 fn late_connector_result_maps_to_deadline() {
     let mut limits = lim();
@@ -435,7 +404,6 @@ fn late_connector_result_maps_to_deadline() {
     );
 }
 
-#[cfg(feature = "quickjs")]
 #[test]
 fn plan_cannot_clobber_promise_completion() {
     let host = Host::new(lim(), reg()).unwrap_or_else(|error| panic!("host: {error}"));
@@ -454,7 +422,6 @@ return {ok: true};
     );
 }
 
-#[cfg(feature = "quickjs")]
 #[test]
 fn fuel_interrupt() {
     let mut limits = lim();
@@ -468,7 +435,6 @@ fn fuel_interrupt() {
     );
 }
 
-#[cfg(feature = "quickjs")]
 #[test]
 fn duplicate_global() {
     let registration = GlobalRegistration::zero(vec![
@@ -483,7 +449,6 @@ fn duplicate_global() {
     ));
 }
 
-#[cfg(feature = "quickjs")]
 #[test]
 fn bounded_microtasks() {
     let mut limits = lim();
@@ -506,7 +471,6 @@ return new Promise(resolve => {
     );
 }
 
-#[cfg(feature = "quickjs")]
 #[test]
 fn external_cancel_interrupts_sync_loop() {
     let host = Host::new(lim(), reg()).unwrap_or_else(|error| panic!("host: {error}"));
@@ -525,7 +489,6 @@ fn external_cancel_interrupts_sync_loop() {
     assert!(started.elapsed() < Duration::from_millis(50));
 }
 
-#[cfg(feature = "quickjs")]
 #[test]
 fn sync_loop_hits_deadline() {
     let mut limits = lim();
@@ -539,7 +502,6 @@ fn sync_loop_hits_deadline() {
     );
 }
 
-#[cfg(feature = "quickjs")]
 #[test]
 fn explicit_timeout_is_bounded_by_host_limit() {
     let mut limits = lim();
@@ -560,7 +522,6 @@ fn explicit_timeout_is_bounded_by_host_limit() {
     }
 }
 
-#[cfg(feature = "quickjs")]
 #[test]
 fn unknown_property_on_a_connector_result_throws() {
     let host = Host::new(lim(), reg()).unwrap_or_else(|error| panic!("host: {error}"));
@@ -581,7 +542,6 @@ fn unknown_property_on_a_connector_result_throws() {
     );
 }
 
-#[cfg(feature = "quickjs")]
 #[test]
 fn wrong_property_inside_a_domain_array_fails_loud() {
     let connector = Rc::new(C {
@@ -603,7 +563,6 @@ fn wrong_property_inside_a_domain_array_fails_loud() {
     );
 }
 
-#[cfg(feature = "quickjs")]
 #[test]
 fn known_properties_stay_readable_through_the_strict_guard() {
     let connector = Rc::new(C {
@@ -622,7 +581,6 @@ fn known_properties_stay_readable_through_the_strict_guard() {
     assert_eq!(value, json!(["ok", 1, 2]));
 }
 
-#[cfg(feature = "quickjs")]
 #[test]
 fn opts_bearing_calls_forward_every_argument_to_the_connector() {
     let connector = Rc::new(C::ok());
@@ -643,7 +601,6 @@ fn opts_bearing_calls_forward_every_argument_to_the_connector() {
     );
 }
 
-#[cfg(feature = "quickjs")]
 #[test]
 fn oversized_result_spills_to_a_ref_with_a_bounded_preview() {
     let store = tempfile::tempdir().unwrap_or_else(|error| panic!("tempdir: {error}"));
@@ -693,7 +650,6 @@ fn oversized_result_spills_to_a_ref_with_a_bounded_preview() {
     assert_eq!(stored.len(), 20_971_522);
 }
 
-#[cfg(feature = "quickjs")]
 #[test]
 fn model_visible_error_text_is_bounded_without_splitting_utf8() {
     let error = "é".repeat(MAX_VISIBLE_ERROR_BYTES);
@@ -704,7 +660,6 @@ fn model_visible_error_text_is_bounded_without_splitting_utf8() {
     assert_eq!(finalize_visible_error("short"), "short");
 }
 
-#[cfg(feature = "quickjs")]
 #[test]
 fn arbitrary_decimal_byte_arrays_finalize_once_behind_an_exact_ref() {
     let store = tempfile::tempdir().unwrap_or_else(|error| panic!("tempdir: {error}"));
@@ -739,7 +694,6 @@ fn arbitrary_decimal_byte_arrays_finalize_once_behind_an_exact_ref() {
     assert_eq!(exact["refs"].as_array().unwrap().len(), 2);
 }
 
-#[cfg(feature = "quickjs")]
 #[test]
 fn result_finalizer_bounds_nested_width_cycle_ref_and_connector_shapes() {
     let store = tempfile::tempdir().unwrap_or_else(|error| panic!("tempdir: {error}"));
@@ -781,7 +735,6 @@ fn result_finalizer_bounds_nested_width_cycle_ref_and_connector_shapes() {
     }
 }
 
-#[cfg(feature = "quickjs")]
 #[test]
 fn one_direct_exact_expand_bypasses_budget_but_broad_parent_cannot() {
     let store = tempfile::tempdir().unwrap_or_else(|error| panic!("tempdir: {error}"));
@@ -868,7 +821,6 @@ fn one_direct_exact_expand_bypasses_budget_but_broad_parent_cannot() {
     assert_eq!(forged["spilled"], true);
 }
 
-#[cfg(feature = "quickjs")]
 #[test]
 fn spill_root_without_expand_capability_fails_before_publication() {
     let store = tempfile::tempdir().unwrap_or_else(|error| panic!("tempdir: {error}"));
@@ -891,7 +843,6 @@ fn spill_root_without_expand_capability_fails_before_publication() {
     assert_eq!(std::fs::read_dir(store.path()).unwrap().count(), 0);
 }
 
-#[cfg(feature = "quickjs")]
 #[test]
 fn oversized_result_without_a_spill_root_still_reports_the_limit() {
     let mut limits = lim();
@@ -905,7 +856,6 @@ fn oversized_result_without_a_spill_root_still_reports_the_limit() {
     );
 }
 
-#[cfg(feature = "quickjs")]
 #[test]
 fn every_route_emits_only_zero_result_v1_without_alias_synthesis() {
     let route_shapes = [
@@ -943,7 +893,6 @@ fn every_route_emits_only_zero_result_v1_without_alias_synthesis() {
     }
 }
 
-#[cfg(feature = "quickjs")]
 #[test]
 fn explicit_ref_content_stays_ref_content() {
     let reference = format!("tz://blob/{}", "a".repeat(64));
@@ -973,7 +922,6 @@ fn explicit_ref_content_stays_ref_content() {
     );
 }
 
-#[cfg(feature = "quickjs")]
 #[test]
 fn malformed_declared_or_explicit_ref_results_fail_closed() {
     let shapes = [
@@ -1004,7 +952,6 @@ fn malformed_declared_or_explicit_ref_results_fail_closed() {
     }
 }
 
-#[cfg(feature = "quickjs")]
 #[test]
 fn legacy_or_wrong_result_access_fails_loud() {
     let host = Host::new(lim(), reg()).unwrap_or_else(|error| panic!("host: {error}"));
@@ -1029,7 +976,6 @@ fn public_result_field_names_are_published() {
     assert_eq!(PUBLIC_RESULT_FIELDS, &["ack", "content"]);
 }
 
-#[cfg(feature = "quickjs")]
 #[test]
 fn capability_calls_return_thenables_usable_with_promise_all() {
     let connector = Rc::new(C::ok());
@@ -1048,7 +994,6 @@ fn capability_calls_return_thenables_usable_with_promise_all() {
     assert_eq!(connector.calls.borrow().len(), 2);
 }
 
-#[cfg(feature = "quickjs")]
 #[test]
 fn promise_all_dispatches_concurrently_and_settles_fifo_completions() {
     const CALLS: usize = 6;
@@ -1079,7 +1024,6 @@ fn promise_all_dispatches_concurrently_and_settles_fifo_completions() {
     );
 }
 
-#[cfg(feature = "quickjs")]
 #[test]
 fn connector_inflight_capacity_fails_loud_without_unbounded_queueing() {
     let connector = Rc::new(CoordinatedConnector {
@@ -1104,7 +1048,6 @@ fn connector_inflight_capacity_fails_loud_without_unbounded_queueing() {
     );
 }
 
-#[cfg(feature = "quickjs")]
 #[test]
 fn unserializable_plan_result_degrades_instead_of_failing() {
     let host = Host::new(lim(), reg()).unwrap_or_else(|error| panic!("host: {error}"));

@@ -1,5 +1,3 @@
-#![cfg(feature = "quickjs")]
-
 use std::io::{BufRead, BufReader, Write};
 use std::process::{Child, ChildStdin, Command, Stdio};
 use std::sync::mpsc::{self, Receiver};

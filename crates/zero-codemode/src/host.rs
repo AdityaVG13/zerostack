@@ -12,14 +12,12 @@ use serde_json::Value as JsonValue;
 use zero_abi::ZeroResultV1;
 use zero_store::SharedCas;
 
-#[cfg(feature = "quickjs")]
-use crate::wrap_plan;
 use crate::{HostLimits, LimitError, PlanError};
 
 static RUNTIME_CREATIONS: AtomicU64 = AtomicU64::new(0);
 
 pub fn runtime_creation_count() -> u64 {
-    RUNTIME_CREATIONS.load(Ordering::Relaxed)
+    RUNTIME_CREATIONS.load(Ordering::Relaxed) + crate::interpreter::interpreter_creation_count()
 }
 
 #[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
@@ -114,23 +112,23 @@ impl DispatchContext {
 /// remain bounded even while the JavaScript runtime is executing microtasks.
 pub const MAX_INFLIGHT_CONNECTOR_CALLS: usize = 64;
 
-struct ConnectorCompletionMessage {
-    sequence: u64,
-    result: Result<String, ConnectorError>,
+pub(crate) struct ConnectorCompletionMessage {
+    pub(crate) sequence: u64,
+    pub(crate) result: Result<String, ConnectorError>,
 }
 
 /// One-shot completion authority for an accepted connector dispatch.
 ///
 /// A connector may move this value to its own bounded dispatcher or event
 /// loop, but it must complete it exactly once. The completion never enters
-/// QuickJS directly; the host runtime thread receives and settles it.
+/// the interpreter directly; the host runtime thread receives and settles it.
 pub struct ConnectorCompletion {
     sequence: u64,
     sender: mpsc::SyncSender<ConnectorCompletionMessage>,
 }
 
 impl ConnectorCompletion {
-    fn new(sequence: u64, sender: mpsc::SyncSender<ConnectorCompletionMessage>) -> Self {
+    pub(crate) fn new(sequence: u64, sender: mpsc::SyncSender<ConnectorCompletionMessage>) -> Self {
         Self { sequence, sender }
     }
 
@@ -221,30 +219,22 @@ pub const PUBLIC_RESULT_FIELDS: &[&str] = &["ack", "content"];
 
 #[derive(Clone, Debug)]
 pub struct Host {
-    limits: HostLimits,
-    registration: GlobalRegistration,
-    spill_root: Option<PathBuf>,
-    max_visible_result_bytes: usize,
+    pub(crate) limits: HostLimits,
+    pub(crate) registration: GlobalRegistration,
+    pub(crate) spill_root: Option<PathBuf>,
+    pub(crate) max_visible_result_bytes: usize,
 }
 
 impl Host {
     pub fn new(limits: HostLimits, registration: GlobalRegistration) -> Result<Self, HostError> {
         limits.validate().map_err(HostError::Limits)?;
         registration.validate().map_err(HostError::Registration)?;
-        #[cfg(not(feature = "quickjs"))]
-        {
-            let _ = registration;
-            Err(HostError::QuickJsDisabled)
-        }
-        #[cfg(feature = "quickjs")]
-        {
-            Ok(Self {
-                max_visible_result_bytes: limits.max_json_bytes,
-                limits,
-                registration,
-                spill_root: None,
-            })
-        }
+        Ok(Self {
+            max_visible_result_bytes: limits.max_json_bytes,
+            limits,
+            registration,
+            spill_root: None,
+        })
     }
 
     /// Publish results larger than `max_json_bytes` into the content-addressed
@@ -275,7 +265,6 @@ impl Host {
         &self.registration
     }
 
-    #[cfg(feature = "quickjs")]
     pub fn execute(
         &self,
         plan: &str,
@@ -284,17 +273,15 @@ impl Host {
         self.execute_with_cancel(plan, connector, Arc::new(AtomicBool::new(false)))
     }
 
-    #[cfg(feature = "quickjs")]
     pub fn execute_with_cancel(
         &self,
         plan: &str,
         connector: Rc<dyn Connector>,
         cancelled: Arc<AtomicBool>,
     ) -> Result<JsonValue, HostError> {
-        quickjs::execute(self, plan, connector, cancelled, self.limits.wall_timeout)
+        crate::interpreter::execute(self, plan, connector, cancelled, self.limits.wall_timeout)
     }
 
-    #[cfg(feature = "quickjs")]
     pub fn execute_with_cancel_timeout(
         &self,
         plan: &str,
@@ -302,33 +289,13 @@ impl Host {
         cancelled: Arc<AtomicBool>,
         timeout: Duration,
     ) -> Result<JsonValue, HostError> {
-        quickjs::execute(
+        crate::interpreter::execute(
             self,
             plan,
             connector,
             cancelled,
             timeout.min(self.limits.wall_timeout),
         )
-    }
-
-    #[cfg(not(feature = "quickjs"))]
-    pub fn execute(
-        &self,
-        _plan: &str,
-        _connector: Rc<dyn Connector>,
-    ) -> Result<JsonValue, HostError> {
-        Err(HostError::QuickJsDisabled)
-    }
-
-    #[cfg(not(feature = "quickjs"))]
-    pub fn execute_with_cancel_timeout(
-        &self,
-        _plan: &str,
-        _connector: Rc<dyn Connector>,
-        _cancelled: Arc<AtomicBool>,
-        _timeout: Duration,
-    ) -> Result<JsonValue, HostError> {
-        Err(HostError::QuickJsDisabled)
     }
 }
 
@@ -357,10 +324,13 @@ impl std::error::Error for RegistrationError {}
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum HostError {
-    QuickJsDisabled,
     Limits(LimitError),
     Registration(RegistrationError),
     Plan(PlanError),
+    Parse(String),
+    UnsupportedSyntax(String),
+    Data(String),
+    Execution(String),
     Runtime(String),
     JavaScript(String),
     MethodNotFound(String),
@@ -378,10 +348,13 @@ pub enum HostError {
 impl fmt::Display for HostError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::QuickJsDisabled => f.write_str("QuickJS support is disabled"),
             Self::Limits(error) => write!(f, "invalid limits: {error}"),
             Self::Registration(error) => write!(f, "invalid registration: {error}"),
             Self::Plan(error) => write!(f, "invalid plan: {error}"),
+            Self::Parse(message) => write!(f, "parse error: {message}"),
+            Self::UnsupportedSyntax(message) => write!(f, "unsupported syntax: {message}"),
+            Self::Data(message) => write!(f, "data error: {message}"),
+            Self::Execution(message) => write!(f, "execution error: {message}"),
             Self::Runtime(message) => write!(f, "runtime error: {message}"),
             Self::JavaScript(message)
             | Self::MethodNotFound(message)
@@ -464,7 +437,7 @@ fn explicit_result_reference(
 /// Normalize the transport-owned worker result before JavaScript can observe it.
 /// Raw WorkerResponseFrame metadata stays inside inline content; a producer may
 /// request ref content only through an explicit typed `kind: "ref"` value.
-fn normalize_public_result(encoded: &str) -> Result<String, HostError> {
+pub(crate) fn normalize_public_result(encoded: &str) -> Result<String, HostError> {
     let value: JsonValue = serde_json::from_str(encoded)
         .map_err(|error| HostError::Json(format!("connector returned invalid JSON: {error}")))?;
     if let Some(result) = declared_zero_result(&value)? {
@@ -502,7 +475,7 @@ fn is_canonical_spill_ref(reference: &str) -> bool {
 /// Explicit expansion is the one intentional escape from the default visible
 /// result budget. Keep the authorization narrow: one direct aggregate call,
 /// one canonical spill ref, and no surrounding plan work.
-fn directly_expands_one_spill_ref(plan: &str) -> bool {
+pub(crate) fn directly_expands_one_spill_ref(plan: &str) -> bool {
     let trimmed = plan.trim();
     let trimmed = trimmed.strip_suffix(';').unwrap_or(trimmed).trim();
     let argument = [
@@ -528,7 +501,7 @@ fn directly_expands_one_spill_ref(plan: &str) -> bool {
     reference.as_deref().is_some_and(is_canonical_spill_ref)
 }
 
-fn is_terminal_exact_token_expansion(value: &JsonValue) -> bool {
+pub(crate) fn is_terminal_exact_token_expansion(value: &JsonValue) -> bool {
     let inline = serde_json::from_value::<ZeroResultV1>(value.clone())
         .ok()
         .and_then(|result| result.inline_value().ok().cloned());
@@ -579,7 +552,7 @@ fn is_terminal_exact_token_expansion(value: &JsonValue) -> bool {
 /// Publish an oversized encoded result into the CAS and describe it with a ref
 /// plus a bounded preview, so a large final value degrades to a fetchable
 /// reference instead of a hard framing error.
-fn spill_result(cas_root: &Path, encoded: &str) -> Result<JsonValue, HostError> {
+pub(crate) fn spill_result(cas_root: &Path, encoded: &str) -> Result<JsonValue, HostError> {
     let cas = SharedCas::open_labeled(cas_root, "codemode-result-spill");
     let hash = cas
         .put(encoded.as_bytes())
@@ -641,594 +614,4 @@ fn spill_result(cas_root: &Path, encoded: &str) -> Result<JsonValue, HostError> 
     Err(HostError::ResultSpill(
         "finalized spill receipt length did not converge".into(),
     ))
-}
-
-#[cfg(feature = "quickjs")]
-mod quickjs {
-    use std::cell::RefCell;
-    use std::collections::BTreeMap;
-    use std::sync::atomic::AtomicU64;
-    use std::sync::mpsc::{Receiver, RecvTimeoutError, SyncSender, TryRecvError};
-
-    use rquickjs::function::{Constructor, Rest};
-    use rquickjs::promise::PromiseState;
-    use rquickjs::{Array, Context, Ctx, Function, Object, Persistent, Promise, Runtime, Value};
-
-    use super::*;
-
-    struct PendingDispatch {
-        resolve: Persistent<Function<'static>>,
-        reject: Persistent<Function<'static>>,
-    }
-
-    type PendingDispatches = Rc<RefCell<BTreeMap<u64, PendingDispatch>>>;
-
-    #[derive(Clone)]
-    struct DispatchBindings {
-        context: DispatchContext,
-        expired: Arc<AtomicBool>,
-        completion_sender: SyncSender<ConnectorCompletionMessage>,
-        pending: PendingDispatches,
-        sequence: Arc<AtomicU64>,
-    }
-
-    struct PendingCleanup<'a> {
-        context: &'a Context,
-        pending: PendingDispatches,
-    }
-
-    impl Drop for PendingCleanup<'_> {
-        fn drop(&mut self) {
-            let dispatches = std::mem::take(&mut *self.pending.borrow_mut());
-            self.context.with(|ctx| {
-                for (_, dispatch) in dispatches {
-                    if let Ok(resolve) = dispatch.resolve.restore(&ctx) {
-                        drop(resolve);
-                    }
-                    if let Ok(reject) = dispatch.reject.restore(&ctx) {
-                        drop(reject);
-                    }
-                }
-            });
-        }
-    }
-
-    pub(super) fn execute(
-        host: &Host,
-        plan: &str,
-        connector: Rc<dyn Connector>,
-        cancelled: Arc<AtomicBool>,
-        wall_timeout: Duration,
-    ) -> Result<JsonValue, HostError> {
-        let wrapped = wrap_plan(plan, host.limits.max_plan_bytes).map_err(HostError::Plan)?;
-        let runtime = Runtime::new().map_err(runtime_error)?;
-        RUNTIME_CREATIONS.fetch_add(1, Ordering::Relaxed);
-        runtime.set_memory_limit(host.limits.memory_bytes);
-        runtime.set_max_stack_size(host.limits.stack_bytes);
-
-        let deadline = Instant::now() + wall_timeout;
-        let fuel = Arc::new(AtomicU64::new(host.limits.instruction_budget));
-        let timed_out = Arc::new(AtomicBool::new(false));
-        let dispatch_expired = Arc::new(AtomicBool::new(false));
-        let exhausted = Arc::new(AtomicBool::new(false));
-        let interrupt_fuel = Arc::clone(&fuel);
-        let interrupt_timeout = Arc::clone(&timed_out);
-        let interrupt_exhausted = Arc::clone(&exhausted);
-        let interrupt_cancelled = Arc::clone(&cancelled);
-        runtime.set_interrupt_handler(Some(Box::new(move || {
-            if interrupt_cancelled.load(Ordering::Relaxed) {
-                return true;
-            }
-            if Instant::now() >= deadline {
-                interrupt_timeout.store(true, Ordering::Relaxed);
-                return true;
-            }
-            if interrupt_fuel
-                .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |value| {
-                    value.checked_sub(1)
-                })
-                .is_err()
-            {
-                interrupt_exhausted.store(true, Ordering::Relaxed);
-                return true;
-            }
-            false
-        })));
-
-        let context = Context::full(&runtime).map_err(runtime_error)?;
-        let dispatch_context = DispatchContext {
-            deadline,
-            max_json_bytes: host.limits.max_json_bytes,
-        };
-        let (completion_sender, completion_receiver) =
-            std::sync::mpsc::sync_channel(MAX_INFLIGHT_CONNECTOR_CALLS);
-        let pending = Rc::new(RefCell::new(BTreeMap::new()));
-        let _pending_cleanup = PendingCleanup {
-            context: &context,
-            pending: Rc::clone(&pending),
-        };
-        let bindings = DispatchBindings {
-            context: dispatch_context,
-            expired: Arc::clone(&dispatch_expired),
-            completion_sender,
-            pending: Rc::clone(&pending),
-            sequence: Arc::new(AtomicU64::new(1)),
-        };
-        let persistent: Result<Persistent<Promise<'static>>, HostError> = context.with(|ctx| {
-            install_globals(ctx.clone(), &host.registration, connector, bindings)?;
-            let promise: Promise<'_> = ctx
-                .eval(wrapped.as_str())
-                .map_err(|error| normalized_js_error(&ctx, error))?;
-            Ok(Persistent::save(&ctx, promise))
-        });
-
-        check_limits(
-            &timed_out,
-            &dispatch_expired,
-            &exhausted,
-            &cancelled,
-            deadline,
-        )?;
-        let persistent = persistent?;
-
-        let mut executed_jobs = 0;
-        loop {
-            check_limits(
-                &timed_out,
-                &dispatch_expired,
-                &exhausted,
-                &cancelled,
-                deadline,
-            )?;
-            drain_ready_completions(&context, &completion_receiver, &pending, dispatch_context)?;
-            let state = context.with(|ctx| {
-                persistent
-                    .clone()
-                    .restore(&ctx)
-                    .map(|promise| promise.state())
-                    .map_err(js_error)
-            })?;
-            if state != PromiseState::Pending && pending.borrow().is_empty() {
-                break;
-            }
-            if state == PromiseState::Pending {
-                if executed_jobs >= host.limits.microtask_ceiling {
-                    return Err(HostError::MicrotaskLimit);
-                }
-                match runtime.execute_pending_job() {
-                    Ok(true) => {
-                        executed_jobs += 1;
-                        continue;
-                    }
-                    Ok(false) => {}
-                    Err(error) => {
-                        check_limits(
-                            &timed_out,
-                            &dispatch_expired,
-                            &exhausted,
-                            &cancelled,
-                            deadline,
-                        )?;
-                        return Err(HostError::JavaScript(error.to_string()));
-                    }
-                }
-            }
-            if pending.borrow().is_empty() {
-                return Err(HostError::JavaScript(
-                    "plan promise did not settle".to_owned(),
-                ));
-            }
-            let wait = dispatch_context.remaining().min(Duration::from_millis(25));
-            match completion_receiver.recv_timeout(wait) {
-                Ok(completion) => {
-                    settle_completion(&context, &pending, completion, dispatch_context)?;
-                }
-                Err(RecvTimeoutError::Timeout) => continue,
-                Err(RecvTimeoutError::Disconnected) => {
-                    return Err(HostError::Connector(
-                        "connector completion channel closed with calls in flight".into(),
-                    ));
-                }
-            }
-        }
-
-        check_limits(
-            &timed_out,
-            &dispatch_expired,
-            &exhausted,
-            &cancelled,
-            deadline,
-        )?;
-        let encoded = context.with(move |ctx| {
-            let promise = persistent.restore(&ctx).map_err(js_error)?;
-            match promise.result::<String>() {
-                Some(Ok(encoded)) => Ok(encoded),
-                Some(Err(error)) => Err(normalized_js_error(&ctx, error)),
-                None => Err(HostError::JavaScript(
-                    "plan promise did not settle".to_owned(),
-                )),
-            }
-        })?;
-        let value: JsonValue =
-            serde_json::from_str(&encoded).map_err(|error| HostError::Json(error.to_string()))?;
-        if encoded.len() > host.max_visible_result_bytes
-            && !(directly_expands_one_spill_ref(plan) && is_terminal_exact_token_expansion(&value))
-        {
-            return match host.spill_root.as_deref() {
-                Some(root)
-                    if host.registration.capabilities.iter().any(|capability| {
-                        capability.surface == "token" && capability.method == "expand"
-                    }) =>
-                {
-                    spill_result(root, &encoded)
-                }
-                Some(_) => Err(HostError::ResultSpill(
-                    "token.expand capability is required before publishing a result ref".into(),
-                )),
-                None => Err(HostError::ResultTooLarge {
-                    actual: encoded.len(),
-                    maximum: host.max_visible_result_bytes,
-                }),
-            };
-        }
-        Ok(value)
-    }
-
-    fn drain_ready_completions(
-        context: &Context,
-        receiver: &Receiver<ConnectorCompletionMessage>,
-        pending: &PendingDispatches,
-        dispatch_context: DispatchContext,
-    ) -> Result<(), HostError> {
-        let mut ready = Vec::new();
-        loop {
-            match receiver.try_recv() {
-                Ok(completion) => ready.push(completion),
-                Err(TryRecvError::Empty) => break,
-                Err(TryRecvError::Disconnected) => {
-                    if pending.borrow().is_empty() {
-                        break;
-                    }
-                    return Err(HostError::Connector(
-                        "connector completion channel closed with calls in flight".into(),
-                    ));
-                }
-            }
-        }
-        // The bounded MPSC channel preserves the connector completion order.
-        // Dispatch sequence only identifies the matching JavaScript promise.
-        for completion in ready {
-            settle_completion(context, pending, completion, dispatch_context)?;
-        }
-        Ok(())
-    }
-
-    fn settle_completion(
-        context: &Context,
-        pending: &PendingDispatches,
-        completion: ConnectorCompletionMessage,
-        dispatch_context: DispatchContext,
-    ) -> Result<(), HostError> {
-        let dispatch = pending
-            .borrow_mut()
-            .remove(&completion.sequence)
-            .ok_or_else(|| {
-                HostError::Connector(format!(
-                    "connector returned unknown or duplicate completion {}",
-                    completion.sequence
-                ))
-            })?;
-        context.with(move |ctx| {
-            let resolve = dispatch.resolve.restore(&ctx).map_err(js_error)?;
-            let reject = dispatch.reject.restore(&ctx).map_err(js_error)?;
-            match completion.result {
-                Ok(encoded) if encoded.len() > dispatch_context.max_json_bytes => reject_error(
-                    &ctx,
-                    &reject,
-                    "connector result exceeds JSON limit".to_owned(),
-                ),
-                Ok(encoded) => {
-                    let normalized = normalize_public_result(&encoded)?;
-                    if normalized.len() > dispatch_context.max_json_bytes {
-                        return reject_error(
-                            &ctx,
-                            &reject,
-                            "normalized connector result exceeds JSON limit".to_owned(),
-                        );
-                    }
-                    let value = ctx.json_parse(normalized).map_err(|error| {
-                        HostError::Json(format!(
-                            "normalized connector result is invalid JSON: {error}"
-                        ))
-                    })?;
-                    resolve.call::<_, ()>((value,)).map_err(js_error)
-                }
-                Err(error) => reject_error(&ctx, &reject, error.to_string()),
-            }
-        })
-    }
-
-    fn reject_error<'js>(
-        ctx: &Ctx<'js>,
-        reject: &Function<'js>,
-        message: String,
-    ) -> Result<(), HostError> {
-        let constructor: Constructor<'_> = ctx.globals().get("Error").map_err(js_error)?;
-        let error: Object<'_> = constructor.construct((message,)).map_err(js_error)?;
-        reject.call::<_, ()>((error,)).map_err(js_error)
-    }
-
-    fn check_limits(
-        timed_out: &AtomicBool,
-        dispatch_expired: &AtomicBool,
-        exhausted: &AtomicBool,
-        cancelled: &AtomicBool,
-        deadline: Instant,
-    ) -> Result<(), HostError> {
-        if cancelled.load(Ordering::Relaxed) {
-            return Err(HostError::Cancelled);
-        }
-        if timed_out.load(Ordering::Relaxed)
-            || dispatch_expired.load(Ordering::Relaxed)
-            || Instant::now() >= deadline
-        {
-            return Err(HostError::DeadlineExceeded);
-        }
-        if exhausted.load(Ordering::Relaxed) {
-            return Err(HostError::FuelExhausted);
-        }
-        Ok(())
-    }
-
-    fn null_object<'js>(ctx: &Ctx<'js>) -> Result<Object<'js>, HostError> {
-        ctx.eval::<Object<'js>, _>("Object.create(null)")
-            .map_err(|error| normalized_js_error(ctx, error))
-    }
-
-    /// Wraps every capability result so reading a property the host never
-    /// returned throws instead of yielding undefined. A mistyped field name is a
-    /// caller bug worth one error, not a silent empty value.
-    const STRICT_RESULT_WRAPPER: &str = r#"(() => {
-"use strict";
-const guard = (value, label) => {
-    if (Array.isArray(value)) {
-        return value.map((entry, index) => guard(entry, `${label}[${index}]`));
-    }
-    if (value === null || typeof value !== "object") {
-        return value;
-    }
-    return new Proxy(value, {
-        get(target, property) {
-            if (typeof property === "symbol") {
-                return Reflect.get(target, property);
-            }
-            if (Object.prototype.hasOwnProperty.call(target, property)) {
-                return guard(target[property], label + "." + property);
-            }
-            if (property === "then" || property === "toJSON") {
-                return undefined;
-            }
-            const keys = Object.keys(target);
-            throw new TypeError(
-                "unknown property '" + property + "' on " + label +
-                "; available properties: " + (keys.length ? keys.join(", ") : "(none)")
-            );
-        },
-    });
-};
-// Every capability returns a real Promise. The native call only enqueues
-// bounded work; the native completion boundary supplies zero-result/v1.
-return (call, label) => async (...args) => guard(await call(...args), label);
-})()"#;
-
-    fn strict_result_wrapper<'js>(ctx: &Ctx<'js>) -> Result<Function<'js>, HostError> {
-        ctx.eval::<Function<'js>, _>(STRICT_RESULT_WRAPPER)
-            .map_err(|error| normalized_js_error(ctx, error))
-    }
-
-    /// Guards the aggregate capability tree itself. An unknown surface or
-    /// method is a caller bug, never a reason to degrade to catalog search.
-    const STRICT_CAPABILITY_WRAPPER: &str = r#"(() => {
-"use strict";
-const ignored = new Set(["then", "toJSON", "toString"]);
-const distance = (left, right) => {
-    let row = Array.from({length: right.length + 1}, (_, index) => index);
-    for (let leftIndex = 0; leftIndex < left.length; leftIndex += 1) {
-        const next = [leftIndex + 1];
-        for (let rightIndex = 0; rightIndex < right.length; rightIndex += 1) {
-            next.push(Math.min(
-                next[rightIndex] + 1,
-                row[rightIndex + 1] + 1,
-                row[rightIndex] + (left[leftIndex] === right[rightIndex] ? 0 : 1),
-            ));
-        }
-        row = next;
-    }
-    return row[right.length];
-};
-return (target, label, kind) => new Proxy(target, {
-    get(target, property) {
-        if (typeof property === "symbol") {
-            return Reflect.get(target, property);
-        }
-        if (Object.prototype.hasOwnProperty.call(target, property)) {
-            return target[property];
-        }
-        if (ignored.has(property)) {
-            return undefined;
-        }
-        const closest = Object.keys(target)
-            .map(name => [distance(property, name), name])
-            .sort((left, right) => left[0] - right[0] || (left[1] < right[1] ? -1 : left[1] > right[1] ? 1 : 0))
-            .slice(0, 3)
-            .map(entry => entry[1]);
-        const plural = kind === "method" ? "methods" : "surfaces";
-        throw new TypeError(
-            kind + "_not_found: unknown " + kind + " '" + property + "' on " + label +
-            "; closest " + plural + ": " + (closest.length ? closest.join(", ") : "(none)")
-        );
-    },
-});
-})()"#;
-
-    fn strict_capability_wrapper<'js>(ctx: &Ctx<'js>) -> Result<Function<'js>, HostError> {
-        ctx.eval::<Function<'js>, _>(STRICT_CAPABILITY_WRAPPER)
-            .map_err(|error| normalized_js_error(ctx, error))
-    }
-
-    /// Encodes a capability call's argument list for the connector. A single
-    /// argument keeps its own shape so existing one-argument capabilities are
-    /// unchanged; extra arguments (an `opts` bag, for example) are forwarded as
-    /// a JSON array instead of being dropped before dispatch.
-    fn call_arguments<'js>(
-        ctx: &Ctx<'js>,
-        mut args: Vec<Value<'js>>,
-    ) -> Result<Value<'js>, rquickjs::Error> {
-        if args.len() == 1 {
-            return Ok(args.remove(0));
-        }
-        let array = Array::new(ctx.clone())?;
-        for (index, value) in args.into_iter().enumerate() {
-            array.set(index, value)?;
-        }
-        Ok(array.into_value())
-    }
-
-    fn install_globals<'js>(
-        ctx: Ctx<'js>,
-        registration: &GlobalRegistration,
-        connector: Rc<dyn Connector>,
-        bindings: DispatchBindings,
-    ) -> Result<(), HostError> {
-        let root = null_object(&ctx)?;
-        let strict_result = strict_result_wrapper(&ctx)?;
-        let strict_capability = strict_capability_wrapper(&ctx)?;
-        let mut surfaces: BTreeMap<String, Object<'js>> = BTreeMap::new();
-
-        for capability in &registration.capabilities {
-            let surface = match surfaces.entry(capability.surface.clone()) {
-                std::collections::btree_map::Entry::Occupied(entry) => entry.into_mut(),
-                std::collections::btree_map::Entry::Vacant(entry) => {
-                    entry.insert(null_object(&ctx)?)
-                }
-            }
-            .clone();
-            let descriptor = capability.clone();
-            let connector = Rc::clone(&connector);
-            let bindings = bindings.clone();
-            let function =
-                Function::new(ctx.clone(), move |ctx: Ctx<'js>, args: Rest<Value<'js>>| {
-                    let args = call_arguments(&ctx, args.0)?;
-                    let Some(json) = ctx.json_stringify(args)? else {
-                        return Err(rquickjs::Error::new_from_js_message(
-                            "value",
-                            "JSON",
-                            "arguments are not JSON-serializable",
-                        ));
-                    };
-                    let encoded = json.to_string()?;
-                    if encoded.len() > bindings.context.max_json_bytes {
-                        return Err(rquickjs::Error::new_from_js_message(
-                            "JSON",
-                            "connector",
-                            "arguments exceed JSON limit",
-                        ));
-                    }
-                    if bindings.context.is_expired() {
-                        bindings.expired.store(true, Ordering::Relaxed);
-                        return Err(rquickjs::Error::new_from_js_message(
-                            "deadline",
-                            "connector",
-                            "wall-clock deadline exceeded",
-                        ));
-                    }
-                    if bindings.pending.borrow().len() >= MAX_INFLIGHT_CONNECTOR_CALLS {
-                        return Err(rquickjs::Error::new_from_js_message(
-                            "connector",
-                            "JavaScript",
-                            "connector in-flight capacity exhausted",
-                        ));
-                    }
-                    let dispatch_id = bindings.sequence.fetch_add(1, Ordering::Relaxed);
-                    let (promise, resolve, reject) = Promise::new(&ctx)?;
-                    bindings.pending.borrow_mut().insert(
-                        dispatch_id,
-                        PendingDispatch {
-                            resolve: Persistent::save(&ctx, resolve),
-                            reject: Persistent::save(&ctx, reject),
-                        },
-                    );
-                    let completion =
-                        ConnectorCompletion::new(dispatch_id, bindings.completion_sender.clone());
-                    if let Err(error) =
-                        connector.dispatch(&descriptor, &encoded, bindings.context, completion)
-                    {
-                        bindings.pending.borrow_mut().remove(&dispatch_id);
-                        return Err(rquickjs::Error::new_from_js_message(
-                            "connector",
-                            "JavaScript",
-                            error.to_string(),
-                        ));
-                    }
-                    Ok(promise)
-                })
-                .map_err(js_error)?;
-            let label = format!("{}.{} result", capability.surface, capability.method);
-            let guarded: Function<'js> = strict_result
-                .call((function, label))
-                .map_err(|error| normalized_js_error(&ctx, error))?;
-            surface
-                .set(capability.method.as_str(), guarded)
-                .map_err(js_error)?;
-        }
-
-        for (name, surface) in surfaces {
-            let label = format!("{}.{}", registration.root, name);
-            let guarded: Object<'js> = strict_capability
-                .call((surface, label, "method"))
-                .map_err(|error| normalized_js_error(&ctx, error))?;
-            root.set(name, guarded).map_err(js_error)?;
-        }
-        let guarded_root: Object<'js> = strict_capability
-            .call((root, registration.root.clone(), "surface"))
-            .map_err(|error| normalized_js_error(&ctx, error))?;
-        ctx.globals()
-            .set(registration.root.as_str(), guarded_root)
-            .map_err(js_error)
-    }
-
-    fn runtime_error(error: rquickjs::Error) -> HostError {
-        HostError::Runtime(error.to_string())
-    }
-
-    fn js_error(error: rquickjs::Error) -> HostError {
-        HostError::JavaScript(error.to_string())
-    }
-
-    fn classified_js_error(message: String) -> HostError {
-        if message.starts_with("method_not_found:") {
-            HostError::MethodNotFound(message)
-        } else if message.starts_with("surface_not_found:") {
-            HostError::SurfaceNotFound(message)
-        } else {
-            HostError::JavaScript(message)
-        }
-    }
-
-    fn normalized_js_error(ctx: &Ctx<'_>, error: rquickjs::Error) -> HostError {
-        if matches!(error, rquickjs::Error::Exception) {
-            let caught = ctx.catch();
-            if let Some(object) = caught.as_object()
-                && let Ok(message) = object.get::<_, String>("message")
-            {
-                return classified_js_error(message);
-            }
-            if let Some(string) = caught.as_string()
-                && let Ok(message) = string.to_string()
-            {
-                return classified_js_error(message);
-            }
-        }
-        js_error(error)
-    }
 }

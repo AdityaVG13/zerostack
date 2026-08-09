@@ -19,7 +19,13 @@ const [files, graph] = await Promise.all([
 return { files: files.content, graph: graph.content };
 ~~~
 
-This Cloudflare-style execution model reduces protocol round trips and keeps intermediate values inside the sandbox rather than exposing each one to model context.
+This execution model reduces protocol round trips and keeps intermediate values inside the interpreter rather than exposing each one to model context.
+
+### Restricted interpreter provenance
+
+ZeroStack's owned Rust interpreter adopts the restricted in-process architecture reviewed directly in `anomalyco/opencode`, branch `dev`, commit `0bff28de09105088ff5bdefab91413d55c28dff1`, package `packages/codemode`. That upstream package is MIT licensed, Copyright (c) 2025 opencode. ZeroStack reimplements the architecture against its own ABI, planner, raw-worker, ref, store, lifecycle, and conformance contracts; it does not execute source through `eval`, Node.js, QuickJS, or any ambient host runtime.
+
+The upstream MIT terms permit use, copying, modification, distribution, sublicensing, and sale provided the copyright and permission notice remain with copies or substantial portions. The software is provided "AS IS", without warranty, and the authors are not liable for claims or damages arising from its use. This provenance record binds the reviewed source revision and those obligations.
 
 ### Capability result shape
 
@@ -142,19 +148,18 @@ boundary. `SurfaceKind` therefore models one selected artifact face, not a
 runtime switch or a dual catalog.
 
 This contract is metadata and validation only. It does not import FastMCP,
-QuickJS, or engine-domain code. An engine compatibility package may provide a
+an unrestricted JavaScript runtime, or engine-domain code. An engine compatibility package may provide a
 thin MCP carrier, but that carrier must consume the same registration and must
 not reimplement the registry, result envelope, ref ownership, or telemetry.
 
 The hub-owned FastMCP carrier uses `McpTransportConfig`. It permits at most
 `MAX_MCP_MAX_INFLIGHT` (256) concurrent callbacks. Zero and larger values are
-rejected. The `fastmcp` and `quickjs` Cargo features are mutually exclusive, so
-one `zero-codemode` artifact cannot contain both runtimes.
+rejected. The `fastmcp` compatibility transport remains an optional feature.
 
 ## Harness-neutral raw-worker client
 
 The zero_codemode::worker module is the stable Rust ownership boundary between
-any harness and raw-worker v2 processes. It is independent of Pi, MCP, QuickJS,
+any harness and raw-worker v2 processes. It is independent of Pi and MCP,
 and engine runtimes. WorkerRegistry maps the closed EngineIdentity set
 (FsZero, GraphZero, TokenZero) to a WorkerFactory. A factory returns a
 WorkerSpec; WorkerClient alone owns spawn, framed stdin/stdout/stderr,

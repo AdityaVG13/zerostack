@@ -1,4 +1,4 @@
-#![cfg(all(unix, feature = "quickjs", feature = "worker-fixture"))]
+#![cfg(all(unix, feature = "worker-fixture"))]
 #![forbid(unsafe_code)]
 
 use serde_json::{Value, json};

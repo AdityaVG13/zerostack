@@ -1,4 +1,4 @@
-#![cfg(all(unix, feature = "quickjs"))]
+#![cfg(unix)]
 use serde_json::{Value, json};
 use std::{
     io::{BufRead, BufReader, Read, Write},
@@ -835,7 +835,7 @@ fn warm_session_entry_latency_meets_p50_and_p95_gates() {
 }
 
 #[test]
-fn quickjs_globals_do_not_cross_model_visible_plans() {
+fn interpreter_globals_do_not_cross_model_visible_plans() {
     let (d, mut session, token, shutdown_token, _) = start(ProcessIdentity::current().unwrap());
     let socket = d.path().join("runtime/session.sock");
     let (mut stream, mut reader, generation) = connect_authenticated(&socket, &token);

@@ -1,7 +1,6 @@
 #![forbid(unsafe_code)]
 
-#[cfg(all(feature = "fastmcp", feature = "quickjs"))]
-compile_error!("zero-codemode features `fastmcp` and `quickjs` are mutually exclusive");
+mod interpreter;
 
 pub mod discovery;
 mod edit_protocol;
