@@ -46,6 +46,8 @@ WORKER_PACKAGES = {
     "tokenzero-worker",
 }
 WORKER_PATH_MARKERS = ("-worker", "-codemode")
+COMPAT_PACKAGE_SUFFIXES = ("-mcp", "-mcp-compat")
+HUB_TRANSPORT_DEPENDENCY = "zero-codemode"
 FORBIDDEN_DEPENDENCIES = {
     "fastmcp-rust",
     "rquickjs",
@@ -65,6 +67,16 @@ EXCLUSIVITY_GUARD_RE = re.compile(
     \#\[\s*cfg\s*\(\s*all\s*\(
       (?=[^)]*feature\s*=\s*[\"']surface-mcp[\"'])
       (?=[^)]*feature\s*=\s*[\"']surface-codemode[\"'])
+      [^)]*
+    \)\s*\)\s*\]\s*compile_error\s*!\s*\(
+    """,
+    re.DOTALL | re.VERBOSE,
+)
+CODEMODE_FEATURE_GUARD_RE = re.compile(
+    r"""
+    \#\[\s*cfg\s*\(\s*all\s*\(
+      (?=[^)]*feature\s*=\s*[\"']fastmcp[\"'])
+      (?=[^)]*feature\s*=\s*[\"']quickjs[\"'])
       [^)]*
     \)\s*\)\s*\]\s*compile_error\s*!\s*\(
     """,
@@ -124,6 +136,18 @@ def rust_files(root: Path):
         yield path
 
 
+def check_codemode_feature_exclusivity(root: Path) -> list[str]:
+    path = root / "crates" / "zero-codemode" / "src" / "lib.rs"
+    if not path.is_file():
+        return [f"missing CodeMode feature guard source: {path}"]
+    text = path.read_text(encoding="utf-8", errors="replace")
+    if CODEMODE_FEATURE_GUARD_RE.search(text):
+        return []
+    return [
+        f"{path}: no cfg+compile_error! guard rejects simultaneous fastmcp and quickjs"
+    ]
+
+
 def check_exclusive_features(root: Path) -> list[str]:
     for path in rust_files(root):
         if any(part in EXCLUDED_GUARD_PATH_PARTS for part in path.relative_to(root).parts):
@@ -136,8 +160,21 @@ def check_exclusive_features(root: Path) -> list[str]:
     ]
 
 
+DEPENDENCY_SECTIONS = ("dependencies", "build-dependencies", "dev-dependencies")
+
+
 def _dependency_is_optional(value: Any) -> bool:
     return isinstance(value, dict) and value.get("optional") is True
+
+
+def _manifest_dependency_tables(data: dict[str, Any]):
+    for section in DEPENDENCY_SECTIONS:
+        yield section, data.get(section, {})
+    for target, target_data in data.get("target", {}).items():
+        if not isinstance(target_data, dict):
+            continue
+        for section in DEPENDENCY_SECTIONS:
+            yield f"target.{target}.{section}", target_data.get(section, {})
 
 
 def check_worker_dependencies(root: Path, strict: bool) -> list[str]:
@@ -152,17 +189,48 @@ def check_worker_dependencies(root: Path, strict: bool) -> list[str]:
             continue
         package = data.get("package", {})
         package_name = package.get("name", "")
-        if package_name not in WORKER_PACKAGES and not any(
+        is_compat_package = package_name.endswith(COMPAT_PACKAGE_SUFFIXES)
+        is_worker_package = package_name in WORKER_PACKAGES or any(
             marker in manifest.parent.name for marker in WORKER_PATH_MARKERS
-        ):
+        )
+        dependencies = data.get("dependencies", {})
+        tables = list(_manifest_dependency_tables(data))
+        direct_fastmcp = any(
+            not section.endswith("dev-dependencies") and "fastmcp-rust" in values
+            for section, values in tables
+        )
+        if is_compat_package:
+            if strict and HUB_TRANSPORT_DEPENDENCY not in dependencies:
+                errors.append(
+                    f"{manifest}: compatibility package must depend on hub transport "
+                    f"{HUB_TRANSPORT_DEPENDENCY!r}"
+                )
+            if strict and direct_fastmcp:
+                errors.append(
+                    f"{manifest}: compatibility package directly depends on "
+                    "forbidden 'fastmcp-rust'; use the hub transport"
+                )
             continue
-        for section in ("dependencies", "build-dependencies", "dev-dependencies"):
-            for dependency, value in data.get(section, {}).items():
+        if strict and direct_fastmcp:
+            if HUB_TRANSPORT_DEPENDENCY not in dependencies:
+                errors.append(
+                    f"{manifest}: engine production manifest must depend on hub transport "
+                    f"{HUB_TRANSPORT_DEPENDENCY!r} when declaring 'fastmcp-rust'"
+                )
+            errors.append(
+                f"{manifest}: engine production manifest directly depends on forbidden "
+                "'fastmcp-rust'; use the hub transport"
+            )
+        if not is_worker_package:
+            continue
+        for section, values in tables:
+            for dependency, value in values.items():
                 if dependency not in FORBIDDEN_DEPENDENCIES:
                     continue
-                if section == "dev-dependencies" or _dependency_is_optional(value):
-                    if not strict:
-                        continue
+                if section.endswith("dev-dependencies"):
+                    continue
+                if _dependency_is_optional(value) and not strict:
+                    continue
                 errors.append(
                     f"{manifest}: worker directly depends on forbidden {dependency!r}"
                 )
@@ -176,6 +244,7 @@ def scan_roots(roots: list[Path], strict_engines: bool = False) -> list[str]:
     # The first root is ZeroStack. Sibling roots do not contain the hub module;
     # they are checked only for worker dependency and feature exclusivity rules.
     errors.extend(check_hub_surface(roots[0]))
+    errors.extend(check_codemode_feature_exclusivity(roots[0]))
     for root in roots[1:]:
         errors.extend(check_exclusive_features(root))
         errors.extend(check_worker_dependencies(root, strict_engines))

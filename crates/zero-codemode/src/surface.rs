@@ -5,6 +5,7 @@
 //! carrier may expose. It deliberately contains no JavaScript runtime, MCP
 //! transport, or engine-domain dispatch.
 
+use std::collections::BTreeSet;
 use std::fmt;
 
 use serde::{Deserialize, Serialize};
@@ -83,7 +84,31 @@ impl DomainAdapterRegistration {
         }
         GlobalRegistration::zero(self.capabilities.clone())
             .validate()
-            .map_err(SurfaceContractError::InvalidCapabilities)
+            .map_err(SurfaceContractError::InvalidCapabilities)?;
+
+        let canonical_ids: BTreeSet<String> = self
+            .registry
+            .operations
+            .iter()
+            .map(|operation| operation.canonical_id.clone())
+            .collect();
+        let capability_ids: BTreeSet<String> = self
+            .capabilities
+            .iter()
+            .map(|capability| format!("{}.{}", capability.surface, capability.method))
+            .collect();
+        let missing = canonical_ids
+            .difference(&capability_ids)
+            .cloned()
+            .collect::<Vec<_>>();
+        let extra = capability_ids
+            .difference(&canonical_ids)
+            .cloned()
+            .collect::<Vec<_>>();
+        if !missing.is_empty() || !extra.is_empty() {
+            return Err(SurfaceContractError::CapabilityCatalogMismatch { missing, extra });
+        }
+        Ok(())
     }
 
     /// The canonical digest of the typed domain operation registry.
@@ -178,6 +203,10 @@ pub enum SurfaceContractError {
         requested: SurfaceKind,
         actual: SurfaceKind,
     },
+    CapabilityCatalogMismatch {
+        missing: Vec<String>,
+        extra: Vec<String>,
+    },
     Encoding(String),
 }
 
@@ -216,6 +245,10 @@ impl fmt::Display for SurfaceContractError {
                 actual.as_str(),
                 requested.as_str(),
                 actual.as_str()
+            ),
+            Self::CapabilityCatalogMismatch { missing, extra } => write!(
+                formatter,
+                "capability catalog must exactly match canonical operations; missing={missing:?}, extra={extra:?}"
             ),
             Self::Encoding(error) => write!(formatter, "failed to encode surface catalog: {error}"),
         }
@@ -322,6 +355,39 @@ mod tests {
         .unwrap();
         wire["unexpected"] = json!(true);
         assert!(serde_json::from_value::<SurfaceRegistration>(wire).is_err());
+    }
+
+    #[test]
+    fn capability_catalog_must_match_canonical_operations_exactly() {
+        let mut missing = adapter();
+        missing.capabilities.clear();
+        assert!(matches!(
+            missing.validate(),
+            Err(SurfaceContractError::CapabilityCatalogMismatch { missing, extra })
+                if missing == vec!["fs.read"] && extra.is_empty()
+        ));
+
+        let mut extra = adapter();
+        extra.capabilities = vec![
+            CapabilityDescriptor::new("fs", "read"),
+            CapabilityDescriptor::new("fs", "write"),
+        ];
+        assert!(matches!(
+            extra.validate(),
+            Err(SurfaceContractError::CapabilityCatalogMismatch { missing, extra })
+                if missing.is_empty() && extra == vec!["fs.write"]
+        ));
+
+        let mut duplicate = adapter();
+        duplicate
+            .capabilities
+            .push(CapabilityDescriptor::new("fs", "read"));
+        assert!(matches!(
+            duplicate.validate(),
+            Err(SurfaceContractError::InvalidCapabilities(
+                crate::RegistrationError::DuplicateCapability(_)
+            ))
+        ));
     }
 
     #[test]

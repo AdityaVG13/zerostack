@@ -1,10 +1,14 @@
 #![forbid(unsafe_code)]
 
+#[cfg(all(feature = "fastmcp", feature = "quickjs"))]
+compile_error!("zero-codemode features `fastmcp` and `quickjs` are mutually exclusive");
+
 pub mod discovery;
 mod edit_protocol;
 mod host;
 mod limits;
 pub mod manifest;
+pub mod mcp_transport;
 pub mod node;
 pub mod session;
 pub mod surface;
@@ -32,6 +36,13 @@ pub use manifest::{
     HarnessArtifact, JOURNAL_DIR, LIB_DIR, MANIFEST_SCHEMA, ManifestFacts, NODE_ENV,
     RUNTIME_MODULE_ENV, Refusal, SUBSTRATE_MODULE_ENV, StorePaths, artifact_candidates,
     is_ephemeral, is_readable_file, locate_manifest, manifest_order, resolve_artifact,
+};
+#[cfg(feature = "fastmcp")]
+pub use mcp_transport::FastMcpTransport;
+pub use mcp_transport::{
+    DEFAULT_MCP_MAX_INFLIGHT, DEFAULT_MCP_TOOL_TIMEOUT, MAX_MCP_MAX_INFLIGHT, MAX_MCP_TOOL_TIMEOUT,
+    McpCallContext, McpDispatchError, McpDispatcher, McpTransportConfig, McpTransportError,
+    execute_call, execute_call_with_cancel, validate_mcp_registration,
 };
 pub use node::{
     FNM_DEFAULT_ALIAS_SUBDIR, FNM_DIR_ENV, NODE_ORDER, NODE_SCHEMA, NodeCandidate, NodeEnv,

@@ -166,6 +166,113 @@ class SurfaceSubstrateGuardTests(unittest.TestCase):
         root = self._root(self.valid_surface(), manifest)
         self.assertTrue(module.check_worker_dependencies(root, False))
 
+    def test_fastmcp_feature_guard_is_required_in_hub(self):
+        root = self._root(self.valid_surface())
+        codemode = root / "crates/zero-codemode/src/lib.rs"
+        codemode.write_text(
+            '#[cfg(all(feature = "fastmcp", feature = "quickjs"))]\n'
+            'compile_error!("mutually exclusive");',
+            encoding="utf-8",
+        )
+        self.assertEqual(module.check_codemode_feature_exclusivity(root), [])
+        codemode.write_text(
+            '#[cfg(feature = "fastmcp")]\nfn transport() {}',
+            encoding="utf-8",
+        )
+        self.assertTrue(module.check_codemode_feature_exclusivity(root))
+
+    def test_strict_compatibility_packages_must_use_hub_transport(self):
+        temp = tempfile.TemporaryDirectory()
+        self.addCleanup(temp.cleanup)
+        root = Path(temp.name)
+        manifest = root / "crates/graphzero-mcp-compat/Cargo.toml"
+        manifest.parent.mkdir(parents=True)
+        manifest.write_text(
+            """
+            [package]
+            name = "graphzero-mcp-compat"
+            [dependencies]
+            fastmcp-rust = "0.3"
+            """,
+            encoding="utf-8",
+        )
+        errors = module.check_worker_dependencies(root, True)
+        self.assertTrue(any("hub transport" in error for error in errors))
+        self.assertTrue(any("fastmcp-rust" in error for error in errors))
+
+        manifest.write_text(
+            """
+            [package]
+            name = "graphzero-mcp-compat"
+            [dependencies]
+            zero-codemode = { path = "../../../ZeroStack/crates/zero-codemode", features = ["fastmcp"] }
+            """,
+            encoding="utf-8",
+        )
+        self.assertEqual(module.check_worker_dependencies(root, True), [])
+
+    def test_target_dev_dependency_and_workspace_declaration_are_not_production_edges(self):
+        temp = tempfile.TemporaryDirectory()
+        self.addCleanup(temp.cleanup)
+        root = Path(temp.name)
+        manifest = root / "Cargo.toml"
+        manifest.write_text(
+            """
+            [package]
+            name = "fszero-worker"
+            [target.'cfg(unix)'.dev-dependencies]
+            fastmcp-rust = "0.3"
+            [workspace.dependencies]
+            fastmcp-rust = "0.3"
+            """,
+            encoding="utf-8",
+        )
+        self.assertEqual(module.check_worker_dependencies(root, True), [])
+
+        manifest.write_text(
+            """
+            [package]
+            name = "fszero-worker"
+            [target.'cfg(unix)'.dependencies]
+            fastmcp-rust = "0.3"
+            """,
+            encoding="utf-8",
+        )
+        errors = module.check_worker_dependencies(root, True)
+        self.assertTrue(any("fastmcp-rust" in error for error in errors))
+
+    def test_strict_engine_fastmcp_dependency_is_rejected_without_hub_carrier(self):
+        temp = tempfile.TemporaryDirectory()
+        self.addCleanup(temp.cleanup)
+        root = Path(temp.name)
+        manifest = root / "Cargo.toml"
+        manifest.write_text(
+            """
+            [package]
+            name = "fs-zero"
+            [dependencies]
+            fastmcp-rust = { optional = true }
+            """,
+            encoding="utf-8",
+        )
+        errors = module.check_worker_dependencies(root, True)
+        self.assertTrue(any("engine production manifest" in error for error in errors))
+        self.assertTrue(any("forbidden 'fastmcp-rust'" in error for error in errors))
+
+        manifest.write_text(
+            """
+            [package]
+            name = "fs-zero"
+            [dependencies]
+            zero-codemode = { path = "../ZeroStack/crates/zero-codemode" }
+            fastmcp-rust = { optional = true }
+            """,
+            encoding="utf-8",
+        )
+        errors = module.check_worker_dependencies(root, True)
+        self.assertTrue(any("forbidden 'fastmcp-rust'" in error for error in errors))
+
 
 if __name__ == "__main__":
+
     unittest.main()

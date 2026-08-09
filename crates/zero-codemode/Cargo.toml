@@ -7,6 +7,7 @@ description = "Pure-safe generic CodeMode host foundation"
 
 [features]
 default = []
+fastmcp = ["dep:fastmcp-rust"]
 quickjs = ["dep:rquickjs"]
 worker-fixture = []
 
@@ -38,6 +39,7 @@ zero-store = { path = "../zero-store" }
 rquickjs = { version = "0.12", optional = true, default-features = false, features = ["full", "macro"] }
 command-group = "5.0.1"
 sha2.workspace = true
+fastmcp-rust = { git = "https://github.com/Dicklesworthstone/fastmcp_rust", rev = "1c66097b15dea9550e833ee9e433beeb66eefece", optional = true }
 zerostack-machine-permit = { path = "../zerostack-machine-permit" }
 
 [dev-dependencies]

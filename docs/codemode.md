@@ -146,6 +146,11 @@ QuickJS, or engine-domain code. An engine compatibility package may provide a
 thin MCP carrier, but that carrier must consume the same registration and must
 not reimplement the registry, result envelope, ref ownership, or telemetry.
 
+The hub-owned FastMCP carrier uses `McpTransportConfig`. It permits at most
+`MAX_MCP_MAX_INFLIGHT` (256) concurrent callbacks. Zero and larger values are
+rejected. The `fastmcp` and `quickjs` Cargo features are mutually exclusive, so
+one `zero-codemode` artifact cannot contain both runtimes.
+
 ## Harness-neutral raw-worker client
 
 The zero_codemode::worker module is the stable Rust ownership boundary between
