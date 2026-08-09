@@ -37,6 +37,19 @@ SUSPECT_FN = re.compile(
 # zero-abi is the one legitimate home.
 ALLOWED_PATH_PARTS = ("zero-abi", "zero_abi")
 
+# Calling the canonical zero-abi encoder makes a function a thin delegating
+# wrapper, not a second implementation: it cannot diverge because the bytes it
+# emits come from zero-abi itself.
+DELEGATE_MARKER = "zero_abi::canonical_json"
+
+# Real Rust test attributes, matched exactly. Qualified forms (e.g.
+# `#[tokio::test]`) are test registrations too. Anything else that merely
+# contains the substring "test" (e.g. `#[cfg(feature = "latest")]`) is NOT a
+# test attribute and must not exempt a canonical-JSON encoder.
+TEST_ATTR_RE = re.compile(
+    r"^#\[\s*(?:(?:[A-Za-z_][A-Za-z0-9_]*::)*test|cfg\(test\))\s*\]$"
+)
+
 # Known divergences with a bead already tracking them. Remove an entry when
 # its bead closes; leaving it is how the gate silently stops working.
 KNOWN_EXCEPTIONS = {
@@ -84,6 +97,58 @@ def known_exception(path: Path, fn: str):
     return None
 
 
+def is_test_fn(text: str, fn_pos: int) -> bool:
+    """True when the `fn` at fn_pos is test-only, never a digest encoder.
+
+    Covers both `#[test]`-annotated helpers in src files and functions inside
+    a `#[cfg(test)] mod` block. Test helpers may be named *_canonical_json* to
+    assert against the golden form, but nothing outside the test binary ever
+    hashes their output, so they cannot cause cross-engine identity drift.
+    """
+    head = text[:fn_pos]
+    lines = head.splitlines()
+    attrs = []
+    i = len(lines) - 1
+    while i >= 0:
+        line = lines[i].strip()
+        if not line or line.startswith("///") or line.startswith("//!"):
+            i -= 1
+            continue
+        if line.startswith("#["):
+            attrs.append(line)
+            i -= 1
+            continue
+        break
+    if any(TEST_ATTR_RE.fullmatch(attr) for attr in attrs):
+        return True
+    cfg_idx = head.rfind("#[cfg(test)]")
+    if cfg_idx >= 0:
+        segment = text[cfg_idx:fn_pos]
+        if segment.count("{") - segment.count("}") >= 1:
+            return True
+    return False
+
+
+def fn_body(text: str, fn_pos: int) -> str | None:
+    """Return the brace-delimited body of the fn at fn_pos, or None."""
+    rest = text[fn_pos:]
+    depth = 0
+    for idx, ch in enumerate(rest):
+        if ch == "{":
+            depth += 1
+        elif ch == "}":
+            depth -= 1
+            if depth == 0:
+                return rest[: idx + 1]
+    return None
+
+
+def delegates_to_zero_abi(text: str, fn_pos: int) -> bool:
+    """True when the fn at fn_pos calls zero_abi::canonical_json in its body."""
+    body = fn_body(text, fn_pos)
+    return body is not None and DELEGATE_MARKER in body
+
+
 def scan_roots(roots: list[Path]) -> tuple[list[str], list[str], int]:
     """Walk all roots; return violations, excused, files checked."""
     violations: list[str] = []
@@ -102,7 +167,10 @@ def scan_roots(roots: list[Path]) -> tuple[list[str], list[str], int]:
                 fn = match.group(1)
                 if is_allowed(path):
                     continue
-                line = text[: match.start()].count("\n") + 1
+                fn_pos = match.start()
+                if is_test_fn(text, fn_pos) or delegates_to_zero_abi(text, fn_pos):
+                    continue
+                line = text[:fn_pos].count("\n") + 1
                 bead = known_exception(path, fn)
                 where = "%s:%d: fn %s" % (path, line, fn)
                 if bead:
