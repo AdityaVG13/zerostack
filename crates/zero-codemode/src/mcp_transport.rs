@@ -18,10 +18,11 @@ use crate::{SurfaceContractError, SurfaceKind, SurfaceRegistration};
 #[cfg(feature = "fastmcp")]
 use zero_abi::CanonicalResource;
 
-/// Default maximum wall time for one compatibility tool call.
-pub const DEFAULT_MCP_TOOL_TIMEOUT: Duration = Duration::from_secs(30);
-/// Hard upper bound for one compatibility tool call.
-pub const MAX_MCP_TOOL_TIMEOUT: Duration = Duration::from_secs(300);
+/// Default compatibility behavior: no hub-imposed outer deadline. Domain
+/// operations retain their own declared deadlines and remain cancellable.
+pub const DEFAULT_MCP_TOOL_TIMEOUT: Duration = Duration::ZERO;
+/// Hard upper bound for an explicitly configured finite outer deadline.
+pub const MAX_MCP_TOOL_TIMEOUT: Duration = Duration::from_secs(3_600);
 /// Default number of callbacks that may run at once.
 pub const DEFAULT_MCP_MAX_INFLIGHT: usize = 16;
 /// Hard upper bound for concurrent compatibility callbacks.
@@ -31,6 +32,7 @@ const CANCELLATION_POLL: Duration = Duration::from_millis(10);
 /// Configuration shared by every dynamically registered tool.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct McpTransportConfig {
+    /// Finite hub outer deadline. Zero delegates deadline policy to the engine.
     pub tool_timeout: Duration,
     pub max_inflight: usize,
 }
@@ -57,11 +59,6 @@ pub struct McpAliasMetadata {
 
 impl McpTransportConfig {
     pub fn validate(self) -> Result<Self, McpTransportError> {
-        if self.tool_timeout.is_zero() {
-            return Err(McpTransportError::InvalidConfig(
-                "tool_timeout must be greater than zero".into(),
-            ));
-        }
         if self.tool_timeout > MAX_MCP_TOOL_TIMEOUT {
             return Err(McpTransportError::InvalidConfig(format!(
                 "tool_timeout must not exceed {}s",
@@ -96,21 +93,26 @@ pub fn validate_mcp_registration(
 /// Cooperative cancellation and deadline information for one domain callback.
 #[derive(Clone, Debug)]
 pub struct McpCallContext {
-    deadline: Instant,
+    deadline: Option<Instant>,
     cancelled: Arc<AtomicBool>,
 }
 
 impl McpCallContext {
-    pub fn deadline(&self) -> Instant {
+    /// Finite hub deadline, or `None` when the engine owns deadline policy.
+    pub fn deadline(&self) -> Option<Instant> {
         self.deadline
     }
 
-    pub fn remaining(&self) -> Duration {
-        self.deadline.saturating_duration_since(Instant::now())
+    pub fn remaining(&self) -> Option<Duration> {
+        self.deadline
+            .map(|deadline| deadline.saturating_duration_since(Instant::now()))
     }
 
     pub fn is_cancelled(&self) -> bool {
-        self.cancelled.load(Ordering::Acquire) || Instant::now() >= self.deadline
+        self.cancelled.load(Ordering::Acquire)
+            || self
+                .deadline
+                .is_some_and(|deadline| Instant::now() >= deadline)
     }
 
     pub fn check(&self) -> Result<(), McpDispatchError> {
@@ -483,12 +485,12 @@ where
 {
     let permit = limiter.acquire(operation)?;
     let cancelled = Arc::new(AtomicBool::new(false));
+    let deadline = (!config.tool_timeout.is_zero()).then(|| Instant::now() + config.tool_timeout);
     let context = McpCallContext {
-        deadline: Instant::now() + config.tool_timeout,
+        deadline,
         cancelled: Arc::clone(&cancelled),
     };
     let (sender, receiver) = mpsc::sync_channel(1);
-    let deadline = context.deadline;
     let _worker = thread::Builder::new()
         .name("zerostack-mcp-tool".into())
         .spawn(move || {
@@ -512,13 +514,20 @@ where
             return Err(McpDispatchError::cancelled().with_op(operation));
         }
         let elapsed = started.elapsed();
-        if elapsed >= config.tool_timeout {
+        if !config.tool_timeout.is_zero() && elapsed >= config.tool_timeout {
             cancelled.store(true, Ordering::Release);
             return Err(McpDispatchError::timeout(operation, config.tool_timeout));
         }
-        let wait = (config.tool_timeout - elapsed).min(CANCELLATION_POLL);
+        let wait = if config.tool_timeout.is_zero() {
+            CANCELLATION_POLL
+        } else {
+            (config.tool_timeout - elapsed).min(CANCELLATION_POLL)
+        };
         match receiver.recv_timeout(wait) {
-            Ok(Err(error)) if error.kind == "cancelled" && Instant::now() >= deadline => {
+            Ok(Err(error))
+                if error.kind == "cancelled"
+                    && deadline.is_some_and(|deadline| Instant::now() >= deadline) =>
+            {
                 return Err(McpDispatchError::timeout(operation, config.tool_timeout));
             }
             Ok(result) => return result,
@@ -1075,10 +1084,7 @@ mod tests {
             }),
             "fs.read",
             json!({}),
-            McpTransportConfig {
-                tool_timeout: Duration::from_secs(1),
-                max_inflight: 1,
-            },
+            McpTransportConfig::default(),
             move || started.elapsed() >= Duration::from_millis(25),
         );
         assert_eq!(result.unwrap_err().kind, "cancelled");
@@ -1244,23 +1250,25 @@ mod tests {
     }
 
     #[test]
-    fn invalid_configuration_fails_before_starting_callback() {
-        let callback_calls = Arc::new(AtomicUsize::new(0));
-        let callback_count = Arc::clone(&callback_calls);
+    fn configuration_preserves_engine_deadlines_and_rejects_invalid_bounds() {
         let result = execute_call(
-            Arc::new(move |_: &str, _: Value, _: &McpCallContext| {
-                callback_count.fetch_add(1, Ordering::Relaxed);
-                Ok(json!(null))
+            Arc::new(|_: &str, _: Value, context: &McpCallContext| {
+                Ok(json!({"hub_deadline": context.deadline().is_some()}))
             }),
-            "fs.read",
+            "token.shell",
             json!({}),
+            McpTransportConfig::default(),
+        )
+        .unwrap();
+        assert_eq!(result, json!({"hub_deadline":false}));
+        assert!(
             McpTransportConfig {
-                tool_timeout: Duration::ZERO,
+                tool_timeout: Duration::from_secs(3_600),
                 max_inflight: 1,
-            },
+            }
+            .validate()
+            .is_ok()
         );
-        assert_eq!(result.unwrap_err().kind, "invalid_config");
-        assert_eq!(callback_calls.load(Ordering::Relaxed), 0);
 
         let result = execute_call(
             Arc::new(|_: &str, _: Value, _: &McpCallContext| Ok(json!(null))),
