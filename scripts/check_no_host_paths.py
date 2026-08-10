@@ -52,6 +52,27 @@ ALLOWLIST_LINE_RES: dict[str, list[re.Pattern[str]]] = {
         re.compile(r"/Users/\|/home/\|BEGIN"),
         re.compile(r"names /Users/ and /home/ as the strings"),
     ],
+    "crates/zero-codemode/tests/locate_manifest.rs": [
+        re.compile(
+            r'^\s*let ephemeral = "/home/u/\.local/state/fnm_multishells/1347_1785364489620/bin";$'
+        ),
+    ],
+    "crates/zero-codemode/tests/node_resolution.rs": [
+        re.compile(
+            r'^\s*const MULTISHELL: &str = "/home/u/\.local/state/fnm_multishells/1347_1785364489620/bin/node";$'
+        ),
+        re.compile(r'^\s*Some\("/home/u"\),$'),
+        re.compile(r'^\s*let env = env_with\(.*Some\("/home/u"\).*$'),
+        re.compile(
+            r'^\s*"/home/u/(?:\.local/share/fnm/aliases/default/bin/node|\.volta/bin/node|\.local/bin/node)",$'
+        ),
+        re.compile(
+            r'^\s*let multishell_dir = "/home/u/\.local/state/fnm_multishells/1347_1785364489620/bin";$'
+        ),
+        re.compile(
+            r'^\s*"/home/u/\.local/share/fnm/node-versions/v24\.14\.1/installation/bin/node"$'
+        ),
+    ],
 }
 
 
