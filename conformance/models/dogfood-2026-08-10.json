@@ -1,0 +1,593 @@
+{
+  "campaigns": {
+    "omp": {
+      "active_cancellation": {
+        "interrupt": "CTRL_C",
+        "next_call_result": 42,
+        "plan": "FS search across /Users/aditya",
+        "post_shutdown_sidecars": 0,
+        "process_exit": 130,
+        "tool_event": "tool_execution_start write xd://zero_execute",
+        "tool_execution_end_observed": false
+      },
+      "aggregate_engine_operations": {
+        "fs": 5,
+        "graph": 5,
+        "token": 5
+      },
+      "authorized_mutation": {
+        "bytes": 21,
+        "path": "/tmp/zerostack-omp-mutation/dogfood.txt",
+        "result_ref": "tz://blob/6d67378232173bd1ff2b80f80c833ff426bb707cde3100f331483c8ea3c0c2f1",
+        "sha256": "54f70557c851f539122a0fc68f30fd1d8f73ca732807c86f434648749722bd9c"
+      },
+      "harness": "omp-zerostack",
+      "minimum_observed_harness_tool_calls": 6,
+      "minimum_observed_model_turns": 6,
+      "model": "openai-codex/gpt-5.6-sol:medium",
+      "native_fallbacks": 0,
+      "package_head_at_campaign": "ed1437549485e4e84b7b7a6dc5b0f0b9c9c5e723",
+      "shutdown_reap": {
+        "pgrep_matches": 0
+      },
+      "spill_expansion": {
+        "content_kind": "capsule",
+        "ref": "tz://blob/6d67378232173bd1ff2b80f80c833ff426bb707cde3100f331483c8ea3c0c2f1",
+        "succeeded": true
+      },
+      "visible_spill_bytes": 1302,
+      "yield_wait": {
+        "evidence": "Graph index completed after 1768.452 ms through ZeroSidecar.execute; the client resolved yield frames by wait requests",
+        "fixture_tests": "29/29 package tests pass including yield/wait and abort",
+        "live": true,
+        "yield_ms": 1
+      }
+    },
+    "pi": {
+      "active_cancellation": {
+        "interrupt": "CTRL_C",
+        "next_call_result": 42,
+        "plan": "FS search across /Users/aditya/AI",
+        "post_shutdown_sidecars": 0,
+        "tool_event": "tool_execution_start zero_execute",
+        "tool_execution_end_observed": false
+      },
+      "aggregate_engine_operations": {
+        "fs": 5,
+        "graph": 5,
+        "token": 5
+      },
+      "authorized_mutation": {
+        "bytes": 20,
+        "path": "/tmp/zerostack-pi-mutation/dogfood.txt",
+        "result_ref": "tz://blob/d085c2ea86da488524161b97be3a4c67bd4caeabac6c7d0890b9af456ac879ad",
+        "sha256": "0a32cde1dcb8e7cab01034ad837184db2d033d3cf96e5d72f180c073f91a09f8"
+      },
+      "harness": "pi-zerostack",
+      "minimum_observed_harness_tool_calls": 6,
+      "minimum_observed_model_turns": 6,
+      "model": "openai-codex/gpt-5.6-sol:medium",
+      "native_fallbacks": 0,
+      "package_head_at_campaign": "ed1437549485e4e84b7b7a6dc5b0f0b9c9c5e723",
+      "shutdown_reap": {
+        "pgrep_matches": 0
+      },
+      "spill_expansion": {
+        "content_kind": "capsule",
+        "ref": "tz://blob/d085c2ea86da488524161b97be3a4c67bd4caeabac6c7d0890b9af456ac879ad",
+        "succeeded": true
+      },
+      "visible_spill_bytes": 1301,
+      "yield_wait": {
+        "evidence": "Graph index completed after 9675.885 ms through ZeroSidecar.execute; the client resolved yield frames by wait requests",
+        "fixture_tests": "28/28 package tests pass including yield/wait and abort",
+        "live": true,
+        "yield_ms": 1
+      }
+    }
+  },
+  "comparison_policy": {
+    "native_baseline_latency": "UNMEASURED",
+    "native_baseline_visible_bytes": "UNMEASURED",
+    "note": "Raw-worker baseline reports establish ten shared conformance workflows per engine. Latency and visible-byte comparisons are not claimed because the baseline reports do not record them. Every measured aggregate adapter row is retained, including the 9675.885 ms Pi GraphZero cold index.",
+    "performance_claim": "none",
+    "qualifying_workflows_per_engine_per_harness": 5,
+    "rows_filtered": 0
+  },
+  "dogfood_artifacts": {
+    "adapter_campaign_head": "ed1437549485e4e84b7b7a6dc5b0f0b9c9c5e723",
+    "adapter_followup_head": "bc4cf30a3733ca6cbf3cfc4aec6b8a3da688e3f1",
+    "aggregate_host": {
+      "path": "/tmp/rch_target_zerostack/debug/zerostack-codemode-host",
+      "sha256": "d0ff0fbd4d40dfa0a62139ce48b24b1d136d14230127fc913efcb7565c690956",
+      "source_head_at_build": "e579420"
+    },
+    "fszero_worker": {
+      "path": "/tmp/rch_target_fszero/debug/fszero-codemode",
+      "sha256": "4f0926096c4b675dc5f4d1993ec07fbc228c5a37a28acadac247c3f27e3e3205",
+      "source_head_at_build": "508d706"
+    },
+    "graphzero_worker": {
+      "path": "/tmp/rch_target_graphzero/debug/graphzero-codemode",
+      "sha256": "adbe6999adfc1c3fae995b439e3330e6e146f89272849a23018b8f48a4b973f1",
+      "source_head_at_build": "0dbc9ec"
+    },
+    "tokenzero_worker": {
+      "path": "/tmp/rch_target_tokenzero/debug/tokenzero-codemode",
+      "sha256": "1305e57ec4599170a978ec15de13133a30cc41dd9dff5213f630cf10ea0d7fd0",
+      "source_head_at_build": "d5d686e"
+    }
+  },
+  "measured_adapter_workflows": {
+    "omp": {
+      "generation": "1786772425385313152",
+      "harness": "omp",
+      "rows": [
+        {
+          "durationMs": 1067.598,
+          "engine": "fs",
+          "error": null,
+          "harness": "omp",
+          "ref": null,
+          "resultSchema": null,
+          "spilled": false,
+          "visibleBytes": 833,
+          "workflow": 1
+        },
+        {
+          "durationMs": 18.864,
+          "engine": "fs",
+          "error": null,
+          "harness": "omp",
+          "ref": null,
+          "resultSchema": null,
+          "spilled": false,
+          "visibleBytes": 834,
+          "workflow": 2
+        },
+        {
+          "durationMs": 203.166,
+          "engine": "fs",
+          "error": null,
+          "harness": "omp",
+          "ref": null,
+          "resultSchema": null,
+          "spilled": false,
+          "visibleBytes": 835,
+          "workflow": 3
+        },
+        {
+          "durationMs": 3.365,
+          "engine": "fs",
+          "error": null,
+          "harness": "omp",
+          "ref": null,
+          "resultSchema": null,
+          "spilled": false,
+          "visibleBytes": 1244,
+          "workflow": 4
+        },
+        {
+          "durationMs": 15.549,
+          "engine": "fs",
+          "error": null,
+          "harness": "omp",
+          "ref": null,
+          "resultSchema": null,
+          "spilled": false,
+          "visibleBytes": 834,
+          "workflow": 5
+        },
+        {
+          "durationMs": 1768.452,
+          "engine": "graph",
+          "error": null,
+          "harness": "omp",
+          "ref": null,
+          "resultSchema": null,
+          "spilled": false,
+          "visibleBytes": 1152,
+          "workflow": 1
+        },
+        {
+          "durationMs": 1067.22,
+          "engine": "graph",
+          "error": null,
+          "harness": "omp",
+          "ref": null,
+          "resultSchema": null,
+          "spilled": false,
+          "visibleBytes": 1058,
+          "workflow": 2
+        },
+        {
+          "durationMs": 1063.429,
+          "engine": "graph",
+          "error": null,
+          "harness": "omp",
+          "ref": null,
+          "resultSchema": null,
+          "spilled": false,
+          "visibleBytes": 1025,
+          "workflow": 3
+        },
+        {
+          "durationMs": 1013.109,
+          "engine": "graph",
+          "error": null,
+          "harness": "omp",
+          "ref": null,
+          "resultSchema": null,
+          "spilled": false,
+          "visibleBytes": 1058,
+          "workflow": 4
+        },
+        {
+          "durationMs": 1759.287,
+          "engine": "graph",
+          "error": null,
+          "harness": "omp",
+          "ref": null,
+          "resultSchema": null,
+          "spilled": false,
+          "visibleBytes": 1157,
+          "workflow": 5
+        },
+        {
+          "durationMs": 427.094,
+          "engine": "token",
+          "error": null,
+          "harness": "omp",
+          "ref": null,
+          "resultSchema": null,
+          "spilled": false,
+          "visibleBytes": 835,
+          "workflow": 1
+        },
+        {
+          "durationMs": 28.045,
+          "engine": "token",
+          "error": null,
+          "harness": "omp",
+          "ref": null,
+          "resultSchema": null,
+          "spilled": false,
+          "visibleBytes": 834,
+          "workflow": 2
+        },
+        {
+          "durationMs": 19.875,
+          "engine": "token",
+          "error": null,
+          "harness": "omp",
+          "ref": null,
+          "resultSchema": null,
+          "spilled": false,
+          "visibleBytes": 834,
+          "workflow": 3
+        },
+        {
+          "durationMs": 23.121,
+          "engine": "token",
+          "error": null,
+          "harness": "omp",
+          "ref": null,
+          "resultSchema": null,
+          "spilled": false,
+          "visibleBytes": 834,
+          "workflow": 4
+        },
+        {
+          "durationMs": 21.902,
+          "engine": "token",
+          "error": null,
+          "harness": "omp",
+          "ref": null,
+          "resultSchema": null,
+          "spilled": false,
+          "visibleBytes": 834,
+          "workflow": 5
+        }
+      ]
+    },
+    "pi": {
+      "generation": "1786802031292659664",
+      "harness": "pi",
+      "rows": [
+        {
+          "durationMs": 1053.993,
+          "engine": "fs",
+          "error": null,
+          "harness": "pi",
+          "ref": null,
+          "resultSchema": null,
+          "spilled": false,
+          "visibleBytes": 833,
+          "workflow": 1
+        },
+        {
+          "durationMs": 22.064,
+          "engine": "fs",
+          "error": null,
+          "harness": "pi",
+          "ref": null,
+          "resultSchema": null,
+          "spilled": false,
+          "visibleBytes": 834,
+          "workflow": 2
+        },
+        {
+          "durationMs": 201.298,
+          "engine": "fs",
+          "error": null,
+          "harness": "pi",
+          "ref": null,
+          "resultSchema": null,
+          "spilled": false,
+          "visibleBytes": 835,
+          "workflow": 3
+        },
+        {
+          "durationMs": 3.143,
+          "engine": "fs",
+          "error": null,
+          "harness": "pi",
+          "ref": null,
+          "resultSchema": null,
+          "spilled": false,
+          "visibleBytes": 1244,
+          "workflow": 4
+        },
+        {
+          "durationMs": 17.801,
+          "engine": "fs",
+          "error": null,
+          "harness": "pi",
+          "ref": null,
+          "resultSchema": null,
+          "spilled": false,
+          "visibleBytes": 834,
+          "workflow": 5
+        },
+        {
+          "durationMs": 9675.885,
+          "engine": "graph",
+          "error": null,
+          "harness": "pi",
+          "ref": null,
+          "resultSchema": null,
+          "spilled": false,
+          "visibleBytes": 1152,
+          "workflow": 1
+        },
+        {
+          "durationMs": 1123.702,
+          "engine": "graph",
+          "error": null,
+          "harness": "pi",
+          "ref": null,
+          "resultSchema": null,
+          "spilled": false,
+          "visibleBytes": 1058,
+          "workflow": 2
+        },
+        {
+          "durationMs": 1056.579,
+          "engine": "graph",
+          "error": null,
+          "harness": "pi",
+          "ref": null,
+          "resultSchema": null,
+          "spilled": false,
+          "visibleBytes": 1025,
+          "workflow": 3
+        },
+        {
+          "durationMs": 1049.097,
+          "engine": "graph",
+          "error": null,
+          "harness": "pi",
+          "ref": null,
+          "resultSchema": null,
+          "spilled": false,
+          "visibleBytes": 1058,
+          "workflow": 4
+        },
+        {
+          "durationMs": 1759.534,
+          "engine": "graph",
+          "error": null,
+          "harness": "pi",
+          "ref": null,
+          "resultSchema": null,
+          "spilled": false,
+          "visibleBytes": 1160,
+          "workflow": 5
+        },
+        {
+          "durationMs": 425.089,
+          "engine": "token",
+          "error": null,
+          "harness": "pi",
+          "ref": null,
+          "resultSchema": null,
+          "spilled": false,
+          "visibleBytes": 835,
+          "workflow": 1
+        },
+        {
+          "durationMs": 24.074,
+          "engine": "token",
+          "error": null,
+          "harness": "pi",
+          "ref": null,
+          "resultSchema": null,
+          "spilled": false,
+          "visibleBytes": 834,
+          "workflow": 2
+        },
+        {
+          "durationMs": 21.876,
+          "engine": "token",
+          "error": null,
+          "harness": "pi",
+          "ref": null,
+          "resultSchema": null,
+          "spilled": false,
+          "visibleBytes": 834,
+          "workflow": 3
+        },
+        {
+          "durationMs": 22.052,
+          "engine": "token",
+          "error": null,
+          "harness": "pi",
+          "ref": null,
+          "resultSchema": null,
+          "spilled": false,
+          "visibleBytes": 834,
+          "workflow": 4
+        },
+        {
+          "durationMs": 19.039,
+          "engine": "token",
+          "error": null,
+          "harness": "pi",
+          "ref": null,
+          "resultSchema": null,
+          "spilled": false,
+          "visibleBytes": 834,
+          "workflow": 5
+        }
+      ]
+    },
+    "schema": "zerostack.dogfood.adapter_workflows.v1"
+  },
+  "native_baselines": [
+    {
+      "checks": 10,
+      "engine": "fszero",
+      "passed": 10,
+      "path": "tests/reports/fszero/fz-2026-08-10-162746.json",
+      "sha256": "1168e2863de9a8118fbe52ceab41b5481acc6a37fc54f5552c07843a357cf759"
+    },
+    {
+      "checks": 10,
+      "engine": "graphzero",
+      "passed": 10,
+      "path": "tests/reports/graphzero/gz-2026-08-10-162748.json",
+      "sha256": "7d99401bdda6bba44a51c642961118feb0f426d93a35badc4b51cae2ea15a4d2"
+    },
+    {
+      "checks": 10,
+      "engine": "tokenzero",
+      "passed": 10,
+      "path": "tests/reports/tokenzero/tz-2026-08-10-162750.json",
+      "sha256": "39e306ecdbe1cc00d5147acfead18c6abb9954eeedf788d6e6eb2ae599c5cc85"
+    }
+  ],
+  "parity": {
+    "malformed_oversized_skewed_fail_loudly": true,
+    "omp_tests": "29/29",
+    "pi_tests": "28/28",
+    "smoke_loads": "pass",
+    "typed_fixture_parity": true
+  },
+  "publication": {
+    "approval": "explicit_operator_approval_at_single_publication_boundary",
+    "engine_pins": {
+      "fszero": "c9fc077",
+      "graphzero": "532a3d4",
+      "tokenzero": "ba6027c"
+    },
+    "immutable_remote": "origin/main",
+    "published_hub_revision": "fa253840910ab4051635e2de95f04ddf6043a000"
+  },
+  "recorded_at": "2026-08-10T22:35:00Z",
+  "result": "pass_with_routed_non_blocking_defects",
+  "routed_defects": [
+    {
+      "bead": "zerostack-3xhk",
+      "issue": "stale orient architecture sample",
+      "status": "closed"
+    },
+    {
+      "bead": "fszero-wnqy",
+      "issue": "pre-existing fs.world registration collision",
+      "status": "open"
+    },
+    {
+      "bead": "br-j77",
+      "issue": "unrelated pi-tidy-tools failure prevents later live OMP plugins loading",
+      "status": "open",
+      "workaround": "isolated explicit omp-zerostack extension load"
+    },
+    {
+      "bead": "br-k4v",
+      "issue": "constructor environment omitted from locate subprocess",
+      "status": "closed"
+    },
+    {
+      "bead": "zerostack-7hle",
+      "issue": "aggregate FS mutation is zero.fs.compound write, not zero.fs.write",
+      "status": "closed_not_defect"
+    },
+    {
+      "bead": "fszero-2bbk",
+      "issue": "canonical fs.write does not require a separate approval grant",
+      "status": "closed_not_defect"
+    }
+  ],
+  "schema": "zerostack.dogfood.report.v1",
+  "source_heads_after_followups": {
+    "fszero": "3101f3d99c5ea4cf54e1b49de28cd7c01c723fde",
+    "graphzero": "b277eb60f279cd153a325438ec82bf9e5d81497d",
+    "pi_stack": "bc4cf30a3733ca6cbf3cfc4aec6b8a3da688e3f1",
+    "tokenzero": "5f8b2ddde78d1c4ba57f73e7cfc119576abe10c6",
+    "zerostack": "4e3489e48448ce9e0b5e7faa1584b12fbdddecfd"
+  },
+  "subsequent_beads": [
+    {
+      "bead": "zerostack-3xhk",
+      "commit": "4e3489e",
+      "repo": "ZeroStack",
+      "result": "closed"
+    },
+    {
+      "bead": "fszero-uvi6",
+      "commit": "3101f3d",
+      "repo": "FSZero",
+      "result": "closed"
+    },
+    {
+      "bead": "graphzero-46bov",
+      "commit": "b277eb6",
+      "repo": "GraphZero",
+      "result": "closed"
+    },
+    {
+      "bead": "tokenzero-1rl1",
+      "commit": "5f8b2dd",
+      "repo": "TokenZero",
+      "result": "closed"
+    },
+    {
+      "bead": "br-k4v",
+      "commit": "bc4cf30",
+      "harnesses": [
+        "pi",
+        "omp"
+      ],
+      "repo": "pi-stack",
+      "result": "closed"
+    }
+  ],
+  "timing_accounting": {
+    "build_time": "UNMEASURED in this report; native build logs were retained separately",
+    "cancellation_count": 2,
+    "child_model_time": "UNMEASURED: headless harness output did not expose provider duration",
+    "cold_start_and_warm_runtime": "recorded per adapter row",
+    "failure_count": 0,
+    "first_delay_source": "cold sidecar plus engine initialization; not further separable from available telemetry"
+  }
+}
