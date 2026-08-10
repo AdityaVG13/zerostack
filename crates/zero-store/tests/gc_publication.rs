@@ -32,6 +32,15 @@ fn contract_manifest_freezes_v2_lock_and_compatibility_semantics() {
     );
     assert_eq!(manifest["safety"]["cas_publish_lock"], "shared");
     assert_eq!(manifest["safety"]["metadata_publish_lock"], "exclusive");
+    assert_eq!(
+        manifest["safety"]["leased_publish"],
+        "lease-before-object-under-exclusive-lock"
+    );
+    assert_eq!(manifest["safety"]["expired_pin"], "does-not-retain");
+    assert_eq!(
+        manifest["safety"]["lock_namespace"],
+        "real-directory-and-regular-file-only"
+    );
     assert_eq!(gc_contract_digest_hex().len(), 64);
 }
 

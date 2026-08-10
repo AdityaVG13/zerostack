@@ -81,7 +81,10 @@ pub fn gc_contract_manifest() -> serde_json::Value {
             "collector_lock": "exclusive-through-recheck-and-mutation",
             "unknown_metadata": "retain-uncertain",
             "snapshot_epoch": "strictly-monotonic-per-producer-project",
-            "repair": "quarantine-before-republish"
+            "repair": "quarantine-before-republish",
+            "leased_publish": "lease-before-object-under-exclusive-lock",
+            "expired_pin": "does-not-retain",
+            "lock_namespace": "real-directory-and-regular-file-only"
         }
     })
 }
@@ -1025,15 +1028,9 @@ fn load_all_pins(store_root: &Path, state: &mut MarkState, now: SystemTime) -> R
                 .expires_at
                 .as_deref()
                 .and_then(parse_rfc3339)
-                .is_some_and(|exp| exp <= now)
+                .is_some_and(|expires_at| expires_at <= now)
             {
-                mark_uncertain(
-                    state,
-                    format!(
-                        "expired pin {} retained on clock uncertainty",
-                        path.display()
-                    ),
-                );
+                return;
             }
             mark_hash(
                 state,
@@ -1463,7 +1460,7 @@ pub fn run_gc(store_root: &Path, config: &GcConfig) -> Result<DryRunReport, GcEr
             continue;
         }
         if deleted_set.contains(&obj.blob_hash) {
-            obj.evidence.push("deleted by this sweep".into());
+            push_bounded(&mut obj.evidence, "deleted by this sweep".into());
             continue;
         }
         obj.verdict = GcVerdict::RetainUncertain;
@@ -2092,12 +2089,12 @@ impl SharedCas {
         let lease_path = validate_lease_record(self.store_root(), &lease)?;
         let coord = StoreLock::sweep(self.store_root(), LOCK_DEADLINE).map_err(GcError::Io)?;
         validate_next_lease_epoch(&lease_path, epoch)?;
+        publish_lease_record_locked(self.store_root(), &lease, &lease_path, &coord)?;
         let outcome = self.put_in_lock(bytes, crate::CAS_MAX_OBJECT_BYTES, &coord)?;
         debug_assert_eq!(
             lease.blob_hashes.as_slice(),
             std::slice::from_ref(&outcome.hash)
         );
-        publish_lease_record_locked(self.store_root(), &lease, &lease_path, &coord)?;
         Ok(outcome)
     }
 }
@@ -2288,6 +2285,41 @@ mod tests {
         let report = run_gc(dir.path(), &GcConfig::default()).unwrap();
         assert_eq!(verdict(&report, &pinned), GcVerdict::Retain);
         assert_eq!(verdict(&report, &leased), GcVerdict::Retain);
+    }
+
+    #[test]
+    fn expired_pin_does_not_wedge_collection() {
+        let (dir, cas, project, _) = setup_rooted_store();
+        let expired = cas.put(b"expired pin").unwrap();
+        let unrelated = cas.put(b"unrelated orphan").unwrap();
+        publish_pin_record(
+            dir.path(),
+            &PinRecord {
+                schema_version: GC_SCHEMA_VERSION.into(),
+                record_type: GC_RECORD_TYPE_PIN.into(),
+                engine: "tokenzero".into(),
+                project_id: project,
+                store_contract_digest: Some(gc_contract_digest_hex()),
+                pin_id: "expired-pin".into(),
+                created_at: format_system_time(UNIX_EPOCH + std::time::Duration::from_secs(100)),
+                expires_at: Some(format_system_time(
+                    UNIX_EPOCH + std::time::Duration::from_secs(200),
+                )),
+                blob_hash: expired.clone(),
+            },
+        )
+        .unwrap();
+
+        let report = run_gc(
+            dir.path(),
+            &GcConfig {
+                now: UNIX_EPOCH + std::time::Duration::from_secs(300),
+                ..GcConfig::default()
+            },
+        )
+        .unwrap();
+        assert_eq!(verdict(&report, &expired), GcVerdict::Collect);
+        assert_eq!(verdict(&report, &unrelated), GcVerdict::Collect);
     }
 
     #[test]

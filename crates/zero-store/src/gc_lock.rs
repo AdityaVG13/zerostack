@@ -184,9 +184,59 @@ fn try_lock(file: &File, mode: LockMode) -> Result<(), TryLockError> {
 /// would be harmless because the contents are unused, but it would also
 /// destroy any future holder metadata written there.
 fn open_lock_file(store_root: &Path) -> io::Result<(PathBuf, File)> {
-    let path = coordinator_lock_path(store_root);
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent)?;
+    fs::create_dir_all(store_root)?;
+    if !fs::symlink_metadata(store_root)?.file_type().is_dir() {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            format!(
+                "store root is not a real directory: {}",
+                store_root.display()
+            ),
+        ));
+    }
+
+    let directory = store_root.join(GC_DIR);
+    match fs::symlink_metadata(&directory) {
+        Ok(metadata) if metadata.file_type().is_dir() => {}
+        Ok(_) => {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                format!(
+                    "GC namespace is not a real directory: {}",
+                    directory.display()
+                ),
+            ));
+        }
+        Err(error) if error.kind() == io::ErrorKind::NotFound => {
+            match fs::create_dir(&directory) {
+                Ok(()) => {}
+                Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {}
+                Err(error) => return Err(error),
+            }
+            if !fs::symlink_metadata(&directory)?.file_type().is_dir() {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    format!(
+                        "GC namespace is not a real directory: {}",
+                        directory.display()
+                    ),
+                ));
+            }
+        }
+        Err(error) => return Err(error),
+    }
+
+    let path = directory.join(COORDINATOR_LOCK);
+    match fs::symlink_metadata(&path) {
+        Ok(metadata) if metadata.file_type().is_file() => {}
+        Ok(_) => {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                format!("coordinator lock is not a real file: {}", path.display()),
+            ));
+        }
+        Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+        Err(error) => return Err(error),
     }
     let file = fs::OpenOptions::new()
         .read(true)
@@ -306,5 +356,19 @@ mod tests {
             "binding is spelling-independent"
         );
         assert_eq!(guard.store_root(), crate::store_root::absolutize(a.path()));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn symlinked_gc_namespace_is_refused() {
+        use std::os::unix::fs::symlink;
+
+        let root = TempDir::new().unwrap();
+        let outside = TempDir::new().unwrap();
+        symlink(outside.path(), root.path().join(GC_DIR)).unwrap();
+
+        let error = StoreLock::publish(root.path(), LOCK_DEADLINE).unwrap_err();
+        assert_eq!(error.kind(), io::ErrorKind::InvalidInput);
+        assert!(!outside.path().join(COORDINATOR_LOCK).exists());
     }
 }
