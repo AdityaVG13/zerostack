@@ -89,7 +89,7 @@
   ],
   "registry_projections": [
     {
-      "version": "zerostack.canonical_dispatch.v1",
+      "version": "zerostack.canonical_dispatch.v2",
       "engine": "token_zero",
       "operations": [
         {
@@ -107,7 +107,7 @@
       ]
     },
     {
-      "version": "zerostack.canonical_dispatch.v1",
+      "version": "zerostack.canonical_dispatch.v2",
       "engine": "fs_zero",
       "operations": [
         {
@@ -125,7 +125,7 @@
       ]
     },
     {
-      "version": "zerostack.canonical_dispatch.v1",
+      "version": "zerostack.canonical_dispatch.v2",
       "engine": "graph_zero",
       "operations": [
         {

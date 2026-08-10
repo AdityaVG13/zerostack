@@ -6,7 +6,7 @@
   "additionalProperties": false,
   "required": ["version", "engine", "operations"],
   "properties": {
-    "version": { "const": "zerostack.canonical_dispatch.v1" },
+    "version": { "const": "zerostack.canonical_dispatch.v2" },
     "engine": { "enum": ["token_zero", "fs_zero", "graph_zero"] },
     "operations": {
       "type": "array",
