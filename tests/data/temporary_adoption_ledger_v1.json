@@ -2,12 +2,12 @@
   "schema": "zerostack.temporary-adoption-ledger.v1",
   "version": 1,
   "generated_from_heads": {
-    "zerostack": "e9e37bd7d261f9651fd6e51b2fa595b11bfd6fa1",
+    "zerostack": "f3eab9b6b4166c403b05939ac0f1f69839bec07a",
     "fszero": "64458c875debb0b8d06e368e9b4ee1b647d4053b",
     "graphzero": "7a9267f80bde567f9618aeff67a5bb16741e5910",
     "tokenzero": "a343ded40f2d70db4576754552665cf610b6c138"
   },
-  "generated_at": "2026-08-10T06:30:00Z",
+  "generated_at": "2026-08-10T12:29:36Z",
   "policy": "Every semantic record marked temporary_duplicate appears exactly once here. Duplication expires only after the published hub replacement, pinned engine adoption, targeted RCH evidence, and exact deletion approval when a whole file is removed.",
   "entries": [
     {
