@@ -236,7 +236,14 @@ fn authenticated_cross_surface_and_rejections() {
         &mut s,
         json!({"type":"execute","id":3,"generation":generation,"root":"/","source":"return 1"}),
     );
-    assert_eq!(read(&mut r)["ok"], false);
+    let root_error = read(&mut r);
+    assert_eq!(root_error["ok"], false);
+    assert_eq!(root_error["code"], "authorized_root_mismatch");
+    let detail = root_error["error"].as_str().unwrap();
+    assert!(detail.contains(&format!("authorized root {:?}", d.path())));
+    assert!(detail.contains("requested root \"/\""));
+    assert!(detail.contains("zerostack-session serve --root \"/\""));
+    assert!(detail.contains("send the same canonical root"));
     send(
         &mut s,
         json!({"type":"shutdown","id":4,"token":shutdown_token}),

@@ -471,14 +471,16 @@ fn handle_client(
                     )?;
                     continue;
                 }
-                if PathBuf::from(requested).canonicalize().ok().as_ref() != Some(&root) {
+                let requested_root = PathBuf::from(&requested).canonicalize();
+                if requested_root.as_ref().ok() != Some(&root) {
+                    let detail = authorized_root_mismatch_detail(&root, &requested);
                     write_frame(
                         &mut stream,
                         &SessionResponse::typed_error(
                             Some(id),
                             active_generation,
                             "authorized_root_mismatch",
-                            "authorized root mismatch",
+                            detail,
                         ),
                     )?;
                     continue;
@@ -848,4 +850,27 @@ fn write_frame(
     w.write_all(&b)?;
     w.flush()?;
     Ok(())
+}
+
+#[cfg(any(unix, windows))]
+fn authorized_root_mismatch_detail(authorized: &std::path::Path, requested: &str) -> String {
+    format!(
+        "requested root {requested:?} does not match this session's authorized root {authorized:?}; start a separate session with `zerostack-session serve --root {requested:?} --runtime-dir <DIR> --owner <ID>` and send the same canonical root in execute requests"
+    )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::authorized_root_mismatch_detail;
+    use std::path::Path;
+
+    #[test]
+    fn root_mismatch_names_both_roots_and_exact_authorization_command() {
+        let detail =
+            authorized_root_mismatch_detail(Path::new("/authorized root"), "/scratch root");
+        assert!(detail.contains("authorized root \"/authorized root\""));
+        assert!(detail.contains("requested root \"/scratch root\""));
+        assert!(detail.contains("zerostack-session serve --root \"/scratch root\""));
+        assert!(detail.contains("send the same canonical root"));
+    }
 }
