@@ -44,14 +44,17 @@ pub use durable_journal::{
 };
 pub use fs_replace::{atomic_write_file, replace_file};
 pub use gc::{
-    validate_dry_run_report, publish_lease_record, publish_pin_record,
-    publish_reachability_snapshot, remove_pin_record, repair_object, run_gc,
-    project_id as gc_project_id, BeforeUnlinkHook, DryRunReport, GcCandidate, GcConfig,
-    GcError, GcVerdict, LeaseOwner, LeaseRecord, PinRecord, ReachabilitySnapshot,
-    DEFAULT_GC_REPORT_LIMIT, GC_MAX_BLOB_HASHES, GC_MAX_EVIDENCE_ITEMS, GC_MAX_RECORD_BYTES,
-    GC_MAX_REPORT_OBJECTS, GC_MIN_GRACE_SECONDS, GC_RECORD_TYPE_DRY_RUN,
-    GC_RECORD_TYPE_LEASE, GC_RECORD_TYPE_PIN, GC_RECORD_TYPE_REACHABILITY,
-    GC_RECORD_TYPE_SWEEP_PROGRESS, GC_SCHEMA_VERSION,
+    BeforeUnlinkHook, DEFAULT_GC_REPORT_LIMIT, DryRunReport, GC_MAX_BLOB_HASHES,
+    GC_MAX_EVIDENCE_ITEMS, GC_MAX_OWNER_HOST_BYTES, GC_MAX_PRODUCER_ID_BYTES,
+    GC_MAX_PRODUCER_NAMESPACES, GC_MAX_RECORD_BYTES, GC_MAX_REPORT_OBJECTS, GC_MIN_GRACE_SECONDS,
+    GC_RECORD_TYPE_DRY_RUN, GC_RECORD_TYPE_LEASE, GC_RECORD_TYPE_PIN, GC_RECORD_TYPE_REACHABILITY,
+    GC_RECORD_TYPE_REPAIR, GC_RECORD_TYPE_SWEEP_PROGRESS, GC_SCHEMA_VERSION, GC_SCHEMA_VERSION_V1,
+    GcCandidate, GcConfig, GcError, GcRunReceipt, GcRunState, GcVerdict, LeaseOwner, LeaseRecord,
+    PinRecord, ReachabilitySnapshot, RepairReceipt, current_reachability_snapshot,
+    gc_contract_digest_hex, gc_contract_manifest, gc_repair_receipt_digest_hex,
+    gc_report_digest_hex, project_id as gc_project_id, publish_lease_record, publish_pin_record,
+    publish_reachability_snapshot, remove_lease_record, remove_pin_record, repair_object,
+    repair_object_receipted, run_gc, validate_dry_run_report, validate_repair_receipt,
 };
 pub use gc_lock::{
     COORDINATOR_LOCK, GC_DIR, LOCK_DEADLINE, LockMode, StoreLock, coordinator_lock_path,

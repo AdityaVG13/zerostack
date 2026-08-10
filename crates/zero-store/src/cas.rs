@@ -69,7 +69,11 @@ fn ensure_object_publish_dirs(parent: &Path) -> Result<(), CasError> {
 }
 
 /// Collect listable regular-file object names from one fan-out shard directory.
-fn push_objects_from_shard(shard_path: &Path, out: &mut Vec<String>) -> Result<(), CasError> {
+fn push_objects_from_shard(
+    shard_path: &Path,
+    out: &mut Vec<String>,
+    max_objects: Option<usize>,
+) -> Result<(), CasError> {
     for object in fs::read_dir(shard_path).map_err(|e| io_err("read CAS shard", e))? {
         let object = object.map_err(|e| io_err("read CAS object entry", e))?;
         let name = object.file_name().to_string_lossy().into_owned();
@@ -77,6 +81,13 @@ fn push_objects_from_shard(shard_path: &Path, out: &mut Vec<String>) -> Result<(
         if is_listable_object_name(&name)
             && object.file_type().map(|t| t.is_file()).unwrap_or(false)
         {
+            if let Some(max_objects) = max_objects
+                && out.len() >= max_objects
+            {
+                return Err(CasError::Malformed(format!(
+                    "CAS object enumeration exceeds {max_objects} objects"
+                )));
+            }
             out.push(name);
         }
     }
@@ -253,12 +264,11 @@ impl SharedCas {
         self.put_outcome(bytes, CAS_MAX_OBJECT_BYTES)
     }
 
-    /// Publish while already holding a publish guard, for callers batching
-    /// several objects under one acquisition.
+    /// Publish while already holding this store's coordinator lock.
     ///
-    /// Panics in debug builds if handed a sweep guard, which would mean the
-    /// caller is publishing from inside a collection.
-    ///
+    /// Normal batches use a shared publish guard. Atomic object-plus-lease
+    /// transactions use an exclusive guard so the object and protection record
+    /// become visible as one collector boundary.
     /// # Multi-object contract
     ///
     /// There is no cross-object barrier. Each call is individually atomic (a
@@ -280,10 +290,6 @@ impl SharedCas {
         limit: u64,
         guard: &StoreLock,
     ) -> Result<PutOutcome, CasError> {
-        debug_assert!(
-            !guard.is_exclusive(),
-            "publishing under a sweep guard inverts the protocol"
-        );
         self.check_guard_root(guard)?;
         self.put_with_limit(bytes, limit.min(CAS_MAX_OBJECT_BYTES))
     }
@@ -489,6 +495,15 @@ impl SharedCas {
     /// Every published object: exact 64-lowercase-hex regular files under the
     /// fan-out, skipping symlinks, temps, and dotfiles.
     pub fn list_objects(&self) -> Result<Vec<String>, CasError> {
+        self.list_objects_with_limit(None)
+    }
+
+    /// List at most `max_objects` published objects for a bounded GC pass.
+    pub(crate) fn list_objects_bounded(&self, max_objects: usize) -> Result<Vec<String>, CasError> {
+        self.list_objects_with_limit(Some(max_objects))
+    }
+
+    fn list_objects_with_limit(&self, max_objects: Option<usize>) -> Result<Vec<String>, CasError> {
         let sha_root = self.root.join("blobs").join("sha256");
         let mut out = Vec::new();
         let shards = match fs::read_dir(&sha_root) {
@@ -501,7 +516,7 @@ impl SharedCas {
             if !shard.file_type().map(|t| t.is_dir()).unwrap_or(false) {
                 continue;
             }
-            push_objects_from_shard(&shard.path(), &mut out)?;
+            push_objects_from_shard(&shard.path(), &mut out, max_objects)?;
         }
         out.sort();
         Ok(out)
@@ -855,6 +870,18 @@ mod tests {
         let mut expected = vec![a, b];
         expected.sort();
         assert_eq!(cas.list_objects().unwrap(), expected);
+    }
+
+    #[test]
+    fn bounded_list_objects_rejects_excess_objects() {
+        let root = tempdir().unwrap();
+        let cas = SharedCas::open(root.path());
+        cas.put(b"a").unwrap();
+        cas.put(b"b").unwrap();
+        assert!(matches!(
+            cas.list_objects_bounded(1),
+            Err(CasError::Malformed(message)) if message.contains("exceeds 1 objects")
+        ));
     }
 
     #[test]

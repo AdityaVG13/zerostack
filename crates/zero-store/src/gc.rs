@@ -1,4 +1,4 @@
-//! Generic `zerostack.cas-gc.v1` reachability and collection state machine.
+//! Canonical `zerostack.cas-gc.v2` protocol with read-only v1 compatibility.
 //!
 //! This module owns only store metadata and immutable CAS lifecycle. It has no
 //! engine-specific authority; engines publish roots, pins, and leases here.
@@ -7,18 +7,19 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs::{self, File};
-use std::io::{self, Read};
+use std::io::{self, Read, Write};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use thiserror::Error;
 
-use crate::cas::{CasError, SharedCas};
+use crate::cas::{CasError, PutOutcome, SharedCas};
 use crate::fs_replace::atomic_write_file;
-use crate::{LOCK_DEADLINE, StoreLock};
+use crate::{LOCK_DEADLINE, LockMode, StoreLock};
 
-pub const GC_SCHEMA_VERSION: &str = "zerostack.cas-gc.v1";
+pub const GC_SCHEMA_VERSION_V1: &str = "zerostack.cas-gc.v1";
+pub const GC_SCHEMA_VERSION: &str = "zerostack.cas-gc.v2";
 /// Hard bounds keep malformed metadata from turning collection into an
 /// unbounded allocation or path traversal surface.
 pub const GC_MAX_RECORD_BYTES: u64 = 32 * 1024 * 1024;
@@ -26,20 +27,87 @@ pub const GC_MAX_BLOB_HASHES: usize = 65_536;
 pub const GC_MAX_REPORT_OBJECTS: usize = 65_536;
 pub const GC_MAX_EVIDENCE_ITEMS: usize = 256;
 const GC_EVIDENCE_TRUNCATED: &str = "evidence truncated at GC_MAX_EVIDENCE_ITEMS";
-const GC_ENGINES: &[&str] = &["tokenzero", "fszero", "graphzero"];
+pub const GC_MAX_PRODUCER_ID_BYTES: usize = 64;
+pub const GC_MAX_PRODUCER_NAMESPACES: usize = 1_024;
+pub const GC_MAX_OWNER_HOST_BYTES: usize = 255;
 pub const GC_RECORD_TYPE_REACHABILITY: &str = "reachability-snapshot";
 pub const GC_RECORD_TYPE_PIN: &str = "pin";
 pub const GC_RECORD_TYPE_LEASE: &str = "lease";
-pub const GC_RECORD_TYPE_DRY_RUN: &str = "dry-run-report";
+pub const GC_RECORD_TYPE_DRY_RUN: &str = "gc-run-receipt";
 pub const GC_RECORD_TYPE_SWEEP_PROGRESS: &str = "sweep-progress";
+pub const GC_RECORD_TYPE_REPAIR: &str = "repair-receipt";
 pub const GC_MIN_GRACE_SECONDS: u64 = 60;
 pub const DEFAULT_GC_REPORT_LIMIT: usize = 32;
 
-fn require_gc_engine(engine: &str) -> Result<(), GcError> {
-    if GC_ENGINES.contains(&engine) {
+/// Machine-readable semantics bound into every v2 GC record.
+pub fn gc_contract_manifest() -> serde_json::Value {
+    serde_json::json!({
+        "schema_version": GC_SCHEMA_VERSION,
+        "legacy_read_versions": [GC_SCHEMA_VERSION_V1],
+        "legacy_read_record_types": [
+            GC_RECORD_TYPE_REACHABILITY,
+            GC_RECORD_TYPE_PIN,
+            GC_RECORD_TYPE_LEASE
+        ],
+        "store": {
+            "cas_layout": crate::CAS_LAYOUT,
+            "cas_layout_version": crate::CAS_LAYOUT_VERSION,
+            "digest": "sha256-lowercase-hex"
+        },
+        "producer_id": {
+            "max_bytes": GC_MAX_PRODUCER_ID_BYTES,
+            "grammar": "[a-z0-9][a-z0-9._-]*[a-z0-9] (single alphanumeric allowed)"
+        },
+        "records": {
+            "reachability": GC_RECORD_TYPE_REACHABILITY,
+            "pin": GC_RECORD_TYPE_PIN,
+            "lease": GC_RECORD_TYPE_LEASE,
+            "run_receipt": GC_RECORD_TYPE_DRY_RUN,
+            "sweep_progress": GC_RECORD_TYPE_SWEEP_PROGRESS,
+            "repair_receipt": GC_RECORD_TYPE_REPAIR
+        },
+        "bounds": {
+            "record_bytes": GC_MAX_RECORD_BYTES,
+            "producer_namespaces": GC_MAX_PRODUCER_NAMESPACES,
+            "blob_hashes": GC_MAX_BLOB_HASHES,
+            "report_objects": GC_MAX_REPORT_OBJECTS,
+            "evidence_items": GC_MAX_EVIDENCE_ITEMS,
+            "owner_host_bytes": GC_MAX_OWNER_HOST_BYTES,
+            "minimum_grace_seconds": GC_MIN_GRACE_SECONDS
+        },
+        "safety": {
+            "cas_publish_lock": "shared",
+            "metadata_publish_lock": "exclusive",
+            "collector_lock": "exclusive-through-recheck-and-mutation",
+            "unknown_metadata": "retain-uncertain",
+            "snapshot_epoch": "strictly-monotonic-per-producer-project",
+            "repair": "quarantine-before-republish"
+        }
+    })
+}
+
+/// Lowercase SHA-256 of canonical JSON for [`gc_contract_manifest`].
+pub fn gc_contract_digest_hex() -> String {
+    zero_abi::contract_digest_hex(&gc_contract_manifest())
+}
+fn is_valid_producer_id(producer_id: &str) -> bool {
+    let bytes = producer_id.as_bytes();
+    !bytes.is_empty()
+        && bytes.len() <= GC_MAX_PRODUCER_ID_BYTES
+        && bytes.first().is_some_and(u8::is_ascii_alphanumeric)
+        && bytes.last().is_some_and(u8::is_ascii_alphanumeric)
+        && bytes.iter().all(|byte| {
+            byte.is_ascii_lowercase() || byte.is_ascii_digit() || matches!(byte, b'.' | b'_' | b'-')
+        })
+}
+
+fn require_gc_producer(producer_id: &str) -> Result<(), GcError> {
+    if is_valid_producer_id(producer_id) {
         Ok(())
     } else {
-        Err(GcError::Policy(format!("invalid engine {engine}")))
+        Err(GcError::Policy(format!(
+            "invalid producer id {producer_id}"
+        )))
     }
 }
 
@@ -76,22 +144,30 @@ impl From<CasError> for GcError {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct ReachabilitySnapshot {
     pub schema_version: String,
     pub record_type: String,
+    /// Producer namespace. The `engine` wire key remains for v1 compatibility.
     pub engine: String,
     pub project_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub store_contract_digest: Option<String>,
     pub epoch: u64,
     pub published_at: String,
     pub blob_hashes: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct PinRecord {
     pub schema_version: String,
     pub record_type: String,
+    /// Producer namespace. The `engine` wire key remains for v1 compatibility.
     pub engine: String,
     pub project_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub store_contract_digest: Option<String>,
     pub pin_id: String,
     pub created_at: String,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -100,17 +176,22 @@ pub struct PinRecord {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct LeaseOwner {
     pub pid: u64,
     pub host: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct LeaseRecord {
     pub schema_version: String,
     pub record_type: String,
+    /// Producer namespace. The `engine` wire key remains for v1 compatibility.
     pub engine: String,
     pub project_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub store_contract_digest: Option<String>,
     pub operation_id: String,
     pub epoch: u64,
     pub owner: LeaseOwner,
@@ -128,7 +209,15 @@ pub enum GcVerdict {
     RetainUncertain,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum GcRunState {
+    Evaluated,
+    Complete,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct GcCandidate {
     pub blob_hash: String,
     pub verdict: GcVerdict,
@@ -136,14 +225,38 @@ pub struct GcCandidate {
     pub evidence: Vec<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// Complete, contract-bound receipt for a dry run or applied sweep.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct DryRunReport {
     pub schema_version: String,
     pub record_type: String,
+    pub store_contract_digest: String,
     pub run_id: String,
     pub store_root: String,
     pub evaluated_at: String,
+    pub apply: bool,
+    pub state: GcRunState,
     pub objects: Vec<GcCandidate>,
+    pub planned: Vec<String>,
+    pub deleted: Vec<String>,
+}
+
+pub type GcRunReceipt = DryRunReport;
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RepairReceipt {
+    pub schema_version: String,
+    pub record_type: String,
+    pub store_contract_digest: String,
+    pub producer_id: String,
+    pub project_id: String,
+    pub operation_id: String,
+    pub blob_hash: String,
+    pub repaired: bool,
+    pub quarantined: bool,
+    pub completed_at: String,
 }
 
 /// See [`GcConfig::before_unlink`].
@@ -220,7 +333,10 @@ fn ensure_real_directory_tree(dir: &Path) -> io::Result<()> {
             Ok(metadata) if metadata.file_type().is_dir() => Ok(()),
             Ok(_) => Err(io::Error::new(
                 io::ErrorKind::InvalidInput,
-                format!("GC path component is not a real directory: {}", path.display()),
+                format!(
+                    "GC path component is not a real directory: {}",
+                    path.display()
+                ),
             )),
             Err(error) if error.kind() == io::ErrorKind::NotFound => match fs::create_dir(path) {
                 Ok(()) => Ok(()),
@@ -273,7 +389,7 @@ fn gc_join(store_root: &Path, parts: &[&str]) -> PathBuf {
 }
 
 fn gc_record_path(store_root: &Path, subdir: &str, record: &impl GcRecord, id: &str) -> PathBuf {
-    let (_, _, engine, project) = record.header();
+    let (_, _, engine, project, _) = record.header();
     gc_join(
         store_root,
         &[subdir, engine, project, &format!("{id}.json")],
@@ -481,18 +597,19 @@ fn require_min(value: u64, min: u64, path: &Path, field: &str) -> Result<(), GcE
 }
 
 trait GcRecord {
-    fn header(&self) -> (&str, &str, &str, &str);
+    fn header(&self) -> (&str, &str, &str, &str, Option<&str>);
 }
 
 macro_rules! impl_gc_record {
     ($T:ty) => {
         impl GcRecord for $T {
-            fn header(&self) -> (&str, &str, &str, &str) {
+            fn header(&self) -> (&str, &str, &str, &str, Option<&str>) {
                 (
                     &self.schema_version,
                     &self.record_type,
                     &self.engine,
                     &self.project_id,
+                    self.store_contract_digest.as_deref(),
                 )
             }
         }
@@ -509,27 +626,70 @@ fn read_gc_json<T: for<'de> Deserialize<'de>>(path: &Path) -> Result<T, GcError>
         return Err(corrupt(path, "metadata is not a regular file".into()));
     }
     if metadata.len() > GC_MAX_RECORD_BYTES {
-        return Err(corrupt(path, format!("metadata exceeds {GC_MAX_RECORD_BYTES} bytes")));
+        return Err(corrupt(
+            path,
+            format!("metadata exceeds {GC_MAX_RECORD_BYTES} bytes"),
+        ));
     }
     let file = File::open(path).map_err(GcError::Io)?;
-    let mut bytes = Vec::with_capacity((GC_MAX_RECORD_BYTES as usize).saturating_add(1));
+    let capacity = metadata.len().min(GC_MAX_RECORD_BYTES) as usize + 1;
+    let mut bytes = Vec::with_capacity(capacity);
     file.take(GC_MAX_RECORD_BYTES.saturating_add(1))
         .read_to_end(&mut bytes)
         .map_err(GcError::Io)?;
     if bytes.len() as u64 > GC_MAX_RECORD_BYTES {
-        return Err(corrupt(path, format!("metadata exceeds {GC_MAX_RECORD_BYTES} bytes")));
+        return Err(corrupt(
+            path,
+            format!("metadata exceeds {GC_MAX_RECORD_BYTES} bytes"),
+        ));
     }
     serde_json::from_slice(&bytes).map_err(GcError::Json)
 }
 
-fn write_gc_json<T: Serialize>(path: &Path, value: &T) -> Result<(), GcError> {
-    let bytes = serde_json::to_vec_pretty(value)?;
-    if bytes.len() as u64 > GC_MAX_RECORD_BYTES {
-        return Err(GcError::Policy(format!(
-            "serialized GC record exceeds {GC_MAX_RECORD_BYTES} bytes"
-        )));
+struct BoundedJsonBuffer {
+    bytes: Vec<u8>,
+    max: usize,
+    exceeded: bool,
+}
+
+impl Write for BoundedJsonBuffer {
+    fn write(&mut self, input: &[u8]) -> io::Result<usize> {
+        let available = self.max.saturating_sub(self.bytes.len());
+        if input.len() > available {
+            self.exceeded = true;
+            return Err(io::Error::new(
+                io::ErrorKind::FileTooLarge,
+                "serialized GC record exceeds byte bound",
+            ));
+        }
+        self.bytes.extend_from_slice(input);
+        Ok(input.len())
     }
-    gc_atomic_write(path, &bytes).map_err(GcError::Io)
+
+    fn flush(&mut self) -> io::Result<()> {
+        Ok(())
+    }
+}
+
+fn serialize_gc_json<T: Serialize>(value: &T) -> Result<Vec<u8>, GcError> {
+    let mut output = BoundedJsonBuffer {
+        bytes: Vec::new(),
+        max: GC_MAX_RECORD_BYTES as usize,
+        exceeded: false,
+    };
+    if let Err(error) = serde_json::to_writer_pretty(&mut output, value) {
+        if output.exceeded {
+            return Err(GcError::Policy(format!(
+                "serialized GC record exceeds {GC_MAX_RECORD_BYTES} bytes"
+            )));
+        }
+        return Err(GcError::Json(error));
+    }
+    Ok(output.bytes)
+}
+
+fn write_gc_json<T: Serialize>(path: &Path, value: &T) -> Result<(), GcError> {
+    gc_atomic_write(path, &serialize_gc_json(value)?).map_err(GcError::Io)
 }
 
 fn validate_record_schema(
@@ -553,12 +713,38 @@ fn validate_record_common<R: GcRecord>(
     path: &Path,
     expected_type: &str,
 ) -> Result<(), GcError> {
-    let (schema_version, record_type, engine, project_id) = record.header();
-    validate_record_schema(schema_version, record_type, path, expected_type)?;
-    if !GC_ENGINES.contains(&engine) {
-        return Err(corrupt(path, format!("invalid engine {engine}")));
+    let (schema_version, record_type, producer_id, project_id, contract_digest) = record.header();
+    if record_type != expected_type {
+        return Err(corrupt(path, format!("record_type {record_type}")));
     }
-    validate_namespace(path, engine, project_id)
+    match schema_version {
+        GC_SCHEMA_VERSION_V1 if contract_digest.is_none() => {}
+        GC_SCHEMA_VERSION => {
+            let expected = gc_contract_digest_hex();
+            if contract_digest != Some(expected.as_str()) {
+                return Err(corrupt(path, "store_contract_digest mismatch".into()));
+            }
+        }
+        GC_SCHEMA_VERSION_V1 => {
+            return Err(corrupt(
+                path,
+                "legacy record unexpectedly binds a v2 store contract".into(),
+            ));
+        }
+        _ => {
+            return Err(corrupt(
+                path,
+                format!("unsupported schema_version {schema_version}"),
+            ));
+        }
+    }
+    if !is_valid_producer_id(producer_id) {
+        return Err(corrupt(path, format!("invalid producer id {producer_id}")));
+    }
+    if !is_valid_hash(project_id) {
+        return Err(corrupt(path, "invalid project_id".into()));
+    }
+    validate_namespace(path, producer_id, project_id)
 }
 
 fn read_reachability_snapshot(path: &Path) -> Result<ReachabilitySnapshot, GcError> {
@@ -567,7 +753,10 @@ fn read_reachability_snapshot(path: &Path) -> Result<ReachabilitySnapshot, GcErr
     require_min(snap.epoch, 1, path, "epoch")?;
     require_rfc3339(&snap.published_at, path, "published_at")?;
     if snap.blob_hashes.len() > GC_MAX_BLOB_HASHES {
-        return Err(corrupt(path, format!("too many blob hashes (max {GC_MAX_BLOB_HASHES})")));
+        return Err(corrupt(
+            path,
+            format!("too many blob hashes (max {GC_MAX_BLOB_HASHES})"),
+        ));
     }
     for h in &snap.blob_hashes {
         require_hash(h, path, "blob hash")?;
@@ -581,9 +770,14 @@ fn read_pin_record(path: &Path) -> Result<PinRecord, GcError> {
     if !is_valid_pin_id(&pin.pin_id) {
         return Err(corrupt(path, format!("invalid pin_id {}", pin.pin_id)));
     }
-    require_rfc3339(&pin.created_at, path, "created_at")?;
+    let created_at =
+        parse_rfc3339(&pin.created_at).ok_or_else(|| corrupt(path, "invalid created_at".into()))?;
     if let Some(exp) = pin.expires_at.as_deref() {
-        require_rfc3339(exp, path, "expires_at")?;
+        let expires_at =
+            parse_rfc3339(exp).ok_or_else(|| corrupt(path, "invalid expires_at".into()))?;
+        if expires_at < created_at {
+            return Err(corrupt(path, "expires_at precedes created_at".into()));
+        }
     }
     require_hash(&pin.blob_hash, path, "blob_hash")?;
     Ok(pin)
@@ -599,8 +793,22 @@ fn read_lease_record(path: &Path) -> Result<LeaseRecord, GcError> {
         ));
     }
     require_min(lease.epoch, 1, path, "epoch")?;
-    require_rfc3339(&lease.started_at, path, "started_at")?;
-    require_rfc3339(&lease.expires_at, path, "expires_at")?;
+    if lease.owner.pid == 0 {
+        return Err(corrupt(path, "owner.pid must be >= 1".into()));
+    }
+    if lease.owner.host.is_empty()
+        || lease.owner.host.len() > GC_MAX_OWNER_HOST_BYTES
+        || lease.owner.host.bytes().any(|byte| byte.is_ascii_control())
+    {
+        return Err(corrupt(path, "invalid owner.host".into()));
+    }
+    let started_at = parse_rfc3339(&lease.started_at)
+        .ok_or_else(|| corrupt(path, "invalid started_at".into()))?;
+    let expires_at = parse_rfc3339(&lease.expires_at)
+        .ok_or_else(|| corrupt(path, "invalid expires_at".into()))?;
+    if expires_at < started_at {
+        return Err(corrupt(path, "expires_at precedes started_at".into()));
+    }
     require_min(
         lease.grace_seconds,
         GC_MIN_GRACE_SECONDS,
@@ -608,7 +816,10 @@ fn read_lease_record(path: &Path) -> Result<LeaseRecord, GcError> {
         "grace_seconds",
     )?;
     if lease.blob_hashes.len() > GC_MAX_BLOB_HASHES {
-        return Err(corrupt(path, format!("too many blob hashes (max {GC_MAX_BLOB_HASHES})")));
+        return Err(corrupt(
+            path,
+            format!("too many blob hashes (max {GC_MAX_BLOB_HASHES})"),
+        ));
     }
     for h in &lease.blob_hashes {
         require_hash(h, path, "blob hash")?;
@@ -620,7 +831,7 @@ fn read_lease_record(path: &Path) -> Result<LeaseRecord, GcError> {
 struct MarkState {
     live: BTreeMap<String, (BTreeSet<String>, BTreeSet<String>)>,
     uncertain: bool,
-    global_evidence: Vec<String>,
+    global_evidence: BTreeSet<String>,
 }
 
 fn push_bounded(values: &mut Vec<String>, value: String) {
@@ -629,26 +840,37 @@ fn push_bounded(values: &mut Vec<String>, value: String) {
     }
     if values.len() < GC_MAX_EVIDENCE_ITEMS {
         values.push(value);
-    } else if !values.iter().any(|existing| existing == GC_EVIDENCE_TRUNCATED) {
+    } else if !values
+        .iter()
+        .any(|existing| existing == GC_EVIDENCE_TRUNCATED)
+    {
         values[GC_MAX_EVIDENCE_ITEMS - 1] = GC_EVIDENCE_TRUNCATED.into();
     }
 }
 
 fn push_bounded_set(values: &mut BTreeSet<String>, value: String) {
-    if values.contains(&value) {
+    values.insert(value);
+    if values.len() <= GC_MAX_EVIDENCE_ITEMS {
         return;
     }
-    if values.len() < GC_MAX_EVIDENCE_ITEMS {
-        values.insert(value);
-    } else if !values.contains(GC_EVIDENCE_TRUNCATED) {
-        values.pop_last();
-        values.insert(GC_EVIDENCE_TRUNCATED.into());
+    values.insert(GC_EVIDENCE_TRUNCATED.into());
+    while values.len() > GC_MAX_EVIDENCE_ITEMS {
+        let removable = values
+            .iter()
+            .rev()
+            .find(|item| item.as_str() != GC_EVIDENCE_TRUNCATED)
+            .cloned()
+            .expect("evidence bound always leaves a removable item");
+        values.remove(&removable);
     }
 }
 
 fn mark_hash(state: &mut MarkState, hash: &str, reason: &str, evidence: &str) {
     if state.live.len() >= GC_MAX_REPORT_OBJECTS && !state.live.contains_key(hash) {
-        mark_uncertain(state, format!("live hash traversal exceeded {GC_MAX_REPORT_OBJECTS}"));
+        mark_uncertain(
+            state,
+            format!("live hash traversal exceeded {GC_MAX_REPORT_OBJECTS}"),
+        );
         return;
     }
     let meta = state.live.entry(hash.to_string()).or_default();
@@ -658,7 +880,7 @@ fn mark_hash(state: &mut MarkState, hash: &str, reason: &str, evidence: &str) {
 
 fn mark_uncertain(state: &mut MarkState, evidence: String) {
     state.uncertain = true;
-    push_bounded(&mut state.global_evidence, evidence);
+    push_bounded_set(&mut state.global_evidence, evidence);
 }
 
 const GC_MAX_PROJECT_NAMESPACES: usize = GC_MAX_REPORT_OBJECTS;
@@ -677,6 +899,7 @@ fn walk_gc_projects(
     if !dir_meta.file_type().is_dir() {
         return Err(corrupt(&dir, "GC namespace is not a real directory".into()));
     }
+    let mut producer_count = 0usize;
     let mut project_count = 0usize;
     for engine_entry in fs::read_dir(&dir)? {
         let engine_entry = engine_entry?;
@@ -684,8 +907,27 @@ fn walk_gc_projects(
         if !engine_type.is_dir() {
             return Err(corrupt(
                 &engine_entry.path(),
-                "GC engine namespace is not a real directory".into(),
+                "GC producer namespace is not a real directory".into(),
             ));
+        }
+        let producer_id = engine_entry.file_name();
+        let producer_id = producer_id.to_str().ok_or_else(|| {
+            corrupt(
+                &engine_entry.path(),
+                "GC producer namespace is not UTF-8".into(),
+            )
+        })?;
+        if !is_valid_producer_id(producer_id) {
+            return Err(corrupt(
+                &engine_entry.path(),
+                format!("invalid producer id {producer_id}"),
+            ));
+        }
+        producer_count = producer_count.saturating_add(1);
+        if producer_count > GC_MAX_PRODUCER_NAMESPACES {
+            return Err(GcError::Policy(format!(
+                "GC producer traversal exceeds {GC_MAX_PRODUCER_NAMESPACES}"
+            )));
         }
         for project_entry in fs::read_dir(engine_entry.path())? {
             let project_entry = project_entry?;
@@ -694,6 +936,19 @@ fn walk_gc_projects(
                 return Err(corrupt(
                     &project_entry.path(),
                     "GC project namespace is not a real directory".into(),
+                ));
+            }
+            let project_id = project_entry.file_name();
+            let project_id = project_id.to_str().ok_or_else(|| {
+                corrupt(
+                    &project_entry.path(),
+                    "GC project namespace is not UTF-8".into(),
+                )
+            })?;
+            if !is_valid_hash(project_id) {
+                return Err(corrupt(
+                    &project_entry.path(),
+                    "invalid project_id namespace".into(),
                 ));
             }
             project_count = project_count.saturating_add(1);
@@ -839,10 +1094,11 @@ fn load_mark_state(
         read_lease_record,
         |path, lease, state| {
             let expires = parse_rfc3339(&lease.expires_at).unwrap_or(now);
-            let grace_end =
-                expires + std::time::Duration::from_secs(lease.grace_seconds.max(grace_seconds));
+            let grace_end = expires.checked_add(std::time::Duration::from_secs(
+                lease.grace_seconds.max(grace_seconds),
+            ));
             let active = now <= expires;
-            let in_grace = !active && now < grace_end;
+            let in_grace = !active && grace_end.is_none_or(|end| now < end);
             let reason = if active {
                 "active-lease"
             } else {
@@ -879,9 +1135,10 @@ fn build_dry_run_report(
     state: &MarkState,
     min_age_seconds: u64,
     now: SystemTime,
+    apply: bool,
 ) -> Result<DryRunReport, GcError> {
     let mut objects = Vec::new();
-    for hash in cas.list_objects()? {
+    for hash in cas.list_objects_bounded(GC_MAX_REPORT_OBJECTS)? {
         let (verdict, mut reasons, evidence) = if let Some(meta) = state.live.get(&hash) {
             (
                 GcVerdict::Retain,
@@ -892,13 +1149,15 @@ fn build_dry_run_report(
             (
                 GcVerdict::RetainUncertain,
                 vec!["uncertain-metadata".into()],
-                state.global_evidence.clone(),
+                state.global_evidence.iter().cloned().collect(),
             )
         } else {
             let young = fs::metadata(cas.object_path(&hash))
                 .ok()
-                .and_then(|m| m.modified().ok())
-                .map(|m| now.duration_since(m).unwrap_or_default().as_secs() < min_age_seconds)
+                .and_then(|metadata| metadata.modified().ok())
+                .map(|modified| {
+                    now.duration_since(modified).unwrap_or_default().as_secs() < min_age_seconds
+                })
                 .unwrap_or(true);
             if young {
                 (
@@ -929,26 +1188,53 @@ fn build_dry_run_report(
         });
     }
     if objects.len() > GC_MAX_REPORT_OBJECTS {
-        return Err(GcError::Policy(format!("report exceeds {GC_MAX_REPORT_OBJECTS} objects")));
+        return Err(GcError::Policy(format!(
+            "report exceeds {GC_MAX_REPORT_OBJECTS} objects"
+        )));
     }
-    objects.sort_by(|a, b| a.blob_hash.cmp(&b.blob_hash));
+    objects.sort_by(|left, right| left.blob_hash.cmp(&right.blob_hash));
+    let planned = objects
+        .iter()
+        .filter(|object| object.verdict == GcVerdict::Collect)
+        .map(|object| object.blob_hash.clone())
+        .collect();
     Ok(DryRunReport {
         schema_version: GC_SCHEMA_VERSION.to_string(),
         record_type: GC_RECORD_TYPE_DRY_RUN.to_string(),
+        store_contract_digest: gc_contract_digest_hex(),
         run_id: run_id.to_string(),
-        store_root: store_root.to_string_lossy().into_owned(),
-        evaluated_at: format_system_time(SystemTime::now()),
+        store_root: crate::store_root::absolutize(store_root)
+            .to_string_lossy()
+            .into_owned(),
+        evaluated_at: format_system_time(now),
+        apply,
+        state: GcRunState::Evaluated,
         objects,
+        planned,
+        deleted: Vec::new(),
     })
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+fn sweep_plan_digest(run_id: &str, store_root: &str, objects: &[String]) -> String {
+    zero_abi::contract_digest_hex(&serde_json::json!({
+        "domain": "zerostack.gc-sweep-plan.v1",
+        "store_contract_digest": gc_contract_digest_hex(),
+        "run_id": run_id,
+        "store_root": store_root,
+        "objects": objects,
+    }))
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 struct SweepProgress {
     schema_version: String,
     record_type: String,
+    store_contract_digest: String,
     run_id: String,
     store_root: String,
     evaluated_at: String,
+    plan_digest: String,
     objects: Vec<String>,
     deleted: Vec<String>,
     state: String,
@@ -962,26 +1248,44 @@ fn read_sweep_progress(path: &Path) -> Result<SweepProgress, GcError> {
         path,
         GC_RECORD_TYPE_SWEEP_PROGRESS,
     )?;
-    if progress.run_id.is_empty() {
-        return Err(GcError::SchemaViolation("run_id empty".into()));
+    if progress.store_contract_digest != gc_contract_digest_hex() {
+        return Err(corrupt(path, "store_contract_digest mismatch".into()));
     }
+    validate_run_id(&progress.run_id).map_err(|error| corrupt(path, error.to_string()))?;
     if progress.store_root.is_empty() {
-        return Err(GcError::SchemaViolation("store_root empty".into()));
+        return Err(corrupt(path, "store_root empty".into()));
     }
-    if progress.objects.len() > GC_MAX_BLOB_HASHES {
+    require_rfc3339(&progress.evaluated_at, path, "evaluated_at")?;
+    if progress.state != "sweeping" {
         return Err(corrupt(
             path,
-            format!("too many sweep objects (max {GC_MAX_BLOB_HASHES})"),
+            format!("invalid sweep state {}", progress.state),
         ));
     }
-    if progress.deleted.len() > GC_MAX_BLOB_HASHES {
+    if progress.objects.len() > GC_MAX_REPORT_OBJECTS {
         return Err(corrupt(
             path,
-            format!("too many deleted hashes (max {GC_MAX_BLOB_HASHES})"),
+            format!("too many sweep objects (max {GC_MAX_REPORT_OBJECTS})"),
         ));
     }
-    for h in progress.objects.iter().chain(progress.deleted.iter()) {
-        require_hash(h, path, "blob hash")?;
+    if progress.deleted.len() > progress.objects.len() {
+        return Err(corrupt(path, "deleted set exceeds sweep object set".into()));
+    }
+    let object_set: BTreeSet<_> = progress.objects.iter().cloned().collect();
+    let deleted_set: BTreeSet<_> = progress.deleted.iter().cloned().collect();
+    if object_set.len() != progress.objects.len() || deleted_set.len() != progress.deleted.len() {
+        return Err(corrupt(path, "duplicate sweep hash".into()));
+    }
+    if !deleted_set.is_subset(&object_set) {
+        return Err(corrupt(path, "deleted hash is outside sweep plan".into()));
+    }
+    for hash in &progress.objects {
+        require_hash(hash, path, "blob hash")?;
+    }
+    let expected_plan =
+        sweep_plan_digest(&progress.run_id, &progress.store_root, &progress.objects);
+    if progress.plan_digest != expected_plan {
+        return Err(corrupt(path, "sweep plan digest mismatch".into()));
     }
     Ok(progress)
 }
@@ -1002,6 +1306,11 @@ fn prune_gc_reports(store_root: &Path, keep: usize, current: &Path) -> Result<()
             && !name.ends_with(".progress.json")
         {
             let modified = entry.metadata()?.modified().unwrap_or(UNIX_EPOCH);
+            if reports.len() >= GC_MAX_REPORT_OBJECTS {
+                return Err(GcError::Policy(format!(
+                    "GC report namespace exceeds {GC_MAX_REPORT_OBJECTS} records"
+                )));
+            }
             reports.push((modified, name.to_owned(), path));
         }
     }
@@ -1021,7 +1330,9 @@ pub fn run_gc(store_root: &Path, config: &GcConfig) -> Result<DryRunReport, GcEr
     validate_run_id(&config.run_id)?;
     let coord = StoreLock::sweep(store_root, LOCK_DEADLINE).map_err(GcError::Io)?;
     let cas = SharedCas::open(store_root.to_path_buf());
-    let store_root_key = store_root.to_string_lossy().into_owned();
+    let store_root_key = crate::store_root::absolutize(store_root)
+        .to_string_lossy()
+        .into_owned();
     let progress_path = gc_join(
         store_root,
         &["reports", &format!("{}.progress.json", config.run_id)],
@@ -1053,6 +1364,7 @@ pub fn run_gc(store_root: &Path, config: &GcConfig) -> Result<DryRunReport, GcEr
         &state,
         config.min_age_seconds,
         config.now,
+        config.apply,
     )?;
     let report_path = gc_join(store_root, &["reports", &format!("{}.json", config.run_id)]);
     write_gc_json(&report_path, &report)?;
@@ -1061,31 +1373,59 @@ pub fn run_gc(store_root: &Path, config: &GcConfig) -> Result<DryRunReport, GcEr
         return Ok(report);
     }
 
-    let mut deleted: Vec<String> = prior_progress
-        .as_ref()
-        .map(|p| {
-            p.deleted
-                .iter()
-                .filter(|h| !cas.contains(h))
-                .cloned()
-                .collect()
-        })
-        .unwrap_or_default();
-    let to_delete: Vec<String> = report
+    let current_to_delete: Vec<String> = report
         .objects
         .iter()
-        .filter(|o| o.verdict == GcVerdict::Collect)
-        .map(|o| o.blob_hash.clone())
+        .filter(|object| object.verdict == GcVerdict::Collect)
+        .map(|object| object.blob_hash.clone())
         .collect();
+    let mut deleted = Vec::new();
+    if let Some(progress) = prior_progress.as_ref() {
+        for hash in &progress.deleted {
+            match fs::symlink_metadata(cas.object_path(hash)) {
+                Ok(metadata) if metadata.file_type().is_file() => {}
+                Ok(_) => {
+                    return Err(GcError::CorruptMetadata {
+                        path: cas.object_path(hash),
+                        reason: "sweep progress deletion replaced by a non-regular entry".into(),
+                    });
+                }
+                Err(error) if error.kind() == io::ErrorKind::NotFound => {
+                    deleted.push(hash.clone());
+                }
+                Err(error) => return Err(GcError::Io(error)),
+            }
+        }
+    }
+    let (to_delete, plan_digest) = if let Some(progress) = prior_progress.as_ref() {
+        let deleted_set: BTreeSet<_> = deleted.iter().collect();
+        let expected_remaining: Vec<_> = progress
+            .objects
+            .iter()
+            .filter(|hash| !deleted_set.contains(hash))
+            .cloned()
+            .collect();
+        if expected_remaining != current_to_delete {
+            return Err(GcError::SchemaViolation(
+                "existing sweep progress does not match the current remaining plan".into(),
+            ));
+        }
+        (progress.objects.clone(), progress.plan_digest.clone())
+    } else {
+        let digest = sweep_plan_digest(&config.run_id, &store_root_key, &current_to_delete);
+        (current_to_delete, digest)
+    };
     let persist = |deleted: &[String]| -> Result<(), GcError> {
         write_gc_json(
             &progress_path,
             &SweepProgress {
                 schema_version: GC_SCHEMA_VERSION.to_string(),
                 record_type: GC_RECORD_TYPE_SWEEP_PROGRESS.to_string(),
+                store_contract_digest: gc_contract_digest_hex(),
                 run_id: config.run_id.clone(),
                 store_root: store_root_key.clone(),
                 evaluated_at: report.evaluated_at.clone(),
+                plan_digest: plan_digest.clone(),
                 objects: to_delete.clone(),
                 deleted: deleted.to_vec(),
                 state: "sweeping".into(),
@@ -1115,6 +1455,9 @@ pub fn run_gc(store_root: &Path, config: &GcConfig) -> Result<DryRunReport, GcEr
 
     let deleted_set: BTreeSet<_> = deleted.iter().cloned().collect();
     let mut final_report = report.clone();
+    final_report.state = GcRunState::Complete;
+    final_report.planned = to_delete.clone();
+    final_report.deleted = deleted.clone();
     for obj in &mut final_report.objects {
         if obj.verdict != GcVerdict::Collect {
             continue;
@@ -1127,21 +1470,40 @@ pub fn run_gc(store_root: &Path, config: &GcConfig) -> Result<DryRunReport, GcEr
         obj.reason_codes = vec!["uncertain-metadata".into()];
         obj.evidence = vec!["re-check before delete showed a live reference or uncertainty".into()];
     }
+    let final_value = serde_json::to_value(&final_report)?;
+    validate_dry_run_report(&final_value)?;
     write_gc_json(&report_path, &final_report)?;
     prune_gc_reports(store_root, config.report_limit, &report_path)?;
-    let _ = fs::remove_file(&progress_path);
+    remove_gc_record(&progress_path)?;
     Ok(final_report)
 }
 
 const DRY_RUN_FIELDS: &[&str] = &[
     "schema_version",
     "record_type",
+    "store_contract_digest",
     "run_id",
     "store_root",
     "evaluated_at",
+    "apply",
+    "state",
     "objects",
+    "planned",
+    "deleted",
 ];
 const CANDIDATE_FIELDS: &[&str] = &["blob_hash", "verdict", "reason_codes", "evidence"];
+const REPAIR_RECEIPT_FIELDS: &[&str] = &[
+    "schema_version",
+    "record_type",
+    "store_contract_digest",
+    "producer_id",
+    "project_id",
+    "operation_id",
+    "blob_hash",
+    "repaired",
+    "quarantined",
+    "completed_at",
+];
 const REASON_CODES: &[&str] = &[
     "reachability-root",
     "pin",
@@ -1190,7 +1552,7 @@ fn validate_list(
 ) -> Result<(), GcError> {
     let items = value
         .get(field)
-        .and_then(|v| v.as_array())
+        .and_then(serde_json::Value::as_array)
         .ok_or_else(|| GcError::SchemaViolation(field.into()))?;
     if items.len() > GC_MAX_EVIDENCE_ITEMS {
         return Err(GcError::SchemaViolation(format!(
@@ -1203,16 +1565,16 @@ fn validate_list(
     let reasons = field == "reason_codes";
     let mut seen = BTreeSet::new();
     for item in items {
-        let s = item.as_str().ok_or_else(|| {
+        let item = item.as_str().ok_or_else(|| {
             GcError::SchemaViolation(if reasons { "reason_code" } else { "evidence" }.into())
         })?;
-        if !reasons && s.is_empty() {
+        if !reasons && item.is_empty() {
             return Err(GcError::SchemaViolation("empty evidence".into()));
         }
-        if allow.is_some_and(|a| !a.contains(&s)) {
-            return Err(GcError::SchemaViolation(format!("reason_code {s}")));
+        if allow.is_some_and(|allowed| !allowed.contains(&item)) {
+            return Err(GcError::SchemaViolation(format!("reason_code {item}")));
         }
-        if !seen.insert(s) {
+        if !seen.insert(item) {
             return Err(GcError::SchemaViolation(
                 if reasons {
                     "duplicate reason_code"
@@ -1227,12 +1589,21 @@ fn validate_list(
 }
 
 pub fn validate_dry_run_report(value: &serde_json::Value) -> Result<(), GcError> {
+    serialize_gc_json(value)?;
     exact_keys(value, DRY_RUN_FIELDS, "extra top-level keys")?;
-    if value.get("schema_version").and_then(|v| v.as_str()) != Some(GC_SCHEMA_VERSION) {
+    if value
+        .get("schema_version")
+        .and_then(serde_json::Value::as_str)
+        != Some(GC_SCHEMA_VERSION)
+    {
         return Err(GcError::SchemaViolation("schema_version".into()));
     }
-    if value.get("record_type").and_then(|v| v.as_str()) != Some(GC_RECORD_TYPE_DRY_RUN) {
+    if value.get("record_type").and_then(serde_json::Value::as_str) != Some(GC_RECORD_TYPE_DRY_RUN)
+    {
         return Err(GcError::SchemaViolation("record_type".into()));
+    }
+    if require_str(value, "store_contract_digest")? != gc_contract_digest_hex() {
+        return Err(GcError::SchemaViolation("store_contract_digest".into()));
     }
     validate_run_id(require_str(value, "run_id")?)?;
     if require_str(value, "store_root")?.is_empty() {
@@ -1241,9 +1612,22 @@ pub fn validate_dry_run_report(value: &serde_json::Value) -> Result<(), GcError>
     if parse_rfc3339(require_str(value, "evaluated_at")?).is_none() {
         return Err(GcError::SchemaViolation("evaluated_at".into()));
     }
+    let apply = value
+        .get("apply")
+        .and_then(serde_json::Value::as_bool)
+        .ok_or_else(|| GcError::SchemaViolation("apply".into()))?;
+    let state = require_str(value, "state")?;
+    if !matches!(state, "evaluated" | "complete") {
+        return Err(GcError::SchemaViolation("state".into()));
+    }
+    if !apply && state != "evaluated" {
+        return Err(GcError::SchemaViolation(
+            "dry run cannot have complete state".into(),
+        ));
+    }
     let objects = value
         .get("objects")
-        .and_then(|v| v.as_array())
+        .and_then(serde_json::Value::as_array)
         .ok_or_else(|| GcError::SchemaViolation("objects".into()))?;
     if objects.len() > GC_MAX_REPORT_OBJECTS {
         return Err(GcError::SchemaViolation(format!(
@@ -1251,35 +1635,168 @@ pub fn validate_dry_run_report(value: &serde_json::Value) -> Result<(), GcError>
         )));
     }
     let mut seen_hashes = BTreeSet::new();
-    for obj in objects {
-        exact_keys(obj, CANDIDATE_FIELDS, "extra object keys")?;
-        let blob_hash = require_str(obj, "blob_hash")?;
-        if !seen_hashes.insert(blob_hash.to_string()) {
-            return Err(GcError::SchemaViolation("duplicate blob_hash".into()));
+    let mut collect_hashes = BTreeSet::new();
+    for object in objects {
+        exact_keys(object, CANDIDATE_FIELDS, "extra object keys")?;
+        let blob_hash = require_str(object, "blob_hash")?;
+        if !is_valid_hash(blob_hash) || !seen_hashes.insert(blob_hash.to_string()) {
+            return Err(GcError::SchemaViolation(
+                "invalid or duplicate blob_hash".into(),
+            ));
         }
-        if !is_valid_hash(require_str(obj, "blob_hash")?) {
-            return Err(GcError::SchemaViolation("blob_hash".into()));
-        }
-        if !matches!(
-            require_str(obj, "verdict")?,
-            "retain" | "collect" | "retain-uncertain"
-        ) {
+        let object_verdict = require_str(object, "verdict")?;
+        if !matches!(object_verdict, "retain" | "collect" | "retain-uncertain") {
             return Err(GcError::SchemaViolation("verdict".into()));
         }
-        validate_list(obj, "reason_codes", Some(REASON_CODES))?;
-        validate_list(obj, "evidence", None)?;
+        if object_verdict == "collect" {
+            collect_hashes.insert(blob_hash.to_string());
+        }
+        validate_list(object, "reason_codes", Some(REASON_CODES))?;
+        validate_list(object, "evidence", None)?;
+    }
+    let planned = value
+        .get("planned")
+        .and_then(serde_json::Value::as_array)
+        .ok_or_else(|| GcError::SchemaViolation("planned".into()))?;
+    if planned.len() > GC_MAX_REPORT_OBJECTS {
+        return Err(GcError::SchemaViolation(format!(
+            "planned exceeds {GC_MAX_REPORT_OBJECTS}"
+        )));
+    }
+    let mut seen_planned = BTreeSet::new();
+    for hash in planned {
+        let hash = hash
+            .as_str()
+            .ok_or_else(|| GcError::SchemaViolation("planned hash".into()))?;
+        if !is_valid_hash(hash) || !seen_planned.insert(hash.to_string()) {
+            return Err(GcError::SchemaViolation(
+                "invalid or duplicate planned hash".into(),
+            ));
+        }
+    }
+    if state == "evaluated" && seen_planned != collect_hashes {
+        return Err(GcError::SchemaViolation(
+            "evaluated planned set differs from collect candidates".into(),
+        ));
+    }
+    if !collect_hashes.is_subset(&seen_planned) {
+        return Err(GcError::SchemaViolation(
+            "collect candidate is absent from planned set".into(),
+        ));
+    }
+    let deleted = value
+        .get("deleted")
+        .and_then(serde_json::Value::as_array)
+        .ok_or_else(|| GcError::SchemaViolation("deleted".into()))?;
+    if deleted.len() > GC_MAX_REPORT_OBJECTS {
+        return Err(GcError::SchemaViolation(format!(
+            "deleted exceeds {GC_MAX_REPORT_OBJECTS}"
+        )));
+    }
+    let mut seen_deleted = BTreeSet::new();
+    for hash in deleted {
+        let hash = hash
+            .as_str()
+            .ok_or_else(|| GcError::SchemaViolation("deleted hash".into()))?;
+        if !is_valid_hash(hash) || !seen_deleted.insert(hash.to_string()) {
+            return Err(GcError::SchemaViolation(
+                "invalid or duplicate deleted hash".into(),
+            ));
+        }
+    }
+    if !seen_deleted.is_subset(&seen_planned) {
+        return Err(GcError::SchemaViolation(
+            "deleted hash is absent from planned set".into(),
+        ));
+    }
+    if seen_planned
+        .iter()
+        .any(|hash| !seen_hashes.contains(hash) && !seen_deleted.contains(hash))
+    {
+        return Err(GcError::SchemaViolation(
+            "planned hash is absent from both objects and deleted".into(),
+        ));
+    }
+    if (!apply || state != "complete") && !deleted.is_empty() {
+        return Err(GcError::SchemaViolation(
+            "only a complete applied run may report deletions".into(),
+        ));
     }
     Ok(())
 }
 
+/// Digest every frozen run-receipt field using canonical JSON.
+pub fn gc_report_digest_hex(report: &DryRunReport) -> Result<String, GcError> {
+    serialize_gc_json(report)?;
+    let value = serde_json::to_value(report)?;
+    validate_dry_run_report(&value)?;
+    Ok(zero_abi::contract_digest_hex(&value))
+}
+
+/// Validate one immutable repair receipt against the frozen GC contract.
+pub fn validate_repair_receipt(value: &serde_json::Value) -> Result<(), GcError> {
+    serialize_gc_json(value)?;
+    exact_keys(value, REPAIR_RECEIPT_FIELDS, "extra repair receipt keys")?;
+    if require_str(value, "schema_version")? != GC_SCHEMA_VERSION {
+        return Err(GcError::SchemaViolation("schema_version".into()));
+    }
+    if require_str(value, "record_type")? != GC_RECORD_TYPE_REPAIR {
+        return Err(GcError::SchemaViolation("record_type".into()));
+    }
+    if require_str(value, "store_contract_digest")? != gc_contract_digest_hex() {
+        return Err(GcError::SchemaViolation("store_contract_digest".into()));
+    }
+    require_gc_producer(require_str(value, "producer_id")?)?;
+    if !is_valid_hash(require_str(value, "project_id")?) {
+        return Err(GcError::SchemaViolation("project_id".into()));
+    }
+    require_schema_field(
+        is_valid_pin_id(require_str(value, "operation_id")?),
+        "operation_id",
+    )?;
+    if !is_valid_hash(require_str(value, "blob_hash")?) {
+        return Err(GcError::SchemaViolation("blob_hash".into()));
+    }
+    let repaired = value
+        .get("repaired")
+        .and_then(serde_json::Value::as_bool)
+        .ok_or_else(|| GcError::SchemaViolation("repaired".into()))?;
+    let quarantined = value
+        .get("quarantined")
+        .and_then(serde_json::Value::as_bool)
+        .ok_or_else(|| GcError::SchemaViolation("quarantined".into()))?;
+    if quarantined && !repaired {
+        return Err(GcError::SchemaViolation(
+            "quarantined repair receipt must report repaired".into(),
+        ));
+    }
+    if parse_rfc3339(require_str(value, "completed_at")?).is_none() {
+        return Err(GcError::SchemaViolation("completed_at".into()));
+    }
+    Ok(())
+}
+
+/// Digest every frozen repair-receipt field using canonical JSON.
+pub fn gc_repair_receipt_digest_hex(receipt: &RepairReceipt) -> Result<String, GcError> {
+    serialize_gc_json(receipt)?;
+    let value = serde_json::to_value(receipt)?;
+    validate_repair_receipt(&value)?;
+    Ok(zero_abi::contract_digest_hex(&value))
+}
+
+/// Publish one complete producer-owned reachability set.
+///
+/// An empty `blob_hashes` slice is an explicit declaration that this producer
+/// and project retain no CAS objects. Epochs are strictly monotonic, including
+/// across legacy v1 records.
 pub fn publish_reachability_snapshot(
     store_root: &Path,
-    engine: &str,
+    producer_id: &str,
     project_id: &str,
     epoch: u64,
     blob_hashes: &[String],
 ) -> Result<PathBuf, GcError> {
-    require_gc_engine(engine)?;
+    require_gc_producer(producer_id)?;
     if !is_valid_hash(project_id) {
         return Err(GcError::SchemaViolation("project_id".into()));
     }
@@ -1291,14 +1808,20 @@ pub fn publish_reachability_snapshot(
             "blob_hashes exceeds {GC_MAX_BLOB_HASHES}"
         )));
     }
-    if let Some(h) = blob_hashes.iter().find(|h| !is_valid_hash(h)) {
-        return Err(GcError::Policy(format!("invalid hash {h}")));
+    if let Some(hash) = blob_hashes.iter().find(|hash| !is_valid_hash(hash)) {
+        return Err(GcError::Policy(format!("invalid hash {hash}")));
     }
     let _coord = StoreLock::sweep(store_root, LOCK_DEADLINE).map_err(GcError::Io)?;
-    let path = gc_join(store_root, &["roots", engine, project_id, "current.json"]);
+    let path = gc_join(
+        store_root,
+        &["roots", producer_id, project_id, "current.json"],
+    );
     match fs::symlink_metadata(&path) {
         Ok(metadata) if !metadata.file_type().is_file() => {
-            return Err(corrupt(&path, "reachability snapshot is not a regular file".into()));
+            return Err(corrupt(
+                &path,
+                "reachability snapshot is not a regular file".into(),
+            ));
         }
         Ok(_) => {
             let existing = read_reachability_snapshot(&path)?;
@@ -1320,14 +1843,40 @@ pub fn publish_reachability_snapshot(
         &ReachabilitySnapshot {
             schema_version: GC_SCHEMA_VERSION.to_string(),
             record_type: GC_RECORD_TYPE_REACHABILITY.to_string(),
-            engine: engine.to_string(),
+            engine: producer_id.to_string(),
             project_id: project_id.to_string(),
+            store_contract_digest: Some(gc_contract_digest_hex()),
             epoch,
             published_at: format_system_time(SystemTime::now()),
             blob_hashes: hashes,
         },
     )?;
     Ok(path)
+}
+
+/// Read the current validated snapshot for one producer and project.
+pub fn current_reachability_snapshot(
+    store_root: &Path,
+    producer_id: &str,
+    project_id: &str,
+) -> Result<Option<ReachabilitySnapshot>, GcError> {
+    require_gc_producer(producer_id)?;
+    require_schema_field(is_valid_hash(project_id), "project_id")?;
+    let path = gc_join(
+        store_root,
+        &["roots", producer_id, project_id, "current.json"],
+    );
+    match fs::symlink_metadata(&path) {
+        Ok(metadata) if metadata.file_type().is_file() => {
+            read_reachability_snapshot(&path).map(Some)
+        }
+        Ok(_) => Err(corrupt(
+            &path,
+            "reachability snapshot is not a regular file".into(),
+        )),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(None),
+        Err(error) => Err(GcError::Io(error)),
+    }
 }
 
 fn require_schema_field(valid: bool, field: &str) -> Result<(), GcError> {
@@ -1341,61 +1890,95 @@ fn require_schema(schema_version: &str, record_type: &str, expected: &str) -> Re
     require_schema_field(record_type == expected, "record_type")
 }
 
-pub fn publish_pin_record(store_root: &Path, pin: &PinRecord) -> Result<PathBuf, GcError> {
+fn require_store_contract(contract_digest: Option<&str>) -> Result<(), GcError> {
+    require_schema_field(
+        contract_digest == Some(gc_contract_digest_hex().as_str()),
+        "store_contract_digest",
+    )
+}
+
+fn validate_pin_record(store_root: &Path, pin: &PinRecord) -> Result<PathBuf, GcError> {
     require_schema(&pin.schema_version, &pin.record_type, GC_RECORD_TYPE_PIN)?;
-    require_gc_engine(&pin.engine)?;
+    require_store_contract(pin.store_contract_digest.as_deref())?;
+    require_gc_producer(&pin.engine)?;
     require_schema_field(is_valid_hash(&pin.project_id), "project_id")?;
     require_schema_field(is_valid_pin_id(&pin.pin_id), "pin_id")?;
     require_schema_field(is_valid_hash(&pin.blob_hash), "blob_hash")?;
-    let path = gc_record_path(store_root, "pins", pin, &pin.pin_id);
+    let created_at = parse_rfc3339(&pin.created_at)
+        .ok_or_else(|| GcError::SchemaViolation("created_at".into()))?;
+    if let Some(expires_at) = pin.expires_at.as_deref() {
+        let expires_at = parse_rfc3339(expires_at)
+            .ok_or_else(|| GcError::SchemaViolation("expires_at".into()))?;
+        require_schema_field(expires_at >= created_at, "expires_at precedes created_at")?;
+    }
+    Ok(gc_record_path(store_root, "pins", pin, &pin.pin_id))
+}
+
+pub fn publish_pin_record(store_root: &Path, pin: &PinRecord) -> Result<PathBuf, GcError> {
+    let path = validate_pin_record(store_root, pin)?;
     let _coord = StoreLock::sweep(store_root, LOCK_DEADLINE).map_err(GcError::Io)?;
     write_gc_json(&path, pin)?;
     Ok(path)
 }
 
-/// Remove a previously published pin. Idempotent: a pin that is already gone is
-/// not an error, since callers unpin on resolution paths that may be retried.
-///
-/// Takes the same exclusive coordinator lock as `publish_pin_record` so a sweep
-/// cannot observe a half-removed pin set.
+/// Remove a previously published pin. This operation is idempotent.
 pub fn remove_pin_record(
     store_root: &Path,
-    engine: &str,
+    producer_id: &str,
     project_id: &str,
     pin_id: &str,
 ) -> Result<(), GcError> {
-    require_gc_engine(engine)?;
+    require_gc_producer(producer_id)?;
     require_schema_field(is_valid_hash(project_id), "project_id")?;
     require_schema_field(is_valid_pin_id(pin_id), "pin_id")?;
     let path = gc_join(
         store_root,
-        &["pins", engine, project_id, &format!("{pin_id}.json")],
+        &["pins", producer_id, project_id, &format!("{pin_id}.json")],
     );
     let _coord = StoreLock::sweep(store_root, LOCK_DEADLINE).map_err(GcError::Io)?;
-    match fs::remove_file(&path) {
-        Ok(()) => Ok(()),
-        Err(err) if err.kind() == io::ErrorKind::NotFound => Ok(()),
-        Err(err) => Err(err.into()),
-    }
+    remove_gc_record(&path)
 }
 
 pub fn publish_lease_record(store_root: &Path, lease: &LeaseRecord) -> Result<PathBuf, GcError> {
     let path = validate_lease_record(store_root, lease)?;
-    let _coord = StoreLock::sweep(store_root, LOCK_DEADLINE).map_err(GcError::Io)?;
-    write_gc_json(&path, lease)?;
-    Ok(path)
+    let coord = StoreLock::sweep(store_root, LOCK_DEADLINE).map_err(GcError::Io)?;
+    publish_lease_record_locked(store_root, lease, &path, &coord)
 }
 
-/// Write a lease assuming the caller already holds a GC coordination lock.
-/// `publish_leased` runs under the SHARED lock, so it must not re-acquire the
-/// exclusive one here.
-pub(crate) fn publish_lease_record_locked(
+fn publish_lease_record_locked(
     store_root: &Path,
     lease: &LeaseRecord,
+    path: &Path,
+    guard: &StoreLock,
 ) -> Result<PathBuf, GcError> {
-    let path = validate_lease_record(store_root, lease)?;
-    write_gc_json(&path, lease)?;
-    Ok(path)
+    if guard.mode() != LockMode::Exclusive || !guard.is_for_store_root(store_root) {
+        return Err(GcError::Policy(
+            "lease publication requires this store's exclusive coordinator lock".into(),
+        ));
+    }
+    validate_next_lease_epoch(path, lease.epoch)?;
+    write_gc_json(path, lease)?;
+    Ok(path.to_path_buf())
+}
+fn validate_next_lease_epoch(path: &Path, epoch: u64) -> Result<(), GcError> {
+    match fs::symlink_metadata(path) {
+        Ok(metadata) if !metadata.file_type().is_file() => {
+            Err(corrupt(path, "lease record is not a regular file".into()))
+        }
+        Ok(_) => {
+            let existing = read_lease_record(path)?;
+            if epoch <= existing.epoch {
+                Err(GcError::SchemaViolation(format!(
+                    "lease epoch {epoch} must be strictly greater than current {}",
+                    existing.epoch
+                )))
+            } else {
+                Ok(())
+            }
+        }
+        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(GcError::Io(error)),
+    }
 }
 
 fn validate_lease_record(store_root: &Path, lease: &LeaseRecord) -> Result<PathBuf, GcError> {
@@ -1404,16 +1987,22 @@ fn validate_lease_record(store_root: &Path, lease: &LeaseRecord) -> Result<PathB
         &lease.record_type,
         GC_RECORD_TYPE_LEASE,
     )?;
-    require_gc_engine(&lease.engine)?;
+    require_store_contract(lease.store_contract_digest.as_deref())?;
+    require_gc_producer(&lease.engine)?;
     require_schema_field(is_valid_hash(&lease.project_id), "project_id")?;
     require_schema_field(is_valid_pin_id(&lease.operation_id), "operation_id")?;
-    // Writer and reader must agree. read_lease_record requires epoch >= 1, so
-    // accepting 0 here would let a caller persist a lease that the sweep then
-    // discards as corrupt -- protection that silently does not exist.
     require_schema_field(lease.epoch >= 1, "epoch")?;
+    require_schema_field(lease.blob_hashes.len() <= GC_MAX_BLOB_HASHES, "blob_hashes")?;
     require_schema_field(
-        lease.blob_hashes.len() <= GC_MAX_BLOB_HASHES,
-        "blob_hashes",
+        lease.blob_hashes.iter().all(|hash| is_valid_hash(hash)),
+        "blob_hash",
+    )?;
+    require_schema_field(lease.owner.pid >= 1, "owner.pid")?;
+    require_schema_field(
+        !lease.owner.host.is_empty()
+            && lease.owner.host.len() <= GC_MAX_OWNER_HOST_BYTES
+            && !lease.owner.host.bytes().any(|byte| byte.is_ascii_control()),
+        "owner.host",
     )?;
     if lease.grace_seconds < GC_MIN_GRACE_SECONDS {
         return Err(GcError::SchemaViolation(format!(
@@ -1421,18 +2010,11 @@ fn validate_lease_record(store_root: &Path, lease: &LeaseRecord) -> Result<PathB
             GC_MIN_GRACE_SECONDS
         )));
     }
-    for (field, stamp) in [
-        ("expires_at", &lease.expires_at),
-        ("started_at", &lease.started_at),
-    ] {
-        if parse_rfc3339(stamp).is_none() {
-            return Err(GcError::SchemaViolation((*field).into()));
-        }
-    }
-    require_schema_field(
-        lease.blob_hashes.iter().all(|h| is_valid_hash(h)),
-        "blob_hash",
-    )?;
+    let started_at = parse_rfc3339(&lease.started_at)
+        .ok_or_else(|| GcError::SchemaViolation("started_at".into()))?;
+    let expires_at = parse_rfc3339(&lease.expires_at)
+        .ok_or_else(|| GcError::SchemaViolation("expires_at".into()))?;
+    require_schema_field(expires_at >= started_at, "expires_at precedes started_at")?;
     Ok(gc_record_path(
         store_root,
         "leases",
@@ -1441,11 +2023,143 @@ fn validate_lease_record(store_root: &Path, lease: &LeaseRecord) -> Result<PathB
     ))
 }
 
+/// Remove a lease after its object is committed into a newer reachability snapshot.
+pub fn remove_lease_record(
+    store_root: &Path,
+    producer_id: &str,
+    project_id: &str,
+    operation_id: &str,
+) -> Result<(), GcError> {
+    require_gc_producer(producer_id)?;
+    require_schema_field(is_valid_hash(project_id), "project_id")?;
+    require_schema_field(is_valid_pin_id(operation_id), "operation_id")?;
+    let path = gc_join(
+        store_root,
+        &[
+            "leases",
+            producer_id,
+            project_id,
+            &format!("{operation_id}.json"),
+        ],
+    );
+    let _coord = StoreLock::sweep(store_root, LOCK_DEADLINE).map_err(GcError::Io)?;
+    remove_gc_record(&path)
+}
 
-/// Verify an immutable object and restore it from authoritative bytes when it
-/// is absent or corrupt. Corrupt content is removed only under the exclusive
-/// coordination lock; replacement uses the normal publish protocol.
+fn remove_gc_record(path: &Path) -> Result<(), GcError> {
+    match fs::remove_file(path) {
+        Ok(()) => Ok(()),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(error.into()),
+    }
+}
+
+impl SharedCas {
+    /// Publish bytes and their protecting lease in one exclusive coordinator
+    /// transaction. The object cannot become visible to a sweep without the
+    /// valid lease also becoming visible.
+    #[allow(clippy::too_many_arguments)]
+    pub fn put_leased(
+        &self,
+        bytes: &[u8],
+        producer_id: &str,
+        project_id: &str,
+        operation_id: &str,
+        epoch: u64,
+        owner: LeaseOwner,
+        lease_seconds: u64,
+    ) -> Result<PutOutcome, GcError> {
+        let now = SystemTime::now();
+        let lease_duration =
+            std::time::Duration::from_secs(lease_seconds.max(GC_MIN_GRACE_SECONDS));
+        let expires_at = now
+            .checked_add(lease_duration)
+            .ok_or_else(|| GcError::Policy("lease expiry overflows system time".into()))?;
+        let lease = LeaseRecord {
+            schema_version: GC_SCHEMA_VERSION.to_string(),
+            record_type: GC_RECORD_TYPE_LEASE.to_string(),
+            engine: producer_id.to_string(),
+            project_id: project_id.to_string(),
+            store_contract_digest: Some(gc_contract_digest_hex()),
+            operation_id: operation_id.to_string(),
+            epoch,
+            owner,
+            started_at: format_system_time(now),
+            expires_at: format_system_time(expires_at),
+            grace_seconds: GC_MIN_GRACE_SECONDS,
+            blob_hashes: vec![content_sha256_hex(bytes)],
+        };
+        let lease_path = validate_lease_record(self.store_root(), &lease)?;
+        let coord = StoreLock::sweep(self.store_root(), LOCK_DEADLINE).map_err(GcError::Io)?;
+        validate_next_lease_epoch(&lease_path, epoch)?;
+        let outcome = self.put_in_lock(bytes, crate::CAS_MAX_OBJECT_BYTES, &coord)?;
+        debug_assert_eq!(
+            lease.blob_hashes.as_slice(),
+            std::slice::from_ref(&outcome.hash)
+        );
+        publish_lease_record_locked(self.store_root(), &lease, &lease_path, &coord)?;
+        Ok(outcome)
+    }
+}
+
+/// Verify an immutable object and restore it from authoritative bytes.
+/// Corrupt content is quarantined before replacement. This compatibility API
+/// returns only whether bytes changed; use [`repair_object_receipted`] when an
+/// auditable producer receipt is required.
 pub fn repair_object(store_root: &Path, blob_hash: &str, bytes: &[u8]) -> Result<bool, GcError> {
+    validate_repair_bytes(blob_hash, bytes)?;
+    let cas = SharedCas::open(store_root.to_path_buf());
+    let lock = StoreLock::sweep(store_root, LOCK_DEADLINE).map_err(GcError::Io)?;
+    repair_object_with_guard(&cas, &lock, blob_hash, bytes).map(|(repaired, _)| repaired)
+}
+
+/// Repair one object and persist an immutable producer-scoped receipt.
+pub fn repair_object_receipted(
+    store_root: &Path,
+    producer_id: &str,
+    project_id: &str,
+    operation_id: &str,
+    blob_hash: &str,
+    bytes: &[u8],
+) -> Result<RepairReceipt, GcError> {
+    require_gc_producer(producer_id)?;
+    require_schema_field(is_valid_hash(project_id), "project_id")?;
+    require_schema_field(is_valid_pin_id(operation_id), "operation_id")?;
+    validate_repair_bytes(blob_hash, bytes)?;
+    let receipt_path = gc_join(
+        store_root,
+        &[
+            "repairs",
+            producer_id,
+            project_id,
+            &format!("{operation_id}.json"),
+        ],
+    );
+    let cas = SharedCas::open(store_root.to_path_buf());
+    let lock = StoreLock::sweep(store_root, LOCK_DEADLINE).map_err(GcError::Io)?;
+    if fs::symlink_metadata(&receipt_path).is_ok() {
+        return Err(GcError::Policy(format!(
+            "repair operation {operation_id} already has a receipt"
+        )));
+    }
+    let (repaired, quarantined) = repair_object_with_guard(&cas, &lock, blob_hash, bytes)?;
+    let receipt = RepairReceipt {
+        schema_version: GC_SCHEMA_VERSION.to_string(),
+        record_type: GC_RECORD_TYPE_REPAIR.to_string(),
+        store_contract_digest: gc_contract_digest_hex(),
+        producer_id: producer_id.to_string(),
+        project_id: project_id.to_string(),
+        operation_id: operation_id.to_string(),
+        blob_hash: blob_hash.to_string(),
+        repaired,
+        quarantined,
+        completed_at: format_system_time(SystemTime::now()),
+    };
+    write_gc_json(&receipt_path, &receipt)?;
+    Ok(receipt)
+}
+
+fn validate_repair_bytes(blob_hash: &str, bytes: &[u8]) -> Result<(), GcError> {
     if !is_valid_hash(blob_hash) {
         return Err(GcError::SchemaViolation("blob_hash".into()));
     }
@@ -1455,27 +2169,43 @@ pub fn repair_object(store_root: &Path, blob_hash: &str, bytes: &[u8]) -> Result
             reason: "repair bytes do not match blob hash".into(),
         });
     }
-    let cas = SharedCas::open(store_root.to_path_buf());
-    match cas.get_verified(blob_hash) {
-        Ok(_) => return Ok(false),
-        Err(CasError::NotFound) => {}
+    Ok(())
+}
+
+fn repair_object_with_guard(
+    cas: &SharedCas,
+    lock: &StoreLock,
+    blob_hash: &str,
+    bytes: &[u8],
+) -> Result<(bool, bool), GcError> {
+    if lock.mode() != LockMode::Exclusive || !lock.is_for_store_root(cas.store_root()) {
+        return Err(GcError::Policy(
+            "repair requires this store's exclusive coordinator lock".into(),
+        ));
+    }
+    let quarantined = match cas.get_verified(blob_hash) {
+        Ok(_) => return Ok((false, false)),
+        Err(CasError::NotFound) => false,
         Err(CasError::DigestMismatch { .. }) => {
-            let lock = StoreLock::sweep(store_root, LOCK_DEADLINE).map_err(GcError::Io)?;
-            match cas.remove_object(blob_hash, &lock) {
-                Ok(()) | Err(CasError::NotFound) => {}
-                Err(error) => return Err(error.into()),
-            }
+            cas.quarantine_object(blob_hash, lock)?;
+            true
         }
         Err(error) => return Err(error.into()),
+    };
+    let outcome = cas.put_in_lock(bytes, crate::CAS_MAX_OBJECT_BYTES, lock)?;
+    if outcome.hash != blob_hash {
+        return Err(GcError::CorruptMetadata {
+            path: PathBuf::from(blob_hash),
+            reason: "repair publication produced a different digest".into(),
+        });
     }
-    cas.put(bytes).map_err(GcError::from)?;
-    Ok(true)
+    Ok((true, quarantined))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::{mpsc, Mutex};
+    use std::sync::{Mutex, mpsc};
     use std::thread;
 
     fn setup_rooted_store() -> (tempfile::TempDir, SharedCas, String, String) {
@@ -1484,14 +2214,23 @@ mod tests {
         let root = cas.put(b"live root").unwrap();
         let project = project_id(dir.path()).unwrap();
         publish_reachability_snapshot(
-            dir.path(), "tokenzero", &project, 1, std::slice::from_ref(&root),
-        ).unwrap();
+            dir.path(),
+            "tokenzero",
+            &project,
+            1,
+            std::slice::from_ref(&root),
+        )
+        .unwrap();
         (dir, cas, project, root)
     }
 
     fn verdict(report: &DryRunReport, hash: &str) -> GcVerdict {
-        report.objects.iter().find(|object| object.blob_hash == hash)
-            .unwrap().verdict
+        report
+            .objects
+            .iter()
+            .find(|object| object.blob_hash == hash)
+            .unwrap()
+            .verdict
     }
 
     #[test]
@@ -1507,21 +2246,45 @@ mod tests {
     fn pins_and_leases_preserve_unrooted_objects() {
         let (dir, cas, project, _) = setup_rooted_store();
         let pinned = cas.put(b"pinned").unwrap();
-        publish_pin_record(dir.path(), &PinRecord {
-            schema_version: GC_SCHEMA_VERSION.into(), record_type: "pin".into(),
-            engine: "tokenzero".into(), project_id: project.clone(), pin_id: "pin-1".into(),
-            created_at: format_system_time(SystemTime::now()), expires_at: None,
-            blob_hash: pinned.clone(),
-        }).unwrap();
+        publish_pin_record(
+            dir.path(),
+            &PinRecord {
+                schema_version: GC_SCHEMA_VERSION.into(),
+                record_type: "pin".into(),
+                engine: "tokenzero".into(),
+                project_id: project.clone(),
+                store_contract_digest: Some(gc_contract_digest_hex()),
+                pin_id: "pin-1".into(),
+                created_at: format_system_time(SystemTime::now()),
+                expires_at: None,
+                blob_hash: pinned.clone(),
+            },
+        )
+        .unwrap();
         let leased = cas.put(b"leased").unwrap();
-        publish_lease_record(dir.path(), &LeaseRecord {
-            schema_version: GC_SCHEMA_VERSION.into(), record_type: "lease".into(),
-            engine: "tokenzero".into(), project_id: project, operation_id: "op-1".into(),
-            epoch: 1, owner: LeaseOwner { pid: 1, host: "test".into() },
-            started_at: format_system_time(SystemTime::now()),
-            expires_at: format_system_time(SystemTime::now() + std::time::Duration::from_secs(300)),
-            grace_seconds: GC_MIN_GRACE_SECONDS, blob_hashes: vec![leased.clone()],
-        }).unwrap();
+        publish_lease_record(
+            dir.path(),
+            &LeaseRecord {
+                schema_version: GC_SCHEMA_VERSION.into(),
+                record_type: "lease".into(),
+                engine: "tokenzero".into(),
+                project_id: project,
+                store_contract_digest: Some(gc_contract_digest_hex()),
+                operation_id: "op-1".into(),
+                epoch: 1,
+                owner: LeaseOwner {
+                    pid: 1,
+                    host: "test".into(),
+                },
+                started_at: format_system_time(SystemTime::now()),
+                expires_at: format_system_time(
+                    SystemTime::now() + std::time::Duration::from_secs(300),
+                ),
+                grace_seconds: GC_MIN_GRACE_SECONDS,
+                blob_hashes: vec![leased.clone()],
+            },
+        )
+        .unwrap();
         let report = run_gc(dir.path(), &GcConfig::default()).unwrap();
         assert_eq!(verdict(&report, &pinned), GcVerdict::Retain);
         assert_eq!(verdict(&report, &leased), GcVerdict::Retain);
@@ -1532,33 +2295,72 @@ mod tests {
         let (dir, cas, _, _) = setup_rooted_store();
         let first = cas.put(b"first orphan").unwrap();
         let second = cas.put(b"second orphan").unwrap();
-        let failed = run_gc(dir.path(), &GcConfig {
-            run_id: "resume-1".into(), apply: true, fault_after_deletes: Some(1),
-            ..GcConfig::default()
-        });
+        let failed = run_gc(
+            dir.path(),
+            &GcConfig {
+                run_id: "resume-1".into(),
+                apply: true,
+                fault_after_deletes: Some(1),
+                ..GcConfig::default()
+            },
+        );
         assert!(matches!(failed, Err(GcError::FaultInjected)));
-        assert!(dir.path().join("gc/reports/resume-1.progress.json").is_file());
-        let resumed = run_gc(dir.path(), &GcConfig {
-            run_id: "resume-1".into(), apply: true, ..GcConfig::default()
-        }).unwrap();
+        assert!(
+            dir.path()
+                .join("gc/reports/resume-1.progress.json")
+                .is_file()
+        );
+        let resumed = run_gc(
+            dir.path(),
+            &GcConfig {
+                run_id: "resume-1".into(),
+                apply: true,
+                ..GcConfig::default()
+            },
+        )
+        .unwrap();
         assert!(!cas.contains(&first));
         assert!(!cas.contains(&second));
-        assert!(resumed.objects.iter().filter(|o| o.blob_hash == first || o.blob_hash == second)
-            .all(|o| o.evidence.iter().any(|e| e.contains("deleted by this sweep"))));
-        assert!(!dir.path().join("gc/reports/resume-1.progress.json").exists());
+        assert!(
+            resumed
+                .objects
+                .iter()
+                .filter(|o| o.blob_hash == first || o.blob_hash == second)
+                .all(|o| o
+                    .evidence
+                    .iter()
+                    .any(|e| e.contains("deleted by this sweep")))
+        );
+        assert!(
+            !dir.path()
+                .join("gc/reports/resume-1.progress.json")
+                .exists()
+        );
     }
 
     #[test]
     fn stale_epoch_and_bad_version_fail_closed() {
         let (dir, _, project, _) = setup_rooted_store();
-        let stale = publish_reachability_snapshot(
-            dir.path(), "tokenzero", &project, 1, &[],
-        ).unwrap_err();
+        let stale =
+            publish_reachability_snapshot(dir.path(), "tokenzero", &project, 1, &[]).unwrap_err();
         assert!(matches!(stale, GcError::SchemaViolation(_)));
-        let path = dir.path().join("gc/roots/tokenzero").join(&project).join("current.json");
-        fs::write(&path, br#"{"schema_version":"zerostack.cas-gc.v999","record_type":"reachability-snapshot"}"#).unwrap();
+        let path = dir
+            .path()
+            .join("gc/roots/tokenzero")
+            .join(&project)
+            .join("current.json");
+        fs::write(
+            &path,
+            br#"{"schema_version":"zerostack.cas-gc.v999","record_type":"reachability-snapshot"}"#,
+        )
+        .unwrap();
         let report = run_gc(dir.path(), &GcConfig::default()).unwrap();
-        assert!(report.objects.iter().all(|object| object.verdict == GcVerdict::RetainUncertain));
+        assert!(
+            report
+                .objects
+                .iter()
+                .all(|object| object.verdict == GcVerdict::RetainUncertain)
+        );
     }
 
     #[test]
@@ -1583,7 +2385,8 @@ mod tests {
         let published = Arc::new(std::sync::atomic::AtomicBool::new(false));
         let published_in_hook = Arc::clone(&published);
         let config = GcConfig {
-            run_id: "race-1".into(), apply: true,
+            run_id: "race-1".into(),
+            apply: true,
             now: SystemTime::now() + std::time::Duration::from_secs(86_400),
             before_unlink: Some(Arc::new(move |_| {
                 entered_tx.send(()).unwrap();
@@ -1632,30 +2435,65 @@ mod tests {
             Err(GcError::SchemaViolation(_))
         ));
         let lease = LeaseRecord {
-            schema_version: GC_SCHEMA_VERSION.into(), record_type: "lease".into(),
-            engine: "tokenzero".into(), project_id: project, operation_id: "op".into(),
-            epoch: 1, owner: LeaseOwner { pid: 1, host: "test".into() },
+            schema_version: GC_SCHEMA_VERSION.into(),
+            record_type: "lease".into(),
+            engine: "tokenzero".into(),
+            project_id: project,
+            store_contract_digest: Some(gc_contract_digest_hex()),
+            operation_id: "op".into(),
+            epoch: 1,
+            owner: LeaseOwner {
+                pid: 1,
+                host: "test".into(),
+            },
             started_at: format_system_time(SystemTime::now()),
             expires_at: format_system_time(SystemTime::now() + std::time::Duration::from_secs(300)),
-            grace_seconds: GC_MIN_GRACE_SECONDS, blob_hashes: too_many,
+            grace_seconds: GC_MIN_GRACE_SECONDS,
+            blob_hashes: too_many,
         };
-        assert!(matches!(publish_lease_record(dir.path(), &lease), Err(GcError::SchemaViolation(_))));
+        assert!(matches!(
+            publish_lease_record(dir.path(), &lease),
+            Err(GcError::SchemaViolation(_))
+        ));
         let progress = dir.path().join("gc/reports/bounds.progress.json");
         let hashes = vec!["a".repeat(64); GC_MAX_BLOB_HASHES + 1];
         fs::create_dir_all(progress.parent().unwrap()).unwrap();
-        fs::write(&progress, serde_json::json!({
-            "schema_version": GC_SCHEMA_VERSION,
-            "record_type": "sweep-progress", "run_id": "bounds", "store_root": dir.path(),
-            "evaluated_at": format_system_time(SystemTime::now()), "objects": hashes,
-            "deleted": [], "state": "sweeping"
-        }).to_string()).unwrap();
-        assert!(matches!(run_gc(dir.path(), &GcConfig { run_id: "bounds".into(), ..GcConfig::default() }), Err(GcError::CorruptMetadata { .. })));
+        fs::write(
+            &progress,
+            serde_json::json!({
+                "schema_version": GC_SCHEMA_VERSION,
+                "record_type": GC_RECORD_TYPE_SWEEP_PROGRESS,
+                "store_contract_digest": gc_contract_digest_hex(),
+                "run_id": "bounds",
+                "store_root": dir.path(),
+                "evaluated_at": format_system_time(SystemTime::now()),
+                "plan_digest": "b".repeat(64),
+                "objects": hashes,
+                "deleted": [],
+                "state": "sweeping"
+            })
+            .to_string(),
+        )
+        .unwrap();
+        assert!(matches!(
+            run_gc(
+                dir.path(),
+                &GcConfig {
+                    run_id: "bounds".into(),
+                    ..GcConfig::default()
+                }
+            ),
+            Err(GcError::CorruptMetadata { .. })
+        ));
     }
 
     #[test]
     fn json_entry_counter_enforces_global_bound() {
         let mut count = GC_MAX_BLOB_HASHES;
-        assert!(matches!(count_gc_json_entry(&mut count), Err(GcError::Policy(_))));
+        assert!(matches!(
+            count_gc_json_entry(&mut count),
+            Err(GcError::Policy(_))
+        ));
         count = GC_MAX_BLOB_HASHES - 1;
         count_gc_json_entry(&mut count).unwrap();
         assert_eq!(count, GC_MAX_BLOB_HASHES);
@@ -1671,21 +2509,43 @@ mod tests {
             }));
         }
         let report = serde_json::json!({
-            "schema_version": GC_SCHEMA_VERSION, "record_type": "dry-run-report",
-            "run_id": "bounds", "store_root": "/tmp/store",
-            "evaluated_at": "2026-01-01T00:00:00Z", "objects": objects
+            "schema_version": GC_SCHEMA_VERSION,
+            "record_type": GC_RECORD_TYPE_DRY_RUN,
+            "store_contract_digest": gc_contract_digest_hex(),
+            "run_id": "bounds",
+            "store_root": "/tmp/store",
+            "evaluated_at": "2026-01-01T00:00:00Z",
+            "apply": false,
+            "state": "evaluated",
+            "objects": objects,
+            "deleted": []
         });
-        assert!(matches!(validate_dry_run_report(&report), Err(GcError::SchemaViolation(_))));
+        assert!(matches!(
+            validate_dry_run_report(&report),
+            Err(GcError::SchemaViolation(_))
+        ));
         let evidence = vec![serde_json::Value::String("e".into()); GC_MAX_EVIDENCE_ITEMS + 1];
         let report = serde_json::json!({
-            "schema_version": GC_SCHEMA_VERSION, "record_type": "dry-run-report",
-            "run_id": "bounds", "store_root": "/tmp/store",
-            "evaluated_at": "2026-01-01T00:00:00Z", "objects": [{
+            "schema_version": GC_SCHEMA_VERSION,
+            "record_type": GC_RECORD_TYPE_DRY_RUN,
+            "store_contract_digest": gc_contract_digest_hex(),
+            "run_id": "bounds",
+            "store_root": "/tmp/store",
+            "evaluated_at": "2026-01-01T00:00:00Z",
+            "apply": false,
+            "state": "evaluated",
+            "objects": [{
                 "blob_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-                "verdict": "collect", "reason_codes": ["no-live-reference"], "evidence": evidence
-            }]
+                "verdict": "collect",
+                "reason_codes": ["no-live-reference"],
+                "evidence": evidence
+            }],
+            "deleted": []
         });
-        assert!(matches!(validate_dry_run_report(&report), Err(GcError::SchemaViolation(_))));
+        assert!(matches!(
+            validate_dry_run_report(&report),
+            Err(GcError::SchemaViolation(_))
+        ));
     }
 
     #[test]
@@ -1699,7 +2559,9 @@ mod tests {
                 gc_atomic_write(&path, format!("{index}").as_bytes()).unwrap();
             }));
         }
-        for worker in workers { worker.join().unwrap(); }
+        for worker in workers {
+            worker.join().unwrap();
+        }
         assert!(path.is_file());
         assert!(fs::read_dir(path.parent().unwrap()).unwrap().all(|entry| {
             let name = entry.unwrap().file_name();
@@ -1721,9 +2583,16 @@ mod tests {
         symlink(external.path(), dir.path().join("gc/roots")).unwrap();
         let result = run_gc(dir.path(), &GcConfig::default());
         assert!(matches!(result, Err(GcError::CorruptMetadata { .. })));
-        assert!(publish_reachability_snapshot(
-            dir.path(), "tokenzero", &"a".repeat(64), 1, std::slice::from_ref(&orphan)
-        ).is_err());
+        assert!(
+            publish_reachability_snapshot(
+                dir.path(),
+                "tokenzero",
+                &"a".repeat(64),
+                1,
+                std::slice::from_ref(&orphan)
+            )
+            .is_err()
+        );
         assert!(cas.contains(&orphan));
         assert!(!external.path().join("gc").exists());
         assert_eq!(fs::read(&sentinel).unwrap(), b"unchanged");
