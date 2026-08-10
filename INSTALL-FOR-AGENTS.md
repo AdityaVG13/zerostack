@@ -17,7 +17,7 @@ Four executables and one optional CLI wrapper.
 | Artifact | Produced by | Role |
 | --- | --- | --- |
 | `zerostack-codemode-host` | `ZeroStack`, `cargo build --release -p zero-codemode --bin zerostack-codemode-host` | Aggregate CodeMode sidecar. Reads bounded NDJSON frames on stdin, writes them on stdout. |
-| `fszero-codemode` | `FSZero`, `cargo build --release -p fszero-codemode` | FSZero CodeMode delegate / raw worker. |
+| `fszero-codemode` | `FSZero`, `cargo build --release -p fszero-worker --bin fszero-codemode` | FSZero planner-free raw worker. |
 | `graphzero-codemode` | `GraphZero`, `cargo build --release -p graphzero --bin graphzero-codemode --features tokenzero,surface-codemode` | GraphZero CodeMode delegate. |
 | `tokenzero-codemode` | `TokenZero`, `cargo build --release --bin tokenzero-codemode --no-default-features --features surface-codemode` | TokenZero CodeMode delegate. |
 | `zs` | `ZeroStack/scripts/install_zs.py` | Python CLI wrapper for shell-only harnesses. |
@@ -64,7 +64,7 @@ directory names are fixed by `HarnessBinary::dev_repo_dir` in `discovery.rs`:
 ```sh
 # <parent>/ZeroStack, <parent>/FSZero, <parent>/GraphZero, <parent>/TokenZero
 cd <parent>/ZeroStack   && cargo build --release -p zero-codemode --bin zerostack-codemode-host
-cd <parent>/FSZero      && cargo build --release -p fszero-codemode
+cd <parent>/FSZero      && cargo build --release -p fszero-worker --bin fszero-codemode
 cd <parent>/GraphZero   && cargo build --release -p graphzero --bin graphzero-codemode --features tokenzero,surface-codemode
 cd <parent>/TokenZero   && cargo build --release --bin tokenzero-codemode --no-default-features --features surface-codemode
 ```
