@@ -22,6 +22,7 @@ python3 scripts/bench/senpi-zerostack/run.py \
   --senpi-root /tmp/senpi-ymp3 \
   --zerostack-root /tmp/zerostack-ymp3-source \
   --zerostack-host /path/to/zerostack-codemode-host \
+  --zerostack-revision <full-immutable-revision> \
   --profile quick \
   --output /tmp/senpi-zerostack-quick.json
 ```
@@ -33,8 +34,11 @@ It does not change user configuration.
 
 ## Frozen comparison
 
-`identity.json` pins the Senpi revision, schedule, output budget, fake delegate,
-timeouts, and three matched workloads:
+`identity.json` pins the default ZeroStack revision, Senpi revision, schedule,
+output budget, fake delegate, timeouts, and workloads. Pass
+`--zerostack-revision` to bind a run to another immutable hub revision.
+
+The benchmark covers:
 
 - no-op JavaScript
 - one 1 KiB read delegate round trip

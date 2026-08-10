@@ -480,6 +480,10 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--senpi-root", type=Path, required=True)
     parser.add_argument("--zerostack-host", type=Path, required=True)
     parser.add_argument("--zerostack-root", type=Path, default=repository_root(Path(__file__).resolve()))
+    parser.add_argument(
+        "--zerostack-revision",
+        help="expected immutable ZeroStack revision; defaults to identity.json",
+    )
     parser.add_argument("--identity", type=Path, default=Path(__file__).with_name("identity.json"))
     parser.add_argument("--driver", type=Path, default=Path(__file__).with_name("senpi-driver.ts"))
     parser.add_argument("--profile", choices=["quick", "full"], default="quick")
@@ -506,9 +510,12 @@ def main() -> int:
     senpi_fact = git_fact(args.senpi_root)
     if senpi_fact["head"] != config["comparison"]["assembly_manifest"]["senpi_revision"]:
         raise RuntimeError("Senpi revision does not match the frozen identity")
-    zero_fact = git_fact(args.zerostack_root)
-    if zero_fact["head"] != config["comparison"]["assembly_manifest"]["zerostack_revision"]:
-        raise RuntimeError("ZeroStack revision does not match the frozen identity")
+    expected_zero_revision = (
+        args.zerostack_revision
+        or config["comparison"]["assembly_manifest"]["zerostack_revision"]
+    )
+    if zero_fact["head"] != expected_zero_revision:
+        raise RuntimeError("ZeroStack revision does not match the expected identity")
     facts = {
         "host": host_facts(),
         "senpi": senpi_fact,
