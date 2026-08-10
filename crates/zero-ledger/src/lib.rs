@@ -12,14 +12,24 @@
 //!   mixing identities is a typed error ([`LedgerError::TokenizerIdentityMismatch`]).
 //! - **Append-only monotone counters.** [`ResourceGauge`] exposes no API to
 //!   decrement or rewrite history; overflow is a typed error, never a wrap.
-//! - **Complete charge accounting.** Every model-visible call declares its
-//!   locked-tokenizer input once in [`TokenCharge::input_tokens`] and splits it
-//!   across the [`ChargeClass`] variants. Billed input, failed trials, retries,
-//!   verification/recovery, re-expansions and raw fallbacks are all summed into
-//!   the receipt exposure, so cost cannot hide in a side counter. Unclassified
-//!   and double-counted input are typed errors at charge time and again at
-//!   finalization ([`LedgerError::UnclassifiedInput`],
+//! - **Legacy v2 token surface stays readable.** Every model-visible call
+//!   declares its locked-tokenizer input once in [`TokenCharge::input_tokens`]
+//!   and splits it across the six [`ChargeClass`] variants. This is the archived
+//!   v2 per-surface report and remains wire-compatible, but it is **not** the
+//!   complete causal authority: the six classes can omit or double-class
+//!   fallback, restoration, prewarm, and residue work, and declared estimates
+//!   can masquerade as measured facts. Unclassified and double-counted input
+//!   remain typed errors on this surface ([`LedgerError::UnclassifiedInput`],
 //!   [`LedgerError::DoubleCountedInput`]).
+//! - **Complete causal authority is versioned and exclusive.** [`causal_work`]
+//!   replaces the six token classes as complete authority with exactly-one
+//!   classification across candidate, verification, comparison, baseline,
+//!   fallback, restoration, prewarm, and residue. Receipts bind one
+//!   parent-measured integer counter window and a preregistered residue policy;
+//!   declared estimates live in a separate namespace ([`DeclaredEstimateV1`])
+//!   that can never construct a measured receipt, and an unavailable counter is
+//!   [`ParentCounterObservationV1::Unmeasured`], never zero. Legacy v2 classes
+//!   map readably without rewriting archives ([`map_legacy_class_v2`]).
 //! - **Integer-only arithmetic.** Retained fractions are parts-per-million
 //!   integers widened to u128; there are no floats and no percentage strings.
 //!   [`RetainedFractionPpm`] is range-validated at construction and on the wire.
@@ -218,10 +228,15 @@ impl LedgerConfig {
     }
 }
 
-/// The exhaustive set of input-token charge classes (T8, section 2.2).
+/// Legacy v2 input-token charge classes (T8, section 2.2).
 ///
-/// Every model-visible call falls into exactly one class per token, and the
-/// receipt exposure is the sum over all of them.
+/// These six classes are the archived v2 per-surface report and stay readable
+/// and wire-compatible, but they are not the complete causal authority: they
+/// can omit or double-class fallback, restoration, prewarm, and residue work,
+/// and declared estimates can masquerade as measured facts. Complete exactly-one
+/// causal accounting lives in [`causal_work`] ([`CausalWorkClassV1`],
+/// [`CausalWorkReceiptV1`]); [`map_legacy_class_v2`] maps these classes readably
+/// without rewriting archives.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
 pub enum ChargeClass {
     /// Input tokens of an accepted, billed rendering.
