@@ -31,6 +31,11 @@ use zero_abi::{
     ApprovalState, CallRequest, TOKEN_JOB_OPERATION_V1, TokenJobPollRequestV1,
     TokenJobPollResultV1, WorkerResult, WorkerTrace,
 };
+use zerostack_machine_permit::{
+    MachinePermit, MachinePermitHeartbeat, PERMIT_HEARTBEAT_INTERVAL, PermitOwnerMetadata,
+    try_scoped_permit_base_for,
+};
+
 use zero_store::{Engine, ResolvedStore, ensure_layout};
 
 pub const SESSION_PROTOCOL: &str = "zerostack-session/v1";
@@ -220,6 +225,78 @@ struct AggregateWorkerState {
 struct ActiveApprovals {
     grants: Vec<SessionApprovalGrantV1>,
 }
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct AggregateExecutionContext {
+    generation: u64,
+    request_id: u64,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum DispatchPermitClass {
+    Analysis,
+    Index,
+    Heavy,
+}
+
+impl DispatchPermitClass {
+    const fn as_str(self) -> &'static str {
+        match self {
+            Self::Analysis => "analysis",
+            Self::Index => "index",
+            Self::Heavy => "heavy",
+        }
+    }
+}
+
+fn dispatch_permit_class(engine: EngineIdentity, operation: &str) -> Option<DispatchPermitClass> {
+    if matches!(
+        (engine, operation),
+        (EngineIdentity::FsZero, "fs.expand")
+            | (EngineIdentity::GraphZero, "expand")
+            | (EngineIdentity::TokenZero, "expand")
+    ) {
+        return None;
+    }
+    if engine == EngineIdentity::GraphZero && matches!(operation, "index" | "remember") {
+        return Some(DispatchPermitClass::Index);
+    }
+    if matches!(
+        (engine, operation),
+        (EngineIdentity::FsZero, "fs.edit" | "fs.write")
+            | (EngineIdentity::TokenZero, "ingest" | "shell")
+    ) {
+        return Some(DispatchPermitClass::Heavy);
+    }
+    Some(DispatchPermitClass::Analysis)
+}
+
+fn dispatch_permit_slots(class: DispatchPermitClass, cores: usize) -> usize {
+    match class {
+        DispatchPermitClass::Analysis => (cores / 4).max(1).min(8),
+        DispatchPermitClass::Index => (cores / 8).max(1).min(2),
+        DispatchPermitClass::Heavy => 1,
+    }
+}
+
+fn available_cores() -> usize {
+    std::thread::available_parallelism()
+        .map(|value| value.get())
+        .unwrap_or(1)
+}
+
+fn execution_session_ref(session_id: &str, context: AggregateExecutionContext) -> String {
+    format!(
+        "cm://session/{}/generation/{}",
+        session_id, context.generation
+    )
+}
+
+fn execution_cell_ref(session_id: &str, context: AggregateExecutionContext) -> String {
+    format!(
+        "cm://cell/{}/generation/{}/request/{}",
+        session_id, context.generation, context.request_id
+    )
+}
 
 struct AggregateDispatch {
     engine: EngineIdentity,
@@ -227,6 +304,7 @@ struct AggregateDispatch {
     revision: String,
     contract_digest: String,
     context: DispatchContext,
+    execution: AggregateExecutionContext,
     completion: crate::ConnectorCompletion,
 }
 
@@ -236,6 +314,7 @@ struct AggregateConnector {
     dispatchers: Vec<JoinHandle<()>>,
     sequence: AtomicU64,
     approvals: Mutex<ActiveApprovals>,
+    execution_context: Mutex<Option<AggregateExecutionContext>>,
 }
 
 impl AggregateConnector {
@@ -393,9 +472,31 @@ impl AggregateConnector {
             dispatchers,
             sequence: AtomicU64::new(1),
             approvals: Mutex::new(ActiveApprovals::default()),
+            execution_context: Mutex::new(None),
         })
     }
 
+    fn set_execution_context(&self, context: AggregateExecutionContext) -> Result<(), HostError> {
+        let mut active = self
+            .execution_context
+            .lock()
+            .map_err(|_| HostError::Connector("execution context lock poisoned".into()))?;
+        *active = Some(context);
+        Ok(())
+    }
+
+    fn clear_execution_context(&self) {
+        if let Ok(mut active) = self.execution_context.lock() {
+            *active = None;
+        }
+    }
+
+    fn execution_context(&self) -> Result<AggregateExecutionContext, ConnectorError> {
+        self.execution_context
+            .lock()
+            .map_err(|_| ConnectorError::new("execution context lock poisoned"))?
+            .ok_or_else(|| ConnectorError::new("aggregate execution context missing"))
+    }
     fn install_approvals(&self, grants: Vec<SessionApprovalGrantV1>) -> Result<(), HostError> {
         let mut active = self
             .approvals
@@ -1100,9 +1201,12 @@ impl Connector for AggregateConnector {
                 "aggregate dispatch deadline or cancellation",
             ));
         }
+        let execution = self.execution_context()?;
         let id = format!(
-            "{}-{}",
+            "{}-g{}-r{}-{}",
             self.state.session_id,
+            execution.generation,
+            execution.request_id,
             self.sequence.fetch_add(1, Ordering::Relaxed)
         );
         let (revision, contract_digest) = self
@@ -1113,10 +1217,10 @@ impl Connector for AggregateConnector {
             .ok_or_else(|| ConnectorError::new("worker pin missing"))?;
         let trace = WorkerTrace {
             runtime_id: self.state.session_id.clone(),
-            cell_id: self.state.session_id.clone(),
+            cell_id: execution_cell_ref(&self.state.session_id, execution),
             request_id: id.clone(),
             trace_id: id.clone(),
-            parent_span_id: None,
+            parent_span_id: Some(execution_session_ref(&self.state.session_id, execution)),
             worker_revision: revision.clone(),
             contract_digest: contract_digest.clone(),
         };
@@ -1144,6 +1248,7 @@ impl Connector for AggregateConnector {
             revision,
             contract_digest,
             context,
+            execution,
             completion,
         };
         let sender = self
@@ -1194,6 +1299,39 @@ fn normalize_aggregate_result_value(
         .map_err(|error| ConnectorError::new(format!("invalid token.job result: {error}")))?;
     serde_json::to_value(result).map_err(|error| ConnectorError::new(error.to_string()))
 }
+fn acquire_dispatch_permit(
+    state: &AggregateWorkerState,
+    dispatch: &AggregateDispatch,
+) -> Result<Option<MachinePermitHeartbeat>, ConnectorError> {
+    let Some(class) = dispatch_permit_class(dispatch.engine, &dispatch.request.op) else {
+        return Ok(None);
+    };
+    let base = try_scoped_permit_base_for(class.as_str(), Some(&state.root)).map_err(|error| {
+        ConnectorError::new(format!("resolve {} permit scope: {error}", class.as_str()))
+    })?;
+    let owner = PermitOwnerMetadata::new(
+        state.root.to_string_lossy(),
+        dispatch.request.op.clone(),
+        execution_session_ref(&state.session_id, dispatch.execution),
+        execution_cell_ref(&state.session_id, dispatch.execution),
+    );
+    let permit = MachinePermit::acquire_slots_with_owner_metadata(
+        &base,
+        dispatch_permit_slots(class, available_cores()),
+        dispatch.context.deadline,
+        owner,
+    )
+    .map_err(|error| ConnectorError::new(format!("{} permit: {error}", class.as_str())))?;
+    permit
+        .start_heartbeat(PERMIT_HEARTBEAT_INTERVAL)
+        .map(Some)
+        .map_err(|error| {
+            ConnectorError::new(format!(
+                "start {} permit heartbeat: {error}",
+                class.as_str()
+            ))
+        })
+}
 
 fn run_aggregate_dispatch(
     state: &AggregateWorkerState,
@@ -1204,6 +1342,7 @@ fn run_aggregate_dispatch(
             "aggregate dispatch deadline or cancellation",
         ));
     }
+    let _permit = acquire_dispatch_permit(state, dispatch)?;
     let mut worker = checkout_worker(state, dispatch.engine)?;
     if worker.is_terminal() {
         worker = launch_worker(state, dispatch.engine)?;
@@ -1371,11 +1510,22 @@ impl SessionExecutor {
         })
     }
     pub fn execute(&self, source: &str, timeout: Duration) -> Result<Value, HostError> {
-        self.execute_with_approvals(source, timeout, Vec::new())
+        self.execute_with_context(0, 0, source, timeout, Vec::new())
     }
 
     pub fn execute_with_approvals(
         &self,
+        source: &str,
+        timeout: Duration,
+        approval_grants: Vec<SessionApprovalGrantV1>,
+    ) -> Result<Value, HostError> {
+        self.execute_with_context(0, 0, source, timeout, approval_grants)
+    }
+
+    pub fn execute_with_context(
+        &self,
+        generation: u64,
+        request_id: u64,
         source: &str,
         timeout: Duration,
         approval_grants: Vec<SessionApprovalGrantV1>,
@@ -1386,12 +1536,23 @@ impl SessionExecutor {
             return Err(HostError::Connector("session cancelled".into()));
         }
         self.connector.install_approvals(approval_grants)?;
+        if let Err(error) = self
+            .connector
+            .set_execution_context(AggregateExecutionContext {
+                generation,
+                request_id,
+            })
+        {
+            self.connector.clear_approvals();
+            return Err(error);
+        }
         let result = self.host.execute_with_cancel_timeout(
             source,
             self.connector.clone(),
             self.cancelled.clone(),
             timeout,
         );
+        self.connector.clear_execution_context();
         self.connector.clear_approvals();
         result
     }
@@ -1535,6 +1696,8 @@ struct AggregateSessionState {
 
 enum SessionCommand {
     Execute {
+        generation: u64,
+        request_id: u64,
         source: String,
         timeout: Duration,
         approval_grants: Vec<SessionApprovalGrantV1>,
@@ -1850,6 +2013,8 @@ impl AggregateSession {
             state.consumed_approval_ids.extend(approval_ids);
         }
         match self.commands.try_send(SessionCommand::Execute {
+            generation,
+            request_id,
             source: source.into(),
             timeout,
             approval_grants,
@@ -2183,6 +2348,8 @@ fn session_worker(
     while let Ok(command) = commands.recv() {
         match command {
             SessionCommand::Execute {
+                generation,
+                request_id,
                 source,
                 timeout,
                 approval_grants,
@@ -2192,7 +2359,13 @@ fn session_worker(
                     .as_ref()
                     .ok_or_else(|| HostError::Runtime("session executor is unavailable".into()))
                     .and_then(|executor| {
-                        executor.execute_with_approvals(&source, timeout, approval_grants)
+                        executor.execute_with_context(
+                            generation,
+                            request_id,
+                            &source,
+                            timeout,
+                            approval_grants,
+                        )
                     });
                 let _ = reply.send(result);
             }
@@ -2581,5 +2754,41 @@ mod tests {
             );
         }
         assert!(lower("token", "expand", json!("https://invalid")).is_err());
+    }
+    #[test]
+    fn dispatch_permit_defaults_and_expand_exception_are_bounded() {
+        assert_eq!(dispatch_permit_slots(DispatchPermitClass::Analysis, 1), 1);
+        assert_eq!(dispatch_permit_slots(DispatchPermitClass::Analysis, 32), 8);
+        assert_eq!(dispatch_permit_slots(DispatchPermitClass::Index, 1), 1);
+        assert_eq!(dispatch_permit_slots(DispatchPermitClass::Index, 32), 2);
+        assert_eq!(dispatch_permit_slots(DispatchPermitClass::Heavy, 128), 1);
+        assert_eq!(
+            dispatch_permit_class(EngineIdentity::TokenZero, "expand"),
+            None
+        );
+        assert_eq!(
+            dispatch_permit_class(EngineIdentity::FsZero, "fs.search"),
+            Some(DispatchPermitClass::Analysis)
+        );
+        assert_eq!(
+            dispatch_permit_class(EngineIdentity::GraphZero, "index"),
+            Some(DispatchPermitClass::Index)
+        );
+    }
+
+    #[test]
+    fn execution_context_refs_bind_generation_and_request() {
+        let context = AggregateExecutionContext {
+            generation: 7,
+            request_id: 19,
+        };
+        assert_eq!(
+            execution_session_ref("session-7", context),
+            "cm://session/session-7/generation/7"
+        );
+        assert_eq!(
+            execution_cell_ref("session-7", context),
+            "cm://cell/session-7/generation/7/request/19"
+        );
     }
 }

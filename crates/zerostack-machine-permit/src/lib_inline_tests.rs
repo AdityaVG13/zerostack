@@ -1226,3 +1226,80 @@ fn unix_fallback_refuses_symlink_and_unsafe_preexisting_runtime() {
     assert!(verify_permit_base(&runtime).is_err());
     fs::remove_dir_all(&temp).expect("remove isolated temp");
 }
+
+#[test]
+fn typed_owner_metadata_is_written_exactly() {
+    let base = fencing_test_path("typed-owner-metadata");
+    let owner = PermitOwnerMetadata::new(
+        "/repo/exact",
+        "fs.search",
+        "cm://session/session-7/generation/3",
+        "cm://cell/session-7/generation/3/request/11",
+    );
+    let permit = MachinePermit::acquire_slots_with_owner_metadata(
+        &base,
+        1,
+        Instant::now() + Duration::from_secs(2),
+        owner.clone(),
+    )
+    .expect("typed owner acquires");
+    assert_eq!(permit.owner_metadata().expect("read typed owner"), owner);
+    let status = permit_status(&base, 1).expect("inspect typed owner");
+    assert_eq!(status[0].repository.as_deref(), Some("/repo/exact"));
+    assert_eq!(status[0].operation.as_deref(), Some("fs.search"));
+    assert_eq!(
+        status[0].session_ref.as_deref(),
+        Some("cm://session/session-7/generation/3")
+    );
+    assert_eq!(
+        status[0].cell_ref.as_deref(),
+        Some("cm://cell/session-7/generation/3/request/11")
+    );
+    drop(permit);
+    assert!(!base.join("slot-0").exists());
+    let _ = fs::remove_dir_all(base);
+}
+
+#[test]
+fn background_heartbeat_stops_and_releases_once() {
+    let base = fencing_test_path("heartbeat-lease");
+    let permit = MachinePermit::acquire_slots(
+        &base,
+        1,
+        Instant::now() + Duration::from_secs(2),
+        "heartbeat-lease",
+    )
+    .expect("acquire heartbeat permit");
+    let initial = permit_status(&base, 1)
+        .expect("inspect initial heartbeat")
+        .pop()
+        .expect("initial holder")
+        .heartbeat_at_ms
+        .expect("initial heartbeat timestamp");
+    let lease = permit
+        .start_heartbeat(Duration::from_millis(2))
+        .expect("start bounded heartbeat");
+    let deadline = Instant::now() + Duration::from_secs(1);
+    let mut refreshed = initial;
+    while refreshed <= initial && Instant::now() < deadline {
+        thread::sleep(Duration::from_millis(2));
+        refreshed = permit_status(&base, 1)
+            .expect("inspect refreshed heartbeat")
+            .pop()
+            .expect("live holder")
+            .heartbeat_at_ms
+            .expect("heartbeat timestamp");
+    }
+    assert!(refreshed > initial, "background heartbeat did not refresh");
+    lease.stop();
+    assert!(!base.join("slot-0").exists(), "lease must release its slot");
+    let next = MachinePermit::acquire_slots(
+        &base,
+        1,
+        Instant::now() + Duration::from_secs(2),
+        "after-heartbeat-lease",
+    )
+    .expect("slot must be available after one release");
+    drop(next);
+    let _ = fs::remove_dir_all(base);
+}

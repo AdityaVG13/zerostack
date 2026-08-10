@@ -13,17 +13,111 @@ use std::io::{self, Write};
 use std::marker::PhantomData;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{
+    Arc, Condvar, Mutex,
+    atomic::{AtomicU64, Ordering},
+};
+use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 pub mod session_owner;
 
 pub const PERMIT_POLL: Duration = Duration::from_millis(20);
 pub const PERMIT_POLL_MAX: Duration = Duration::from_millis(200);
+pub const PERMIT_HEARTBEAT_INTERVAL: Duration = Duration::from_secs(1);
+pub const PERMIT_HEARTBEAT_MAX_INTERVAL: Duration = Duration::from_secs(60);
 const INCOMPLETE_PERMIT_GRACE: Duration = Duration::from_millis(250);
 const WAITER_IDENTITY_MAX_AGE: Duration = Duration::from_secs(24 * 60 * 60);
 // Seven days is deliberately generous, but prevents unverifiable non-Linux holders wedging forever.
 const OWNER_IDENTITY_MAX_AGE: Duration = Duration::from_secs(7 * 24 * 60 * 60);
+
+/// Explicit diagnostic ownership metadata for one held machine permit.
+///
+/// The legacy acquire methods derive these values from the process and
+/// environment. The typed acquire methods write these exact values instead.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct PermitOwnerMetadata {
+    pub repository: String,
+    pub operation: String,
+    pub session_ref: String,
+    pub cell_ref: String,
+}
+
+impl PermitOwnerMetadata {
+    pub fn new(
+        repository: impl Into<String>,
+        operation: impl Into<String>,
+        session_ref: impl Into<String>,
+        cell_ref: impl Into<String>,
+    ) -> Self {
+        Self {
+            repository: repository.into(),
+            operation: operation.into(),
+            session_ref: session_ref.into(),
+            cell_ref: cell_ref.into(),
+        }
+    }
+
+    fn from_command(command: &str) -> Self {
+        let started_at = epoch_millis();
+        let pid = std::process::id();
+        let owner = format!("{}-{}-{:?}", pid, started_at, std::thread::current().id());
+        let repository = permit_scope_root()
+            .or_else(|| std::env::current_dir().ok())
+            .unwrap_or_else(|| PathBuf::from("."));
+        let session_ref = std::env::var("ZEROSTACK_SESSION_ID")
+            .ok()
+            .filter(|value| !value.trim().is_empty())
+            .map(|value| format!("cm://session/{}", metadata_text(&value)))
+            .unwrap_or_else(|| format!("cm://session/process/{pid}/{started_at}"));
+        Self::new(
+            repository.to_string_lossy(),
+            command,
+            session_ref,
+            format!("cm://cell/process/{}", metadata_text(&owner)),
+        )
+    }
+}
+
+/// A permit owner plus a bounded heartbeat thread.
+///
+/// The worker thread owns the underlying `MachinePermit`. Dropping or
+/// explicitly stopping this value signals the thread, joins it, and therefore
+/// releases the permit exactly once through the original cookie fence.
+pub struct MachinePermitHeartbeat {
+    stop: Arc<(Mutex<bool>, Condvar)>,
+    worker: Option<JoinHandle<()>>,
+    path: PathBuf,
+}
+
+/// Compatibility alias for callers that name the lease by its heartbeat.
+pub type PermitHeartbeat = MachinePermitHeartbeat;
+
+impl MachinePermitHeartbeat {
+    pub fn path(&self) -> &Path {
+        &self.path
+    }
+
+    pub fn stop(mut self) {
+        self.stop_inner();
+    }
+
+    fn stop_inner(&mut self) {
+        if let Ok(mut stopped) = self.stop.0.lock() {
+            *stopped = true;
+            self.stop.1.notify_one();
+        }
+        if let Some(worker) = self.worker.take() {
+            let _ = worker.join();
+        }
+    }
+}
+
+impl Drop for MachinePermitHeartbeat {
+    fn drop(&mut self) {
+        self.stop_inner();
+    }
+}
 
 /// Repo-scoped permit base below the current user's private runtime directory.
 pub fn scoped_permit_base(class: &str) -> PathBuf {
@@ -288,6 +382,62 @@ impl MachinePermit {
         &self.path
     }
 
+    pub fn owner_metadata(&self) -> io::Result<PermitOwnerMetadata> {
+        Ok(PermitOwnerMetadata::new(
+            read_required_metadata(&self.path, "repository")?,
+            read_required_metadata(&self.path, "operation")
+                .or_else(|_| read_required_metadata(&self.path, "command"))?,
+            read_required_metadata(&self.path, "session_ref")?,
+            read_required_metadata(&self.path, "cell_ref")?,
+        ))
+    }
+
+    /// Move this permit into a bounded heartbeat owner.
+    pub fn start_heartbeat(self, interval: Duration) -> io::Result<MachinePermitHeartbeat> {
+        if interval.is_zero() {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "machine permit heartbeat interval must be nonzero",
+            ));
+        }
+        let interval = interval.min(PERMIT_HEARTBEAT_MAX_INTERVAL);
+        self.heartbeat()?;
+        let stop = Arc::new((Mutex::new(false), Condvar::new()));
+        let thread_stop = Arc::clone(&stop);
+        let path = self.path.clone();
+        let worker = thread::Builder::new()
+            .name("zerostack-permit-heartbeat".into())
+            .spawn(move || {
+                loop {
+                    let guard = match thread_stop.0.lock() {
+                        Ok(guard) => guard,
+                        Err(_) => break,
+                    };
+                    let guard = match thread_stop.1.wait_timeout(guard, interval) {
+                        Ok((guard, _)) => guard,
+                        Err(_) => break,
+                    };
+                    if *guard {
+                        break;
+                    }
+                    drop(guard);
+                    if self.heartbeat().is_err() {
+                        break;
+                    }
+                }
+                drop(self);
+            })?;
+        Ok(MachinePermitHeartbeat {
+            stop,
+            worker: Some(worker),
+            path,
+        })
+    }
+
+    pub fn heartbeat_in_background(self, interval: Duration) -> io::Result<MachinePermitHeartbeat> {
+        self.start_heartbeat(interval)
+    }
+
     /// Refresh the diagnostic lease timestamp after verifying that this guard
     /// still owns the exact permit cookie. A replaced owner is never touched.
     pub fn heartbeat(&self) -> io::Result<()> {
@@ -307,20 +457,60 @@ impl MachinePermit {
         fs::rename(temporary, self.path.join("heartbeat_at"))
     }
 
+    pub fn acquire_slots_with_owner_metadata(
+        base: &Path,
+        slots: usize,
+        deadline: Instant,
+        owner: PermitOwnerMetadata,
+    ) -> Result<Self, AcquireError> {
+        Self::acquire_slots_with_wake_and_owner(base, slots, deadline, owner, PermitWake::new)
+    }
+
+    pub fn acquire_slots_with_owner(
+        base: &Path,
+        slots: usize,
+        deadline: Instant,
+        owner: PermitOwnerMetadata,
+    ) -> Result<Self, AcquireError> {
+        Self::acquire_slots_with_owner_metadata(base, slots, deadline, owner)
+    }
+
     pub fn acquire_slots(
         base: &Path,
         slots: usize,
         deadline: Instant,
         command: &str,
     ) -> Result<Self, AcquireError> {
-        Self::acquire_slots_with_wake(base, slots, deadline, command, PermitWake::new)
+        Self::acquire_slots_with_owner_metadata(
+            base,
+            slots,
+            deadline,
+            PermitOwnerMetadata::from_command(command),
+        )
     }
 
+    #[cfg(test)]
     fn acquire_slots_with_wake(
         base: &Path,
         slots: usize,
         deadline: Instant,
         command: &str,
+        make_wake: impl FnOnce(&Path) -> PermitWake,
+    ) -> Result<Self, AcquireError> {
+        Self::acquire_slots_with_wake_and_owner(
+            base,
+            slots,
+            deadline,
+            PermitOwnerMetadata::from_command(command),
+            make_wake,
+        )
+    }
+
+    fn acquire_slots_with_wake_and_owner(
+        base: &Path,
+        slots: usize,
+        deadline: Instant,
+        owner: PermitOwnerMetadata,
         make_wake: impl FnOnce(&Path) -> PermitWake,
     ) -> Result<Self, AcquireError> {
         // Always use base/slot-N — even when slots==1 — so mixed concurrency
@@ -332,8 +522,8 @@ impl MachinePermit {
             ))
         })?;
         // Pool size is the caller's requested budget (from env); do not freeze
-        // capacity to the first asker — that would let CONCURRENCY=1 starve the
-        // family-wide cores/4 analysis budget.
+        // capacity to the first asker — that would let CONCURRENCY=1 starve
+        // the family-wide cores/4 analysis budget.
         let waiter = WaiterIntent::create(base)?;
         let mut wake = make_wake(base);
         let mut attempt = 0u32;
@@ -345,7 +535,7 @@ impl MachinePermit {
             if !has_preceding && !legacy_exclusive_busy(base) {
                 for idx in 0..slots {
                     let path = base.join(format!("slot-{idx}"));
-                    match Self::try_create(&path, command) {
+                    match Self::try_create_with_owner(&path, &owner) {
                         Ok(permit) => return Ok(permit),
                         Err(TryPermit::Busy) => {}
                         Err(TryPermit::Fatal(e)) => return Err(AcquireError::Fatal(e)),
@@ -387,17 +577,48 @@ impl MachinePermit {
         }
     }
 
+    pub fn acquire_with_owner_metadata(
+        path: &Path,
+        deadline: Instant,
+        owner: PermitOwnerMetadata,
+    ) -> Result<Self, AcquireError> {
+        let mut attempt = 0u32;
+        loop {
+            match Self::try_create_with_owner(path, &owner) {
+                Ok(permit) => return Ok(permit),
+                Err(TryPermit::Busy) => {
+                    if Instant::now() >= deadline {
+                        return Err(AcquireError::Busy(describe_busy_path(path)));
+                    }
+                    let sleep_for = permit_backoff(attempt)
+                        .min(deadline.saturating_duration_since(Instant::now()));
+                    attempt = attempt.saturating_add(1);
+                    std::thread::sleep(sleep_for);
+                }
+                Err(TryPermit::Fatal(e)) => return Err(AcquireError::Fatal(e)),
+            }
+        }
+    }
+
     fn try_create(path: &Path, command: &str) -> Result<Self, TryPermit> {
+        let owner = PermitOwnerMetadata::from_command(command);
+        Self::try_create_with_owner(path, &owner)
+    }
+
+    fn try_create_with_owner(
+        path: &Path,
+        owner_metadata: &PermitOwnerMetadata,
+    ) -> Result<Self, TryPermit> {
         match fs::create_dir(path) {
             Ok(()) => {
                 let cookie = owner_cookie();
-                let owner = format!(
+                let identity_owner = format!(
                     "{}-{}-{:?}",
                     std::process::id(),
                     epoch_millis(),
                     std::thread::current().id()
                 );
-                if let Err(e) = write_metadata(path, &cookie, &owner, command) {
+                if let Err(e) = write_metadata(path, &cookie, &identity_owner, owner_metadata) {
                     quarantine_exact(path, None);
                     return Err(TryPermit::Fatal(format!(
                         "write codemode permit metadata: {e}"
@@ -418,7 +639,7 @@ impl MachinePermit {
             }
             Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
                 if reclaim_dead(path) {
-                    return Self::try_create(path, command);
+                    return Self::try_create_with_owner(path, owner_metadata);
                 }
                 Err(TryPermit::Busy)
             }
@@ -720,6 +941,17 @@ fn read_metadata(path: &Path, name: &str) -> Option<String> {
         .map(|value| metadata_text(value.trim()))
         .filter(|value| !value.is_empty())
 }
+fn read_required_metadata(path: &Path, name: &str) -> io::Result<String> {
+    read_metadata(path, name).ok_or_else(|| {
+        io::Error::new(
+            io::ErrorKind::NotFound,
+            format!(
+                "machine permit metadata is missing: {}",
+                path.join(name).display()
+            ),
+        )
+    })
+}
 
 fn describe_busy_slots(base: &Path, slots: usize) -> String {
     match permit_status(base, slots) {
@@ -821,25 +1053,24 @@ enum ProcessObservation {
     Unknown,
 }
 
-fn write_metadata(path: &Path, cookie: &str, owner: &str, command: &str) -> io::Result<()> {
+fn write_metadata(
+    path: &Path,
+    cookie: &str,
+    owner: &str,
+    metadata: &PermitOwnerMetadata,
+) -> io::Result<()> {
     let started_at = epoch_millis();
     let pid = std::process::id();
-    let repository = permit_scope_root()
-        .or_else(|| std::env::current_dir().ok())
-        .unwrap_or_else(|| PathBuf::from("."));
-    let session_ref = std::env::var("ZEROSTACK_SESSION_ID")
-        .ok()
-        .filter(|value| !value.trim().is_empty())
-        .map(|value| format!("cm://session/{}", metadata_text(&value)))
-        .unwrap_or_else(|| format!("cm://session/process/{pid}/{started_at}"));
-    let cell_ref = format!("cm://cell/process/{}", metadata_text(owner));
+    let repository = metadata_text(&metadata.repository);
+    let operation = metadata_text(&metadata.operation);
+    let session_ref = metadata_text(&metadata.session_ref);
+    let cell_ref = metadata_text(&metadata.cell_ref);
     write_file(&path.join("owner"), &metadata_text(owner))?;
     write_file(&path.join("pid"), &pid.to_string())?;
-    write_file(
-        &path.join("repository"),
-        &metadata_text(&repository.to_string_lossy()),
-    )?;
-    write_file(&path.join("command"), &metadata_text(command))?;
+    write_file(&path.join("repository"), &repository)?;
+    write_file(&path.join("operation"), &operation)?;
+    // Keep the legacy command filename as a source-compatible diagnostic alias.
+    write_file(&path.join("command"), &operation)?;
     write_file(&path.join("session_ref"), &session_ref)?;
     write_file(&path.join("cell_ref"), &cell_ref)?;
     write_file(&path.join("started_at"), &started_at.to_string())?;
