@@ -5,7 +5,7 @@ use std::{
     os::unix::{fs::PermissionsExt, net::UnixStream},
     process::{Command, Stdio},
     thread,
-    time::{Duration, Instant},
+    time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 use tempfile::TempDir;
 use zero_codemode::session::SessionExecutor;
@@ -251,6 +251,103 @@ fn authenticated_cross_surface_and_rejections() {
     let _ = read(&mut r);
     c.wait().unwrap();
     assert!(!sock.exists())
+}
+
+#[test]
+fn approval_grant_reaches_one_exact_worker_call_and_cannot_replay_or_leak() {
+    let (directory, mut session, token, shutdown_token, _) =
+        start(ProcessIdentity::current().unwrap());
+    let socket = directory.path().join("runtime/session.sock");
+    let (mut stream, mut reader, generation) = connect_authenticated(&socket, &token);
+    let root = directory.path().canonicalize().unwrap();
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_millis() as u64;
+    let grant = json!({
+        "schema":"zerostack.session.approval_grant.v1",
+        "grant_id":"grant-exact-1",
+        "engine":"fszero",
+        "root":root,
+        "generation":generation,
+        "request_id":11,
+        "operation":"fs.write",
+        "effect":"approval_required_mutation",
+        "authority_digest":"a".repeat(64),
+        "policy_digest":"b".repeat(64),
+        "issued_at_unix_ms":now.saturating_sub(1),
+        "expires_at_unix_ms":now.saturating_add(60_000),
+    });
+    let source = "return await zero.fs.compound('write',{__approval_fixture:true});";
+    send(
+        &mut stream,
+        json!({
+            "type":"execute",
+            "id":11,
+            "generation":generation,
+            "root":directory.path(),
+            "source":source,
+            "approval_grants":[grant.clone()],
+        }),
+    );
+    let response = read(&mut reader);
+    assert_eq!(response["ok"], true, "{response}");
+    let exact = exact_result(directory.path(), &response);
+    let forwarded = &exact["content"]["value"]["value"]["approval_grant"];
+    assert_eq!(forwarded["grant_id"], "grant-exact-1");
+    assert_eq!(forwarded["engine"], "fszero");
+    assert_eq!(forwarded["root"], root.to_string_lossy().as_ref());
+    assert_eq!(forwarded["operation"], "fs.write");
+    assert_eq!(forwarded["effect"], "approval_required_mutation");
+    assert!(
+        forwarded["request_id"]
+            .as_str()
+            .is_some_and(|id| !id.is_empty())
+    );
+
+    let mut replay = grant;
+    replay["request_id"] = json!(12);
+    send(
+        &mut stream,
+        json!({
+            "type":"execute",
+            "id":12,
+            "generation":generation,
+            "root":directory.path(),
+            "source":source,
+            "approval_grants":[replay],
+        }),
+    );
+    let replayed = read(&mut reader);
+    assert_eq!(replayed["ok"], false, "{replayed}");
+    assert_eq!(replayed["code"], "approval_replay");
+
+    send(
+        &mut stream,
+        json!({
+            "type":"execute",
+            "id":13,
+            "generation":generation,
+            "root":directory.path(),
+            "source":source,
+        }),
+    );
+    let unapproved = read(&mut reader);
+    assert_eq!(unapproved["ok"], false, "{unapproved}");
+    assert_eq!(unapproved["code"], "backend_execution");
+    assert!(
+        unapproved["error"]
+            .as_str()
+            .unwrap()
+            .contains("worker approval required or denied")
+    );
+
+    send(
+        &mut stream,
+        json!({"type":"shutdown","id":14,"token":shutdown_token}),
+    );
+    assert_eq!(read(&mut reader)["ok"], true);
+    session.wait().unwrap();
 }
 #[test]
 fn aggregate_promise_all_dispatches_slow_calls_in_parallel() {
@@ -920,23 +1017,12 @@ fn owner_sigkill_reaps_worker_descendants_before_socket_cleanup() {
 #[test]
 fn terminal_cancellation_rejects_queued_execution() {
     let d = TempDir::new().unwrap();
-    // SAFETY: edition-2024 set_var; this #[test] runs before the executor
-    // spawns threads and cargo test isolates the process per test binary.
-    unsafe {
-        std::env::set_var("ZEROSTACK_SESSION_ROOT", d.path());
-        std::env::set_var(
-            zero_codemode::worker::SESSION_ID_ENV,
-            "test-terminal-cancel",
-        );
-        std::env::set_var("ZEROSTACK_TEST_MODE", "1");
-        for engine in ["FSZERO", "GRAPHZERO", "TOKENZERO"] {
-            std::env::set_var(
-                format!("ZERO_{engine}_RAW_BIN"),
-                env!("CARGO_BIN_EXE_zero-codemode-worker-fixture"),
-            );
-        }
-    }
-    let exec = SessionExecutor::new().unwrap();
+    let exec = SessionExecutor::new_with_worker_fixture(
+        d.path().to_path_buf(),
+        "test-terminal-cancel".into(),
+        env!("CARGO_BIN_EXE_zero-codemode-worker-fixture").into(),
+    )
+    .unwrap();
     assert_eq!(
         exec.execute("return 1", Duration::from_secs(1)).unwrap(),
         json!(1)

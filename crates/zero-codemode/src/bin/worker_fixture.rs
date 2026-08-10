@@ -379,7 +379,9 @@ fn transport_telemetry(
 
 fn result(request: CallRequest) -> WorkerResult {
     let engine = parse_engine();
-    let (value, refs) = opaque_chain_result(engine, &request).unwrap_or_else(|| {
+    let expose_approval = request.args["__approval_fixture"] == true;
+    let approval_grant = request.approval_grant.clone();
+    let (mut value, refs) = opaque_chain_result(engine, &request).unwrap_or_else(|| {
         (
             json!({
                 "args": request.args,
@@ -389,15 +391,40 @@ fn result(request: CallRequest) -> WorkerResult {
             Vec::new(),
         )
     });
-    WorkerResult {
-        value,
-        metadata: WorkerResultMetadata {
-            effect: EffectClass::ReadOnly,
-            approval: ApprovalMetadata {
+    if expose_approval {
+        value["approval_grant"] = serde_json::to_value(&approval_grant).unwrap();
+    }
+    let (effect, approval) = if expose_approval {
+        (
+            EffectClass::ApprovalRequiredMutation,
+            match approval_grant {
+                Some(grant) => ApprovalMetadata {
+                    state: ApprovalState::Granted,
+                    approval_id: Some(grant.grant_id),
+                    policy: Some("fixture-approval-required".into()),
+                },
+                None => ApprovalMetadata {
+                    state: ApprovalState::Required,
+                    approval_id: None,
+                    policy: Some("fixture-approval-required".into()),
+                },
+            },
+        )
+    } else {
+        (
+            EffectClass::ReadOnly,
+            ApprovalMetadata {
                 state: ApprovalState::NotRequired,
                 approval_id: None,
                 policy: None,
             },
+        )
+    };
+    WorkerResult {
+        value,
+        metadata: WorkerResultMetadata {
+            effect,
+            approval,
             revert: RevertMetadata {
                 supported: false,
                 journal_id: None,

@@ -301,8 +301,6 @@ fn execution_cell_ref(session_id: &str, context: AggregateExecutionContext) -> S
 struct AggregateDispatch {
     engine: EngineIdentity,
     request: CallRequest,
-    revision: String,
-    contract_digest: String,
     context: DispatchContext,
     execution: AggregateExecutionContext,
     completion: crate::ConnectorCompletion,
@@ -322,6 +320,7 @@ impl AggregateConnector {
         root: PathBuf,
         session_id: String,
         cancellation: CancellationSignal,
+        fixture_binary: Option<&Path>,
     ) -> Result<Self, HostError> {
         let mut registry = WorkerRegistry::new();
         let mut configured_pins = BTreeMap::new();
@@ -338,19 +337,26 @@ impl AggregateConnector {
                 Some("ZERO_TOKENZERO_BIN"),
             ),
         ] {
-            let binary = std::env::var(binary_env)
-                .or_else(|_| {
-                    fallback_env
-                        .map(std::env::var)
-                        .unwrap_or(Err(std::env::VarError::NotPresent))
-                })
-                .map_err(|_| {
-                    HostError::Connector(format!("missing raw worker binary: {binary_env}"))
-                })?;
+            let binary = if let Some(fixture_binary) = fixture_binary {
+                fixture_binary.to_path_buf()
+            } else {
+                PathBuf::from(
+                    std::env::var(binary_env)
+                        .or_else(|_| {
+                            fallback_env
+                                .map(std::env::var)
+                                .unwrap_or(Err(std::env::VarError::NotPresent))
+                        })
+                        .map_err(|_| {
+                            HostError::Connector(format!("missing raw worker binary: {binary_env}"))
+                        })?,
+                )
+            };
             let test_mode = cfg!(feature = "worker-fixture")
-                && std::env::var("ZEROSTACK_TEST_MODE").as_deref() == Ok("1");
+                && (fixture_binary.is_some()
+                    || std::env::var("ZEROSTACK_TEST_MODE").as_deref() == Ok("1"));
             let key = engine.as_str().to_ascii_uppercase();
-            let (binary, binary_hash) = pinned_worker_binary(Path::new(&binary), &key)?;
+            let (binary, binary_hash) = pinned_worker_binary(&binary, &key)?;
             let probed_contract = probe_contract(engine, &binary, test_mode)?;
             let revision = std::env::var(format!("ZEROSTACK_{}_WORKER_REVISION", key))
                 .unwrap_or_else(|_| {
@@ -522,7 +528,7 @@ impl AggregateConnector {
         engine: EngineIdentity,
         operation: &str,
         worker_request_id: &str,
-    ) -> Result<Option<WorkerApprovalGrant>, ConnectorError> {
+    ) -> Result<Option<(WorkerApprovalGrant, SessionApprovalGrantV1)>, ConnectorError> {
         let mut active = self
             .approvals
             .lock()
@@ -535,19 +541,39 @@ impl AggregateConnector {
             return Ok(None);
         };
         let grant = active.grants.remove(index);
-        Ok(Some(WorkerApprovalGrant {
-            grant_id: grant.grant_id,
-            engine,
-            root: grant.root,
-            session_id: self.state.session_id.clone(),
-            request_id: worker_request_id.to_owned(),
-            operation: operation.to_owned(),
-            effect: grant.effect,
-            authority_digest: grant.authority_digest,
-            policy_digest: grant.policy_digest,
-            issued_at_unix_ms: grant.issued_at_unix_ms,
-            expires_at_unix_ms: grant.expires_at_unix_ms,
-        }))
+        let original = grant.clone();
+        Ok(Some((
+            WorkerApprovalGrant {
+                grant_id: grant.grant_id,
+                engine,
+                root: grant.root,
+                session_id: self.state.session_id.clone(),
+                request_id: worker_request_id.to_owned(),
+                operation: operation.to_owned(),
+                effect: grant.effect,
+                authority_digest: grant.authority_digest,
+                policy_digest: grant.policy_digest,
+                issued_at_unix_ms: grant.issued_at_unix_ms,
+                expires_at_unix_ms: grant.expires_at_unix_ms,
+            },
+            original,
+        )))
+    }
+
+    fn restore_approval(&self, grant: SessionApprovalGrantV1) -> Result<(), ConnectorError> {
+        let mut active = self
+            .approvals
+            .lock()
+            .map_err(|_| ConnectorError::new("approval state lock poisoned"))?;
+        if active
+            .grants
+            .iter()
+            .any(|active_grant| active_grant.grant_id == grant.grant_id)
+        {
+            return Err(ConnectorError::new("approval reservation restore conflict"));
+        }
+        active.grants.push(grant);
+        Ok(())
     }
 }
 
@@ -1224,7 +1250,14 @@ impl Connector for AggregateConnector {
             worker_revision: revision.clone(),
             contract_digest: contract_digest.clone(),
         };
-        let approval_grant = self.take_approval(engine, &op, &id)?;
+        let sender = self
+            .dispatch_sender
+            .as_ref()
+            .ok_or_else(|| ConnectorError::new("aggregate dispatcher closed"))?;
+        let taken_approval = self.take_approval(engine, &op, &id)?;
+        let approval_grant = taken_approval
+            .as_ref()
+            .map(|(worker_grant, _)| worker_grant.clone());
         let request = CallRequest {
             request_id: id,
             op,
@@ -1245,22 +1278,22 @@ impl Connector for AggregateConnector {
         let dispatch = AggregateDispatch {
             engine,
             request,
-            revision,
-            contract_digest,
             context,
             execution,
             completion,
         };
-        let sender = self
-            .dispatch_sender
-            .as_ref()
-            .ok_or_else(|| ConnectorError::new("aggregate dispatcher closed"))?;
         match sender.try_send(dispatch) {
             Ok(()) => Ok(()),
             Err(TrySendError::Full(_)) => {
+                if let Some((_, grant)) = taken_approval {
+                    self.restore_approval(grant)?;
+                }
                 Err(ConnectorError::new("aggregate dispatch capacity exhausted"))
             }
             Err(TrySendError::Disconnected(_)) => {
+                if let Some((_, grant)) = taken_approval {
+                    self.restore_approval(grant)?;
+                }
                 Err(ConnectorError::new("aggregate dispatcher closed"))
             }
         }
@@ -1366,10 +1399,7 @@ fn run_aggregate_dispatch(
     }
     if result.metadata.ownership.engine != dispatch.engine
         || result.metadata.ownership.session_id != state.session_id
-        || result.metadata.trace.runtime_id != state.session_id
-        || result.metadata.trace.request_id != result.metadata.trace.trace_id
-        || result.metadata.trace.worker_revision != dispatch.revision
-        || result.metadata.trace.contract_digest != dispatch.contract_digest
+        || result.metadata.trace != dispatch.request.trace
     {
         return Err(ConnectorError::new("worker result binding mismatch"));
     }
@@ -1465,6 +1495,23 @@ impl SessionExecutor {
     }
 
     fn new_authorized(root: PathBuf, session_id: String) -> Result<Self, HostError> {
+        Self::new_authorized_with_fixture(root, session_id, None)
+    }
+
+    #[cfg(feature = "worker-fixture")]
+    pub fn new_with_worker_fixture(
+        root: PathBuf,
+        session_id: String,
+        fixture_binary: PathBuf,
+    ) -> Result<Self, HostError> {
+        Self::new_authorized_with_fixture(root, session_id, Some(fixture_binary))
+    }
+
+    fn new_authorized_with_fixture(
+        root: PathBuf,
+        session_id: String,
+        fixture_binary: Option<PathBuf>,
+    ) -> Result<Self, HostError> {
         if session_id.is_empty() {
             return Err(HostError::Connector(
                 "missing explicit ZeroStack session identity".into(),
@@ -1483,6 +1530,7 @@ impl SessionExecutor {
             root,
             session_id,
             cancellation.clone(),
+            fixture_binary.as_deref(),
         )?);
         let registration = GlobalRegistration::zero(
             METHODS
@@ -1977,7 +2025,7 @@ impl AggregateSession {
         approval_grants: Vec<SessionApprovalGrantV1>,
     ) -> Result<SessionExecutionResult, AggregateSessionError> {
         let (reply_tx, reply_rx) = mpsc::sync_channel(1);
-        {
+        let approval_ids = {
             let mut state = self.lock_state(Some(request_id))?;
             if generation != state.generation {
                 return Err(AggregateSessionError::new(
@@ -2010,8 +2058,11 @@ impl AggregateSession {
                 validate_session_approvals(&state, generation, request_id, &approval_grants)?;
             state.seen_request_ids.insert(request_id);
             state.active_request_ids.insert(request_id);
-            state.consumed_approval_ids.extend(approval_ids);
-        }
+            state
+                .consumed_approval_ids
+                .extend(approval_ids.iter().cloned());
+            approval_ids
+        };
         match self.commands.try_send(SessionCommand::Execute {
             generation,
             request_id,
@@ -2022,11 +2073,11 @@ impl AggregateSession {
         }) {
             Ok(()) => {}
             Err(TrySendError::Full(_)) => {
-                self.release_unadmitted(generation, request_id);
+                self.release_unadmitted(generation, request_id, &approval_ids);
                 return Err(AggregateSessionError::backpressure(generation, request_id));
             }
             Err(TrySendError::Disconnected(_)) => {
-                self.release_active(request_id);
+                self.release_unadmitted(generation, request_id, &approval_ids);
                 return Err(AggregateSessionError::new(
                     AggregateSessionFailureCode::BackendUnavailable,
                     generation,
@@ -2253,18 +2304,15 @@ impl AggregateSession {
         })
     }
 
-    fn release_unadmitted(&self, generation: u64, request_id: u64) {
+    fn release_unadmitted(&self, generation: u64, request_id: u64, approval_ids: &[String]) {
         if let Ok(mut state) = self.state.lock() {
             state.active_request_ids.remove(&request_id);
             if state.generation == generation {
                 state.seen_request_ids.remove(&request_id);
             }
-        }
-    }
-
-    fn release_active(&self, request_id: u64) {
-        if let Ok(mut state) = self.state.lock() {
-            state.active_request_ids.remove(&request_id);
+            for approval_id in approval_ids {
+                state.consumed_approval_ids.remove(approval_id);
+            }
         }
     }
 
@@ -2448,10 +2496,55 @@ mod tests {
             .expect("valid approval");
         state.consumed_approval_ids.extend(ids);
         assert_eq!(
-            validate_session_approvals(&state, 7, 9, &[grant])
+            validate_session_approvals(&state, 7, 9, &[grant.clone()])
                 .unwrap_err()
                 .code,
             AggregateSessionFailureCode::ApprovalReplay
+        );
+
+        let mut fresh_state = state;
+        fresh_state.consumed_approval_ids.clear();
+        let mut wrong_root = grant.clone();
+        wrong_root.root = "/tmp/other-root".into();
+        assert_eq!(
+            validate_session_approvals(&fresh_state, 7, 9, &[wrong_root])
+                .unwrap_err()
+                .code,
+            AggregateSessionFailureCode::InvalidApproval
+        );
+        let mut wrong_effect = grant.clone();
+        wrong_effect.effect = EffectClass::ReadOnly;
+        assert_eq!(
+            validate_session_approvals(&fresh_state, 7, 9, &[wrong_effect])
+                .unwrap_err()
+                .code,
+            AggregateSessionFailureCode::InvalidApproval
+        );
+        let mut expired = grant.clone();
+        expired.issued_at_unix_ms = now.saturating_sub(2);
+        expired.expires_at_unix_ms = now.saturating_sub(1);
+        assert_eq!(
+            validate_session_approvals(&fresh_state, 7, 9, &[expired])
+                .unwrap_err()
+                .code,
+            AggregateSessionFailureCode::InvalidApproval
+        );
+        assert_eq!(
+            validate_session_approvals(&fresh_state, 7, 9, &[grant.clone(), grant.clone()])
+                .unwrap_err()
+                .code,
+            AggregateSessionFailureCode::ApprovalReplay
+        );
+        assert_eq!(
+            validate_session_approvals(
+                &fresh_state,
+                7,
+                9,
+                &vec![grant.clone(); MAX_SESSION_APPROVAL_GRANTS + 1],
+            )
+            .unwrap_err()
+            .code,
+            AggregateSessionFailureCode::InvalidApproval
         );
 
         let request: SessionRequest = serde_json::from_value(serde_json::json!({
@@ -2466,6 +2559,37 @@ mod tests {
             request,
             SessionRequest::Execute { approval_grants, .. } if approval_grants.is_empty()
         ));
+    }
+
+    #[test]
+    fn unqueued_request_releases_request_and_approval_reservations() {
+        let state = Arc::new(Mutex::new(AggregateSessionState {
+            generation: 7,
+            accepting: true,
+            replacing: false,
+            terminating: false,
+            shutdown_sent: false,
+            worker_stopped: false,
+            seen_request_ids: BTreeSet::from([9]),
+            active_request_ids: BTreeSet::from([9]),
+            root: "/tmp/approved-root".into(),
+            consumed_approval_ids: BTreeSet::from(["grant-1".into(), "grant-2".into()]),
+        }));
+        let (commands, _receiver) = mpsc::sync_channel(1);
+        let session = AggregateSession {
+            state: Arc::clone(&state),
+            commands,
+            cancellation: Arc::new(Mutex::new(None)),
+            worker: Mutex::new(None),
+        };
+
+        session.release_unadmitted(7, 9, &["grant-1".into()]);
+
+        let state = state.lock().unwrap();
+        assert!(!state.seen_request_ids.contains(&9));
+        assert!(!state.active_request_ids.contains(&9));
+        assert!(!state.consumed_approval_ids.contains("grant-1"));
+        assert!(state.consumed_approval_ids.contains("grant-2"));
     }
 
     #[cfg(unix)]
