@@ -14,6 +14,7 @@
 //!   `tree_poll_exited_keeps_pin_and_allows_descendant_sweep`
 //! - tree revoke-before-teardown guard ..... -> `direct_revoke_before_tree_teardown_fails_without_reaping`
 //! - tree concurrent settle ............... -> `concurrent_revoke_and_cancel_settle_tree_with_no_descendant`
+//! - external-revoke wait wake ............. -> `long_wait_observes_concurrent_signal_and_revoke`
 //!
 //! Fixtures are self-spawns of this test binary (`fixture_runner`), so every
 //! test is runnable natively on macOS, Linux, and Windows. Unix pidfd-only
@@ -367,6 +368,28 @@ fn wait_timeout_retains_live_child_for_explicit_teardown() {
     ));
     assert!(started.elapsed() < Duration::from_secs(1));
     terminate_owned(&owned, "test-owner", 0);
+}
+
+#[test]
+fn long_wait_observes_concurrent_signal_and_revoke() {
+    let child = spawn_fixture("sleep");
+    let owned = VerifiedChild::capture(child, "wait-owner", 9);
+    let waiter = owned.clone();
+    let started = Instant::now();
+    let waiting = std::thread::spawn(move || waiter.wait_for_exit(Duration::from_secs(5)));
+
+    std::thread::sleep(Duration::from_millis(100));
+    owned
+        .signal_graceful_for("wait-owner", 9, Duration::from_millis(250))
+        .expect("concurrent exact-handle signal settles child");
+    owned.revoke().expect("concurrent signal is revocable");
+
+    assert!(waiting.join().expect("wait thread joins"));
+    assert!(
+        started.elapsed() < Duration::from_secs(2),
+        "wait_for_exit ignored externally recorded terminal status"
+    );
+    assert!(owned.terminal_status().is_some());
 }
 
 #[test]

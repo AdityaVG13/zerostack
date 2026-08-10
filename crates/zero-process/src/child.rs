@@ -766,30 +766,53 @@ impl VerifiedChild {
     /// it. Windows blocks on the retained process handle; Unix preserves the
     /// waitable root pin while checking within the bound.
     pub fn wait_for_exit(&self, timeout: Duration) -> bool {
-        if self.terminal_status().is_some() {
-            return true;
-        }
+        let deadline = Instant::now()
+            .checked_add(timeout)
+            .unwrap_or_else(Instant::now);
         #[cfg(windows)]
         {
             use std::os::windows::io::AsRawHandle;
-            let guard = self
-                .0
-                .child
-                .lock()
-                .unwrap_or_else(|poisoned| poisoned.into_inner());
-            let Some(child) = guard.as_ref() else {
-                return false;
-            };
-            let milliseconds = timeout.as_millis().min(u32::MAX as u128) as u32;
-            // SAFETY: the std Child owns this exact process handle for the
-            // whole wait while the mutex guard prevents reaping.
-            return unsafe { WaitForSingleObject(child.as_raw_handle(), milliseconds) }
-                == WAIT_OBJECT_0;
+            loop {
+                if self.terminal_status().is_some() {
+                    return true;
+                }
+                let now = Instant::now();
+                let wait = deadline
+                    .saturating_duration_since(now)
+                    .min(Duration::from_millis(10));
+                let milliseconds = wait.as_millis().min(u32::MAX as u128) as u32;
+                let exited = {
+                    let guard = self
+                        .0
+                        .child
+                        .lock()
+                        .unwrap_or_else(|poisoned| poisoned.into_inner());
+                    let Some(child) = guard.as_ref() else {
+                        drop(guard);
+                        return self.terminal_status().is_some();
+                    };
+                    // SAFETY: the std Child owns this exact process handle for
+                    // this short wait while the mutex guard prevents reaping.
+                    (unsafe { WaitForSingleObject(child.as_raw_handle(), milliseconds) })
+                        == WAIT_OBJECT_0
+                };
+                if exited {
+                    return true;
+                }
+                if Instant::now() >= deadline {
+                    return false;
+                }
+            }
         }
         #[cfg(not(windows))]
         {
-            let deadline = Instant::now() + timeout;
             loop {
+                // A concurrent exact-handle signal may reap and revoke between
+                // polls. Recheck its recorded status every iteration; an empty
+                // child slot alone is not proof because it may also be missing.
+                if self.terminal_status().is_some() {
+                    return true;
+                }
                 if self.poll_exited() {
                     return true;
                 }
