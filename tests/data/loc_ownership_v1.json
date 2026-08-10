@@ -2,7 +2,7 @@
   "schema": "zerostack.loc-ownership.v1",
   "version": 1,
   "generated_from_heads": {
-    "zerostack": "c5997e6240d720e7e1afdae6ee8475044ee581c2",
+    "zerostack": "cd2c17507c6ec2fe30836314987c66f90a05cca8",
     "fszero": "64458c875debb0b8d06e368e9b4ee1b647d4053b",
     "graphzero": "7a9267f80bde567f9618aeff67a5bb16741e5910",
     "tokenzero": "a343ded40f2d70db4576754552665cf610b6c138"
@@ -459,7 +459,7 @@
       "classification": "shared-candidate",
       "rule": "hub-owned-substrate",
       "justification": "hub implementation already owned by zero-codemode",
-      "blob_digest": "ff1c9caf371cff3d1983240c459ff689d7ece686",
+      "blob_digest": "003dee15b25aaf464cf69ce2741ddd0c6f6f9cbb",
       "hub_target": "zero-codemode"
     },
     {
@@ -569,7 +569,7 @@
       "classification": "shared-candidate",
       "rule": "hub-owned-substrate",
       "justification": "hub implementation already owned by zero-codemode",
-      "blob_digest": "75bc5064880cffcbc8ffd3b1bb77fd114af334cf",
+      "blob_digest": "70fceb1b3274477e9d3e4c833c63f81c947ef3e0",
       "hub_target": "zero-codemode"
     },
     {
@@ -849,7 +849,7 @@
       "classification": "shared-candidate",
       "rule": "hub-owned-substrate",
       "justification": "hub implementation already owned by zero-process",
-      "blob_digest": "bd66150d8a5539d46ce0c13fe581572cbf4fd2d5",
+      "blob_digest": "bd7e9fb9b5df45a28b78bc04dccfbaa9aca14cac",
       "hub_target": "zero-process"
     },
     {
