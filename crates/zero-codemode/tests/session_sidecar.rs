@@ -240,7 +240,10 @@ fn authenticated_cross_surface_and_rejections() {
     assert_eq!(root_error["ok"], false);
     assert_eq!(root_error["code"], "authorized_root_mismatch");
     let detail = root_error["error"].as_str().unwrap();
-    assert!(detail.contains(&format!("authorized root {:?}", d.path())));
+    assert!(detail.contains(&format!(
+        "authorized root {:?}",
+        d.path().canonicalize().unwrap()
+    )));
     assert!(detail.contains("requested root \"/\""));
     assert!(detail.contains("zerostack-session serve --root \"/\""));
     assert!(detail.contains("send the same canonical root"));

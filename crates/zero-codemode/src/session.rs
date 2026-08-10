@@ -584,9 +584,24 @@ impl Drop for AggregateConnector {
         for dispatcher in self.dispatchers.drain(..) {
             let _ = dispatcher.join();
         }
+        let idle_workers = {
+            let mut workers = self
+                .state
+                .workers
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            std::mem::take(&mut *workers)
+                .into_values()
+                .flatten()
+                .collect::<Vec<_>>()
+        };
+        thread::scope(|scope| {
+            for worker in idle_workers {
+                scope.spawn(move || drop(worker));
+            }
+        });
     }
 }
-
 fn pinned_worker_binary(path: &Path, key: &str) -> Result<(PathBuf, String), HostError> {
     let canonical = path.canonicalize().map_err(|error| {
         HostError::Connector(format!("cannot resolve {key} raw worker: {error}"))
@@ -1616,7 +1631,7 @@ impl SessionExecutor {
 }
 
 pub const SESSION_EXECUTION_QUEUE_CAPACITY: usize = 8;
-pub const SESSION_REPLACEMENT_SETTLE_TIMEOUT: Duration = Duration::from_secs(1);
+pub const SESSION_REPLACEMENT_SETTLE_TIMEOUT: Duration = Duration::from_secs(5);
 pub const SESSION_EXECUTOR_START_TIMEOUT: Duration = Duration::from_secs(5);
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
