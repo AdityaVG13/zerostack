@@ -18,8 +18,8 @@ Four executables and one optional CLI wrapper.
 | --- | --- | --- |
 | `zerostack-codemode-host` | `ZeroStack`, `cargo build --release -p zero-codemode --bin zerostack-codemode-host` | Aggregate CodeMode sidecar. Reads bounded NDJSON frames on stdin, writes them on stdout. |
 | `fszero-codemode` | `FSZero`, `cargo build --release -p fszero-worker --bin fszero-codemode` | FSZero planner-free raw worker. |
-| `graphzero-codemode` | `GraphZero`, `cargo build --release -p graphzero --bin graphzero-codemode --features tokenzero,surface-codemode` | GraphZero CodeMode delegate. |
-| `tokenzero-codemode` | `TokenZero`, `cargo build --release --bin tokenzero-codemode --no-default-features --features surface-codemode` | TokenZero CodeMode delegate. |
+| `graphzero-codemode` | `GraphZero`, `cargo build --release -p graphzero-worker --bin graphzero-codemode --no-default-features` | GraphZero planner-free raw worker. |
+| `tokenzero-codemode` | `TokenZero`, `cargo build --release -p tokenzero-worker --bin tokenzero-codemode --no-default-features` | TokenZero planner-free raw worker. |
 | `zs` | `ZeroStack/scripts/install_zs.py` | Python CLI wrapper for shell-only harnesses. |
 
 Binary names and the set of four are fixed in
@@ -65,8 +65,8 @@ directory names are fixed by `HarnessBinary::dev_repo_dir` in `discovery.rs`:
 # <parent>/ZeroStack, <parent>/FSZero, <parent>/GraphZero, <parent>/TokenZero
 cd <parent>/ZeroStack   && cargo build --release -p zero-codemode --bin zerostack-codemode-host
 cd <parent>/FSZero      && cargo build --release -p fszero-worker --bin fszero-codemode
-cd <parent>/GraphZero   && cargo build --release -p graphzero --bin graphzero-codemode --features tokenzero,surface-codemode
-cd <parent>/TokenZero   && cargo build --release --bin tokenzero-codemode --no-default-features --features surface-codemode
+cd <parent>/GraphZero   && cargo build --release -p graphzero-worker --bin graphzero-codemode --no-default-features
+cd <parent>/TokenZero   && cargo build --release -p tokenzero-worker --bin tokenzero-codemode --no-default-features
 ```
 
 The host uses ZeroStack's restricted in-process AST interpreter. It needs no
@@ -338,8 +338,8 @@ Rust-sidecar-only install and does not block steps 2 and 3.
 ### If something is unresolved
 
 - **A binary is `<unresolved>`.** `--locate-binaries` lists every probed
-  candidate with its rule label. Compare against §4.2: usually the build did not
-  run, the `surface-codemode` feature was omitted, or the checkout
+  candidate with its rule label. Compare against §4.2: usually the planner-free
+  worker build did not run, the wrong package/bin was selected, or the checkout
   directory name does not match `ZeroStack` / `FSZero` / `GraphZero` /
   `TokenZero`.
 - **A pin was ignored.** It was relative, empty, or whitespace-only. All three
