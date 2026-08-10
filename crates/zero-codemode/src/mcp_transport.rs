@@ -57,6 +57,44 @@ pub struct McpAliasMetadata {
     pub output_schema: Option<Value>,
 }
 
+/// Engine-owned MCP initialize identity.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct McpServerIdentity {
+    pub name: String,
+    pub version: String,
+}
+
+impl McpServerIdentity {
+    pub fn new(
+        name: impl Into<String>,
+        version: impl Into<String>,
+    ) -> Result<Self, McpTransportError> {
+        let identity = Self {
+            name: name.into(),
+            version: version.into(),
+        };
+        for (label, value) in [
+            ("server name", identity.name.as_str()),
+            ("server version", identity.version.as_str()),
+        ] {
+            if value.is_empty() || value.trim() != value {
+                return Err(McpTransportError::InvalidServerIdentity(format!(
+                    "{label} must be non-empty and trimmed"
+                )));
+            }
+        }
+        Ok(identity)
+    }
+}
+
+/// Model-visible MCP error text policy.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum McpErrorPresentation {
+    #[default]
+    Structured,
+    PlainMessage,
+}
+
 impl McpTransportConfig {
     pub fn validate(self) -> Result<Self, McpTransportError> {
         if self.tool_timeout > MAX_MCP_TOOL_TIMEOUT {
@@ -304,6 +342,7 @@ impl std::error::Error for McpDispatchError {}
 pub enum McpTransportError {
     InvalidConfig(String),
     InvalidAliasMetadata(String),
+    InvalidServerIdentity(String),
     Surface(SurfaceContractError),
     WrongSurface(SurfaceKind),
     MissingResourceReader,
@@ -317,6 +356,9 @@ impl fmt::Display for McpTransportError {
             }
             Self::InvalidAliasMetadata(message) => {
                 write!(formatter, "invalid MCP alias metadata: {message}")
+            }
+            Self::InvalidServerIdentity(message) => {
+                write!(formatter, "invalid MCP server identity: {message}")
             }
             Self::Surface(error) => write!(formatter, "invalid MCP surface registration: {error}"),
             Self::WrongSurface(surface) => write!(
@@ -554,13 +596,25 @@ mod fastmcp {
         definition: Tool,
         dispatcher: Arc<dyn McpDispatcher>,
         config: McpTransportConfig,
+        error_presentation: McpErrorPresentation,
         limiter: Arc<Inflight>,
+    }
+
+    pub(super) fn present_dispatch_error(
+        error: McpDispatchError,
+        presentation: McpErrorPresentation,
+    ) -> McpError {
+        match presentation {
+            McpErrorPresentation::Structured => McpError::tool_error(error.wire_text()),
+            McpErrorPresentation::PlainMessage => McpError::tool_error(error.message),
+        }
     }
 
     pub(super) struct RegisteredResource {
         definition: Resource,
         reader: Arc<dyn McpResourceReader>,
         config: McpTransportConfig,
+        error_presentation: McpErrorPresentation,
         limiter: Arc<Inflight>,
     }
 
@@ -569,6 +623,7 @@ mod fastmcp {
             resource: &CanonicalResource,
             reader: Arc<dyn McpResourceReader>,
             config: McpTransportConfig,
+            error_presentation: McpErrorPresentation,
             limiter: Arc<Inflight>,
         ) -> Self {
             Self {
@@ -584,6 +639,7 @@ mod fastmcp {
                 },
                 reader,
                 config,
+                error_presentation,
                 limiter,
             }
         }
@@ -629,7 +685,7 @@ mod fastmcp {
                         blob,
                     }])
                 }
-                Err(error) => Err(McpError::tool_error(error.wire_text())),
+                Err(error) => Err(present_dispatch_error(error, self.error_presentation)),
             }
         }
     }
@@ -639,6 +695,7 @@ mod fastmcp {
             operation: &CanonicalOperation,
             dispatcher: Arc<dyn McpDispatcher>,
             config: McpTransportConfig,
+            error_presentation: McpErrorPresentation,
             limiter: Arc<Inflight>,
         ) -> Self {
             let name = operation
@@ -658,6 +715,7 @@ mod fastmcp {
                 operation.output_schema.clone(),
                 dispatcher,
                 config,
+                error_presentation,
                 limiter,
             )
         }
@@ -668,6 +726,7 @@ mod fastmcp {
             metadata: Option<&McpAliasMetadata>,
             dispatcher: Arc<dyn McpDispatcher>,
             config: McpTransportConfig,
+            error_presentation: McpErrorPresentation,
             limiter: Arc<Inflight>,
         ) -> Self {
             let canonical_description = Some(if operation.description.is_empty() {
@@ -689,6 +748,7 @@ mod fastmcp {
                     .unwrap_or_else(|| operation.output_schema.clone()),
                 dispatcher,
                 config,
+                error_presentation,
                 limiter,
             )
         }
@@ -702,6 +762,7 @@ mod fastmcp {
             output_schema: Option<Value>,
             dispatcher: Arc<dyn McpDispatcher>,
             config: McpTransportConfig,
+            error_presentation: McpErrorPresentation,
             limiter: Arc<Inflight>,
         ) -> Self {
             let read_only = operation.effect_policy.effect_class == EffectClass::ReadOnly;
@@ -723,6 +784,7 @@ mod fastmcp {
                 },
                 dispatcher,
                 config,
+                error_presentation,
                 limiter,
             }
         }
@@ -760,7 +822,7 @@ mod fastmcp {
                     .into_iter()
                     .map(|item| Content::text(item.text))
                     .collect()),
-                Err(error) => Err(McpError::tool_error(error.wire_text())),
+                Err(error) => Err(present_dispatch_error(error, self.error_presentation)),
             }
         }
     }
@@ -771,6 +833,8 @@ mod fastmcp {
         dispatcher: Arc<dyn McpDispatcher>,
         resource_reader: Option<Arc<dyn McpResourceReader>>,
         alias_metadata: Vec<McpAliasMetadata>,
+        server_identity: McpServerIdentity,
+        error_presentation: McpErrorPresentation,
         config: McpTransportConfig,
     }
 
@@ -785,11 +849,17 @@ mod fastmcp {
             if !registration.adapter.registry.resources.is_empty() {
                 return Err(McpTransportError::MissingResourceReader);
             }
+            let server_identity = McpServerIdentity {
+                name: registration.root.clone(),
+                version: env!("CARGO_PKG_VERSION").into(),
+            };
             Ok(Self {
                 registration,
                 dispatcher,
                 resource_reader: None,
                 alias_metadata: Vec::new(),
+                server_identity,
+                error_presentation: McpErrorPresentation::default(),
                 config,
             })
         }
@@ -803,17 +873,37 @@ mod fastmcp {
         ) -> Result<Self, McpTransportError> {
             validate_mcp_registration(&registration)?;
             let config = config.validate()?;
+            let server_identity = McpServerIdentity {
+                name: registration.root.clone(),
+                version: env!("CARGO_PKG_VERSION").into(),
+            };
             Ok(Self {
                 registration,
                 dispatcher,
                 resource_reader: Some(resource_reader),
                 alias_metadata: Vec::new(),
+                server_identity,
+                error_presentation: McpErrorPresentation::default(),
                 config,
             })
         }
 
         pub fn registration(&self) -> &SurfaceRegistration {
             &self.registration
+        }
+
+        pub fn with_server_identity(
+            mut self,
+            name: impl Into<String>,
+            version: impl Into<String>,
+        ) -> Result<Self, McpTransportError> {
+            self.server_identity = McpServerIdentity::new(name, version)?;
+            Ok(self)
+        }
+
+        pub fn with_error_presentation(mut self, presentation: McpErrorPresentation) -> Self {
+            self.error_presentation = presentation;
+            self
         }
 
         /// Add lossless alias-specific catalog metadata. Every entry must bind
@@ -900,6 +990,7 @@ mod fastmcp {
                         operation,
                         Arc::clone(&self.dispatcher),
                         self.config,
+                        self.error_presentation,
                         Arc::clone(&limiter),
                     )
                     .definition;
@@ -957,14 +1048,17 @@ mod fastmcp {
 
         pub fn build_server(&self) -> Server {
             let limiter = Arc::new(Inflight::new(self.config.max_inflight));
-            let mut builder =
-                Server::new(self.registration.root.clone(), env!("CARGO_PKG_VERSION"))
-                    .request_timeout(0);
+            let mut builder = Server::new(
+                self.server_identity.name.clone(),
+                self.server_identity.version.clone(),
+            )
+            .request_timeout(0);
             for operation in &self.registration.adapter.registry.operations {
                 builder = builder.tool(RegisteredTool::new(
                     operation,
                     Arc::clone(&self.dispatcher),
                     self.config,
+                    self.error_presentation,
                     Arc::clone(&limiter),
                 ));
                 for alias in &operation.aliases {
@@ -974,6 +1068,7 @@ mod fastmcp {
                         self.alias_metadata(operation, alias),
                         Arc::clone(&self.dispatcher),
                         self.config,
+                        self.error_presentation,
                         Arc::clone(&limiter),
                     ));
                 }
@@ -984,6 +1079,7 @@ mod fastmcp {
                         resource,
                         Arc::clone(reader),
                         self.config,
+                        self.error_presentation,
                         Arc::clone(&limiter),
                     ));
                 }
@@ -1021,6 +1117,14 @@ mod tests {
             Err(McpTransportError::WrongSurface(SurfaceKind::CodeMode))
         ));
         assert!(validate_mcp_registration(&test_registration(SurfaceKind::Mcp)).is_ok());
+        assert!(matches!(
+            McpServerIdentity::new("", "1.0.0"),
+            Err(McpTransportError::InvalidServerIdentity(_))
+        ));
+        assert!(matches!(
+            McpServerIdentity::new("tokenzero", " 1.4.0"),
+            Err(McpTransportError::InvalidServerIdentity(_))
+        ));
     }
 
     #[test]
@@ -1134,12 +1238,28 @@ mod tests {
             }
         }
 
+        let plain_error = super::fastmcp::present_dispatch_error(
+            McpDispatchError::new("denied", "approval required", false),
+            McpErrorPresentation::PlainMessage,
+        );
+        assert_eq!(i32::from(plain_error.code), -32_000);
+        assert_eq!(plain_error.message, "approval required");
+        let structured_error = super::fastmcp::present_dispatch_error(
+            McpDispatchError::new("denied", "approval required", false),
+            McpErrorPresentation::Structured,
+        );
+        let structured: McpDispatchError = serde_json::from_str(&structured_error.message).unwrap();
+        assert_eq!(structured.kind, "denied");
+
         let transport = FastMcpTransport::new(
             test_registration(SurfaceKind::Mcp),
             Arc::new(TestDispatcher),
             McpTransportConfig::default(),
         )
         .unwrap()
+        .with_server_identity("tokenzero", "1.4.0")
+        .unwrap()
+        .with_error_presentation(McpErrorPresentation::PlainMessage)
         .with_alias_metadata(vec![McpAliasMetadata {
             canonical_id: "fs.read".into(),
             name: "read".into(),
@@ -1173,6 +1293,8 @@ mod tests {
         );
 
         let server = transport.build_server();
+        assert_eq!(server.info().name, "tokenzero");
+        assert_eq!(server.info().version, "1.4.0");
         let mut session = Session::new(
             ServerInfo {
                 name: "zerostack".into(),
@@ -1242,11 +1364,9 @@ mod tests {
             serde_json::from_value(call("read", json!({"fail":true})).result.unwrap()).unwrap();
         assert!(failure.is_error);
         let Content::Text { text } = &failure.content[0] else {
-            panic!("FastMCP structured error must use text content");
+            panic!("FastMCP plain error must use text content");
         };
-        let error: McpDispatchError = serde_json::from_str(text).unwrap();
-        assert_eq!(error.kind, "denied");
-        assert_eq!(error.data, Some(json!({"approval_id":"a1"})));
+        assert_eq!(text, "approval required");
     }
 
     #[test]
@@ -1355,6 +1475,7 @@ mod tests {
             &resource,
             Arc::new(|_: &str, _: &McpCallContext| Ok(json!({"answer": 42}))),
             McpTransportConfig::default(),
+            McpErrorPresentation::Structured,
             Arc::new(Inflight::new(1)),
         );
         let success = success_handler
@@ -1386,6 +1507,7 @@ mod tests {
             &resource,
             Arc::new(ExactResourceReader),
             McpTransportConfig::default(),
+            McpErrorPresentation::Structured,
             Arc::new(Inflight::new(1)),
         );
         let exact = exact_handler
@@ -1406,6 +1528,7 @@ mod tests {
                 ))
             }),
             McpTransportConfig::default(),
+            McpErrorPresentation::Structured,
             Arc::new(Inflight::new(1)),
         );
         let error = handler
@@ -1428,6 +1551,7 @@ mod tests {
                 tool_timeout: Duration::from_millis(25),
                 max_inflight: 1,
             },
+            McpErrorPresentation::Structured,
             Arc::new(Inflight::new(1)),
         );
         let started = Instant::now();
