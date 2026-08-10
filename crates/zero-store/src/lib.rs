@@ -19,6 +19,7 @@
 mod cas;
 mod durable_journal;
 mod fs_replace;
+mod gc;
 mod gc_lock;
 mod metadata;
 mod store_root;
@@ -42,6 +43,16 @@ pub use durable_journal::{
     recover_journal_with_fault_v1,
 };
 pub use fs_replace::{atomic_write_file, replace_file};
+pub use gc::{
+    validate_dry_run_report, publish_lease_record, publish_pin_record,
+    publish_reachability_snapshot, remove_pin_record, repair_object, run_gc,
+    project_id as gc_project_id, BeforeUnlinkHook, DryRunReport, GcCandidate, GcConfig,
+    GcError, GcVerdict, LeaseOwner, LeaseRecord, PinRecord, ReachabilitySnapshot,
+    DEFAULT_GC_REPORT_LIMIT, GC_MAX_BLOB_HASHES, GC_MAX_EVIDENCE_ITEMS, GC_MAX_RECORD_BYTES,
+    GC_MAX_REPORT_OBJECTS, GC_MIN_GRACE_SECONDS, GC_RECORD_TYPE_DRY_RUN,
+    GC_RECORD_TYPE_LEASE, GC_RECORD_TYPE_PIN, GC_RECORD_TYPE_REACHABILITY,
+    GC_RECORD_TYPE_SWEEP_PROGRESS, GC_SCHEMA_VERSION,
+};
 pub use gc_lock::{
     COORDINATOR_LOCK, GC_DIR, LOCK_DEADLINE, LockMode, StoreLock, coordinator_lock_path,
 };
