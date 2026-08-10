@@ -305,7 +305,7 @@ zerostack-codemode-host --locate-binaries
 # 2. Per-engine plans through the shell-only path.
 zs --version
 zs -C . fs    'return await zero.fs.compound("list", { path: "docs" });'
-zs -C . graph 'return await zero.graph.orient("architecture");'
+zs -C . graph 'return await zero.graph.orient("context", "recoverable ref");'
 zs -C . token 'return await zero.token.compact("hello world");'
 
 # 3. Discovery capability surface: search then describe before executing.
