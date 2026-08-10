@@ -1097,3 +1097,84 @@ return value;
     assert_eq!(result["result"]["handle"], json!("[unreadable]"));
     assert_eq!(result["refs"], json!(["fz://blob/abc"]));
 }
+
+#[test]
+fn cyclic_json_stringify_is_rejected_with_typed_error() {
+    let host = Host::new(lim(), reg()).unwrap_or_else(|error| panic!("host: {error}"));
+    let error = host
+        .execute(
+            r#"const value = {name: "loop"}; value.self = value; return JSON.stringify(value);"#,
+            Rc::new(C::ok()),
+        )
+        .expect_err("cyclic JSON.stringify must be rejected");
+    assert!(matches!(error, HostError::Data(_)), "{error}");
+    assert!(error.to_string().contains("cyclic"), "{error}");
+}
+
+#[test]
+fn cyclic_array_to_string_falls_back_deterministically() {
+    let host = Host::new(lim(), reg()).unwrap_or_else(|error| panic!("host: {error}"));
+    let value = host
+        .execute(
+            "const a = []; a.push(a); return String(a);",
+            Rc::new(C::ok()),
+        )
+        .unwrap_or_else(|error| panic!("cyclic String(a): {error}"));
+    assert_eq!(value, json!(""));
+}
+
+#[test]
+fn deep_nested_evaluation_is_capped_with_typed_error() {
+    let mut limits = lim();
+    limits.stack_bytes = 16 * 1024; // derived depth ceiling = 8
+    let host = Host::new(limits, reg()).unwrap_or_else(|error| panic!("host: {error}"));
+    let plan = format!("return {};", "[[[[[[[[[[1]]]]]]]]]]");
+    let error = host
+        .execute(&plan, Rc::new(C::ok()))
+        .expect_err("deep nesting must be rejected");
+    assert!(matches!(error, HostError::Data(_)), "{error}");
+    assert!(error.to_string().contains("depth"), "{error}");
+    // Bounded nesting still evaluates and serializes with the same limits.
+    let value = host
+        .execute("return [[[1]]];", Rc::new(C::ok()))
+        .unwrap_or_else(|error| panic!("bounded nesting: {error}"));
+    assert_eq!(value, json!([[[1]]]));
+}
+
+#[test]
+fn array_from_huge_length_is_rejected_before_allocation() {
+    let host = Host::new(lim(), reg()).unwrap_or_else(|error| panic!("host: {error}"));
+    let error = host
+        .execute(
+            "return Array.from({length: 1000000000000});",
+            Rc::new(C::ok()),
+        )
+        .expect_err("huge array-like length must be rejected");
+    assert!(matches!(error, HostError::Data(_)), "{error}");
+    assert!(error.to_string().contains("memory limit"), "{error}");
+}
+
+#[test]
+fn array_from_length_above_remaining_fuel_is_rejected() {
+    let host = Host::new(lim(), reg()).unwrap_or_else(|error| panic!("host: {error}"));
+    // 100_000 elements fit the 16 MiB memory limit but exceed the 10_000
+    // instruction budget, so the pre-flight fuel check must fire.
+    let error = host
+        .execute("return Array.from({length: 100000});", Rc::new(C::ok()))
+        .expect_err("length above remaining fuel must be rejected");
+    assert_eq!(error, HostError::FuelExhausted);
+}
+
+#[test]
+fn array_from_bounded_length_stays_compatible() {
+    let host = Host::new(lim(), reg()).unwrap_or_else(|error| panic!("host: {error}"));
+    let value = host
+        .execute(
+            "return Array.from({length: 100}, (_, i) => i * 2);",
+            Rc::new(C::ok()),
+        )
+        .unwrap_or_else(|error| panic!("bounded Array.from: {error}"));
+    let array = value.as_array().unwrap();
+    assert_eq!(array.len(), 100);
+    assert_eq!(array[99], json!(198));
+}

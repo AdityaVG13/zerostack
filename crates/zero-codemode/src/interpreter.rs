@@ -4,7 +4,7 @@
 //! value space and exposes only the registered capability tree. It never
 //! evaluates source as host code.
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::collections::{BTreeMap, BTreeSet};
 use std::rc::Rc;
 use std::sync::Arc;
@@ -28,6 +28,45 @@ static INTERPRETER_CREATIONS: AtomicU64 = AtomicU64::new(0);
 
 pub(crate) fn interpreter_creation_count() -> u64 {
     INTERPRETER_CREATIONS.load(Ordering::Relaxed)
+}
+
+/// Conservative estimate of one interpreter recursion frame's stack cost.
+/// The derived evaluation-depth ceiling divides `stack_bytes` by this
+/// divisor so the bound never approaches the real native stack.
+const BYTES_PER_EVAL_FRAME: usize = 2 * 1024;
+
+/// Absolute ceiling for any recursion depth derived from host stack bytes.
+const MAX_DEPTH_HARD_CAP: usize = 128;
+
+/// Ceiling for `to_string` coercion recursion, independent of host limits.
+const MAX_TO_STRING_DEPTH: usize = 128;
+
+/// RAII recursion-depth guard. Every entry increments the shared counter and
+/// the guard's `Drop` decrements it on every return path, including errors
+/// and thrown values, so recursion state always unwinds to zero.
+struct DepthGuard {
+    depth: Rc<Cell<usize>>,
+}
+
+impl DepthGuard {
+    fn enter(depth: &Rc<Cell<usize>>, max_depth: usize) -> Result<Self, HostError> {
+        let current = depth.get();
+        if current >= max_depth {
+            return Err(HostError::Data(format!(
+                "evaluation depth exceeds the limit of {max_depth}"
+            )));
+        }
+        depth.set(current + 1);
+        Ok(Self {
+            depth: Rc::clone(depth),
+        })
+    }
+}
+
+impl Drop for DepthGuard {
+    fn drop(&mut self) {
+        self.depth.set(self.depth.get().saturating_sub(1));
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -205,6 +244,8 @@ struct Interpreter<'tree> {
     deadline: Instant,
     instructions: u64,
     microtasks: usize,
+    depth: Rc<Cell<usize>>,
+    max_depth: usize,
 }
 
 impl<'tree> Interpreter<'tree> {
@@ -221,6 +262,9 @@ impl<'tree> Interpreter<'tree> {
             values: BTreeMap::new(),
             parent: None,
         }));
+        let depth = Rc::new(Cell::new(0));
+        let max_depth =
+            (host.limits.stack_bytes / BYTES_PER_EVAL_FRAME).clamp(1, MAX_DEPTH_HARD_CAP);
         let mut interpreter = Self {
             host,
             source,
@@ -235,6 +279,8 @@ impl<'tree> Interpreter<'tree> {
             deadline: Instant::now() + timeout,
             instructions: 0,
             microtasks: 0,
+            depth,
+            max_depth,
         };
         interpreter.install_globals();
         interpreter
@@ -331,6 +377,7 @@ impl<'tree> Interpreter<'tree> {
     }
 
     fn exec(&mut self, node: Node<'tree>) -> Result<Control<'tree>, Fault<'tree>> {
+        let _guard = DepthGuard::enter(&self.depth, self.max_depth).map_err(Fault::Host)?;
         let mut cursor = node.walk();
         for child in node.named_children(&mut cursor) {
             let result = self.statement(child)?;
@@ -343,6 +390,7 @@ impl<'tree> Interpreter<'tree> {
 
     fn statement(&mut self, node: Node<'tree>) -> Result<Control<'tree>, Fault<'tree>> {
         self.tick()?;
+        let _guard = DepthGuard::enter(&self.depth, self.max_depth).map_err(Fault::Host)?;
         match node.kind() {
             "program" | "statement_block" => self.exec(node),
             "empty_statement" => Ok(Control::Normal),
@@ -663,6 +711,7 @@ impl<'tree> Interpreter<'tree> {
 
     fn eval(&mut self, node: Node<'tree>) -> Result<Value<'tree>, Fault<'tree>> {
         self.tick().map_err(Fault::Host)?;
+        let _guard = DepthGuard::enter(&self.depth, self.max_depth).map_err(Fault::Host)?;
         match node.kind() {
             "identifier" | "property_identifier" | "shorthand_property_identifier" => {
                 self.lookup(self.text(node)).ok_or_else(|| {
@@ -1175,6 +1224,7 @@ impl<'tree> Interpreter<'tree> {
     }
 
     fn resolve(&mut self, id: u64) -> Result<Value<'tree>, Fault<'tree>> {
+        let _depth = DepthGuard::enter(&self.depth, self.max_depth).map_err(Fault::Host)?;
         self.pump(id).map_err(Fault::Host)?;
         match self
             .promises
@@ -1229,6 +1279,7 @@ impl<'tree> Interpreter<'tree> {
     }
 
     fn pump(&mut self, target: u64) -> Result<(), HostError> {
+        let _depth = DepthGuard::enter(&self.depth, self.max_depth)?;
         loop {
             self.tick()?;
             self.drain()?;
@@ -1595,39 +1646,100 @@ impl<'tree> Interpreter<'tree> {
             ("Array", "from") => {
                 let source = args.first().cloned().unwrap_or(Value::Undefined);
                 let mapper = args.get(1).cloned();
-                let values = match source {
-                    Value::Array(items) => items.borrow().clone(),
-                    Value::String(value) => value
-                        .chars()
-                        .map(|character| Value::String(character.to_string()))
-                        .collect(),
+                if let Some(mapper) = &mapper
+                    && !matches!(mapper, Value::Function(_))
+                {
+                    return Err(Fault::Host(HostError::Data(
+                        "Array.from mapper must be a function".into(),
+                    )));
+                }
+                // Resolve the source to (length, element producer) without
+                // materializing the output, so every length check runs
+                // before any allocation.
+                let (length, producer): (usize, Box<dyn Fn(usize) -> Value<'tree>>) = match source {
+                    Value::Array(items) => {
+                        let length = items.borrow().len();
+                        (
+                            length,
+                            Box::new(move |index| {
+                                items
+                                    .borrow()
+                                    .get(index)
+                                    .cloned()
+                                    .unwrap_or(Value::Undefined)
+                            }),
+                        )
+                    }
+                    Value::String(value) => {
+                        let length = value.chars().count();
+                        let remaining = self
+                            .host
+                            .limits
+                            .instruction_budget
+                            .saturating_sub(self.instructions);
+                        if length as u64 > remaining {
+                            return Err(Fault::Host(HostError::FuelExhausted));
+                        }
+                        let staged_allocation = length
+                            .checked_mul(
+                                std::mem::size_of::<char>()
+                                    .saturating_add(std::mem::size_of::<Value<'tree>>()),
+                            )
+                            .ok_or_else(|| {
+                                Fault::Host(HostError::Data(
+                                    "Array.from string output length is too large".into(),
+                                ))
+                            })?;
+                        if staged_allocation > self.host.limits.memory_bytes {
+                            return Err(Fault::Host(HostError::Data(format!(
+                                "Array.from string staging of {staged_allocation} bytes exceeds memory limit of {} bytes",
+                                self.host.limits.memory_bytes
+                            ))));
+                        }
+                        let mut characters = Vec::new();
+                        characters.try_reserve_exact(length).map_err(|error| {
+                            Fault::Host(HostError::Data(format!(
+                                "Array.from string staging could not be reserved: {error}"
+                            )))
+                        })?;
+                        characters.extend(value.chars());
+                        (
+                            length,
+                            Box::new(move |index| {
+                                Value::String(
+                                    characters.get(index).copied().unwrap_or('\0').to_string(),
+                                )
+                            }),
+                        )
+                    }
                     Value::Object(object) => {
-                        let object = object.borrow();
-                        let length =
-                            object
-                                .fields
-                                .get("length")
-                                .and_then(number)
-                                .ok_or_else(|| {
-                                    Fault::Host(HostError::Data(
-                                        "Array.from length must be a finite number".into(),
-                                    ))
-                                })?;
+                        let length = object
+                            .borrow()
+                            .fields
+                            .get("length")
+                            .and_then(number)
+                            .ok_or_else(|| {
+                                Fault::Host(HostError::Data(
+                                    "Array.from length must be a finite number".into(),
+                                ))
+                            })?;
                         if !length.is_finite() || length < 0.0 {
                             return Err(Fault::Host(HostError::Data(
                                 "Array.from length must be finite and non-negative".into(),
                             )));
                         }
                         let length = length.floor() as usize;
-                        (0..length)
-                            .map(|index| {
+                        (
+                            length,
+                            Box::new(move |index| {
                                 object
+                                    .borrow()
                                     .fields
                                     .get(&index.to_string())
                                     .cloned()
                                     .unwrap_or(Value::Undefined)
-                            })
-                            .collect()
+                            }),
+                        )
                     }
                     _ => {
                         return Err(Fault::Host(HostError::Data(
@@ -1635,22 +1747,47 @@ impl<'tree> Interpreter<'tree> {
                         )));
                     }
                 };
-                let values = if let Some(mapper) = mapper {
-                    if !matches!(mapper, Value::Function(_)) {
-                        return Err(Fault::Host(HostError::Data(
-                            "Array.from mapper must be a function".into(),
-                        )));
-                    }
-                    values
-                        .into_iter()
-                        .enumerate()
-                        .map(|(index, value)| {
-                            self.call(mapper.clone(), vec![value, Value::Number(index as f64)])
-                        })
-                        .collect::<Result<Vec<_>, _>>()?
-                } else {
-                    values
-                };
+                // Pre-flight length checks: the output allocation must fit
+                // the memory limit and the emission loop must fit the
+                // remaining fuel, both before any memory is reserved.
+                let allocation = length
+                    .checked_mul(std::mem::size_of::<Value<'tree>>())
+                    .ok_or_else(|| {
+                        Fault::Host(HostError::Data(
+                            "Array.from output length is too large".into(),
+                        ))
+                    })?;
+                if allocation > self.host.limits.memory_bytes {
+                    return Err(Fault::Host(HostError::Data(format!(
+                        "Array.from allocation of {allocation} bytes exceeds memory limit of {} bytes",
+                        self.host.limits.memory_bytes
+                    ))));
+                }
+                let remaining = self
+                    .host
+                    .limits
+                    .instruction_budget
+                    .saturating_sub(self.instructions);
+                if length as u64 > remaining {
+                    return Err(Fault::Host(HostError::FuelExhausted));
+                }
+                let mut values = Vec::new();
+                values.try_reserve_exact(length).map_err(|error| {
+                    Fault::Host(HostError::Data(format!(
+                        "Array.from output allocation could not be reserved: {error}"
+                    )))
+                })?;
+                for index in 0..length {
+                    self.tick()?;
+                    let item = match &mapper {
+                        Some(mapper) => self.call(
+                            mapper.clone(),
+                            vec![producer(index), Value::Number(index as f64)],
+                        )?,
+                        None => producer(index),
+                    };
+                    values.push(item);
+                }
                 Ok(new_array(values))
             }
             ("Object", "keys") => Ok(new_array(object_keys(
@@ -2118,6 +2255,24 @@ impl<'tree> Interpreter<'tree> {
     }
 
     fn from_json(&self, value: JsonValue, strict: bool) -> Result<Value<'tree>, HostError> {
+        self.from_json_depth(value, strict, 0)
+    }
+
+    /// Depth-aware JSON import. Every nesting level is checked against the
+    /// interpreter's derived depth ceiling before recursion, so hostile
+    /// connector payloads cannot build unboundedly deep value trees.
+    fn from_json_depth(
+        &self,
+        value: JsonValue,
+        strict: bool,
+        depth: usize,
+    ) -> Result<Value<'tree>, HostError> {
+        if depth >= self.max_depth {
+            return Err(HostError::Data(format!(
+                "JSON parsing depth exceeds the limit of {}",
+                self.max_depth
+            )));
+        }
         Ok(match value {
             JsonValue::Null => Value::Null,
             JsonValue::Bool(value) => Value::Bool(value),
@@ -2130,13 +2285,13 @@ impl<'tree> Interpreter<'tree> {
             JsonValue::Array(values) => new_array(
                 values
                     .into_iter()
-                    .map(|value| self.from_json(value, strict))
+                    .map(|value| self.from_json_depth(value, strict, depth + 1))
                     .collect::<Result<_, _>>()?,
             ),
             JsonValue::Object(values) => Value::Object(Rc::new(RefCell::new(ObjectValue {
                 fields: values
                     .into_iter()
-                    .map(|(key, value)| Ok((key, self.from_json(value, strict)?)))
+                    .map(|(key, value)| Ok((key, self.from_json_depth(value, strict, depth + 1)?)))
                     .collect::<Result<_, HostError>>()?,
                 getters: BTreeMap::new(),
                 access: if strict {
@@ -2149,6 +2304,25 @@ impl<'tree> Interpreter<'tree> {
     }
 
     fn to_json(&self, value: &Value<'tree>) -> Result<JsonValue, HostError> {
+        let mut active = BTreeSet::new();
+        self.to_json_depth(value, 0, &mut active)
+    }
+
+    /// Depth-aware JSON export. Container nesting is capped at the derived
+    /// depth ceiling, and active Rc pointers are tracked so a cyclic value
+    /// is rejected with a typed data error before recursion can loop.
+    fn to_json_depth(
+        &self,
+        value: &Value<'tree>,
+        depth: usize,
+        active: &mut BTreeSet<usize>,
+    ) -> Result<JsonValue, HostError> {
+        if depth >= self.max_depth {
+            return Err(HostError::Data(format!(
+                "JSON serialization depth exceeds the limit of {}",
+                self.max_depth
+            )));
+        }
         Ok(match value {
             Value::Undefined | Value::Null => JsonValue::Null,
             Value::Bool(value) => JsonValue::Bool(*value),
@@ -2164,22 +2338,42 @@ impl<'tree> Interpreter<'tree> {
                 .ok_or_else(|| HostError::Data("invalid number".into()))?,
             Value::Number(_) => JsonValue::Null,
             Value::String(value) => JsonValue::String(value.clone()),
-            Value::Array(values) => JsonValue::Array(
-                values
-                    .borrow()
-                    .iter()
-                    .map(|value| self.to_json(value))
-                    .collect::<Result<_, _>>()?,
-            ),
+            Value::Array(values) => {
+                let pointer = Rc::as_ptr(values) as usize;
+                if !active.insert(pointer) {
+                    return Err(HostError::Data(
+                        "cyclic value cannot be serialized as JSON".into(),
+                    ));
+                }
+                let result = JsonValue::Array(
+                    values
+                        .borrow()
+                        .iter()
+                        .map(|value| self.to_json_depth(value, depth + 1, active))
+                        .collect::<Result<_, _>>()?,
+                );
+                active.remove(&pointer);
+                result
+            }
             Value::Object(value) => {
+                let pointer = Rc::as_ptr(value) as usize;
+                if !active.insert(pointer) {
+                    return Err(HostError::Data(
+                        "cyclic value cannot be serialized as JSON".into(),
+                    ));
+                }
                 let object = value.borrow();
-                JsonValue::Object(
+                let result = JsonValue::Object(
                     object
                         .fields
                         .iter()
-                        .map(|(key, value)| Ok((key.clone(), self.to_json(value)?)))
+                        .map(|(key, value)| {
+                            Ok((key.clone(), self.to_json_depth(value, depth + 1, active)?))
+                        })
                         .collect::<Result<Map<_, _>, HostError>>()?,
-                )
+                );
+                active.remove(&pointer);
+                result
             }
             Value::Error(value) => JsonValue::Object(
                 [
@@ -2211,16 +2405,23 @@ impl<'tree> Interpreter<'tree> {
     fn to_public_json(&mut self, value: &Value<'tree>) -> Result<(JsonValue, bool), HostError> {
         let mut degraded = false;
         let mut seen = BTreeSet::new();
-        let json = self.serialize_public(value, &mut seen, &mut degraded)?;
+        let json = self.serialize_public(value, 0, &mut seen, &mut degraded)?;
         Ok((json, degraded))
     }
 
     fn serialize_public(
         &mut self,
         value: &Value<'tree>,
+        depth: usize,
         seen: &mut BTreeSet<usize>,
         degraded: &mut bool,
     ) -> Result<JsonValue, HostError> {
+        if depth >= self.max_depth {
+            return Err(HostError::Data(format!(
+                "result serialization depth exceeds the limit of {}",
+                self.max_depth
+            )));
+        }
         Ok(match value {
             Value::Undefined | Value::Null => JsonValue::Null,
             Value::Bool(value) => JsonValue::Bool(*value),
@@ -2244,13 +2445,13 @@ impl<'tree> Interpreter<'tree> {
                 let pointer = Rc::as_ptr(values) as usize;
                 if !seen.insert(pointer) {
                     *degraded = true;
-                    self.serialize_public(&Value::Unreadable, seen, degraded)?
+                    self.serialize_public(&Value::Unreadable, depth + 1, seen, degraded)?
                 } else {
                     let items = values.borrow().clone();
                     let json = JsonValue::Array(
                         items
                             .iter()
-                            .map(|item| self.serialize_public(item, seen, degraded))
+                            .map(|item| self.serialize_public(item, depth + 1, seen, degraded))
                             .collect::<Result<_, _>>()?,
                     );
                     seen.remove(&pointer);
@@ -2261,7 +2462,7 @@ impl<'tree> Interpreter<'tree> {
                 let pointer = Rc::as_ptr(value) as usize;
                 if !seen.insert(pointer) {
                     *degraded = true;
-                    self.serialize_public(&Value::Unreadable, seen, degraded)?
+                    self.serialize_public(&Value::Unreadable, depth + 1, seen, degraded)?
                 } else {
                     let (fields, getters) = {
                         let object = value.borrow();
@@ -2273,15 +2474,22 @@ impl<'tree> Interpreter<'tree> {
                     for key in keys {
                         let entry = if let Some(getter) = getters.get(&key) {
                             match self.call(getter.clone(), Vec::new()) {
-                                Ok(result) => self.serialize_public(&result, seen, degraded)?,
+                                Ok(result) => {
+                                    self.serialize_public(&result, depth + 1, seen, degraded)?
+                                }
                                 Err(Fault::Throw(_)) => {
                                     *degraded = true;
-                                    self.serialize_public(&Value::Unreadable, seen, degraded)?
+                                    self.serialize_public(
+                                        &Value::Unreadable,
+                                        depth + 1,
+                                        seen,
+                                        degraded,
+                                    )?
                                 }
                                 Err(Fault::Host(error)) => return Err(error),
                             }
                         } else {
-                            self.serialize_public(&fields[&key], seen, degraded)?
+                            self.serialize_public(&fields[&key], depth + 1, seen, degraded)?
                         };
                         map.insert(key, entry);
                     }
@@ -2483,18 +2691,38 @@ fn truthy(value: &Value<'_>) -> bool {
 }
 
 fn to_string(value: &Value<'_>) -> String {
+    to_string_depth(value, &mut BTreeSet::new(), 0)
+}
+
+/// Coercion with an independent pointer/depth guard. Arrays can reference
+/// themselves (for example via `push`), and string, template, join, sort,
+/// and error formatting all recurse through this helper, so cycles and
+/// excessive nesting fall back to a JS-like empty element instead of
+/// overflowing the native stack.
+fn to_string_depth(value: &Value<'_>, active: &mut BTreeSet<usize>, depth: usize) -> String {
+    if depth >= MAX_TO_STRING_DEPTH {
+        return String::new();
+    }
     match value {
         Value::Undefined => "undefined".into(),
         Value::Null => "null".into(),
         Value::Bool(value) => value.to_string(),
         Value::Number(value) => value.to_string(),
         Value::String(value) => value.clone(),
-        Value::Array(values) => values
-            .borrow()
-            .iter()
-            .map(to_string)
-            .collect::<Vec<_>>()
-            .join(","),
+        Value::Array(values) => {
+            let pointer = Rc::as_ptr(values) as usize;
+            if !active.insert(pointer) {
+                return String::new();
+            }
+            let joined = values
+                .borrow()
+                .iter()
+                .map(|item| to_string_depth(item, active, depth + 1))
+                .collect::<Vec<_>>()
+                .join(",");
+            active.remove(&pointer);
+            joined
+        }
         Value::Error(value) => value.message.clone(),
         _ => "[object Object]".into(),
     }
@@ -2597,4 +2825,213 @@ fn unquote(value: &str) -> String {
         }
     }
     value.into()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::HostLimits;
+    use crate::host::{CapabilityDescriptor, ConnectorError, GlobalRegistration};
+
+    struct NullConnector;
+
+    impl Connector for NullConnector {
+        fn dispatch(
+            &self,
+            _: &CapabilityDescriptor,
+            _: &str,
+            _: DispatchContext,
+            _: ConnectorCompletion,
+        ) -> Result<(), ConnectorError> {
+            Ok(())
+        }
+    }
+
+    fn test_host(stack_bytes: usize, instruction_budget: u64) -> Host {
+        let limits = HostLimits::new(
+            16 * 1024 * 1024,
+            stack_bytes,
+            Duration::from_secs(2),
+            instruction_budget,
+            64,
+            256 * 1024,
+            16 * 1024 * 1024,
+        )
+        .unwrap();
+        Host::new(limits, GlobalRegistration::zero(vec![])).unwrap()
+    }
+
+    fn test_interpreter(host: &Host) -> Interpreter<'_> {
+        let mut parser = Parser::new();
+        parser.set_language(&LANGUAGE.into()).unwrap();
+        let tree = parser.parse("", None).unwrap();
+        let tree: &'static tree_sitter::Tree = Box::leak(Box::new(tree));
+        Interpreter::new(
+            host,
+            "",
+            tree.root_node(),
+            Rc::new(NullConnector),
+            Arc::new(AtomicBool::new(false)),
+            Duration::from_secs(2),
+        )
+    }
+
+    #[test]
+    fn depth_guard_unwinds_on_every_return_path() {
+        let depth = Rc::new(Cell::new(0usize));
+        {
+            let _outer = DepthGuard::enter(&depth, 8).unwrap();
+            assert_eq!(depth.get(), 1);
+            {
+                let _inner = DepthGuard::enter(&depth, 8).unwrap();
+                assert_eq!(depth.get(), 2);
+                drop(_inner);
+                assert_eq!(depth.get(), 1);
+            }
+        }
+        assert_eq!(depth.get(), 0);
+    }
+
+    #[test]
+    fn depth_guard_rejects_past_limit_and_keeps_counter_stable() {
+        let depth = Rc::new(Cell::new(8usize));
+        let error = match DepthGuard::enter(&depth, 8) {
+            Ok(_) => panic!("depth guard must reject entries past the limit"),
+            Err(error) => error,
+        };
+        assert!(matches!(error, HostError::Data(_)));
+        assert!(error.to_string().contains("depth"));
+        assert_eq!(depth.get(), 8);
+    }
+
+    #[test]
+    fn depth_guard_unwinds_after_early_error_return() {
+        let depth = Rc::new(Cell::new(0usize));
+        fn probe(depth: &Rc<Cell<usize>>, fail: bool) -> Result<(), HostError> {
+            let _guard = DepthGuard::enter(depth, 16)?;
+            if fail {
+                return Err(HostError::Data("boom".into()));
+            }
+            Ok(())
+        }
+        let _ = probe(&depth, true);
+        assert_eq!(depth.get(), 0);
+        probe(&depth, false).unwrap();
+        assert_eq!(depth.get(), 0);
+    }
+
+    #[test]
+    fn to_json_rejects_cycles_before_recursion() {
+        let host = test_host(256 * 1024, 100_000);
+        let interpreter = test_interpreter(&host);
+        let value = Value::Object(Rc::new(RefCell::new(ObjectValue {
+            fields: BTreeMap::new(),
+            getters: BTreeMap::new(),
+            access: ObjectAccess::Open,
+        })));
+        if let Value::Object(object) = &value {
+            object
+                .borrow_mut()
+                .fields
+                .insert("self".into(), value.clone());
+        }
+        let error = interpreter.to_json(&value).unwrap_err();
+        assert!(matches!(error, HostError::Data(_)));
+        assert!(error.to_string().contains("cyclic"));
+    }
+
+    #[test]
+    fn from_json_caps_depth_with_typed_error() {
+        let host = test_host(16 * 1024, 100_000); // derived ceiling = 8
+        let interpreter = test_interpreter(&host);
+        let mut json = JsonValue::Null;
+        for _ in 0..32 {
+            json = JsonValue::Array(vec![json]);
+        }
+        let error = interpreter.from_json(json, false).unwrap_err();
+        assert!(matches!(error, HostError::Data(_)));
+        assert!(error.to_string().contains("depth"));
+    }
+
+    #[test]
+    fn from_json_accepts_bounded_nesting() {
+        let host = test_host(16 * 1024, 100_000); // derived ceiling = 8
+        let interpreter = test_interpreter(&host);
+        let mut json = JsonValue::Null;
+        for _ in 0..4 {
+            json = JsonValue::Array(vec![json]);
+        }
+        let value = interpreter.from_json(json, false).unwrap();
+        assert!(matches!(value, Value::Array(_)));
+    }
+    fn nested_array<'tree>(depth: usize) -> Value<'tree> {
+        let mut value = Value::Number(1.0);
+        for _ in 0..depth {
+            value = new_array(vec![value]);
+        }
+        value
+    }
+
+    #[test]
+    fn public_serialization_caps_depth_with_typed_error() {
+        let host = test_host(256 * 1024, 100_000); // derived ceiling = 128
+        let mut interpreter = test_interpreter(&host);
+        let value = nested_array(160);
+        let error = interpreter.to_public_json(&value).unwrap_err();
+        assert!(matches!(error, HostError::Data(_)));
+        assert!(error.to_string().contains("serialization depth"));
+    }
+
+    #[test]
+    fn public_serialization_accepts_bounded_nesting() {
+        let host = test_host(256 * 1024, 100_000); // derived ceiling = 128
+        let mut interpreter = test_interpreter(&host);
+        let value = nested_array(64);
+        let (json, degraded) = interpreter.to_public_json(&value).unwrap();
+        assert!(!degraded);
+        let mut node = &json;
+        for _ in 0..64 {
+            node = node.as_array().unwrap().first().unwrap();
+        }
+        assert_eq!(node, &serde_json::json!(1));
+    }
+    #[test]
+    fn promise_resolution_recursion_is_depth_bounded() {
+        let host = test_host(16 * 1024, 100_000); // derived ceiling = 8
+        let mut interpreter = test_interpreter(&host);
+        interpreter
+            .promises
+            .insert(0, PromiseState::Fulfilled(Value::Number(1.0)));
+        for id in 1..=16 {
+            interpreter
+                .promises
+                .insert(id, PromiseState::Pending(PromiseKind::All(vec![id - 1])));
+        }
+
+        let error = match interpreter.resolve(16) {
+            Ok(_) => panic!("nested promise resolution must be depth bounded"),
+            Err(Fault::Host(error)) => error,
+            Err(Fault::Throw(_)) => panic!("nested promise resolution returned a thrown value"),
+        };
+        assert!(matches!(error, HostError::Data(_)));
+        assert!(error.to_string().contains("depth"));
+        assert_eq!(interpreter.depth.get(), 0);
+    }
+
+    #[test]
+    fn promise_pump_entry_obeys_depth_limit() {
+        let host = test_host(16 * 1024, 100_000); // derived ceiling = 8
+        let mut interpreter = test_interpreter(&host);
+        interpreter
+            .promises
+            .insert(1, PromiseState::Fulfilled(Value::Number(1.0)));
+        interpreter.depth.set(interpreter.max_depth);
+
+        let error = interpreter
+            .pump(1)
+            .expect_err("promise pump must share the interpreter depth limit");
+        assert!(matches!(error, HostError::Data(_)));
+        assert!(error.to_string().contains("depth"));
+        assert_eq!(interpreter.depth.get(), interpreter.max_depth);
+    }
 }
