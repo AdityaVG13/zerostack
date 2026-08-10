@@ -2,7 +2,7 @@
   "schema": "zerostack.loc-ownership.v1",
   "version": 1,
   "generated_from_heads": {
-    "zerostack": "cd2c17507c6ec2fe30836314987c66f90a05cca8",
+    "zerostack": "b1353e32767a6685d4487755aa4623a948bdf8f1",
     "fszero": "64458c875debb0b8d06e368e9b4ee1b647d4053b",
     "graphzero": "7a9267f80bde567f9618aeff67a5bb16741e5910",
     "tokenzero": "a343ded40f2d70db4576754552665cf610b6c138"
@@ -1435,10 +1435,11 @@
       "repo": "zerostack",
       "path": "scripts/check_no_host_paths.py",
       "language": "Python",
-      "classification": "excluded",
-      "rule": "cross-repo-duplicate",
-      "justification": "exact-byte duplicate across repositories (zerostack:scripts/check_no_host_paths.py, graphzero:scripts/check_no_host_paths.py); all copies remain in the denominator, are excluded from the hub numerator, and fail the gate",
-      "blob_digest": "cd75822b38d4c6a74a512d27dba621efed70598d"
+      "classification": "shared-candidate",
+      "rule": "hub-owned-substrate",
+      "justification": "hub implementation already owned by zero-testkit",
+      "blob_digest": "3d2582cb72ee9653fa80eb4067b80dd05a5e3e48",
+      "hub_target": "zero-testkit"
     },
     {
       "repo": "zerostack",
@@ -8607,9 +8608,9 @@
       "repo": "graphzero",
       "path": "scripts/check_no_host_paths.py",
       "language": "Python",
-      "classification": "excluded",
-      "rule": "cross-repo-duplicate",
-      "justification": "exact-byte duplicate across repositories (zerostack:scripts/check_no_host_paths.py, graphzero:scripts/check_no_host_paths.py); all copies remain in the denominator, are excluded from the hub numerator, and fail the gate",
+      "classification": "domain-local",
+      "rule": "engine-domain-default",
+      "justification": "graphzero domain implementation has no reviewed shared-substrate signal",
       "blob_digest": "cd75822b38d4c6a74a512d27dba621efed70598d"
     },
     {
