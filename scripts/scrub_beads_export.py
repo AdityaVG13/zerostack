@@ -47,8 +47,8 @@ WIN_HOME_PATH = re.compile(r"[A-Za-z]:[\\/]Users[\\/][A-Za-z0-9_.-]+(?=[\\/]|\b)
 
 def relativize(text: str) -> str:
     """Rewrite absolute home paths to ~-relative form, leaving the rest intact."""
-    text = HOME_PATH.sub("~", text)
-    return WIN_HOME_PATH.sub("~", text)
+    text = WIN_HOME_PATH.sub("~", text)
+    return HOME_PATH.sub("~", text)
 
 
 def _scrub_string(value: str, *, key: str | None, source_repo: str | None) -> tuple[str, bool]:

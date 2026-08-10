@@ -4,7 +4,7 @@
       "active_cancellation": {
         "interrupt": "CTRL_C",
         "next_call_result": 42,
-        "plan": "FS search across /Users/aditya",
+        "plan": "FS search across ~",
         "post_shutdown_sidecars": 0,
         "process_exit": 130,
         "tool_event": "tool_execution_start write xd://zero_execute",
@@ -47,7 +47,7 @@
       "active_cancellation": {
         "interrupt": "CTRL_C",
         "next_call_result": 42,
-        "plan": "FS search across /Users/aditya/AI",
+        "plan": "FS search across ~/AI",
         "post_shutdown_sidecars": 0,
         "tool_event": "tool_execution_start zero_execute",
         "tool_execution_end_observed": false
