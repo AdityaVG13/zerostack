@@ -3423,11 +3423,7 @@ mod tests {
                     80,
                 ),
                 ZeroBenchArmV1::RaccRAmplify => {
-                    let result = if regression && raw_success {
-                        false
-                    } else {
-                        true
-                    };
+                    let result = !(regression && raw_success);
                     (
                         Some(result),
                         Some(result),

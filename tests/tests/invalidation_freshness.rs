@@ -1,16 +1,13 @@
 //! Frozen Z3 vector replay and schema/ABI correspondence.
 
 use serde::Deserialize;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use zero_abi::{
-    canonical_json, decide_freshness_v1, sha256_hex, CertifiedInfluenceClosure,
-    DependencyEdgeKindV1, DependencyEdgeV1, DigestV1, EssentialDependencyCertificate,
-    FreshnessFailureCodeV1, FreshnessHeadV1, FreshnessStatusV1, IndexedThroughCertificate,
-    ProducerDomainV1,
+    CertifiedInfluenceClosure, DependencyEdgeKindV1, DependencyEdgeV1, DigestV1,
+    EssentialDependencyCertificate, FreshnessFailureCodeV1, FreshnessHeadV1, FreshnessStatusV1,
+    IndexedThroughCertificate, ProducerDomainV1, canonical_json, decide_freshness_v1, sha256_hex,
 };
-use zerostack_shared_tests::racc::{
-    validate_racc_schema, RACC_INVALIDATION_FRESHNESS_SCHEMA,
-};
+use zerostack_shared_tests::racc::{RACC_INVALIDATION_FRESHNESS_SCHEMA, validate_racc_schema};
 
 const VECTORS: &str = include_str!("../fixtures/invalidation-freshness-v1.json");
 
@@ -181,11 +178,13 @@ fn freshness_missing_edge_is_loud_and_non_promotable() {
             "token:cache".into(),
         ],
         vec![required_first.clone(), edge("graph:symbol", "token:cache")],
-        vec![EssentialDependencyCertificate::new(
-            required_first.clone(),
-            vec!["fs:file".into(), "graph:symbol".into()],
-        )
-        .unwrap()],
+        vec![
+            EssentialDependencyCertificate::new(
+                required_first.clone(),
+                vec!["fs:file".into(), "graph:symbol".into()],
+            )
+            .unwrap(),
+        ],
     )
     .unwrap();
     let incomplete = CertifiedInfluenceClosure::new(
@@ -202,11 +201,13 @@ fn freshness_missing_edge_is_loud_and_non_promotable() {
             "token:cache".into(),
         ],
         vec![required_first.clone()],
-        vec![EssentialDependencyCertificate::new(
-            required_first,
-            vec!["fs:file".into(), "graph:symbol".into()],
-        )
-        .unwrap()],
+        vec![
+            EssentialDependencyCertificate::new(
+                required_first,
+                vec!["fs:file".into(), "graph:symbol".into()],
+            )
+            .unwrap(),
+        ],
     )
     .unwrap();
     let certificate = IndexedThroughCertificate::new("graph-index", 7, incomplete).unwrap();

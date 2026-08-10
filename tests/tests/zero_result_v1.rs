@@ -1,5 +1,5 @@
 use jsonschema::Validator;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use zero_abi::{ZeroResultAccessError, ZeroResultV1};
 
 fn schema() -> Validator {

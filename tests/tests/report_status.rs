@@ -1,9 +1,11 @@
 use zerostack_shared_tests::{
-    CheckResult, CompletionStatus, ConformanceReport, Ns, Surface, CHECK_IDS,
-    RAW_CHECK_IDS,
+    CHECK_IDS, CheckResult, CompletionStatus, ConformanceReport, Ns, RAW_CHECK_IDS, Surface,
 };
 fn plan_checks() -> Vec<CheckResult> {
-    CHECK_IDS.iter().map(|id| CheckResult::pass(id, id)).collect()
+    CHECK_IDS
+        .iter()
+        .map(|id| CheckResult::pass(id, id))
+        .collect()
 }
 fn raw_checks() -> Vec<CheckResult> {
     RAW_CHECK_IDS
@@ -76,7 +78,11 @@ fn non_required_skip_is_partial_not_failed() {
 fn mcp_g1_only_cannot_false_green() {
     let mut c = vec![CheckResult::pass("G1", "exposure")];
     c.extend(CHECK_IDS[1..].iter().map(|id| {
-        CheckResult::skip(id, id, "not applicable to MCP surface; requires planner execution")
+        CheckResult::skip(
+            id,
+            id,
+            "not applicable to MCP surface; requires planner execution",
+        )
     }));
     let r = ConformanceReport::new(Ns::Fz, "fake", Surface::Mcp, c);
     assert_eq!(r.completion_status, CompletionStatus::Partial);

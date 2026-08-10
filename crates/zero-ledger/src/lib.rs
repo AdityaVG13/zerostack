@@ -970,23 +970,23 @@ impl DominanceReceipt {
         let racc_input_tokens = ledger
             .check_accounting_complete()
             .map_err(ReceiptError::Accounting)?;
-        if let Some(root) = exactness.byte_exact {
-            if root != roots.archive_root {
-                return Err(ReceiptError::EvidenceRootMismatch {
-                    kind: "archive",
-                    receipt: roots.archive_root,
-                    evidence: root,
-                });
-            }
+        if let Some(root) = exactness.byte_exact
+            && root != roots.archive_root
+        {
+            return Err(ReceiptError::EvidenceRootMismatch {
+                kind: "archive",
+                receipt: roots.archive_root,
+                evidence: root,
+            });
         }
-        if let Some(root) = exactness.policy_exact_or_fallback {
-            if root != roots.certificate_root {
-                return Err(ReceiptError::EvidenceRootMismatch {
-                    kind: "policy",
-                    receipt: roots.certificate_root,
-                    evidence: root,
-                });
-            }
+        if let Some(root) = exactness.policy_exact_or_fallback
+            && root != roots.certificate_root
+        {
+            return Err(ReceiptError::EvidenceRootMismatch {
+                kind: "policy",
+                receipt: roots.certificate_root,
+                evidence: root,
+            });
         }
         Ok(Self {
             schema_version: RECEIPT_SCHEMA_VERSION,

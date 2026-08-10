@@ -13,8 +13,8 @@
 //! here (that is the raw-worker path), and a `*-mcp` artifact only exercises
 //! G1 exposure.
 
-use crate::{collect_refs, valid_execution_id, valid_ref, CheckResult, McpClient, Ns};
-use serde_json::{json, Value};
+use crate::{CheckResult, McpClient, Ns, collect_refs, valid_execution_id, valid_ref};
+use serde_json::{Value, json};
 use std::collections::BTreeMap;
 use std::path::Path;
 use std::time::Duration;
@@ -65,7 +65,11 @@ pub fn run_conformance(ns: Ns, bin: &Path, timeout: Duration) -> Vec<CheckResult
                 ("G9", "coalescing"),
                 ("G10", "sandbox-denial"),
             ] {
-                checks.push(CheckResult::skip(id, name, "planner server did not initialize"));
+                checks.push(CheckResult::skip(
+                    id,
+                    name,
+                    "planner server did not initialize",
+                ));
             }
         }
     }
@@ -76,12 +80,14 @@ pub fn run_conformance(ns: Ns, bin: &Path, timeout: Duration) -> Vec<CheckResult
 /// exactly the three CodeMode tools, and refuses to also serve the opposite
 /// (MCP) surface.
 fn check_plan_exposure(ns: Ns, bin: &Path, timeout: Duration) -> Result<CheckResult, String> {
-    let codemode_tools: std::collections::BTreeSet<String> =
-        ns.tool_names().into_iter().collect();
+    let codemode_tools: std::collections::BTreeSet<String> = ns.tool_names().into_iter().collect();
     let mut client = McpClient::spawn(bin, None, timeout).map_err(|e| e.to_string())?;
     client.initialize().map_err(|e| e.to_string())?;
-    let served: std::collections::BTreeSet<String> =
-        client.list_tools().map_err(|e| e.to_string())?.into_iter().collect();
+    let served: std::collections::BTreeSet<String> = client
+        .list_tools()
+        .map_err(|e| e.to_string())?
+        .into_iter()
+        .collect();
     let mut details = Vec::new();
     if served != codemode_tools {
         details.push(format!(
@@ -89,13 +95,14 @@ fn check_plan_exposure(ns: Ns, bin: &Path, timeout: Duration) -> Result<CheckRes
         ));
     }
     // Opposite (MCP) spawn failure is a pass: fail-closed refusal.
-    if let Ok(mut wrong) = McpClient::spawn(bin, Some("mcp"), timeout) {
-        if wrong.initialize().is_ok() && wrong.list_tools().is_ok() {
-            details.push(
-                "planner artifact also served the mcp surface; surfaces must be mutually exclusive"
-                    .into(),
-            );
-        }
+    if let Ok(mut wrong) = McpClient::spawn(bin, Some("mcp"), timeout)
+        && wrong.initialize().is_ok()
+        && wrong.list_tools().is_ok()
+    {
+        details.push(
+            "planner artifact also served the mcp surface; surfaces must be mutually exclusive"
+                .into(),
+        );
     }
     Ok(CheckResult::with_details("G1", "exposure", details))
 }
@@ -299,8 +306,12 @@ fn limit_probe_plan(name: &str, limit: u64) -> Option<String> {
         "max_parallel_width" => Some(format!(
             "return zero.queryMany ? zero.queryMany(Array.from({{length: {above}}}, (_, i) => String(i))) : 1;"
         )),
-        "max_wall_ms" | "hard_max_wall_ms" | "max_memory_bytes" | "max_physical_ops"
-        | "max_result_ref_bytes" | "max_refs_emitted" => None,
+        "max_wall_ms"
+        | "hard_max_wall_ms"
+        | "max_memory_bytes"
+        | "max_physical_ops"
+        | "max_result_ref_bytes"
+        | "max_refs_emitted" => None,
         _ => None,
     }
 }
@@ -560,12 +571,11 @@ fn payload_from_content(content: &[Value]) -> Option<Value> {
         }
     }
     for item in content {
-        if let Some(text) = item.get("text").and_then(Value::as_str) {
-            if let Ok(parsed) = serde_json::from_str::<Value>(text) {
-                if matches!(parsed, Value::Object(_) | Value::Array(_)) {
-                    return Some(parsed);
-                }
-            }
+        if let Some(text) = item.get("text").and_then(Value::as_str)
+            && let Ok(parsed) = serde_json::from_str::<Value>(text)
+            && matches!(parsed, Value::Object(_) | Value::Array(_))
+        {
+            return Some(parsed);
         }
     }
     None
@@ -595,19 +605,10 @@ mod tests {
     #[test]
     fn mutation_interpret_matrix_pins_user_authorization_policy() {
         // Plan G8 owns user-surface authorization; raw RW8 does not.
-        let denied_ok = interpret_mutation_probe(
-            "denied",
-            None,
-            Some("policy"),
-            &json!({}),
-        );
+        let denied_ok = interpret_mutation_probe("denied", None, Some("policy"), &json!({}));
         assert!(denied_ok.is_empty());
-        let denied_wrong = interpret_mutation_probe(
-            "denied",
-            None,
-            Some("runtime"),
-            &json!({"k": "v"}),
-        );
+        let denied_wrong =
+            interpret_mutation_probe("denied", None, Some("runtime"), &json!({"k": "v"}));
         assert!(!denied_wrong.is_empty());
         let allowed_ok = interpret_mutation_probe("allowed", Some("X0"), None, &json!({}));
         assert!(allowed_ok.is_empty());

@@ -1,9 +1,8 @@
 use serde_json::json;
 use zero_abi::{
     ALL_DISPATCH_ERROR_CLASSES, ApprovalRequirement, CanonicalOperation, CanonicalRegistry,
-    CanonicalResource, EffectClass, EffectPolicy, EngineIdentity, PermitRequirement,
-    RefOwnership, RegistryEngine,
-    TelemetrySchema,
+    CanonicalResource, EffectClass, EffectPolicy, EngineIdentity, PermitRequirement, RefOwnership,
+    RegistryEngine, TelemetrySchema,
 };
 use zero_codemode::{
     CapabilityDescriptor, DomainAdapterRegistration, SurfaceContractError, SurfaceKind,
@@ -108,8 +107,14 @@ fn populated_surface_metadata_round_trips_with_stable_digest() {
     let decoded: SurfaceRegistration = serde_json::from_value(catalog.clone()).unwrap();
     assert_eq!(decoded, registration);
     assert_eq!(decoded.adapter.registry_digest_hex().unwrap(), digest);
-    assert_eq!(catalog["instructions"], "Use the engine catalog exactly as declared.");
-    assert_eq!(catalog["adapter"]["registry"]["resources"][0]["uri"], "resource://z");
+    assert_eq!(
+        catalog["instructions"],
+        "Use the engine catalog exactly as declared."
+    );
+    assert_eq!(
+        catalog["adapter"]["registry"]["resources"][0]["uri"],
+        "resource://z"
+    );
 }
 
 #[test]

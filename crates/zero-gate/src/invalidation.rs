@@ -874,7 +874,7 @@ fn require_nonzero(
     label: &'static str,
     values: &[DigestV1],
 ) -> Result<(), InvalidationIntakeErrorV1> {
-    if values.iter().any(|value| *value == DigestV1::ZERO) {
+    if values.contains(&DigestV1::ZERO) {
         Err(intake_error(
             InvalidationFailureCodeV1::ZeroDigest,
             format!("{label} contains a zero digest"),

@@ -221,13 +221,13 @@ impl EffectLocalizationV1 {
         if let Some(target) = self.target_digest {
             require_digest("localization target", target)?;
         }
-        if let (Some(start), Some(len)) = (self.byte_start, self.byte_len) {
-            if len == 0 || start.checked_add(len).is_none() {
-                return Err(EffectWitnessErrorV1::new(
-                    EffectWitnessFailureCodeV1::RangeOverflow,
-                    "byte localization is empty or overflows u64",
-                ));
-            }
+        if let (Some(start), Some(len)) = (self.byte_start, self.byte_len)
+            && (len == 0 || start.checked_add(len).is_none())
+        {
+            return Err(EffectWitnessErrorV1::new(
+                EffectWitnessFailureCodeV1::RangeOverflow,
+                "byte localization is empty or overflows u64",
+            ));
         }
         Ok(())
     }
@@ -642,7 +642,7 @@ fn build_witness(
     expected_predicate_digest: DigestV1,
     state_snapshot: DigestV1,
     localization: EffectLocalizationV1,
-    expansion_handles: &mut Vec<DigestV1>,
+    expansion_handles: &mut [DigestV1],
     verifier_digest: DigestV1,
     evidence: &VerifiedEvidence<'_, '_>,
 ) -> Result<EffectWitnessV1, EffectWitnessErrorV1> {
@@ -676,7 +676,7 @@ fn build_witness(
         state_snapshot,
         localization,
         exact_evidence_refs,
-        expansion_handles: expansion_handles.clone(),
+        expansion_handles: expansion_handles.to_vec(),
         verifier_digest,
         witness_digest: DigestV1::ZERO,
     };

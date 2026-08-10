@@ -368,6 +368,7 @@ fn permit_liveness_identity(pid: u32) -> PermitIdentity {
     }
 }
 
+#[cfg(any(target_os = "linux", target_os = "android"))]
 #[test]
 fn permit_liveness_proc_stat_parses_parenthesized_comm_with_spaces_and_parens() {
     let stat =

@@ -241,6 +241,7 @@ impl<'de> Deserialize<'de> for CausalWorkReceiptV1 {
     }
 }
 
+#[allow(clippy::large_enum_variant)]
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(tag = "outcome", rename_all = "snake_case", deny_unknown_fields)]
 pub enum CausalWorkOutcomeV1 {

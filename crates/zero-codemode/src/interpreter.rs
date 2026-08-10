@@ -192,7 +192,7 @@ pub(super) fn execute(
         timeout,
     );
     let value = interpreter.run()?;
-    let (serialized, degraded) = interpreter.to_public_json(&value)?;
+    let (serialized, degraded) = interpreter.serialize_public_json(&value)?;
     let public: JsonValue = if degraded {
         let refs = collect_refs(&serialized);
         serde_json::json!({
@@ -1392,7 +1392,7 @@ impl<'tree> Interpreter<'tree> {
                     serde_json::from_str::<JsonValue>(&value)
                         .map_err(|error| HostError::Json(error.to_string()))
                 })
-                .and_then(|value| self.from_json(value, true))
+                .and_then(|value| self.convert_from_json(value, true))
             {
                 Ok(value) => PromiseState::Fulfilled(value),
                 Err(error) => PromiseState::Failed(error),
@@ -1445,10 +1445,8 @@ impl<'tree> Interpreter<'tree> {
                     let object = value.borrow();
                     if let Some(result) = object.fields.get(key) {
                         Some(Ok(result.clone()))
-                    } else if let Some(getter) = object.getters.get(key) {
-                        Some(Err(getter.clone()))
                     } else {
-                        None
+                        object.getters.get(key).map(|getter| Err(getter.clone()))
                     }
                 };
                 match found {
@@ -1861,7 +1859,7 @@ impl<'tree> Interpreter<'tree> {
                                 message: error.to_string(),
                             }))
                         })?;
-                self.from_json(json, false).map_err(Fault::Host)
+                self.convert_from_json(json, false).map_err(Fault::Host)
             }
             ("JSON", "stringify") => Ok(Value::String(
                 serde_json::to_string(
@@ -2254,14 +2252,14 @@ impl<'tree> Interpreter<'tree> {
         Ok(())
     }
 
-    fn from_json(&self, value: JsonValue, strict: bool) -> Result<Value<'tree>, HostError> {
-        self.from_json_depth(value, strict, 0)
+    fn convert_from_json(&self, value: JsonValue, strict: bool) -> Result<Value<'tree>, HostError> {
+        self.convert_from_json_depth(value, strict, 0)
     }
 
     /// Depth-aware JSON import. Every nesting level is checked against the
     /// interpreter's derived depth ceiling before recursion, so hostile
     /// connector payloads cannot build unboundedly deep value trees.
-    fn from_json_depth(
+    fn convert_from_json_depth(
         &self,
         value: JsonValue,
         strict: bool,
@@ -2285,13 +2283,15 @@ impl<'tree> Interpreter<'tree> {
             JsonValue::Array(values) => new_array(
                 values
                     .into_iter()
-                    .map(|value| self.from_json_depth(value, strict, depth + 1))
+                    .map(|value| self.convert_from_json_depth(value, strict, depth + 1))
                     .collect::<Result<_, _>>()?,
             ),
             JsonValue::Object(values) => Value::Object(Rc::new(RefCell::new(ObjectValue {
                 fields: values
                     .into_iter()
-                    .map(|(key, value)| Ok((key, self.from_json_depth(value, strict, depth + 1)?)))
+                    .map(|(key, value)| {
+                        Ok((key, self.convert_from_json_depth(value, strict, depth + 1)?))
+                    })
                     .collect::<Result<_, HostError>>()?,
                 getters: BTreeMap::new(),
                 access: if strict {
@@ -2402,7 +2402,10 @@ impl<'tree> Interpreter<'tree> {
     }
     /// Serialize the public plan result, degrading cycles and unreadable
     /// values instead of failing, and reporting whether degradation occurred.
-    fn to_public_json(&mut self, value: &Value<'tree>) -> Result<(JsonValue, bool), HostError> {
+    fn serialize_public_json(
+        &mut self,
+        value: &Value<'tree>,
+    ) -> Result<(JsonValue, bool), HostError> {
         let mut degraded = false;
         let mut seen = BTreeSet::new();
         let json = self.serialize_public(value, 0, &mut seen, &mut degraded)?;
@@ -2948,7 +2951,7 @@ mod tests {
         for _ in 0..32 {
             json = JsonValue::Array(vec![json]);
         }
-        let error = interpreter.from_json(json, false).unwrap_err();
+        let error = interpreter.convert_from_json(json, false).unwrap_err();
         assert!(matches!(error, HostError::Data(_)));
         assert!(error.to_string().contains("depth"));
     }
@@ -2961,7 +2964,7 @@ mod tests {
         for _ in 0..4 {
             json = JsonValue::Array(vec![json]);
         }
-        let value = interpreter.from_json(json, false).unwrap();
+        let value = interpreter.convert_from_json(json, false).unwrap();
         assert!(matches!(value, Value::Array(_)));
     }
     fn nested_array<'tree>(depth: usize) -> Value<'tree> {
@@ -2977,7 +2980,7 @@ mod tests {
         let host = test_host(256 * 1024, 100_000); // derived ceiling = 128
         let mut interpreter = test_interpreter(&host);
         let value = nested_array(160);
-        let error = interpreter.to_public_json(&value).unwrap_err();
+        let error = interpreter.serialize_public_json(&value).unwrap_err();
         assert!(matches!(error, HostError::Data(_)));
         assert!(error.to_string().contains("serialization depth"));
     }
@@ -2987,7 +2990,7 @@ mod tests {
         let host = test_host(256 * 1024, 100_000); // derived ceiling = 128
         let mut interpreter = test_interpreter(&host);
         let value = nested_array(64);
-        let (json, degraded) = interpreter.to_public_json(&value).unwrap();
+        let (json, degraded) = interpreter.serialize_public_json(&value).unwrap();
         assert!(!degraded);
         let mut node = &json;
         for _ in 0..64 {

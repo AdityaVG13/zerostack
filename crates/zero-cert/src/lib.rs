@@ -862,6 +862,7 @@ fn verify_byte_exact_diff<R: Resolver + ?Sized>(
     )
 }
 
+#[allow(clippy::too_many_arguments)]
 fn verify_diff_ranges(
     c: &EvidenceCertificate<'_>,
     old: &[u8],

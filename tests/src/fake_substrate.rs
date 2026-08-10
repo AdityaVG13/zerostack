@@ -2,10 +2,10 @@
 
 use crate::checks::CheckId;
 use crate::patterns::validate_refs_in_response;
-use crate::schema::{validate_document, SchemaName};
+use crate::schema::{SchemaName, validate_document};
 use crate::{CheckResult, ConformanceReport, GateStatus, Ns, Surface};
-use anyhow::{bail, Context, Result};
-use serde_json::{json, Value};
+use anyhow::{Context, Result, bail};
+use serde_json::{Value, json};
 use std::io::{BufRead, BufReader, Write};
 use std::process::{Child, ChildStdin, ChildStdout, Command, Stdio};
 
@@ -545,17 +545,20 @@ mod tests {
     #[test]
     fn in_process_status_vector_stable_for_pass_and_bad_refs() {
         let pass = status_vector(&run_harness_smoke_in_process("gz", false));
-        assert!(pass
-            .iter()
-            .any(|(id, st)| id == CheckId::G1Exposure.as_str() && *st == GateStatus::Pass));
-        assert!(pass
-            .iter()
-            .any(|(id, st)| id == CheckId::G2Refs.as_str() && *st == GateStatus::Pass));
+        assert!(
+            pass.iter()
+                .any(|(id, st)| id == CheckId::G1Exposure.as_str() && *st == GateStatus::Pass)
+        );
+        assert!(
+            pass.iter()
+                .any(|(id, st)| id == CheckId::G2Refs.as_str() && *st == GateStatus::Pass)
+        );
 
         let bad = status_vector(&run_harness_smoke_in_process("gz", true));
-        assert!(bad
-            .iter()
-            .any(|(id, st)| id == CheckId::G2Refs.as_str() && *st == GateStatus::Fail));
+        assert!(
+            bad.iter()
+                .any(|(id, st)| id == CheckId::G2Refs.as_str() && *st == GateStatus::Fail)
+        );
     }
 }
 

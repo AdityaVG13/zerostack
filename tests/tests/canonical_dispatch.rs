@@ -1,13 +1,13 @@
 use std::collections::BTreeSet;
 
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use zero_abi::{
-    ApprovalGrant, CanonicalOperation, CanonicalRegistry, DispatchErrorClass, DispatchMachine,
-    DispatchStage, EffectGrant, EffectPolicy, PermitGrant, RegistryEngine, SourceDiagnostic,
-    SourceForm, ALL_DISPATCH_ERROR_CLASSES, CANONICAL_DISPATCH_VERSION,
+    ALL_DISPATCH_ERROR_CLASSES, ApprovalGrant, CANONICAL_DISPATCH_VERSION, CanonicalOperation,
+    CanonicalRegistry, DispatchErrorClass, DispatchMachine, DispatchStage, EffectGrant,
+    EffectPolicy, PermitGrant, RegistryEngine, SourceDiagnostic, SourceForm,
 };
 use zerostack_shared_tests::schema::{
-    validate_against_schema, SchemaName, CANONICAL_DISPATCH_SCHEMA,
+    CANONICAL_DISPATCH_SCHEMA, SchemaName, validate_against_schema,
 };
 
 fn fixture() -> Value {
@@ -180,10 +180,12 @@ fn golden_vectors_cover_every_effect_and_error_class() {
     );
     for error_class in ALL_DISPATCH_ERROR_CLASSES {
         let encoded = serde_json::to_value(error_class).unwrap();
-        assert!(fixture["error_class_vectors"]
-            .as_array()
-            .unwrap()
-            .contains(&encoded));
+        assert!(
+            fixture["error_class_vectors"]
+                .as_array()
+                .unwrap()
+                .contains(&encoded)
+        );
     }
 }
 
@@ -275,9 +277,11 @@ fn lexical_source_forms_are_diagnostic_only() {
         3,
         "the lexical forms must actually differ"
     );
-    assert!(authorization_results
-        .windows(2)
-        .all(|window| window[0] == window[1]));
+    assert!(
+        authorization_results
+            .windows(2)
+            .all(|window| window[0] == window[1])
+    );
     assert_eq!(authorization_results[0].2, DispatchStage::AcquireAuthority);
 }
 

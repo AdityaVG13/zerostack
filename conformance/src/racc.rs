@@ -5,14 +5,14 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::BTreeMap;
 
-pub const RACC_CERTIFICATE_SCHEMA: &str = include_str!("../contracts/racc-certificate.schema.json");
-pub const RACC_RECEIPT_SCHEMA: &str = include_str!("../contracts/racc-receipt.schema.json");
+pub const RACC_CERTIFICATE_SCHEMA: &str = include_str!("../schemas/racc-certificate.schema.json");
+pub const RACC_RECEIPT_SCHEMA: &str = include_str!("../schemas/racc-receipt.schema.json");
 pub const RACC_TASK_ACCEPTANCE_RECEIPT_SCHEMA: &str =
-    include_str!("../contracts/racc-task-acceptance-receipt.schema.json");
+    include_str!("../schemas/racc-task-acceptance-receipt.schema.json");
 pub const RACC_INVALIDATION_FRESHNESS_SCHEMA: &str =
-    include_str!("../contracts/invalidation-freshness-v1.schema.json");
+    include_str!("../schemas/invalidation-freshness-v1.schema.json");
 pub const RACC_TWO_PHASE_GATE_SCHEMA: &str =
-    include_str!("../contracts/two-phase-gate-v1.schema.json");
+    include_str!("../schemas/two-phase-gate-v1.schema.json");
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub enum RaccGateId {
@@ -814,7 +814,7 @@ pub fn check_residency(substrate: &mut impl RaccSubstrate) -> RaccCheckResult {
                         "resident object {} was not byte-identical with metadata",
                         object.id
                     ),
-                );
+                )
             }
         }
         match removed {
@@ -826,7 +826,7 @@ pub fn check_residency(substrate: &mut impl RaccSubstrate) -> RaccCheckResult {
                         "guarded removal of {} did not yield a typed miss",
                         object.id
                     ),
-                );
+                )
             }
         }
     }
@@ -918,10 +918,7 @@ pub fn check_task_transaction(substrate: &mut impl RaccSubstrate) -> RaccCheckRe
             "irreversible speculation was not typed pre-attempt rejection",
         );
     }
-    pass(
-        RaccGateId::TaskTransaction,
-        "passing verifier committed with receipt; failure rolled back charged; irreversible rejected",
-    )
+    pass(RaccGateId::TaskTransaction, "passing verifier committed with receipt; failure rolled back charged; irreversible rejected")
 }
 
 pub fn run_racc_suite(substrate: &mut impl RaccSubstrate) -> RaccHarnessReport {

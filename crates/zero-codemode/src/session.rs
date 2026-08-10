@@ -272,8 +272,8 @@ fn dispatch_permit_class(engine: EngineIdentity, operation: &str) -> Option<Disp
 
 fn dispatch_permit_slots(class: DispatchPermitClass, cores: usize) -> usize {
     match class {
-        DispatchPermitClass::Analysis => (cores / 4).max(1).min(8),
-        DispatchPermitClass::Index => (cores / 8).max(1).min(2),
+        DispatchPermitClass::Analysis => (cores / 4).clamp(1, 8),
+        DispatchPermitClass::Index => (cores / 8).clamp(1, 2),
         DispatchPermitClass::Heavy => 1,
     }
 }
@@ -2511,7 +2511,7 @@ mod tests {
             .expect("valid approval");
         state.consumed_approval_ids.extend(ids);
         assert_eq!(
-            validate_session_approvals(&state, 7, 9, &[grant.clone()])
+            validate_session_approvals(&state, 7, 9, std::slice::from_ref(&grant))
                 .unwrap_err()
                 .code,
             AggregateSessionFailureCode::ApprovalReplay

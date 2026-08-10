@@ -1,15 +1,12 @@
 //! Frozen Z5 model, runtime record schema, and proof receipt checks.
 
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 use std::{collections::BTreeSet, fs, path::PathBuf};
 use zero_abi::sha256_hex;
-use zerostack_shared_tests::racc::{RACC_TWO_PHASE_GATE_SCHEMA, validate_racc_schema};
+use zerostack_codemode_conformance::racc::{validate_racc_schema, RACC_TWO_PHASE_GATE_SCHEMA};
 
 fn root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .parent()
-        .expect("shared test crate is nested under repository root")
-        .join("conformance")
 }
 fn digest(byte: u8) -> Value {
     json!(vec![byte; 32])
@@ -186,23 +183,7 @@ fn two_phase_gate_proof_receipt_is_partial_hash_bound_and_non_promotable() {
     );
     assert_eq!(receipt["failure_code"], "NATIVE_WINDOWS_NOT_RUN");
     for (path, expected) in receipt["output_artifact_hashes"].as_object().unwrap() {
-        let expected = expected.as_str().unwrap();
-        assert_eq!(expected.len(), 64, "{path}");
-        assert!(
-            expected
-                .bytes()
-                .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte)),
-            "{path}"
-        );
-        let artifact = root().parent().unwrap().join(path);
-        assert!(artifact.is_file(), "{path}");
-        // The receipt binds source code at its recorded historical head. Only
-        // versioned conformance artifacts remain byte-immutable at later heads.
-        if path.starts_with("conformance/")
-            || path.starts_with("crates/zero-testkit/conformance/two-phase-gate/v1/")
-        {
-            let actual = sha256_hex(&fs::read(artifact).unwrap());
-            assert_eq!(actual, expected, "{path}");
-        }
+        let actual = sha256_hex(&fs::read(root().parent().unwrap().join(path)).unwrap());
+        assert_eq!(&actual, expected.as_str().unwrap(), "{path}");
     }
 }

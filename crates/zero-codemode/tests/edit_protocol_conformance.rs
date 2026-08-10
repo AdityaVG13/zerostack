@@ -81,10 +81,7 @@ fn every_verb_has_a_level0_fallback() {
             op.verb()
         );
     }
-    assert_eq!(
-        EditPlan::new(every_verb()).level0().lines().count() >= 9,
-        true
-    );
+    assert!(EditPlan::new(every_verb()).level0().lines().count() >= 9);
 }
 
 #[test]

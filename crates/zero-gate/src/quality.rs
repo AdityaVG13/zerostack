@@ -1640,7 +1640,7 @@ fn validate_id(field: &str, value: &str) -> Result<(), QualityEnvelopeErrorV1> {
 }
 
 fn require_nonzero(label: &str, digests: &[DigestV1]) -> Result<(), QualityEnvelopeErrorV1> {
-    if digests.iter().any(|digest| *digest == DigestV1::ZERO) {
+    if digests.contains(&DigestV1::ZERO) {
         Err(QualityEnvelopeErrorV1::new(
             QualityEnvelopeFailureCodeV1::MissingBinding,
             format!("{label} contains a zero digest"),

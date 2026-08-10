@@ -11,10 +11,10 @@ pub mod report;
 pub mod schema;
 pub mod testkit_bridge;
 
-use anyhow::{anyhow, bail, Context, Result};
+use anyhow::{Context, Result, anyhow, bail};
 use regex::Regex;
 use serde::{Deserialize, Serialize};
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::io::{BufRead, BufReader, Write};
@@ -316,7 +316,7 @@ pub fn validate_capability_manifest(ns: Ns, value: &Value) -> Vec<String> {
         Err(err) => {
             return vec![format!(
                 "capabilities are not shaped like a manifest: {err}"
-            )]
+            )];
         }
     };
 

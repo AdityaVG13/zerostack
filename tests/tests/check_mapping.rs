@@ -1,10 +1,8 @@
 //! G1-G10 canonical plan IDs and RW1-RW10 raw-worker IDs are pinned here,
 //! along with the invariant that the two vocabularies never overlap.
 
-use zerostack_shared_tests::checks::{
-    CheckId, GATE_MAPPINGS, RAW_GATE_MAPPINGS, RawCheckId,
-};
 use std::collections::HashSet;
+use zerostack_shared_tests::checks::{CheckId, GATE_MAPPINGS, RAW_GATE_MAPPINGS, RawCheckId};
 
 #[test]
 fn mapping_table_is_complete_distinct_and_canonical() {
@@ -74,7 +72,10 @@ fn raw_mapping_table_is_complete_distinct_and_disjoint_from_plan() {
     );
     let labels: HashSet<&str> = RAW_GATE_MAPPINGS.iter().map(|m| m.semantic_label).collect();
     assert_eq!(labels.len(), 10);
-    assert_eq!(RawCheckId::Rw8DomainMutation.semantic_label(), "domain_mutation");
+    assert_eq!(
+        RawCheckId::Rw8DomainMutation.semantic_label(),
+        "domain_mutation"
+    );
 }
 
 #[test]

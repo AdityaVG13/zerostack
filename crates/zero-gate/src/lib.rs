@@ -328,6 +328,7 @@ impl VerifiedTaskAttempt {
     }
 }
 
+#[allow(clippy::result_large_err)]
 pub fn verify_task_acceptance<V: TaskAcceptanceVerifier + ?Sized>(
     verifier: &V,
     attempt: SandboxAttempt,
@@ -462,8 +463,9 @@ impl fmt::Display for GateError {
 }
 impl std::error::Error for GateError {}
 
+#[allow(clippy::result_large_err)]
 pub fn decide<'certificate, 'payload>(
-    mut state: GateState,
+    state: GateState,
     input: GateInput<'certificate, 'payload>,
 ) -> Result<(GateState, DecisionGate<'certificate, 'payload>), GateError> {
     if state.phase == GatePhase::Terminal {
@@ -590,7 +592,7 @@ pub fn ceil_log2_ratio(numerator: u128, denominator: u128) -> Result<u32, GateEr
     }
     let quotient = numerator / denominator;
     let rounded = quotient
-        .checked_add(u128::from(numerator % denominator != 0))
+        .checked_add(u128::from(!numerator.is_multiple_of(denominator)))
         .ok_or(GateError::BoundOverflow)?;
     Ok(if rounded <= 1 {
         0

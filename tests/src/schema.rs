@@ -1,6 +1,6 @@
 //! Golden JSON Schema validation (embedded at compile time).
 
-use anyhow::{bail, Result};
+use anyhow::{Result, bail};
 use jsonschema::Validator;
 use serde_json::Value;
 use std::sync::LazyLock;
@@ -143,10 +143,12 @@ mod tests {
             }),
         )
         .expect("valid error");
-        assert!(validate_document(
-            SchemaName::Error,
-            &json!({ "kind": "sandbox", "message": "x" })
-        )
-        .is_err());
+        assert!(
+            validate_document(
+                SchemaName::Error,
+                &json!({ "kind": "sandbox", "message": "x" })
+            )
+            .is_err()
+        );
     }
 }

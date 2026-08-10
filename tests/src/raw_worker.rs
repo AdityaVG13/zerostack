@@ -40,8 +40,8 @@
 //!   RW10 planner_refusal:   planner/JS/MCP ops are denied with typed errors and the
 //!                           worker stays alive for the next call
 
-use anyhow::{bail, Context, Result};
-use serde_json::{json, Value};
+use anyhow::{Context, Result, bail};
+use serde_json::{Value, json};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -241,6 +241,8 @@ pub fn package_abi_digest(output: &str) -> Option<String> {
     .then_some(digest)
 }
 
+type WorkerObserver = Arc<dyn Fn(&WorkerObservation) + Send + Sync>;
+
 fn spawn_worker(
     ns: Ns,
     bin: &Path,
@@ -248,7 +250,7 @@ fn spawn_worker(
     digest: &str,
     revision: &str,
     timeout: Duration,
-    observer: Option<Arc<dyn Fn(&WorkerObservation) + Send + Sync>>,
+    observer: Option<WorkerObserver>,
 ) -> Result<WorkerClient> {
     let c = contract(ns);
     let mut factory = StaticWorkerFactory::new(bin, revision, digest, digest)
@@ -344,9 +346,7 @@ fn make_engine_request(
 }
 
 fn deadline_in(timeout: Duration) -> u64 {
-    now_unix_ms()
-        .checked_add(timeout.as_millis() as u64)
-        .unwrap_or(u64::MAX)
+    now_unix_ms().saturating_add(timeout.as_millis() as u64)
 }
 
 /// Remote error kind extracted from a dispatch failure, if it is a typed
@@ -409,9 +409,9 @@ fn is_deadline_enforcement(error: &WorkerAdapterError) -> bool {
 fn is_bounds_enforcement(error: &WorkerAdapterError) -> bool {
     match error {
         WorkerAdapterError::Bounds { .. } => true,
-        WorkerAdapterError::Protocol(zero_abi::raw_worker::FrameCodecError::TooLarge { .. }) => {
-            true
-        }
+        WorkerAdapterError::Protocol(zero_abi::raw_worker::FrameCodecError::TooLarge {
+            ..
+        }) => true,
         WorkerAdapterError::Remote { kind, .. } => is_output_bounds_kind(kind),
         _ => false,
     }
@@ -472,7 +472,9 @@ fn classify_oversized_frame_outcome(
             }
         }
         Err(error) => match error {
-            WorkerAdapterError::Protocol(zero_abi::raw_worker::FrameCodecError::TooLarge { .. })
+            WorkerAdapterError::Protocol(zero_abi::raw_worker::FrameCodecError::TooLarge {
+                ..
+            })
             | WorkerAdapterError::Bounds { .. }
             | WorkerAdapterError::Crash { .. } => {}
             WorkerAdapterError::Remote { kind, .. } if is_output_bounds_kind(kind) => {}
@@ -501,14 +503,13 @@ impl ProbedWorker {
     ) -> Result<Self> {
         let last_settlement = Arc::new(Mutex::new(None));
         let observed = Arc::clone(&last_settlement);
-        let observer: Arc<dyn Fn(&WorkerObservation) + Send + Sync> =
-            Arc::new(move |observation: &WorkerObservation| {
-                if let Some(settlement) = &observation.settlement {
-                    if let Ok(mut slot) = observed.lock() {
-                        *slot = Some(settlement.clone());
-                    }
-                }
-            });
+        let observer: WorkerObserver = Arc::new(move |observation: &WorkerObservation| {
+            if let Some(settlement) = &observation.settlement
+                && let Ok(mut slot) = observed.lock()
+            {
+                *slot = Some(settlement.clone());
+            }
+        });
         let client = spawn_worker(ns, bin, fixture, digest, revision, timeout, Some(observer))?;
         Ok(Self {
             client,
@@ -749,7 +750,10 @@ fn expand_ownership_refs(
         if let Err(error) = worker.dispatch(request) {
             details.push(format!(
                 "ownership ref {reference:?} did not resolve via {} ({}={}): {}",
-                c.expand_op, c.expand_arg, reference, remote_error(&error)
+                c.expand_op,
+                c.expand_arg,
+                reference,
+                remote_error(&error)
             ));
         }
     }
@@ -833,13 +837,10 @@ fn check_telemetry_gate(
                 if receipt.engine_timeline.is_none() {
                     details.push("engine_stage_timeline missing from settlement".into());
                 }
-                match &receipt.engine_timeline {
-                    Some(timeline) => {
-                        if timeline.total_ns == 0 || timeline.spans.is_empty() {
-                            details.push("engine timeline has no measured spans".into());
-                        }
-                    }
-                    None => {}
+                if let Some(timeline) = &receipt.engine_timeline
+                    && (timeline.total_ns == 0 || timeline.spans.is_empty())
+                {
+                    details.push("engine timeline has no measured spans".into());
                 }
                 match &receipt.worker_token_accounting {
                     None => {
@@ -848,9 +849,7 @@ fn check_telemetry_gate(
                         // intentionally emit None. When present it is still
                         // validated for honesty.
                         if requires_token_accounting(ns) {
-                            details.push(
-                                "worker_token_accounting missing from settlement".into(),
-                            );
+                            details.push("worker_token_accounting missing from settlement".into());
                         }
                     }
                     Some(accounting) => details.extend(validate_accounting(accounting)),
@@ -909,12 +908,11 @@ fn check_leak_gate(
     let outcome = worker.dispatch(request);
     let limit = worker.negotiated_limits().max_output_bytes as usize;
     details.extend(classify_leak_outcome(&outcome, limit));
-    if let Ok(_result) = &outcome {
-        if let Some(receipt) = worker.settlement() {
-            if let Some(accounting) = &receipt.worker_token_accounting {
-                details.extend(validate_accounting(accounting));
-            }
-        }
+    if outcome.is_ok()
+        && let Some(receipt) = worker.settlement()
+        && let Some(accounting) = &receipt.worker_token_accounting
+    {
+        details.extend(validate_accounting(accounting));
     }
     CheckResult::with_details("RW4", "output_bounds", details)
 }
@@ -1040,7 +1038,7 @@ fn check_chain_gate(
         Err(error) => {
             return CheckResult::fail(
                 "RW6",
-                    "session_continuity",
+                "session_continuity",
                 format!("first chain call failed: {}", remote_error(&error)),
             );
         }
@@ -1067,7 +1065,7 @@ fn check_chain_gate(
         Err(error) => {
             return CheckResult::fail(
                 "RW6",
-                    "session_continuity",
+                "session_continuity",
                 format!(
                     "second chain call failed (session continuity broken): {}",
                     remote_error(&error)
@@ -1192,7 +1190,7 @@ fn check_mutation_gate(
                 "RW8",
                 "domain_mutation",
                 format!("fixture setup failed: {}", error),
-            )
+            );
         }
     };
     let mut worker = match ProbedWorker::spawn(ns, bin, &fixture, digest, revision, timeout) {
@@ -1394,7 +1392,11 @@ pub fn run_conformance(ns: Ns, bin: &Path, timeout: Duration) -> Vec<CheckResult
         Err(error) => {
             return vec![
                 CheckResult::pass("RW1", "artifact_exposure"),
-                CheckResult::fail("RW2", "recoverable_refs", format!("fixture setup failed: {}", error)),
+                CheckResult::fail(
+                    "RW2",
+                    "recoverable_refs",
+                    format!("fixture setup failed: {}", error),
+                ),
             ];
         }
     };
@@ -1430,10 +1432,7 @@ pub fn run_conformance(ns: Ns, bin: &Path, timeout: Duration) -> Vec<CheckResult
     // A setup failure is surfaced explicitly (attached to RW2) so the report
     // names the pre-index root cause instead of only downstream no-snapshot
     // errors. Other rows still run honestly; we never false-green.
-    let pre_index_note = match pre_index_graph(ns, bin, &fixture, &digest, &revision, timeout) {
-        Ok(()) => None,
-        Err(reason) => Some(reason),
-    };
+    let pre_index_note = pre_index_graph(ns, bin, &fixture, &digest, &revision, timeout).err();
     checks.push(check_refs_gate(
         ns, bin, &fixture, &digest, &revision, timeout,
     ));
@@ -1462,14 +1461,14 @@ pub fn run_conformance(ns: Ns, bin: &Path, timeout: Duration) -> Vec<CheckResult
     // Attach a GraphZero pre-index setup failure to RW2 so the report names the
     // root cause (spawn/dispatch) instead of only downstream no-snapshot
     // errors. RW2 stays/ becomes a fail; other rows already ran honestly.
-    if let Some(reason) = pre_index_note {
-        if let Some(rw2) = checks.iter_mut().find(|check| check.id == "RW2") {
-            let mut merged = vec![format!("graph pre-index setup failed: {reason}")];
-            merged.append(&mut rw2.details);
-            rw2.details = merged;
-            rw2.passed = false;
-            rw2.status = crate::GateStatus::Fail;
-        }
+    if let Some(reason) = pre_index_note
+        && let Some(rw2) = checks.iter_mut().find(|check| check.id == "RW2")
+    {
+        let mut merged = vec![format!("graph pre-index setup failed: {reason}")];
+        merged.append(&mut rw2.details);
+        rw2.details = merged;
+        rw2.passed = false;
+        rw2.status = crate::GateStatus::Fail;
     }
     checks
 }
@@ -1827,7 +1826,10 @@ mod tests {
         // empty path / control chars / oversize are rejected.
         assert!(!validate_engine_ref_format("tz", "tz://").is_empty());
         assert!(!validate_engine_ref_format("tz", "tz://file/ab\tcd").is_empty());
-        assert!(!validate_engine_ref_format("tz", &format!("tz://file/{}", "a".repeat(5000))).is_empty());
+        assert!(
+            !validate_engine_ref_format("tz", &format!("tz://file/{}", "a".repeat(5000)))
+                .is_empty()
+        );
     }
 
     #[test]
@@ -1871,7 +1873,10 @@ mod tests {
         // ABI permits Exact, ConservativeUpperBound, and Estimate. None may be
         // rejected; only honesty (nonempty tokenizer, nonzero tokens) matters.
         assert!(validate_accounting(&accounting(WorkerTokenCountKind::Exact)).is_empty());
-        assert!(validate_accounting(&accounting(WorkerTokenCountKind::ConservativeUpperBound)).is_empty());
+        assert!(
+            validate_accounting(&accounting(WorkerTokenCountKind::ConservativeUpperBound))
+                .is_empty()
+        );
         assert!(validate_accounting(&accounting(WorkerTokenCountKind::Estimate)).is_empty());
 
         // empty tokenizer / all-zero accounting are still rejected.
@@ -1924,7 +1929,10 @@ mod tests {
         // `reference` arg key on a definitely-missing ref.
         let (gz_op, gz_args) = substrate_probe(Ns::Gz);
         assert_eq!(gz_op, "expand");
-        assert_eq!(gz_args, json!({ "reference": "gz://missing/zzz_no_such_claim_zzz" }));
+        assert_eq!(
+            gz_args,
+            json!({ "reference": "gz://missing/zzz_no_such_claim_zzz" })
+        );
         // FSZero/TokenZero keep the missing-read-path probe.
         let (fz_op, fz_args) = substrate_probe(Ns::Fz);
         assert_eq!(fz_op, "fs.read");

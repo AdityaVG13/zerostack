@@ -164,10 +164,10 @@ fn permit_runtime_dir() -> io::Result<PathBuf> {
 
 #[cfg(unix)]
 fn unix_runtime_dir_for(xdg: Option<&Path>, temp: &Path) -> io::Result<PathBuf> {
-    if let Some(path) = xdg.filter(|path| path.is_absolute()) {
-        if verify_unix_private_dir(path, false).is_ok() {
-            return Ok(path.to_path_buf());
-        }
+    if let Some(path) = xdg.filter(|path| path.is_absolute())
+        && verify_unix_private_dir(path, false).is_ok()
+    {
+        return Ok(path.to_path_buf());
     }
     let path = temp.join(format!("zerostack-runtime-{}", effective_uid()));
     ensure_unix_private_dir(&path, true)?;
@@ -1181,6 +1181,7 @@ fn parse_identity_details<'a>(lines: &'a [&'a str]) -> Option<ParsedIdentityDeta
     }
 }
 
+#[cfg(any(target_os = "linux", target_os = "android"))]
 fn parse_proc_stat_starttime(value: &str) -> Option<u64> {
     let close = value.rfind(')')?;
     let after_comm = value.get(close + 1..)?.trim_start();

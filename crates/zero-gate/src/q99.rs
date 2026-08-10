@@ -95,7 +95,7 @@ pub enum CacheValidityV1 {
 }
 
 impl CacheValidityV1 {
-    fn validate_for(self: &Self, coordinate: CacheCoordinateV1) -> Result<(), Q99ErrorV1> {
+    fn validate_for(&self, coordinate: CacheCoordinateV1) -> Result<(), Q99ErrorV1> {
         match self {
             Self::Exact
                 if matches!(
@@ -985,10 +985,7 @@ impl Q99ClaimRecordV1 {
             || self.task_count as usize > Q99_MAX_TASKS_V1
             || self.source_receipt_digests.is_empty()
             || self.source_receipt_digests.len() > (Q99_MAX_TASKS_V1 * 2 + 1)
-            || self
-                .source_receipt_digests
-                .iter()
-                .any(|digest| *digest == DigestV1::ZERO)
+            || self.source_receipt_digests.contains(&DigestV1::ZERO)
             || self
                 .source_receipt_digests
                 .windows(2)
@@ -1406,15 +1403,13 @@ fn q99_contract_manifest(version: u16, require_invalidation: bool) -> Value {
         ],
         "resource_arithmetic": "checked_integer_native_counter_coordinates_only",
     });
-    if require_invalidation {
-        if let Value::Object(fields) = &mut manifest {
-            fields.insert(
-                "strict_reuse_requires".into(),
-                Value::String(
-                    "proof_carrying_invalidation_authority_bound_to_complete_cache_line".into(),
-                ),
-            );
-        }
+    if require_invalidation && let Value::Object(fields) = &mut manifest {
+        fields.insert(
+            "strict_reuse_requires".into(),
+            Value::String(
+                "proof_carrying_invalidation_authority_bound_to_complete_cache_line".into(),
+            ),
+        );
     }
     manifest
 }
@@ -1456,7 +1451,7 @@ fn canonical_causal_work_bytes(receipt: &CausalWorkReceiptV1) -> Result<Vec<u8>,
 }
 
 fn sorted_unique_digests(mut digests: Vec<DigestV1>) -> Result<Vec<DigestV1>, Q99ErrorV1> {
-    if digests.iter().any(|digest| *digest == DigestV1::ZERO) {
+    if digests.contains(&DigestV1::ZERO) {
         return Err(q99_error(
             Q99FailureCodeV1::ZeroDigest,
             "source receipt set contains a zero digest",
@@ -1546,7 +1541,7 @@ fn domain_digest(domain: &[u8], bytes: &[u8]) -> DigestV1 {
 }
 
 fn require_nonzero(label: &'static str, values: &[DigestV1]) -> Result<(), Q99ErrorV1> {
-    if values.iter().any(|value| *value == DigestV1::ZERO) {
+    if values.contains(&DigestV1::ZERO) {
         Err(q99_error(
             Q99FailureCodeV1::ZeroDigest,
             format!("{label} contains a zero digest"),
@@ -1841,10 +1836,10 @@ mod tests {
             .into_iter()
             .enumerate()
             .map(|(index, (coordinate, owner, mut validity))| {
-                if let Some((target, status)) = &override_status {
-                    if *target == coordinate {
-                        validity = status.clone();
-                    }
+                if let Some((target, status)) = &override_status
+                    && *target == coordinate
+                {
+                    validity = status.clone();
                 }
                 let claim = CausalCacheComponentClaimV1::new(
                     binding(),

@@ -970,6 +970,7 @@ pub enum AttributionClass {
     Changed,
 }
 
+#[allow(clippy::large_enum_variant)]
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case", tag = "status")]
 pub enum SnapEvidence {
@@ -1733,7 +1734,7 @@ fn validate_source_heads(heads: &[SourceHead]) -> Result<(), KernelError> {
     let mut previous: Option<(&str, &str)> = None;
     let mut unique = BTreeSet::new();
     for source in heads {
-        let repository_valid = source.repository.len() > 0
+        let repository_valid = !source.repository.is_empty()
             && source.repository.len() <= 64
             && source
                 .repository

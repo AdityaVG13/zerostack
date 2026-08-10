@@ -99,8 +99,11 @@ def scrub_record(record: dict) -> bool:
 
 def scrub_file(path: Path, *, check_only: bool) -> int:
     if not path.is_file():
-        print(f"{path}: not found", file=sys.stderr)
-        return 1
+        # The export is gitignored, so a clean checkout has none. A missing
+        # export is a successful no-op, not a portability failure; when an
+        # export is present it is still scanned and leaks are rejected.
+        print(f"{path}: no export present (clean checkout no-op)")
+        return 0
 
     original = path.read_text(encoding="utf-8")
     out_lines: list[str] = []

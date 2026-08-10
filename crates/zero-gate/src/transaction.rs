@@ -7,6 +7,8 @@
 //! the declared effect-closed scope; it never upgrades filesystem rollback to
 //! universal external-state restoration or native durability.
 
+#![allow(clippy::result_large_err)]
+
 use std::fmt;
 
 use serde::{Deserialize, Serialize};
@@ -227,7 +229,6 @@ pub struct EffectResourceClosureV1 {
 
 impl EffectResourceClosureV1 {
     fn validate(self) -> Result<(), TransactionErrorV1> {
-        self.requirement.validate()?;
         if self.isolation == ResourceIsolationModeV1::Unsupported
             || self.restoration == ResourceRestorationModeV1::Unsupported
         {
@@ -1166,7 +1167,7 @@ fn validate_program_resource_mapping(
 }
 
 fn sort_and_validate_requirements(
-    resources: &mut Vec<TransactionResourceRequirementV1>,
+    resources: &mut [TransactionResourceRequirementV1],
 ) -> Result<(), TransactionErrorV1> {
     resources.sort_by_key(|resource| resource.key());
     validate_sorted_requirements(resources)

@@ -328,13 +328,13 @@ where
                 instance.rendered.clone(),
             ));
         }
-        if let Some(count) = instance.expected_token_count {
-            if count != 1 {
-                return Err(CertificationError::ExpectedCountNotOne {
-                    rendered: instance.rendered.clone(),
-                    count,
-                });
-            }
+        if let Some(count) = instance.expected_token_count
+            && count != 1
+        {
+            return Err(CertificationError::ExpectedCountNotOne {
+                rendered: instance.rendered.clone(),
+                count,
+            });
         }
         let count = count_tokens(&fixture.provider_lock, &instance.rendered)
             .map_err(CertificationError::Tokenizer)?;

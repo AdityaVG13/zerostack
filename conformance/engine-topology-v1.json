@@ -725,6 +725,16 @@
         },
         {
           "kind": "binary",
+          "path": "crates/tokenzero/src/bin/tokenzero_mcp.rs",
+          "package": "tokenzero-cli",
+          "name": "tokenzero-mcp",
+          "disposition": "move",
+          "target_role": "harness-adapter",
+          "target_package": "zerostack-mcp-adapter",
+          "target_binary": "zerostack-mcp"
+        },
+        {
+          "kind": "binary",
           "path": "fuzz/fuzz_targets/expand_fragment_differential.rs",
           "package": "tokenzero-fuzz",
           "name": "expand_fragment_differential",
@@ -1291,16 +1301,6 @@
           "target_role": "harness-adapter",
           "target_package": "zerostack-mcp-adapter",
           "target_binary": "zerostack-mcp"
-        },
-        {
-          "kind": "binary",
-          "path": "crates/graphzero-cli/src/bin/graphzero_codemode.rs",
-          "package": "graphzero-cli",
-          "name": "graphzero-codemode",
-          "disposition": "move",
-          "target_role": "raw-worker",
-          "target_package": "graphzero-worker",
-          "target_binary": "graphzero-codemode"
         },
         {
           "kind": "binary",

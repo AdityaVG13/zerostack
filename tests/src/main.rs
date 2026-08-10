@@ -1,10 +1,10 @@
-use anyhow::{bail, Context, Result};
+use anyhow::{Context, Result, bail};
 use clap::Parser;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 use zerostack_shared_tests::fake_substrate::fake_mcp_main;
 use zerostack_shared_tests::{
-    run_conformance, CompletionStatus, ConformanceReport, Ns, RunConfig, Surface,
+    CompletionStatus, ConformanceReport, Ns, RunConfig, Surface, run_conformance,
 };
 
 /// Infer the served surface from the artifact filename.
@@ -28,7 +28,9 @@ fn infer_surface(bin: &std::path::Path) -> Option<Surface> {
 
 #[derive(Debug, Parser)]
 #[command(name = "zerostack-codemode-conformance")]
-#[command(about = "Run ZeroStack conformance: plan G1-G10 (planner), raw-worker RW1-RW10 (codemode), or G1 exposure (mcp)")]
+#[command(
+    about = "Run ZeroStack conformance: plan G1-G10 (planner), raw-worker RW1-RW10 (codemode), or G1 exposure (mcp)"
+)]
 struct Args {
     /// Substrate namespace: fz, tz, or gz.
     #[arg(long)]
@@ -99,18 +101,17 @@ fn fake_mcp_argv(raw_args: &[String]) -> Option<Vec<String>> {
 }
 
 fn fake_ns_from_raw(raw_args: &[String]) -> String {
-    if let Some(i) = raw_args.iter().position(|a| a == "--fake-codemode-mcp") {
-        if let Some(ns) = raw_args.get(i + 1) {
-            // Positional ns after the flag (spawn path). Skip other long-opts.
-            if !ns.starts_with('-') {
-                return ns.clone();
-            }
-        }
+    if let Some(i) = raw_args.iter().position(|a| a == "--fake-codemode-mcp")
+        && let Some(ns) = raw_args.get(i + 1)
+        && !ns.starts_with('-')
+    {
+        // Positional ns after the flag (spawn path). Skip other long-opts.
+        return ns.clone();
     }
-    if let Some(i) = raw_args.iter().position(|a| a == "--fake-ns") {
-        if let Some(ns) = raw_args.get(i + 1) {
-            return ns.clone();
-        }
+    if let Some(i) = raw_args.iter().position(|a| a == "--fake-ns")
+        && let Some(ns) = raw_args.get(i + 1)
+    {
+        return ns.clone();
     }
     "gz".into()
 }

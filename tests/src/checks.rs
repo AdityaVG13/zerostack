@@ -285,15 +285,13 @@ mod tests {
     #[test]
     fn raw_gate_labels_are_distinct_and_canonical() {
         let ids: Vec<_> = RAW_GATE_MAPPINGS.iter().map(|m| m.id.as_str()).collect();
-        assert_eq!(
-            ids,
-            (1..=10)
-                .map(|n| format!("RW{n}"))
-                .collect::<Vec<_>>()
-        );
+        assert_eq!(ids, (1..=10).map(|n| format!("RW{n}")).collect::<Vec<_>>());
         let labels: HashSet<&str> = RAW_GATE_MAPPINGS.iter().map(|m| m.semantic_label).collect();
         assert_eq!(labels.len(), 10);
-        assert_eq!(RawCheckId::Rw8DomainMutation.semantic_label(), "domain_mutation");
+        assert_eq!(
+            RawCheckId::Rw8DomainMutation.semantic_label(),
+            "domain_mutation"
+        );
     }
 
     #[test]

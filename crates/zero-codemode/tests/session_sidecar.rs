@@ -1,4 +1,4 @@
-#![cfg(unix)]
+#![cfg(all(unix, feature = "worker-fixture"))]
 use serde_json::{Value, json};
 use std::{
     io::{BufRead, BufReader, Read, Write},
@@ -8,6 +8,7 @@ use std::{
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 use tempfile::TempDir;
+#[cfg(feature = "worker-fixture")]
 use zero_codemode::session::SessionExecutor;
 use zero_store::{Engine, ResolvedStore, SharedCas, ensure_layout};
 use zerostack_machine_permit::session_owner::ProcessIdentity;
@@ -1021,6 +1022,7 @@ fn owner_sigkill_reaps_worker_descendants_before_socket_cleanup() {
     assert!(session.wait().unwrap().success());
 }
 
+#[cfg(feature = "worker-fixture")]
 #[test]
 fn terminal_cancellation_rejects_queued_execution() {
     let d = TempDir::new().unwrap();

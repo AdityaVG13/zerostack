@@ -1,10 +1,10 @@
 use proptest::prelude::*;
-use serde_json::{json, Map, Value};
+use serde_json::{Map, Value, json};
 use zero_abi::{
-    decode_request_frame, encode_frame, raw_worker_protocol_digest_hex, CallRequest,
-    WorkerRequestFrame, WorkerTrace, DEFAULT_MAX_FRAME_BYTES, RAW_WORKER_PROTOCOL_VERSION,
+    CallRequest, DEFAULT_MAX_FRAME_BYTES, RAW_WORKER_PROTOCOL_VERSION, WorkerRequestFrame,
+    WorkerTrace, decode_request_frame, encode_frame, raw_worker_protocol_digest_hex,
 };
-use zerostack_shared_tests::schema::{validate_against_schema, SchemaName};
+use zerostack_shared_tests::schema::{SchemaName, validate_against_schema};
 
 fn fixture_frames() -> Vec<Value> {
     serde_json::from_str(include_str!("../fixtures/raw_worker_v2_frames.json"))
@@ -93,10 +93,12 @@ fn engine_identities_are_closed_and_canonical() {
             canonical
         );
     }
-    assert!(serde_json::from_value::<CallRequest>(
-        serde_json::to_value(approval_call("fszero")).unwrap()
-    )
-    .is_ok());
+    assert!(
+        serde_json::from_value::<CallRequest>(
+            serde_json::to_value(approval_call("fszero")).unwrap()
+        )
+        .is_ok()
+    );
     let mut unknown = serde_json::to_value(approval_call("fszero")).unwrap();
     unknown["approval_grant"]["engine"] = json!("futurezero");
     assert!(serde_json::from_value::<CallRequest>(unknown).is_err());
@@ -110,9 +112,11 @@ fn approval_grant_binding_expiry_effect_digest_and_replay_are_enforced() {
     let engine = grant.engine;
     let effect = grant.effect;
     let mut consumed = BTreeSet::new();
-    assert!(request
-        .validate_approval_grant(engine, "/workspace", "session", effect, 150, &mut consumed)
-        .is_ok());
+    assert!(
+        request
+            .validate_approval_grant(engine, "/workspace", "session", effect, 150, &mut consumed)
+            .is_ok()
+    );
     assert_eq!(
         format!(
             "{:?}",

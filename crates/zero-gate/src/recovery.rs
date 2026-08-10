@@ -291,10 +291,7 @@ impl DominanceRecoveryProblemV1 {
             self.validate_query(query)?;
         }
         if self.recovery_query_trace.len() > DCR_MAX_QUERY_TRACE_V1
-            || self
-                .recovery_query_trace
-                .iter()
-                .any(|digest| *digest == DigestV1::ZERO)
+            || self.recovery_query_trace.contains(&DigestV1::ZERO)
             || self
                 .recovery_query_trace
                 .iter()
@@ -630,10 +627,7 @@ impl DominanceCompleteRecoveryClaimV1 {
             ));
         }
         if self.recovery_query_trace.len() > DCR_MAX_QUERY_TRACE_V1
-            || self
-                .recovery_query_trace
-                .iter()
-                .any(|digest| *digest == DigestV1::ZERO)
+            || self.recovery_query_trace.contains(&DigestV1::ZERO)
         {
             return Err(dcr_error(
                 DcrFailureCodeV1::InvalidQueryTrace,
@@ -887,6 +881,7 @@ impl RecoveryUnknownDecisionV1 {
     }
 }
 
+#[allow(clippy::large_enum_variant)]
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case", tag = "status", content = "decision")]
 pub enum RecoveryDecisionV1 {
@@ -1551,7 +1546,7 @@ fn domain_digest(domain: &[u8], bytes: &[u8]) -> DigestV1 {
 }
 
 fn require_nonzero(label: &'static str, values: &[DigestV1]) -> Result<(), DcrErrorV1> {
-    if values.iter().any(|value| *value == DigestV1::ZERO) {
+    if values.contains(&DigestV1::ZERO) {
         Err(dcr_error(
             DcrFailureCodeV1::ZeroDigest,
             format!("{label} contains a zero digest"),

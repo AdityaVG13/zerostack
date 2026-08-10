@@ -66,8 +66,7 @@ pub use dispatch::{
     ALL_DISPATCH_ERROR_CLASSES, ApprovalGrant, ApprovalRequirement, CANONICAL_DISPATCH_VERSION,
     CanonicalOperation, CanonicalRegistry, CanonicalResource, DispatchContractError,
     DispatchErrorClass, DispatchMachine, DispatchStage, EffectGrant, EffectPolicy, PermitGrant,
-    PermitRequirement,
-    RegistryEngine, SourceDiagnostic, SourceForm,
+    PermitRequirement, RegistryEngine, SourceDiagnostic, SourceForm,
 };
 pub use effect::{
     EFFECT_IR_ACTION_DOMAIN_V1, EFFECT_IR_CONTRACT_VERSION_V1, EFFECT_IR_MAX_CANONICAL_BYTES_V1,

@@ -1572,7 +1572,7 @@ fn lower_hex(bytes: &[u8]) -> String {
 }
 
 fn decode_lower_hex(value: &str) -> Result<Vec<u8>, RawV2SliceErrorV1> {
-    if value.len() % 2 != 0
+    if !value.len().is_multiple_of(2)
         || !value
             .bytes()
             .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))

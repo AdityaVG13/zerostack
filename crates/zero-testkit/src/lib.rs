@@ -554,23 +554,13 @@ pub fn run_all(harness: &mut dyn EngineHarness) -> Vec<SuiteReport> {
 mod tests {
     use super::*;
 
+    #[derive(Default)]
     struct FakeHarness {
         unsupported: Option<Capability>,
         fail: Option<EngineOperation>,
         invocations: Vec<Invocation>,
         install: Option<&'static str>,
         racc_written: bool,
-    }
-    impl Default for FakeHarness {
-        fn default() -> Self {
-            Self {
-                unsupported: None,
-                fail: None,
-                invocations: Vec::new(),
-                install: None,
-                racc_written: false,
-            }
-        }
     }
 
     impl EngineHarness for FakeHarness {
@@ -679,9 +669,11 @@ mod tests {
         );
     }
 
+    type SuiteRunner = fn(&mut dyn EngineHarness) -> SuiteReport;
+
     #[test]
     fn zero_testkit_each_suite_owns_its_injected_failure() {
-        let suites: [(EngineOperation, fn(&mut dyn EngineHarness) -> SuiteReport); 5] = [
+        let suites: [(EngineOperation, SuiteRunner); 5] = [
             (EngineOperation::PackagingInstall, packaging_lifecycle),
             (EngineOperation::PackagingE2e, packaging_e2e),
             (EngineOperation::RaccWrite, racc_durability_matrix),

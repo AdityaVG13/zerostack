@@ -97,6 +97,16 @@
           "path": "crates/tokenzero/Cargo.toml",
           "replacement_binary": "tokenzero",
           "replacement_package": "tokenzero-cli"
+        },
+        {
+          "classification": "move",
+          "compatibility_impact": "release topology changes; coordinated reinstall required",
+          "current_name": "tokenzero-mcp",
+          "evidence": "conformance/engine-topology-v1.json current_to_target; live-inventory equality test",
+          "kind": "binary",
+          "path": "crates/tokenzero/src/bin/tokenzero_mcp.rs",
+          "replacement_binary": "zerostack-mcp",
+          "replacement_package": "zerostack-mcp-adapter"
         }
       ],
       "id": "tokenzero-topology-migration",
@@ -230,16 +240,6 @@
         "remove superseded path in engine-owned cleanup bead"
       ],
       "entries": [
-        {
-          "classification": "move",
-          "compatibility_impact": "release topology changes; coordinated reinstall required",
-          "current_name": "graphzero-codemode",
-          "evidence": "conformance/engine-topology-v1.json current_to_target; live-inventory equality test",
-          "kind": "binary",
-          "path": "crates/graphzero-cli/src/bin/graphzero_codemode.rs",
-          "replacement_binary": "graphzero-codemode",
-          "replacement_package": "graphzero-worker"
-        },
         {
           "classification": "move",
           "compatibility_impact": "release topology changes; coordinated reinstall required",

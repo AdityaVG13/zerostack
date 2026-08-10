@@ -274,7 +274,9 @@ impl CanonicalRegistry {
         registry
             .operations
             .sort_by(|left, right| left.canonical_id.cmp(&right.canonical_id));
-        registry.resources.sort_by(|left, right| left.uri.cmp(&right.uri));
+        registry
+            .resources
+            .sort_by(|left, right| left.uri.cmp(&right.uri));
 
         serde_json::to_value(registry).map_err(|error| {
             DispatchContractError::new(
@@ -330,13 +332,13 @@ fn validate_operation(operation: &CanonicalOperation) -> Result<(), DispatchCont
     if let Some(tool_name) = operation.mcp_tool_name.as_deref() {
         validate_name(tool_name, "MCP tool name")?;
     }
-    if let Some(output_schema) = &operation.output_schema {
-        if !output_schema.is_object() {
-            return Err(DispatchContractError::new(
-                DispatchErrorClass::InvalidRegistry,
-                format!("{} output_schema must be an object", operation.canonical_id),
-            ));
-        }
+    if let Some(output_schema) = &operation.output_schema
+        && !output_schema.is_object()
+    {
+        return Err(DispatchContractError::new(
+            DispatchErrorClass::InvalidRegistry,
+            format!("{} output_schema must be an object", operation.canonical_id),
+        ));
     }
     operation.effect_policy.validate()?;
     if !operation.args_schema.is_object() {
@@ -1112,7 +1114,9 @@ mod tests {
 
         let mut canonical_collision = primary_collision.clone();
         canonical_collision.operations[0].mcp_tool_name = Some("fs.other".into());
-        canonical_collision.operations.push(operation("fs.other", "other"));
+        canonical_collision
+            .operations
+            .push(operation("fs.other", "other"));
         assert_eq!(
             canonical_collision.validate().unwrap_err().class,
             DispatchErrorClass::InvalidRegistry

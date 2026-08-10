@@ -1697,7 +1697,7 @@ fn domain_digest(domain: &[u8], bytes: &[u8]) -> DigestV1 {
 }
 
 fn require_nonzero(label: &'static str, values: &[DigestV1]) -> Result<(), DeoptimizationErrorV1> {
-    if values.iter().any(|value| *value == DigestV1::ZERO) {
+    if values.contains(&DigestV1::ZERO) {
         Err(deopt_error(
             DeoptimizationFailureCodeV1::ZeroDigest,
             format!("{label} contains a zero digest"),
@@ -1733,6 +1733,7 @@ pub struct BaselineExecutionClaimV1 {
 }
 
 impl BaselineExecutionClaimV1 {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         invocation: &FrozenBaselineInvocationV1,
         output_digest: DigestV1,
