@@ -5,6 +5,9 @@
 
 mod child;
 mod identity;
+#[cfg(windows)]
+mod pipe;
+mod random;
 
 pub use child::{
     ChildBinding, IDENTITY_FILE_NAME, IdentityError, SignalOutcome, VerifiedChild,
@@ -13,3 +16,6 @@ pub use child::{
 pub use identity::{OwnerWatchError, OwnerWatcher, ProcessIdentity};
 #[cfg(unix)]
 pub use identity::{current_euid, peer_euid};
+#[cfg(windows)]
+pub use pipe::{PipeConnection, PipeListener, PipeListenerCancel, PipeSecurity, Sid};
+pub use random::fill_random;

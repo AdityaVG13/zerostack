@@ -1,5 +1,21 @@
 #![forbid(unsafe_code)]
+
 #[cfg(unix)]
+type SessionStream = std::os::unix::net::UnixStream;
+#[cfg(windows)]
+type SessionStream = zero_process::PipeConnection;
+
+#[cfg(unix)]
+type SessionEndpoint = std::path::PathBuf;
+#[cfg(windows)]
+type SessionEndpoint = String;
+
+#[cfg(unix)]
+struct SessionChild(Option<std::process::Child>);
+#[cfg(windows)]
+struct SessionChild(Option<zero_process::VerifiedChild>);
+
+#[cfg(any(unix, windows))]
 fn main() {
     let response = run().unwrap_or_else(
         |e| serde_json::json!({"protocol":"zerostack-session/v1","ok":false,"error":e.to_string()}),
@@ -9,18 +25,19 @@ fn main() {
         std::process::exit(1)
     }
 }
-#[cfg(not(unix))]
+
+#[cfg(not(any(unix, windows)))]
 fn main() {
     println!(
         "{\"protocol\":\"zerostack-session/v1\",\"ok\":false,\"error\":\"unsupported platform\"}"
     );
     std::process::exit(2)
 }
-#[cfg(unix)]
+
+#[cfg(any(unix, windows))]
 fn run() -> Result<serde_json::Value, Box<dyn std::error::Error>> {
     use std::{
         io::{BufReader, Read},
-        os::unix::net::UnixStream,
         path::PathBuf,
         process::{Command, Stdio},
     };
@@ -49,25 +66,21 @@ fn run() -> Result<serde_json::Value, Box<dyn std::error::Error>> {
     };
     let mut child = None;
     let mut shutdown_token = None;
-    let (socket, token, ready_generation) = match (
+    let (endpoint, token, ready_generation) = match (
         std::env::var(SESSION_SOCKET_ENV),
         std::env::var(SESSION_TOKEN_ENV),
     ) {
-        (Ok(s), Ok(t)) => (PathBuf::from(s), t, None),
+        (Ok(endpoint), Ok(token)) => (endpoint_from_env(endpoint)?, token, None),
         (Err(std::env::VarError::NotPresent), Err(std::env::VarError::NotPresent)) => {
             let token = random_capability()?;
             let stop_token = random_capability()?;
             let runtime_nonce = random_capability()?;
-            let dir = PathBuf::from("/tmp").join(format!(
-                "zsx-{}-{}",
-                std::process::id(),
-                &runtime_nonce[..32]
-            ));
-            let socket = dir.join("session.sock");
-            let owner =
-                zerostack_machine_permit::session_owner::ProcessIdentity::current()?.encode();
+            let dir = session_runtime_dir(&runtime_nonce);
+            let endpoint = endpoint_for_runtime(&dir)?;
+            let owner = zero_process::ProcessIdentity::current()?.encode();
             let bin = std::env::current_exe()?.with_file_name("zerostack-session");
-            let mut c = Command::new(bin)
+            let mut command = Command::new(bin);
+            command
                 .args([
                     "serve",
                     "--root",
@@ -79,15 +92,13 @@ fn run() -> Result<serde_json::Value, Box<dyn std::error::Error>> {
                 ])
                 .env(SESSION_TOKEN_ENV, &token)
                 .env(SESSION_SHUTDOWN_TOKEN_ENV, &stop_token)
+                .env(SESSION_SOCKET_ENV, endpoint_as_env(&endpoint))
                 .stdout(Stdio::piped())
-                .stderr(Stdio::inherit())
-                .spawn()?;
-            let ready = read(&mut BufReader::new(
-                c.stdout.take().ok_or("missing session stdout")?,
-            ))?;
+                .stderr(Stdio::inherit());
+            let (mut launched, stdout) = spawn_session(command)?;
+            let ready = read(&mut BufReader::new(stdout))?;
             if ready["type"] != "ready" || ready["protocol"] != SESSION_PROTOCOL {
-                let _ = c.kill();
-                let _ = c.wait();
+                launched.terminate();
                 return Err("invalid session ready handshake".into());
             }
             let generation = ready["generation"]
@@ -95,12 +106,13 @@ fn run() -> Result<serde_json::Value, Box<dyn std::error::Error>> {
                 .filter(|value| *value != 0)
                 .ok_or("invalid session generation")?;
             shutdown_token = Some(stop_token);
-            child = Some(c);
-            (socket, token, Some(generation))
+            child = Some(launched);
+            (endpoint, token, Some(generation))
         }
         _ => return Err("incomplete inherited session endpoint".into()),
     };
-    let mut stream = UnixStream::connect(&socket)?;
+    let mut stream = connect_session(&endpoint)?;
+    set_stream_timeouts(&stream)?;
     let mut reader = BufReader::new(stream.try_clone()?);
     send(
         &mut stream,
@@ -141,14 +153,168 @@ fn run() -> Result<serde_json::Value, Box<dyn std::error::Error>> {
         {
             return Err("invalid shutdown response binding".into());
         }
-        let status = c.wait()?;
-        if !status.success() {
+        if !c.wait_success()? {
             return Err("session shutdown failed".into());
         }
     }
     Ok(result)
 }
 #[cfg(unix)]
+fn session_runtime_dir(nonce: &str) -> std::path::PathBuf {
+    std::path::PathBuf::from("/tmp").join(format!("zsx-{}-{}", std::process::id(), &nonce[..32]))
+}
+
+#[cfg(windows)]
+fn session_runtime_dir(nonce: &str) -> std::path::PathBuf {
+    std::env::temp_dir().join(format!(
+        "zerostack-session-{}-{}",
+        std::process::id(),
+        &nonce[..32]
+    ))
+}
+
+#[cfg(unix)]
+fn endpoint_from_env(value: String) -> Result<SessionEndpoint, Box<dyn std::error::Error>> {
+    let endpoint = std::path::PathBuf::from(value);
+    if !endpoint.is_absolute() {
+        return Err("inherited session endpoint must be absolute".into());
+    }
+    Ok(endpoint)
+}
+
+#[cfg(windows)]
+fn endpoint_from_env(value: String) -> Result<SessionEndpoint, Box<dyn std::error::Error>> {
+    if !value.starts_with(r"\\.\pipe\zerostack-session-") || value.contains('\0') {
+        return Err("inherited session endpoint is not a ZeroStack named pipe".into());
+    }
+    Ok(value)
+}
+
+#[cfg(unix)]
+fn endpoint_for_runtime(
+    dir: &std::path::Path,
+) -> Result<SessionEndpoint, Box<dyn std::error::Error>> {
+    Ok(dir.join("session.sock"))
+}
+
+#[cfg(windows)]
+fn endpoint_for_runtime(
+    dir: &std::path::Path,
+) -> Result<SessionEndpoint, Box<dyn std::error::Error>> {
+    let stem = dir
+        .file_name()
+        .and_then(|value| value.to_str())
+        .ok_or("runtime dir has no UTF-8 name")?;
+    if stem.is_empty()
+        || !stem
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_'))
+    {
+        return Err("runtime dir name is not pipe-safe".into());
+    }
+    Ok(format!(r"\\.\pipe\{stem}"))
+}
+
+#[cfg(unix)]
+fn endpoint_as_env(endpoint: &SessionEndpoint) -> std::ffi::OsString {
+    endpoint.as_os_str().to_owned()
+}
+
+#[cfg(windows)]
+fn endpoint_as_env(endpoint: &SessionEndpoint) -> std::ffi::OsString {
+    endpoint.into()
+}
+
+#[cfg(unix)]
+fn connect_session(endpoint: &SessionEndpoint) -> std::io::Result<SessionStream> {
+    std::os::unix::net::UnixStream::connect(endpoint)
+}
+
+#[cfg(windows)]
+fn connect_session(endpoint: &SessionEndpoint) -> std::io::Result<SessionStream> {
+    zero_process::PipeConnection::connect(endpoint)
+}
+
+#[cfg(unix)]
+fn set_stream_timeouts(stream: &SessionStream) -> std::io::Result<()> {
+    stream.set_read_timeout(Some(std::time::Duration::from_secs(40)))?;
+    stream.set_write_timeout(Some(std::time::Duration::from_secs(2)))
+}
+
+#[cfg(windows)]
+fn set_stream_timeouts(stream: &SessionStream) -> std::io::Result<()> {
+    stream.set_read_timeout(Some(std::time::Duration::from_secs(40)));
+    stream.set_write_timeout(Some(std::time::Duration::from_secs(2)));
+    Ok(())
+}
+
+#[cfg(unix)]
+fn spawn_session(
+    mut command: std::process::Command,
+) -> std::io::Result<(SessionChild, std::process::ChildStdout)> {
+    let mut child = command.spawn()?;
+    let stdout = child.stdout.take().ok_or_else(|| {
+        std::io::Error::new(std::io::ErrorKind::BrokenPipe, "missing session stdout")
+    })?;
+    Ok((SessionChild(Some(child)), stdout))
+}
+
+#[cfg(windows)]
+fn spawn_session(
+    command: std::process::Command,
+) -> std::io::Result<(SessionChild, std::process::ChildStdout)> {
+    let (child, pipes) =
+        zero_process::VerifiedChild::spawn_tree_with_pipes(command, "zsx-sidecar", 0)?;
+    let stdout = pipes.stdout.ok_or_else(|| {
+        std::io::Error::new(std::io::ErrorKind::BrokenPipe, "missing session stdout")
+    })?;
+    Ok((SessionChild(Some(child)), stdout))
+}
+
+#[cfg(unix)]
+impl SessionChild {
+    fn terminate(&mut self) {
+        if let Some(mut child) = self.0.take() {
+            let _ = child.kill();
+            let _ = child.wait();
+        }
+    }
+
+    fn wait_success(&mut self) -> Result<bool, Box<dyn std::error::Error>> {
+        let mut child = self.0.take().ok_or("session child already reaped")?;
+        Ok(child.wait()?.success())
+    }
+}
+
+#[cfg(windows)]
+impl SessionChild {
+    fn terminate(&mut self) {
+        if let Some(child) = self.0.take() {
+            let _ = child.signal_graceful_for("zsx-sidecar", 0, std::time::Duration::ZERO);
+            let _ = child.revoke();
+        }
+    }
+
+    fn wait_success(&mut self) -> Result<bool, Box<dyn std::error::Error>> {
+        let child = self.0.take().ok_or("session child already reaped")?;
+        if !child.wait_for_exit(std::time::Duration::from_secs(5)) {
+            let _ = child.signal_graceful_for("zsx-sidecar", 0, std::time::Duration::ZERO);
+        }
+        child.revoke()?;
+        Ok(child
+            .terminal_status()
+            .is_some_and(|status| status.success()))
+    }
+}
+
+#[cfg(any(unix, windows))]
+impl Drop for SessionChild {
+    fn drop(&mut self) {
+        self.terminate();
+    }
+}
+
+#[cfg(any(unix, windows))]
 fn send(
     w: &mut impl std::io::Write,
     v: &serde_json::Value,
@@ -162,7 +328,8 @@ fn send(
     w.flush()?;
     Ok(())
 }
-#[cfg(unix)]
+
+#[cfg(any(unix, windows))]
 fn read(r: &mut impl std::io::BufRead) -> Result<serde_json::Value, Box<dyn std::error::Error>> {
     let mut bytes = Vec::new();
     let mut limited = std::io::Read::take(
@@ -178,11 +345,11 @@ fn read(r: &mut impl std::io::BufRead) -> Result<serde_json::Value, Box<dyn std:
     }
     Ok(serde_json::from_slice(&bytes)?)
 }
-#[cfg(unix)]
+
+#[cfg(any(unix, windows))]
 fn random_capability() -> Result<String, Box<dyn std::error::Error>> {
-    use std::io::Read;
     let mut bytes = [0u8; 32];
-    std::fs::File::open("/dev/urandom")?.read_exact(&mut bytes)?;
+    zero_process::fill_random(&mut bytes)?;
     let mut encoded = String::with_capacity(64);
     const HEX: &[u8; 16] = b"0123456789abcdef";
     for byte in bytes {

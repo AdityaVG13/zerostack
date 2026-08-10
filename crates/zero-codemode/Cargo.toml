@@ -34,10 +34,10 @@ zero-abi = { path = "../zero-abi" }
 zero-store = { path = "../zero-store" }
 tree-sitter = "0.26.12"
 tree-sitter-javascript = "0.25.0"
-command-group = "5.0.1"
 sha2.workspace = true
 fastmcp-rust = { git = "https://github.com/Dicklesworthstone/fastmcp_rust", rev = "1c66097b15dea9550e833ee9e433beeb66eefece", optional = true }
 zerostack-machine-permit = { path = "../zerostack-machine-permit" }
+zero-process = { path = "../zero-process" }
 
 [dev-dependencies]
 tempfile = "3"

@@ -44,23 +44,30 @@
 
 use std::fmt;
 use std::io;
-use std::process::{Child, ChildStdin, ChildStdout, Command};
+use std::process::{Child, ChildStderr, ChildStdin, ChildStdout, Command, ExitStatus};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
+use crate::ProcessIdentity;
 #[cfg(windows)]
-use windows_sys::Win32::Foundation::{CloseHandle, HANDLE};
+use crate::identity::Handle;
+#[cfg(windows)]
+use windows_sys::Win32::Foundation::{CloseHandle, HANDLE, WAIT_OBJECT_0};
+#[cfg(windows)]
+use windows_sys::Win32::System::Diagnostics::ToolHelp::{
+    CreateToolhelp32Snapshot, TH32CS_SNAPTHREAD, THREADENTRY32, Thread32First, Thread32Next,
+};
 #[cfg(windows)]
 use windows_sys::Win32::System::JobObjects::{
     AssignProcessToJobObject, CreateJobObjectW, JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
-    JOBOBJECT_BASIC_LIMIT_INFORMATION, JobObjectBasicLimitInformation, SetInformationJobObject,
-    TerminateJobObject,
+    JOBOBJECT_EXTENDED_LIMIT_INFORMATION, JobObjectExtendedLimitInformation,
+    SetInformationJobObject, TerminateJobObject,
 };
 #[cfg(windows)]
-use windows_sys::Win32::System::Threading::ResumeThread;
-
-use crate::ProcessIdentity;
+use windows_sys::Win32::System::Threading::{
+    OpenThread, ResumeThread, THREAD_SUSPEND_RESUME, WaitForSingleObject,
+};
 
 /// File name of the daemon identity record next to `stem.pid`.
 pub const IDENTITY_FILE_NAME: &str = "stem.identity";
@@ -270,6 +277,14 @@ pub fn peer_is_same_user(_stream: &()) -> bool {
     false
 }
 
+/// The three stdio pipes of a spawn-tree child, all owned by the caller.
+#[derive(Debug)]
+pub struct ChildPipes {
+    pub stdin: Option<ChildStdin>,
+    pub stdout: Option<ChildStdout>,
+    pub stderr: Option<ChildStderr>,
+}
+
 struct VerifiedChildInner {
     child: Mutex<Option<Child>>,
     binding: ChildBinding,
@@ -288,6 +303,10 @@ struct VerifiedChildInner {
     /// capture and Windows never read it.
     #[cfg(unix)]
     settled: AtomicBool,
+    /// Exit status observed at reap time (std caches it in the owned
+    /// [`Child`]); captured by [`VerifiedChild::revoke`] and readable through
+    /// [`VerifiedChild::terminal_status`].
+    exit_status: Mutex<Option<ExitStatus>>,
 }
 
 /// A same-process owned child whose identity was captured at spawn.
@@ -327,6 +346,7 @@ impl VerifiedChild {
             revoked: AtomicBool::new(false),
             #[cfg(unix)]
             settled: AtomicBool::new(false),
+            exit_status: Mutex::new(None),
         }))
     }
 
@@ -348,10 +368,21 @@ impl VerifiedChild {
     /// The returned pipes are the child's stdin/stdout; the owned child stays
     /// intact inside `Self`.
     pub fn spawn_tree(
-        mut command: Command,
+        command: Command,
         owner_session: &str,
         generation: u64,
     ) -> io::Result<(Self, Option<ChildStdin>, Option<ChildStdout>)> {
+        let (owned, pipes) = Self::spawn_tree_with_pipes(command, owner_session, generation)?;
+        Ok((owned, pipes.stdin, pipes.stdout))
+    }
+
+    /// Like [`Self::spawn_tree`] but returns stdin, stdout, and stderr so the
+    /// caller can own all three raw-worker pipes.
+    pub fn spawn_tree_with_pipes(
+        mut command: Command,
+        owner_session: &str,
+        generation: u64,
+    ) -> io::Result<(Self, ChildPipes)> {
         #[cfg(unix)]
         {
             use std::os::unix::process::CommandExt;
@@ -379,19 +410,9 @@ impl VerifiedChild {
             Ok(job) => {
                 // Resume the primary thread now that the exact child handle is
                 // inside the kill-on-close job. Never return while suspended.
-                use std::os::windows::process::ChildExt;
-                // SAFETY: main_thread_handle returns the handle of the primary
-                // thread of our owned, unreaped child; it stays valid while
-                // the Child is alive. as_raw_handle converts the borrowed
-                // handle to the raw HANDLE ResumeThread expects.
-                use std::os::windows::io::AsRawHandle;
-                let main_thread = child.main_thread_handle();
-                let main_thread = main_thread.as_raw_handle();
-                // SAFETY: ResumeThread on the child's primary thread handle
-                // undoes the CREATE_SUSPENDED count (1 -> 0).
-                let rc = unsafe { ResumeThread(main_thread) };
-                if rc == u32::MAX {
-                    let error = io::Error::last_os_error();
+                // The thread id comes from a Toolhelp snapshot (stable API);
+                // `main_thread_handle` is still unstable on nightly.
+                if let Err(error) = resume_primary_thread(pid) {
                     // Fail closed: kill and reap the exact root, then drop the
                     // job so KILL_ON_JOB_CLOSE sweeps any job member.
                     let _ = child.kill();
@@ -411,6 +432,7 @@ impl VerifiedChild {
         };
         let stdin = child.stdin.take();
         let stdout = child.stdout.take();
+        let stderr = child.stderr.take();
         Ok((
             Self(Arc::new(VerifiedChildInner {
                 child: Mutex::new(Some(child)),
@@ -427,9 +449,13 @@ impl VerifiedChild {
                 revoked: AtomicBool::new(false),
                 #[cfg(unix)]
                 settled: AtomicBool::new(false),
+                exit_status: Mutex::new(None),
             })),
-            stdin,
-            stdout,
+            ChildPipes {
+                stdin,
+                stdout,
+                stderr,
+            },
         ))
     }
 
@@ -518,6 +544,10 @@ impl VerifiedChild {
     /// the Windows Job Object -- never the caller's group. Single-process mode
     /// signals through the owned, unreaped child handle. No path authorizes a
     /// numeric PID from a detached identity record.
+    #[allow(
+        clippy::needless_return,
+        reason = "each cfg-selected platform block is the function tail"
+    )]
     pub fn signal_graceful_for(
         &self,
         expected_owner: &str,
@@ -658,10 +688,17 @@ impl VerifiedChild {
             .child
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
-        if let Some(child) = guard.as_mut()
-            && child.try_wait()?.is_none()
-        {
-            return Err(IdentityError::StillRunning);
+        if let Some(child) = guard.as_mut() {
+            match child.try_wait()? {
+                Some(status) => {
+                    *self
+                        .0
+                        .exit_status
+                        .lock()
+                        .unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(status);
+                }
+                None => return Err(IdentityError::StillRunning),
+            }
         }
         guard.take();
         self.0.revoked.store(true, Ordering::SeqCst);
@@ -700,6 +737,83 @@ impl VerifiedChild {
         }
         child.try_wait().ok().flatten().is_some()
     }
+    /// Wait up to `timeout` for the exact owned root to exit without reaping
+    /// it. Windows blocks on the retained process handle; Unix preserves the
+    /// waitable root pin while checking within the bound.
+    pub fn wait_for_exit(&self, timeout: Duration) -> bool {
+        if self.terminal_status().is_some() {
+            return true;
+        }
+        #[cfg(windows)]
+        {
+            use std::os::windows::io::AsRawHandle;
+            let guard = self
+                .0
+                .child
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            let Some(child) = guard.as_ref() else {
+                return false;
+            };
+            let milliseconds = timeout.as_millis().min(u32::MAX as u128) as u32;
+            // SAFETY: the std Child owns this exact process handle for the
+            // whole wait while the mutex guard prevents reaping.
+            return unsafe { WaitForSingleObject(child.as_raw_handle(), milliseconds) }
+                == WAIT_OBJECT_0;
+        }
+        #[cfg(not(windows))]
+        {
+            let deadline = Instant::now() + timeout;
+            loop {
+                if self.poll_exited() {
+                    return true;
+                }
+                if Instant::now() >= deadline {
+                    return false;
+                }
+                std::thread::sleep(Duration::from_millis(10));
+            }
+        }
+    }
+
+    /// Exit status captured when the owned child was reaped by
+    /// [`Self::revoke`] (or settled teardown followed by revoke).
+    pub fn terminal_status(&self) -> Option<ExitStatus> {
+        *self
+            .0
+            .exit_status
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
+
+    /// Wait up to `timeout` for the owned root to exit, then settle the exact
+    /// tree within `grace` and reap it. A live root at the deadline returns
+    /// [`IdentityError::StillRunning`] without signaling or releasing the
+    /// owned tree primitive.
+    ///
+    /// - Tree mode: after the root exits, the group (Unix) or job (Windows)
+    ///   is swept so no descendant survives, then the root is reaped.
+    /// - Single-process capture: reaps directly.
+    ///
+    /// The returned status is also available via [`Self::terminal_status`].
+    pub fn wait(
+        &self,
+        expected_owner: &str,
+        expected_generation: u64,
+        timeout: Duration,
+        grace: Duration,
+    ) -> Result<ExitStatus, IdentityError> {
+        if !self.wait_for_exit(timeout) {
+            return Err(IdentityError::StillRunning);
+        }
+        if self.is_tree() {
+            // The root has exited; sweeping the still-owned tree primitive
+            // cannot touch an unrelated process (the job/group is ours).
+            self.signal_graceful_for(expected_owner, expected_generation, grace)?;
+        }
+        self.revoke()?;
+        self.terminal_status().ok_or(IdentityError::Missing)
+    }
 }
 
 /// Last-owner abandonment cleanup. A Unix tree that was never torn down
@@ -733,11 +847,11 @@ impl Drop for VerifiedChildInner {
                 // provably still ours; otherwise the PGID may be recycled and a
                 // stale signal would risk an unrelated tree.
                 if child_pin_ok {
-                    if let Some(pgid) = *self
+                    let pgid = *self
                         .group_pgid
                         .lock()
-                        .unwrap_or_else(|poisoned| poisoned.into_inner())
-                    {
+                        .unwrap_or_else(|poisoned| poisoned.into_inner());
+                    if let Some(pgid) = pgid {
                         // SAFETY: the waitable root pin is proved, so the numeric
                         // PGID is still pinned to our tree.
                         let _ = unsafe { libc::kill(-pgid, libc::SIGKILL) };
@@ -846,37 +960,41 @@ impl JobHandle {
     /// terminates and reaps the child (fail closed).
     fn assign(child: &Child) -> io::Result<Self> {
         use std::os::windows::io::AsRawHandle;
+        let job = Self::create_kill_on_close()?;
+        // SAFETY: as_raw_handle returns the exact owned process handle of the
+        // unreaped child; the pid cannot be reused while any handle to the
+        // process is open.
+        let handle = child.as_raw_handle();
+        let rc = unsafe { AssignProcessToJobObject(job.0, handle) };
+        if rc == 0 {
+            let error = io::Error::last_os_error();
+            drop(job);
+            return Err(error);
+        }
+        Ok(job)
+    }
+
+    /// Create a job with `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE`, owning the
+    /// handle from creation on (RAII; closed exactly once).
+    fn create_kill_on_close() -> io::Result<Self> {
         // SAFETY: CreateJobObjectW takes an optional security descriptor and
         // optional name; null is valid for both.
         let job = unsafe { CreateJobObjectW(std::ptr::null(), std::ptr::null()) };
         if job.is_null() {
             return Err(io::Error::last_os_error());
         }
-        // SAFETY: `job` is a valid job handle and `info` is a valid,
-        // zero-initialized JOBOBJECT_BASIC_LIMIT_INFORMATION.
-        let mut info: JOBOBJECT_BASIC_LIMIT_INFORMATION = unsafe { std::mem::zeroed() };
-        info.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+        // SAFETY: `job` is valid and `info` is a zero-initialized extended
+        // limit structure, the documented carrier for kill-on-close.
+        let mut info: JOBOBJECT_EXTENDED_LIMIT_INFORMATION = unsafe { std::mem::zeroed() };
+        info.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
         let rc = unsafe {
             SetInformationJobObject(
                 job,
-                JobObjectBasicLimitInformation,
-                (&info as *const JOBOBJECT_BASIC_LIMIT_INFORMATION).cast(),
-                std::mem::size_of::<JOBOBJECT_BASIC_LIMIT_INFORMATION>() as u32,
+                JobObjectExtendedLimitInformation,
+                (&info as *const JOBOBJECT_EXTENDED_LIMIT_INFORMATION).cast(),
+                std::mem::size_of::<JOBOBJECT_EXTENDED_LIMIT_INFORMATION>() as u32,
             )
         };
-        if rc == 0 {
-            let error = io::Error::last_os_error();
-            // SAFETY: closing our own job handle.
-            unsafe {
-                CloseHandle(job);
-            }
-            return Err(error);
-        }
-        // SAFETY: as_raw_handle returns the exact owned process handle of the
-        // unreaped child; the pid cannot be reused while any handle to the
-        // process is open.
-        let handle = child.as_raw_handle();
-        let rc = unsafe { AssignProcessToJobObject(job, handle) };
         if rc == 0 {
             let error = io::Error::last_os_error();
             // SAFETY: closing our own job handle.
@@ -990,16 +1108,20 @@ fn terminate_tree_child(
     //    signal: the PGID is only provably ours while the root is waitable. A
     //    running root or a WNOWAIT-retained zombie are both safe (pin holds).
     //    On any error (ECHILD = pin lost) send no group signal and fail loud.
-    let _ = child_exited_no_reap(child)?;
+    let root_already_exited = child_exited_no_reap(child)?;
     // 1. SIGTERM to the exact group while the root is unreaped (pins the PGID).
     // SAFETY: `pgid` is our own spawned tree's group id; a negative pid signals
     // the whole group.
     let already_gone = if unsafe { libc::kill(group, libc::SIGTERM) } == -1 {
         let error = io::Error::last_os_error();
-        if error.raw_os_error() == Some(libc::ESRCH) {
-            true
-        } else {
-            return Err(error);
+        match error.raw_os_error() {
+            Some(libc::ESRCH) => true,
+            // A group whose only members are zombies (root exited, no live
+            // descendant) reports EPERM on macOS: no live member received the
+            // signal. With the pin proving the root already exited, the group
+            // is drained; reaping the zombie root is then exact.
+            Some(libc::EPERM) if root_already_exited => true,
+            _ => return Err(error),
         }
     } else {
         false
@@ -1080,9 +1202,10 @@ fn child_exited_no_reap(child: &Child) -> io::Result<bool> {
         )
     };
     if rc == 0 {
-        // si_signo == SIGCHLD means the child was found (it has exited, kept
-        // as a zombie by WNOWAIT); 0 means no state change (still running).
-        Ok(info.si_signo != 0)
+        // POSIX specifies `si_pid == 0` when WNOHANG found no waitable status.
+        // `si_signo` is not a portable discriminator here (Darwin leaves it
+        // zero even when the exited child is reported).
+        Ok(unsafe { info.si_pid() } != 0)
     } else {
         // ECHILD means the waitable root pin is already gone: the numeric
         // PGID is no longer provably ours, so the caller must send no group
@@ -1106,6 +1229,9 @@ fn group_is_gone(pgid: i32) -> bool {
 /// timeout error, never silent success.
 #[cfg(unix)]
 fn wait_for_group_gone(pgid: i32, grace: Duration) -> io::Result<()> {
+    if group_is_gone(pgid) {
+        return Ok(());
+    }
     let deadline = Instant::now() + grace;
     while Instant::now() < deadline {
         if group_is_gone(pgid) {
@@ -1238,4 +1364,42 @@ pub fn escalate_detached(
     _grace: Duration,
 ) -> Result<SignalOutcome, IdentityError> {
     Err(IdentityError::Unsupported)
+}
+
+/// Resume the primary thread of a `CREATE_SUSPENDED` child by looking up its
+/// thread id through a Toolhelp snapshot (stable API; `main_thread_handle` is
+/// still unstable). The snapshot and the thread handle are both RAII/closed on
+/// every path.
+#[cfg(windows)]
+fn resume_primary_thread(pid: u32) -> io::Result<()> {
+    // SAFETY: TH32CS_SNAPTHREAD with pid 0 snapshots all threads; Handle owns
+    // the returned snapshot and rejects NULL/INVALID_HANDLE_VALUE.
+    let snapshot = Handle::new(unsafe { CreateToolhelp32Snapshot(TH32CS_SNAPTHREAD, 0) })?;
+    let mut entry: THREADENTRY32 = unsafe { std::mem::zeroed() };
+    entry.dwSize = std::mem::size_of::<THREADENTRY32>() as u32;
+    // SAFETY: snapshot is valid and entry is initialized with dwSize.
+    if unsafe { Thread32First(snapshot.raw(), &mut entry) } == 0 {
+        return Err(io::Error::last_os_error());
+    }
+    loop {
+        if entry.th32OwnerProcessID == pid {
+            // SAFETY: the thread id belongs to our CREATE_SUSPENDED child;
+            // Handle owns the fresh THREAD_SUSPEND_RESUME handle.
+            let thread =
+                Handle::new(unsafe { OpenThread(THREAD_SUSPEND_RESUME, 0, entry.th32ThreadID) })?;
+            // SAFETY: the child has not executed since CREATE_SUSPENDED, so
+            // this is its sole primary thread and its suspend count is one.
+            if unsafe { ResumeThread(thread.raw()) } == u32::MAX {
+                return Err(io::Error::last_os_error());
+            }
+            return Ok(());
+        }
+        // SAFETY: iterating our valid snapshot; zero means no more entries.
+        if unsafe { Thread32Next(snapshot.raw(), &mut entry) } == 0 {
+            return Err(io::Error::new(
+                io::ErrorKind::NotFound,
+                "spawned child primary thread not found",
+            ));
+        }
+    }
 }

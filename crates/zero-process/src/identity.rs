@@ -1,5 +1,18 @@
 //! Session-owner identity and blocking owner-death notification.
 use std::{fmt, io};
+#[cfg(windows)]
+use windows_sys::Win32::Foundation::{
+    CloseHandle, FILETIME, HANDLE, INVALID_HANDLE_VALUE, WAIT_OBJECT_0, WAIT_TIMEOUT,
+};
+#[cfg(windows)]
+use windows_sys::Win32::Security::TOKEN_ACCESS_MASK;
+#[cfg(windows)]
+use windows_sys::Win32::Storage::FileSystem::SYNCHRONIZE;
+#[cfg(windows)]
+use windows_sys::Win32::System::Threading::{
+    CreateEventW, GetCurrentProcess, GetProcessTimes, INFINITE, OpenProcess, OpenProcessToken,
+    PROCESS_ACCESS_RIGHTS, PROCESS_QUERY_LIMITED_INFORMATION, WaitForSingleObject,
+};
 
 #[cfg(unix)]
 pub fn current_euid() -> u32 {
@@ -7,6 +20,10 @@ pub fn current_euid() -> u32 {
 }
 
 #[cfg(unix)]
+#[allow(
+    clippy::needless_return,
+    reason = "each cfg-selected platform block is the function tail"
+)]
 pub fn peer_euid(stream: &std::os::unix::net::UnixStream) -> io::Result<u32> {
     use std::os::fd::AsRawFd;
     let fd = stream.as_raw_fd();
@@ -114,17 +131,56 @@ impl From<io::Error> for OwnerWatchError {
     }
 }
 pub struct OwnerWatcher {
+    /// Retained on Unix (wait re-checks it); on Windows the handle is the
+    /// exactness proof, so the identity field is kept for parity only.
+    #[cfg_attr(windows, allow(dead_code))]
     identity: ProcessIdentity,
+    /// Retained exact process handle (Windows): the handle pins the captured
+    /// process for the watcher's whole lifetime, so a recycled pid can never
+    /// be observed. The handle is closed exactly once by its RAII owner.
+    #[cfg(windows)]
+    handle: Handle,
 }
 impl OwnerWatcher {
     pub fn new(identity: ProcessIdentity) -> Result<Self, OwnerWatchError> {
         if !identity.is_live()? {
             return Err(OwnerWatchError::IdentityChanged);
         }
-        Ok(Self { identity })
+        #[cfg(windows)]
+        {
+            // Retain an exact SYNCHRONIZE handle now: from this point the
+            // captured process is pinned by the handle, and every later check
+            // goes through the handle rather than a fresh numeric pid lookup.
+            let handle = Handle::open_process(
+                SYNCHRONIZE | PROCESS_QUERY_LIMITED_INFORMATION,
+                identity.pid,
+            )?;
+            if !identity_via_handle(&handle, &identity)? {
+                return Err(OwnerWatchError::IdentityChanged);
+            }
+            Ok(Self { identity, handle })
+        }
+        #[cfg(not(windows))]
+        {
+            Ok(Self { identity })
+        }
     }
     pub fn wait(self) -> Result<(), OwnerWatchError> {
-        wait_for_exit(&self.identity)
+        #[cfg(windows)]
+        {
+            // Blocking wait on the retained handle: no polling, and the
+            // handle closes exactly once when `self` drops after this call.
+            let rc = unsafe { WaitForSingleObject(self.handle.raw(), INFINITE) };
+            if rc == WAIT_OBJECT_0 {
+                Ok(())
+            } else {
+                Err(io::Error::last_os_error().into())
+            }
+        }
+        #[cfg(not(windows))]
+        {
+            wait_for_exit(&self.identity)
+        }
     }
 }
 #[cfg(any(target_os = "linux", target_os = "android"))]
@@ -185,7 +241,54 @@ fn capture(_: u32) -> io::Result<Option<ProcessIdentity>> {
         "process start identity unsupported on this Unix platform",
     ))
 }
-#[cfg(not(unix))]
+#[cfg(windows)]
+fn capture(pid: u32) -> io::Result<Option<ProcessIdentity>> {
+    let handle = match Handle::open_process(PROCESS_QUERY_LIMITED_INFORMATION | SYNCHRONIZE, pid) {
+        Ok(handle) => handle,
+        Err(error) => {
+            // A pid with no live process fails OpenProcess with
+            // ERROR_INVALID_PARAMETER; that is the not-found signal.
+            if error.raw_os_error()
+                == Some(windows_sys::Win32::Foundation::ERROR_INVALID_PARAMETER as i32)
+            {
+                return Ok(None);
+            }
+            return Err(error);
+        }
+    };
+    // SAFETY: handle names the exact process; a zero-time wait distinguishes
+    // running from exited without the documented exit-code-259 ambiguity.
+    match unsafe { WaitForSingleObject(handle.raw(), 0) } {
+        WAIT_TIMEOUT => {}
+        WAIT_OBJECT_0 => return Ok(None),
+        _ => return Err(io::Error::last_os_error()),
+    }
+    let mut creation: FILETIME = unsafe { std::mem::zeroed() };
+    let mut exit: FILETIME = unsafe { std::mem::zeroed() };
+    let mut kernel: FILETIME = unsafe { std::mem::zeroed() };
+    let mut user: FILETIME = unsafe { std::mem::zeroed() };
+    // SAFETY: the handle names the live process `pid`; all four FILETIMEs are
+    // initialized zeroed buffers of the correct size.
+    if unsafe {
+        GetProcessTimes(
+            handle.raw(),
+            &mut creation,
+            &mut exit,
+            &mut kernel,
+            &mut user,
+        )
+    } == 0
+    {
+        return Err(io::Error::last_os_error());
+    }
+    Ok(Some(ProcessIdentity {
+        pid,
+        // The creation FILETIME is a 100ns-resolution value unique to the
+        // process incarnation; pid reuse cannot alias two start keys.
+        start_key: format!("{}:{}", creation.dwHighDateTime, creation.dwLowDateTime),
+    }))
+}
+#[cfg(not(any(unix, windows)))]
 fn capture(_: u32) -> io::Result<Option<ProcessIdentity>> {
     Err(io::Error::new(
         io::ErrorKind::Unsupported,
@@ -278,13 +381,119 @@ fn wait_for_exit(_: &ProcessIdentity) -> Result<(), OwnerWatchError> {
     )
     .into())
 }
-#[cfg(not(unix))]
+#[cfg(not(any(unix, windows)))]
 fn wait_for_exit(_: &ProcessIdentity) -> Result<(), OwnerWatchError> {
     Err(io::Error::new(
         io::ErrorKind::Unsupported,
         "blocking owner watcher unsupported",
     )
     .into())
+}
+
+// ---------------------------------------------------------------------------
+// Windows handle ownership
+// ---------------------------------------------------------------------------
+
+/// RAII-owned Windows kernel handle. The handle closes exactly once when the
+/// owner drops. Windows kernel object handles permit concurrent operations;
+/// higher-level pipe code serializes operations that share an OVERLAPPED
+/// event, while process/event calls are independent.
+#[cfg(windows)]
+pub(crate) struct Handle(HANDLE);
+
+#[cfg(windows)]
+impl Handle {
+    /// Adopt a raw handle, failing when it is not a valid open handle.
+    pub(crate) fn new(raw: HANDLE) -> io::Result<Self> {
+        if raw.is_null() || raw == INVALID_HANDLE_VALUE {
+            Err(io::Error::last_os_error())
+        } else {
+            Ok(Self(raw))
+        }
+    }
+
+    pub(crate) fn raw(&self) -> HANDLE {
+        self.0
+    }
+
+    /// Open a process with `access`, retaining the handle (RAII).
+    pub(crate) fn open_process(access: PROCESS_ACCESS_RIGHTS, pid: u32) -> io::Result<Self> {
+        // SAFETY: `access` and `pid` are caller-provided values; OpenProcess
+        // either returns a fresh owned handle or NULL.
+        let raw = unsafe { OpenProcess(access, 0, pid) };
+        Self::new(raw)
+    }
+
+    /// Open the process token of `process` with `access`, retaining the
+    /// handle (RAII). `process` may be a raw pseudo-handle (current process).
+    pub(crate) fn open_process_token(
+        process: HANDLE,
+        access: TOKEN_ACCESS_MASK,
+    ) -> io::Result<Self> {
+        let mut token: HANDLE = std::ptr::null_mut();
+        // SAFETY: `process` is a valid open process handle; `token` receives
+        // an owned handle on success.
+        if unsafe { OpenProcessToken(process, access, &mut token) } == 0 {
+            return Err(io::Error::last_os_error());
+        }
+        Ok(Self(token))
+    }
+
+    /// Create an event object (RAII); `manual_reset` matches
+    /// `bManualReset` in CreateEventW.
+    pub(crate) fn create_event(manual_reset: bool) -> io::Result<Self> {
+        // SAFETY: null attributes/name create an unnamed event owned by us.
+        let raw =
+            unsafe { CreateEventW(std::ptr::null(), manual_reset as i32, 0, std::ptr::null()) };
+        Self::new(raw)
+    }
+
+    /// Current process pseudo-handle (never needs closing).
+    pub(crate) fn current_process() -> HANDLE {
+        // SAFETY: GetCurrentProcess returns a pseudo-handle that must not be
+        // closed; it is only borrowed here.
+        unsafe { GetCurrentProcess() }
+    }
+}
+
+#[cfg(windows)]
+impl Drop for Handle {
+    fn drop(&mut self) {
+        // SAFETY: `self.0` is the unique owned handle; Drop runs exactly once.
+        unsafe {
+            CloseHandle(self.0);
+        }
+    }
+}
+
+#[cfg(windows)]
+unsafe impl Send for Handle {}
+#[cfg(windows)]
+unsafe impl Sync for Handle {}
+
+/// Compare the creation time of the process named by `handle` against the
+/// captured start key. This is the exactness proof: the retained handle names
+/// one specific process incarnation, so a recycled pid can never pass.
+#[cfg(windows)]
+fn identity_via_handle(handle: &Handle, expected: &ProcessIdentity) -> io::Result<bool> {
+    let mut creation: FILETIME = unsafe { std::mem::zeroed() };
+    let mut exit: FILETIME = unsafe { std::mem::zeroed() };
+    let mut kernel: FILETIME = unsafe { std::mem::zeroed() };
+    let mut user: FILETIME = unsafe { std::mem::zeroed() };
+    // SAFETY: `handle` is a valid open process handle with query access.
+    if unsafe {
+        GetProcessTimes(
+            handle.raw(),
+            &mut creation,
+            &mut exit,
+            &mut kernel,
+            &mut user,
+        )
+    } == 0
+    {
+        return Err(io::Error::last_os_error());
+    }
+    Ok(format!("{}:{}", creation.dwHighDateTime, creation.dwLowDateTime) == expected.start_key)
 }
 #[cfg(test)]
 mod tests {

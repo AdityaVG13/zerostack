@@ -146,6 +146,10 @@ fn unique_temp_path(name: &str) -> PathBuf {
 /// the given role. The gate guarantees the leaf exists only after the parent
 /// finished establishing tree ownership (Unix process group at spawn; Windows
 /// job assignment), so the leaf is always inside the tree.
+#[allow(
+    clippy::zombie_processes,
+    reason = "fixture leaves the leaf for the parent tree-containment assertion"
+)]
 fn tree_fixture(leaf_role: &str, stay_alive: bool) {
     if let Ok(gate) = std::env::var(GATE_ENV) {
         // The parent always creates the gate after tree ownership is
@@ -350,6 +354,19 @@ fn duplicate_revoke_is_harmless() {
     terminate_owned(&owned, "test-owner", 0);
     owned.revoke().expect("duplicate revoke must be harmless");
     assert!(owned.is_revoked());
+}
+
+#[test]
+fn wait_timeout_retains_live_child_for_explicit_teardown() {
+    let child = spawn_fixture("sleep");
+    let owned = VerifiedChild::capture(child, "test-owner", 0);
+    let started = Instant::now();
+    assert!(matches!(
+        owned.wait("test-owner", 0, Duration::from_millis(20), Duration::ZERO,),
+        Err(IdentityError::StillRunning)
+    ));
+    assert!(started.elapsed() < Duration::from_secs(1));
+    terminate_owned(&owned, "test-owner", 0);
 }
 
 #[test]

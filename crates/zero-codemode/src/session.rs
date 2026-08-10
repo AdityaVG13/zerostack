@@ -442,56 +442,78 @@ fn probe_output(
     command
         .args(args)
         .env_remove(SESSION_TOKEN_ENV)
-        .env_remove(SESSION_SHUTDOWN_TOKEN_ENV);
+        .env_remove(SESSION_SHUTDOWN_TOKEN_ENV)
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
     if let Some(name) = remove_env {
         command.env_remove(name);
     }
-    let mut child = command
-        .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
+    let owner = format!("capability-probe-{key}");
+    let (child, pipes) = zero_process::VerifiedChild::spawn_tree_with_pipes(command, &owner, 0)
         .map_err(|error| HostError::Connector(format!("cannot probe {key}: {error}")))?;
-    let started = Instant::now();
-    loop {
-        match child.try_wait() {
-            Ok(Some(status)) => {
-                let output = child.wait_with_output().map_err(|error| {
-                    HostError::Connector(format!("cannot read {key} probe: {error}"))
-                })?;
-                let bytes = if output.stdout.is_empty() {
-                    output.stderr
-                } else {
-                    output.stdout
-                };
-                if !status.success() && bytes.is_empty() {
-                    return Err(HostError::Connector(format!(
-                        "{key} capability probe failed without output"
-                    )));
-                }
-                return String::from_utf8(bytes).map_err(|error| {
-                    HostError::Connector(format!("{key} probe was not UTF-8: {error}"))
-                });
-            }
-            Ok(None) if started.elapsed() < Duration::from_secs(2) => {
-                thread::sleep(Duration::from_millis(10));
-            }
-            Ok(None) => {
-                let _ = child.kill();
-                let _ = child.wait();
-                return Err(HostError::Connector(format!(
-                    "{key} capability probe timed out"
-                )));
-            }
-            Err(error) => {
-                let _ = child.kill();
-                let _ = child.wait();
-                return Err(HostError::Connector(format!(
-                    "cannot wait for {key} probe: {error}"
-                )));
-            }
-        }
+    let stdout = pipes
+        .stdout
+        .ok_or_else(|| HostError::Connector(format!("cannot capture {key} probe stdout")))?;
+    let stderr = pipes
+        .stderr
+        .ok_or_else(|| HostError::Connector(format!("cannot capture {key} probe stderr")))?;
+    let stdout_reader = bounded_probe_reader(stdout);
+    let stderr_reader = bounded_probe_reader(stderr);
+    if !child.wait_for_exit(Duration::from_secs(2)) {
+        let _ = child.signal_graceful_for(&owner, 0, Duration::ZERO);
+        let _ = child.revoke();
+        let _ = stdout_reader.join();
+        let _ = stderr_reader.join();
+        return Err(HostError::Connector(format!(
+            "{key} capability probe timed out"
+        )));
     }
+    child
+        .signal_graceful_for(&owner, 0, Duration::from_millis(100))
+        .map_err(|error| HostError::Connector(format!("cannot settle {key} probe: {error}")))?;
+    child
+        .revoke()
+        .map_err(|error| HostError::Connector(format!("cannot reap {key} probe: {error}")))?;
+    let status = child
+        .terminal_status()
+        .ok_or_else(|| HostError::Connector(format!("cannot read {key} probe exit status")))?;
+    let stdout = stdout_reader
+        .join()
+        .map_err(|_| HostError::Connector(format!("{key} stdout reader panicked")))?
+        .map_err(|error| HostError::Connector(format!("cannot read {key} probe: {error}")))?;
+    let stderr = stderr_reader
+        .join()
+        .map_err(|_| HostError::Connector(format!("{key} stderr reader panicked")))?
+        .map_err(|error| HostError::Connector(format!("cannot read {key} probe: {error}")))?;
+    let bytes = if stdout.is_empty() { stderr } else { stdout };
+    if !status.success() && bytes.is_empty() {
+        return Err(HostError::Connector(format!(
+            "{key} capability probe failed without output"
+        )));
+    }
+    String::from_utf8(bytes)
+        .map_err(|error| HostError::Connector(format!("{key} probe was not UTF-8: {error}")))
+}
+
+fn bounded_probe_reader<R>(mut reader: R) -> JoinHandle<std::io::Result<Vec<u8>>>
+where
+    R: Read + Send + 'static,
+{
+    thread::spawn(move || {
+        let mut bytes = Vec::new();
+        reader
+            .by_ref()
+            .take((MAX_SESSION_FRAME + 1) as u64)
+            .read_to_end(&mut bytes)?;
+        if bytes.len() > MAX_SESSION_FRAME {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "capability probe output exceeds frame bound",
+            ));
+        }
+        Ok(bytes)
+    })
 }
 
 fn digest_from_json(output: &str) -> Option<String> {

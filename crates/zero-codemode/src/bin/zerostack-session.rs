@@ -1,50 +1,50 @@
 #![forbid(unsafe_code)]
-#[cfg(unix)]
+
+#[cfg(any(unix, windows))]
 fn main() {
     if let Err(e) = run() {
         eprintln!("zerostack-session: {e}");
         std::process::exit(1);
     }
 }
-#[cfg(not(unix))]
+
+#[cfg(not(any(unix, windows)))]
 fn main() {
-    eprintln!("zerostack-session: unsupported platform; Job Object gate unmet");
+    eprintln!("zerostack-session: unsupported platform");
     std::process::exit(2);
 }
 
 #[cfg(unix)]
+type SessionStream = std::os::unix::net::UnixStream;
+#[cfg(windows)]
+type SessionStream = zero_process::PipeConnection;
+
 struct RuntimeCleanup {
-    socket: std::path::PathBuf,
     dir: std::path::PathBuf,
 }
 
-#[cfg(unix)]
 impl Drop for RuntimeCleanup {
     fn drop(&mut self) {
-        let _ = std::fs::remove_file(&self.socket);
+        #[cfg(unix)]
+        let _ = std::fs::remove_file(self.dir.join("session.sock"));
         let _ = std::fs::remove_dir(&self.dir);
     }
 }
 
-#[cfg(unix)]
 const MAX_SESSION_CLIENTS: usize = 8;
 
-#[cfg(unix)]
 enum SessionEvent {
-    Client(std::os::unix::net::UnixStream),
+    Client(SessionStream),
     Terminate(Option<String>),
 }
 
-#[cfg(unix)]
 struct ActiveClientGuard(std::sync::Arc<std::sync::atomic::AtomicUsize>);
 
-#[cfg(unix)]
 struct ClientHandler {
     join: std::thread::JoinHandle<()>,
-    control: std::os::unix::net::UnixStream,
+    control: SessionStream,
 }
 
-#[cfg(unix)]
 impl Drop for ActiveClientGuard {
     fn drop(&mut self) {
         self.0.fetch_sub(1, std::sync::atomic::Ordering::AcqRel);
@@ -52,11 +52,49 @@ impl Drop for ActiveClientGuard {
 }
 
 #[cfg(unix)]
+struct SessionListener(std::os::unix::net::UnixListener);
+
+#[cfg(unix)]
+impl SessionListener {
+    fn bind(dir: &std::path::Path) -> std::io::Result<Self> {
+        use std::os::unix::fs::PermissionsExt;
+        let socket = dir.join("session.sock");
+        if socket.exists() {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::AlreadyExists,
+                "runtime socket already exists",
+            ));
+        }
+        let listener = std::os::unix::net::UnixListener::bind(&socket)?;
+        std::fs::set_permissions(&socket, std::fs::Permissions::from_mode(0o600))?;
+        Ok(Self(listener))
+    }
+
+    fn accept(&mut self) -> std::io::Result<SessionStream> {
+        self.0.accept().map(|(stream, _)| stream)
+    }
+}
+
+#[cfg(windows)]
+struct SessionListener(zero_process::PipeListener);
+
+#[cfg(windows)]
+impl SessionListener {
+    fn bind(dir: &std::path::Path) -> std::io::Result<Self> {
+        Ok(Self(zero_process::PipeListener::new(&windows_pipe_name(
+            dir,
+        )?)?))
+    }
+
+    fn accept(&mut self) -> std::io::Result<SessionStream> {
+        self.0.accept()
+    }
+}
+
+#[cfg(any(unix, windows))]
 fn run() -> Result<(), Box<dyn std::error::Error>> {
     use std::{
-        fs,
         io::{BufReader, Write},
-        os::unix::{fs::PermissionsExt, net::UnixListener},
         path::PathBuf,
         sync::{
             Arc,
@@ -70,9 +108,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         AggregateSession, SESSION_PROTOCOL, SESSION_SHUTDOWN_TOKEN_ENV, SESSION_TOKEN_ENV,
         SessionRequest, SessionResponse,
     };
-    use zerostack_machine_permit::session_owner::{
-        OwnerWatcher, ProcessIdentity, current_euid, peer_euid,
-    };
+    use zero_process::{OwnerWatcher, ProcessIdentity};
     let mut a = std::env::args().skip(1);
     if a.next().as_deref() != Some("serve") {
         return Err(
@@ -100,17 +136,9 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     if constant_time_eq(token.as_bytes(), shutdown_token.as_bytes()) {
         return Err("session capabilities must be distinct".into());
     }
-    prepare_runtime(&dir, current_euid())?;
-    let socket = dir.join("session.sock");
-    if socket.exists() {
-        return Err("runtime socket already exists".into());
-    };
-    let listener = UnixListener::bind(&socket)?;
-    let _cleanup = RuntimeCleanup {
-        socket: socket.clone(),
-        dir: dir.clone(),
-    };
-    fs::set_permissions(&socket, fs::Permissions::from_mode(0o600))?;
+    prepare_runtime(&dir)?;
+    let mut listener = SessionListener::bind(&dir)?;
+    let _cleanup = RuntimeCleanup { dir: dir.clone() };
     let generation = entropy_u64()?;
     let exec = Arc::new(AggregateSession::new_authorized(generation, root.clone())?);
     let watcher = OwnerWatcher::new(owner)?;
@@ -123,14 +151,15 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     let watcher_tx = tx.clone();
     let handler_tx = tx.clone();
     thread::spawn(move || {
-        for incoming in listener.incoming() {
+        loop {
+            let incoming = listener.accept();
             match incoming {
                 Ok(s) => match tx.try_send(SessionEvent::Client(s)) {
                     Ok(()) => {}
                     Err(mpsc::TrySendError::Full(SessionEvent::Client(mut stream))) => {
-                        if peer_euid(&stream).ok() == Some(current_euid()) {
-                            let _ = stream.set_read_timeout(Some(Duration::from_millis(100)));
-                            let _ = stream.set_write_timeout(Some(Duration::from_millis(100)));
+                        if peer_is_current_user(&stream).unwrap_or(false) {
+                            let _ = set_read_timeout(&stream, Some(Duration::from_millis(100)));
+                            let _ = set_write_timeout(&stream, Some(Duration::from_millis(100)));
                             if let Ok(cloned) = stream.try_clone()
                                 && let Ok(SessionRequest::Hello {
                                     protocol,
@@ -205,7 +234,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                     .is_ok();
                 if !admitted {
                     let active_generation = exec.generation().unwrap_or(generation);
-                    let _ = stream.set_write_timeout(Some(Duration::from_millis(100)));
+                    let _ = set_write_timeout(&stream, Some(Duration::from_millis(100)));
                     let _ = write_frame(
                         &mut stream,
                         &SessionResponse::typed_error_with_retry(
@@ -255,7 +284,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     };
     let shutdown_result = exec.shutdown();
     for handler in &handlers {
-        let _ = handler.control.shutdown(std::net::Shutdown::Both);
+        cancel_stream(&handler.control);
     }
     for handler in handlers {
         let _ = handler.join.join();
@@ -271,9 +300,9 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-#[cfg(unix)]
+#[cfg(any(unix, windows))]
 fn handle_client(
-    mut stream: std::os::unix::net::UnixStream,
+    mut stream: SessionStream,
     session: std::sync::Arc<zero_codemode::session::AggregateSession>,
     root: std::path::PathBuf,
     token: String,
@@ -286,13 +315,12 @@ fn handle_client(
         collections::BTreeSet, io::BufReader, path::PathBuf, sync::atomic::Ordering, time::Duration,
     };
     use zero_codemode::session::{SESSION_PROTOCOL, SessionRequest, SessionResponse};
-    use zerostack_machine_permit::session_owner::{current_euid, peer_euid};
 
     let generation = session.generation()?;
-    match peer_euid(&stream) {
-        Ok(uid) if uid == current_euid() => {}
-        Ok(uid) => {
-            eprintln!("peer identity rejected: {uid} != {}", current_euid());
+    match peer_is_current_user(&stream) {
+        Ok(true) => {}
+        Ok(false) => {
+            eprintln!("peer identity rejected");
             let _ = write_frame(
                 &mut stream,
                 &SessionResponse::typed_error(
@@ -318,8 +346,8 @@ fn handle_client(
             return Ok(());
         }
     }
-    stream.set_read_timeout(Some(Duration::from_millis(250)))?;
-    stream.set_write_timeout(Some(Duration::from_millis(250)))?;
+    set_read_timeout(&stream, Some(Duration::from_millis(250)))?;
+    set_write_timeout(&stream, Some(Duration::from_millis(250)))?;
     let mut reader = BufReader::new(stream.try_clone()?);
     let hello = match read_frame(&mut reader) {
         Ok(value) => value,
@@ -349,7 +377,7 @@ fn handle_client(
     }
     // The authenticated session is long-lived. Teardown interrupts this blocking
     // read through the supervisor-held stream clone instead of a polling timeout.
-    stream.set_read_timeout(None)?;
+    set_read_timeout(&stream, None)?;
     let active_generation = session.generation()?;
     write_frame(
         &mut stream,
@@ -601,15 +629,16 @@ fn handle_client(
 }
 
 #[cfg(unix)]
-fn prepare_runtime(dir: &std::path::Path, uid: u32) -> Result<(), Box<dyn std::error::Error>> {
+fn prepare_runtime(dir: &std::path::Path) -> Result<(), Box<dyn std::error::Error>> {
     use std::{
         ffi::OsStr,
         fs,
         os::unix::fs::{MetadataExt, PermissionsExt},
     };
-    if dir.as_os_str() == OsStr::new("") {
-        return Err("empty runtime dir".into());
-    };
+    if dir.as_os_str() == OsStr::new("") || !dir.is_absolute() {
+        return Err("runtime dir must be an absolute non-empty path".into());
+    }
+    let uid = zero_process::current_euid();
     match fs::symlink_metadata(dir) {
         Ok(m) => {
             if !m.is_dir() || m.uid() != uid || (m.mode() & 0o777) != 0o700 {
@@ -624,30 +653,123 @@ fn prepare_runtime(dir: &std::path::Path, uid: u32) -> Result<(), Box<dyn std::e
     };
     Ok(())
 }
-#[cfg(unix)]
-fn entropy_u64() -> Result<u64, Box<dyn std::error::Error>> {
-    use std::io::Read;
-    let mut b = [0u8; 8];
-    std::fs::File::open("/dev/urandom")?.read_exact(&mut b)?;
-    let v = u64::from_ne_bytes(b);
-    if v == 0 {
-        Err("entropy generated zero generation".into())
-    } else {
-        Ok(v)
+
+#[cfg(windows)]
+fn prepare_runtime(dir: &std::path::Path) -> Result<(), Box<dyn std::error::Error>> {
+    if dir.as_os_str().is_empty() || !dir.is_absolute() {
+        return Err("runtime dir must be an absolute non-empty path".into());
+    }
+    match std::fs::symlink_metadata(dir) {
+        Ok(metadata) if metadata.is_dir() && !metadata.file_type().is_symlink() => Ok(()),
+        Ok(_) => Err("runtime dir must be a real directory".into()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            std::fs::create_dir(dir)?;
+            Ok(())
+        }
+        Err(error) => Err(error.into()),
     }
 }
+
+#[cfg(windows)]
+fn windows_pipe_name(dir: &std::path::Path) -> std::io::Result<String> {
+    let stem = dir
+        .file_name()
+        .and_then(|value| value.to_str())
+        .ok_or_else(|| {
+            std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "runtime dir has no UTF-8 name",
+            )
+        })?;
+    if stem.is_empty()
+        || !stem
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_'))
+    {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "runtime dir name is not pipe-safe",
+        ));
+    }
+    Ok(format!(r"\\.\pipe\{stem}"))
+}
+
+fn entropy_u64() -> Result<u64, Box<dyn std::error::Error>> {
+    let mut bytes = [0u8; 8];
+    zero_process::fill_random(&mut bytes)?;
+    let value = u64::from_ne_bytes(bytes);
+    if value == 0 {
+        Err("entropy generated zero generation".into())
+    } else {
+        Ok(value)
+    }
+}
+
 #[cfg(unix)]
+fn peer_is_current_user(stream: &SessionStream) -> std::io::Result<bool> {
+    Ok(zero_process::peer_euid(stream)? == zero_process::current_euid())
+}
+
+#[cfg(windows)]
+fn peer_is_current_user(stream: &SessionStream) -> std::io::Result<bool> {
+    stream.peer_is_current_user()
+}
+
+#[cfg(unix)]
+fn set_read_timeout(
+    stream: &SessionStream,
+    timeout: Option<std::time::Duration>,
+) -> std::io::Result<()> {
+    stream.set_read_timeout(timeout)
+}
+
+#[cfg(windows)]
+fn set_read_timeout(
+    stream: &SessionStream,
+    timeout: Option<std::time::Duration>,
+) -> std::io::Result<()> {
+    stream.set_read_timeout(timeout);
+    Ok(())
+}
+
+#[cfg(unix)]
+fn set_write_timeout(
+    stream: &SessionStream,
+    timeout: Option<std::time::Duration>,
+) -> std::io::Result<()> {
+    stream.set_write_timeout(timeout)
+}
+
+#[cfg(windows)]
+fn set_write_timeout(
+    stream: &SessionStream,
+    timeout: Option<std::time::Duration>,
+) -> std::io::Result<()> {
+    stream.set_write_timeout(timeout);
+    Ok(())
+}
+
+#[cfg(unix)]
+fn cancel_stream(stream: &SessionStream) {
+    let _ = stream.shutdown(std::net::Shutdown::Both);
+}
+
+#[cfg(windows)]
+fn cancel_stream(stream: &SessionStream) {
+    stream.cancel();
+}
+
 fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
     if a.len() != b.len() {
         return false;
     }
-    let mut d = 0u8;
-    for (&x, &y) in a.iter().zip(b) {
-        d |= x ^ y
+    let mut difference = 0u8;
+    for (&left, &right) in a.iter().zip(b) {
+        difference |= left ^ right;
     }
-    d == 0
+    difference == 0
 }
-#[cfg(unix)]
+#[cfg(any(unix, windows))]
 #[derive(Debug)]
 struct SessionFrameError {
     code: &'static str,
@@ -656,17 +778,17 @@ struct SessionFrameError {
     connection_closed: bool,
 }
 
-#[cfg(unix)]
+#[cfg(any(unix, windows))]
 impl std::fmt::Display for SessionFrameError {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         formatter.write_str(&self.message)
     }
 }
 
-#[cfg(unix)]
+#[cfg(any(unix, windows))]
 impl std::error::Error for SessionFrameError {}
 
-#[cfg(unix)]
+#[cfg(any(unix, windows))]
 fn read_value_frame(r: &mut impl std::io::BufRead) -> Result<serde_json::Value, SessionFrameError> {
     let mut bytes = Vec::new();
     let mut limited = std::io::Read::take(
@@ -705,13 +827,13 @@ fn read_value_frame(r: &mut impl std::io::BufRead) -> Result<serde_json::Value, 
     })
 }
 
-#[cfg(unix)]
+#[cfg(any(unix, windows))]
 fn read_frame(
     r: &mut impl std::io::BufRead,
 ) -> Result<zero_codemode::session::SessionRequest, Box<dyn std::error::Error>> {
     Ok(serde_json::from_value(read_value_frame(r)?)?)
 }
-#[cfg(unix)]
+#[cfg(any(unix, windows))]
 fn write_frame(
     w: &mut impl std::io::Write,
     v: &zero_codemode::session::SessionResponse,

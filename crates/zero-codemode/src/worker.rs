@@ -10,7 +10,7 @@ use std::sync::{Arc, Condvar, Mutex, mpsc};
 use std::thread;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
-use command_group::{CommandGroup, GroupChild};
+use zero_process::VerifiedChild;
 
 use zero_abi::raw_worker::EngineIdentity;
 use zero_abi::{
@@ -368,7 +368,10 @@ struct SettlementSeed {
 
 pub struct WorkerClient {
     engine: EngineIdentity,
-    child: GroupChild,
+    child: VerifiedChild,
+    /// Owner-session label bound to the child tree at spawn; every teardown
+    /// signal re-verifies it (zero-process exact-tree invariant).
+    owner: String,
     writer: mpsc::SyncSender<WriterRequest>,
     output: mpsc::Receiver<OutputEvent>,
     stderr: Arc<(Mutex<StderrState>, Condvar)>,
@@ -398,32 +401,40 @@ impl WorkerClient {
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
-        let mut child = command.group_spawn().map_err(WorkerAdapterError::Spawn)?;
-        let stdin = match child.inner().stdin.take() {
+        // Every raw worker joins the hub-owned exact tree primitive: its own
+        // process group on Unix, its own kill-on-close Job Object on Windows.
+        // Teardown goes through that primitive only; no numeric pid is ever
+        // signaled.
+        let (child, pipes) = VerifiedChild::spawn_tree_with_pipes(command, &spec.session_id, 0)
+            .map_err(WorkerAdapterError::Spawn)?;
+        let stdin = match pipes.stdin {
             Some(pipe) => pipe,
             None => {
                 return Err(cleanup_partial(
-                    &mut child,
+                    &child,
+                    &spec.session_id,
                     config.shutdown_timeout,
                     "worker stdin unavailable",
                 ));
             }
         };
-        let stdout = match child.inner().stdout.take() {
+        let stdout = match pipes.stdout {
             Some(pipe) => pipe,
             None => {
                 return Err(cleanup_partial(
-                    &mut child,
+                    &child,
+                    &spec.session_id,
                     config.shutdown_timeout,
                     "worker stdout unavailable",
                 ));
             }
         };
-        let stderr = match child.inner().stderr.take() {
+        let stderr = match pipes.stderr {
             Some(pipe) => pipe,
             None => {
                 return Err(cleanup_partial(
-                    &mut child,
+                    &child,
+                    &spec.session_id,
                     config.shutdown_timeout,
                     "worker stderr unavailable",
                 ));
@@ -539,6 +550,7 @@ impl WorkerClient {
         let mut client = Self {
             engine: spec.engine,
             child,
+            owner: spec.session_id.clone(),
             writer,
             output,
             stderr: stderr_state,
@@ -968,7 +980,7 @@ impl WorkerClient {
         &self.negotiated_limits
     }
     pub fn process_id(&self) -> u32 {
-        self.child.id()
+        self.child.child_id()
     }
     pub fn terminal_status(&self) -> Option<ExitStatus> {
         self.terminal_status
@@ -1254,29 +1266,47 @@ impl WorkerClient {
 
     fn reap_until(&mut self, deadline: Instant) -> bool {
         loop {
-            match self.child.try_wait() {
-                Ok(Some(status)) => {
-                    let _ = self.child.kill();
-                    self.terminal_status = Some(status);
-                    self.terminal = true;
-                    return true;
-                }
-                Ok(None) if Instant::now() < deadline => thread::sleep(Duration::from_millis(5)),
-                Ok(None) | Err(_) => return false,
+            if self.child.poll_exited() {
+                return self.settle_and_reap();
+            }
+            if Instant::now() < deadline {
+                thread::sleep(Duration::from_millis(5));
+            } else {
+                return false;
             }
         }
+    }
+
+    /// The root exited on its own: sweep the still-owned exact tree (kills
+    /// any surviving descendant), reap the root, and capture its status.
+    fn settle_and_reap(&mut self) -> bool {
+        let owner = self.owner.clone();
+        let grace = self.config.shutdown_timeout.min(Duration::from_millis(100));
+        if self.child.signal_graceful_for(&owner, 0, grace).is_err() {
+            return false;
+        }
+        if self.child.revoke().is_err() {
+            return false;
+        }
+        self.terminal_status = self.child.terminal_status();
+        self.terminal = true;
+        true
     }
 
     fn kill_and_reap(&mut self) {
         self.terminal = true;
         if self.terminal_status.is_some() {
-            let _ = self.child.kill();
+            let _ = self.child.revoke();
             return;
         }
-        terminate_process_tree(&mut self.child);
-        if let Ok(status) = self.child.wait() {
-            self.terminal_status = Some(status);
-        }
+        let owner = self.owner.clone();
+        // Escalation path: the graceful Shutdown RPC already failed, so the
+        // exact tree gets a short SIGTERM window (Windows needs a nonzero
+        // reap margin after TerminateJobObject) then SIGKILL/job sweep.
+        let grace = self.config.shutdown_timeout.min(Duration::from_millis(250));
+        let _ = self.child.signal_graceful_for(&owner, 0, grace);
+        let _ = self.child.revoke();
+        self.terminal_status = self.child.terminal_status();
     }
 
     fn observe(
@@ -1328,7 +1358,7 @@ impl Drop for WorkerClient {
         if self.terminal_status.is_none() {
             self.kill_and_reap();
         } else {
-            let _ = self.child.kill();
+            let _ = self.child.revoke();
         }
     }
 }
@@ -1390,12 +1420,13 @@ fn validate_config(config: &WorkerClientConfig) -> Result<(), WorkerAdapterError
 }
 
 fn cleanup_partial(
-    child: &mut GroupChild,
-    _timeout: Duration,
+    child: &VerifiedChild,
+    owner: &str,
+    grace: Duration,
     message: &str,
 ) -> WorkerAdapterError {
-    terminate_process_tree(child);
-    let _ = child.wait();
+    let _ = child.signal_graceful_for(owner, 0, grace);
+    let _ = child.revoke();
     WorkerAdapterError::Configuration(message.into())
 }
 
@@ -1469,10 +1500,6 @@ fn checked_deadline(
     Instant::now()
         .checked_add(timeout)
         .ok_or(WorkerAdapterError::DeadlineOverflow { request_id })
-}
-
-fn terminate_process_tree(child: &mut GroupChild) {
-    let _ = child.kill();
 }
 
 fn ref_scheme(engine: EngineIdentity) -> &'static str {
