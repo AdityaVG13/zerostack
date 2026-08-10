@@ -13,7 +13,7 @@ The harness exposes a constrained JavaScript execution surface. An agent submits
 ~~~js
 const [files, graph] = await Promise.all([
   zero.fs.compound("search", { query: "recoverable ref" }),
-  zero.graph.orient("context", "ref flow"),
+  zero.graph.orient("context", "architecture"),
 ]);
 
 return { files: files.content, graph: graph.content };
