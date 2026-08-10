@@ -2,7 +2,7 @@
   "schema": "zerostack.loc-ownership.v1",
   "version": 1,
   "generated_from_heads": {
-    "zerostack": "f3eab9b6b4166c403b05939ac0f1f69839bec07a",
+    "zerostack": "c5997e6240d720e7e1afdae6ee8475044ee581c2",
     "fszero": "64458c875debb0b8d06e368e9b4ee1b647d4053b",
     "graphzero": "7a9267f80bde567f9618aeff67a5bb16741e5910",
     "tokenzero": "a343ded40f2d70db4576754552665cf610b6c138"
@@ -1525,7 +1525,7 @@
       "classification": "shared-candidate",
       "rule": "hub-owned-substrate",
       "justification": "hub implementation already owned by zero-testkit",
-      "blob_digest": "a3e5f47e7cb22ab8616795fe4c402d2f47089671",
+      "blob_digest": "5e8c4a275c0e83989da24301f94f0d65fff2e0ff",
       "hub_target": "zero-testkit"
     },
     {
@@ -1805,7 +1805,7 @@
       "classification": "shared-candidate",
       "rule": "hub-owned-substrate",
       "justification": "hub implementation already owned by zero-testkit",
-      "blob_digest": "eacfff6bba77846de9dd3758715f9fff3cce37b7",
+      "blob_digest": "f216e2fd7bd74b3b38663c3238904689d522c8d7",
       "hub_target": "zero-testkit"
     },
     {
