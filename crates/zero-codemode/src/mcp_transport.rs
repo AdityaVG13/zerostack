@@ -985,7 +985,7 @@ mod fastmcp {
                 .registry
                 .operations
                 .iter()
-                .map(|operation| {
+                .flat_map(|operation| {
                     let canonical = RegisteredTool::new(
                         operation,
                         Arc::clone(&self.dispatcher),
@@ -1021,7 +1021,6 @@ mod fastmcp {
                         .chain(aliases)
                         .collect::<Vec<_>>()
                 })
-                .flatten()
                 .collect()
         }
 

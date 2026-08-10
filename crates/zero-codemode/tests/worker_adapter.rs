@@ -266,8 +266,10 @@ fn external_cancellation_interrupts_pending_call_and_reaps() {
 
 #[test]
 fn direct_crash_stderr_is_complete_and_explicitly_truncated() {
-    let mut config = WorkerClientConfig::default();
-    config.max_stderr_bytes = 8;
+    let config = WorkerClientConfig {
+        max_stderr_bytes: 8,
+        ..WorkerClientConfig::default()
+    };
     let mut client = registry("crash")
         .launch(context(EngineIdentity::TokenZero), config)
         .unwrap();
@@ -914,10 +916,15 @@ fn bounded_writer_handles_nonreading_workers_without_orphans() {
     startup_registry
         .register(EngineIdentity::FsZero, startup_factory)
         .unwrap();
-    let mut short = WorkerClientConfig::default();
-    short.handshake_timeout = Duration::from_millis(80);
-    short.shutdown_timeout = Duration::from_millis(80);
-    short.limits.default_deadline_ms = 80;
+    let short = WorkerClientConfig {
+        limits: zero_abi::raw_worker::ProtocolLimits {
+            default_deadline_ms: 80,
+            ..zero_abi::raw_worker::ProtocolLimits::default()
+        },
+        handshake_timeout: Duration::from_millis(80),
+        shutdown_timeout: Duration::from_millis(80),
+        ..WorkerClientConfig::default()
+    };
     let started = std::time::Instant::now();
     assert!(
         startup_registry
@@ -1065,10 +1072,10 @@ fn assert_p95_below_one_second(label: &str, samples: &mut [Duration]) {
 
 fn read_descendant_pid(path: &std::path::Path) -> i32 {
     for _ in 0..100 {
-        if let Ok(value) = std::fs::read_to_string(path) {
-            if let Ok(pid) = value.trim().parse() {
-                return pid;
-            }
+        if let Ok(value) = std::fs::read_to_string(path)
+            && let Ok(pid) = value.trim().parse()
+        {
+            return pid;
         }
         std::thread::sleep(Duration::from_millis(5));
     }
