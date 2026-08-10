@@ -406,7 +406,7 @@ impl VerifiedChild {
         mut command: Command,
         owner_session: &str,
         generation: u64,
-        policy: Option<ProcessResourcePolicy>,
+        _policy: Option<ProcessResourcePolicy>,
     ) -> io::Result<(Self, ChildPipes)> {
         #[cfg(unix)]
         {
@@ -431,7 +431,7 @@ impl VerifiedChild {
             .ok()
             .map(|identity| identity.start_key);
         #[cfg(windows)]
-        let job = match JobHandle::assign(&child, policy) {
+        let job = match JobHandle::assign(&child, _policy) {
             Ok(job) => {
                 // Resume the primary thread now that the exact child handle is
                 // inside the kill-on-close job. Never return while suspended.

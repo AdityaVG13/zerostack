@@ -357,8 +357,10 @@ fn aggregate_promise_all_dispatches_slow_calls_in_parallel() {
         });
     let socket = directory.path().join("runtime/session.sock");
     let (mut stream, mut reader, generation) = connect_authenticated(&socket, &token);
+    // Leave enough time for the elapsed assertion to report accidental
+    // serialization instead of surfacing SO_RCVTIMEO as an opaque WouldBlock.
     stream
-        .set_read_timeout(Some(Duration::from_secs(8)))
+        .set_read_timeout(Some(Duration::from_secs(15)))
         .unwrap();
     let started = Instant::now();
     send(
@@ -368,8 +370,10 @@ fn aggregate_promise_all_dispatches_slow_calls_in_parallel() {
             "id":1,
             "generation":generation,
             "root":directory.path(),
-            "source":r#"const calls = Array.from({length: 6}, (_, sequence) =>
-                zero.token.shell(`sleep-${sequence}`).then(value => value.content.value.value.args.command));
+            "source":r#"const calls = Array.from({length: 6}, (_, sequence) => {
+                const ref = `tz://blob/${String(sequence).padStart(64, '0')}`;
+                return zero.token.expand(ref).then(value => value.content.value.value.args.ref);
+            });
                 return await Promise.all(calls);"#,
         }),
     );
@@ -377,12 +381,12 @@ fn aggregate_promise_all_dispatches_slow_calls_in_parallel() {
     let elapsed = started.elapsed();
     assert_eq!(response["ok"], true, "{response}");
     let exact = exact_result(directory.path(), &response);
-    assert_eq!(
-        exact,
-        json!([
-            "sleep-0", "sleep-1", "sleep-2", "sleep-3", "sleep-4", "sleep-5"
-        ])
+    let expected = Value::Array(
+        (0..6)
+            .map(|sequence| Value::String(format!("tz://blob/{sequence:064}")))
+            .collect(),
     );
+    assert_eq!(exact, expected);
     assert!(
         elapsed < Duration::from_secs(4),
         "six two-second calls did not finish in one parallel wave: {elapsed:?}"
