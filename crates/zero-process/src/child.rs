@@ -52,6 +52,7 @@ use std::time::{Duration, Instant};
 use crate::ProcessIdentity;
 #[cfg(windows)]
 use crate::identity::Handle;
+use crate::resource::{ProcessResourcePolicy, ResourceReceipt, configure_command};
 #[cfg(windows)]
 use windows_sys::Win32::Foundation::{CloseHandle, HANDLE, WAIT_OBJECT_0};
 #[cfg(windows)]
@@ -60,7 +61,8 @@ use windows_sys::Win32::System::Diagnostics::ToolHelp::{
 };
 #[cfg(windows)]
 use windows_sys::Win32::System::JobObjects::{
-    AssignProcessToJobObject, CreateJobObjectW, JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
+    AssignProcessToJobObject, CreateJobObjectW, JOB_OBJECT_LIMIT_JOB_MEMORY,
+    JOB_OBJECT_LIMIT_JOB_TIME, JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
     JOBOBJECT_EXTENDED_LIMIT_INFORMATION, JobObjectExtendedLimitInformation,
     SetInformationJobObject, TerminateJobObject,
 };
@@ -379,9 +381,32 @@ impl VerifiedChild {
     /// Like [`Self::spawn_tree`] but returns stdin, stdout, and stderr so the
     /// caller can own all three raw-worker pipes.
     pub fn spawn_tree_with_pipes(
+        command: Command,
+        owner_session: &str,
+        generation: u64,
+    ) -> io::Result<(Self, ChildPipes)> {
+        Self::spawn_tree_with_pipes_inner(command, owner_session, generation, None)
+    }
+
+    /// Spawn a tree under a validated native resource policy and return the
+    /// truthful platform enforcement receipt.
+    pub fn spawn_tree_with_pipes_and_policy(
         mut command: Command,
         owner_session: &str,
         generation: u64,
+        policy: ProcessResourcePolicy,
+    ) -> io::Result<(Self, ChildPipes, ResourceReceipt)> {
+        let resource_receipt = configure_command(&mut command, policy)?;
+        let (child, pipes) =
+            Self::spawn_tree_with_pipes_inner(command, owner_session, generation, Some(policy))?;
+        Ok((child, pipes, resource_receipt))
+    }
+
+    fn spawn_tree_with_pipes_inner(
+        mut command: Command,
+        owner_session: &str,
+        generation: u64,
+        policy: Option<ProcessResourcePolicy>,
     ) -> io::Result<(Self, ChildPipes)> {
         #[cfg(unix)]
         {
@@ -406,7 +431,7 @@ impl VerifiedChild {
             .ok()
             .map(|identity| identity.start_key);
         #[cfg(windows)]
-        let job = match JobHandle::assign(&child) {
+        let job = match JobHandle::assign(&child, policy) {
             Ok(job) => {
                 // Resume the primary thread now that the exact child handle is
                 // inside the kill-on-close job. Never return while suspended.
@@ -958,12 +983,11 @@ impl JobHandle {
     /// Create a kill-on-close job and assign the exact owned child handle to
     /// it. On any failure the job is closed and the error returned; the caller
     /// terminates and reaps the child (fail closed).
-    fn assign(child: &Child) -> io::Result<Self> {
+    fn assign(child: &Child, policy: Option<ProcessResourcePolicy>) -> io::Result<Self> {
         use std::os::windows::io::AsRawHandle;
-        let job = Self::create_kill_on_close()?;
+        let job = Self::create(policy)?;
         // SAFETY: as_raw_handle returns the exact owned process handle of the
-        // unreaped child; the pid cannot be reused while any handle to the
-        // process is open.
+        // unreaped child; the pid cannot be reused while any handle is open.
         let handle = child.as_raw_handle();
         let rc = unsafe { AssignProcessToJobObject(job.0, handle) };
         if rc == 0 {
@@ -974,19 +998,23 @@ impl JobHandle {
         Ok(job)
     }
 
-    /// Create a job with `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE`, owning the
-    /// handle from creation on (RAII; closed exactly once).
-    fn create_kill_on_close() -> io::Result<Self> {
-        // SAFETY: CreateJobObjectW takes an optional security descriptor and
-        // optional name; null is valid for both.
+    /// Create a bounded kill-on-close job, owning the handle from creation.
+    fn create(policy: Option<ProcessResourcePolicy>) -> io::Result<Self> {
+        // SAFETY: null is valid for both the optional descriptor and name.
         let job = unsafe { CreateJobObjectW(std::ptr::null(), std::ptr::null()) };
         if job.is_null() {
             return Err(io::Error::last_os_error());
         }
-        // SAFETY: `job` is valid and `info` is a zero-initialized extended
-        // limit structure, the documented carrier for kill-on-close.
+        // SAFETY: `job` is valid and the extended limit carrier is initialized.
         let mut info: JOBOBJECT_EXTENDED_LIMIT_INFORMATION = unsafe { std::mem::zeroed() };
         info.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+        if let Some(policy) = policy {
+            info.BasicLimitInformation.LimitFlags |=
+                JOB_OBJECT_LIMIT_JOB_MEMORY | JOB_OBJECT_LIMIT_JOB_TIME;
+            info.BasicLimitInformation.PerJobUserTimeLimit =
+                policy.cpu_seconds.saturating_mul(10_000_000) as i64;
+            info.JobMemoryLimit = policy.active_tree_rss_bytes as usize;
+        }
         let rc = unsafe {
             SetInformationJobObject(
                 job,

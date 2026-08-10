@@ -8,6 +8,7 @@ mod identity;
 #[cfg(windows)]
 mod pipe;
 mod random;
+mod resource;
 
 pub use child::{
     ChildBinding, IDENTITY_FILE_NAME, IdentityError, SignalOutcome, VerifiedChild,
@@ -19,3 +20,7 @@ pub use identity::{current_euid, peer_euid};
 #[cfg(windows)]
 pub use pipe::{PipeConnection, PipeListener, PipeListenerCancel, PipeSecurity, Sid};
 pub use random::fill_random;
+pub use resource::{
+    DEFAULT_ACTIVE_CPU_SECONDS, DEFAULT_ACTIVE_TREE_RSS_BYTES, DEFAULT_IDLE_TREE_RSS_BYTES,
+    ProcessResourcePolicy, ResourceEnforcement, ResourceReceipt,
+};
