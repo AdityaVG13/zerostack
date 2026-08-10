@@ -5,7 +5,7 @@
 //! evaluates source as host code.
 
 use std::cell::RefCell;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::rc::Rc;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
@@ -38,19 +38,29 @@ enum Value<'tree> {
     Number(f64),
     String(String),
     Array(Rc<RefCell<Vec<Value<'tree>>>>),
-    Object(ObjectValue<'tree>),
+    Object(Rc<RefCell<ObjectValue<'tree>>>),
     Namespace(String),
     Tool(String, String),
     Method(Box<Value<'tree>>, String),
     Function(FunctionValue<'tree>),
     Promise(u64),
+    Resolver { promise: u64, reject: bool },
     Error(ErrorValue),
+    Unreadable,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum ObjectAccess {
+    Open,
+    Strict,
+    CapabilityRoot,
 }
 
 #[derive(Clone, Debug)]
 struct ObjectValue<'tree> {
     fields: BTreeMap<String, Value<'tree>>,
-    strict: bool,
+    getters: BTreeMap<String, Value<'tree>>,
+    access: ObjectAccess,
 }
 
 #[derive(Clone, Debug)]
@@ -80,6 +90,7 @@ enum PromiseState<'tree> {
     Pending(PromiseKind<'tree>),
     Fulfilled(Value<'tree>),
     Rejected(Value<'tree>),
+    Failed(HostError),
 }
 
 #[derive(Clone, Debug)]
@@ -92,11 +103,17 @@ enum PromiseKind<'tree> {
     All(Vec<u64>),
     AllSettled(Vec<u64>),
     Race(Vec<u64>),
+    Manual,
 }
 
 enum Fault<'tree> {
     Host(HostError),
     Throw(Value<'tree>),
+}
+impl<'tree> From<HostError> for Fault<'tree> {
+    fn from(error: HostError) -> Self {
+        Self::Host(error)
+    }
 }
 
 enum Control<'tree> {
@@ -136,10 +153,19 @@ pub(super) fn execute(
         timeout,
     );
     let value = interpreter.run()?;
-    let encoded = serde_json::to_string(&interpreter.to_json(&value)?)
-        .map_err(|error| HostError::Json(error.to_string()))?;
-    let public: JsonValue =
-        serde_json::from_str(&encoded).map_err(|error| HostError::Json(error.to_string()))?;
+    let (serialized, degraded) = interpreter.to_public_json(&value)?;
+    let public: JsonValue = if degraded {
+        let refs = collect_refs(&serialized);
+        serde_json::json!({
+            "serialization_degraded": true,
+            "result": serialized,
+            "refs": refs,
+        })
+    } else {
+        serialized
+    };
+    let encoded =
+        serde_json::to_string(&public).map_err(|error| HostError::Json(error.to_string()))?;
     if encoded.len() > host.max_visible_result_bytes
         && !(directly_expands_one_spill_ref(source) && is_terminal_exact_token_expansion(&public))
     {
@@ -224,13 +250,15 @@ impl<'tree> Interpreter<'tree> {
         }
         env.values.insert(
             self.host.registration.root.clone(),
-            Value::Object(ObjectValue {
+            Value::Object(Rc::new(RefCell::new(ObjectValue {
                 fields: surfaces,
-                strict: true,
-            }),
+                getters: BTreeMap::new(),
+                access: ObjectAccess::CapabilityRoot,
+            }))),
         );
         for name in [
             "Object",
+            "Reflect",
             "Math",
             "JSON",
             "Array",
@@ -270,16 +298,21 @@ impl<'tree> Interpreter<'tree> {
         env.values.insert("NaN".into(), Value::Number(f64::NAN));
         env.values
             .insert("Infinity".into(), Value::Number(f64::INFINITY));
+        env.values
+            .insert("globalThis".into(), Value::Namespace("globalThis".into()));
     }
 
     fn run(&mut self) -> Result<Value<'tree>, HostError> {
-        match self.exec(self.root)? {
-            Control::Return(value) => Ok(value),
-            Control::Normal => Ok(Value::Undefined),
-            Control::Throw(value) => Err(self.throw_error(value)),
-            Control::Break | Control::Continue => Err(HostError::UnsupportedSyntax(
+        match self.exec(self.root) {
+            Ok(Control::Return(value)) => {
+                self.await_value(value).map_err(|fault| self.fault(fault))
+            }
+            Ok(Control::Normal) => Ok(Value::Undefined),
+            Ok(Control::Throw(value)) | Err(Fault::Throw(value)) => Err(self.throw_error(value)),
+            Ok(Control::Break | Control::Continue) => Err(HostError::UnsupportedSyntax(
                 "loop control escaped its loop".into(),
             )),
+            Err(Fault::Host(error)) => Err(error),
         }
     }
 
@@ -297,7 +330,7 @@ impl<'tree> Interpreter<'tree> {
         Ok(())
     }
 
-    fn exec(&mut self, node: Node<'tree>) -> Result<Control<'tree>, HostError> {
+    fn exec(&mut self, node: Node<'tree>) -> Result<Control<'tree>, Fault<'tree>> {
         let mut cursor = node.walk();
         for child in node.named_children(&mut cursor) {
             let result = self.statement(child)?;
@@ -308,28 +341,33 @@ impl<'tree> Interpreter<'tree> {
         Ok(Control::Normal)
     }
 
-    fn statement(&mut self, node: Node<'tree>) -> Result<Control<'tree>, HostError> {
+    fn statement(&mut self, node: Node<'tree>) -> Result<Control<'tree>, Fault<'tree>> {
         self.tick()?;
         match node.kind() {
             "program" | "statement_block" => self.exec(node),
-            "expression_statement" => {
-                if let Some(expression) = node.named_child(0) {
-                    self.eval_host(expression)?;
-                }
-                Ok(Control::Normal)
-            }
-            "return_statement" => Ok(Control::Return(
-                node.named_child(0)
-                    .map(|child| self.eval_host(child))
-                    .transpose()?
-                    .unwrap_or(Value::Undefined),
-            )),
+            "empty_statement" => Ok(Control::Normal),
+            "expression_statement" => match node
+                .named_child(0)
+                .map(|child| self.eval(child))
+                .transpose()?
+            {
+                Some(_) | None => Ok(Control::Normal),
+            },
+            "return_statement" => match node
+                .named_child(0)
+                .map(|child| self.eval(child))
+                .transpose()
+            {
+                Ok(value) => Ok(Control::Return(value.unwrap_or(Value::Undefined))),
+                Err(Fault::Throw(value)) => Ok(Control::Throw(value)),
+                Err(error) => Err(error),
+            },
             "lexical_declaration" | "variable_declaration" | "using_declaration" => {
                 self.declare(node)?;
                 Ok(Control::Normal)
             }
             "if_statement" => {
-                let condition = self.eval_host(
+                let condition = self.eval(
                     node.child_by_field_name("condition")
                         .ok_or_else(|| self.unsupported("if without condition"))?,
                 )?;
@@ -349,7 +387,7 @@ impl<'tree> Interpreter<'tree> {
             "break_statement" => Ok(Control::Break),
             "continue_statement" => Ok(Control::Continue),
             "throw_statement" => Ok(Control::Throw(
-                self.eval_host(
+                self.eval(
                     node.named_child(0)
                         .ok_or_else(|| self.unsupported("throw without argument"))?,
                 )?,
@@ -376,11 +414,11 @@ impl<'tree> Interpreter<'tree> {
                 self.env.borrow_mut().values.insert(key, function);
                 Ok(Control::Normal)
             }
-            _ => Err(self.unsupported(node.kind())),
+            _ => Err(self.unsupported(node.kind()).into()),
         }
     }
 
-    fn declare(&mut self, node: Node<'tree>) -> Result<(), HostError> {
+    fn declare(&mut self, node: Node<'tree>) -> Result<(), Fault<'tree>> {
         let mut cursor = node.walk();
         for item in node
             .named_children(&mut cursor)
@@ -391,7 +429,7 @@ impl<'tree> Interpreter<'tree> {
                 .ok_or_else(|| self.unsupported("declaration without name"))?;
             let value = item
                 .child_by_field_name("value")
-                .map(|child| self.eval_host(child))
+                .map(|child| self.eval(child))
                 .transpose()?
                 .unwrap_or(Value::Undefined);
             self.bind(name, value);
@@ -409,6 +447,7 @@ impl<'tree> Interpreter<'tree> {
             }
             "object_pattern" => {
                 if let Value::Object(object) = value {
+                    let object = object.borrow();
                     let mut cursor = node.walk();
                     for part in node.named_children(&mut cursor) {
                         let Some(key) = part
@@ -440,20 +479,23 @@ impl<'tree> Interpreter<'tree> {
         }
     }
 
-    fn for_statement(&mut self, node: Node<'tree>) -> Result<Control<'tree>, HostError> {
-        if let Some(initializer) = node.child_by_field_name("initializer") {
+    fn for_statement(&mut self, node: Node<'tree>) -> Result<Control<'tree>, Fault<'tree>> {
+        if let Some(initializer) = node.child_by_field_name("initializer")
+            && initializer.kind() != "empty_statement"
+        {
             if initializer.kind().ends_with("declaration") {
                 self.declare(initializer)?;
             } else {
-                self.eval_host(initializer)?;
+                self.eval(initializer)?;
             }
         }
         loop {
             self.tick()?;
-            if let Some(condition) = node.child_by_field_name("condition") {
-                if !truthy(&self.eval_host(condition)?) {
-                    break;
-                }
+            if let Some(condition) = node.child_by_field_name("condition")
+                && condition.kind() != "empty_statement"
+                && !truthy(&self.eval(condition)?)
+            {
+                break;
             }
             match self.statement(
                 node.child_by_field_name("body")
@@ -467,15 +509,16 @@ impl<'tree> Interpreter<'tree> {
             if let Some(update) = node
                 .child_by_field_name("update")
                 .or_else(|| node.child_by_field_name("increment"))
+                && update.kind() != "empty_statement"
             {
-                self.eval_host(update)?;
+                self.eval(update)?;
             }
         }
         Ok(Control::Normal)
     }
 
-    fn for_in_statement(&mut self, node: Node<'tree>) -> Result<Control<'tree>, HostError> {
-        let source = self.eval_host(
+    fn for_in_statement(&mut self, node: Node<'tree>) -> Result<Control<'tree>, Fault<'tree>> {
+        let source = self.eval(
             node.child_by_field_name("right")
                 .ok_or_else(|| self.unsupported("for-in without source"))?,
         )?;
@@ -485,13 +528,15 @@ impl<'tree> Interpreter<'tree> {
             (false, Value::Array(items)) => (0..items.borrow().len())
                 .map(|index| Value::String(index.to_string()))
                 .collect(),
-            (false, Value::Object(object)) => {
-                object.fields.keys().cloned().map(Value::String).collect()
-            }
+            (false, Value::Object(object)) => object
+                .borrow()
+                .fields
+                .keys()
+                .cloned()
+                .map(Value::String)
+                .collect(),
             _ => {
-                return Err(HostError::Data(
-                    "for-in/of requires an array or object".into(),
-                ));
+                return Err(HostError::Data("for-in/of requires an array or object".into()).into());
             }
         };
         let left = node
@@ -520,13 +565,13 @@ impl<'tree> Interpreter<'tree> {
         Ok(Control::Normal)
     }
 
-    fn while_statement(&mut self, node: Node<'tree>) -> Result<Control<'tree>, HostError> {
+    fn while_statement(&mut self, node: Node<'tree>) -> Result<Control<'tree>, Fault<'tree>> {
         let do_first = node.kind() == "do_statement";
         let mut first = true;
         loop {
             self.tick()?;
             if !do_first || !first {
-                let condition = self.eval_host(
+                let condition = self.eval(
                     node.child_by_field_name("condition")
                         .ok_or_else(|| self.unsupported("while without condition"))?,
                 )?;
@@ -548,11 +593,15 @@ impl<'tree> Interpreter<'tree> {
         Ok(Control::Normal)
     }
 
-    fn try_statement(&mut self, node: Node<'tree>) -> Result<Control<'tree>, HostError> {
-        let mut result = self.statement(
+    fn try_statement(&mut self, node: Node<'tree>) -> Result<Control<'tree>, Fault<'tree>> {
+        let mut result = match self.statement(
             node.child_by_field_name("body")
                 .ok_or_else(|| self.unsupported("try without body"))?,
-        )?;
+        ) {
+            Ok(result) => result,
+            Err(Fault::Throw(value)) => Control::Throw(value),
+            Err(error) => return Err(error),
+        };
         if let Control::Throw(value) = &result {
             let value = value.clone();
             if let Some(handler) = node.child_by_field_name("handler") {
@@ -575,8 +624,8 @@ impl<'tree> Interpreter<'tree> {
         Ok(result)
     }
 
-    fn switch_statement(&mut self, node: Node<'tree>) -> Result<Control<'tree>, HostError> {
-        let target = self.eval_host(
+    fn switch_statement(&mut self, node: Node<'tree>) -> Result<Control<'tree>, Fault<'tree>> {
+        let target = self.eval(
             node.child_by_field_name("value")
                 .ok_or_else(|| self.unsupported("switch without value"))?,
         )?;
@@ -587,7 +636,7 @@ impl<'tree> Interpreter<'tree> {
         let mut cursor = body.walk();
         for case in body.named_children(&mut cursor) {
             if case.kind() == "switch_case" {
-                let value = self.eval_host(
+                let value = self.eval(
                     case.child_by_field_name("value")
                         .ok_or_else(|| self.unsupported("case without value"))?,
                 )?;
@@ -610,10 +659,6 @@ impl<'tree> Interpreter<'tree> {
             }
         }
         Ok(Control::Normal)
-    }
-
-    fn eval_host(&mut self, node: Node<'tree>) -> Result<Value<'tree>, HostError> {
-        self.eval(node).map_err(|fault| self.fault(fault))
     }
 
     fn eval(&mut self, node: Node<'tree>) -> Result<Value<'tree>, Fault<'tree>> {
@@ -721,15 +766,19 @@ impl<'tree> Interpreter<'tree> {
                     node.child_by_field_name("constructor")
                         .ok_or_else(|| Fault::Host(self.unsupported("new constructor")))?,
                 )?;
-                let message = node
+                let argument = node
                     .child_by_field_name("arguments")
                     .and_then(|args| args.named_child(0))
-                    .map(|argument| self.eval_host(argument).map(|value| to_string(&value)))
-                    .transpose()
-                    .map_err(Fault::Host)?
-                    .unwrap_or_default();
+                    .map(|argument| self.eval(argument))
+                    .transpose()?;
                 match constructor {
-                    Value::Namespace(name) => Ok(Value::Error(ErrorValue { name, message })),
+                    Value::Namespace(name) if name == "Promise" => {
+                        self.new_manual_promise(argument.unwrap_or(Value::Undefined))
+                    }
+                    Value::Namespace(name) => Ok(Value::Error(ErrorValue {
+                        name,
+                        message: argument.map(|value| to_string(&value)).unwrap_or_default(),
+                    })),
                     _ => Err(Fault::Host(self.unsupported("constructor"))),
                 }
             }
@@ -789,20 +838,41 @@ impl<'tree> Interpreter<'tree> {
                         .named_child(0)
                         .ok_or_else(|| Fault::Host(self.unsupported("object spread")))?,
                 )? {
-                    Value::Object(object) => fields.extend(object.fields),
+                    Value::Object(object) => fields.extend(object.borrow().fields.clone()),
                     _ => {
                         return Err(Fault::Host(HostError::Data(
                             "object spread requires an object".into(),
                         )));
                     }
                 },
+                "method_definition" => {
+                    let name = child
+                        .child_by_field_name("name")
+                        .ok_or_else(|| Fault::Host(self.unsupported("method name")))?;
+                    let parameters = child
+                        .child_by_field_name("parameters")
+                        .ok_or_else(|| Fault::Host(self.unsupported("method parameters")))?;
+                    let body = child
+                        .child_by_field_name("body")
+                        .ok_or_else(|| Fault::Host(self.unsupported("method body")))?;
+                    fields.insert(
+                        unquote(self.text(name)),
+                        Value::Function(FunctionValue {
+                            parameters,
+                            body,
+                            expression: false,
+                            env: self.env.clone(),
+                        }),
+                    );
+                }
                 _ => return Err(Fault::Host(self.unsupported("object member"))),
             }
         }
-        Ok(Value::Object(ObjectValue {
+        Ok(Value::Object(Rc::new(RefCell::new(ObjectValue {
             fields,
-            strict: false,
-        }))
+            getters: BTreeMap::new(),
+            access: ObjectAccess::Open,
+        }))))
     }
 
     fn eval_template(&mut self, node: Node<'tree>) -> Result<Value<'tree>, Fault<'tree>> {
@@ -939,6 +1009,32 @@ impl<'tree> Interpreter<'tree> {
             Value::Tool(surface, method) => self.call_tool(&surface, &method, args),
             Value::Method(receiver, name) => self.call_method(*receiver, &name, args),
             Value::Function(function) => self.call_function(function, args),
+            Value::Resolver { promise, reject } => {
+                let value = args.into_iter().next().unwrap_or(Value::Undefined);
+                if matches!(
+                    self.promises.get(&promise),
+                    Some(PromiseState::Pending(PromiseKind::Manual))
+                ) {
+                    self.promises.insert(
+                        promise,
+                        if reject {
+                            PromiseState::Rejected(value)
+                        } else {
+                            PromiseState::Fulfilled(value)
+                        },
+                    );
+                }
+                Ok(Value::Undefined)
+            }
+            Value::Namespace(name) if name == "String" => Ok(Value::String(to_string(
+                args.first().unwrap_or(&Value::Undefined),
+            ))),
+            Value::Namespace(name) if name == "Number" => Ok(Value::Number(
+                args.first().and_then(number).unwrap_or(f64::NAN),
+            )),
+            Value::Namespace(name) if name == "Boolean" => {
+                Ok(Value::Bool(args.first().is_some_and(truthy)))
+            }
             Value::Namespace(name) => Err(Fault::Host(HostError::UnsupportedSyntax(format!(
                 "namespace '{name}' is not callable"
             )))),
@@ -973,7 +1069,7 @@ impl<'tree> Interpreter<'tree> {
         let result = if function.expression {
             self.eval(function.body)
         } else {
-            match self.statement(function.body).map_err(Fault::Host)? {
+            match self.statement(function.body)? {
                 Control::Return(value) => Ok(value),
                 Control::Normal => Ok(Value::Undefined),
                 Control::Throw(value) => Err(Fault::Throw(value)),
@@ -1018,11 +1114,15 @@ impl<'tree> Interpreter<'tree> {
                     .any(|capability| capability.surface == surface)
                 {
                     Fault::Host(HostError::MethodNotFound(format!(
-                        "method_not_found: unknown method '{surface}.{method}'"
+                        "method_not_found: unknown method '{method}' on {}.{surface}; closest methods: {}",
+                        self.host.registration.root,
+                        closest_names(method, self.host.registration.capabilities.iter().filter(|capability| capability.surface == surface).map(|capability| capability.method.as_str()))
                     )))
                 } else {
                     Fault::Host(HostError::SurfaceNotFound(format!(
-                        "surface_not_found: unknown surface '{surface}'"
+                        "surface_not_found: unknown surface '{surface}' on {}; closest surfaces: {}",
+                        self.host.registration.root,
+                        closest_names(surface, self.host.registration.capabilities.iter().map(|capability| capability.surface.as_str()))
                     )))
                 }
             })?;
@@ -1049,17 +1149,21 @@ impl<'tree> Interpreter<'tree> {
         self.promises
             .insert(id, PromiseState::Pending(PromiseKind::Connector));
         let completion = ConnectorCompletion::new(id, self.sender.clone());
-        self.connector
-            .dispatch(
-                &descriptor,
-                &encoded,
-                DispatchContext {
-                    deadline: self.deadline,
-                    max_json_bytes: self.host.limits.max_json_bytes,
-                },
-                completion,
-            )
-            .map_err(|error| Fault::Host(HostError::Connector(error.to_string())))?;
+        if let Err(error) = self.connector.dispatch(
+            &descriptor,
+            &encoded,
+            DispatchContext {
+                deadline: self.deadline,
+                max_json_bytes: self.host.limits.max_json_bytes,
+            },
+            completion,
+        ) {
+            self.promises.remove(&id);
+            return Err(Fault::Throw(Value::Error(ErrorValue {
+                name: "TypeError".into(),
+                message: error.to_string(),
+            })));
+        }
         Ok(Value::Promise(id))
     }
 
@@ -1080,6 +1184,7 @@ impl<'tree> Interpreter<'tree> {
         {
             PromiseState::Fulfilled(value) => Ok(value),
             PromiseState::Rejected(value) => Err(Fault::Throw(value)),
+            PromiseState::Failed(error) => Err(Fault::Host(error)),
             PromiseState::Pending(PromiseKind::All(ids)) => {
                 let mut values = Vec::new();
                 for child in ids {
@@ -1117,6 +1222,9 @@ impl<'tree> Interpreter<'tree> {
             PromiseState::Pending(PromiseKind::Connector) => Err(Fault::Host(
                 HostError::Connector("promise did not settle".into()),
             )),
+            PromiseState::Pending(PromiseKind::Manual) => Err(Fault::Host(HostError::Connector(
+                "promise did not settle".into(),
+            ))),
         }
     }
 
@@ -1147,6 +1255,27 @@ impl<'tree> Interpreter<'tree> {
                         }
                     }
                 }
+                PromiseState::Pending(PromiseKind::Manual) => {
+                    let next = self.promises.iter().find_map(|(id, state)| match state {
+                        PromiseState::Pending(PromiseKind::Then { parent, .. })
+                            if matches!(
+                                self.promises.get(parent),
+                                Some(
+                                    PromiseState::Fulfilled(_)
+                                        | PromiseState::Rejected(_)
+                                        | PromiseState::Failed(_)
+                                )
+                            ) =>
+                        {
+                            Some(*id)
+                        }
+                        _ => None,
+                    });
+                    let Some(next) = next else {
+                        return Err(HostError::Connector("promise did not settle".into()));
+                    };
+                    self.pump(next)?;
+                }
                 PromiseState::Pending(PromiseKind::Then {
                     parent,
                     on_fulfilled,
@@ -1175,7 +1304,8 @@ impl<'tree> Interpreter<'tree> {
                 | PromiseState::Pending(PromiseKind::AllSettled(_))
                 | PromiseState::Pending(PromiseKind::Race(_))
                 | PromiseState::Fulfilled(_)
-                | PromiseState::Rejected(_) => return Ok(()),
+                | PromiseState::Rejected(_)
+                | PromiseState::Failed(_) => return Ok(()),
             }
         }
     }
@@ -1214,10 +1344,7 @@ impl<'tree> Interpreter<'tree> {
                 .and_then(|value| self.from_json(value, true))
             {
                 Ok(value) => PromiseState::Fulfilled(value),
-                Err(error) => PromiseState::Rejected(Value::Error(ErrorValue {
-                    name: "DataError".into(),
-                    message: error.to_string(),
-                })),
+                Err(error) => PromiseState::Failed(error),
             },
             Err(error) => PromiseState::Rejected(Value::Error(ErrorValue {
                 name: "ToolError".into(),
@@ -1263,25 +1390,85 @@ impl<'tree> Interpreter<'tree> {
     fn property(&mut self, object: Value<'tree>, key: &str) -> Result<Value<'tree>, Fault<'tree>> {
         match object.clone() {
             Value::Object(value) => {
-                if let Some(result) = value.fields.get(key) {
-                    Ok(result.clone())
-                } else if value.strict {
-                    Err(Fault::Host(HostError::SurfaceNotFound(format!(
-                        "surface_not_found: unknown surface '{key}'"
-                    ))))
-                } else {
-                    Ok(Value::Undefined)
+                let found = {
+                    let object = value.borrow();
+                    if let Some(result) = object.fields.get(key) {
+                        Some(Ok(result.clone()))
+                    } else if let Some(getter) = object.getters.get(key) {
+                        Some(Err(getter.clone()))
+                    } else {
+                        None
+                    }
+                };
+                match found {
+                    Some(Ok(result)) => Ok(result),
+                    Some(Err(getter)) => self.call(getter, Vec::new()),
+                    None => {
+                        let object = value.borrow();
+                        match object.access {
+                            ObjectAccess::Strict => Err(Fault::Host(HostError::Data(format!(
+                                "unknown property '{key}' on connector result; available properties: {}",
+                                object.fields.keys().cloned().collect::<Vec<_>>().join(", ")
+                            )))),
+                            ObjectAccess::CapabilityRoot
+                                if matches!(key, "then" | "toJSON" | "toString") =>
+                            {
+                                Ok(Value::Undefined)
+                            }
+                            ObjectAccess::CapabilityRoot => {
+                                Err(Fault::Host(HostError::SurfaceNotFound(format!(
+                                    "surface_not_found: unknown surface '{key}' on {}; closest surfaces: {}",
+                                    self.host.registration.root,
+                                    closest_names(
+                                        key,
+                                        self.host
+                                            .registration
+                                            .capabilities
+                                            .iter()
+                                            .map(|capability| capability.surface.as_str())
+                                    )
+                                ))))
+                            }
+                            ObjectAccess::Open => Ok(Value::Undefined),
+                        }
+                    }
                 }
             }
+            Value::Namespace(namespace) if namespace == "globalThis" => {
+                Ok(self.lookup(key).unwrap_or(Value::Undefined))
+            }
             Value::Namespace(namespace) => {
+                if matches!(key, "then" | "toJSON" | "toString") {
+                    return Ok(Value::Undefined);
+                }
                 if self
+                    .host
+                    .registration()
+                    .capabilities
+                    .iter()
+                    .any(|capability| capability.surface == namespace && capability.method == key)
+                {
+                    Ok(Value::Tool(namespace, key.into()))
+                } else if self
                     .host
                     .registration()
                     .capabilities
                     .iter()
                     .any(|capability| capability.surface == namespace)
                 {
-                    Ok(Value::Tool(namespace, key.into()))
+                    Err(Fault::Host(HostError::MethodNotFound(format!(
+                        "method_not_found: unknown method '{key}' on {}.{namespace}; closest methods: {}",
+                        self.host.registration.root,
+                        closest_names(
+                            key,
+                            self.host
+                                .registration
+                                .capabilities
+                                .iter()
+                                .filter(|capability| capability.surface == namespace)
+                                .map(|capability| capability.method.as_str())
+                        )
+                    ))))
                 } else {
                     Ok(Value::Method(
                         Box::new(Value::Namespace(namespace)),
@@ -1293,7 +1480,11 @@ impl<'tree> Interpreter<'tree> {
                 if key == "length" {
                     Ok(Value::Number(items.borrow().len() as f64))
                 } else if let Ok(index) = key.parse::<usize>() {
-                    Ok(items.borrow().get(index).cloned().unwrap_or(Value::Undefined))
+                    Ok(items
+                        .borrow()
+                        .get(index)
+                        .cloned()
+                        .unwrap_or(Value::Undefined))
                 } else {
                     Ok(Value::Method(Box::new(Value::Array(items)), key.into()))
                 }
@@ -1334,9 +1525,11 @@ impl<'tree> Interpreter<'tree> {
             Value::Array(items) => self.array_method(items, name, args),
             Value::String(value) => self.string_method(&value, name, args),
             Value::Object(object) if name == "hasOwnProperty" => {
-                Ok(Value::Bool(args.first().is_some_and(|key| {
-                    object.fields.contains_key(&to_key(key))
-                })))
+                let key = to_key(args.first().unwrap_or(&Value::Undefined));
+                let object = object.borrow();
+                Ok(Value::Bool(
+                    object.fields.contains_key(&key) || object.getters.contains_key(&key),
+                ))
             }
             Value::Promise(parent) if name == "then" => {
                 let on_fulfilled = args.into_iter().next().unwrap_or(Value::Undefined);
@@ -1409,15 +1602,17 @@ impl<'tree> Interpreter<'tree> {
                         .map(|character| Value::String(character.to_string()))
                         .collect(),
                     Value::Object(object) => {
-                        let length = object
-                            .fields
-                            .get("length")
-                            .and_then(number)
-                            .ok_or_else(|| {
-                                Fault::Host(HostError::Data(
-                                    "Array.from length must be a finite number".into(),
-                                ))
-                            })?;
+                        let object = object.borrow();
+                        let length =
+                            object
+                                .fields
+                                .get("length")
+                                .and_then(number)
+                                .ok_or_else(|| {
+                                    Fault::Host(HostError::Data(
+                                        "Array.from length must be a finite number".into(),
+                                    ))
+                                })?;
                         if !length.is_finite() || length < 0.0 {
                             return Err(Fault::Host(HostError::Data(
                                 "Array.from length must be finite and non-negative".into(),
@@ -1450,17 +1645,14 @@ impl<'tree> Interpreter<'tree> {
                         .into_iter()
                         .enumerate()
                         .map(|(index, value)| {
-                            self.call(
-                                mapper.clone(),
-                                vec![value, Value::Number(index as f64)],
-                            )
+                            self.call(mapper.clone(), vec![value, Value::Number(index as f64)])
                         })
                         .collect::<Result<Vec<_>, _>>()?
                 } else {
                     values
                 };
                 Ok(new_array(values))
-            },
+            }
             ("Object", "keys") => Ok(new_array(object_keys(
                 args.first().cloned().unwrap_or(Value::Undefined),
             ))),
@@ -1470,6 +1662,59 @@ impl<'tree> Interpreter<'tree> {
             ("Object", "entries") => Ok(new_array(object_entries(
                 args.first().cloned().unwrap_or(Value::Undefined),
             ))),
+            ("Object", "getPrototypeOf") => {
+                let value = args.first().unwrap_or(&Value::Undefined);
+                if matches!(value, &Value::Null | &Value::Undefined) {
+                    Err(Fault::Host(HostError::Data(
+                        "Object.getPrototypeOf expects an object".into(),
+                    )))
+                } else {
+                    Ok(Value::Null)
+                }
+            }
+            ("Reflect", "ownKeys") => Ok(new_array(object_keys(
+                args.first().cloned().unwrap_or(Value::Undefined),
+            ))),
+            ("Object", "defineProperty") => {
+                let mut iter = args.into_iter();
+                let target = iter.next().unwrap_or(Value::Undefined);
+                let key = to_key(&iter.next().unwrap_or(Value::Undefined));
+                let descriptor = iter.next().unwrap_or(Value::Undefined);
+                let Value::Object(target) = target else {
+                    return Err(Fault::Host(HostError::Data(
+                        "Object.defineProperty target must be a mutable user object".into(),
+                    )));
+                };
+                {
+                    let mut object = target.borrow_mut();
+                    if !matches!(object.access, ObjectAccess::Open) {
+                        return Err(Fault::Host(HostError::Data(format!(
+                            "cannot define property '{key}' on an immutable object"
+                        ))));
+                    }
+                    match descriptor {
+                        Value::Object(descriptor) => {
+                            let descriptor = descriptor.borrow();
+                            if let Some(getter) = descriptor.fields.get("get").cloned() {
+                                object.getters.insert(key, getter);
+                            } else if let Some(value) = descriptor.fields.get("value").cloned() {
+                                object.fields.insert(key, value);
+                            } else {
+                                return Err(Fault::Host(HostError::Data(
+                                    "Object.defineProperty descriptor must provide get or value"
+                                        .into(),
+                                )));
+                            }
+                        }
+                        _ => {
+                            return Err(Fault::Host(HostError::Data(
+                                "Object.defineProperty descriptor must be an object".into(),
+                            )));
+                        }
+                    }
+                }
+                Ok(Value::Object(target))
+            }
             ("JSON", "parse") => {
                 let json: JsonValue =
                     serde_json::from_str(&to_string(args.first().unwrap_or(&Value::Undefined)))
@@ -1544,10 +1789,19 @@ impl<'tree> Interpreter<'tree> {
                         .to_vec(),
                 ))
             }
-            "includes" => {
-                Ok(Value::Bool(args.first().is_some_and(|value| {
-                    snapshot.iter().any(|item| same_value(item, value))
-                })))
+            "includes" => Ok(Value::Bool(args.first().is_some_and(|value| {
+                snapshot.iter().any(|item| same_value(item, value))
+            }))),
+            "sort" => {
+                let mut sorted = snapshot;
+                sorted.sort_by(|left, right| match (left, right) {
+                    (&Value::Undefined, &Value::Undefined) => std::cmp::Ordering::Equal,
+                    (&Value::Undefined, _) => std::cmp::Ordering::Greater,
+                    (_, &Value::Undefined) => std::cmp::Ordering::Less,
+                    _ => to_string(left).cmp(&to_string(right)),
+                });
+                *items.borrow_mut() = sorted;
+                Ok(Value::Array(items))
             }
             "indexOf" => Ok(Value::Number(
                 args.first()
@@ -1611,6 +1865,102 @@ impl<'tree> Interpreter<'tree> {
         args: Vec<Value<'tree>>,
     ) -> Result<Value<'tree>, Fault<'tree>> {
         match name {
+            "repeat" => {
+                let raw_count = args.first().and_then(number).unwrap_or(0.0);
+                if raw_count.is_nan() || raw_count == 0.0 {
+                    return Ok(Value::String(String::new()));
+                }
+                if raw_count < 0.0 || !raw_count.is_finite() {
+                    return Err(Fault::Host(HostError::Data(
+                        "String.repeat count must be a finite non-negative number".into(),
+                    )));
+                }
+                if value.is_empty() {
+                    return Ok(Value::String(String::new()));
+                }
+                let count = raw_count.floor();
+                let maximum = self.host.limits.memory_bytes / value.len();
+                if count >= usize::MAX as f64 || count > maximum as f64 {
+                    return Err(Fault::Host(HostError::Data(format!(
+                        "String.repeat allocation exceeds memory limit of {} bytes",
+                        self.host.limits.memory_bytes
+                    ))));
+                }
+                let count = count as usize;
+                let bytes = value.len().checked_mul(count).ok_or_else(|| {
+                    Fault::Host(HostError::Data(
+                        "String.repeat allocation is too large".into(),
+                    ))
+                })?;
+                if bytes > self.host.limits.memory_bytes {
+                    return Err(Fault::Host(HostError::Data(format!(
+                        "String.repeat allocation exceeds memory limit of {} bytes",
+                        self.host.limits.memory_bytes
+                    ))));
+                }
+                Ok(Value::String(value.repeat(count)))
+            }
+            "padStart" => {
+                let raw_target = args.first().and_then(number).unwrap_or(0.0);
+                if raw_target.is_nan() || raw_target <= 0.0 {
+                    return Ok(Value::String(value.into()));
+                }
+                if !raw_target.is_finite() {
+                    return Err(Fault::Host(HostError::Data(
+                        "String.padStart target length must be finite".into(),
+                    )));
+                }
+                let target = raw_target.floor();
+                let current = value.chars().count();
+                if target <= current as f64 {
+                    return Ok(Value::String(value.into()));
+                }
+                if target >= usize::MAX as f64 {
+                    return Err(Fault::Host(HostError::Data(
+                        "String.padStart target length is too large".into(),
+                    )));
+                }
+                let target = target as usize;
+                let needed = target.saturating_sub(current);
+                let pad = match args.get(1) {
+                    None | Some(&Value::Undefined) => " ".to_owned(),
+                    Some(value) => to_string(value),
+                };
+                if pad.is_empty() {
+                    return Ok(Value::String(value.into()));
+                }
+                let pad_chars = pad.chars().count();
+                let full_repeats = needed / pad_chars;
+                let remainder = needed % pad_chars;
+                let remainder_bytes = pad
+                    .chars()
+                    .take(remainder)
+                    .map(|character| character.len_utf8())
+                    .sum::<usize>();
+                let padding_bytes = full_repeats
+                    .checked_mul(pad.len())
+                    .and_then(|bytes| bytes.checked_add(remainder_bytes))
+                    .ok_or_else(|| {
+                        Fault::Host(HostError::Data(
+                            "String.padStart allocation is too large".into(),
+                        ))
+                    })?;
+                let output_bytes = value.len().checked_add(padding_bytes).ok_or_else(|| {
+                    Fault::Host(HostError::Data(
+                        "String.padStart allocation is too large".into(),
+                    ))
+                })?;
+                if output_bytes > self.host.limits.memory_bytes {
+                    return Err(Fault::Host(HostError::Data(format!(
+                        "String.padStart allocation exceeds memory limit of {} bytes",
+                        self.host.limits.memory_bytes
+                    ))));
+                }
+                let mut output = String::with_capacity(output_bytes);
+                output.extend(pad.chars().cycle().take(needed));
+                output.push_str(value);
+                Ok(Value::String(output))
+            }
             "toLowerCase" => Ok(Value::String(value.to_lowercase())),
             "toUpperCase" => Ok(Value::String(value.to_uppercase())),
             "trim" => Ok(Value::String(value.trim().into())),
@@ -1663,6 +2013,40 @@ impl<'tree> Interpreter<'tree> {
         Value::Promise(id)
     }
 
+    fn new_manual_promise(&mut self, executor: Value<'tree>) -> Result<Value<'tree>, Fault<'tree>> {
+        let promise = self.new_promise(PromiseState::Pending(PromiseKind::Manual));
+        let Value::Promise(id) = promise else {
+            unreachable!();
+        };
+        let Value::Function(function) = executor else {
+            return Err(Fault::Throw(Value::Error(ErrorValue {
+                name: "TypeError".into(),
+                message: "Promise executor must be a function".into(),
+            })));
+        };
+        let resolve = Value::Resolver {
+            promise: id,
+            reject: false,
+        };
+        let reject = Value::Resolver {
+            promise: id,
+            reject: true,
+        };
+        match self.call_function(function, vec![resolve, reject]) {
+            Ok(_) => {}
+            Err(Fault::Throw(value)) => {
+                if matches!(
+                    self.promises.get(&id),
+                    Some(PromiseState::Pending(PromiseKind::Manual))
+                ) {
+                    self.promises.insert(id, PromiseState::Rejected(value));
+                }
+            }
+            Err(error) => return Err(error),
+        }
+        Ok(Value::Promise(id))
+    }
+
     fn lookup(&self, name: &str) -> Option<Value<'tree>> {
         let mut current = Some(self.env.clone());
         while let Some(environment) = current {
@@ -1675,6 +2059,48 @@ impl<'tree> Interpreter<'tree> {
     }
 
     fn assign(&mut self, node: Node<'tree>, value: Value<'tree>) -> Result<(), HostError> {
+        if matches!(node.kind(), "member_expression" | "subscript_expression") {
+            let object = node
+                .child_by_field_name("object")
+                .ok_or_else(|| self.unsupported("assignment object"))?;
+            if object.kind() == "identifier" && self.text(object) == "globalThis" {
+                let key = if let Some(property) = node.child_by_field_name("property") {
+                    self.text(property).to_owned()
+                } else if let Some(index) = node.child_by_field_name("index") {
+                    to_key(&self.eval(index).map_err(|fault| self.fault(fault))?)
+                } else {
+                    return Err(self.unsupported("assignment property"));
+                };
+                self.env.borrow_mut().values.insert(key, value);
+                return Ok(());
+            }
+            let key = if let Some(property) = node.child_by_field_name("property") {
+                self.text(property).to_owned()
+            } else if let Some(index) = node.child_by_field_name("index") {
+                to_key(&self.eval(index).map_err(|fault| self.fault(fault))?)
+            } else {
+                return Err(self.unsupported("assignment property"));
+            };
+            let target = self.eval(object).map_err(|fault| self.fault(fault))?;
+            return match target {
+                Value::Object(target) => {
+                    let mut target = target.borrow_mut();
+                    match target.access {
+                        ObjectAccess::Open => {
+                            target.fields.insert(key, value);
+                            Ok(())
+                        }
+                        ObjectAccess::Strict => Err(HostError::Data(format!(
+                            "cannot write property '{key}' on a connector result"
+                        ))),
+                        ObjectAccess::CapabilityRoot => Err(HostError::Data(format!(
+                            "cannot write property '{key}' on the capability root"
+                        ))),
+                    }
+                }
+                _ => Err(self.unsupported("assignment target")),
+            };
+        }
         if node.kind() != "identifier" {
             return Err(self.unsupported("assignment target"));
         }
@@ -1704,16 +2130,21 @@ impl<'tree> Interpreter<'tree> {
             JsonValue::Array(values) => new_array(
                 values
                     .into_iter()
-                    .map(|value| self.from_json(value, false))
+                    .map(|value| self.from_json(value, strict))
                     .collect::<Result<_, _>>()?,
             ),
-            JsonValue::Object(values) => Value::Object(ObjectValue {
+            JsonValue::Object(values) => Value::Object(Rc::new(RefCell::new(ObjectValue {
                 fields: values
                     .into_iter()
-                    .map(|(key, value)| Ok((key, self.from_json(value, false)?)))
+                    .map(|(key, value)| Ok((key, self.from_json(value, strict)?)))
                     .collect::<Result<_, HostError>>()?,
-                strict,
-            }),
+                getters: BTreeMap::new(),
+                access: if strict {
+                    ObjectAccess::Strict
+                } else {
+                    ObjectAccess::Open
+                },
+            }))),
         })
     }
 
@@ -1740,13 +2171,124 @@ impl<'tree> Interpreter<'tree> {
                     .map(|value| self.to_json(value))
                     .collect::<Result<_, _>>()?,
             ),
-            Value::Object(value) => JsonValue::Object(
-                value
-                    .fields
-                    .iter()
-                    .map(|(key, value)| Ok((key.clone(), self.to_json(value)?)))
-                    .collect::<Result<Map<_, _>, HostError>>()?,
+            Value::Object(value) => {
+                let object = value.borrow();
+                JsonValue::Object(
+                    object
+                        .fields
+                        .iter()
+                        .map(|(key, value)| Ok((key.clone(), self.to_json(value)?)))
+                        .collect::<Result<Map<_, _>, HostError>>()?,
+                )
+            }
+            Value::Error(value) => JsonValue::Object(
+                [
+                    (String::from("name"), JsonValue::String(value.name.clone())),
+                    (
+                        String::from("message"),
+                        JsonValue::String(value.message.clone()),
+                    ),
+                ]
+                .into_iter()
+                .collect(),
             ),
+            Value::Unreadable => JsonValue::String("[unreadable]".into()),
+            Value::Promise(_)
+            | Value::Resolver { .. }
+            | Value::Namespace(_)
+            | Value::Tool(_, _)
+            | Value::Method(_, _)
+            | Value::Function(_) => {
+                return Err(HostError::Data(
+                    "runtime value cannot cross the data boundary; use await and return data"
+                        .into(),
+                ));
+            }
+        })
+    }
+    /// Serialize the public plan result, degrading cycles and unreadable
+    /// values instead of failing, and reporting whether degradation occurred.
+    fn to_public_json(&mut self, value: &Value<'tree>) -> Result<(JsonValue, bool), HostError> {
+        let mut degraded = false;
+        let mut seen = BTreeSet::new();
+        let json = self.serialize_public(value, &mut seen, &mut degraded)?;
+        Ok((json, degraded))
+    }
+
+    fn serialize_public(
+        &mut self,
+        value: &Value<'tree>,
+        seen: &mut BTreeSet<usize>,
+        degraded: &mut bool,
+    ) -> Result<JsonValue, HostError> {
+        Ok(match value {
+            Value::Undefined | Value::Null => JsonValue::Null,
+            Value::Bool(value) => JsonValue::Bool(*value),
+            Value::Number(value)
+                if value.is_finite()
+                    && value.fract() == 0.0
+                    && value.abs() <= 9_007_199_254_740_991.0 =>
+            {
+                JsonValue::Number(Number::from(*value as i64))
+            }
+            Value::Number(value) if value.is_finite() => Number::from_f64(*value)
+                .map(JsonValue::Number)
+                .ok_or_else(|| HostError::Data("invalid number".into()))?,
+            Value::Number(_) => JsonValue::Null,
+            Value::String(value) => JsonValue::String(value.clone()),
+            Value::Unreadable => {
+                *degraded = true;
+                JsonValue::String("[unreadable]".into())
+            }
+            Value::Array(values) => {
+                let pointer = Rc::as_ptr(values) as usize;
+                if !seen.insert(pointer) {
+                    *degraded = true;
+                    self.serialize_public(&Value::Unreadable, seen, degraded)?
+                } else {
+                    let items = values.borrow().clone();
+                    let json = JsonValue::Array(
+                        items
+                            .iter()
+                            .map(|item| self.serialize_public(item, seen, degraded))
+                            .collect::<Result<_, _>>()?,
+                    );
+                    seen.remove(&pointer);
+                    json
+                }
+            }
+            Value::Object(value) => {
+                let pointer = Rc::as_ptr(value) as usize;
+                if !seen.insert(pointer) {
+                    *degraded = true;
+                    self.serialize_public(&Value::Unreadable, seen, degraded)?
+                } else {
+                    let (fields, getters) = {
+                        let object = value.borrow();
+                        (object.fields.clone(), object.getters.clone())
+                    };
+                    let mut keys = fields.keys().cloned().collect::<BTreeSet<_>>();
+                    keys.extend(getters.keys().cloned());
+                    let mut map = Map::new();
+                    for key in keys {
+                        let entry = if let Some(getter) = getters.get(&key) {
+                            match self.call(getter.clone(), Vec::new()) {
+                                Ok(result) => self.serialize_public(&result, seen, degraded)?,
+                                Err(Fault::Throw(_)) => {
+                                    *degraded = true;
+                                    self.serialize_public(&Value::Unreadable, seen, degraded)?
+                                }
+                                Err(Fault::Host(error)) => return Err(error),
+                            }
+                        } else {
+                            self.serialize_public(&fields[&key], seen, degraded)?
+                        };
+                        map.insert(key, entry);
+                    }
+                    seen.remove(&pointer);
+                    JsonValue::Object(map)
+                }
+            }
             Value::Error(value) => JsonValue::Object(
                 [
                     (String::from("name"), JsonValue::String(value.name.clone())),
@@ -1759,6 +2301,7 @@ impl<'tree> Interpreter<'tree> {
                 .collect(),
             ),
             Value::Promise(_)
+            | Value::Resolver { .. }
             | Value::Namespace(_)
             | Value::Tool(_, _)
             | Value::Method(_, _)
@@ -1812,6 +2355,35 @@ impl<'tree> Interpreter<'tree> {
     }
 }
 
+fn closest_names<'a>(target: &str, names: impl Iterator<Item = &'a str>) -> String {
+    let mut names = names.collect::<Vec<_>>();
+    names.sort_unstable();
+    names.dedup();
+    names.sort_by_key(|name| (edit_distance(target, name), *name));
+    let closest = names.into_iter().take(3).collect::<Vec<_>>();
+    if closest.is_empty() {
+        "(none)".into()
+    } else {
+        closest.join(", ")
+    }
+}
+
+fn edit_distance(left: &str, right: &str) -> usize {
+    let mut row = (0..=right.len()).collect::<Vec<_>>();
+    for (left_index, left_byte) in left.bytes().enumerate() {
+        let mut next = vec![left_index + 1];
+        for (right_index, right_byte) in right.bytes().enumerate() {
+            next.push(
+                (next[right_index] + 1)
+                    .min(row[right_index + 1] + 1)
+                    .min(row[right_index] + usize::from(left_byte != right_byte)),
+            );
+        }
+        row = next;
+    }
+    row[right.len()]
+}
+
 fn new_array<'tree>(values: Vec<Value<'tree>>) -> Value<'tree> {
     Value::Array(Rc::new(RefCell::new(values)))
 }
@@ -1823,15 +2395,22 @@ fn settled<'tree>(ok: bool, value: Value<'tree>) -> Value<'tree> {
         Value::String(if ok { "fulfilled" } else { "rejected" }.into()),
     );
     fields.insert(if ok { "value" } else { "reason" }.into(), value);
-    Value::Object(ObjectValue {
+    Value::Object(Rc::new(RefCell::new(ObjectValue {
         fields,
-        strict: false,
-    })
+        getters: BTreeMap::new(),
+        access: ObjectAccess::Open,
+    })))
 }
 
 fn object_keys<'tree>(value: Value<'tree>) -> Vec<Value<'tree>> {
     match value {
-        Value::Object(value) => value.fields.keys().cloned().map(Value::String).collect(),
+        Value::Object(value) => value
+            .borrow()
+            .fields
+            .keys()
+            .cloned()
+            .map(Value::String)
+            .collect(),
         Value::Array(value) => (0..value.borrow().len())
             .map(|index| Value::String(index.to_string()))
             .collect(),
@@ -1841,7 +2420,7 @@ fn object_keys<'tree>(value: Value<'tree>) -> Vec<Value<'tree>> {
 
 fn object_values<'tree>(value: Value<'tree>) -> Vec<Value<'tree>> {
     match value {
-        Value::Object(value) => value.fields.into_values().collect(),
+        Value::Object(value) => value.borrow().fields.values().cloned().collect(),
         Value::Array(value) => value.borrow().clone(),
         _ => Vec::new(),
     }
@@ -1850,11 +2429,38 @@ fn object_values<'tree>(value: Value<'tree>) -> Vec<Value<'tree>> {
 fn object_entries<'tree>(value: Value<'tree>) -> Vec<Value<'tree>> {
     match value {
         Value::Object(value) => value
+            .borrow()
             .fields
-            .into_iter()
-            .map(|(key, value)| new_array(vec![Value::String(key), value]))
+            .iter()
+            .map(|(key, value)| new_array(vec![Value::String(key.clone()), value.clone()]))
             .collect(),
         _ => Vec::new(),
+    }
+}
+
+fn collect_refs(value: &JsonValue) -> Vec<String> {
+    let mut refs = Vec::new();
+    collect_refs_inner(value, &mut refs);
+    refs
+}
+
+fn collect_refs_inner(value: &JsonValue, refs: &mut Vec<String>) {
+    match value {
+        JsonValue::String(value) => {
+            if ["fz://", "gz://", "tz://", "cm://"]
+                .iter()
+                .any(|prefix| value.starts_with(prefix))
+            {
+                refs.push(value.clone());
+            }
+        }
+        JsonValue::Array(values) => values
+            .iter()
+            .for_each(|value| collect_refs_inner(value, refs)),
+        JsonValue::Object(map) => map
+            .values()
+            .for_each(|value| collect_refs_inner(value, refs)),
+        JsonValue::Null | JsonValue::Bool(_) | JsonValue::Number(_) => {}
     }
 }
 
