@@ -443,7 +443,7 @@ No existing T13 pi-stack host bead ID was found in repository metadata. Do not i
 
 ## Local report evidence (Option B)
 
-Engine reports and their index under conformance/reports/ are ignored, private, local-only runtime evidence. CI and clean clones do not contain or validate them. Run python3 conformance/scripts/check_freshness.py <explicit-index.json> only against an intentionally supplied local set. The validator creates no evidence and cross-checks indexed report identity, digests, revision, completion, timestamp, and basename-only binary identity.
+Engine reports and their index under conformance/reports/ are ignored, private, local-only runtime evidence. CI and clean clones do not contain or validate them. Run python3 tests/scripts/check_freshness.py <explicit-index.json> only against an intentionally supplied local set. The validator creates no evidence and cross-checks indexed report identity, digests, revision, completion, timestamp, and basename-only binary identity.
 
 Durable attestations require a separate signed publication flow that scrubs host/private data, pins provenance and immutable revisions, reviews artifacts before committing them outside the ignored directory, and verifies signatures and freshness in CI.
 
