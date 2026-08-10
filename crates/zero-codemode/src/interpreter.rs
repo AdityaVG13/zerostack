@@ -839,13 +839,29 @@ impl<'tree> Interpreter<'tree> {
     }
 
     fn eval_call(&mut self, node: Node<'tree>) -> Result<Value<'tree>, Fault<'tree>> {
-        let function = self.eval(
-            node.child_by_field_name("function")
-                .ok_or_else(|| Fault::Host(self.unsupported("call function")))?,
-        )?;
+        let function_node = node
+            .child_by_field_name("function")
+            .ok_or_else(|| Fault::Host(self.unsupported("call function")))?;
         let arguments = node
             .child_by_field_name("arguments")
             .ok_or_else(|| Fault::Host(self.unsupported("call arguments")))?;
+
+        // Tree-sitter parses program-level `await (async () => { ... })()` as
+        // `(await(async () => { ... }))()`: the contextual keyword becomes an
+        // identifier because the source is a script. Accept only that exact
+        // recovery shape. This does not install an ambient `await` function.
+        if function_node.kind() == "identifier" && self.text(function_node) == "await" {
+            let mut cursor = arguments.walk();
+            let children = arguments.named_children(&mut cursor).collect::<Vec<_>>();
+            if let [function] = children.as_slice()
+                && matches!(function.kind(), "arrow_function" | "function_expression")
+            {
+                let value = self.eval(*function)?;
+                return self.await_value(value);
+            }
+        }
+
+        let function = self.eval(function_node)?;
         let mut values = Vec::new();
         let mut cursor = arguments.walk();
         for child in arguments.named_children(&mut cursor) {

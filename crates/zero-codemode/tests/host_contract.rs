@@ -224,9 +224,11 @@ fn async_arrow_helper_can_await_spread_tool_call() {
             r#"const __fszeroDecorate = (__value) => ({ok:true, result:__value});
                const __fszeroCall = async (__method, __args) => __fszeroDecorate(await __method(...__args));
                const fs = {read: (__arg) => __fszeroCall(zero.fs.read, [__arg])};
-               const r = await fs.read({path: "js.txt"});
-               if (!r || r.ok === false) throw new Error("read failed");
-               return r;"#,
+               return await (async () => {
+                   const r = await fs.read({path: "js.txt"});
+                   if (!r || r.ok === false) throw new Error("read failed");
+                   return r;
+               })();"#,
             Rc::new(C::ok()),
         )
         .unwrap_or_else(|error| panic!("execute: {error}"));
@@ -235,6 +237,11 @@ fn async_arrow_helper_can_await_spread_tool_call() {
         value["result"]["content"]["value"]["echo"]["path"],
         "js.txt"
     );
+
+    let error = host
+        .execute("return await;", Rc::new(C::ok()))
+        .expect_err("await must not become an ambient function");
+    assert!(error.to_string().contains("unknown identifier 'await'"));
 }
 
 #[test]
