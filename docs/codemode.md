@@ -79,7 +79,7 @@ zs -C . fs-search 'read a file'
 ## Binary discovery for embedded harnesses
 
 A harness needs four executables: the aggregate host `zerostack-codemode-host` and
-the `fszero-codemode` / `graphzero-codemode` / `tokenzero-codemode` delegates. None of
+the `fszero-codemode` / `graphzero-codemode` / `tokenzero-codemode` raw workers. None of
 them belong in a config as an absolute path — a shipped config that names one
 developer's worktree resolves nothing on any other machine and fails at spawn
 time with a bare `ENOENT`.
@@ -120,7 +120,7 @@ Rules that keep resolution predictable:
 - Each directory is probed once even if several rules name it.
 
 An engine that is not installed is reported as unresolved rather than aborting
-discovery; the harness decides which delegates it actually requires.
+discovery; the harness decides which raw workers it actually requires.
 
 ## Exclusive deployment rule
 

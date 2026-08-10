@@ -267,7 +267,11 @@ impl AggregateConnector {
                 contract.clone(),
                 registry_digest,
             )
-            .env("ZEROSTACK_WORKER_REVISION", revision.clone());
+            .env("ZEROSTACK_WORKER_REVISION", revision.clone())
+            .env(
+                RAW_WORKER_PROTOCOL_ENV,
+                zero_abi::RAW_WORKER_PROTOCOL_VERSION,
+            );
             configured_pins.insert(engine, (revision, contract));
             if test_mode {
                 let key = format!(
@@ -316,7 +320,9 @@ impl AggregateConnector {
                     },
                     worker_config.clone(),
                 )
-                .map_err(worker_error)?;
+                .map_err(|error| {
+                    HostError::Connector(format!("{} worker: {error}", engine.as_str()))
+                })?;
             workers.insert(engine, vec![client]);
         }
         let state = Arc::new(AggregateWorkerState {

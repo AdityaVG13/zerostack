@@ -2,27 +2,28 @@ use serde::Deserialize;
 use serde_json::{Value, json};
 use std::{
     collections::HashMap,
-    io::{self, BufRead, BufReader, BufWriter, Write},
-    rc::Rc,
-    sync::{
-        Arc,
-        atomic::{AtomicBool, AtomicU64, Ordering},
-        mpsc,
-    },
+    io::{self, BufRead, BufReader, BufWriter, Read, Write},
+    sync::{Arc, mpsc},
     thread,
     time::{Duration, Instant},
 };
 use zero_codemode::node::{NODE_SCHEMA, NodeEnv, node_report};
+use zero_codemode::session::{
+    AggregateSession, AggregateSessionError, AggregateSessionFailureCode, MAX_SESSION_FRAME,
+    SessionReplacementReason,
+};
 use zero_codemode::{
-    ArtifactEnv, CapabilityDescriptor, Connector, ConnectorCompletion, ConnectorError,
-    DEFAULT_MAX_VISIBLE_RESULT_BYTES, DISCOVERY_SCHEMA, DiscoveryEnv, DispatchContext,
-    GlobalRegistration, Host, HostError, HostLimits, MANIFEST_SCHEMA, ManifestFacts, StorePaths,
+    ArtifactEnv, DISCOVERY_SCHEMA, DiscoveryEnv, MANIFEST_SCHEMA, ManifestFacts, StorePaths,
     finalize_visible_error, is_executable_file, is_readable_file, locate_manifest, locate_report,
 };
-use zero_store::{Engine, ResolvedStore, ensure_layout};
+use zero_store::{Engine, ResolvedStore};
 
-const PROTOCOL: &str = "zerostack-codemode-host/v1";
+/// v2 executes every plan directly on the aggregate session: capability calls
+/// lower to raw-worker v2 children inside the host, so no delegate frames
+/// cross this transport.
+const PROTOCOL: &str = "zerostack-codemode-host/v2";
 const MAX_CELLS: usize = 1;
+const DEFAULT_EXECUTION_TIMEOUT_MS: u64 = 3_600_000;
 
 #[derive(Debug, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
@@ -31,6 +32,11 @@ enum ClientFrame {
         id: u64,
         cell_id: String,
         source: String,
+        /// Generation reported by the ready frame. When present it must match
+        /// the active session generation; a stale generation is rejected
+        /// before admission.
+        #[serde(default)]
+        generation: Option<u64>,
         #[serde(default)]
         yield_ms: u64,
         #[serde(default)]
@@ -46,14 +52,6 @@ enum ClientFrame {
         id: u64,
         cell_id: String,
     },
-    DelegateResponse {
-        delegate_id: u64,
-        ok: bool,
-        #[serde(default)]
-        result: Option<Value>,
-        #[serde(default)]
-        error: Option<String>,
-    },
     Shutdown {
         id: u64,
     },
@@ -63,17 +61,11 @@ enum Event {
     Input(ClientFrame),
     InputError(String),
     InputClosed,
-    Delegate(DelegateCall),
     Complete {
         cell_id: String,
         outcome: CellOutcome,
         duration_ms: u64,
     },
-}
-struct DelegateCall {
-    cell_id: String,
-    payload: Value,
-    completion: ConnectorCompletion,
 }
 #[derive(Clone)]
 enum CellOutcome {
@@ -86,66 +78,41 @@ struct Waiter {
     deadline: Option<Instant>,
 }
 struct Cell {
-    cancelled: Arc<AtomicBool>,
     outcome: Option<CellOutcome>,
     duration_ms: Option<u64>,
     waiter: Option<Waiter>,
     started: Instant,
 }
-struct PendingDelegate {
-    cell_id: String,
-    completion: ConnectorCompletion,
-}
-struct SidecarConnector {
-    cell_id: String,
-    cancelled: Arc<AtomicBool>,
-    events: mpsc::Sender<Event>,
-}
 
-impl Connector for SidecarConnector {
-    fn dispatch(
-        &self,
-        _: &CapabilityDescriptor,
-        args_json: &str,
-        context: DispatchContext,
-        completion: ConnectorCompletion,
-    ) -> Result<(), ConnectorError> {
-        if self.cancelled.load(Ordering::Relaxed) {
-            return Err(ConnectorError::new("execution cancelled"));
-        }
-        if context.is_expired() {
-            return Err(ConnectorError::new("wall-clock deadline exceeded"));
-        }
-        let payload = serde_json::from_str(args_json)
-            .map_err(|error| ConnectorError::new(error.to_string()))?;
-        self.events
-            .send(Event::Delegate(DelegateCall {
-                cell_id: self.cell_id.clone(),
-                payload,
-                completion,
-            }))
-            .map_err(|_| ConnectorError::new("sidecar transport closed"))
+fn main() {
+    if let Err(error) = run() {
+        eprintln!("zerostack-codemode-host: {error}");
+        std::process::exit(1);
     }
 }
 
-fn main() -> Result<(), Box<dyn std::error::Error>> {
+fn run() -> Result<(), Box<dyn std::error::Error>> {
     if print_cli_metadata()? {
         return Ok(());
     }
+    // Fail-loud startup authorization: the aggregate session requires an
+    // explicit ZEROSTACK_SESSION_ROOT and all three raw worker binaries, and
+    // refuses to start until the executor prewarm succeeds. Nothing is emitted
+    // until authorization passes.
+    let session = Arc::new(AggregateSession::new(initial_generation())?);
+    let mut generation = session.generation()?;
     let (events, receive) = mpsc::channel();
     read_stdin(events.clone());
     let stdout = io::stdout();
     let mut writer = BufWriter::new(stdout.lock());
     write_frame(
         &mut writer,
-        &json!({"type":"ready","protocol":PROTOCOL,"version":1}),
+        &json!({"type":"ready","protocol":PROTOCOL,"version":2,"generation":generation}),
     )?;
     let mut cells: HashMap<String, Cell> = HashMap::new();
-    let mut delegates: HashMap<u64, PendingDelegate> = HashMap::new();
-    let delegate_ids = AtomicU64::new(1);
 
     loop {
-        flush_deadlines(&mut writer, &mut cells)?;
+        flush_deadlines(&mut writer, &mut cells, generation)?;
         let event = match next_deadline(&cells) {
             Some(timeout) => match receive.recv_timeout(timeout) {
                 Ok(e) => e,
@@ -163,22 +130,32 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     id,
                     cell_id,
                     source,
+                    generation: requested,
                     yield_ms,
                     timeout_ms,
                 } => {
+                    if let Some(requested) = requested
+                        && requested != generation
+                    {
+                        write_error(
+                            &mut writer,
+                            id,
+                            generation,
+                            &format!("stale generation: expected {generation}, got {requested}"),
+                        )?;
+                        continue;
+                    }
                     if cells.contains_key(&cell_id) {
-                        write_error(&mut writer, id, "cell already exists")?;
+                        write_error(&mut writer, id, generation, "cell already exists")?;
                         continue;
                     }
                     if cells.len() >= MAX_CELLS {
-                        write_error(&mut writer, id, "cell capacity exhausted")?;
+                        write_error(&mut writer, id, generation, "cell capacity exhausted")?;
                         continue;
                     }
-                    let cancelled = Arc::new(AtomicBool::new(false));
                     cells.insert(
                         cell_id.clone(),
                         Cell {
-                            cancelled: Arc::clone(&cancelled),
                             outcome: None,
                             duration_ms: None,
                             started: Instant::now(),
@@ -188,7 +165,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                             }),
                         },
                     );
-                    spawn_cell(cell_id, source, timeout_ms, cancelled, events.clone());
+                    spawn_cell(
+                        cell_id,
+                        source,
+                        timeout_ms,
+                        generation,
+                        id,
+                        Arc::clone(&session),
+                        events.clone(),
+                    );
                 }
                 ClientFrame::Wait {
                     id,
@@ -196,16 +181,16 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     yield_ms,
                 } => {
                     let Some(cell) = cells.get_mut(&cell_id) else {
-                        write_missing(&mut writer, id, &cell_id)?;
+                        write_missing(&mut writer, id, &cell_id, generation)?;
                         continue;
                     };
                     if cell.waiter.is_some() {
-                        write_error(&mut writer, id, "cell already has a waiter")?;
+                        write_error(&mut writer, id, generation, "cell already has a waiter")?;
                         continue;
                     }
                     if let Some(outcome) = cell.outcome.clone() {
                         let duration_ms = cell.duration_ms;
-                        write_outcome(&mut writer, id, &cell_id, outcome, duration_ms)?;
+                        write_outcome(&mut writer, id, &cell_id, outcome, duration_ms, generation)?;
                         cells.remove(&cell_id);
                     } else {
                         cell.waiter = Some(Waiter {
@@ -215,74 +200,58 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     }
                 }
                 ClientFrame::Terminate { id, cell_id } => {
-                    if let Some(cell) = cells.get_mut(&cell_id) {
-                        cell.cancelled.store(true, Ordering::Relaxed);
-                        cell.waiter = Some(Waiter {
-                            request_id: id,
-                            deadline: Some(Instant::now() + Duration::from_secs(1)),
-                        });
-                        cancel_delegates(&cell_id, &mut delegates);
-                    } else {
-                        write_missing(&mut writer, id, &cell_id)?;
+                    if !cells.contains_key(&cell_id) {
+                        write_missing(&mut writer, id, &cell_id, generation)?;
+                        continue;
                     }
-                }
-                ClientFrame::DelegateResponse {
-                    delegate_id,
-                    ok,
-                    result,
-                    error,
-                } => {
-                    if let Some(pending) = delegates.remove(&delegate_id) {
-                        let value = if ok {
-                            serde_json::to_string(&result.unwrap_or(Value::Null))
-                                .map_err(|error| ConnectorError::new(error.to_string()))
-                        } else {
-                            Err(ConnectorError::new(
-                                error.unwrap_or_else(|| "delegate failed".to_owned()),
-                            ))
-                        };
-                        let _ = pending.completion.complete(value);
+                    // Cancellation replacement: cancelling the backend rolls the
+                    // generation forward and returns the session to accepting,
+                    // so the next execute after a terminate is healthy.
+                    match session.replace(generation, SessionReplacementReason::Manual) {
+                        Ok(receipt) => {
+                            generation = receipt.generation;
+                            cells.remove(&cell_id);
+                            write_outcome(
+                                &mut writer,
+                                id,
+                                &cell_id,
+                                CellOutcome::Terminated,
+                                None,
+                                generation,
+                            )?;
+                        }
+                        Err(error) => {
+                            write_error(
+                                &mut writer,
+                                id,
+                                generation,
+                                &format!("terminate failed: {error}"),
+                            )?;
+                        }
                     }
                 }
                 ClientFrame::Shutdown { id } => {
-                    for cell in cells.values() {
-                        cell.cancelled.store(true, Ordering::Relaxed);
+                    match session.shutdown() {
+                        Ok(_) => {
+                            write_frame(&mut writer, &json!({"type":"response","id":id,"ok":true}))?
+                        }
+                        Err(error) => write_error(
+                            &mut writer,
+                            id,
+                            generation,
+                            &format!("shutdown failed: {error}"),
+                        )?,
                     }
-                    for pending in delegates.into_values() {
-                        let _ = pending
-                            .completion
-                            .complete(Err(ConnectorError::new("sidecar shutting down")));
-                    }
-                    write_frame(&mut writer, &json!({"type":"response","id":id,"ok":true}))?;
                     break;
                 }
             },
-            Event::Delegate(call) => {
-                if !cells.contains_key(&call.cell_id) {
-                    let _ = call
-                        .completion
-                        .complete(Err(ConnectorError::new("cell is unavailable")));
-                    continue;
-                }
-                let delegate_id = delegate_ids.fetch_add(1, Ordering::Relaxed);
-                delegates.insert(
-                    delegate_id,
-                    PendingDelegate {
-                        cell_id: call.cell_id.clone(),
-                        completion: call.completion,
-                    },
-                );
-                write_frame(
-                    &mut writer,
-                    &json!({"type":"delegate_request","delegate_id":delegate_id,"cell_id":call.cell_id,"payload":call.payload}),
-                )?;
-            }
             Event::Complete {
                 cell_id,
                 outcome,
                 duration_ms,
             } => {
-                cancel_delegates(&cell_id, &mut delegates);
+                // The cell may already be gone: terminate removes it before the
+                // replaced execution settles.
                 let Some(cell) = cells.get_mut(&cell_id) else {
                     continue;
                 };
@@ -293,6 +262,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         &cell_id,
                         outcome,
                         Some(duration_ms),
+                        generation,
                     )?;
                     cells.remove(&cell_id);
                 } else {
@@ -305,9 +275,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 &json!({"type":"protocol_error","error":message}),
             )?,
             Event::InputClosed => {
-                for cell in cells.values() {
-                    cell.cancelled.store(true, Ordering::Relaxed);
-                }
+                let _ = session.shutdown();
                 break;
             }
         }
@@ -328,13 +296,13 @@ fn print_cli_metadata() -> Result<bool, Box<dyn std::error::Error>> {
         }
         [flag] if flag == "--help" || flag == "-h" => {
             println!(
-                "ZeroStack native aggregate CodeMode sidecar\n\nUsage: zerostack-codemode-host [--help|--version|--locate [--json]|--locate-binaries|--locate-node]\n\nWithout arguments, bounded NDJSON frames are read from stdin and written to stdout.\n\n--locate prints every binary, module, and store path a harness needs, so no\nabsolute path belongs in its config; --json emits the {MANIFEST_SCHEMA} manifest.\n--locate-binaries emits the narrower {DISCOVERY_SCHEMA} executable report.\n--locate-node emits the {NODE_SCHEMA} node runtime report, which refuses\nper-shell fnm multishell paths so a pin cannot die with the shell that made it.\n\nResolution order: explicit pin, $ZEROSTACK_HOME, $ZEROSTACK_DEV_ROOT/<Repo>,\n$XDG_DATA_HOME/zerostack, platform install dirs, then PATH."
+                "ZeroStack native aggregate CodeMode sidecar\n\nUsage: zerostack-codemode-host [--help|--version|--locate [--json]|--locate-binaries|--locate-node]\n\nWithout arguments, bounded NDJSON frames are read from stdin and written to stdout.\nServe mode requires explicit ZEROSTACK_SESSION_ROOT authorization plus the\nZERO_FSZERO_RAW_BIN / ZERO_GRAPHZERO_RAW_BIN / ZERO_TOKENZERO_RAW_BIN worker pins;\nmissing authorization fails loudly before the ready frame.\n\n--locate prints every binary, module, and store path a harness needs, so no\nabsolute path belongs in its config; --json emits the {MANIFEST_SCHEMA} manifest.\n--locate-binaries emits the narrower {DISCOVERY_SCHEMA} executable report.\n--locate-node emits the {NODE_SCHEMA} node runtime report, which refuses\nper-shell fnm multishell paths so a pin cannot die with the shell that made it.\n\nResolution order: explicit pin, $ZEROSTACK_HOME, $ZEROSTACK_DEV_ROOT/<Repo>,\n$XDG_DATA_HOME/zerostack, platform install dirs, then PATH."
             );
             Ok(true)
         }
         [flag] if flag == "--locate-binaries" => {
             // Discovery is reported, never enforced here: a harness may legitimately
-            // run with only the engines it installed, so unresolved delegates are
+            // run with only the engines it installed, so unresolved engines are
             // data in the report rather than a non-zero exit.
             let env = DiscoveryEnv::from_process();
             println!(
@@ -372,7 +340,7 @@ fn print_cli_metadata() -> Result<bool, Box<dyn std::error::Error>> {
 /// a human reading a terminal.
 ///
 /// Unresolved entries are data, not failure: an install with only some engines is
-/// legitimate, and the harness decides which delegates it requires.
+/// legitimate, and the harness decides which engines it requires.
 fn print_manifest(json: bool) -> Result<(), Box<dyn std::error::Error>> {
     let manifest = locate_manifest(
         &DiscoveryEnv::from_process(),
@@ -432,24 +400,62 @@ fn store_paths() -> StorePaths {
 fn read_stdin(events: mpsc::Sender<Event>) {
     thread::spawn(move || {
         let stdin = io::stdin();
-        for line in BufReader::new(stdin.lock()).lines() {
-            match line {
-                Ok(line) if line.trim().is_empty() => continue,
-                Ok(line) => match serde_json::from_str(&line) {
-                    Ok(frame) => {
-                        if events.send(Event::Input(frame)).is_err() {
-                            return;
-                        }
-                    }
-                    Err(e) => {
-                        if events.send(Event::InputError(e.to_string())).is_err() {
-                            return;
-                        }
-                    }
-                },
-                Err(e) => {
-                    let _ = events.send(Event::InputError(e.to_string()));
+        let mut reader = BufReader::new(stdin.lock());
+        loop {
+            let mut bytes = Vec::new();
+            let read = Read::by_ref(&mut reader)
+                .take((MAX_SESSION_FRAME as u64).saturating_add(2))
+                .read_until(b'\n', &mut bytes);
+            match read {
+                Ok(0) => break,
+                Ok(_) => {}
+                Err(error) => {
+                    let _ = events.send(Event::InputError(error.to_string()));
                     break;
+                }
+            }
+            let ended = bytes.last() == Some(&b'\n');
+            if ended {
+                bytes.pop();
+                if bytes.last() == Some(&b'\r') {
+                    bytes.pop();
+                }
+            }
+            if bytes.len() > MAX_SESSION_FRAME {
+                if !ended && let Err(error) = drain_input_frame(&mut reader) {
+                    let _ = events.send(Event::InputError(error.to_string()));
+                    break;
+                }
+                if events
+                    .send(Event::InputError(format!(
+                        "input frame exceeded {MAX_SESSION_FRAME} bytes"
+                    )))
+                    .is_err()
+                {
+                    return;
+                }
+                continue;
+            }
+            let line = match String::from_utf8(bytes) {
+                Ok(line) if line.trim().is_empty() => continue,
+                Ok(line) => line,
+                Err(error) => {
+                    if events.send(Event::InputError(error.to_string())).is_err() {
+                        return;
+                    }
+                    continue;
+                }
+            };
+            match serde_json::from_str(&line) {
+                Ok(frame) => {
+                    if events.send(Event::Input(frame)).is_err() {
+                        return;
+                    }
+                }
+                Err(error) => {
+                    if events.send(Event::InputError(error.to_string())).is_err() {
+                        return;
+                    }
                 }
             }
         }
@@ -457,51 +463,40 @@ fn read_stdin(events: mpsc::Sender<Event>) {
     });
 }
 
+fn drain_input_frame(reader: &mut impl BufRead) -> io::Result<()> {
+    loop {
+        let available = reader.fill_buf()?;
+        if available.is_empty() {
+            return Ok(());
+        }
+        let newline = available.iter().position(|byte| *byte == b'\n');
+        let consumed = newline.map_or(available.len(), |index| index + 1);
+        reader.consume(consumed);
+        if newline.is_some() {
+            return Ok(());
+        }
+    }
+}
+
 fn spawn_cell(
     cell_id: String,
     source: String,
     timeout_ms: Option<u64>,
-    cancelled: Arc<AtomicBool>,
+    generation: u64,
+    request_id: u64,
+    session: Arc<AggregateSession>,
     events: mpsc::Sender<Event>,
 ) {
     thread::spawn(move || {
-        let execute = || -> Result<Value, HostError> {
-            let limits = HostLimits::new(
-                128 * 1024 * 1024,
-                1024 * 1024,
-                Duration::from_millis(timeout_ms.unwrap_or(3_600_000).clamp(1, 3_600_000)),
-                10_000_000,
-                16_384,
-                256 * 1024,
-                16 * 1024 * 1024,
-            )
-            .map_err(HostError::Limits)?;
-            let mut host = Host::new(
-                limits,
-                GlobalRegistration {
-                    root: "__zero".to_owned(),
-                    capabilities: vec![CapabilityDescriptor::new("host", "call")],
-                },
-            )?;
-            host = host.with_visible_result_budget(DEFAULT_MAX_VISIBLE_RESULT_BYTES)?;
-            if let Some(cas_root) = spill_root() {
-                host = host.with_result_spill(cas_root);
-            }
-            host.execute_with_cancel(
-                &source,
-                Rc::new(SidecarConnector {
-                    cell_id: cell_id.clone(),
-                    cancelled: Arc::clone(&cancelled),
-                    events: events.clone(),
-                }),
-                cancelled,
-            )
-        };
         let started = Instant::now();
-        let outcome = match execute() {
-            Ok(value) => CellOutcome::Result(value),
-            Err(HostError::Cancelled) => CellOutcome::Terminated,
-            Err(e) => CellOutcome::Error(e.to_string()),
+        let timeout = Duration::from_millis(
+            timeout_ms
+                .unwrap_or(DEFAULT_EXECUTION_TIMEOUT_MS)
+                .clamp(1, DEFAULT_EXECUTION_TIMEOUT_MS),
+        );
+        let outcome = match session.execute(generation, request_id, source, timeout) {
+            Ok(result) => CellOutcome::Result(result.value),
+            Err(error) => outcome_from_session_error(&error),
         };
         let duration_ms = u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX);
         let _ = events.send(Event::Complete {
@@ -512,14 +507,27 @@ fn spawn_cell(
     });
 }
 
-/// CAS root for oversized result spill, resolved from the process working
-/// directory. None when the store layout cannot be prepared, in which case an
-/// oversized result keeps reporting the framing limit instead of spilling.
-fn spill_root() -> Option<std::path::PathBuf> {
-    let cwd = std::env::current_dir().ok()?;
-    let resolved = ResolvedStore::resolve_from_process(&cwd, Engine::TokenZero, &[]);
-    ensure_layout(&resolved).ok()?;
-    Some(resolved.cas_host().to_path_buf())
+/// A replaced or terminating session is a cancellation, not a user error:
+/// terminate turns it into the terminated outcome, and any cell that outlived
+/// its generation is dropped by the main loop.
+fn outcome_from_session_error(error: &AggregateSessionError) -> CellOutcome {
+    match error.code {
+        AggregateSessionFailureCode::StaleGeneration | AggregateSessionFailureCode::Terminating => {
+            CellOutcome::Terminated
+        }
+        _ => CellOutcome::Error(error.to_string()),
+    }
+}
+
+fn initial_generation() -> u64 {
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    let time = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_nanos() as u64;
+    let generation = time ^ u64::from(std::process::id()).rotate_left(32);
+    generation.max(1)
 }
 
 fn deadline(yield_ms: u64) -> Option<Instant> {
@@ -535,6 +543,7 @@ fn next_deadline(cells: &HashMap<String, Cell>) -> Option<Duration> {
 fn flush_deadlines(
     writer: &mut BufWriter<io::StdoutLock<'_>>,
     cells: &mut HashMap<String, Cell>,
+    generation: u64,
 ) -> io::Result<()> {
     let now = Instant::now();
     let expired: Vec<_> = cells
@@ -549,36 +558,13 @@ fn flush_deadlines(
             && let Some(waiter) = cell.waiter.take()
         {
             let elapsed_ms = u64::try_from(cell.started.elapsed().as_millis()).unwrap_or(u64::MAX);
-            if cell.cancelled.load(Ordering::Relaxed) {
-                write_outcome(
-                    writer,
-                    waiter.request_id,
-                    &cell_id,
-                    CellOutcome::Terminated,
-                    Some(elapsed_ms),
-                )?;
-            } else {
-                write_frame(
-                    writer,
-                    &json!({"type":"response","id":waiter.request_id,"ok":true,"kind":"yielded","cellId":cell_id,"durationMs":elapsed_ms,"contentItems":[]}),
-                )?;
-            }
+            write_frame(
+                writer,
+                &json!({"type":"response","id":waiter.request_id,"ok":true,"kind":"yielded","cellId":cell_id,"durationMs":elapsed_ms,"generation":generation,"contentItems":[]}),
+            )?;
         }
     }
     Ok(())
-}
-fn cancel_delegates(cell_id: &str, delegates: &mut HashMap<u64, PendingDelegate>) {
-    let ids: Vec<_> = delegates
-        .iter()
-        .filter_map(|(id, p)| (p.cell_id == cell_id).then_some(*id))
-        .collect();
-    for id in ids {
-        if let Some(p) = delegates.remove(&id) {
-            let _ = p
-                .completion
-                .complete(Err(ConnectorError::new("execution cancelled")));
-        }
-    }
 }
 fn write_outcome(
     writer: &mut BufWriter<io::StdoutLock<'_>>,
@@ -586,6 +572,7 @@ fn write_outcome(
     cell_id: &str,
     outcome: CellOutcome,
     duration_ms: Option<u64>,
+    generation: u64,
 ) -> io::Result<()> {
     let mut frame = match outcome {
         CellOutcome::Result(value) => {
@@ -593,14 +580,14 @@ fn write_outcome(
                 Value::String(v) => v,
                 v => serde_json::to_string(&v).unwrap_or_else(|_| "null".to_owned()),
             };
-            json!({"type":"response","id":id,"ok":true,"kind":"result","cellId":cell_id,"contentItems":[{"type":"input_text","text":text}]})
+            json!({"type":"response","id":id,"ok":true,"kind":"result","cellId":cell_id,"generation":generation,"contentItems":[{"type":"input_text","text":text}]})
         }
         CellOutcome::Error(message) => {
             let message = finalize_visible_error(&message);
-            json!({"type":"response","id":id,"ok":true,"kind":"result","cellId":cell_id,"errorText":message,"contentItems":[]})
+            json!({"type":"response","id":id,"ok":true,"kind":"result","cellId":cell_id,"generation":generation,"errorText":message,"contentItems":[]})
         }
         CellOutcome::Terminated => {
-            json!({"type":"response","id":id,"ok":true,"kind":"terminated","cellId":cell_id,"contentItems":[]})
+            json!({"type":"response","id":id,"ok":true,"kind":"terminated","cellId":cell_id,"generation":generation,"contentItems":[]})
         }
     };
     if let (Some(map), Some(duration_ms)) = (frame.as_object_mut(), duration_ms) {
@@ -612,20 +599,22 @@ fn write_missing(
     writer: &mut BufWriter<io::StdoutLock<'_>>,
     id: u64,
     cell_id: &str,
+    generation: u64,
 ) -> io::Result<()> {
     write_frame(
         writer,
-        &json!({"type":"response","id":id,"ok":true,"kind":"missing","cellId":cell_id,"missingCell":true,"contentItems":[]}),
+        &json!({"type":"response","id":id,"ok":true,"kind":"missing","cellId":cell_id,"missingCell":true,"generation":generation,"contentItems":[]}),
     )
 }
 fn write_error(
     writer: &mut BufWriter<io::StdoutLock<'_>>,
     id: u64,
+    generation: u64,
     message: &str,
 ) -> io::Result<()> {
     write_frame(
         writer,
-        &json!({"type":"response","id":id,"ok":false,"error":finalize_visible_error(message)}),
+        &json!({"type":"response","id":id,"ok":false,"generation":generation,"error":finalize_visible_error(message)}),
     )
 }
 fn write_frame(writer: &mut impl Write, value: &Value) -> io::Result<()> {

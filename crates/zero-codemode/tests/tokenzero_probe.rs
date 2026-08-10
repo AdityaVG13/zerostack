@@ -35,8 +35,8 @@ if [ "${{1:-}}" = "raw-worker" ] && [ "${{2:-}}" = "--handshake" ]; then
   printf '%s\n' '{{"semantic_contract_digest":"{ZERO_DIGEST}"}}'
   exit 0
 fi
-if [ "$(basename "$0")" = "tokenzero" ] && [ "${{ZEROSTACK_RAW_WORKER_PROTOCOL:-}}" != "v2" ]; then
-  printf '%s\n' 'TokenZero serve mode lost ZEROSTACK_RAW_WORKER_PROTOCOL=v2' >&2
+if [ "$(basename "$0")" = "tokenzero" ] && [ "${{ZEROSTACK_RAW_WORKER_PROTOCOL:-}}" != "zerostack.raw_worker.v2" ]; then
+  printf '%s\n' 'TokenZero serve mode requires canonical ZEROSTACK_RAW_WORKER_PROTOCOL' >&2
   exit 64
 fi
 exec "$ZEROSTACK_TEST_FIXTURE_BIN" normal
@@ -60,7 +60,7 @@ fn read(reader: &mut BufReader<UnixStream>) -> Value {
 }
 
 #[test]
-fn tokenzero_probe_drops_serve_selector_but_worker_launch_keeps_it() {
+fn tokenzero_probe_drops_selector_but_worker_launch_pins_canonical_v2() {
     let directory = TempDir::new().unwrap();
     let runtime = directory.path().join("runtime");
     let wrappers = directory.path().join("workers");

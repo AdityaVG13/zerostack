@@ -328,7 +328,7 @@ store_root        <repo>/.zerostack/tokenzero
 versions.discovery_schema zerostack.binary_discovery.v1
 versions.host     0.1.0
 versions.manifest_schema zerostack.locate.v1
-versions.protocol zerostack-codemode-host/v1
+versions.protocol zerostack-codemode-host/v2
 ```
 
 `node`, `runtime_module`, and `substrate_module` report `<unresolved>` when the
