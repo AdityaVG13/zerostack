@@ -48,14 +48,36 @@ class SemanticOwnershipTests(unittest.TestCase):
         self.assertTrue(any("requires a hub target" in error for error in self.validate(semantic=changed)))
 
     def test_temporary_ledger_is_exact(self) -> None:
+        changed = copy.deepcopy(self.semantic)
+        record = next(item for item in changed["records"] if item["hub_target"])
+        record["temporary_duplicate"] = True
+
         missing = copy.deepcopy(self.ledger)
-        missing["entries"] = missing["entries"][1:]
-        self.assertTrue(any("temporary duplicate missing" in error for error in self.validate(ledger=missing)))
+        self.assertTrue(
+            any(
+                "temporary duplicate missing" in error
+                for error in self.validate(semantic=changed, ledger=missing)
+            )
+        )
+
         extra = copy.deepcopy(self.ledger)
-        extra_entry = copy.deepcopy(extra["entries"][0])
-        extra_entry["path"] = "not/a/real/path.rs"
-        extra["entries"].append(extra_entry)
-        self.assertTrue(any("no semantic record" in error for error in self.validate(ledger=extra)))
+        extra["entries"].append(
+            {
+                "repo": record["repo"],
+                "path": "not/a/real/path.rs",
+                "blob_digest": record["blob_digest"],
+                "source_head": record["source_head"],
+                "hub_target": record["hub_target"],
+                "owning_bead": record["owning_bead"],
+                "reason": "mutation fixture",
+                "deletion_order": ["mutation fixture"],
+                "temporary_duplicate": True,
+                "expiry_condition": "mutation fixture",
+            }
+        )
+        self.assertTrue(
+            any("no semantic record" in error for error in self.validate(ledger=extra))
+        )
 
     def test_split_boundaries_are_bounded(self) -> None:
         changed = copy.deepcopy(self.semantic)
