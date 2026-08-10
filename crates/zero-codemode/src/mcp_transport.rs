@@ -426,6 +426,7 @@ where
     )
 }
 
+#[cfg(feature = "fastmcp")]
 fn execute_output_with_limiter<F>(
     dispatcher: Arc<dyn McpDispatcher>,
     tool: &str,
@@ -447,6 +448,7 @@ where
     )
 }
 
+#[cfg(feature = "fastmcp")]
 fn execute_resource_with_limiter<F>(
     reader: Arc<dyn McpResourceReader>,
     uri: &str,

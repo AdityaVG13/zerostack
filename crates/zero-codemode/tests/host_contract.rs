@@ -217,6 +217,27 @@ fn hello_dispatch_and_counter() {
 }
 
 #[test]
+fn async_arrow_helper_can_await_spread_tool_call() {
+    let host = Host::new(lim(), reg()).unwrap_or_else(|error| panic!("host: {error}"));
+    let value = host
+        .execute(
+            r#"const __fszeroDecorate = (__value) => ({ok:true, result:__value});
+               const __fszeroCall = async (__method, __args) => __fszeroDecorate(await __method(...__args));
+               const fs = {read: (__arg) => __fszeroCall(zero.fs.read, [__arg])};
+               const r = await fs.read({path: "js.txt"});
+               if (!r || r.ok === false) throw new Error("read failed");
+               return r;"#,
+            Rc::new(C::ok()),
+        )
+        .unwrap_or_else(|error| panic!("execute: {error}"));
+    assert_eq!(value["ok"], true);
+    assert_eq!(
+        value["result"]["content"]["value"]["echo"]["path"],
+        "js.txt"
+    );
+}
+
+#[test]
 fn registered_objects_have_no_inherited_to_string() {
     let host = Host::new(lim(), reg()).unwrap_or_else(|error| panic!("host: {error}"));
     let value = host

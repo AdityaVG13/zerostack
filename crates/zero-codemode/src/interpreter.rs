@@ -908,6 +908,9 @@ impl<'tree> Interpreter<'tree> {
             node.child_by_field_name("right")
                 .ok_or_else(|| Fault::Host(self.unsupported("binary right")))?,
         )?;
+        if matches!(operator.as_str(), "&&" | "||" | "??") {
+            return Ok(right);
+        }
         binary(&operator, left, right).map_err(Fault::Host)
     }
 
@@ -1768,14 +1771,20 @@ impl<'tree> Interpreter<'tree> {
     }
 
     fn operator(&self, node: Node<'tree>) -> &str {
-        let source = self.text(node);
-        [
-            "===", "!==", ">>>", "**", "&&", "||", "??", "<=", ">=", "==", "!=", "+=", "-=", "*=",
-            "/=", "%=", "+", "-", "*", "/", "%", "<", ">", "=", "!", "typeof",
-        ]
-        .into_iter()
-        .find(|operator| source.contains(operator))
-        .unwrap_or("")
+        if let (Some(left), Some(right)) = (
+            node.child_by_field_name("left"),
+            node.child_by_field_name("right"),
+        ) {
+            return self.source[left.end_byte()..right.start_byte()].trim();
+        }
+        if let Some(argument) = node.child_by_field_name("argument") {
+            let prefix = self.source[node.start_byte()..argument.start_byte()].trim();
+            if !prefix.is_empty() {
+                return prefix;
+            }
+            return self.source[argument.end_byte()..node.end_byte()].trim();
+        }
+        ""
     }
 
     fn unsupported(&self, kind: &str) -> HostError {
