@@ -17,6 +17,10 @@ use thiserror::Error;
 use crate::cas::{CasError, PutOutcome, SharedCas};
 use crate::fs_replace::atomic_write_file;
 use crate::{LOCK_DEADLINE, LockMode, StoreLock};
+use zero_abi::zbf::{
+    ZBF_CONTAINER_FLAG_V1, ZBF_HEADER_LEN_V1, ZBF_MAGIC_V1, ZBF_MAX_CHILDREN_V1, ZBF_MAX_DEPTH_V1,
+    ZBF_MAX_OBJECT_BYTES_V1, ZBF_SCHEMA_MAJOR_V1, ZBF_SCHEMA_MINOR_V1,
+};
 
 pub const GC_SCHEMA_VERSION_V1: &str = "zerostack.cas-gc.v1";
 pub const GC_SCHEMA_VERSION: &str = "zerostack.cas-gc.v2";
@@ -36,6 +40,11 @@ pub const GC_RECORD_TYPE_LEASE: &str = "lease";
 pub const GC_RECORD_TYPE_DRY_RUN: &str = "gc-run-receipt";
 pub const GC_RECORD_TYPE_SWEEP_PROGRESS: &str = "sweep-progress";
 pub const GC_RECORD_TYPE_REPAIR: &str = "repair-receipt";
+/// The only refs carrier the GC proof reads: ZBF container children.
+///
+/// Refs are always content-derived from verified object bytes; no metadata
+/// record can widen or narrow the reachable set.
+pub const GC_REFS_FORMAT: &str = "zbf-container-children";
 pub const GC_MIN_GRACE_SECONDS: u64 = 60;
 pub const DEFAULT_GC_REPORT_LIMIT: usize = 32;
 
@@ -85,6 +94,13 @@ pub fn gc_contract_manifest() -> serde_json::Value {
             "leased_publish": "lease-before-object-under-exclusive-lock",
             "expired_pin": "does-not-retain",
             "lock_namespace": "real-directory-and-regular-file-only"
+        },
+        "reachability": {
+            "roots": "reachability-snapshot blob_hashes",
+            "refs": "content-derived-from-verified-object-bytes",
+            "refs_format": GC_REFS_FORMAT,
+            "closure": "transitive-from-roots-pins-and-leases",
+            "fail_closed": "corrupt-or-incomplete-refs-evidence-retains-uncertain-and-never-commits"
         }
     })
 }
@@ -533,6 +549,158 @@ pub(crate) fn lower_hex(bytes: &[u8]) -> String {
 /// Full 64-char lowercase SHA-256 hex digest of `bytes`.
 pub(crate) fn content_sha256_hex(bytes: &[u8]) -> String {
     lower_hex(Sha256::digest(bytes).as_ref())
+}
+
+/// Structurally extract the transitive content-derived refs of one verified
+/// CAS object.
+///
+/// Refs are the digests of every object embedded in a ZBF container (direct
+/// and nested children). The input must already be verified against its CAS
+/// identity: refs are derived from content, never from metadata.
+///
+/// Fail-closed contract:
+/// - Bytes that cannot be a ZBF object (wrong magic) are leaves with no refs.
+/// - Bytes that carry the ZBF magic but violate the ZBF structure (size beyond
+///   the ZBF object bound, truncated header or children, unknown flags,
+///   unsupported schema, nonzero reserved bytes, payload length mismatch,
+///   payload digest mismatch, or a ref set beyond [`GC_MAX_BLOB_HASHES`]) are
+///   corrupt refs evidence: the referenced set is unknown, so a collector must
+///   fail closed (retain uncertain) and must never collect on this object's
+///   subtree.
+pub fn refs_from_verified_bytes(bytes: &[u8]) -> Result<Vec<String>, String> {
+    if bytes.len() < ZBF_MAGIC_V1.len() || &bytes[..ZBF_MAGIC_V1.len()] != ZBF_MAGIC_V1.as_slice() {
+        return Ok(Vec::new());
+    }
+    let mut refs = Vec::new();
+    let mut seen = BTreeSet::new();
+    collect_zbf_refs(bytes, 0, &mut refs, &mut seen)?;
+    Ok(refs)
+}
+
+/// Structural ZBF walk: every embedded object contributes its digest, and
+/// container payloads are walked recursively under the ZBF depth bound.
+///
+/// Only structure needed to *name* refs is validated: magic, schema version,
+/// flags, reserved bytes, payload length, and payload digest. Kind and owner
+/// do not change the referenced set and are intentionally not part of refs
+/// evidence. The durable profile and assembly manifest are unknown to the
+/// collector and are deliberately not checked here.
+fn collect_zbf_refs(
+    bytes: &[u8],
+    depth: u16,
+    refs: &mut Vec<String>,
+    seen: &mut BTreeSet<String>,
+) -> Result<(), String> {
+    if depth > ZBF_MAX_DEPTH_V1 {
+        return Err(format!("ZBF nesting exceeds {ZBF_MAX_DEPTH_V1}"));
+    }
+    if bytes.len() as u64 > ZBF_MAX_OBJECT_BYTES_V1 {
+        return Err(format!(
+            "ZBF object of {} bytes exceeds {ZBF_MAX_OBJECT_BYTES_V1}",
+            bytes.len()
+        ));
+    }
+    if bytes.len() < ZBF_HEADER_LEN_V1 {
+        return Err(format!(
+            "ZBF object shorter than {ZBF_HEADER_LEN_V1}-byte header"
+        ));
+    }
+    if &bytes[..ZBF_MAGIC_V1.len()] != ZBF_MAGIC_V1.as_slice() {
+        return Err("embedded object is missing the ZBF magic".into());
+    }
+    let schema_major = be_u16(&bytes[8..10]);
+    let schema_minor = be_u16(&bytes[10..12]);
+    if schema_major != ZBF_SCHEMA_MAJOR_V1 || schema_minor != ZBF_SCHEMA_MINOR_V1 {
+        return Err(format!(
+            "unsupported ZBF schema {schema_major}.{schema_minor}"
+        ));
+    }
+    let flags = bytes[15];
+    if flags & !ZBF_CONTAINER_FLAG_V1 != 0 {
+        return Err(format!("unknown ZBF flags {flags:#04x}"));
+    }
+    if bytes[184..192].iter().any(|byte| *byte != 0) {
+        return Err("ZBF reserved header bytes are nonzero".into());
+    }
+    let payload_len = be_u64(&bytes[16..24]);
+    let expected_total = (ZBF_HEADER_LEN_V1 as u64)
+        .checked_add(payload_len)
+        .ok_or_else(|| "ZBF payload length overflows".to_string())?;
+    if expected_total != bytes.len() as u64 {
+        return Err(format!(
+            "ZBF payload length {payload_len} does not match object size {}",
+            bytes.len()
+        ));
+    }
+    let payload = &bytes[ZBF_HEADER_LEN_V1..];
+    if content_sha256_hex(payload) != lower_hex(&bytes[152..184]) {
+        return Err("ZBF payload digest mismatch".into());
+    }
+    if flags == 0 {
+        return Ok(());
+    }
+    if payload.len() < 4 {
+        return Err("ZBF container payload is shorter than its child count".into());
+    }
+    let count = be_u32(&payload[..4]);
+    if count > ZBF_MAX_CHILDREN_V1 {
+        return Err(format!(
+            "ZBF child count {count} exceeds {ZBF_MAX_CHILDREN_V1}"
+        ));
+    }
+    let mut offset = 4usize;
+    for _ in 0..count {
+        if payload.len() - offset < 8 {
+            return Err("ZBF container child length is truncated".into());
+        }
+        let child_len = be_u64(&payload[offset..offset + 8]);
+        offset += 8;
+        if child_len < ZBF_HEADER_LEN_V1 as u64 {
+            return Err("ZBF child is shorter than the fixed header".into());
+        }
+        let child_len = usize::try_from(child_len)
+            .map_err(|_| "ZBF child length does not fit usize".to_string())?;
+        if payload.len() - offset < child_len {
+            return Err("ZBF container child bytes are truncated".into());
+        }
+        let child = &payload[offset..offset + child_len];
+        offset += child_len;
+        let child_hash = content_sha256_hex(child);
+        if !seen.contains(&child_hash) {
+            if seen.len() >= GC_MAX_BLOB_HASHES {
+                return Err(format!("refs exceed {GC_MAX_BLOB_HASHES}"));
+            }
+            seen.insert(child_hash.clone());
+            refs.push(child_hash);
+        }
+        collect_zbf_refs(child, depth + 1, refs, seen)?;
+    }
+    if offset != payload.len() {
+        return Err("ZBF container payload has trailing bytes".into());
+    }
+    Ok(())
+}
+
+fn be_u16(bytes: &[u8]) -> u16 {
+    (u16::from(bytes[0]) << 8) | u16::from(bytes[1])
+}
+
+fn be_u32(bytes: &[u8]) -> u32 {
+    (u32::from(bytes[0]) << 24)
+        | (u32::from(bytes[1]) << 16)
+        | (u32::from(bytes[2]) << 8)
+        | u32::from(bytes[3])
+}
+
+fn be_u64(bytes: &[u8]) -> u64 {
+    (u64::from(bytes[0]) << 56)
+        | (u64::from(bytes[1]) << 48)
+        | (u64::from(bytes[2]) << 40)
+        | (u64::from(bytes[3]) << 32)
+        | (u64::from(bytes[4]) << 24)
+        | (u64::from(bytes[5]) << 16)
+        | (u64::from(bytes[6]) << 8)
+        | u64::from(bytes[7])
 }
 
 fn is_valid_hash(s: &str) -> bool {
@@ -1044,6 +1212,7 @@ fn load_all_pins(store_root: &Path, state: &mut MarkState, now: SystemTime) -> R
 
 fn load_mark_state(
     store_root: &Path,
+    cas: &SharedCas,
     now: SystemTime,
     grace_seconds: u64,
 ) -> Result<MarkState, GcError> {
@@ -1122,7 +1291,52 @@ fn load_mark_state(
             }
         },
     )?;
+    trace_refs(cas, &mut state)?;
     Ok(state)
+}
+
+/// Extend liveness to the transitive content-derived refs closure.
+///
+/// Every live seed (reachability root, pin, or lease) is read once and
+/// verified, then its embedded child digests are marked live with `ref-child`
+/// evidence. Fail-closed evidence rules:
+/// - A seed absent from the CAS is incomplete evidence: its refs cannot be
+///   evaluated, so the run is uncertain and collection must not commit.
+/// - A seed that cannot be verified (digest mismatch, non-regular entry, I/O
+///   or policy failure) is corrupt evidence: the run is uncertain.
+/// - Verified bytes carrying the ZBF magic but violating the ZBF structure are
+///   corrupt refs evidence: the referenced set is unknown, so the run is
+///   uncertain. No size shortcut is used: a shrunken or oversized corrupt
+///   file is indistinguishable from a leaf without reading and verifying it.
+fn trace_refs(cas: &SharedCas, state: &mut MarkState) -> Result<(), GcError> {
+    let seeds: Vec<String> = state.live.keys().cloned().collect();
+    for seed in seeds {
+        let bytes = match cas.get_verified(&seed) {
+            Ok(bytes) => bytes,
+            Err(CasError::NotFound) => {
+                mark_uncertain(
+                    state,
+                    format!("reachable seed {seed} missing from CAS; refs evidence incomplete"),
+                );
+                continue;
+            }
+            Err(error) => {
+                mark_uncertain(state, format!("refs seed {seed} unreadable: {error}"));
+                continue;
+            }
+        };
+        match refs_from_verified_bytes(&bytes) {
+            Ok(refs) => {
+                for child in refs {
+                    mark_hash(state, &child, "ref-child", &format!("ref from {seed}"));
+                }
+            }
+            Err(reason) => {
+                mark_uncertain(state, format!("refs evidence corrupt for {seed}: {reason}"));
+            }
+        }
+    }
+    Ok(())
 }
 
 fn build_dry_run_report(
@@ -1166,7 +1380,7 @@ fn build_dry_run_report(
                 (
                     GcVerdict::Collect,
                     vec!["no-live-reference".into()],
-                    vec!["no reachable root, pin, or lease".into()],
+                    vec!["no reachable root, pin, lease, or ref".into()],
                 )
             }
         };
@@ -1353,7 +1567,7 @@ pub fn run_gc(store_root: &Path, config: &GcConfig) -> Result<DryRunReport, GcEr
         None
     };
 
-    let state = load_mark_state(store_root, config.now, config.grace_seconds)?;
+    let state = load_mark_state(store_root, &cas, config.now, config.grace_seconds)?;
     let report = build_dry_run_report(
         store_root,
         &config.run_id,
@@ -1435,7 +1649,7 @@ pub fn run_gc(store_root: &Path, config: &GcConfig) -> Result<DryRunReport, GcEr
         if deleted.contains(hash) {
             continue;
         }
-        let re_state = load_mark_state(store_root, config.now, config.grace_seconds)?;
+        let re_state = load_mark_state(store_root, &cas, config.now, config.grace_seconds)?;
         if re_state.live.contains_key(hash) || re_state.uncertain {
             continue;
         }
@@ -1503,6 +1717,7 @@ const REPAIR_RECEIPT_FIELDS: &[&str] = &[
 ];
 const REASON_CODES: &[&str] = &[
     "reachability-root",
+    "ref-child",
     "pin",
     "active-lease",
     "stale-lease-grace",
@@ -2204,6 +2419,8 @@ mod tests {
     use super::*;
     use std::sync::{Mutex, mpsc};
     use std::thread;
+    use zero_abi::zbf::{DurableProfileV1, ZbfArtifactKindV1, ZbfObjectV1};
+    use zero_abi::{ArtifactOwnerV1, DigestV1};
 
     fn setup_rooted_store() -> (tempfile::TempDir, SharedCas, String, String) {
         let dir = tempfile::tempdir().unwrap();
@@ -2628,5 +2845,130 @@ mod tests {
         assert!(cas.contains(&orphan));
         assert!(!external.path().join("gc").exists());
         assert_eq!(fs::read(&sentinel).unwrap(), b"unchanged");
+    }
+
+    fn zbf_profile() -> DurableProfileV1 {
+        DurableProfileV1::portable_strict()
+    }
+
+    fn zbf_leaf(payload: &[u8]) -> ZbfObjectV1 {
+        ZbfObjectV1::new_leaf(
+            ZbfArtifactKindV1::Snapshot,
+            ArtifactOwnerV1::ZeroStack,
+            DigestV1::from_bytes([1; 32]),
+            zbf_profile(),
+            DigestV1::from_bytes([2; 32]),
+            DigestV1::from_bytes([3; 32]),
+            payload.to_vec(),
+        )
+        .unwrap()
+    }
+
+    fn zbf_container(children: Vec<ZbfObjectV1>) -> ZbfObjectV1 {
+        ZbfObjectV1::new_container(
+            ZbfArtifactKindV1::Snapshot,
+            ArtifactOwnerV1::ZeroStack,
+            DigestV1::from_bytes([1; 32]),
+            zbf_profile(),
+            DigestV1::from_bytes([2; 32]),
+            DigestV1::from_bytes([3; 32]),
+            children,
+        )
+        .unwrap()
+    }
+
+    /// Wrap `payload` in a structurally valid ZBF container header so tests can
+    /// exceed the depth bound the object constructors already enforce.
+    fn zbf_wrap_container(payload: &[u8]) -> Vec<u8> {
+        let mut out = Vec::with_capacity(ZBF_HEADER_LEN_V1 + payload.len());
+        out.extend_from_slice(&ZBF_MAGIC_V1);
+        out.extend_from_slice(&ZBF_SCHEMA_MAJOR_V1.to_be_bytes());
+        out.extend_from_slice(&ZBF_SCHEMA_MINOR_V1.to_be_bytes());
+        out.extend_from_slice(&5u16.to_be_bytes()); // Plan kind
+        out.push(0); // ZeroStack owner
+        out.push(ZBF_CONTAINER_FLAG_V1);
+        out.extend_from_slice(&(payload.len() as u64).to_be_bytes());
+        for _ in 0..5 {
+            out.extend_from_slice(&[7u8; 32]);
+        }
+        out.extend_from_slice(&[0u8; 8]);
+        out[152..184].copy_from_slice(&Sha256::digest(payload));
+        out.extend_from_slice(payload);
+        out
+    }
+
+    #[test]
+    fn refs_extraction_is_total_for_leaf_bytes() {
+        assert_eq!(
+            refs_from_verified_bytes(b"plain bytes").unwrap(),
+            Vec::<String>::new()
+        );
+        assert_eq!(refs_from_verified_bytes(&[]).unwrap(), Vec::<String>::new());
+        let profile = zbf_profile();
+        let leaf = zbf_leaf(b"leaf payload");
+        assert_eq!(
+            refs_from_verified_bytes(&leaf.to_bytes(profile).unwrap()).unwrap(),
+            Vec::<String>::new()
+        );
+    }
+
+    #[test]
+    fn refs_extraction_names_container_children_transitively() {
+        let profile = zbf_profile();
+        let leaf = zbf_leaf(b"child");
+        let inner = zbf_container(vec![leaf.clone()]);
+        let outer = zbf_container(vec![inner.clone(), leaf.clone()]);
+        let inner_hash = content_sha256_hex(&inner.to_bytes(profile).unwrap());
+        let leaf_hash = content_sha256_hex(&leaf.to_bytes(profile).unwrap());
+        let refs = refs_from_verified_bytes(&outer.to_bytes(profile).unwrap()).unwrap();
+        assert_eq!(refs, vec![inner_hash, leaf_hash]);
+    }
+
+    #[test]
+    fn refs_extraction_rejects_corrupt_containers() {
+        let profile = zbf_profile();
+        let container = zbf_container(vec![zbf_leaf(b"child")]);
+        let bytes = container.to_bytes(profile).unwrap();
+
+        // Magic with a truncated header is corrupt refs evidence.
+        assert!(refs_from_verified_bytes(&bytes[..16]).is_err());
+        // Unsupported schema version fails closed.
+        let mut wrong_schema = bytes.clone();
+        wrong_schema[8] = 0;
+        wrong_schema[9] = 0;
+        assert!(refs_from_verified_bytes(&wrong_schema).is_err());
+        // Unknown flags fail closed.
+        let mut unknown_flags = bytes.clone();
+        unknown_flags[15] = 0x02;
+        assert!(refs_from_verified_bytes(&unknown_flags).is_err());
+        // Nonzero reserved header bytes fail closed.
+        let mut reserved = bytes.clone();
+        reserved[191] = 1;
+        assert!(refs_from_verified_bytes(&reserved).is_err());
+        // A tampered payload breaks the declared payload digest.
+        let mut tampered = bytes.clone();
+        let last = tampered.len() - 1;
+        tampered[last] ^= 0xff;
+        assert!(refs_from_verified_bytes(&tampered).is_err());
+        // A leaf with the container flag but no children fails closed.
+        let mut fake_container = zbf_leaf(b"x").to_bytes(profile).unwrap();
+        fake_container[15] = ZBF_CONTAINER_FLAG_V1;
+        assert!(refs_from_verified_bytes(&fake_container).is_err());
+    }
+
+    #[test]
+    fn refs_extraction_enforces_zbf_depth_bound() {
+        let profile = zbf_profile();
+        let mut node = zbf_leaf(b"deepest");
+        for _ in 0..ZBF_MAX_DEPTH_V1 as usize {
+            node = zbf_container(vec![node]);
+        }
+        let chain = node.to_bytes(profile).unwrap();
+        let mut payload = Vec::new();
+        payload.extend_from_slice(&1u32.to_be_bytes());
+        payload.extend_from_slice(&(chain.len() as u64).to_be_bytes());
+        payload.extend_from_slice(&chain);
+        let err = refs_from_verified_bytes(&zbf_wrap_container(&payload)).unwrap_err();
+        assert!(err.contains("exceeds"), "{err}");
     }
 }
