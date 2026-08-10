@@ -46,7 +46,10 @@ class SurfaceSubstrateGuardTests(unittest.TestCase):
         self.assertTrue(any("rquickjs" in error for error in errors))
 
     def test_feature_exclusivity_requires_production_guard_shape(self):
-        root = self._root(self.valid_surface())
+        root = self._root(
+            self.valid_surface(),
+            '[package]\nname = "engine"\n[features]\nsurface-mcp = []\nsurface-codemode = []\n',
+        )
         self.assertTrue(module.check_exclusive_features(root))
         guard = root / "src/guard.rs"
         guard.parent.mkdir(parents=True, exist_ok=True)
@@ -61,6 +64,10 @@ class SurfaceSubstrateGuardTests(unittest.TestCase):
         temp = tempfile.TemporaryDirectory()
         self.addCleanup(temp.cleanup)
         root = Path(temp.name)
+        (root / "Cargo.toml").write_text(
+            '[package]\nname = "engine"\n[features]\nsurface-mcp = []\nsurface-codemode = []\n',
+            encoding="utf-8",
+        )
         tests = root / "tests"
         tests.mkdir(parents=True)
         baseline = tests / "packaging_e2e.rs"
@@ -116,6 +123,10 @@ class SurfaceSubstrateGuardTests(unittest.TestCase):
         temp = tempfile.TemporaryDirectory()
         self.addCleanup(temp.cleanup)
         root = Path(temp.name)
+        (root / "Cargo.toml").write_text(
+            '[package]\nname = "engine"\n[features]\nsurface-mcp = []\nsurface-codemode = []\n',
+            encoding="utf-8",
+        )
         source = root / "src"
         source.mkdir(parents=True)
         baseline = source / "baseline.rs"
@@ -133,6 +144,13 @@ class SurfaceSubstrateGuardTests(unittest.TestCase):
             encoding="utf-8",
         )
         self.assertTrue(module.check_exclusive_features(root))
+
+    def test_feature_exclusivity_skips_single_surface_manifest(self):
+        root = self._root(
+            self.valid_surface(),
+            '[package]\nname = "engine"\n[features]\nsurface-mcp = []\n',
+        )
+        self.assertEqual(module.check_exclusive_features(root), [])
 
     def test_worker_optional_compatibility_dependency_is_adoption_debt(self):
         manifest = """
@@ -165,6 +183,23 @@ class SurfaceSubstrateGuardTests(unittest.TestCase):
         """
         root = self._root(self.valid_surface(), manifest)
         self.assertTrue(module.check_worker_dependencies(root, False))
+
+    def test_fs_domain_package_is_not_misclassified_as_raw_worker(self):
+        temp = tempfile.TemporaryDirectory()
+        self.addCleanup(temp.cleanup)
+        root = Path(temp.name)
+        (root / "Cargo.toml").write_text(
+            """
+            [package]
+            name = "fs-zero"
+            [dependencies]
+            zero-codemode = { optional = true }
+            zerostack-machine-permit = { optional = true }
+            """,
+            encoding="utf-8",
+        )
+        errors = module.check_worker_dependencies(root, True)
+        self.assertFalse(any("worker directly depends" in error for error in errors))
 
     def test_removed_quickjs_feature_needs_no_exclusivity_guard(self):
         root = self._root(self.valid_surface())
@@ -265,6 +300,111 @@ class SurfaceSubstrateGuardTests(unittest.TestCase):
         )
         errors = module.check_worker_dependencies(root, True)
         self.assertTrue(any("forbidden 'fastmcp-rust'" in error for error in errors))
+
+    def test_strict_rejects_engine_runtime_and_permit_manifest_wiring(self):
+        temp = tempfile.TemporaryDirectory()
+        self.addCleanup(temp.cleanup)
+        root = Path(temp.name)
+        (root / "Cargo.toml").write_text(
+            """
+            [package]
+            name = "domain-engine"
+            [features]
+            quickjs-runtime = ["dep:js"]
+            host-permit = ["dep:permit"]
+            [dependencies]
+            js = { package = "rquickjs", version = "1", optional = true }
+            permit = { package = "zerostack-machine-permit", version = "1", optional = true }
+            gate = { package = "zero-gate", version = "1" }
+            """,
+            encoding="utf-8",
+        )
+        errors = module.check_worker_dependencies(root, True)
+        self.assertTrue(any("forbidden 'rquickjs'" in error for error in errors))
+        self.assertTrue(any("forbidden 'zerostack-machine-permit'" in error for error in errors))
+        self.assertTrue(any("forbidden 'zero-gate'" in error for error in errors))
+        self.assertTrue(any("quickjs-runtime" in error for error in errors))
+        self.assertTrue(any("host-permit" in error for error in errors))
+
+    def test_strict_rejects_engine_runtime_and_permit_sources(self):
+        root = self._root(self.valid_surface())
+        source = root / "src"
+        source.mkdir()
+        (source / "runtime.rs").write_text(
+            '#[cfg(feature = "quickjs-runtime")]\nuse rquickjs::Runtime;\n',
+            encoding="utf-8",
+        )
+        (source / "quickjs.rs").write_text("fn dormant() {}\n", encoding="utf-8")
+        (source / "permit.rs").write_text(
+            "use zerostack_machine_permit::MachinePermit;\n",
+            encoding="utf-8",
+        )
+        (source / "host_permit.rs").write_text("fn acquire() {}\n", encoding="utf-8")
+        (source / "mcp_frame.rs").write_text(
+            "pub fn mcp_success_envelope() {}\n",
+            encoding="utf-8",
+        )
+        (source / "child_identity.rs").write_text(
+            "pub struct VerifiedChild;\n"
+            "pub struct ChildBinding;\n"
+            "pub fn escalate_detached() {}\n",
+            encoding="utf-8",
+        )
+        errors = module.check_engine_sources(root, True)
+        self.assertTrue(any("rquickjs import" in error for error in errors))
+        self.assertTrue(any("QuickJS feature gate" in error for error in errors))
+        self.assertTrue(any("QuickJS source module" in error for error in errors))
+        self.assertTrue(any("machine permit" in error for error in errors))
+        self.assertTrue(any("host permit source module" in error for error in errors))
+        self.assertTrue(any("MCP framing source module" in error for error in errors))
+        self.assertTrue(any("MCP envelope framing" in error for error in errors))
+        self.assertTrue(any("process lifecycle" in error for error in errors))
+
+    def test_strict_rejects_direct_machine_permit_even_for_session_identity(self):
+        temp = tempfile.TemporaryDirectory()
+        self.addCleanup(temp.cleanup)
+        root = Path(temp.name)
+        source = root / "src"
+        source.mkdir()
+        (root / "Cargo.toml").write_text(
+            """
+            [package]
+            name = "domain-identity"
+            [dependencies]
+            zerostack-machine-permit = "1"
+            """,
+            encoding="utf-8",
+        )
+        (source / "lib.rs").write_text(
+            "pub use zerostack_machine_permit::session_owner::ProcessIdentity;\n",
+            encoding="utf-8",
+        )
+        errors = module.check_worker_dependencies(root, True)
+        self.assertTrue(any("zerostack-machine-permit" in error for error in errors))
+        self.assertEqual(module.check_engine_sources(root, True), [])
+
+    def test_strict_source_scan_excludes_tests_and_allows_thin_adapter(self):
+        root = self._root(self.valid_surface())
+        tests = root / "tests"
+        tests.mkdir()
+        (tests / "legacy.rs").write_text("use rquickjs::Runtime;\n", encoding="utf-8")
+        source = root / "src"
+        source.mkdir()
+        (source / "legacy_tests.rs").write_text(
+            "use zerostack_machine_permit::MachinePermit;\n",
+            encoding="utf-8",
+        )
+        (source / "adapter.rs").write_text(
+            "use zero_codemode::RawWorkerClient;\n"
+            'const MESSAGE: &str = "QuickJS host permit migration";\n',
+            encoding="utf-8",
+        )
+        ignored = root / ".zerostack/mirror"
+        ignored.mkdir(parents=True)
+        (ignored / "runtime.rs").write_text("use rquickjs::Runtime;\n", encoding="utf-8")
+        (root / ".gitignore").write_text(".zerostack/\n", encoding="utf-8")
+        subprocess.run(["git", "init", "-q", str(root)], check=True)
+        self.assertEqual(module.check_engine_sources(root, True), [])
 
 
 if __name__ == "__main__":

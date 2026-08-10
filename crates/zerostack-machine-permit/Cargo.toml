@@ -6,6 +6,7 @@ license.workspace = true
 description = "Shared ZeroStack CodeMode machine permit (slot locks, reclaim, backoff)."
 
 [dependencies]
+zero-process = { path = "../zero-process" }
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"

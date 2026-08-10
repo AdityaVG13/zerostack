@@ -8,6 +8,7 @@ members = [
     "crates/zero-gate",
     "crates/zero-gauge",
     "crates/zero-ledger",
+    "crates/zero-process",
     "crates/zero-ref",
     "crates/zero-store",
     "crates/zero-testkit",

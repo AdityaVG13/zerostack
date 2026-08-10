@@ -1,0 +1,15 @@
+//! Hub-owned process identity and exact child-tree lifecycle primitives.
+//!
+//! Engines may expose thin compatibility adapters over this crate. They must
+//! not fork these process-lifecycle implementations locally.
+
+mod child;
+mod identity;
+
+pub use child::{
+    ChildBinding, IDENTITY_FILE_NAME, IdentityError, SignalOutcome, VerifiedChild,
+    escalate_detached, peer_is_same_user,
+};
+pub use identity::{OwnerWatchError, OwnerWatcher, ProcessIdentity};
+#[cfg(unix)]
+pub use identity::{current_euid, peer_euid};
