@@ -59,7 +59,6 @@ class LocMajorityTests(unittest.TestCase):
         domain_local = (
             ("fszero", "src/core/session.rs"),
             ("graphzero", "crates/graphzero-store/src/store/session.rs"),
-            ("tokenzero", "crates/tokenzero-codemode/src/journal.rs"),
             ("fszero", "src/packaging/release_smoke.rs"),
             ("graphzero", "crates/graphzero-cli/src/packaging.rs"),
             ("tokenzero", "crates/tokenzero-mcp-compat/src/capability_descriptor.rs"),
@@ -129,6 +128,54 @@ class LocMajorityTests(unittest.TestCase):
             misclassified["files"][0]["classification"] = "domain-local"
             self.assertTrue(module.validate_inventory(misclassified, repos))
 
+    def test_same_repo_dedup_and_engine_only_cross_repo_duplicate(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            repos = []
+            for repo_id in module.REPOSITORIES:
+                repo_root = root / repo_id
+                module._tiny_repo(
+                    repo_root,
+                    {"src/domain.rs": f"fn unique_{repo_id}() {{}}\n"},
+                )
+                repos.append(module.Repo(repo_id, repo_root))
+            baseline = module.measure(repos, module.build_inventory(repos))
+
+            same_repo_copy = repos[1].root / "src/domain_copy.rs"
+            same_repo_copy.write_bytes((repos[1].root / "src/domain.rs").read_bytes())
+            module._run(
+                ["git", "-C", str(repos[1].root), "add", "src/domain_copy.rs"]
+            )
+            module._run(
+                ["git", "-C", str(repos[1].root), "commit", "-qm", "same repo copy"]
+            )
+            deduplicated = module.measure(repos, module.build_inventory(repos))
+            self.assertEqual(deduplicated["denominator"], baseline["denominator"])
+            self.assertEqual(
+                deduplicated["repositories"][1]["implementation_loc"],
+                baseline["repositories"][1]["implementation_loc"],
+            )
+            self.assertEqual(deduplicated["violations"]["count"], 0)
+
+            engine_copy = repos[2].root / "src/copied_token_domain.rs"
+            engine_copy.write_bytes((repos[3].root / "src/domain.rs").read_bytes())
+            module._run(
+                ["git", "-C", str(repos[2].root), "add", "src/copied_token_domain.rs"]
+            )
+            module._run(
+                ["git", "-C", str(repos[2].root), "commit", "-qm", "engine copy"]
+            )
+            duplicate = module.measure(repos, module.build_inventory(repos))
+            self.assertFalse(duplicate["pass"])
+            self.assertEqual(duplicate["violations"]["count"], 1)
+            duplicate_repos = {
+                item["repo"]
+                for item in duplicate["violations"]["cross_repo_exact_duplicates"][0][
+                    "files"
+                ]
+            }
+            self.assertEqual(duplicate_repos, {"graphzero", "tokenzero"})
+
     def test_fixture_tree_inflation_and_hub_engine_copy_fail_closed(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
@@ -157,6 +204,76 @@ class LocMajorityTests(unittest.TestCase):
             self.assertGreater(result["violations"]["count"], 0)
             self.assertEqual(result["hub"]["implementation_loc"], baseline["hub"]["implementation_loc"])
             self.assertLess(result["hub_share"], baseline["hub_share"])
+
+    def test_semantic_majority_excludes_engine_domain_and_thin_adapters(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            files = {
+                "zerostack": {
+                    "src/runtime.rs": "fn hub_one() {}\nfn hub_two() {}\n",
+                },
+                "fszero": {
+                    "src/codemode/host.rs": (
+                        "fn residual_one() {}\nfn residual_two() {}\n"
+                    ),
+                    "src/core.rs": "fn fs_domain() {}\n",
+                    "crates/fszero-codemode/src/main.rs": "fn thin_entry() {}\n",
+                },
+                "graphzero": {"src/domain.rs": "fn graph_domain() {}\n"},
+                "tokenzero": {"src/domain.rs": "fn token_domain() {}\n"},
+            }
+            repos = []
+            for repo_id in module.REPOSITORIES:
+                repo_root = root / repo_id
+                module._tiny_repo(repo_root, files[repo_id])
+                repos.append(module.Repo(repo_id, repo_root))
+
+            equal = module.measure(repos, module.build_inventory(repos))
+            self.assertEqual(equal["shared_substrate"]["hub_shared_substrate_loc"], 2)
+            self.assertEqual(
+                equal["shared_substrate"]["engine_residual_shared_substrate_loc"], 2
+            )
+            self.assertFalse(equal["shared_substrate"]["pass"])
+            self.assertFalse(equal["pass"])
+
+            added = repos[0].root / "src/more.rs"
+            added.write_text("fn hub_three() {}\n", encoding="utf-8")
+            module._run(["git", "-C", str(repos[0].root), "add", "src/more.rs"])
+            module._run(["git", "-C", str(repos[0].root), "commit", "-qm", "hub substrate"])
+            passing = module.measure(repos, module.build_inventory(repos))
+            self.assertTrue(passing["shared_substrate"]["pass"])
+            self.assertTrue(passing["pass"])
+            self.assertFalse(passing["global_share"]["release_blocker"])
+
+            global_before = passing["global_share"]["value"]
+            substrate_before = passing["shared_substrate"]["share"]
+            (repos[1].root / "src/core.rs").write_text(
+                "".join(f"fn fs_domain_{index}() {{}}\n" for index in range(50)),
+                encoding="utf-8",
+            )
+            (repos[1].root / "crates/fszero-codemode/src/main.rs").write_text(
+                "".join(f"fn thin_{index}() {{}}\n" for index in range(50)),
+                encoding="utf-8",
+            )
+            module._run(
+                [
+                    "git",
+                    "-C",
+                    str(repos[1].root),
+                    "add",
+                    "src/core.rs",
+                    "crates/fszero-codemode/src/main.rs",
+                ]
+            )
+            module._run(["git", "-C", str(repos[1].root), "commit", "-qm", "domain and adapter"])
+            excluded = module.measure(repos, module.build_inventory(repos))
+            self.assertEqual(excluded["shared_substrate"]["share"], substrate_before)
+            self.assertLess(excluded["global_share"]["value"], global_before)
+            self.assertEqual(
+                excluded["shared_substrate"]["excluded_engine_loc"]["thin-adapter"],
+                50,
+            )
+            self.assertTrue(excluded["conservation"]["conserves"])
 
     def test_inventory_survives_metadata_only_successor_but_rejects_source_changes(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

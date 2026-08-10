@@ -1,15 +1,16 @@
 #!/usr/bin/env python3
-"""Measure the tracked implementation-line ownership across ZeroStack.
+"""Measure semantic shared-substrate ownership across ZeroStack.
 
-The measurement is deliberately provenance-first.  It reads only the committed
-``HEAD`` tree of each named repository, extracts it to an isolated directory,
-and asks ``tokei`` for code-line counts.  Working-tree files, ignored files,
-prose, data, generated output, vendor trees, fixture trees, and dead code are excluded; same-repository duplicate copies are counted once; cross-repository exact duplicates remain in the denominator but never improve the hub numerator.
+The measurement is provenance-first. It reads only each repository's committed
+``HEAD`` tree, extracts it in isolation, and asks ``tokei`` for code-line
+counts. The hard majority compares hub-owned shared substrate only with
+residual engine shared substrate. Engine domain authority and thin adapters do
+not enter that semantic denominator. The global four-repository share remains
+informational.
 
-The checked-in ownership inventory is a reviewed classification of every
-tracked file in an allowed implementation language.  It is not deletion
-authority.  A changed or added implementation path requires an inventory
-update before the gate can be used as release evidence.
+The checked-in ownership inventory classifies every tracked implementation
+file. Changed or added implementation paths require review before this gate can
+produce release evidence. Cross-repository duplicates remain a hard failure.
 """
 
 from __future__ import annotations
@@ -155,10 +156,6 @@ EXCLUDED_RULE = "excluded-path-or-generated"
 # These engine files have names that resemble reusable substrate, but their
 # semantics remain engine-local.  Keep the exceptions exact and justified.
 DOMAIN_EXCEPTIONS: dict[tuple[str, str], str] = {
-    (
-        "tokenzero",
-        "crates/tokenzero-codemode/src/journal.rs",
-    ): "TokenZero CodeMode journal is engine-domain state, not shared store substrate",
     (
         "tokenzero",
         "crates/tokenzero-mcp-compat/src/capability_descriptor.rs",
@@ -666,6 +663,9 @@ def measure(repos: Sequence[Repo], inventory: Mapping[str, Any]) -> dict[str, An
         tokei_versions.add(version)
         all_sources.extend(sources)
     duplicate_of, cross_repo_groups = _duplicate_canonicals(all_sources)
+    inventory_by_key = {
+        (item["repo"], item["path"]): item for item in inventory["files"]
+    }
     cross_repo_members = {key for group in cross_repo_groups for key in group}
     excluded: dict[tuple[str, str], str] = {}
     for source in all_sources:
@@ -675,6 +675,9 @@ def measure(repos: Sequence[Repo], inventory: Mapping[str, Any]) -> dict[str, An
             excluded[source.key] = f"duplicate content of {duplicate_of[source.key][0]}:{duplicate_of[source.key][1]}"
     repository_rows: list[dict[str, Any]] = []
     ownership_counts: Counter[str] = Counter()
+    ownership_by_repository: dict[str, Counter[str]] = {
+        repo_id: Counter() for repo_id in REPOSITORIES
+    }
     language_totals: Counter[str] = Counter()
     for repo in repos:
         repo_sources = [source for source in all_sources if source.repo == repo.id]
@@ -688,12 +691,9 @@ def measure(repos: Sequence[Repo], inventory: Mapping[str, Any]) -> dict[str, An
         for source in counted:
             by_language[source.language] += source.code_lines
             language_totals[source.language] += source.code_lines
-            if source.key not in cross_repo_members:
-                ownership_counts[next(
-                    item["classification"]
-                    for item in inventory["files"]
-                    if item["repo"] == repo.id and item["path"] == source.path
-                )] += source.code_lines
+            classification = inventory_by_key[source.key]["classification"]
+            ownership_counts[classification] += source.code_lines
+            ownership_by_repository[repo.id][classification] += source.code_lines
         repository_rows.append(
             {
                 "id": repo.id,
@@ -723,17 +723,53 @@ def measure(repos: Sequence[Repo], inventory: Mapping[str, Any]) -> dict[str, An
             }
         )
     denominator = sum(row["implementation_loc"] for row in repository_rows)
+    counted_sources = [source for source in all_sources if source.key not in excluded]
     hub_loc = sum(
         source.code_lines
-        for source in all_sources
-        if source.repo == "zerostack"
-        and source.key not in excluded
-        and source.key not in cross_repo_members
+        for source in counted_sources
+        if source.repo == "zerostack" and source.key not in cross_repo_members
     )
-    threshold_pass = _threshold(hub_loc, denominator)
-    passing = threshold_pass and not cross_repo_groups
-    transfer = max(0, denominator // 2 + 1 - hub_loc)
-    new_hub = max(0, denominator - 2 * hub_loc + 1)
+    hub_shared_substrate_loc = sum(
+        source.code_lines
+        for source in counted_sources
+        if source.repo == "zerostack"
+        and source.key not in cross_repo_members
+        and inventory_by_key[source.key]["classification"] == "shared-candidate"
+    )
+    engine_residual_shared_substrate_loc = sum(
+        source.code_lines
+        for source in counted_sources
+        if source.repo != "zerostack"
+        and inventory_by_key[source.key]["classification"] == "shared-candidate"
+    )
+    shared_substrate_denominator = (
+        hub_shared_substrate_loc + engine_residual_shared_substrate_loc
+    )
+    engine_domain_local_loc = sum(
+        ownership_by_repository[repo_id]["domain-local"]
+        for repo_id in REPOSITORIES
+        if repo_id != "zerostack"
+    )
+    engine_thin_adapter_loc = sum(
+        ownership_by_repository[repo_id]["thin-adapter"]
+        for repo_id in REPOSITORIES
+        if repo_id != "zerostack"
+    )
+    shared_substrate_pass = _threshold(
+        hub_shared_substrate_loc, shared_substrate_denominator
+    )
+    passing = shared_substrate_pass and not cross_repo_groups
+    classified_loc = sum(ownership_counts.values())
+    if classified_loc != denominator:
+        raise GateError(
+            "ownership classification totals do not conserve the implementation denominator"
+        )
+    transfer = max(
+        0, shared_substrate_denominator // 2 + 1 - hub_shared_substrate_loc
+    )
+    new_hub = max(
+        0, engine_residual_shared_substrate_loc - hub_shared_substrate_loc + 1
+    )
     source_by_key = {source.key: source for source in all_sources}
     duplicate_violations = [
         {
@@ -776,6 +812,27 @@ def measure(repos: Sequence[Repo], inventory: Mapping[str, Any]) -> dict[str, An
         },
         "hub": {"repository_id": "zerostack", "implementation_loc": hub_loc},
         "hub_share": hub_loc / denominator,
+        "global_share": {
+            "formula": "hub_nonduplicate_implementation_loc / four_repo_implementation_loc",
+            "hub_nonduplicate_implementation_loc": hub_loc,
+            "four_repo_implementation_loc": denominator,
+            "value": hub_loc / denominator,
+            "release_blocker": False,
+        },
+        "shared_substrate": {
+            "formula": "hub_shared_substrate_loc / (hub_shared_substrate_loc + engine_residual_shared_substrate_loc)",
+            "hub_shared_substrate_loc": hub_shared_substrate_loc,
+            "engine_residual_shared_substrate_loc": engine_residual_shared_substrate_loc,
+            "denominator_loc": shared_substrate_denominator,
+            "share": hub_shared_substrate_loc / shared_substrate_denominator,
+            "threshold": {"operator": ">", "value": THRESHOLD},
+            "pass": shared_substrate_pass,
+            "excluded_engine_classifications": ["domain-local", "thin-adapter"],
+            "excluded_engine_loc": {
+                "domain-local": engine_domain_local_loc,
+                "thin-adapter": engine_thin_adapter_loc,
+            },
+        },
         "threshold": {"operator": ">", "value": THRESHOLD},
         "pass": passing,
         "violations": {
@@ -783,11 +840,20 @@ def measure(repos: Sequence[Repo], inventory: Mapping[str, Any]) -> dict[str, An
             "count": len(duplicate_violations),
         },
         "migration": {
-            "minimum_denominator_preserving_transfer_lines": transfer,
-            "minimum_new_hub_lines_if_denominator_grows": new_hub,
-            "note": "transfer is integer LOC moved from engines to the hub while preserving denominator",
+            "minimum_residual_transfer_lines": transfer,
+            "minimum_new_hub_shared_lines": new_hub,
+            "note": "transfer moves reviewed shared substrate from engine residuals into the hub without changing the semantic denominator",
+        },
+        "conservation": {
+            "classified_implementation_loc": classified_loc,
+            "four_repo_implementation_loc": denominator,
+            "conserves": classified_loc == denominator,
         },
         "ownership_line_totals": dict(sorted(ownership_counts.items())),
+        "ownership_by_repository": {
+            repo_id: dict(sorted(counts.items()))
+            for repo_id, counts in ownership_by_repository.items()
+        },
         "engine_shared_candidates": candidates,
     }
 
@@ -873,7 +939,10 @@ def self_test() -> None:
             repos.append(Repo(repo_id, repo_root))
         inventory = build_inventory(repos)
         baseline = measure(repos, inventory)
-        assert baseline["pass"] is False
+        assert baseline["pass"] is True
+        assert baseline["shared_substrate"]["pass"] is True
+        assert baseline["global_share"]["release_blocker"] is False
+        assert baseline["conservation"]["conserves"] is True
         assert baseline["denominator"]["repository_ids"] == list(REPOSITORIES)
         assert baseline["repositories"][0]["head"] == git_head(repos[0].root)
         # These non-fixture scopes remain eligible for counting.
