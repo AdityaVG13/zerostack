@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
-"""Check generated embedded schemas against their documented schema sources."""
+"""Check generated embedded schemas against their documented schema sources.
+
+Use ``--schema-dir`` when validating a packaged conformance schema tree.
+"""
 
 from __future__ import annotations
 
@@ -136,9 +139,17 @@ def check_pair(source_name: str, snapshot_name: str, write: bool) -> bool:
 
 
 def main() -> int:
+    global SCHEMA_DIR
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--write", action="store_true", help="regenerate embedded snapshots")
+    parser.add_argument(
+        "--schema-dir",
+        type=Path,
+        default=SCHEMA_DIR,
+        help="schema and generated-snapshot directory",
+    )
     args = parser.parse_args()
+    SCHEMA_DIR = args.schema_dir.resolve()
     try:
         results = [check_pair(source, snapshot, args.write) for source, snapshot in PAIRS.items()]
         passed = all(results)
