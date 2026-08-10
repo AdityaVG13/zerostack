@@ -23,6 +23,10 @@ name = "zsx"
 path = "src/bin/zsx.rs"
 
 [[bin]]
+name = "zerostack"
+path = "src/bin/zerostack.rs"
+
+[[bin]]
 name = "zero-codemode-worker-fixture"
 path = "src/bin/worker_fixture.rs"
 required-features = ["worker-fixture"]
@@ -41,3 +45,4 @@ zero-process = { path = "../zero-process" }
 
 [dev-dependencies]
 tempfile = "3"
+serde_json.workspace = true

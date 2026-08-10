@@ -10,11 +10,13 @@
 //! extend that grammar with one extra rule, [Source::Explicit], for a direct
 //! file pin, and are otherwise looked up under the same install roots.
 
+use serde_json::Value;
 use std::path::{Path, PathBuf};
+use zero_store::{Engine, ResolvedStore};
 
 use crate::discovery::{
     BIN_DIR, Candidate, DEV_TARGET_SUBDIR, DISCOVERY_SCHEMA, DiscoveryEnv, HarnessBinary, Source,
-    candidates, resolve_all,
+    candidates, is_executable_file, resolve_all,
 };
 
 /// Versioned manifest schema, stable across surfaces.
@@ -386,9 +388,10 @@ pub fn locate_manifest(
     serde_json::Value::Object(manifest)
 }
 
-/// True for an existing regular file, executable or not.
+/// True for a readable existing regular file, executable or not.
 pub fn is_readable_file(path: &Path) -> bool {
     std::fs::metadata(path).is_ok_and(|metadata| metadata.is_file())
+        && std::fs::File::open(path).is_ok()
 }
 
 fn artifact_json(outcome: &ArtifactOutcome) -> serde_json::Value {
@@ -444,5 +447,72 @@ fn path_json(path: Option<&Path>) -> serde_json::Value {
     match path {
         Some(path) => path.to_string_lossy().into_owned().into(),
         None => serde_json::Value::Null,
+    }
+}
+
+/// The aggregate host wire protocol, shared by the manifest, the ready frame,
+/// and the `zerostack` preflight CLI so the three cannot drift.
+pub const AGGREGATE_HOST_PROTOCOL: &str = "zerostack-codemode-host/v2";
+
+/// Store and journal directories for the current project, resolved without
+/// creating anything: reporting a location must not have side effects.
+pub fn store_paths_from_process() -> StorePaths {
+    let Ok(cwd) = std::env::current_dir() else {
+        return StorePaths::default();
+    };
+    let resolved = ResolvedStore::resolve_from_process(&cwd, Engine::TokenZero, &[]);
+    StorePaths::from_store_root(resolved.engine_dir().to_path_buf())
+}
+
+/// Build the full locate manifest from the live process environment, with the
+/// same store resolution the aggregate host reports, so host flags and the
+/// preflight CLI cannot drift.
+pub fn locate_from_process() -> serde_json::Value {
+    locate_manifest(
+        &DiscoveryEnv::from_process(),
+        &ArtifactEnv::from_process(),
+        &ManifestFacts {
+            host_version: env!("CARGO_PKG_VERSION").to_owned(),
+            protocol: AGGREGATE_HOST_PROTOCOL.to_owned(),
+            store: store_paths_from_process(),
+        },
+        &is_executable_file,
+        &is_readable_file,
+    )
+}
+
+/// Render the manifest for a human: one aligned line per entry, flattening
+/// nested groups one level so every path stays on its own line.
+pub fn render_manifest_human(manifest: &serde_json::Value) -> String {
+    let mut out = String::new();
+    if let Some(object) = manifest.as_object() {
+        for (key, value) in object {
+            render_entry(&mut out, key, value);
+        }
+    }
+    out
+}
+
+/// One manifest field as a line. A nested map is either a located entry, which
+/// has a resolution, or a group of them, which is flattened one level so every
+/// path stays on its own line.
+fn render_entry(out: &mut String, key: &str, value: &Value) {
+    match value {
+        Value::Object(entry) if entry.contains_key("resolved") => {
+            let path = entry
+                .get("path")
+                .and_then(Value::as_str)
+                .unwrap_or("<unresolved>");
+            let source = entry.get("source").and_then(Value::as_str).unwrap_or("-");
+            out.push_str(&format!("{key:<17} {path}  [{source}]\n"));
+        }
+        Value::Object(group) => {
+            for (nested, value) in group {
+                render_entry(out, &format!("{key}.{nested}"), value);
+            }
+        }
+        Value::String(text) => out.push_str(&format!("{key:<17} {text}\n")),
+        Value::Null => out.push_str(&format!("{key:<17} <unresolved>\n")),
+        other => out.push_str(&format!("{key:<17} {other}\n")),
     }
 }

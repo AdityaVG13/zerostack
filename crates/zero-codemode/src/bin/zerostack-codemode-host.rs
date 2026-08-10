@@ -13,15 +13,14 @@ use zero_codemode::session::{
     SessionReplacementReason,
 };
 use zero_codemode::{
-    ArtifactEnv, DISCOVERY_SCHEMA, DiscoveryEnv, MANIFEST_SCHEMA, ManifestFacts, StorePaths,
-    finalize_visible_error, is_executable_file, is_readable_file, locate_manifest, locate_report,
+    AGGREGATE_HOST_PROTOCOL as PROTOCOL, DISCOVERY_SCHEMA, DiscoveryEnv, MANIFEST_SCHEMA,
+    finalize_visible_error, is_executable_file, locate_from_process, locate_report,
+    render_manifest_human,
 };
-use zero_store::{Engine, ResolvedStore};
 
 /// v2 executes every plan directly on the aggregate session: capability calls
 /// lower to raw-worker v2 children inside the host, so no delegate frames
 /// cross this transport.
-const PROTOCOL: &str = "zerostack-codemode-host/v2";
 const MAX_CELLS: usize = 1;
 const DEFAULT_EXECUTION_TIMEOUT_MS: u64 = 3_600_000;
 
@@ -342,59 +341,13 @@ fn print_cli_metadata() -> Result<bool, Box<dyn std::error::Error>> {
 /// Unresolved entries are data, not failure: an install with only some engines is
 /// legitimate, and the harness decides which engines it requires.
 fn print_manifest(json: bool) -> Result<(), Box<dyn std::error::Error>> {
-    let manifest = locate_manifest(
-        &DiscoveryEnv::from_process(),
-        &ArtifactEnv::from_process(),
-        &ManifestFacts {
-            host_version: env!("CARGO_PKG_VERSION").to_owned(),
-            protocol: PROTOCOL.to_owned(),
-            store: store_paths(),
-        },
-        &is_executable_file,
-        &is_readable_file,
-    );
+    let manifest = locate_from_process();
     if json {
         println!("{}", serde_json::to_string_pretty(&manifest)?);
         return Ok(());
     }
-    for (key, value) in manifest.as_object().into_iter().flatten() {
-        print_entry(key, value);
-    }
+    print!("{}", render_manifest_human(&manifest));
     Ok(())
-}
-
-/// One manifest field as a line. A nested map is either a located entry, which
-/// has a resolution, or a group of them, which is flattened one level so every
-/// path stays on its own line.
-fn print_entry(key: &str, value: &Value) {
-    match value {
-        Value::Object(entry) if entry.contains_key("resolved") => {
-            let path = entry
-                .get("path")
-                .and_then(Value::as_str)
-                .unwrap_or("<unresolved>");
-            let source = entry.get("source").and_then(Value::as_str).unwrap_or("-");
-            println!("{key:<17} {path}  [{source}]");
-        }
-        Value::Object(group) => {
-            for (nested, value) in group {
-                print_entry(&format!("{key}.{nested}"), value);
-            }
-        }
-        Value::String(text) => println!("{key:<17} {text}"),
-        Value::Null => println!("{key:<17} <unresolved>"),
-        other => println!("{key:<17} {other}"),
-    }
-}
-
-/// Store and journal directories for the current project, resolved without
-/// creating anything: reporting a location must not have side effects.
-fn store_paths() -> StorePaths {
-    let Ok(cwd) = std::env::current_dir() else {
-        return StorePaths::default();
-    };
-    let resolved = ResolvedStore::resolve_from_process(&cwd, Engine::TokenZero, &[]);
-    StorePaths::from_store_root(resolved.engine_dir().to_path_buf())
 }
 
 fn read_stdin(events: mpsc::Sender<Event>) {

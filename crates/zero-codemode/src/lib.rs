@@ -9,6 +9,7 @@ mod limits;
 pub mod manifest;
 pub mod mcp_transport;
 pub mod node;
+pub mod preflight;
 pub mod session;
 pub mod surface;
 pub mod worker;
@@ -31,10 +32,11 @@ pub use host::{
 };
 pub use limits::{HostLimits, LimitError};
 pub use manifest::{
-    ArtifactEnv, ArtifactOutcome, EPHEMERAL_MARKERS, EPHEMERAL_REASON, HARNESS_ARTIFACTS,
-    HarnessArtifact, JOURNAL_DIR, LIB_DIR, MANIFEST_SCHEMA, ManifestFacts, NODE_ENV,
-    RUNTIME_MODULE_ENV, Refusal, SUBSTRATE_MODULE_ENV, StorePaths, artifact_candidates,
-    is_ephemeral, is_readable_file, locate_manifest, manifest_order, resolve_artifact,
+    AGGREGATE_HOST_PROTOCOL, ArtifactEnv, ArtifactOutcome, EPHEMERAL_MARKERS, EPHEMERAL_REASON,
+    HARNESS_ARTIFACTS, HarnessArtifact, JOURNAL_DIR, LIB_DIR, MANIFEST_SCHEMA, ManifestFacts,
+    NODE_ENV, RUNTIME_MODULE_ENV, Refusal, SUBSTRATE_MODULE_ENV, StorePaths, artifact_candidates,
+    is_ephemeral, is_readable_file, locate_from_process, locate_manifest, manifest_order,
+    render_manifest_human, resolve_artifact, store_paths_from_process,
 };
 #[cfg(feature = "fastmcp")]
 pub use mcp_transport::FastMcpTransport;
@@ -49,6 +51,10 @@ pub use node::{
     FNM_DEFAULT_ALIAS_SUBDIR, FNM_DIR_ENV, NODE_ORDER, NODE_SCHEMA, NodeCandidate, NodeEnv,
     NodeError, NodeOutcome, NodeRefusal, NodeSource, node_candidates, node_file_name, node_report,
     resolve_node, resolve_node_with,
+};
+pub use preflight::{
+    DOCTOR_SCHEMA, DoctorCheck, DoctorReport, doctor_report, locate_complete, locate_missing,
+    render_doctor_human,
 };
 pub use surface::{
     DomainAdapterRegistration, SURFACE_CONTRACT_VERSION, SurfaceContractError, SurfaceKind,
