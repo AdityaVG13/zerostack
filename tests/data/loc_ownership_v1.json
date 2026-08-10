@@ -2,10 +2,10 @@
   "schema": "zerostack.loc-ownership.v1",
   "version": 1,
   "generated_from_heads": {
-    "zerostack": "858c5c2bd404b3db27f52f2d24aab7e4338d92c5",
-    "fszero": "82fd21a75e34d5d0666e4f5a6a63ac686ab35557",
-    "graphzero": "bd354a5d112a32ca395647c6264a361e82947b65",
-    "tokenzero": "56d10770b7f0b950708f75716007d6aa3217f776"
+    "zerostack": "e9e37bd7d261f9651fd6e51b2fa595b11bfd6fa1",
+    "fszero": "64458c875debb0b8d06e368e9b4ee1b647d4053b",
+    "graphzero": "7a9267f80bde567f9618aeff67a5bb16741e5910",
+    "tokenzero": "a343ded40f2d70db4576754552665cf610b6c138"
   },
   "languages": [
     "Rust",
@@ -119,7 +119,7 @@
       "classification": "shared-candidate",
       "rule": "hub-owned-substrate",
       "justification": "hub implementation already owned by zero-abi",
-      "blob_digest": "3784cc1ffdade3f2747fff86ec3eac2fe68edc96",
+      "blob_digest": "58d0bafd1badf0a627d1e50ae0e46f09f1a4ad00",
       "hub_target": "zero-abi"
     },
     {
@@ -159,7 +159,7 @@
       "classification": "shared-candidate",
       "rule": "hub-owned-substrate",
       "justification": "hub implementation already owned by zero-abi",
-      "blob_digest": "cc81961e7767be63bfb9a6287a0b4d702985b8e7",
+      "blob_digest": "3a5bfa7219a03616ad89c51adc1af0684eb51311",
       "hub_target": "zero-abi"
     },
     {
@@ -369,7 +369,17 @@
       "classification": "shared-candidate",
       "rule": "hub-owned-substrate",
       "justification": "hub implementation already owned by zero-codemode",
-      "blob_digest": "7e28d13534466d9c253e31489cc3171e00724620",
+      "blob_digest": "a0275593466e73ab443082a473e9205818e2bb34",
+      "hub_target": "zero-codemode"
+    },
+    {
+      "repo": "zerostack",
+      "path": "crates/zero-codemode/src/interpreter.rs",
+      "language": "Rust",
+      "classification": "shared-candidate",
+      "rule": "hub-owned-substrate",
+      "justification": "hub implementation already owned by zero-codemode",
+      "blob_digest": "5c3830142a16f476c2d923eb846f77b2af2e9dc2",
       "hub_target": "zero-codemode"
     },
     {
@@ -379,7 +389,7 @@
       "classification": "shared-candidate",
       "rule": "hub-owned-substrate",
       "justification": "hub implementation already owned by zero-codemode",
-      "blob_digest": "cffec756e3ba937844461f838102a471b5c05f16",
+      "blob_digest": "dae41b3a0ab2ff5575c510ea6b67b64074ab2254",
       "hub_target": "zero-codemode"
     },
     {
@@ -409,7 +419,7 @@
       "classification": "shared-candidate",
       "rule": "hub-owned-substrate",
       "justification": "hub implementation already owned by zero-codemode",
-      "blob_digest": "c3a96c13453e980d5f1a60cfe57ef7666aef5be9",
+      "blob_digest": "cc3e1b57e7e878e07238091314e2ee9db5be6e79",
       "hub_target": "zero-codemode"
     },
     {
@@ -439,7 +449,7 @@
       "classification": "shared-candidate",
       "rule": "hub-owned-substrate",
       "justification": "hub implementation already owned by zero-codemode",
-      "blob_digest": "5d5eb9dd96d260093bd295aec866bc9aca058c5d",
+      "blob_digest": "79b3e4b94c3d7d4d918ef837343872076d6d04b3",
       "hub_target": "zero-codemode"
     },
     {
@@ -459,7 +469,7 @@
       "classification": "shared-candidate",
       "rule": "hub-owned-substrate",
       "justification": "hub implementation already owned by zero-codemode",
-      "blob_digest": "a6085533ae6a6f6d2cfa785b6597acd41d90c76e",
+      "blob_digest": "e60f01da4b58b6e8e4a7212fa96620b6ec8000cb",
       "hub_target": "zero-codemode"
     },
     {
@@ -489,7 +499,7 @@
       "classification": "shared-candidate",
       "rule": "hub-owned-substrate",
       "justification": "hub implementation already owned by zero-codemode",
-      "blob_digest": "3024bca1a2452e04c0878f00f368ff6b7656c0fb",
+      "blob_digest": "6c26b5323f00a77747da1b77702728e1d7b8db3b",
       "hub_target": "zero-codemode"
     },
     {
@@ -519,7 +529,7 @@
       "classification": "shared-candidate",
       "rule": "hub-owned-substrate",
       "justification": "hub implementation already owned by zero-codemode",
-      "blob_digest": "b7cb20bc4497c57e0090483a8552ef182ad980ab",
+      "blob_digest": "eca13a23739d4781ef3dc9e5bf1fc712ab13a5b4",
       "hub_target": "zero-codemode"
     },
     {
@@ -529,7 +539,7 @@
       "classification": "shared-candidate",
       "rule": "hub-owned-substrate",
       "justification": "hub implementation already owned by zero-codemode",
-      "blob_digest": "3338c8978ce6a1a73442af80ee230430bf647bea",
+      "blob_digest": "194f2984f7696f92c5921bb813c38285ee28fba9",
       "hub_target": "zero-codemode"
     },
     {
@@ -539,7 +549,7 @@
       "classification": "shared-candidate",
       "rule": "hub-owned-substrate",
       "justification": "hub implementation already owned by zero-codemode",
-      "blob_digest": "822d3e5b4435b22b50a730bfb45c45a483dc16d6",
+      "blob_digest": "b2e58c36e49a545c019bf95c16da2822a084535c",
       "hub_target": "zero-codemode"
     },
     {
@@ -774,6 +784,46 @@
     },
     {
       "repo": "zerostack",
+      "path": "crates/zero-process/src/child.rs",
+      "language": "Rust",
+      "classification": "shared-candidate",
+      "rule": "hub-owned-substrate",
+      "justification": "hub implementation already owned by zero-process",
+      "blob_digest": "46803907775f028b1ef193248d436a7388f457ea",
+      "hub_target": "zero-process"
+    },
+    {
+      "repo": "zerostack",
+      "path": "crates/zero-process/src/identity.rs",
+      "language": "Rust",
+      "classification": "shared-candidate",
+      "rule": "hub-owned-substrate",
+      "justification": "hub implementation already owned by zero-process",
+      "blob_digest": "483e9e9297abdab399caf304049c8508b76bd180",
+      "hub_target": "zero-process"
+    },
+    {
+      "repo": "zerostack",
+      "path": "crates/zero-process/src/lib.rs",
+      "language": "Rust",
+      "classification": "shared-candidate",
+      "rule": "hub-owned-substrate",
+      "justification": "hub implementation already owned by zero-process",
+      "blob_digest": "f22f186d6ce78aa3a261721717eafbde788ad665",
+      "hub_target": "zero-process"
+    },
+    {
+      "repo": "zerostack",
+      "path": "crates/zero-process/tests/child.rs",
+      "language": "Rust",
+      "classification": "shared-candidate",
+      "rule": "hub-owned-substrate",
+      "justification": "hub implementation already owned by zero-process",
+      "blob_digest": "46510cd835461844c93f99da3027e360d87aef5f",
+      "hub_target": "zero-process"
+    },
+    {
+      "repo": "zerostack",
       "path": "crates/zero-ref/benches/parse.rs",
       "language": "Rust",
       "classification": "shared-candidate",
@@ -854,6 +904,16 @@
     },
     {
       "repo": "zerostack",
+      "path": "crates/zero-store/src/gc.rs",
+      "language": "Rust",
+      "classification": "shared-candidate",
+      "rule": "hub-owned-substrate",
+      "justification": "hub implementation already owned by zero-store",
+      "blob_digest": "07a20fe074b39b2d69c4a49668671605d4c5c97e",
+      "hub_target": "zero-store"
+    },
+    {
+      "repo": "zerostack",
       "path": "crates/zero-store/src/gc_lock.rs",
       "language": "Rust",
       "classification": "shared-candidate",
@@ -869,7 +929,7 @@
       "classification": "shared-candidate",
       "rule": "hub-owned-substrate",
       "justification": "hub implementation already owned by zero-store",
-      "blob_digest": "1dc3f0ce78425845d292045f03e8bde4ad3b9716",
+      "blob_digest": "0f942f6e9022ab904c86291769f41ab72efc49bc",
       "hub_target": "zero-store"
     },
     {
@@ -1149,7 +1209,7 @@
       "classification": "shared-candidate",
       "rule": "hub-owned-substrate",
       "justification": "hub implementation already owned by zerostack-machine-permit",
-      "blob_digest": "483e9e9297abdab399caf304049c8508b76bd180",
+      "blob_digest": "1d303e938bb742c9e205aa3645bf94dae5608696",
       "hub_target": "zerostack-machine-permit"
     },
     {
@@ -1375,7 +1435,7 @@
       "classification": "shared-candidate",
       "rule": "hub-owned-substrate",
       "justification": "hub implementation already owned by zero-testkit",
-      "blob_digest": "f4ddaff5beab6978923a033101e9fbc3689a05b4",
+      "blob_digest": "fb6acff69d935f1d03931fa8e036391df7e84d1e",
       "hub_target": "zero-testkit"
     },
     {
@@ -1395,7 +1455,7 @@
       "classification": "shared-candidate",
       "rule": "hub-owned-substrate",
       "justification": "hub implementation already owned by zero-testkit",
-      "blob_digest": "13438a0e0c15292a698ea47f89646fecce9ca2a5",
+      "blob_digest": "3bcc462f2c0b00bd71a74a27191a0787c9384474",
       "hub_target": "zero-testkit"
     },
     {
@@ -1405,7 +1465,7 @@
       "classification": "shared-candidate",
       "rule": "hub-owned-substrate",
       "justification": "hub implementation already owned by zero-testkit",
-      "blob_digest": "4347fb6a2af08ef73d22ffae78238606d9b6c17f",
+      "blob_digest": "1795d594096425f7a27a0fbcb6aa7d481f8cec77",
       "hub_target": "zero-testkit"
     },
     {
@@ -1425,7 +1485,7 @@
       "classification": "shared-candidate",
       "rule": "hub-owned-substrate",
       "justification": "hub implementation already owned by zero-testkit",
-      "blob_digest": "708fd98e0a8843b6c4e3a490da196e936a6b0257",
+      "blob_digest": "36a0a4d3fa937046de230232b050c32d62c9276a",
       "hub_target": "zero-testkit"
     },
     {
@@ -1435,7 +1495,7 @@
       "classification": "shared-candidate",
       "rule": "hub-owned-substrate",
       "justification": "hub implementation already owned by zero-testkit",
-      "blob_digest": "18975191b1e631684f68d009e5beb178dd394c27",
+      "blob_digest": "ac880493454908c7fa7aee1894a34857e938a18c",
       "hub_target": "zero-testkit"
     },
     {
@@ -1460,6 +1520,16 @@
     },
     {
       "repo": "zerostack",
+      "path": "tests/src/plan.rs",
+      "language": "Rust",
+      "classification": "shared-candidate",
+      "rule": "hub-owned-substrate",
+      "justification": "hub implementation already owned by zero-testkit",
+      "blob_digest": "6abcf92722ddd78551b06598dd48ea28e2e25865",
+      "hub_target": "zero-testkit"
+    },
+    {
+      "repo": "zerostack",
       "path": "tests/src/racc.rs",
       "language": "Rust",
       "classification": "shared-candidate",
@@ -1470,12 +1540,22 @@
     },
     {
       "repo": "zerostack",
+      "path": "tests/src/raw_worker.rs",
+      "language": "Rust",
+      "classification": "shared-candidate",
+      "rule": "hub-owned-substrate",
+      "justification": "hub implementation already owned by zero-testkit",
+      "blob_digest": "4b1023ae96642c97d13943c3d2596fa108158c58",
+      "hub_target": "zero-testkit"
+    },
+    {
+      "repo": "zerostack",
       "path": "tests/src/report.rs",
       "language": "Rust",
       "classification": "shared-candidate",
       "rule": "hub-owned-substrate",
       "justification": "hub implementation already owned by zero-testkit",
-      "blob_digest": "8774866dce8c864876d584b2bd3372adf856263f",
+      "blob_digest": "e8da2613d948d03529ff401414b27aa3396afbc2",
       "hub_target": "zero-testkit"
     },
     {
@@ -1505,7 +1585,7 @@
       "classification": "shared-candidate",
       "rule": "hub-owned-substrate",
       "justification": "hub implementation already owned by zero-testkit",
-      "blob_digest": "10a9e0644f3903fbcd715009c2eeae5629c32015",
+      "blob_digest": "e68a3fa679414b7ccd43d94e4b8aa0331ade8e4b",
       "hub_target": "zero-testkit"
     },
     {
@@ -1515,7 +1595,7 @@
       "classification": "shared-candidate",
       "rule": "hub-owned-substrate",
       "justification": "hub implementation already owned by zero-testkit",
-      "blob_digest": "21533c4bb6e946fab415df589b57689a49f523aa",
+      "blob_digest": "70f28d87658a65068cfc2e6088f4d8a9dcea0ce3",
       "hub_target": "zero-testkit"
     },
     {
@@ -1555,7 +1635,7 @@
       "classification": "shared-candidate",
       "rule": "hub-owned-substrate",
       "justification": "hub implementation already owned by zero-testkit",
-      "blob_digest": "1e1a9e7018ed7670c2451e33e1df15fdf28eb962",
+      "blob_digest": "b26a4c96480b44d5cd3ef230e44788bf8ddbb0ec",
       "hub_target": "zero-testkit"
     },
     {
@@ -1565,7 +1645,7 @@
       "classification": "shared-candidate",
       "rule": "hub-owned-substrate",
       "justification": "hub implementation already owned by zero-testkit",
-      "blob_digest": "eb154339feb8a057835fbc0284b328b6417094c3",
+      "blob_digest": "0b2d31094f1032d4861638023f5a5ecdd205713c",
       "hub_target": "zero-testkit"
     },
     {
@@ -1575,7 +1655,7 @@
       "classification": "shared-candidate",
       "rule": "hub-owned-substrate",
       "justification": "hub implementation already owned by zero-testkit",
-      "blob_digest": "432b01f65a438c97ebac247767ea209be082986a",
+      "blob_digest": "c9cbcf8a172e15c912d631d2fe73579277adec7d",
       "hub_target": "zero-testkit"
     },
     {
@@ -1615,7 +1695,7 @@
       "classification": "shared-candidate",
       "rule": "hub-owned-substrate",
       "justification": "hub implementation already owned by zero-testkit",
-      "blob_digest": "5dc36a1351a196dbee29e762aba29ef1ca14c7be",
+      "blob_digest": "b3d9c1dba5ac73483f3f18d8163e76c6a3912c6b",
       "hub_target": "zero-testkit"
     },
     {
@@ -1738,7 +1818,7 @@
       "classification": "domain-local",
       "rule": "engine-domain-default",
       "justification": "fszero domain implementation has no reviewed shared-substrate signal",
-      "blob_digest": "8aa872623f3a579a0dfbac120c42d3e957bdef2e"
+      "blob_digest": "e6a7e230db80307c6ef37151e2b8951323e5d555"
     },
     {
       "repo": "fszero",
@@ -1765,7 +1845,7 @@
       "classification": "domain-local",
       "rule": "engine-domain-default",
       "justification": "fszero domain implementation has no reviewed shared-substrate signal",
-      "blob_digest": "40fde1533f8658d3c5861017c847c878a1b3799e"
+      "blob_digest": "1917b27a55e6b2f8d93f3d9cd582e0c99a5ce5bf"
     },
     {
       "repo": "fszero",
@@ -1783,7 +1863,7 @@
       "classification": "domain-local",
       "rule": "engine-domain-default",
       "justification": "fszero domain implementation has no reviewed shared-substrate signal",
-      "blob_digest": "b5628f6fa70dc577027961ba809fad39c4e99b75"
+      "blob_digest": "3d945b436157b7af24aabbc44fbe25c106aee223"
     },
     {
       "repo": "fszero",
@@ -1819,8 +1899,26 @@
       "classification": "thin-adapter",
       "rule": "surface-entrypoint",
       "justification": "surface entrypoint retains engine dispatch only",
-      "blob_digest": "1aec8f5558c0d4634dd7a8aae6604ebc8892d0a5",
+      "blob_digest": "7b076f71e76e26f8e9b2ab644c87b1b1395ac2d7",
       "hub_target": "zero-codemode"
+    },
+    {
+      "repo": "fszero",
+      "path": "crates/fszero-mcp/src/hub_transport.rs",
+      "language": "Rust",
+      "classification": "domain-local",
+      "rule": "engine-domain-default",
+      "justification": "fszero domain implementation has no reviewed shared-substrate signal",
+      "blob_digest": "bf2fd3bef98a80b75c4b131e1dc54edc16ba94c0"
+    },
+    {
+      "repo": "fszero",
+      "path": "crates/fszero-mcp/src/lib.rs",
+      "language": "Rust",
+      "classification": "domain-local",
+      "rule": "engine-domain-default",
+      "justification": "fszero domain implementation has no reviewed shared-substrate signal",
+      "blob_digest": "c2a5632bf5dc66a5cc35b46b79c056be1fb2a14f"
     },
     {
       "repo": "fszero",
@@ -1829,7 +1927,7 @@
       "classification": "thin-adapter",
       "rule": "surface-entrypoint",
       "justification": "surface entrypoint retains engine dispatch only",
-      "blob_digest": "3f2ce19fcf5404c6819c67a922babaabefa91a77",
+      "blob_digest": "10827c233e735c141b089be574a134fdbfe824e4",
       "hub_target": "zero-codemode"
     },
     {
@@ -1839,7 +1937,7 @@
       "classification": "domain-local",
       "rule": "engine-domain-default",
       "justification": "fszero domain implementation has no reviewed shared-substrate signal",
-      "blob_digest": "75517e3be0826b60ad3f1b33cbe77a224e97f343"
+      "blob_digest": "d56844425e2eb3524510e1da173c94d547ea0076"
     },
     {
       "repo": "fszero",
@@ -1911,7 +2009,7 @@
       "classification": "domain-local",
       "rule": "engine-domain-default",
       "justification": "fszero domain implementation has no reviewed shared-substrate signal",
-      "blob_digest": "f9661ac59bcdded16d19566c62fd32ada675b980"
+      "blob_digest": "3ff8b0fe5a27c8f8028def64facfaf0c7bf3d9dd"
     },
     {
       "repo": "fszero",
@@ -1921,6 +2019,15 @@
       "rule": "engine-domain-default",
       "justification": "fszero domain implementation has no reviewed shared-substrate signal",
       "blob_digest": "04a2eada8fb85364768a0d1456005f679dc53c89"
+    },
+    {
+      "repo": "fszero",
+      "path": "scripts/apply_bench_ratchet.py",
+      "language": "Python",
+      "classification": "domain-local",
+      "rule": "engine-domain-default",
+      "justification": "fszero domain implementation has no reviewed shared-substrate signal",
+      "blob_digest": "84cc3e36a7c89c90e3bc4d77df4c4d4f78f438f6"
     },
     {
       "repo": "fszero",
@@ -2055,7 +2162,7 @@
       "classification": "domain-local",
       "rule": "engine-domain-default",
       "justification": "fszero domain implementation has no reviewed shared-substrate signal",
-      "blob_digest": "9752cc0a785a390b8bb183c95126f2f734b92890"
+      "blob_digest": "bc0e64ebcf4e372bffb2168a9c43d65a23e363ba"
     },
     {
       "repo": "fszero",
@@ -2101,6 +2208,15 @@
       "rule": "engine-domain-default",
       "justification": "fszero domain implementation has no reviewed shared-substrate signal",
       "blob_digest": "4fc3462654bf39bd215a25e541e2bbe3737aed23"
+    },
+    {
+      "repo": "fszero",
+      "path": "scripts/surface_wire_ratchet.sh",
+      "language": "Shell",
+      "classification": "domain-local",
+      "rule": "engine-domain-default",
+      "justification": "fszero domain implementation has no reviewed shared-substrate signal",
+      "blob_digest": "9c54e08333a2c0ab039c62b7424159a237c5dcd8"
     },
     {
       "repo": "fszero",
@@ -2168,7 +2284,7 @@
       "classification": "shared-candidate",
       "rule": "codemode-host",
       "justification": "path matches reviewed reusable-substrate rule codemode-host",
-      "blob_digest": "7de250734435896c744fbfadf7645d13fef0feaf",
+      "blob_digest": "1b795743417f399625652541240c0be0fabd61d8",
       "hub_target": "zero-codemode"
     },
     {
@@ -2178,7 +2294,7 @@
       "classification": "shared-candidate",
       "rule": "codemode-host",
       "justification": "path matches reviewed reusable-substrate rule codemode-host",
-      "blob_digest": "d50cb68ab6eed2379b0139d7f071bd87885a3171",
+      "blob_digest": "d63cc86a18fde0a5beeef694ab59f48420a4ec6f",
       "hub_target": "zero-codemode"
     },
     {
@@ -2188,7 +2304,7 @@
       "classification": "shared-candidate",
       "rule": "codemode-host",
       "justification": "path matches reviewed reusable-substrate rule codemode-host",
-      "blob_digest": "385861aa71c6a1281e82f7b434f69d37aec1981c",
+      "blob_digest": "fc9d27f0a245220ebe2ebccaef37fd897379496d",
       "hub_target": "zero-codemode"
     },
     {
@@ -2208,7 +2324,7 @@
       "classification": "shared-candidate",
       "rule": "codemode-host",
       "justification": "path matches reviewed reusable-substrate rule codemode-host",
-      "blob_digest": "3e3e4ae721a630ab2aa78d08c8ae27472b5b2601",
+      "blob_digest": "3804a69c59b4b1957131ccfa71ea4179c066fc37",
       "hub_target": "zero-codemode"
     },
     {
@@ -2238,7 +2354,7 @@
       "classification": "shared-candidate",
       "rule": "codemode-host",
       "justification": "path matches reviewed reusable-substrate rule codemode-host",
-      "blob_digest": "2c8e444f0aa003bb0183bcb4779d5db24880ab4d",
+      "blob_digest": "aec3ad48bdb8c952240f9017502eece924f59432",
       "hub_target": "zero-codemode"
     },
     {
@@ -2298,7 +2414,7 @@
       "classification": "shared-candidate",
       "rule": "codemode-host",
       "justification": "path matches reviewed reusable-substrate rule codemode-host",
-      "blob_digest": "b57ff6dd3444891eb14e66d573655e55ab73612f",
+      "blob_digest": "79ee99c77259477c89a0aa18389826f7405c2354",
       "hub_target": "zero-codemode"
     },
     {
@@ -2338,7 +2454,7 @@
       "classification": "domain-local",
       "rule": "engine-domain-default",
       "justification": "fszero domain implementation has no reviewed shared-substrate signal",
-      "blob_digest": "7bc8b1c41de2e85bdcf3a67b3d134bcb5024be33"
+      "blob_digest": "f2a717c308ad8975468c8b5189addecd7c98bbf1"
     },
     {
       "repo": "fszero",
@@ -2392,7 +2508,7 @@
       "classification": "domain-local",
       "rule": "engine-domain-default",
       "justification": "fszero domain implementation has no reviewed shared-substrate signal",
-      "blob_digest": "cbc9fadacabac495777c6966c3aec3604e802b58"
+      "blob_digest": "5ac091208908112b26b308aa459a3851d97d8c8f"
     },
     {
       "repo": "fszero",
@@ -2565,7 +2681,7 @@
       "classification": "domain-local",
       "rule": "engine-domain-default",
       "justification": "fszero domain implementation has no reviewed shared-substrate signal",
-      "blob_digest": "84107a42ab5d7ab9dad344d1ce030fb7782c8bc6"
+      "blob_digest": "9bdc7b1f6de9d01f11538a9769b8cdb830671f0a"
     },
     {
       "repo": "fszero",
@@ -2894,7 +3010,7 @@
       "classification": "shared-candidate",
       "rule": "raw-worker",
       "justification": "path matches reviewed reusable-substrate rule raw-worker",
-      "blob_digest": "ea959febbf35a4562e3fd6fe64f5483c4124152c",
+      "blob_digest": "8b9a4ac5e54378fba8d19e7d77153c65237fef7f",
       "hub_target": "zero-abi"
     },
     {
@@ -2968,7 +3084,7 @@
       "classification": "domain-local",
       "rule": "engine-domain-default",
       "justification": "fszero domain implementation has no reviewed shared-substrate signal",
-      "blob_digest": "1a0cb676c7ead59234e1ecd6ee22d88548499a9d"
+      "blob_digest": "0d4d789458b57031f3eb6b6183616f5edd868d1a"
     },
     {
       "repo": "fszero",
@@ -2995,7 +3111,7 @@
       "classification": "domain-local",
       "rule": "engine-domain-default",
       "justification": "fszero domain implementation has no reviewed shared-substrate signal",
-      "blob_digest": "699ae2dadd2cad6495893030fd34c543c632f110"
+      "blob_digest": "241eaa25249ff99e36cb9daa39715a2743c3f4f6"
     },
     {
       "repo": "fszero",
@@ -3004,7 +3120,7 @@
       "classification": "shared-candidate",
       "rule": "zeroref",
       "justification": "path matches reviewed reusable-substrate rule zeroref",
-      "blob_digest": "cd9bbd83ba557a6b9097b1ee1a83a6dc3ac6887d",
+      "blob_digest": "0da9f63fecef0c556373fb0dbd786601218e6339",
       "hub_target": "zero-ref"
     },
     {
@@ -3041,7 +3157,7 @@
       "classification": "shared-candidate",
       "rule": "zeroref",
       "justification": "path matches reviewed reusable-substrate rule zeroref",
-      "blob_digest": "9d1093251ee54269e2e9c7da3a3b4fd1c66bc5fe",
+      "blob_digest": "ff3537079d91dd2d407e72b33b26bf30ba463698",
       "hub_target": "zero-ref"
     },
     {
@@ -3078,7 +3194,7 @@
       "classification": "domain-local",
       "rule": "engine-domain-default",
       "justification": "fszero domain implementation has no reviewed shared-substrate signal",
-      "blob_digest": "2b8cdc46d128be5bd54932a41cfc73f47772153e"
+      "blob_digest": "02c9e14f455e27541458b71ce8704cb3edd9581f"
     },
     {
       "repo": "fszero",
@@ -3123,7 +3239,7 @@
       "classification": "domain-local",
       "rule": "engine-domain-default",
       "justification": "fszero domain implementation has no reviewed shared-substrate signal",
-      "blob_digest": "c7c696f0c3a9e6baab0e9e7617f9a31b16f6189f"
+      "blob_digest": "2965c63319936c6310bd39be4d964206e4495667"
     },
     {
       "repo": "fszero",
@@ -3264,7 +3380,7 @@
       "classification": "domain-local",
       "rule": "engine-domain-default",
       "justification": "fszero domain implementation has no reviewed shared-substrate signal",
-      "blob_digest": "743edd94560423f583a973394aa278036d5d0aba"
+      "blob_digest": "1d54b298e13e501e27b17e13f58f77e141a77f71"
     },
     {
       "repo": "fszero",
@@ -3316,32 +3432,12 @@
     },
     {
       "repo": "fszero",
-      "path": "src/host_permit.rs",
-      "language": "Rust",
-      "classification": "shared-candidate",
-      "rule": "machine-permit",
-      "justification": "path matches reviewed reusable-substrate rule machine-permit",
-      "blob_digest": "bc2ee59aae147fd90b874ebb56642134952400a0",
-      "hub_target": "zerostack-machine-permit"
-    },
-    {
-      "repo": "fszero",
       "path": "src/lib.rs",
       "language": "Rust",
       "classification": "domain-local",
       "rule": "engine-domain-default",
       "justification": "fszero domain implementation has no reviewed shared-substrate signal",
-      "blob_digest": "225d08d2d79df9046ecd136ee35d2e91e087fc62"
-    },
-    {
-      "repo": "fszero",
-      "path": "src/mcp_protocol/fastmcp_mode.rs",
-      "language": "Rust",
-      "classification": "shared-candidate",
-      "rule": "codemode-host",
-      "justification": "path matches reviewed reusable-substrate rule codemode-host",
-      "blob_digest": "b4365b9fbf972560243dce84cfee173a5b4e0d37",
-      "hub_target": "zero-codemode"
+      "blob_digest": "8688512cf8af6f534b5e8731f5fe3a66587f0317"
     },
     {
       "repo": "fszero",
@@ -3380,7 +3476,7 @@
       "classification": "shared-candidate",
       "rule": "codemode-host",
       "justification": "path matches reviewed reusable-substrate rule codemode-host",
-      "blob_digest": "4ffc0479820e3a8b3786bac4a043924673c61236",
+      "blob_digest": "a8f1ced6366c04707fcbb2f503a01e1d9410d6eb",
       "hub_target": "zero-codemode"
     },
     {
@@ -3420,7 +3516,7 @@
       "classification": "shared-candidate",
       "rule": "codemode-host",
       "justification": "path matches reviewed reusable-substrate rule codemode-host",
-      "blob_digest": "0e5e55dac81856256ceb91cf5d0d1061681c34e6",
+      "blob_digest": "781119c3b07c7603f869fe53486c69d483f46538",
       "hub_target": "zero-codemode"
     },
     {
@@ -3459,7 +3555,7 @@
       "classification": "domain-local",
       "rule": "engine-domain-default",
       "justification": "fszero domain implementation has no reviewed shared-substrate signal",
-      "blob_digest": "278bd5383086403d4a0b8d43a99ff58d093e5a5d"
+      "blob_digest": "6ae5ee2aa97722db524d8120e5aa8192a724f086"
     },
     {
       "repo": "fszero",
@@ -3477,7 +3573,7 @@
       "classification": "domain-local",
       "rule": "engine-domain-default",
       "justification": "fszero domain implementation has no reviewed shared-substrate signal",
-      "blob_digest": "5b7525362d29722fc1f08e4bbcb6704f1ba34e07"
+      "blob_digest": "dc5d3202134e3d200c5d020ea3a765cbe1ff125f"
     },
     {
       "repo": "fszero",
@@ -3495,7 +3591,7 @@
       "classification": "domain-local",
       "rule": "engine-domain-default",
       "justification": "fszero domain implementation has no reviewed shared-substrate signal",
-      "blob_digest": "f915dfa6f7549647f3cdb66a2cf3e3001d43dc85"
+      "blob_digest": "bfd000cef5311362ad75d0be5295f3faf5b94116"
     },
     {
       "repo": "fszero",
@@ -3644,7 +3740,7 @@
       "classification": "shared-candidate",
       "rule": "codemode-host",
       "justification": "path matches reviewed reusable-substrate rule codemode-host",
-      "blob_digest": "23717a18bca247104965bc5fe1968e84fb08989e",
+      "blob_digest": "4db176748acde244b33be436788c05401e6170e6",
       "hub_target": "zero-codemode"
     },
     {
@@ -3684,7 +3780,7 @@
       "classification": "shared-candidate",
       "rule": "codemode-host",
       "justification": "path matches reviewed reusable-substrate rule codemode-host",
-      "blob_digest": "38339819b0cb2d6144fd48b8b76c539f2bb3d6b1",
+      "blob_digest": "24c42f15a0444952cf0851a9bafba7f4242447ed",
       "hub_target": "zero-codemode"
     },
     {
@@ -3767,7 +3863,7 @@
       "classification": "domain-local",
       "rule": "engine-domain-default",
       "justification": "fszero domain implementation has no reviewed shared-substrate signal",
-      "blob_digest": "7381a30b9d154a679388af111ecf4658399aef84"
+      "blob_digest": "10fef0d70fda4185967e45a7c7763a0288f1aae4"
     },
     {
       "repo": "fszero",
@@ -3813,7 +3909,7 @@
       "classification": "domain-local",
       "rule": "engine-domain-default",
       "justification": "fszero domain implementation has no reviewed shared-substrate signal",
-      "blob_digest": "61ad0a8e20c6cc15f69278c22a3d87f46de9b27a"
+      "blob_digest": "1e8d525c76902b7517f6c3678690d9cecdf533df"
     },
     {
       "repo": "fszero",
@@ -3849,7 +3945,7 @@
       "classification": "domain-local",
       "rule": "engine-domain-default",
       "justification": "fszero domain implementation has no reviewed shared-substrate signal",
-      "blob_digest": "1f290fc363a95ab5af7a79b30ec19625a5bbb754"
+      "blob_digest": "0beae6237d1dbc4a46e90a41ff617640cd28df0e"
     },
     {
       "repo": "fszero",
@@ -3858,17 +3954,7 @@
       "classification": "domain-local",
       "rule": "engine-domain-default",
       "justification": "fszero domain implementation has no reviewed shared-substrate signal",
-      "blob_digest": "5450551e2a5bd7619bafc44ed6726e9616c04cc0"
-    },
-    {
-      "repo": "fszero",
-      "path": "tests/host_permit.rs",
-      "language": "Rust",
-      "classification": "shared-candidate",
-      "rule": "machine-permit",
-      "justification": "path matches reviewed reusable-substrate rule machine-permit",
-      "blob_digest": "110b4b98a71dba4312830223ea055e7b3619692e",
-      "hub_target": "zerostack-machine-permit"
+      "blob_digest": "2a917a732e2741b87a9705f807328b35ebad1479"
     },
     {
       "repo": "fszero",
@@ -3877,7 +3963,7 @@
       "classification": "domain-local",
       "rule": "engine-domain-default",
       "justification": "fszero domain implementation has no reviewed shared-substrate signal",
-      "blob_digest": "5b402ce7e871bc202ada25dd6a33a040bada63bf"
+      "blob_digest": "77dcb890d0714f8ee283bdf4f4af3e3b2322f7dc"
     },
     {
       "repo": "fszero",
@@ -3942,7 +4028,7 @@
       "classification": "domain-local",
       "rule": "engine-domain-default",
       "justification": "fszero domain implementation has no reviewed shared-substrate signal",
-      "blob_digest": "d691596661092332e4e87cefc0e719a1825b87cf"
+      "blob_digest": "1bcdbbb39f0053c08ca39ca5308a568a5e91777a"
     },
     {
       "repo": "fszero",
@@ -3998,7 +4084,7 @@
       "classification": "domain-local",
       "rule": "engine-domain-default",
       "justification": "fszero domain implementation has no reviewed shared-substrate signal",
-      "blob_digest": "c565f87448975e2b20912ae2dedd220c5184f753"
+      "blob_digest": "4866df0a4fdf48718f5021ff94aa93ad7db5bfc5"
     },
     {
       "repo": "fszero",
@@ -4016,7 +4102,7 @@
       "classification": "domain-local",
       "rule": "engine-domain-default",
       "justification": "fszero domain implementation has no reviewed shared-substrate signal",
-      "blob_digest": "8748c2806b7391f7a1cfc2127796c710ba4a873f"
+      "blob_digest": "38cb25cb4e139e5d812b7c976f6036d461018250"
     },
     {
       "repo": "fszero",
@@ -4216,7 +4302,7 @@
       "classification": "domain-local",
       "rule": "engine-domain-default",
       "justification": "fszero domain implementation has no reviewed shared-substrate signal",
-      "blob_digest": "9a6b00b0ac6c8cf4da31eb3b790e3de3ee1cf05c"
+      "blob_digest": "1149fc9179972bc427fd4968f7bd59d3e9948f68"
     },
     {
       "repo": "fszero",
@@ -4252,7 +4338,7 @@
       "classification": "domain-local",
       "rule": "engine-domain-default",
       "justification": "fszero domain implementation has no reviewed shared-substrate signal",
-      "blob_digest": "cac8354aed2f1a24cbc754ad7462975ae99c8741"
+      "blob_digest": "306c79cd88f7a9625414db92b1b177621530188f"
     },
     {
       "repo": "fszero",
@@ -4307,7 +4393,7 @@
       "classification": "domain-local",
       "rule": "engine-domain-default",
       "justification": "fszero domain implementation has no reviewed shared-substrate signal",
-      "blob_digest": "ae174ea299feec4b6d14752a85f2bfcee6e1face"
+      "blob_digest": "c51cdefeab17ef85a654823a9f7a3d5d7a7bb93f"
     },
     {
       "repo": "fszero",
@@ -4607,7 +4693,7 @@
       "classification": "domain-local",
       "rule": "engine-domain-default",
       "justification": "graphzero domain implementation has no reviewed shared-substrate signal",
-      "blob_digest": "866262b44080fedd1872093701e633f34d7a9019"
+      "blob_digest": "beca86e75a4ce80566e4d9a9ecf99e3f965ae755"
     },
     {
       "repo": "graphzero",
@@ -4625,7 +4711,7 @@
       "classification": "domain-local",
       "rule": "engine-domain-default",
       "justification": "graphzero domain implementation has no reviewed shared-substrate signal",
-      "blob_digest": "4029636990ebb3e8da416a83821ad8a0aae6bab7"
+      "blob_digest": "8d927b959f30ff3ae9788e15d1b2e09cf2fe696a"
     },
     {
       "repo": "graphzero",
@@ -4652,7 +4738,7 @@
       "classification": "domain-local",
       "rule": "engine-domain-default",
       "justification": "graphzero domain implementation has no reviewed shared-substrate signal",
-      "blob_digest": "50c2f910a1a999ff3bcd47456c78c0b79394eb01"
+      "blob_digest": "5cc1126fb4063ca0336e95b68320eabc7062734f"
     },
     {
       "repo": "graphzero",
@@ -4683,22 +4769,12 @@
     },
     {
       "repo": "graphzero",
-      "path": "crates/graphzero-cli/src/bin/graphzero_codemode.rs",
-      "language": "Rust",
-      "classification": "thin-adapter",
-      "rule": "surface-entrypoint",
-      "justification": "surface entrypoint retains engine dispatch only",
-      "blob_digest": "0879906f2458ea41e5e3d580237fd94a705db904",
-      "hub_target": "zero-codemode"
-    },
-    {
-      "repo": "graphzero",
       "path": "crates/graphzero-cli/src/bin/graphzero_mcp.rs",
       "language": "Rust",
       "classification": "thin-adapter",
       "rule": "surface-entrypoint",
       "justification": "surface entrypoint retains engine dispatch only",
-      "blob_digest": "5da0c7831a622c8a6586161c7fd925750068a237",
+      "blob_digest": "7d834868d6beba7bc5a3704a1e187f228c039124",
       "hub_target": "zero-codemode"
     },
     {
@@ -4708,7 +4784,7 @@
       "classification": "domain-local",
       "rule": "engine-domain-default",
       "justification": "graphzero domain implementation has no reviewed shared-substrate signal",
-      "blob_digest": "db656de8e1c2bdea4b489ecb8fbbb0929e7cf773"
+      "blob_digest": "c16b828102525649b8ba91bd5e2353377468f1d7"
     },
     {
       "repo": "graphzero",
@@ -4717,7 +4793,7 @@
       "classification": "domain-local",
       "rule": "engine-domain-default",
       "justification": "graphzero domain implementation has no reviewed shared-substrate signal",
-      "blob_digest": "c74afd26d102866c1c2bde92b753f809141a9beb"
+      "blob_digest": "0fc12bb10e5e7164c35b03c6c0be75cb84d7d6bb"
     },
     {
       "repo": "graphzero",
@@ -4780,7 +4856,7 @@
       "classification": "domain-local",
       "rule": "engine-domain-default",
       "justification": "graphzero domain implementation has no reviewed shared-substrate signal",
-      "blob_digest": "309c20750980f3893f4cc7769aaf62cffc312b28"
+      "blob_digest": "39c7c440bfdadf82a2fba4dd393af41f1be9b674"
     },
     {
       "repo": "graphzero",
@@ -4789,7 +4865,7 @@
       "classification": "domain-local",
       "rule": "engine-domain-default",
       "justification": "graphzero domain implementation has no reviewed shared-substrate signal",
-      "blob_digest": "53131ca27a3f38d0d22dd9589caac30ffce8b65f"
+      "blob_digest": "819eda24a73b3ac14f07ed2f86f65451997cf010"
     },
     {
       "repo": "graphzero",
@@ -4807,7 +4883,7 @@
       "classification": "shared-candidate",
       "rule": "codemode-host",
       "justification": "path matches reviewed reusable-substrate rule codemode-host",
-      "blob_digest": "8a291f63805af5f744f415aa4ddc110274d8a696",
+      "blob_digest": "4a98875ad4e0758ec9355cfd0e52f8f8b41d85c0",
       "hub_target": "zero-codemode"
     },
     {
@@ -4817,7 +4893,7 @@
       "classification": "shared-candidate",
       "rule": "codemode-host",
       "justification": "path matches reviewed reusable-substrate rule codemode-host",
-      "blob_digest": "718b8f94baa9d24c77fc00079274889f5250562a",
+      "blob_digest": "881a5d3fafb282af28e2f0a283d0bd0464f25ade",
       "hub_target": "zero-codemode"
     },
     {
@@ -4845,7 +4921,7 @@
       "classification": "domain-local",
       "rule": "engine-domain-default",
       "justification": "graphzero domain implementation has no reviewed shared-substrate signal",
-      "blob_digest": "1ef09dc854add4908dab8b7df026476edda5da51"
+      "blob_digest": "c10fd4b153a3ac9ecfc713e8bdc98379ea81eeeb"
     },
     {
       "repo": "graphzero",
@@ -4854,7 +4930,7 @@
       "classification": "domain-local",
       "rule": "engine-domain-default",
       "justification": "graphzero domain implementation has no reviewed shared-substrate signal",
-      "blob_digest": "4fe590053431d78eb72571c41b9f1e7b2adfa6f8"
+      "blob_digest": "67e51d7bb6cb1d84c8798ae6388252ac90f963a5"
     },
     {
       "repo": "graphzero",
@@ -4882,7 +4958,7 @@
       "classification": "domain-local",
       "rule": "engine-domain-default",
       "justification": "graphzero domain implementation has no reviewed shared-substrate signal",
-      "blob_digest": "c9c5dc86b22f32259a132e1cfdf49dcf507e5399"
+      "blob_digest": "e36196b801848fe83f4a8b845c33e9ae41504635"
     },
     {
       "repo": "graphzero",
@@ -5009,7 +5085,7 @@
       "classification": "domain-local",
       "rule": "engine-domain-default",
       "justification": "graphzero domain implementation has no reviewed shared-substrate signal",
-      "blob_digest": "c27ee6763802390579779333ea33eaeabc8657b1"
+      "blob_digest": "e98d73f57b21d57353c47633ea0769a4ba3f14e5"
     },
     {
       "repo": "graphzero",
@@ -5072,7 +5148,7 @@
       "classification": "domain-local",
       "rule": "engine-domain-default",
       "justification": "graphzero domain implementation has no reviewed shared-substrate signal",
-      "blob_digest": "ed57197360845f04c351fd47c4ba097649d5fcb6"
+      "blob_digest": "3d2f657dfccd181c2c48046394d2167e57f0c384"
     },
     {
       "repo": "graphzero",
@@ -5081,7 +5157,7 @@
       "classification": "domain-local",
       "rule": "engine-domain-default",
       "justification": "graphzero domain implementation has no reviewed shared-substrate signal",
-      "blob_digest": "04cd8123913db7da1746ac21de06c3eda13335fe"
+      "blob_digest": "893a42fdf4d07fa86bd9c6113f9a8c61d6357adf"
     },
     {
       "repo": "graphzero",
@@ -5108,7 +5184,7 @@
       "classification": "domain-local",
       "rule": "engine-domain-default",
       "justification": "graphzero domain implementation has no reviewed shared-substrate signal",
-      "blob_digest": "042af8f33047b7ff6c6c7f02d2783001846f542a"
+      "blob_digest": "e2002152e3d303291de7233e85db445a249f0a25"
     },
     {
       "repo": "graphzero",
@@ -5240,22 +5316,12 @@
     },
     {
       "repo": "graphzero",
-      "path": "crates/graphzero-codemode/src/lib.rs",
-      "language": "Rust",
-      "classification": "shared-candidate",
-      "rule": "codemode-host",
-      "justification": "path matches reviewed reusable-substrate rule codemode-host",
-      "blob_digest": "54ae930c7d83e577707e01998c2613eff1c9ec3a",
-      "hub_target": "zero-codemode"
-    },
-    {
-      "repo": "graphzero",
       "path": "crates/graphzero-codemode/src/main.rs",
       "language": "Rust",
       "classification": "thin-adapter",
       "rule": "surface-entrypoint",
       "justification": "surface entrypoint retains engine dispatch only",
-      "blob_digest": "74d6670a23f512c2ddd789b13f09e16746bb84e4",
+      "blob_digest": "681147cfa2b0cab032c71e80c245e9fb9c1a3365",
       "hub_target": "zero-codemode"
     },
     {
@@ -5545,7 +5611,7 @@
       "classification": "domain-local",
       "rule": "engine-domain-default",
       "justification": "graphzero domain implementation has no reviewed shared-substrate signal",
-      "blob_digest": "8cd8603438fb082c208a05ee8d52e8794de58dad"
+      "blob_digest": "3d8f3a4825ef1610a4cdad2de8e03ec0e01c3ebc"
     },
     {
       "repo": "graphzero",
@@ -5590,7 +5656,7 @@
       "classification": "domain-local",
       "rule": "engine-domain-default",
       "justification": "graphzero domain implementation has no reviewed shared-substrate signal",
-      "blob_digest": "5a160728650da781b961d6d59b2cc48c689b56d4"
+      "blob_digest": "b2f2ccf7fd59f96403588bd2f258677c79ca39b8"
     },
     {
       "repo": "graphzero",
@@ -5599,7 +5665,7 @@
       "classification": "thin-adapter",
       "rule": "surface-entrypoint",
       "justification": "surface entrypoint retains engine dispatch only",
-      "blob_digest": "f04bf3a4f0478b7bf9ca0bb37b0ce4eb379ce591",
+      "blob_digest": "7f7e0c9627b5d407b126dd2c839be9d501a3eeec",
       "hub_target": "zero-codemode"
     },
     {
@@ -5764,7 +5830,7 @@
       "classification": "domain-local",
       "rule": "engine-domain-default",
       "justification": "graphzero domain implementation has no reviewed shared-substrate signal",
-      "blob_digest": "fdcd96cc27534e197c5006ddf757af9b5baab590"
+      "blob_digest": "dac5fa8592230c4e9a4452d4e98284fcbe64fd6f"
     },
     {
       "repo": "graphzero",
@@ -5773,7 +5839,7 @@
       "classification": "shared-candidate",
       "rule": "codemode-host",
       "justification": "path matches reviewed reusable-substrate rule codemode-host",
-      "blob_digest": "681d0ba18f9d66fa8a49edb2aa8d6e1665f6ee19",
+      "blob_digest": "189aaff9687a350c3de3129d1937c5e253962108",
       "hub_target": "zero-codemode"
     },
     {
@@ -5783,7 +5849,7 @@
       "classification": "shared-candidate",
       "rule": "codemode-host",
       "justification": "path matches reviewed reusable-substrate rule codemode-host",
-      "blob_digest": "1636796b93a60720fa85d825d1f6987ef146542b",
+      "blob_digest": "9543a0c0846b1360e286d01570fad9d1c625946e",
       "hub_target": "zero-codemode"
     },
     {
@@ -5793,7 +5859,7 @@
       "classification": "shared-candidate",
       "rule": "codemode-host",
       "justification": "path matches reviewed reusable-substrate rule codemode-host",
-      "blob_digest": "5504e746995100f3caf9778cad5ee817450973f4",
+      "blob_digest": "80876e55e2efc8581b77b343252a535c4668fbfe",
       "hub_target": "zero-codemode"
     },
     {
@@ -5803,7 +5869,7 @@
       "classification": "shared-candidate",
       "rule": "codemode-host",
       "justification": "path matches reviewed reusable-substrate rule codemode-host",
-      "blob_digest": "7a8a7687cbd620d9da518213a16f071dae5c00a9",
+      "blob_digest": "73bf7e37adc117bcd0d34ea71ecaf9a52ab4263b",
       "hub_target": "zero-codemode"
     },
     {
@@ -5813,7 +5879,7 @@
       "classification": "shared-candidate",
       "rule": "codemode-host",
       "justification": "path matches reviewed reusable-substrate rule codemode-host",
-      "blob_digest": "7c12c56df7c718b6e446278351ea0c2028c128e1",
+      "blob_digest": "013a4fcad6091ed43ea4d5ef4cd14dffadb2757c",
       "hub_target": "zero-codemode"
     },
     {
@@ -5823,18 +5889,8 @@
       "classification": "shared-candidate",
       "rule": "codemode-host",
       "justification": "path matches reviewed reusable-substrate rule codemode-host",
-      "blob_digest": "2c6f0f00b5f1001aad62c1d0a939b2058b04c6f6",
+      "blob_digest": "274ee84ef8f7d6fdb5196a19f6d3674882646ed7",
       "hub_target": "zero-codemode"
-    },
-    {
-      "repo": "graphzero",
-      "path": "crates/graphzero-query/src/codemode/host_permit.rs",
-      "language": "Rust",
-      "classification": "shared-candidate",
-      "rule": "machine-permit",
-      "justification": "path matches reviewed reusable-substrate rule machine-permit",
-      "blob_digest": "ce3d077fc3371c5db659ce87710297edbd137afb",
-      "hub_target": "zerostack-machine-permit"
     },
     {
       "repo": "graphzero",
@@ -5848,32 +5904,12 @@
     },
     {
       "repo": "graphzero",
-      "path": "crates/graphzero-query/src/codemode/quickjs.rs",
-      "language": "Rust",
-      "classification": "shared-candidate",
-      "rule": "codemode-host",
-      "justification": "path matches reviewed reusable-substrate rule codemode-host",
-      "blob_digest": "4eec9495a53ef3284db8b3e9030f2f2917d3684c",
-      "hub_target": "zero-codemode"
-    },
-    {
-      "repo": "graphzero",
-      "path": "crates/graphzero-query/src/codemode/quickjs_stub.rs",
-      "language": "Rust",
-      "classification": "shared-candidate",
-      "rule": "codemode-host",
-      "justification": "path matches reviewed reusable-substrate rule codemode-host",
-      "blob_digest": "b183f1f141ffea9bed696617bcca42c02d66644d",
-      "hub_target": "zero-codemode"
-    },
-    {
-      "repo": "graphzero",
       "path": "crates/graphzero-query/src/codemode/response.rs",
       "language": "Rust",
       "classification": "shared-candidate",
       "rule": "codemode-host",
       "justification": "path matches reviewed reusable-substrate rule codemode-host",
-      "blob_digest": "5feabcaca235d97f7e8d9ee5eb07cb6131ffea96",
+      "blob_digest": "2b2b56cdca2e719de89c40bcbf1df7daabc12412",
       "hub_target": "zero-codemode"
     },
     {
@@ -5883,7 +5919,7 @@
       "classification": "shared-candidate",
       "rule": "codemode-host",
       "justification": "path matches reviewed reusable-substrate rule codemode-host",
-      "blob_digest": "ae5b2cc5cafbae03dd2c788a087e1059e96a59f7",
+      "blob_digest": "b38675723d1c19781eea986d441a86444cfc77f8",
       "hub_target": "zero-codemode"
     },
     {
@@ -5903,7 +5939,7 @@
       "classification": "shared-candidate",
       "rule": "codemode-host",
       "justification": "path matches reviewed reusable-substrate rule codemode-host",
-      "blob_digest": "cbaeac9882ba324d6a52978b280b3f90970de582",
+      "blob_digest": "ae13a783a7bf188bddfad4ad69afb3368736dd05",
       "hub_target": "zero-codemode"
     },
     {
@@ -5923,7 +5959,7 @@
       "classification": "domain-local",
       "rule": "engine-domain-default",
       "justification": "graphzero domain implementation has no reviewed shared-substrate signal",
-      "blob_digest": "25912d91bc968727b809864867e0066cd97919ed"
+      "blob_digest": "f6f6498e3b63e50924b6c120032be5c7acdef8a9"
     },
     {
       "repo": "graphzero",
@@ -5941,7 +5977,7 @@
       "classification": "domain-local",
       "rule": "engine-domain-default",
       "justification": "graphzero domain implementation has no reviewed shared-substrate signal",
-      "blob_digest": "f35ad415f190ab5f8031f2f5a1621733da77abb9"
+      "blob_digest": "727888120601ac432fa99f5deb9994c7f61e1547"
     },
     {
       "repo": "graphzero",
@@ -5950,7 +5986,7 @@
       "classification": "domain-local",
       "rule": "engine-domain-default",
       "justification": "graphzero domain implementation has no reviewed shared-substrate signal",
-      "blob_digest": "247da66bb3b7ec498b2ee524ab4c0ae22f67efbc"
+      "blob_digest": "16f2f3d4279d24a5e6d2d42af3a31d62d14f0736"
     },
     {
       "repo": "graphzero",
@@ -5959,7 +5995,7 @@
       "classification": "domain-local",
       "rule": "engine-domain-default",
       "justification": "graphzero domain implementation has no reviewed shared-substrate signal",
-      "blob_digest": "a40d810813c288ac07e6abb6cf18016335ee78e4"
+      "blob_digest": "c5ff09cfd19771455cc1d844344207ce01537694"
     },
     {
       "repo": "graphzero",
@@ -5968,7 +6004,7 @@
       "classification": "domain-local",
       "rule": "engine-domain-default",
       "justification": "graphzero domain implementation has no reviewed shared-substrate signal",
-      "blob_digest": "a7179c65f6b9ebd779768b9c93d85792da36df51"
+      "blob_digest": "274c006f6f73d4e57009c4cda5b305c3812e6d70"
     },
     {
       "repo": "graphzero",
@@ -5986,17 +6022,7 @@
       "classification": "domain-local",
       "rule": "engine-domain-default",
       "justification": "graphzero domain implementation has no reviewed shared-substrate signal",
-      "blob_digest": "0e601ec52672a28e863c45aa65507a7a30ff92ae"
-    },
-    {
-      "repo": "graphzero",
-      "path": "crates/graphzero-query/src/mcp_frame.rs",
-      "language": "Rust",
-      "classification": "shared-candidate",
-      "rule": "codemode-host",
-      "justification": "path matches reviewed reusable-substrate rule codemode-host",
-      "blob_digest": "586961fbb8c5f461d89d1c51b8e3ee15ea80f491",
-      "hub_target": "zero-codemode"
+      "blob_digest": "6eb80c0043043b4614dd02f96bcd8d2dca938476"
     },
     {
       "repo": "graphzero",
@@ -6014,7 +6040,7 @@
       "classification": "shared-candidate",
       "rule": "operation-abi",
       "justification": "path matches reviewed reusable-substrate rule operation-abi",
-      "blob_digest": "5d7eefb66a68b2fa859811a36e1e2b9e79dcdc82",
+      "blob_digest": "b88943940cd55ab2c16b95d4a19982e8a58a934f",
       "hub_target": "zero-abi"
     },
     {
@@ -6034,7 +6060,7 @@
       "classification": "shared-candidate",
       "rule": "operation-abi",
       "justification": "path matches reviewed reusable-substrate rule operation-abi",
-      "blob_digest": "f7aad0a156b33cc09ee73e9e5c59760a49a82974",
+      "blob_digest": "fd70a1706d416e3f057b042da2c06c4f622647cd",
       "hub_target": "zero-abi"
     },
     {
@@ -6044,7 +6070,7 @@
       "classification": "shared-candidate",
       "rule": "operation-abi",
       "justification": "path matches reviewed reusable-substrate rule operation-abi",
-      "blob_digest": "c7ac0c407d1451e8508a58578bd5ce85ae018be6",
+      "blob_digest": "ddf3a9127190fb72a5010c9ef3be0d78d9a67cd9",
       "hub_target": "zero-abi"
     },
     {
@@ -6054,7 +6080,7 @@
       "classification": "shared-candidate",
       "rule": "operation-abi",
       "justification": "path matches reviewed reusable-substrate rule operation-abi",
-      "blob_digest": "97d7af23ef9a4cb2b20c6ff02cd6e95ad5d70d9d",
+      "blob_digest": "5352498239242fb087ab5d44d75e648a32d5d705",
       "hub_target": "zero-abi"
     },
     {
@@ -6074,7 +6100,7 @@
       "classification": "shared-candidate",
       "rule": "operation-abi",
       "justification": "path matches reviewed reusable-substrate rule operation-abi",
-      "blob_digest": "39aa8b242f81a38b76384d1f5980c2448ad0b71a",
+      "blob_digest": "7480b94bced7a31ecfcdbc721efc40499160b79f",
       "hub_target": "zero-abi"
     },
     {
@@ -6093,7 +6119,7 @@
       "classification": "domain-local",
       "rule": "engine-domain-default",
       "justification": "graphzero domain implementation has no reviewed shared-substrate signal",
-      "blob_digest": "4db198b01632682649b02d8c4f6b02a6189aa2f3"
+      "blob_digest": "fcdee200c7860509fa03a30fb824f203128b6cd0"
     },
     {
       "repo": "graphzero",
@@ -6111,7 +6137,7 @@
       "classification": "domain-local",
       "rule": "engine-domain-default",
       "justification": "graphzero domain implementation has no reviewed shared-substrate signal",
-      "blob_digest": "b6a3673413f7136cef5d1b4e269c361517f53c5d"
+      "blob_digest": "28b0ed6f9384e1082c64f0caff159a4671f5e607"
     },
     {
       "repo": "graphzero",
@@ -6129,7 +6155,7 @@
       "classification": "domain-local",
       "rule": "engine-domain-default",
       "justification": "graphzero domain implementation has no reviewed shared-substrate signal",
-      "blob_digest": "1b33f30a82aca211b12deb93686ee716e416a131"
+      "blob_digest": "d2acf52fdeab1452ea58125e44789cfc918d5d14"
     },
     {
       "repo": "graphzero",
@@ -6147,7 +6173,7 @@
       "classification": "domain-local",
       "rule": "engine-domain-default",
       "justification": "graphzero domain implementation has no reviewed shared-substrate signal",
-      "blob_digest": "1e151813ddc63b94ca8dfd88d91f1f52ad5eeb72"
+      "blob_digest": "c5d85609759a259c03aeb0062ae789350e811073"
     },
     {
       "repo": "graphzero",
@@ -6175,7 +6201,7 @@
       "classification": "domain-local",
       "rule": "engine-domain-default",
       "justification": "graphzero domain implementation has no reviewed shared-substrate signal",
-      "blob_digest": "cebef8941e9108b934ea418c95bd577964ba35cc"
+      "blob_digest": "2c0a9fc5344e37c1a672200928173245b53107cf"
     },
     {
       "repo": "graphzero",
@@ -6184,7 +6210,7 @@
       "classification": "domain-local",
       "rule": "engine-domain-default",
       "justification": "graphzero domain implementation has no reviewed shared-substrate signal",
-      "blob_digest": "bd328160b89ac5fe62ce855a0da3ecace42432c3"
+      "blob_digest": "c4ee73b521b73de821e7aaa7b88c6673cbed08b1"
     },
     {
       "repo": "graphzero",
@@ -6193,7 +6219,7 @@
       "classification": "domain-local",
       "rule": "engine-domain-default",
       "justification": "graphzero domain implementation has no reviewed shared-substrate signal",
-      "blob_digest": "8688d081eaf5ed60b4959070dace124be9a4348c"
+      "blob_digest": "892b9a6b1f5f8a5100ce3093118d49efbb139566"
     },
     {
       "repo": "graphzero",
@@ -6212,7 +6238,16 @@
       "classification": "domain-local",
       "rule": "engine-domain-default",
       "justification": "graphzero domain implementation has no reviewed shared-substrate signal",
-      "blob_digest": "dacad72bc3e22066423b43bc5d091a42625c0385"
+      "blob_digest": "aee28f1a1092059e3a291a7aaa0499845cd20ab6"
+    },
+    {
+      "repo": "graphzero",
+      "path": "crates/graphzero-query/src/world_envelope.rs",
+      "language": "Rust",
+      "classification": "domain-local",
+      "rule": "engine-domain-default",
+      "justification": "graphzero domain implementation has no reviewed shared-substrate signal",
+      "blob_digest": "cfa707152290453ae299d6cd1bcb897601bb065c"
     },
     {
       "repo": "graphzero",
@@ -6230,7 +6265,7 @@
       "classification": "shared-candidate",
       "rule": "codemode-host",
       "justification": "path matches reviewed reusable-substrate rule codemode-host",
-      "blob_digest": "6fcd4c56e9efae949e44a25e91a45a0c9ddf72fb",
+      "blob_digest": "db54c0830fcb0ada56f4df1a84324fb5b563b711",
       "hub_target": "zero-codemode"
     },
     {
@@ -6240,7 +6275,7 @@
       "classification": "shared-candidate",
       "rule": "codemode-host",
       "justification": "path matches reviewed reusable-substrate rule codemode-host",
-      "blob_digest": "e3595efeb1823f666cb1f9c1efd30c734d1a8173",
+      "blob_digest": "693619a83ce4210ba6c1b32e3d39622a896b9883",
       "hub_target": "zero-codemode"
     },
     {
@@ -6287,7 +6322,7 @@
       "classification": "domain-local",
       "rule": "engine-domain-default",
       "justification": "graphzero domain implementation has no reviewed shared-substrate signal",
-      "blob_digest": "4afc42fb49d0674e9c147b326b98f4472f4de889"
+      "blob_digest": "ec24b6cb4cafd588ac46d50eed30ec293df4cbd9"
     },
     {
       "repo": "graphzero",
@@ -6359,7 +6394,7 @@
       "classification": "domain-local",
       "rule": "engine-domain-default",
       "justification": "graphzero domain implementation has no reviewed shared-substrate signal",
-      "blob_digest": "a1a74a16add26004c1bfb9c1d615a99cafe9c021"
+      "blob_digest": "d881e51af55b86a649c35ead089c0accf94e5d31"
     },
     {
       "repo": "graphzero",
@@ -6386,7 +6421,7 @@
       "classification": "domain-local",
       "rule": "engine-domain-default",
       "justification": "graphzero domain implementation has no reviewed shared-substrate signal",
-      "blob_digest": "273273f1a4cf2d6430baf88814aa973512989a81"
+      "blob_digest": "2bf7ec4f44f3a838d92f49f8c159c8b16bb14ee6"
     },
     {
       "repo": "graphzero",
@@ -6423,7 +6458,7 @@
       "classification": "domain-local",
       "rule": "engine-domain-default",
       "justification": "graphzero domain implementation has no reviewed shared-substrate signal",
-      "blob_digest": "126ade743d3e3a1273798bc0e6c0b37803b5ad87"
+      "blob_digest": "62add11289c644572d0d66efbdc6f73771b98f84"
     },
     {
       "repo": "graphzero",
@@ -6432,7 +6467,7 @@
       "classification": "domain-local",
       "rule": "engine-domain-default",
       "justification": "graphzero domain implementation has no reviewed shared-substrate signal",
-      "blob_digest": "3a06dafbec1204b85afa559577575578db455166"
+      "blob_digest": "33af0e4f8062cae6f302139cb2b4fd22d2adcc95"
     },
     {
       "repo": "graphzero",
@@ -6874,7 +6909,7 @@
       "classification": "domain-local",
       "rule": "engine-domain-default",
       "justification": "graphzero domain implementation has no reviewed shared-substrate signal",
-      "blob_digest": "8b1354a9aa066092051811472c3b381612236790"
+      "blob_digest": "76d9dd158f466ffc030fd5b9376b16ecf2ff0d35"
     },
     {
       "repo": "graphzero",
@@ -6892,7 +6927,7 @@
       "classification": "domain-local",
       "rule": "engine-domain-default",
       "justification": "graphzero domain implementation has no reviewed shared-substrate signal",
-      "blob_digest": "736d579b242759ed69cf0602207c15822757b546"
+      "blob_digest": "9450dbe27411700caca4056bdeef12ff4fe19c46"
     },
     {
       "repo": "graphzero",
@@ -6955,7 +6990,7 @@
       "classification": "domain-local",
       "rule": "engine-domain-default",
       "justification": "graphzero domain implementation has no reviewed shared-substrate signal",
-      "blob_digest": "9740cd1946fe93b28950186dfe46d224ad17d8bb"
+      "blob_digest": "ed728efce9c212fb7917f1d7c213e2fd2ca8139a"
     },
     {
       "repo": "graphzero",
@@ -6982,7 +7017,7 @@
       "classification": "domain-local",
       "rule": "engine-domain-default",
       "justification": "graphzero domain implementation has no reviewed shared-substrate signal",
-      "blob_digest": "50a43faaa6d700ceed2c90a2ba7b5d020919f4b2"
+      "blob_digest": "9a224b451d0f4492c2fac2e522e5eb8a1e7d96e2"
     },
     {
       "repo": "graphzero",
@@ -6991,7 +7026,16 @@
       "classification": "domain-local",
       "rule": "engine-domain-default",
       "justification": "graphzero domain implementation has no reviewed shared-substrate signal",
-      "blob_digest": "29a15843e66ee5607aabca68838d3cb327324ebe"
+      "blob_digest": "65e0283b3bc7b5c7a6b71eadb38f1646783bb368"
+    },
+    {
+      "repo": "graphzero",
+      "path": "crates/graphzero-store/src/store/durability_receipt.rs",
+      "language": "Rust",
+      "classification": "domain-local",
+      "rule": "engine-domain-default",
+      "justification": "graphzero domain implementation has no reviewed shared-substrate signal",
+      "blob_digest": "9be59e8224ae9ce561b8b2d6554583089ae3ca29"
     },
     {
       "repo": "graphzero",
@@ -7082,7 +7126,7 @@
       "classification": "domain-local",
       "rule": "engine-domain-default",
       "justification": "graphzero domain implementation has no reviewed shared-substrate signal",
-      "blob_digest": "e69d3628b9e6fe573e83ddc50ed1afd89f219633"
+      "blob_digest": "96ce594c86a8b12617fb6d7d92b14cd6b38a460b"
     },
     {
       "repo": "graphzero",
@@ -7145,7 +7189,7 @@
       "classification": "domain-local",
       "rule": "engine-domain-default",
       "justification": "graphzero domain implementation has no reviewed shared-substrate signal",
-      "blob_digest": "b62958ded445a5232f618c155331891654151636"
+      "blob_digest": "f41de3eb09035ba824fb02b891c15450e8043099"
     },
     {
       "repo": "graphzero",
@@ -7217,7 +7261,7 @@
       "classification": "domain-local",
       "rule": "engine-domain-default",
       "justification": "graphzero domain implementation has no reviewed shared-substrate signal",
-      "blob_digest": "37477d5df5a39dc806ac68d8d6ebc47273e83dda"
+      "blob_digest": "03b5bf8ad3e80051f9c3d80365703c8bc26e2df9"
     },
     {
       "repo": "graphzero",
@@ -7425,7 +7469,7 @@
       "classification": "shared-candidate",
       "rule": "store-cas",
       "justification": "path matches reviewed reusable-substrate rule store-cas",
-      "blob_digest": "d1f6f965457804037bbfffb7ee1825b4adec16f9",
+      "blob_digest": "01b41d07008991002fdd5442623e80f86d3b9d5f",
       "hub_target": "zero-store"
     },
     {
@@ -7634,6 +7678,15 @@
     },
     {
       "repo": "graphzero",
+      "path": "crates/graphzero-store/tests/durability_receipt_contract.rs",
+      "language": "Rust",
+      "classification": "domain-local",
+      "rule": "engine-domain-default",
+      "justification": "graphzero domain implementation has no reviewed shared-substrate signal",
+      "blob_digest": "36b1ae80ea87bb7db0f61364f503e1a4e3d73a2d"
+    },
+    {
+      "repo": "graphzero",
       "path": "crates/graphzero-store/tests/entity_cross_view_dedup_gate.rs",
       "language": "Rust",
       "classification": "domain-local",
@@ -7784,7 +7837,7 @@
       "classification": "domain-local",
       "rule": "engine-domain-default",
       "justification": "graphzero domain implementation has no reviewed shared-substrate signal",
-      "blob_digest": "d0f3c2427cb974fd9eb02f60c7fd9a64e939c018"
+      "blob_digest": "c825ff94cd40e1d5e7c2bf031b4870d556e4d307"
     },
     {
       "repo": "graphzero",
@@ -7968,7 +8021,7 @@
       "classification": "domain-local",
       "rule": "engine-domain-default",
       "justification": "graphzero domain implementation has no reviewed shared-substrate signal",
-      "blob_digest": "9132dbcfe40acd4dc6fed99b22f1b2c538a80836"
+      "blob_digest": "a8303cf9c369691068d54df0654f0c4fa642b56a"
     },
     {
       "repo": "graphzero",
@@ -8031,7 +8084,7 @@
       "classification": "domain-local",
       "rule": "engine-domain-default",
       "justification": "graphzero domain implementation has no reviewed shared-substrate signal",
-      "blob_digest": "df5c4d810867c0d344fef4eba9f8549804773dd2"
+      "blob_digest": "6ff0bda72070b4cab4d316a265f557df7e64fa07"
     },
     {
       "repo": "graphzero",
@@ -8049,7 +8102,7 @@
       "classification": "domain-local",
       "rule": "engine-domain-default",
       "justification": "graphzero domain implementation has no reviewed shared-substrate signal",
-      "blob_digest": "2d317fdc7b3e82239303c321df41a4417952c55d"
+      "blob_digest": "0c9f261e3c05d9b0cf6b71d94f08430664b6df1b"
     },
     {
       "repo": "graphzero",
@@ -8112,7 +8165,7 @@
       "classification": "domain-local",
       "rule": "engine-domain-default",
       "justification": "graphzero domain implementation has no reviewed shared-substrate signal",
-      "blob_digest": "2efd0862f41c92035ac02bb0b6428b26ce82ec7d"
+      "blob_digest": "880c4ef62e463ec43f7954edde8e6bfd5e3f1331"
     },
     {
       "repo": "graphzero",
@@ -8157,7 +8210,7 @@
       "classification": "domain-local",
       "rule": "engine-domain-default",
       "justification": "graphzero domain implementation has no reviewed shared-substrate signal",
-      "blob_digest": "78d20195b9671aaf3cc17d03a630e65035b7184b"
+      "blob_digest": "3d0a2882bfa01d5a10f6984b2d8781bee3fe68b8"
     },
     {
       "repo": "graphzero",
@@ -8166,7 +8219,7 @@
       "classification": "domain-local",
       "rule": "engine-domain-default",
       "justification": "graphzero domain implementation has no reviewed shared-substrate signal",
-      "blob_digest": "b94079dfb28a49ba666b9763cdd30d62f7d79c5d"
+      "blob_digest": "e222b4ed05cd0afc811f8729c295c6075df777dd"
     },
     {
       "repo": "graphzero",
@@ -8206,12 +8259,21 @@
     },
     {
       "repo": "graphzero",
+      "path": "crates/graphzero-types/src/child_identity.rs",
+      "language": "Rust",
+      "classification": "domain-local",
+      "rule": "engine-domain-default",
+      "justification": "graphzero domain implementation has no reviewed shared-substrate signal",
+      "blob_digest": "e88c86dbe24c80e9ed5695ffdca1c8705cf6bbb3"
+    },
+    {
+      "repo": "graphzero",
       "path": "crates/graphzero-types/src/lib.rs",
       "language": "Rust",
       "classification": "domain-local",
       "rule": "engine-domain-default",
       "justification": "graphzero domain implementation has no reviewed shared-substrate signal",
-      "blob_digest": "419f0f8a155f90cb42deb6a87626edce9bb62fea"
+      "blob_digest": "8c48ff00cae865e3e8fd306b5cf61f29ed655cb4"
     },
     {
       "repo": "graphzero",
@@ -8221,6 +8283,15 @@
       "rule": "engine-domain-default",
       "justification": "graphzero domain implementation has no reviewed shared-substrate signal",
       "blob_digest": "163f50206b50f884649ab59e81b04253eb2e1c1b"
+    },
+    {
+      "repo": "graphzero",
+      "path": "crates/graphzero-types/tests/child_identity.rs",
+      "language": "Rust",
+      "classification": "domain-local",
+      "rule": "engine-domain-default",
+      "justification": "graphzero domain implementation has no reviewed shared-substrate signal",
+      "blob_digest": "fae7a0e66ec639ec6ad874fe23dab61c62157542"
     },
     {
       "repo": "graphzero",
@@ -8373,7 +8444,7 @@
       "classification": "domain-local",
       "rule": "engine-domain-default",
       "justification": "graphzero domain implementation has no reviewed shared-substrate signal",
-      "blob_digest": "96d1071716246eb69a3444865ff440b010426a68"
+      "blob_digest": "434d8a0995736cd055b049c9f1df0a6b2c747021"
     },
     {
       "repo": "graphzero",
@@ -8382,7 +8453,7 @@
       "classification": "domain-local",
       "rule": "engine-domain-default",
       "justification": "graphzero domain implementation has no reviewed shared-substrate signal",
-      "blob_digest": "8888880443db48796114c18ff8c77b381261c6e7"
+      "blob_digest": "1c95a3f729104eb2a3f7587034c55d4051aca93a"
     },
     {
       "repo": "graphzero",
@@ -8391,7 +8462,7 @@
       "classification": "domain-local",
       "rule": "engine-domain-default",
       "justification": "graphzero domain implementation has no reviewed shared-substrate signal",
-      "blob_digest": "04d7d0cd0cdf5792851040b87fbec8af924e792e"
+      "blob_digest": "eff8143ea49ff29d30ba5143c07c1506188a82cb"
     },
     {
       "repo": "graphzero",
@@ -8422,6 +8493,15 @@
     },
     {
       "repo": "graphzero",
+      "path": "scripts/check_secret_keyword_ledger.py",
+      "language": "Python",
+      "classification": "domain-local",
+      "rule": "engine-domain-default",
+      "justification": "graphzero domain implementation has no reviewed shared-substrate signal",
+      "blob_digest": "7759ecc7eedee97b50f60c1e3c1c20acdb1f5530"
+    },
+    {
+      "repo": "graphzero",
       "path": "scripts/check_spec_tags.py",
       "language": "Python",
       "classification": "domain-local",
@@ -8445,7 +8525,7 @@
       "classification": "domain-local",
       "rule": "engine-domain-default",
       "justification": "graphzero domain implementation has no reviewed shared-substrate signal",
-      "blob_digest": "25885f37134315a6079deebd7e00cd1c6c1e5582"
+      "blob_digest": "96ec3e9dccb62bf2919fe0df1af610d6e5f25a48"
     },
     {
       "repo": "graphzero",
@@ -8535,7 +8615,7 @@
       "classification": "domain-local",
       "rule": "engine-domain-default",
       "justification": "graphzero domain implementation has no reviewed shared-substrate signal",
-      "blob_digest": "973ec8dd0d54083e614dfce6fe928b4ad102161c"
+      "blob_digest": "d196d0db93d3e23818819e638d9aa62eb2647d98"
     },
     {
       "repo": "graphzero",
@@ -8566,12 +8646,30 @@
     },
     {
       "repo": "graphzero",
+      "path": "scripts/test_benchmark_shell_policy.py",
+      "language": "Python",
+      "classification": "domain-local",
+      "rule": "engine-domain-default",
+      "justification": "graphzero domain implementation has no reviewed shared-substrate signal",
+      "blob_digest": "0590cc697d1ccdf6208028b8766404e489e1e05f"
+    },
+    {
+      "repo": "graphzero",
       "path": "scripts/test_check_proptest_contract.py",
       "language": "Python",
       "classification": "domain-local",
       "rule": "engine-domain-default",
       "justification": "graphzero domain implementation has no reviewed shared-substrate signal",
       "blob_digest": "9fc8eedf7738e2f5b5e523466805fed09d0f7811"
+    },
+    {
+      "repo": "graphzero",
+      "path": "scripts/test_check_secret_keyword_ledger.py",
+      "language": "Python",
+      "classification": "domain-local",
+      "rule": "engine-domain-default",
+      "justification": "graphzero domain implementation has no reviewed shared-substrate signal",
+      "blob_digest": "98bb4bb214fb5af1816927f66b2e224442b0f541"
     },
     {
       "repo": "graphzero",
@@ -8593,12 +8691,31 @@
     },
     {
       "repo": "graphzero",
+      "path": "scripts/test_python_benchmark_environment.py",
+      "language": "Python",
+      "classification": "domain-local",
+      "rule": "engine-domain-default",
+      "justification": "graphzero domain implementation has no reviewed shared-substrate signal",
+      "blob_digest": "914ceb1318981c5aa0a387059fba8ae76f5994cd"
+    },
+    {
+      "repo": "graphzero",
       "path": "scripts/test_rotation_snapshot_sha.py",
       "language": "Python",
       "classification": "domain-local",
       "rule": "engine-domain-default",
       "justification": "graphzero domain implementation has no reviewed shared-substrate signal",
       "blob_digest": "ea253d947baf4f3c000016c7ff3aaeaf1be78f65"
+    },
+    {
+      "repo": "graphzero",
+      "path": "scripts/test_zeroref_conformance_gate.py",
+      "language": "Python",
+      "classification": "shared-candidate",
+      "rule": "zeroref",
+      "justification": "path matches reviewed reusable-substrate rule zeroref",
+      "blob_digest": "7856044cf9cbf775b65dbe455b772591dd5fdba5",
+      "hub_target": "zero-ref"
     },
     {
       "repo": "graphzero",
@@ -8616,7 +8733,7 @@
       "classification": "shared-candidate",
       "rule": "zeroref",
       "justification": "path matches reviewed reusable-substrate rule zeroref",
-      "blob_digest": "90d9587c1075582b502917508fc56320456c6718",
+      "blob_digest": "27d6b692f9dbda05d24abb6a6ef38e40c0d8cc79",
       "hub_target": "zero-ref"
     },
     {
@@ -8730,161 +8847,12 @@
     },
     {
       "repo": "tokenzero",
-      "path": "crates/tokenzero-codemode/src/audit.rs",
-      "language": "Rust",
-      "classification": "shared-candidate",
-      "rule": "codemode-host",
-      "justification": "path matches reviewed reusable-substrate rule codemode-host",
-      "blob_digest": "8b137891791fe96927ad78e64b0aad7bded08bdc",
-      "hub_target": "zero-codemode"
-    },
-    {
-      "repo": "tokenzero",
-      "path": "crates/tokenzero-codemode/src/catalog.rs",
-      "language": "Rust",
-      "classification": "shared-candidate",
-      "rule": "codemode-host",
-      "justification": "path matches reviewed reusable-substrate rule codemode-host",
-      "blob_digest": "95a9abc5f62f295bae3f1b40cfc38a2c3f4f6811",
-      "hub_target": "zero-codemode"
-    },
-    {
-      "repo": "tokenzero",
-      "path": "crates/tokenzero-codemode/src/containment.rs",
-      "language": "Rust",
-      "classification": "shared-candidate",
-      "rule": "codemode-host",
-      "justification": "path matches reviewed reusable-substrate rule codemode-host",
-      "blob_digest": "863ee1099240e1b04ea7d0f7de832c7bb507494b",
-      "hub_target": "zero-codemode"
-    },
-    {
-      "repo": "tokenzero",
-      "path": "crates/tokenzero-codemode/src/containment_tests.rs",
-      "language": "Rust",
-      "classification": "shared-candidate",
-      "rule": "codemode-host",
-      "justification": "path matches reviewed reusable-substrate rule codemode-host",
-      "blob_digest": "343c34ee1ca5e9f9780d683f09a2e20a5b181bbd",
-      "hub_target": "zero-codemode"
-    },
-    {
-      "repo": "tokenzero",
-      "path": "crates/tokenzero-codemode/src/e2e_tests.rs",
-      "language": "Rust",
-      "classification": "shared-candidate",
-      "rule": "codemode-host",
-      "justification": "path matches reviewed reusable-substrate rule codemode-host",
-      "blob_digest": "683315b8a3a0c1b8c6b939a9ec392e08e22d1498",
-      "hub_target": "zero-codemode"
-    },
-    {
-      "repo": "tokenzero",
-      "path": "crates/tokenzero-codemode/src/exec.rs",
-      "language": "Rust",
-      "classification": "shared-candidate",
-      "rule": "codemode-host",
-      "justification": "path matches reviewed reusable-substrate rule codemode-host",
-      "blob_digest": "09342621f073deacf010efcd8de1e14d01a7f8c6",
-      "hub_target": "zero-codemode"
-    },
-    {
-      "repo": "tokenzero",
-      "path": "crates/tokenzero-codemode/src/exec_stub.rs",
-      "language": "Rust",
-      "classification": "shared-candidate",
-      "rule": "codemode-host",
-      "justification": "path matches reviewed reusable-substrate rule codemode-host",
-      "blob_digest": "374830236491deaa3ff901f194690c4f1b70a36f",
-      "hub_target": "zero-codemode"
-    },
-    {
-      "repo": "tokenzero",
-      "path": "crates/tokenzero-codemode/src/journal.rs",
-      "language": "Rust",
-      "classification": "domain-local",
-      "rule": "engine-domain-exception",
-      "justification": "TokenZero CodeMode journal is engine-domain state, not shared store substrate",
-      "blob_digest": "9e29f4b05ecddc058ec70156bc2d580cb115a3b2"
-    },
-    {
-      "repo": "tokenzero",
-      "path": "crates/tokenzero-codemode/src/lib.rs",
-      "language": "Rust",
-      "classification": "shared-candidate",
-      "rule": "codemode-host",
-      "justification": "path matches reviewed reusable-substrate rule codemode-host",
-      "blob_digest": "a6a09a10da89d3c169b7355ca89e023ffa3192f7",
-      "hub_target": "zero-codemode"
-    },
-    {
-      "repo": "tokenzero",
       "path": "crates/tokenzero-codemode/src/main.rs",
       "language": "Rust",
       "classification": "thin-adapter",
       "rule": "surface-entrypoint",
       "justification": "surface entrypoint retains engine dispatch only",
       "blob_digest": "4a36354dc64bc3c8f07535de5d57177450cd3bd0",
-      "hub_target": "zero-codemode"
-    },
-    {
-      "repo": "tokenzero",
-      "path": "crates/tokenzero-codemode/src/parser.rs",
-      "language": "Rust",
-      "classification": "shared-candidate",
-      "rule": "codemode-host",
-      "justification": "path matches reviewed reusable-substrate rule codemode-host",
-      "blob_digest": "82a5e4017370d4acc9366e1b0bb52f28f82ffb81",
-      "hub_target": "zero-codemode"
-    },
-    {
-      "repo": "tokenzero",
-      "path": "crates/tokenzero-codemode/src/recipe_registry.rs",
-      "language": "Rust",
-      "classification": "shared-candidate",
-      "rule": "codemode-host",
-      "justification": "path matches reviewed reusable-substrate rule codemode-host",
-      "blob_digest": "f8bfdc512c6c82e542fad272f4ceeac64b7267e9",
-      "hub_target": "zero-codemode"
-    },
-    {
-      "repo": "tokenzero",
-      "path": "crates/tokenzero-codemode/src/result.rs",
-      "language": "Rust",
-      "classification": "shared-candidate",
-      "rule": "codemode-host",
-      "justification": "path matches reviewed reusable-substrate rule codemode-host",
-      "blob_digest": "8f210d4fbac4a22ec187d369764814002c64844e",
-      "hub_target": "zero-codemode"
-    },
-    {
-      "repo": "tokenzero",
-      "path": "crates/tokenzero-codemode/src/sandbox.rs",
-      "language": "Rust",
-      "classification": "shared-candidate",
-      "rule": "codemode-host",
-      "justification": "path matches reviewed reusable-substrate rule codemode-host",
-      "blob_digest": "f828002f9b43c21ea5b06588563c5cbb8de36c47",
-      "hub_target": "zero-codemode"
-    },
-    {
-      "repo": "tokenzero",
-      "path": "crates/tokenzero-codemode/src/sentinel.rs",
-      "language": "Rust",
-      "classification": "shared-candidate",
-      "rule": "codemode-host",
-      "justification": "path matches reviewed reusable-substrate rule codemode-host",
-      "blob_digest": "546c37bee64d8f76d8c3f96d9b9e3caac97189d0",
-      "hub_target": "zero-codemode"
-    },
-    {
-      "repo": "tokenzero",
-      "path": "crates/tokenzero-codemode/src/store.rs",
-      "language": "Rust",
-      "classification": "shared-candidate",
-      "rule": "codemode-host",
-      "justification": "path matches reviewed reusable-substrate rule codemode-host",
-      "blob_digest": "7335653f88f6caf3717c896f9cbdb005e85c6f41",
       "hub_target": "zero-codemode"
     },
     {
@@ -8939,7 +8907,7 @@
       "classification": "shared-candidate",
       "rule": "operation-abi",
       "justification": "path matches reviewed reusable-substrate rule operation-abi",
-      "blob_digest": "d9b3ad3dde51a7826d12b445b44871edf4be5a3f",
+      "blob_digest": "cede2d29d9baad25d79af0fe128ec9b0b783249b",
       "hub_target": "zero-abi"
     },
     {
@@ -9009,7 +8977,7 @@
       "classification": "shared-candidate",
       "rule": "operation-abi",
       "justification": "path matches reviewed reusable-substrate rule operation-abi",
-      "blob_digest": "d16d6d6aafc2d42870f50af788b7bcf9a24a9680",
+      "blob_digest": "e7c52f66369b96a3d6c5e2d11dad86fee97a701e",
       "hub_target": "zero-abi"
     },
     {
@@ -9182,7 +9150,7 @@
       "classification": "domain-local",
       "rule": "engine-domain-default",
       "justification": "tokenzero domain implementation has no reviewed shared-substrate signal",
-      "blob_digest": "a5d806f8b8bbd7d942fd60145087384a5bd74505"
+      "blob_digest": "a341af2866efe1a13ca9726345b60e9a4270c69b"
     },
     {
       "repo": "tokenzero",
@@ -9335,7 +9303,7 @@
       "classification": "shared-candidate",
       "rule": "codemode-host",
       "justification": "path matches reviewed reusable-substrate rule codemode-host",
-      "blob_digest": "b8af1451a71975f135e62a796e77cf00bbaf47e4",
+      "blob_digest": "988c1ca7bf8d8b5b5fafe3da79b1338359cd9352",
       "hub_target": "zero-codemode"
     },
     {
@@ -9345,7 +9313,7 @@
       "classification": "shared-candidate",
       "rule": "codemode-host",
       "justification": "path matches reviewed reusable-substrate rule codemode-host",
-      "blob_digest": "ab6324692c34f717ee29da4c186004e7f00e4c6d",
+      "blob_digest": "4694ffe358229ddb0bcfa8609510ee74d13dc5b2",
       "hub_target": "zero-codemode"
     },
     {
@@ -9409,7 +9377,7 @@
       "classification": "domain-local",
       "rule": "engine-domain-default",
       "justification": "tokenzero domain implementation has no reviewed shared-substrate signal",
-      "blob_digest": "2a4f0755b45603a47c7df4e407a6b013736d6094"
+      "blob_digest": "c50db0d785aa1758c6e6ebe0130ea09dcbae7937"
     },
     {
       "repo": "tokenzero",
@@ -9454,7 +9422,7 @@
       "classification": "domain-local",
       "rule": "engine-domain-default",
       "justification": "tokenzero domain implementation has no reviewed shared-substrate signal",
-      "blob_digest": "cf1600d4b0654756e26789c5e50526208b846e2d"
+      "blob_digest": "5a8c9a5647d60d53c3d118e095e798e28948134e"
     },
     {
       "repo": "tokenzero",
@@ -9463,7 +9431,7 @@
       "classification": "domain-local",
       "rule": "engine-domain-default",
       "justification": "tokenzero domain implementation has no reviewed shared-substrate signal",
-      "blob_digest": "6a205be00ad9147f26f1bf142ec97dbb0135fe4b"
+      "blob_digest": "a6cd3a377ef4513e39c6cb9e0b10a5ff2b43d8b3"
     },
     {
       "repo": "tokenzero",
@@ -9481,7 +9449,7 @@
       "classification": "domain-local",
       "rule": "engine-domain-default",
       "justification": "tokenzero domain implementation has no reviewed shared-substrate signal",
-      "blob_digest": "07021deb9a98264b14608429d0dfc7306255f6ad"
+      "blob_digest": "6bd95a53c941a622db9003ffe8918b009d58a75c"
     },
     {
       "repo": "tokenzero",
@@ -9553,7 +9521,7 @@
       "classification": "domain-local",
       "rule": "engine-domain-default",
       "justification": "tokenzero domain implementation has no reviewed shared-substrate signal",
-      "blob_digest": "065c7d17b7fba1e679297a94073ce5676c36a320"
+      "blob_digest": "f95afc6502ba1db900f6fb3fb1a9ed32b94835df"
     },
     {
       "repo": "tokenzero",
@@ -9609,7 +9577,7 @@
       "classification": "shared-candidate",
       "rule": "raw-worker",
       "justification": "path matches reviewed reusable-substrate rule raw-worker",
-      "blob_digest": "d68fd634880da4e30072d4cf7f6658f17e945327",
+      "blob_digest": "a688fdf240d5304a339aa0e8b7e9943b19ab9ae4",
       "hub_target": "zero-abi"
     },
     {
@@ -9638,7 +9606,7 @@
       "classification": "domain-local",
       "rule": "engine-domain-default",
       "justification": "tokenzero domain implementation has no reviewed shared-substrate signal",
-      "blob_digest": "2029c806e44af23f5b8ec60495777e6ef78cd476"
+      "blob_digest": "e819e3aabc57224bf47ab2e4c5f18de4ac5b26fe"
     },
     {
       "repo": "tokenzero",
@@ -9665,7 +9633,7 @@
       "classification": "shared-candidate",
       "rule": "session-discovery",
       "justification": "path matches reviewed reusable-substrate rule session-discovery",
-      "blob_digest": "588eabd7f427473d36fb400b84079e4e01d92fa0",
+      "blob_digest": "e536823a87e70bc0eae9abd8ca68b3b5e369e8f1",
       "hub_target": "zero-codemode"
     },
     {
@@ -9684,7 +9652,7 @@
       "classification": "domain-local",
       "rule": "engine-domain-default",
       "justification": "tokenzero domain implementation has no reviewed shared-substrate signal",
-      "blob_digest": "8f3d5b026a3ac9b0a1681b8a6959f51d1877a039"
+      "blob_digest": "6f5d38b6f8dae3ff0ed9f8748c847bd6b79897c7"
     },
     {
       "repo": "tokenzero",
@@ -9693,7 +9661,7 @@
       "classification": "shared-candidate",
       "rule": "surface-protocol",
       "justification": "path matches reviewed reusable-substrate rule surface-protocol",
-      "blob_digest": "98cf2025ab5028e8ba66f0a534703fa0e4a04043",
+      "blob_digest": "515c8bafeb0b22be39801ea3f8429d6335e9d008",
       "hub_target": "zero-codemode"
     },
     {
@@ -9703,7 +9671,7 @@
       "classification": "domain-local",
       "rule": "engine-domain-default",
       "justification": "tokenzero domain implementation has no reviewed shared-substrate signal",
-      "blob_digest": "d9b6e05b4ee6d613dc97d481fc461e330299c6fe"
+      "blob_digest": "5fec2a5c8f097b77aef7603eed90986675d5d90b"
     },
     {
       "repo": "tokenzero",
@@ -9741,7 +9709,7 @@
       "classification": "domain-local",
       "rule": "engine-domain-default",
       "justification": "tokenzero domain implementation has no reviewed shared-substrate signal",
-      "blob_digest": "b4366f5fa5e3779fc8baf5010e584cbc451adc78"
+      "blob_digest": "fb6983f2c6ed078cec7740e413f450ec739e6358"
     },
     {
       "repo": "tokenzero",
@@ -9759,7 +9727,7 @@
       "classification": "domain-local",
       "rule": "engine-domain-default",
       "justification": "tokenzero domain implementation has no reviewed shared-substrate signal",
-      "blob_digest": "11a0da565e43fa4ebe03de65c0de828a1cd067f3"
+      "blob_digest": "fb8f56ac8d7ed09fa4433b5e2403bbe561ba9d3d"
     },
     {
       "repo": "tokenzero",
@@ -9804,7 +9772,7 @@
       "classification": "shared-candidate",
       "rule": "codemode-host",
       "justification": "path matches reviewed reusable-substrate rule codemode-host",
-      "blob_digest": "55b4adbad2289485584aa52e7e7c1b2306171aa2",
+      "blob_digest": "38d2bcf24a586037d7fc74b84852805fd96dd3a5",
       "hub_target": "zero-codemode"
     },
     {
@@ -9814,7 +9782,7 @@
       "classification": "domain-local",
       "rule": "engine-domain-default",
       "justification": "tokenzero domain implementation has no reviewed shared-substrate signal",
-      "blob_digest": "d2261beb23569f0f5c70a406cafb4bb3ccec3437"
+      "blob_digest": "aaa81c064ddcd773a8dc31b886df7b3b5d646a6d"
     },
     {
       "repo": "tokenzero",
@@ -9832,7 +9800,7 @@
       "classification": "shared-candidate",
       "rule": "codemode-host",
       "justification": "path matches reviewed reusable-substrate rule codemode-host",
-      "blob_digest": "a486c3bdd954d2b63aea3ccb8e8cc17cc69236b8",
+      "blob_digest": "0120f3ccc6cd160d12f215f33dba368f05a1ac17",
       "hub_target": "zero-codemode"
     },
     {
@@ -9878,7 +9846,7 @@
       "classification": "domain-local",
       "rule": "engine-domain-default",
       "justification": "tokenzero domain implementation has no reviewed shared-substrate signal",
-      "blob_digest": "94138bdcfadaf496c506d1aa4ec57af8f246fcc4"
+      "blob_digest": "699c6a5c673e36f06ec2c7188ae274173866f954"
     },
     {
       "repo": "tokenzero",
@@ -9932,7 +9900,7 @@
       "classification": "domain-local",
       "rule": "engine-domain-default",
       "justification": "tokenzero domain implementation has no reviewed shared-substrate signal",
-      "blob_digest": "e525efe9af006609263c0fec72b87d61326b3c48"
+      "blob_digest": "dec647be01522c4700b4ab0716a2db8bffc8d665"
     },
     {
       "repo": "tokenzero",
@@ -10040,7 +10008,7 @@
       "classification": "domain-local",
       "rule": "engine-domain-default",
       "justification": "tokenzero domain implementation has no reviewed shared-substrate signal",
-      "blob_digest": "30360b8d8b53bffb0ca0ae632ea0015013c1c7a3"
+      "blob_digest": "08750831edab22a4d6b6f7e9af295a4ce3b57e8f"
     },
     {
       "repo": "tokenzero",
@@ -10049,7 +10017,7 @@
       "classification": "domain-local",
       "rule": "engine-domain-default",
       "justification": "tokenzero domain implementation has no reviewed shared-substrate signal",
-      "blob_digest": "aec1004fdeb8c39767cd53ab357a64fdbdb2f243"
+      "blob_digest": "599f506b1e48af78159ad18ffa265bea6df99f69"
     },
     {
       "repo": "tokenzero",
@@ -10190,30 +10158,12 @@
     },
     {
       "repo": "tokenzero",
-      "path": "crates/tokenzero-mcp-compat/src/bench.rs",
-      "language": "Rust",
-      "classification": "domain-local",
-      "rule": "engine-domain-default",
-      "justification": "tokenzero domain implementation has no reviewed shared-substrate signal",
-      "blob_digest": "ff4368fef4612196dddf8ed411a28e3983549a7f"
-    },
-    {
-      "repo": "tokenzero",
-      "path": "crates/tokenzero-mcp-compat/src/bench_tests.rs",
-      "language": "Rust",
-      "classification": "domain-local",
-      "rule": "engine-domain-default",
-      "justification": "tokenzero domain implementation has no reviewed shared-substrate signal",
-      "blob_digest": "b57f2d891647f86747a4b7f52aaf6e555437c397"
-    },
-    {
-      "repo": "tokenzero",
       "path": "crates/tokenzero-mcp-compat/src/capability_descriptor.rs",
       "language": "Rust",
       "classification": "domain-local",
       "rule": "engine-domain-exception",
       "justification": "TokenZero capability descriptor preserves engine-specific MCP compatibility semantics",
-      "blob_digest": "1d0ce65e3507914bc8af1423bb2782c4d46b8250"
+      "blob_digest": "080f04d58d9615d68da8626e1d0c04366d02eca3"
     },
     {
       "repo": "tokenzero",
@@ -10222,7 +10172,7 @@
       "classification": "domain-local",
       "rule": "engine-domain-default",
       "justification": "tokenzero domain implementation has no reviewed shared-substrate signal",
-      "blob_digest": "a9b61a05cb21e46040d1ec1585cb141858b0ad51"
+      "blob_digest": "ab551facbc36cd6b2ec45b66c091a4884809904e"
     },
     {
       "repo": "tokenzero",
@@ -10231,17 +10181,7 @@
       "classification": "shared-candidate",
       "rule": "codemode-host",
       "justification": "path matches reviewed reusable-substrate rule codemode-host",
-      "blob_digest": "9e320e90aff489c84983771e8741ab8c40dd1599",
-      "hub_target": "zero-codemode"
-    },
-    {
-      "repo": "tokenzero",
-      "path": "crates/tokenzero-mcp-compat/src/fastmcp_stub.rs",
-      "language": "Rust",
-      "classification": "shared-candidate",
-      "rule": "codemode-host",
-      "justification": "path matches reviewed reusable-substrate rule codemode-host",
-      "blob_digest": "9f80bcb424ccce63c40aa5da58df091263a239b8",
+      "blob_digest": "289a090af015f7a951da71c46d24420cc96c27a2",
       "hub_target": "zero-codemode"
     },
     {
@@ -10261,7 +10201,7 @@
       "classification": "domain-local",
       "rule": "engine-domain-default",
       "justification": "tokenzero domain implementation has no reviewed shared-substrate signal",
-      "blob_digest": "d3ee9a007fcc32d0b9105891a6d40e4ce02b03f7"
+      "blob_digest": "5ec5699e534f924c7a9bf5b6410f119e9fe940e9"
     },
     {
       "repo": "tokenzero",
@@ -10270,7 +10210,7 @@
       "classification": "shared-candidate",
       "rule": "operation-abi",
       "justification": "path matches reviewed reusable-substrate rule operation-abi",
-      "blob_digest": "dd1e36e3ef62f5011ad09e2dbecaa763c87d4ed2",
+      "blob_digest": "2a81c54ddd39d6a83ec9db530a47772af07906f6",
       "hub_target": "zero-abi"
     },
     {
@@ -10280,7 +10220,7 @@
       "classification": "domain-local",
       "rule": "engine-domain-default",
       "justification": "tokenzero domain implementation has no reviewed shared-substrate signal",
-      "blob_digest": "91066ef8bb0cfedb8d278faee5e632241324078f"
+      "blob_digest": "0d70cf0ee258ef4ae4813010bbab95c98a52e5b2"
     },
     {
       "repo": "tokenzero",
@@ -10307,7 +10247,7 @@
       "classification": "domain-local",
       "rule": "engine-domain-default",
       "justification": "tokenzero domain implementation has no reviewed shared-substrate signal",
-      "blob_digest": "961287c450d49a024e21e7506b79878d8f2d828e"
+      "blob_digest": "1717625af90b14a46cd201104034deab83057f8c"
     },
     {
       "repo": "tokenzero",
@@ -10316,7 +10256,7 @@
       "classification": "domain-local",
       "rule": "engine-domain-default",
       "justification": "tokenzero domain implementation has no reviewed shared-substrate signal",
-      "blob_digest": "bd777d72c206e8fd72ab3d0efd5cfb588502b472"
+      "blob_digest": "e8b9f2f72a6c215984b57f3cd78d44ea6dabe01c"
     },
     {
       "repo": "tokenzero",
@@ -10325,7 +10265,7 @@
       "classification": "domain-local",
       "rule": "engine-domain-default",
       "justification": "tokenzero domain implementation has no reviewed shared-substrate signal",
-      "blob_digest": "33af0c9a754273bca3bfabc793968fa4ba36a2f2"
+      "blob_digest": "278a7140671dce1528c1d896da3df7cc09769b07"
     },
     {
       "repo": "tokenzero",
@@ -10334,7 +10274,7 @@
       "classification": "shared-candidate",
       "rule": "codemode-host",
       "justification": "path matches reviewed reusable-substrate rule codemode-host",
-      "blob_digest": "f848ee90cba9acab76641d09047522f5c749952d",
+      "blob_digest": "fb86ad21b89d0f47b046dfdd9535aa36108175a3",
       "hub_target": "zero-codemode"
     },
     {
@@ -10344,7 +10284,7 @@
       "classification": "domain-local",
       "rule": "engine-domain-default",
       "justification": "tokenzero domain implementation has no reviewed shared-substrate signal",
-      "blob_digest": "a15a97d52491ca68bd54a1521a9fc04197de4a8c"
+      "blob_digest": "02a35e2eb86c2c0339f6e2bebbe83bc19ff6a0ca"
     },
     {
       "repo": "tokenzero",
@@ -10353,7 +10293,7 @@
       "classification": "domain-local",
       "rule": "engine-domain-default",
       "justification": "tokenzero domain implementation has no reviewed shared-substrate signal",
-      "blob_digest": "647d2587b98db2bad80a2bafdeb44754fcf2fc5c"
+      "blob_digest": "d166dee4eca8b7b6ea4924c5a2ab9926fdd8af1b"
     },
     {
       "repo": "tokenzero",
@@ -10362,7 +10302,7 @@
       "classification": "domain-local",
       "rule": "engine-domain-default",
       "justification": "tokenzero domain implementation has no reviewed shared-substrate signal",
-      "blob_digest": "2fd59692aa4a88c2f150285bb569a3ff8eca215c"
+      "blob_digest": "9343829e2c7bc56b038f4c25b8f909903a83c374"
     },
     {
       "repo": "tokenzero",
@@ -10371,7 +10311,7 @@
       "classification": "domain-local",
       "rule": "engine-domain-default",
       "justification": "tokenzero domain implementation has no reviewed shared-substrate signal",
-      "blob_digest": "6f487ead967e7ad5ca73c2ddbdc060a4231b761f"
+      "blob_digest": "a5b4d5a4bd70c2042682f46c594a91d6130794fd"
     },
     {
       "repo": "tokenzero",
@@ -10380,7 +10320,7 @@
       "classification": "domain-local",
       "rule": "engine-domain-default",
       "justification": "tokenzero domain implementation has no reviewed shared-substrate signal",
-      "blob_digest": "dab6a89d937b28ceb82679628c477a99f18390af"
+      "blob_digest": "fe152e3c792dbddd5d00c8ee44da3ed2cf542c40"
     },
     {
       "repo": "tokenzero",
@@ -10389,7 +10329,7 @@
       "classification": "domain-local",
       "rule": "engine-domain-default",
       "justification": "tokenzero domain implementation has no reviewed shared-substrate signal",
-      "blob_digest": "c97911363f339106172308a1d60970e87b12e092"
+      "blob_digest": "2357ed3cd1372cbf5ebc4431b1105e1bcd8de542"
     },
     {
       "repo": "tokenzero",
@@ -10426,7 +10366,7 @@
       "classification": "domain-local",
       "rule": "engine-domain-default",
       "justification": "tokenzero domain implementation has no reviewed shared-substrate signal",
-      "blob_digest": "1592a9f5b95b9196a08ebd8fe123a78a55eb1211"
+      "blob_digest": "f58d76cfbff7c34a8b0cb2201d3e4004aab5205f"
     },
     {
       "repo": "tokenzero",
@@ -10454,7 +10394,7 @@
       "classification": "domain-local",
       "rule": "engine-domain-default",
       "justification": "tokenzero domain implementation has no reviewed shared-substrate signal",
-      "blob_digest": "2ac3f97c7bfdb4235f0b15911ae31b6cb827acbc"
+      "blob_digest": "cd78f87116b573fc76e8c48dd5fd44150ad59e64"
     },
     {
       "repo": "tokenzero",
@@ -10463,7 +10403,7 @@
       "classification": "domain-local",
       "rule": "engine-domain-default",
       "justification": "tokenzero domain implementation has no reviewed shared-substrate signal",
-      "blob_digest": "ed36379ed0778fb5b13f6d2d26d6c4a5a5a67fbd"
+      "blob_digest": "dc7904a631583c486c7dcbebdd59ac657a3ef8a5"
     },
     {
       "repo": "tokenzero",
@@ -10562,7 +10502,7 @@
       "classification": "shared-candidate",
       "rule": "store-cas",
       "justification": "path matches reviewed reusable-substrate rule store-cas",
-      "blob_digest": "3fa9e1aa84a385a01cee2bb7136fac935820593a",
+      "blob_digest": "5d322fbaf8c80cc95dc99acac1c5f8670203f1f5",
       "hub_target": "zero-store"
     },
     {
@@ -10572,7 +10512,7 @@
       "classification": "domain-local",
       "rule": "engine-domain-default",
       "justification": "tokenzero domain implementation has no reviewed shared-substrate signal",
-      "blob_digest": "e03bc09b27cd10d52ddc8907d671c1f7b27038e8"
+      "blob_digest": "4b2fa2acda3fcf86f48696b84bd09aee627cbf9c"
     },
     {
       "repo": "tokenzero",
@@ -10590,7 +10530,7 @@
       "classification": "domain-local",
       "rule": "engine-domain-default",
       "justification": "tokenzero domain implementation has no reviewed shared-substrate signal",
-      "blob_digest": "b51727b8f3b2359360f1d432ece1b2cd9e1857f0"
+      "blob_digest": "6023a8cb32aaee77e762d24fd0641aee532fa823"
     },
     {
       "repo": "tokenzero",
@@ -10645,7 +10585,7 @@
       "classification": "shared-candidate",
       "rule": "store-cas",
       "justification": "path matches reviewed reusable-substrate rule store-cas",
-      "blob_digest": "3ea5566e5e9d04197e3b6decfaecfe61ed7fdea2",
+      "blob_digest": "ceccdef14c4ee97bbca5f43280a1e6dc78fb697a",
       "hub_target": "zero-store"
     },
     {
@@ -10665,7 +10605,7 @@
       "classification": "domain-local",
       "rule": "engine-domain-default",
       "justification": "tokenzero domain implementation has no reviewed shared-substrate signal",
-      "blob_digest": "dfdcda4a429ecaea317a2e9d9070951dbdbb502c"
+      "blob_digest": "65c7e2afba1abfe4a6ee20ed8fba6555248f54dd"
     },
     {
       "repo": "tokenzero",
@@ -10820,7 +10760,7 @@
       "classification": "domain-local",
       "rule": "engine-domain-default",
       "justification": "tokenzero domain implementation has no reviewed shared-substrate signal",
-      "blob_digest": "25855b6d7ce7d820bd3562573a7fe66bdb3121e3"
+      "blob_digest": "829b6fea7ff0ac01e1c4708ff723d0f0da47b761"
     },
     {
       "repo": "tokenzero",
@@ -10829,7 +10769,7 @@
       "classification": "domain-local",
       "rule": "engine-domain-default",
       "justification": "tokenzero domain implementation has no reviewed shared-substrate signal",
-      "blob_digest": "c5c428186e0a3e16921e9681e92041fb3fd6420f"
+      "blob_digest": "20bf75da8ded519a60118c10e0ad6923aa6ce8f1"
     },
     {
       "repo": "tokenzero",
@@ -10838,7 +10778,7 @@
       "classification": "domain-local",
       "rule": "engine-domain-default",
       "justification": "tokenzero domain implementation has no reviewed shared-substrate signal",
-      "blob_digest": "bac48c9b4eb263463c07dc9b91184a73512b485c"
+      "blob_digest": "7bdf073d8a9381b156a8f78cfa0b9effe3bcf954"
     },
     {
       "repo": "tokenzero",
@@ -10896,22 +10836,12 @@
     },
     {
       "repo": "tokenzero",
-      "path": "crates/tokenzero/src/bin/tokenzero_codemode.rs",
-      "language": "Rust",
-      "classification": "thin-adapter",
-      "rule": "surface-entrypoint",
-      "justification": "surface entrypoint retains engine dispatch only",
-      "blob_digest": "2b8056a0b8d2da73d2089a408ac22c72eb82576f",
-      "hub_target": "zero-codemode"
-    },
-    {
-      "repo": "tokenzero",
       "path": "crates/tokenzero/src/bin/tokenzero_mcp.rs",
       "language": "Rust",
       "classification": "thin-adapter",
       "rule": "surface-entrypoint",
       "justification": "surface entrypoint retains engine dispatch only",
-      "blob_digest": "f634d04ad215809a882f54506d38210b012f6701",
+      "blob_digest": "fbfaf5c0bc72057e0ec5dadd480c72fd4a296275",
       "hub_target": "zero-codemode"
     },
     {
@@ -10930,7 +10860,7 @@
       "classification": "domain-local",
       "rule": "engine-domain-default",
       "justification": "tokenzero domain implementation has no reviewed shared-substrate signal",
-      "blob_digest": "50e797cb7965fcbd57dcdd4b46d17c530d5223c3"
+      "blob_digest": "eb66ccb81cd690b26ebd8d1acc84217f9c4981c6"
     },
     {
       "repo": "tokenzero",
@@ -10966,7 +10896,7 @@
       "classification": "domain-local",
       "rule": "engine-domain-default",
       "justification": "tokenzero domain implementation has no reviewed shared-substrate signal",
-      "blob_digest": "ac622c324e90e832cc5c2e84ce00d5f60af5c314"
+      "blob_digest": "7452d5fbc7ce32181b9cf1b8daefff5fd1cda9e2"
     },
     {
       "repo": "tokenzero",
@@ -11021,7 +10951,7 @@
       "classification": "domain-local",
       "rule": "engine-domain-default",
       "justification": "tokenzero domain implementation has no reviewed shared-substrate signal",
-      "blob_digest": "f63a4851b02f207b4019cf8a85ab058438c77514"
+      "blob_digest": "e6ab027e212cfafbe8574ad71eacdde15106026f"
     },
     {
       "repo": "tokenzero",
@@ -11030,7 +10960,7 @@
       "classification": "domain-local",
       "rule": "engine-domain-default",
       "justification": "tokenzero domain implementation has no reviewed shared-substrate signal",
-      "blob_digest": "c2bb18253652bdfc1d172e1372d19a66ed5a580a"
+      "blob_digest": "8e4c699753338b90ade86934c3e5daafbe2e16c7"
     },
     {
       "repo": "tokenzero",
@@ -11040,6 +10970,15 @@
       "rule": "engine-domain-default",
       "justification": "tokenzero domain implementation has no reviewed shared-substrate signal",
       "blob_digest": "06be238fb84b0f714a723aa16f5d044af2fb292a"
+    },
+    {
+      "repo": "tokenzero",
+      "path": "crates/tokenzero/tests/gate_c_retirement_contract.rs",
+      "language": "Rust",
+      "classification": "domain-local",
+      "rule": "engine-domain-default",
+      "justification": "tokenzero domain implementation has no reviewed shared-substrate signal",
+      "blob_digest": "d23355b7b50ee5df6b6588b0aef582a72b1b361a"
     },
     {
       "repo": "tokenzero",
@@ -11066,7 +11005,7 @@
       "classification": "domain-local",
       "rule": "engine-domain-default",
       "justification": "tokenzero domain implementation has no reviewed shared-substrate signal",
-      "blob_digest": "f9cea0b8840d67acdfe3b47d2ccd6e4887874ed6"
+      "blob_digest": "3b8648cdca54766f4e91e6f7f0629338d8608778"
     },
     {
       "repo": "tokenzero",
@@ -11093,7 +11032,7 @@
       "classification": "domain-local",
       "rule": "engine-domain-default",
       "justification": "tokenzero domain implementation has no reviewed shared-substrate signal",
-      "blob_digest": "e7fab5ebee059ca420f1024327a4a0a289e60bc0"
+      "blob_digest": "66499587c389b591fa4398ded7b054195d2e8b71"
     },
     {
       "repo": "tokenzero",
@@ -11111,7 +11050,7 @@
       "classification": "domain-local",
       "rule": "engine-domain-default",
       "justification": "tokenzero domain implementation has no reviewed shared-substrate signal",
-      "blob_digest": "bdee41d199e514381c9a6907056e7f5bff522664"
+      "blob_digest": "209afed2b2d928518ff3e89e69bed47f2e9fe02b"
     },
     {
       "repo": "tokenzero",
@@ -11130,7 +11069,7 @@
       "classification": "domain-local",
       "rule": "engine-domain-default",
       "justification": "tokenzero domain implementation has no reviewed shared-substrate signal",
-      "blob_digest": "79f710dd3e7cc12cd6f162db33e26b578cb91e08"
+      "blob_digest": "2e02374bdc95ee8b5b4a0e03ee2f0de6cfd13fbe"
     },
     {
       "repo": "tokenzero",
@@ -11139,7 +11078,7 @@
       "classification": "domain-local",
       "rule": "engine-domain-default",
       "justification": "tokenzero domain implementation has no reviewed shared-substrate signal",
-      "blob_digest": "08fb2a855444be82f11c2b43a2a1bdbb45e81621"
+      "blob_digest": "eb96ea1ae0bad8716f5d1157f86c60b135ab7eb1"
     },
     {
       "repo": "tokenzero",
@@ -11265,7 +11204,7 @@
       "classification": "domain-local",
       "rule": "engine-domain-default",
       "justification": "tokenzero domain implementation has no reviewed shared-substrate signal",
-      "blob_digest": "2e8061312f21faff1913eafa218c4bc23402299b"
+      "blob_digest": "f7b76cba74145b9e752a6dc3b8d2e8daef2e6ab0"
     },
     {
       "repo": "tokenzero",
@@ -11301,7 +11240,7 @@
       "classification": "domain-local",
       "rule": "engine-domain-default",
       "justification": "tokenzero domain implementation has no reviewed shared-substrate signal",
-      "blob_digest": "0626a5df446dca32c9471cde9a9d1a7b21243abe"
+      "blob_digest": "af4ccce129e9dfd9668a19827e875546ab5cbcee"
     },
     {
       "repo": "tokenzero",
@@ -11383,6 +11322,15 @@
       "rule": "engine-domain-default",
       "justification": "tokenzero domain implementation has no reviewed shared-substrate signal",
       "blob_digest": "2ffa3a9178687d47071dbc0af6e13806f4d66f90"
+    },
+    {
+      "repo": "tokenzero",
+      "path": "scripts/rustfmt_targeted.sh",
+      "language": "Shell",
+      "classification": "domain-local",
+      "rule": "engine-domain-default",
+      "justification": "tokenzero domain implementation has no reviewed shared-substrate signal",
+      "blob_digest": "1e5d7d2c08838b37cbd8c0f3da47de901940daaf"
     },
     {
       "repo": "tokenzero",
