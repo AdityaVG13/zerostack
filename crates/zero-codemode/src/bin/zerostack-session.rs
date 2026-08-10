@@ -457,6 +457,7 @@ fn handle_client(
                 root: requested,
                 source,
                 timeout_ms,
+                approval_grants,
             } => {
                 if !ids.insert((generation, id)) {
                     write_frame(
@@ -482,11 +483,12 @@ fn handle_client(
                     )?;
                     continue;
                 }
-                match session.execute(
+                match session.execute_with_approvals(
                     generation,
                     id,
                     source,
                     Duration::from_millis(timeout_ms.unwrap_or(30_000).clamp(1, 3_600_000)),
+                    approval_grants,
                 ) {
                     Ok(result) => write_frame(
                         &mut stream,

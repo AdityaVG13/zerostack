@@ -26,7 +26,7 @@ use std::{
     thread::{self, JoinHandle},
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
-use zero_abi::raw_worker::EngineIdentity;
+use zero_abi::raw_worker::{ApprovalGrant as WorkerApprovalGrant, EffectClass, EngineIdentity};
 use zero_abi::{
     ApprovalState, CallRequest, TOKEN_JOB_OPERATION_V1, TokenJobPollRequestV1,
     TokenJobPollResultV1, WorkerResult, WorkerTrace,
@@ -39,6 +39,10 @@ pub const SESSION_SOCKET_ENV: &str = "ZEROSTACK_SESSION_SOCKET";
 pub const SESSION_TOKEN_ENV: &str = "ZEROSTACK_SESSION_TOKEN";
 pub const SESSION_SHUTDOWN_TOKEN_ENV: &str = "ZEROSTACK_SESSION_SHUTDOWN_TOKEN";
 const RAW_WORKER_PROTOCOL_ENV: &str = "ZEROSTACK_RAW_WORKER_PROTOCOL";
+pub const SESSION_APPROVAL_SCHEMA: &str = "zerostack.session.approval_grant.v1";
+pub const MAX_SESSION_APPROVAL_GRANTS: usize = 64;
+const MAX_SESSION_APPROVAL_LIFETIME_MS: u64 = 300_000;
+const MAX_SESSION_CONSUMED_APPROVALS: usize = 65_536;
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -62,6 +66,23 @@ impl SessionReplacementReason {
     }
 }
 
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct SessionApprovalGrantV1 {
+    pub schema: String,
+    pub grant_id: String,
+    pub engine: EngineIdentity,
+    pub root: String,
+    pub generation: u64,
+    pub request_id: u64,
+    pub operation: String,
+    pub effect: EffectClass,
+    pub authority_digest: String,
+    pub policy_digest: String,
+    pub issued_at_unix_ms: u64,
+    pub expires_at_unix_ms: u64,
+}
+
 #[derive(Debug, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum SessionRequest {
@@ -76,6 +97,8 @@ pub enum SessionRequest {
         source: String,
         #[serde(default)]
         timeout_ms: Option<u64>,
+        #[serde(default)]
+        approval_grants: Vec<SessionApprovalGrantV1>,
     },
     Replace {
         id: u64,
@@ -193,6 +216,11 @@ struct AggregateWorkerState {
     cancellation: CancellationSignal,
 }
 
+#[derive(Default)]
+struct ActiveApprovals {
+    grants: Vec<SessionApprovalGrantV1>,
+}
+
 struct AggregateDispatch {
     engine: EngineIdentity,
     request: CallRequest,
@@ -207,6 +235,7 @@ struct AggregateConnector {
     dispatch_sender: Option<SyncSender<AggregateDispatch>>,
     dispatchers: Vec<JoinHandle<()>>,
     sequence: AtomicU64,
+    approvals: Mutex<ActiveApprovals>,
 }
 
 impl AggregateConnector {
@@ -363,7 +392,61 @@ impl AggregateConnector {
             dispatch_sender: Some(dispatch_sender),
             dispatchers,
             sequence: AtomicU64::new(1),
+            approvals: Mutex::new(ActiveApprovals::default()),
         })
+    }
+
+    fn install_approvals(&self, grants: Vec<SessionApprovalGrantV1>) -> Result<(), HostError> {
+        let mut active = self
+            .approvals
+            .lock()
+            .map_err(|_| HostError::Connector("approval state lock poisoned".into()))?;
+        if !active.grants.is_empty() {
+            return Err(HostError::Connector(
+                "approval state was not cleared after the prior execution".into(),
+            ));
+        }
+        active.grants = grants;
+        Ok(())
+    }
+
+    fn clear_approvals(&self) {
+        if let Ok(mut active) = self.approvals.lock() {
+            active.grants.clear();
+        }
+    }
+
+    fn take_approval(
+        &self,
+        engine: EngineIdentity,
+        operation: &str,
+        worker_request_id: &str,
+    ) -> Result<Option<WorkerApprovalGrant>, ConnectorError> {
+        let mut active = self
+            .approvals
+            .lock()
+            .map_err(|_| ConnectorError::new("approval state lock poisoned"))?;
+        let Some(index) = active
+            .grants
+            .iter()
+            .position(|grant| grant.engine == engine && grant.operation == operation)
+        else {
+            return Ok(None);
+        };
+        let grant = active.grants.remove(index);
+        Ok(Some(WorkerApprovalGrant {
+            grant_id: grant.grant_id,
+            engine,
+            root: grant.root,
+            session_id: self.state.session_id.clone(),
+            request_id: worker_request_id.to_owned(),
+            operation: operation.to_owned(),
+            effect: grant.effect,
+            authority_digest: grant.authority_digest,
+            policy_digest: grant.policy_digest,
+            issued_at_unix_ms: grant.issued_at_unix_ms,
+            expires_at_unix_ms: grant.expires_at_unix_ms,
+        }))
     }
 }
 
@@ -1037,6 +1120,7 @@ impl Connector for AggregateConnector {
             worker_revision: revision.clone(),
             contract_digest: contract_digest.clone(),
         };
+        let approval_grant = self.take_approval(engine, &op, &id)?;
         let request = CallRequest {
             request_id: id,
             op,
@@ -1051,7 +1135,7 @@ impl Connector for AggregateConnector {
                 ),
             ),
             trace,
-            approval_grant: None,
+            approval_grant,
             telemetry_request: None,
         };
         let dispatch = AggregateDispatch {
@@ -1287,17 +1371,29 @@ impl SessionExecutor {
         })
     }
     pub fn execute(&self, source: &str, timeout: Duration) -> Result<Value, HostError> {
+        self.execute_with_approvals(source, timeout, Vec::new())
+    }
+
+    pub fn execute_with_approvals(
+        &self,
+        source: &str,
+        timeout: Duration,
+        approval_grants: Vec<SessionApprovalGrantV1>,
+    ) -> Result<Value, HostError> {
         if self.cancelled.load(Ordering::Acquire)
             || self.connector.state.cancellation.is_cancelled()
         {
             return Err(HostError::Connector("session cancelled".into()));
         }
-        self.host.execute_with_cancel_timeout(
+        self.connector.install_approvals(approval_grants)?;
+        let result = self.host.execute_with_cancel_timeout(
             source,
             self.connector.clone(),
             self.cancelled.clone(),
             timeout,
-        )
+        );
+        self.connector.clear_approvals();
+        result
     }
     pub fn cancellation(&self) -> SessionCancellation {
         SessionCancellation {
@@ -1320,6 +1416,8 @@ pub enum AggregateSessionFailureCode {
     InvalidGeneration,
     StaleGeneration,
     DuplicateRequestId,
+    InvalidApproval,
+    ApprovalReplay,
     Backpressure,
     ReplacementInProgress,
     Terminating,
@@ -1337,6 +1435,8 @@ impl AggregateSessionFailureCode {
             Self::InvalidGeneration => "invalid_generation",
             Self::StaleGeneration => "stale_generation",
             Self::DuplicateRequestId => "duplicate_request_id",
+            Self::InvalidApproval => "invalid_approval",
+            Self::ApprovalReplay => "approval_replay",
             Self::Backpressure => "backpressure",
             Self::ReplacementInProgress => "replacement_in_progress",
             Self::Terminating => "session_terminating",
@@ -1429,12 +1529,15 @@ struct AggregateSessionState {
     worker_stopped: bool,
     seen_request_ids: BTreeSet<u64>,
     active_request_ids: BTreeSet<u64>,
+    root: String,
+    consumed_approval_ids: BTreeSet<String>,
 }
 
 enum SessionCommand {
     Execute {
         source: String,
         timeout: Duration,
+        approval_grants: Vec<SessionApprovalGrantV1>,
         reply: SyncSender<Result<Value, HostError>>,
     },
     Replace {
@@ -1472,6 +1575,97 @@ impl AggregateSessionCancellation {
         cancel_backend(&self.cancellation);
     }
 }
+fn validate_session_approvals(
+    state: &AggregateSessionState,
+    generation: u64,
+    request_id: u64,
+    grants: &[SessionApprovalGrantV1],
+) -> Result<Vec<String>, AggregateSessionError> {
+    let invalid = |detail: String| {
+        AggregateSessionError::new(
+            AggregateSessionFailureCode::InvalidApproval,
+            state.generation,
+            Some(request_id),
+            detail,
+        )
+    };
+    if grants.len() > MAX_SESSION_APPROVAL_GRANTS {
+        return Err(invalid(format!(
+            "approval grant count {} exceeds maximum {MAX_SESSION_APPROVAL_GRANTS}",
+            grants.len()
+        )));
+    }
+    if state
+        .consumed_approval_ids
+        .len()
+        .saturating_add(grants.len())
+        > MAX_SESSION_CONSUMED_APPROVALS
+    {
+        return Err(invalid(
+            "session approval replay ledger capacity exhausted".into(),
+        ));
+    }
+    let now = now_ms();
+    let mut ids = BTreeSet::new();
+    for grant in grants {
+        let lower_hex = |value: &str| {
+            value.len() == 64
+                && value
+                    .bytes()
+                    .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+        };
+        if grant.schema != SESSION_APPROVAL_SCHEMA
+            || grant.grant_id.is_empty()
+            || grant.grant_id.len() > 128
+            || grant.operation.is_empty()
+            || grant.operation.len() > 256
+            || !lower_hex(&grant.authority_digest)
+            || !lower_hex(&grant.policy_digest)
+            || grant.issued_at_unix_ms >= grant.expires_at_unix_ms
+            || grant
+                .expires_at_unix_ms
+                .saturating_sub(grant.issued_at_unix_ms)
+                > MAX_SESSION_APPROVAL_LIFETIME_MS
+        {
+            return Err(invalid(format!(
+                "approval grant '{}' is malformed",
+                grant.grant_id
+            )));
+        }
+        if grant.root != state.root
+            || grant.generation != generation
+            || grant.request_id != request_id
+        {
+            return Err(invalid(format!(
+                "approval grant '{}' binding mismatch",
+                grant.grant_id
+            )));
+        }
+        if grant.effect != EffectClass::ApprovalRequiredMutation {
+            return Err(invalid(format!(
+                "approval grant '{}' has wrong effect",
+                grant.grant_id
+            )));
+        }
+        if now < grant.issued_at_unix_ms || now >= grant.expires_at_unix_ms {
+            return Err(invalid(format!(
+                "approval grant '{}' is expired or not yet valid",
+                grant.grant_id
+            )));
+        }
+        if !ids.insert(grant.grant_id.clone())
+            || state.consumed_approval_ids.contains(&grant.grant_id)
+        {
+            return Err(AggregateSessionError::new(
+                AggregateSessionFailureCode::ApprovalReplay,
+                state.generation,
+                Some(request_id),
+                format!("approval grant '{}' was already consumed", grant.grant_id),
+            ));
+        }
+    }
+    Ok(ids.into_iter().collect())
+}
 
 impl AggregateSession {
     pub fn new(initial_generation: u64) -> Result<Self, AggregateSessionError> {
@@ -1506,6 +1700,15 @@ impl AggregateSession {
                 "initial generation must be nonzero",
             ));
         }
+        let root = root.canonicalize().map_err(|error| {
+            AggregateSessionError::new(
+                AggregateSessionFailureCode::BackendUnavailable,
+                initial_generation,
+                None,
+                format!("cannot resolve authorized session root: {error}"),
+            )
+        })?;
+        let root_text = root.to_string_lossy().into_owned();
         let (commands, receiver) = mpsc::sync_channel(SESSION_EXECUTION_QUEUE_CAPACITY);
         let (ready_tx, ready_rx) = mpsc::sync_channel(1);
         let cancellation = Arc::new(Mutex::new(None));
@@ -1562,6 +1765,8 @@ impl AggregateSession {
                 worker_stopped: false,
                 seen_request_ids: BTreeSet::new(),
                 active_request_ids: BTreeSet::new(),
+                root: root_text,
+                consumed_approval_ids: BTreeSet::new(),
             })),
             commands,
             cancellation,
@@ -1597,6 +1802,17 @@ impl AggregateSession {
         source: impl Into<String>,
         timeout: Duration,
     ) -> Result<SessionExecutionResult, AggregateSessionError> {
+        self.execute_with_approvals(generation, request_id, source, timeout, Vec::new())
+    }
+
+    pub fn execute_with_approvals(
+        &self,
+        generation: u64,
+        request_id: u64,
+        source: impl Into<String>,
+        timeout: Duration,
+        approval_grants: Vec<SessionApprovalGrantV1>,
+    ) -> Result<SessionExecutionResult, AggregateSessionError> {
         let (reply_tx, reply_rx) = mpsc::sync_channel(1);
         {
             let mut state = self.lock_state(Some(request_id))?;
@@ -1619,7 +1835,7 @@ impl AggregateSession {
                     "session is not accepting execution",
                 ));
             }
-            if !state.seen_request_ids.insert(request_id) {
+            if state.seen_request_ids.contains(&request_id) {
                 return Err(AggregateSessionError::new(
                     AggregateSessionFailureCode::DuplicateRequestId,
                     state.generation,
@@ -1627,11 +1843,16 @@ impl AggregateSession {
                     "request id was already admitted in this generation",
                 ));
             }
+            let approval_ids =
+                validate_session_approvals(&state, generation, request_id, &approval_grants)?;
+            state.seen_request_ids.insert(request_id);
             state.active_request_ids.insert(request_id);
+            state.consumed_approval_ids.extend(approval_ids);
         }
         match self.commands.try_send(SessionCommand::Execute {
             source: source.into(),
             timeout,
+            approval_grants,
             reply: reply_tx,
         }) {
             Ok(()) => {}
@@ -1964,12 +2185,15 @@ fn session_worker(
             SessionCommand::Execute {
                 source,
                 timeout,
+                approval_grants,
                 reply,
             } => {
                 let result = executor
                     .as_ref()
                     .ok_or_else(|| HostError::Runtime("session executor is unavailable".into()))
-                    .and_then(|executor| executor.execute(&source, timeout));
+                    .and_then(|executor| {
+                        executor.execute_with_approvals(&source, timeout, approval_grants)
+                    });
                 let _ = reply.send(result);
             }
             SessionCommand::Replace { generation, reply } => {
@@ -2016,6 +2240,60 @@ fn start_session_executor(generation: u64, root: &Path) -> Result<SessionExecuto
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn session_approval_contract_is_bounded_and_replay_safe() {
+        let root = "/tmp/approved-root";
+        let now = now_ms();
+        let grant = SessionApprovalGrantV1 {
+            schema: SESSION_APPROVAL_SCHEMA.into(),
+            grant_id: "grant-1".into(),
+            engine: EngineIdentity::FsZero,
+            root: root.into(),
+            generation: 7,
+            request_id: 9,
+            operation: "fs.write".into(),
+            effect: EffectClass::ApprovalRequiredMutation,
+            authority_digest: "a".repeat(64),
+            policy_digest: "b".repeat(64),
+            issued_at_unix_ms: now.saturating_sub(1),
+            expires_at_unix_ms: now.saturating_add(1_000),
+        };
+        let mut state = AggregateSessionState {
+            generation: 7,
+            accepting: true,
+            replacing: false,
+            terminating: false,
+            shutdown_sent: false,
+            worker_stopped: false,
+            seen_request_ids: BTreeSet::new(),
+            active_request_ids: BTreeSet::new(),
+            root: root.into(),
+            consumed_approval_ids: BTreeSet::new(),
+        };
+        let ids = validate_session_approvals(&state, 7, 9, std::slice::from_ref(&grant))
+            .expect("valid approval");
+        state.consumed_approval_ids.extend(ids);
+        assert_eq!(
+            validate_session_approvals(&state, 7, 9, &[grant])
+                .unwrap_err()
+                .code,
+            AggregateSessionFailureCode::ApprovalReplay
+        );
+
+        let request: SessionRequest = serde_json::from_value(serde_json::json!({
+            "type": "execute",
+            "id": 1,
+            "generation": 7,
+            "root": root,
+            "source": "return null"
+        }))
+        .unwrap();
+        assert!(matches!(
+            request,
+            SessionRequest::Execute { approval_grants, .. } if approval_grants.is_empty()
+        ));
+    }
 
     #[cfg(unix)]
     #[test]
