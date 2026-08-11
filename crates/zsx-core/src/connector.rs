@@ -244,6 +244,14 @@ pub(crate) fn attempts_root_for(root: &Path) -> PathBuf {
         .join("attempts")
 }
 
+fn attempt_sequence_seed(session_id: &str) -> u64 {
+    let digest = sha256(session_id.as_bytes());
+    u64::from_be_bytes([
+        digest[0], digest[1], digest[2], digest[3], digest[4], digest[5], digest[6], digest[7],
+    ])
+    .max(1)
+}
+
 fn journal_dir_for(
     attempts_root: &Path,
     execution: AggregateExecutionContext,
@@ -567,6 +575,7 @@ impl ZsxConnector {
             }
         }
         let attempts_root = attempts_root_for(&root);
+        let sequence_seed = attempt_sequence_seed(&session_id);
         let state = Arc::new(ZsxState {
             adapters,
             engine_locks: [Mutex::new(()), Mutex::new(()), Mutex::new(())],
@@ -603,7 +612,7 @@ impl ZsxConnector {
             state,
             dispatch_sender: Some(dispatch_sender),
             dispatchers,
-            sequence: AtomicU64::new(1),
+            sequence: AtomicU64::new(sequence_seed),
             approvals: Mutex::new(ActiveApprovals::default()),
             execution_context: Mutex::new(None),
             request_cancellation: Mutex::new(None),

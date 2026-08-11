@@ -162,6 +162,32 @@ fn in_process_dispatch_proves_one_process_and_no_worker_spawn() {
 }
 
 #[test]
+fn durable_attempts_do_not_collide_between_native_sessions() {
+    let directory = TempDir::new().unwrap();
+    let root = directory.path().canonicalize().unwrap();
+
+    for session_id in ["fixture-session-one", "fixture-session-two"] {
+        let (fs, graph, token) = fixture::fixture_adapters(&root, session_id);
+        let session = ZsxSession::builder(root.clone())
+            .with_session_id(session_id)
+            .fszero(as_adapter(&fs))
+            .graphzero(as_adapter(&graph))
+            .tokenzero(as_adapter(&token))
+            .build()
+            .expect("build native fixture session");
+        session
+            .execute(
+                1,
+                1,
+                "return await zero.token.shell('printf ok');",
+                Duration::from_secs(30),
+            )
+            .expect("same-root mutation journal remains unique per native session");
+        session.shutdown().expect("shutdown settles");
+    }
+}
+
+#[test]
 fn approvals_reachability_and_bounded_dispatch_survive_in_process() {
     let directory = TempDir::new().unwrap();
     let root = directory.path().canonicalize().unwrap();

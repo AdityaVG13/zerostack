@@ -18,11 +18,11 @@ use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 use std::sync::{
     Arc, Mutex,
-    atomic::{AtomicBool, Ordering},
+    atomic::{AtomicBool, AtomicU64, Ordering},
     mpsc::{self, Receiver, SyncSender, TrySendError},
 };
 use std::thread::{self, JoinHandle};
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use serde_json::Value;
 use zero_abi::EffectClass;
@@ -338,6 +338,17 @@ impl ZsxExecutor {
     }
 }
 
+static SESSION_ID_SEQUENCE: AtomicU64 = AtomicU64::new(1);
+
+fn default_session_id() -> String {
+    let timestamp = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_nanos();
+    let sequence = SESSION_ID_SEQUENCE.fetch_add(1, Ordering::Relaxed);
+    format!("zsx-{:x}-{timestamp:x}-{sequence:x}", std::process::id())
+}
+
 /// Builder for a single-process ZSX session with exactly the three domain
 /// adapters: FSZero, GraphZero, and TokenZero.
 ///
@@ -363,7 +374,7 @@ impl ZsxBuilder {
     fn new(root: PathBuf) -> Self {
         Self {
             root,
-            session_id: format!("zsx-{:x}", std::process::id()),
+            session_id: default_session_id(),
             fszero: None,
             graphzero: None,
             tokenzero: None,
@@ -1355,6 +1366,13 @@ fn validate_session_approvals(
 mod tests {
     use super::*;
     use zero_abi::raw_worker::EngineIdentity;
+
+    #[test]
+    fn default_session_id_is_unique_per_builder() {
+        let first = ZsxBuilder::new(PathBuf::from("/tmp/one"));
+        let second = ZsxBuilder::new(PathBuf::from("/tmp/two"));
+        assert_ne!(first.session_id, second.session_id);
+    }
 
     #[test]
     fn session_approval_contract_is_bounded_and_replay_safe() {

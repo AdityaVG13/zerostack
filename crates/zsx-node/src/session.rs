@@ -33,11 +33,12 @@ impl NativeZsxSession {
     /// registered. No process is spawned and no socket is opened.
     #[napi(constructor)]
     pub fn new(root: String, session_id: Option<String>) -> napi::Result<Self> {
-        let session_id = session_id.unwrap_or_else(|| format!("zsx-node-{:x}", std::process::id()));
-        let session = ZsxSession::builder(&root)
-            .with_session_id(&session_id)
-            .build_canonical()
-            .map_err(|err| error::zsx_error("constructor", &err))?;
+        let builder = ZsxSession::builder(&root);
+        let session = match session_id {
+            Some(session_id) => builder.with_session_id(session_id).build_canonical(),
+            None => builder.build_canonical(),
+        }
+        .map_err(|err| error::zsx_error("constructor", &err))?;
         Ok(Self {
             core: Arc::new(SessionCore::new(session)),
         })
