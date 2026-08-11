@@ -62,6 +62,10 @@ pub struct SessionReplacementReceipt {
 }
 
 pub const SESSION_EXECUTION_QUEUE_CAPACITY: usize = 8;
+/// Canonical model-visible JSON byte budget. This avoids a durable spill for
+/// a tiny read plus its execution receipt while retaining a hard inline cap;
+/// tokenizer-specific certification remains a separate TokenZero boundary.
+const SESSION_VISIBLE_RESULT_BYTES: usize = 4 * 1024;
 pub const SESSION_REPLACEMENT_SETTLE_TIMEOUT: Duration = Duration::from_secs(5);
 pub const SESSION_EXECUTOR_START_TIMEOUT: Duration = Duration::from_secs(5);
 
@@ -299,7 +303,7 @@ impl ZsxExecutor {
         });
         let limits = crate::connector::host_limits()?;
         let host = Host::new(limits, registration())?
-            .with_visible_result_budget(zero_codemode::DEFAULT_MAX_VISIBLE_RESULT_BYTES)?
+            .with_visible_result_budget(SESSION_VISIBLE_RESULT_BYTES)?
             .with_result_spill(state_root);
         Ok(Self {
             host,

@@ -1,13 +1,13 @@
 //! Canonical zsx result envelope.
 //!
 //! Mirrors the JSON envelope `zsx exec` resolves (`zerostack.zsx.v1`):
-//! `{ protocol, ok, generation, request_id, result }`, extended with a typed
-//! `error` object `{ code, detail, retry_after_ms? }` for failed requests.
+//! `{ protocol, ok, generation, request_id, result, metrics }`, extended with
+//! a typed `error` object `{ code, detail, retry_after_ms? }` for failures.
 //! Every execution resolves this envelope; rejections are reserved for
 //! napi-level failures (e.g. an abort before the async work started).
 
 use serde_json::Value;
-use zsx_core::{ZsxExecutionResult, ZsxSessionError};
+use zsx_core::{ZsxExecutionMetrics, ZsxExecutionResult, ZsxSessionError};
 
 use crate::core::{CODE_CANCELLED, CODE_PANIC};
 
@@ -29,6 +29,7 @@ pub struct Envelope {
     pub generation: u64,
     pub request_id: u64,
     pub result: Option<Value>,
+    pub metrics: Option<ZsxExecutionMetrics>,
     pub error: Option<EnvelopeError>,
 }
 
@@ -39,6 +40,7 @@ impl Envelope {
             generation,
             request_id,
             result: Some(result.value),
+            metrics: Some(result.metrics),
             error: None,
         }
     }
@@ -49,6 +51,7 @@ impl Envelope {
             generation,
             request_id,
             result: None,
+            metrics: None,
             error: Some(EnvelopeError {
                 code: CODE_CANCELLED.to_string(),
                 detail: "request cancelled by AbortSignal".to_string(),
@@ -65,6 +68,7 @@ impl Envelope {
             generation,
             request_id,
             result: None,
+            metrics: None,
             error: Some(EnvelopeError {
                 code: err.code.as_str().to_string(),
                 detail: err.detail.clone(),
@@ -80,6 +84,7 @@ impl Envelope {
             generation,
             request_id,
             result: None,
+            metrics: None,
             error: Some(EnvelopeError {
                 code: CODE_PANIC.to_string(),
                 detail: "backend panic contained by catch_unwind; session state is preserved"
@@ -102,6 +107,11 @@ impl Envelope {
             v.as_object_mut()
                 .expect("envelope is an object")
                 .insert("result".to_string(), result.clone());
+            if let Some(metrics) = &self.metrics {
+                v.as_object_mut()
+                    .expect("envelope is an object")
+                    .insert("metrics".to_string(), serde_json::json!(metrics));
+            }
         } else if let Some(err) = &self.error {
             let mut e = serde_json::json!({
                 "code": err.code,

@@ -126,6 +126,10 @@ fn dispatch_permit_class(engine: EngineIdentity, operation: &str) -> Option<Disp
     if matches!(
         (engine, operation),
         (EngineIdentity::FsZero, "fs.expand")
+            | (
+                EngineIdentity::FsZero,
+                "fs.read" | "fs.readMany" | "fs.ls" | "fs.listMany" | "fs.stat" | "fs.history"
+            )
             | (EngineIdentity::GraphZero, "expand")
             | (EngineIdentity::TokenZero, "expand")
     ) {
@@ -1295,6 +1299,10 @@ mod tests {
         assert_eq!(dispatch_permit_slots(DispatchPermitClass::Heavy, 128), 1);
         assert_eq!(
             dispatch_permit_class(EngineIdentity::TokenZero, "expand"),
+            None
+        );
+        assert_eq!(
+            dispatch_permit_class(EngineIdentity::FsZero, "fs.read"),
             None
         );
         assert_eq!(
