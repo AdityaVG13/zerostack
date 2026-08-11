@@ -117,10 +117,34 @@ impl TokenZeroAdapter {
         session_id: impl Into<String>,
     ) -> Result<Self, AdapterContractError> {
         let root = root.into();
-        let mut config = EngineConfig::for_root(&root);
-        let resolved_store =
-            ResolvedStore::resolve_from_process(&root, StoreEngine::TokenZero, &[]);
-        config.cache_path = resolved_store.engine_dir().join("recovery-cache.json");
+        let cache_path = ResolvedStore::resolve_from_process(&root, StoreEngine::TokenZero, &[])
+            .engine_dir()
+            .join("recovery-cache.json");
+        Self::build(root.clone(), root, cache_path, session_id)
+    }
+
+    /// Build over `workspace_root` while keeping TokenZero recovery and CAS
+    /// state below the explicit session `state_root`.
+    pub fn new_with_state_root(
+        workspace_root: impl Into<PathBuf>,
+        state_root: impl Into<PathBuf>,
+        session_id: impl Into<String>,
+    ) -> Result<Self, AdapterContractError> {
+        let workspace_root = workspace_root.into();
+        let state_root = state_root.into();
+        let cache_path = state_root.join("tokenzero").join("recovery-cache.json");
+        Self::build(workspace_root, state_root, cache_path, session_id)
+    }
+
+    fn build(
+        workspace_root: PathBuf,
+        state_root: PathBuf,
+        cache_path: PathBuf,
+        session_id: impl Into<String>,
+    ) -> Result<Self, AdapterContractError> {
+        let _ = std::fs::create_dir_all(cache_path.parent().unwrap_or(&state_root));
+        let mut config = EngineConfig::for_root(&workspace_root);
+        config.cache_path = cache_path;
         // Mirror the raw-worker entry (`engine_from_options`): the seen-set
         // redundancy layer stays off for the composition path.
         config.session_dedup = false;
@@ -137,7 +161,7 @@ impl TokenZeroAdapter {
         Ok(Self {
             engine,
             binding,
-            root,
+            root: state_root,
             session_id: session_id.into(),
             recovery: OnceLock::new(),
         })

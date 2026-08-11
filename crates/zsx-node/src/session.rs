@@ -25,15 +25,23 @@ pub struct NativeZsxSession {
 
 #[napi]
 impl NativeZsxSession {
-    /// Build one real full session rooted at `root`.
+    /// Build one real full session rooted at `root`, with optional mutable
+    /// state isolated below `state_root`.
     ///
     /// This is the canonical in-process zsx-core composition: the session
     /// worker thread, the aggregate connector, and the confined interpreter
     /// host with the three domain adapters (FSZero, GraphZero, TokenZero)
     /// registered. No process is spawned and no socket is opened.
     #[napi(constructor)]
-    pub fn new(root: String, session_id: Option<String>) -> napi::Result<Self> {
-        let builder = ZsxSession::builder(&root);
+    pub fn new(
+        root: String,
+        session_id: Option<String>,
+        state_root: Option<String>,
+    ) -> napi::Result<Self> {
+        let mut builder = ZsxSession::builder(&root);
+        if let Some(state_root) = state_root {
+            builder = builder.with_state_root(state_root);
+        }
         let session = match session_id {
             Some(session_id) => builder.with_session_id(session_id).build_canonical(),
             None => builder.build_canonical(),

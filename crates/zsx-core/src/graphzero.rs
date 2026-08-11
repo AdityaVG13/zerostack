@@ -70,7 +70,28 @@ impl GraphZeroAdapter {
     /// default (`GRAPHZERO_STORE` defaults to `<repo>/.graphzero`).
     pub fn new(repo_root: impl Into<PathBuf>, session_id: impl Into<String>) -> Self {
         let repo_root = repo_root.into();
-        let embedded = EmbeddedGraphZero::new(repo_root.join(".graphzero"), Some(repo_root));
+        let store_root = repo_root.join(".graphzero");
+        Self::new_with_store_root(repo_root, store_root, session_id)
+    }
+
+    /// Build over `repo_root` while placing durable GraphZero state below an
+    /// explicit session store root.
+    pub fn new_with_state_root(
+        repo_root: impl Into<PathBuf>,
+        state_root: impl Into<PathBuf>,
+        session_id: impl Into<String>,
+    ) -> Self {
+        let repo_root = repo_root.into();
+        let store_root = state_root.into().join("graphzero");
+        Self::new_with_store_root(repo_root, store_root, session_id)
+    }
+
+    fn new_with_store_root(
+        repo_root: PathBuf,
+        store_root: PathBuf,
+        session_id: impl Into<String>,
+    ) -> Self {
+        let embedded = EmbeddedGraphZero::new(store_root, Some(repo_root));
         let session_id = session_id.into();
         let binding = AdapterBinding::new(
             EngineIdentity::GraphZero,

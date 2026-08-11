@@ -489,6 +489,7 @@ pub struct FsZeroAdapter {
     sender: SyncSender<SessionCommand>,
     session_thread: Option<JoinHandle<()>>,
     root: PathBuf,
+    state_root: PathBuf,
     binding: AdapterBinding,
     /// True when the durable repo store could not be opened and the session
     /// fell back to in-memory recovery (durable refs do not survive restart).
@@ -505,6 +506,30 @@ impl FsZeroAdapter {
     pub fn new(root: impl Into<PathBuf>, session_id: &str) -> Self {
         let root = root.into();
         let root = root.canonicalize().unwrap_or(root);
+        Self::build(root.clone(), root, session_id, None)
+    }
+
+    /// Build over `workspace_root` while keeping all durable engine and CAS
+    /// state below the caller-authorized `state_root`.
+    pub fn new_with_state_root(
+        workspace_root: impl Into<PathBuf>,
+        state_root: impl Into<PathBuf>,
+        session_id: &str,
+    ) -> Self {
+        let workspace_root = workspace_root.into();
+        let workspace_root = workspace_root.canonicalize().unwrap_or(workspace_root);
+        let state_root = state_root.into();
+        let _ = std::fs::create_dir_all(state_root.join("fszero"));
+        let database = state_root.join("fszero").join("store.sqlite3");
+        Self::build(workspace_root, state_root, session_id, Some(database))
+    }
+
+    fn build(
+        root: PathBuf,
+        state_root: PathBuf,
+        session_id: &str,
+        database: Option<PathBuf>,
+    ) -> Self {
         // FSZero equates the semantic contract digest with the operation ABI
         // digest (surface_handshake::local_capability).
         let digest = operation_abi_digest();
@@ -521,23 +546,30 @@ impl FsZeroAdapter {
         let (init_tx, init_rx) = mpsc::sync_channel(1);
         let thread_session_id = session_id.to_owned();
         let thread_root = root.clone();
+        let thread_state_root = state_root.clone();
         // The session is not `Send` (single-threaded fsqlite connection), so
         // it is created on the session thread itself; only the root path
         // crosses the spawn boundary.
         let session_thread = thread::Builder::new()
             .name("zsx-fszero-session".into())
             .spawn(move || {
-                let (session, degraded) = match FSZeroSession::try_with_repo_store(&thread_root) {
-                    Ok(session) => (session, false),
-                    Err(error) => {
-                        eprintln!(
-                            "zsx-core: FSZero durable store unavailable ({error}); using in-memory recovery"
-                        );
-                        (FSZeroSession::with_root(&thread_root), true)
-                    }
+                let (session, degraded) = match database {
+                    Some(database) => (
+                        FSZeroSession::with_durable_root(&thread_root, database),
+                        false,
+                    ),
+                    None => match FSZeroSession::try_with_repo_store(&thread_root) {
+                        Ok(session) => (session, false),
+                        Err(error) => {
+                            eprintln!(
+                                "zsx-core: FSZero durable store unavailable ({error}); using in-memory recovery"
+                            );
+                            (FSZeroSession::with_root(&thread_root), true)
+                        }
+                    },
                 };
                 let _ = init_tx.send(degraded);
-                session_loop(session, receiver, thread_root, thread_session_id);
+                session_loop(session, receiver, thread_state_root, thread_session_id);
             })
             .expect("cannot start fszero session thread");
         let degraded = init_rx
@@ -547,6 +579,7 @@ impl FsZeroAdapter {
             sender,
             session_thread: Some(session_thread),
             root,
+            state_root,
             binding,
             degraded,
         }
@@ -561,6 +594,11 @@ impl FsZeroAdapter {
     /// The session root this adapter serves.
     pub fn root(&self) -> &std::path::Path {
         &self.root
+    }
+
+    /// Root containing this adapter's durable state and shared CAS.
+    pub fn state_root(&self) -> &std::path::Path {
+        &self.state_root
     }
 }
 

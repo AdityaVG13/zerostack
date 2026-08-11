@@ -24,7 +24,6 @@ use serde_json::Value;
 use zero_abi::EffectClass;
 use zero_codemode::CancellationSignal;
 use zero_codemode::{Host, HostError};
-use zero_store::{Engine, ResolvedStore, ensure_layout};
 
 use crate::adapter::{AdapterBinding, DomainAdapter};
 use crate::connector::{
@@ -183,6 +182,7 @@ struct ZsxSessionState {
     seen_request_ids: BTreeSet<u64>,
     active_request_ids: BTreeSet<u64>,
     root: String,
+    state_root: String,
     consumed_approval_ids: BTreeSet<String>,
 }
 
@@ -258,6 +258,7 @@ struct ActiveRequestCancellation {
 impl ZsxExecutor {
     fn new(
         root: PathBuf,
+        state_root: PathBuf,
         session_id: String,
         adapters: std::collections::BTreeMap<
             zero_abi::raw_worker::EngineIdentity,
@@ -268,16 +269,26 @@ impl ZsxExecutor {
         let root = root.canonicalize().map_err(|error| {
             HostError::Connector(format!("cannot resolve authorized session root: {error}"))
         })?;
-        let resolved_store = ResolvedStore::resolve_from_process(&root, Engine::TokenZero, &[]);
-        ensure_layout(&resolved_store).map_err(|error| {
+        std::fs::create_dir_all(&state_root).map_err(|error| {
             HostError::Connector(format!("cannot prepare session result store: {error}"))
         })?;
-        let result_spill_root = resolved_store.cas_host().to_path_buf();
-        let connector = std::rc::Rc::new(ZsxConnector::new(root, session_id, adapters)?);
+        let state_root = state_root.canonicalize().map_err(|error| {
+            HostError::Connector(format!("cannot resolve session state root: {error}"))
+        })?;
+        let connector = std::rc::Rc::new(if state_root == root {
+            ZsxConnector::new(root, session_id, adapters)?
+        } else {
+            ZsxConnector::new_with_state_root(
+                root,
+                state_root.clone(),
+                session_id,
+                adapters,
+            )?
+        });
         let limits = crate::connector::host_limits()?;
         let host = Host::new(limits, registration())?
             .with_visible_result_budget(zero_codemode::DEFAULT_MAX_VISIBLE_RESULT_BYTES)?
-            .with_result_spill(result_spill_root);
+            .with_result_spill(state_root);
         Ok(Self {
             host,
             connector,
@@ -382,6 +393,7 @@ fn default_session_id() -> String {
 /// ```
 pub struct ZsxBuilder {
     root: PathBuf,
+    state_root: PathBuf,
     session_id: String,
     fszero: Option<Arc<dyn DomainAdapter>>,
     graphzero: Option<Arc<dyn DomainAdapter>>,
@@ -391,6 +403,7 @@ pub struct ZsxBuilder {
 impl ZsxBuilder {
     fn new(root: PathBuf) -> Self {
         Self {
+            state_root: root.clone(),
             root,
             session_id: default_session_id(),
             fszero: None,
@@ -402,6 +415,13 @@ impl ZsxBuilder {
     /// Override the session identity surfaced in traces and ref ownership.
     pub fn with_session_id(mut self, session_id: impl Into<String>) -> Self {
         self.session_id = session_id.into();
+        self
+    }
+
+    /// Place mutable session, engine, CAS, journal, and spill state below an
+    /// explicit root while keeping repository operations authorized to `root`.
+    pub fn with_state_root(mut self, state_root: impl Into<PathBuf>) -> Self {
+        self.state_root = state_root.into();
         self
     }
 
@@ -470,7 +490,13 @@ impl ZsxBuilder {
             })?;
             adapters.insert(engine, adapter);
         }
-        ZsxSession::new_authorized_with_adapters(1, self.root, self.session_id, adapters)
+        ZsxSession::new_authorized_with_adapters(
+            1,
+            self.root,
+            self.state_root,
+            self.session_id,
+            adapters,
+        )
     }
 
     /// Build the canonical session over exactly the three real adapters
@@ -482,17 +508,37 @@ impl ZsxBuilder {
     #[cfg(all(feature = "fszero", feature = "graphzero", feature = "tokenzero"))]
     pub fn build_canonical(self) -> Result<ZsxSession, ZsxSessionError> {
         let root = self.root.clone();
+        let state_root = self.state_root.clone();
         let session_id = self.session_id.clone();
-        let fszero = Arc::new(crate::fszero::FsZeroAdapter::new(
-            &root,
-            session_id.as_str(),
-        ));
-        let graphzero = Arc::new(crate::graphzero::GraphZeroAdapter::new(
-            &root,
-            session_id.as_str(),
-        ));
+        let fszero = Arc::new(if state_root == root {
+            crate::fszero::FsZeroAdapter::new(&root, session_id.as_str())
+        } else {
+            crate::fszero::FsZeroAdapter::new_with_state_root(
+                &root,
+                &state_root,
+                session_id.as_str(),
+            )
+        });
+        let graphzero = Arc::new(if state_root == root {
+            crate::graphzero::GraphZeroAdapter::new(&root, session_id.as_str())
+        } else {
+            crate::graphzero::GraphZeroAdapter::new_with_state_root(
+                &root,
+                &state_root,
+                session_id.as_str(),
+            )
+        });
         let tokenzero = Arc::new(
-            crate::tokenzero::TokenZeroAdapter::new(&root, session_id.as_str()).map_err(
+            (if state_root == root {
+                crate::tokenzero::TokenZeroAdapter::new(&root, session_id.as_str())
+            } else {
+                crate::tokenzero::TokenZeroAdapter::new_with_state_root(
+                    &root,
+                    &state_root,
+                    session_id.as_str(),
+                )
+            })
+            .map_err(
                 |error| {
                     ZsxSessionError::new(
                         ZsxSessionFailureCode::BackendUnavailable,
@@ -579,6 +625,7 @@ impl ZsxSession {
     pub(crate) fn new_authorized_with_adapters(
         initial_generation: u64,
         root: PathBuf,
+        state_root: PathBuf,
         session_id: String,
         adapters: std::collections::BTreeMap<
             zero_abi::raw_worker::EngineIdentity,
@@ -609,7 +656,24 @@ impl ZsxSession {
                 format!("cannot resolve authorized session root: {error}"),
             )
         })?;
+        std::fs::create_dir_all(&state_root).map_err(|error| {
+            ZsxSessionError::new(
+                ZsxSessionFailureCode::BackendUnavailable,
+                initial_generation,
+                None,
+                format!("cannot create session state root: {error}"),
+            )
+        })?;
+        let state_root = state_root.canonicalize().map_err(|error| {
+            ZsxSessionError::new(
+                ZsxSessionFailureCode::BackendUnavailable,
+                initial_generation,
+                None,
+                format!("cannot resolve session state root: {error}"),
+            )
+        })?;
         let root_text = root.to_string_lossy().into_owned();
+        let state_root_text = state_root.to_string_lossy().into_owned();
         let (commands, receiver) = mpsc::sync_channel(SESSION_EXECUTION_QUEUE_CAPACITY);
         let (ready_tx, ready_rx) = mpsc::sync_channel(1);
         let cancellation = Arc::new(Mutex::new(ActiveCancellationSlot::default()));
@@ -620,6 +684,7 @@ impl ZsxSession {
                 session_worker(
                     initial_generation,
                     root,
+                    state_root,
                     session_id,
                     adapters,
                     receiver,
@@ -669,6 +734,7 @@ impl ZsxSession {
                 seen_request_ids: BTreeSet::new(),
                 active_request_ids: BTreeSet::new(),
                 root: root_text,
+                state_root: state_root_text,
                 consumed_approval_ids: BTreeSet::new(),
             })),
             commands,
@@ -867,7 +933,7 @@ impl ZsxSession {
                     ),
                 ));
             }
-            state.root.clone()
+            state.state_root.clone()
         };
         let attempts_root = attempts_root_for(Path::new(&root));
         reconcile_request_attempts(&attempts_root, generation, request_id).map_err(|detail| {
@@ -886,7 +952,7 @@ impl ZsxSession {
     pub fn reconcile_all_attempts(&self) -> Result<Vec<ZsxAttemptJournalStatus>, ZsxSessionError> {
         let (root, generation) = {
             let state = self.lock_state(None)?;
-            (state.root.clone(), state.generation)
+            (state.state_root.clone(), state.generation)
         };
         let attempts_root = attempts_root_for(Path::new(&root));
         reconcile_all_attempts(&attempts_root).map_err(|detail| {
@@ -1159,6 +1225,7 @@ fn cancel_backend(cancellation: &Arc<Mutex<ActiveCancellationSlot>>) {
 fn session_worker(
     initial_generation: u64,
     root: PathBuf,
+    state_root: PathBuf,
     session_id: String,
     adapters: std::collections::BTreeMap<
         zero_abi::raw_worker::EngineIdentity,
@@ -1171,6 +1238,7 @@ fn session_worker(
     let mut executor = match start_session_executor(
         initial_generation,
         &root,
+        &state_root,
         &session_id,
         &adapters,
         Arc::clone(&cancellation),
@@ -1225,6 +1293,7 @@ fn session_worker(
                     start_session_executor(
                         generation,
                         &root,
+                        &state_root,
                         &session_id,
                         &adapters,
                         Arc::clone(&cancellation),
@@ -1262,6 +1331,7 @@ fn session_worker(
 fn start_session_executor(
     generation: u64,
     root: &Path,
+    state_root: &Path,
     session_id: &str,
     adapters: &std::collections::BTreeMap<
         zero_abi::raw_worker::EngineIdentity,
@@ -1271,6 +1341,7 @@ fn start_session_executor(
 ) -> Result<ZsxExecutor, String> {
     let executor = ZsxExecutor::new(
         root.to_path_buf(),
+        state_root.to_path_buf(),
         session_id.to_owned(),
         adapters.clone(),
         cancellation_slot,
@@ -1420,6 +1491,7 @@ mod tests {
             seen_request_ids: BTreeSet::new(),
             active_request_ids: BTreeSet::new(),
             root: root.into(),
+            state_root: root.into(),
             consumed_approval_ids: BTreeSet::new(),
         };
         let ids = validate_session_approvals(&state, 7, 9, std::slice::from_ref(&grant))
