@@ -8,6 +8,7 @@
       "namespace": "fz",
       "surface": "codemode",
       "binary_env": "FSZERO_CODEMODE_BIN",
+      "source_repo_env": "FSZERO_REPO",
       "command": "explicit-binary",
       "probe": "capabilities --json",
       "serve": "--raw-worker --root <root>"
@@ -19,6 +20,7 @@
       "namespace": "gz",
       "surface": "codemode",
       "binary_env": "GRAPHZERO_CODEMODE_BIN",
+      "source_repo_env": "GRAPHZERO_REPO",
       "command": "explicit-binary",
       "probe": "capabilities --json",
       "serve": "default serve mode (GRAPHZERO_REPO env)"
@@ -30,6 +32,7 @@
       "namespace": "tz",
       "surface": "codemode",
       "binary_env": "TOKENZERO_CODEMODE_BIN",
+      "source_repo_env": "TOKENZERO_REPO",
       "command": "explicit-binary",
       "probe": "capabilities --json",
       "serve": "raw-worker --root <root>"

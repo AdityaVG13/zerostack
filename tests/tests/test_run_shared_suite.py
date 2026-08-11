@@ -14,6 +14,7 @@ spec = importlib.util.spec_from_file_location("run_shared_suite", SCRIPT)
 assert spec and spec.loader
 runner = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(runner)
+SOURCE_HEAD = "a" * 40
 
 
 class SharedSuiteRunnerTests(unittest.TestCase):
@@ -35,7 +36,18 @@ class SharedSuiteRunnerTests(unittest.TestCase):
 
     def test_selected_engine_uses_explicit_binary_and_descriptor_namespace(self):
         with patch.object(runner.subprocess, "call", return_value=0) as call:
-            self.assertEqual(runner.main(["fszero", "--fszero-bin", "/tmp/fszero-codemode"]), 0)
+            self.assertEqual(
+                runner.main(
+                    [
+                        "fszero",
+                        "--fszero-bin",
+                        "/tmp/fszero-codemode",
+                        "--source-head",
+                        SOURCE_HEAD,
+                    ]
+                ),
+                0,
+            )
         command, kwargs = call.call_args
         self.assertEqual(command[0][0], "zerostack-shared-conformance")
         self.assertIn("--ns", command[0])
@@ -59,6 +71,12 @@ class SharedSuiteRunnerTests(unittest.TestCase):
                     "/tmp/graphzero",
                     "--tokenzero-bin",
                     "/tmp/tokenzero",
+                    "--fszero-source-head",
+                    SOURCE_HEAD,
+                    "--graphzero-source-head",
+                    SOURCE_HEAD,
+                    "--tokenzero-source-head",
+                    SOURCE_HEAD,
                 ]
             )
 
@@ -98,11 +116,37 @@ class SharedSuiteRunnerTests(unittest.TestCase):
                     "/tmp/graphzero",
                     "--tokenzero-bin",
                     "/tmp/tokenzero",
+                    "--fszero-source-head",
+                    SOURCE_HEAD,
+                    "--graphzero-source-head",
+                    SOURCE_HEAD,
+                    "--tokenzero-source-head",
+                    SOURCE_HEAD,
                 ]
             )
 
         self.assertEqual(result, 7)
         self.assertEqual(len(commands), 4)
+
+    def test_all_rejects_one_ambiguous_source_head(self):
+        error = StringIO()
+        with redirect_stderr(error):
+            with self.assertRaises(SystemExit) as raised:
+                runner.main(
+                    [
+                        "--all",
+                        "--fszero-bin",
+                        "/tmp/fszero",
+                        "--graphzero-bin",
+                        "/tmp/graphzero",
+                        "--tokenzero-bin",
+                        "/tmp/tokenzero",
+                        "--source-head",
+                        SOURCE_HEAD,
+                    ]
+                )
+        self.assertEqual(raised.exception.code, 2)
+        self.assertIn("ambiguous", error.getvalue())
 
     def test_schema_pair_checker_runs_against_canonical_contracts(self):
         result = subprocess.run(

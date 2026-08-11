@@ -39,11 +39,46 @@ def command_for(adapter: str, descriptor: dict, binary: str | None) -> list[str]
     return [selected]
 
 
-def run_one(adapter: str, descriptor: dict, binary: str | None, reports: Path) -> int:
+def git_head(repo: Path) -> str:
+    """Resolve the exact current HEAD of a repository (40..=64 lowercase hex)."""
+    result = subprocess.run(
+        ["git", "-C", str(repo), "rev-parse", "HEAD"],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if result.returncode != 0:
+        raise ValueError(f"cannot resolve git HEAD for {repo}: {result.stderr.strip()}")
+    head = result.stdout.strip()
+    if len(head) < 40 or len(head) > 64 or not all(c in "0123456789abcdef" for c in head):
+        raise ValueError(f"invalid git HEAD {head!r} for {repo}")
+    return head
+
+
+def run_one(
+    adapter: str,
+    descriptor: dict,
+    binary: str | None,
+    reports: Path,
+    source_head: str | None,
+    hub_head: str | None,
+) -> int:
     command = command_for(adapter, descriptor, binary)
     namespace = descriptor.get("namespace", "reference")
     if adapter == "reference":
         return subprocess.call(command + ["--suite", "all"], cwd=TESTS_ROOT)
+    # Production receipts are immutable: bind the checked engine repository,
+    # not the hub checkout that happens to run this script.
+    if source_head is None:
+        repo_env = descriptor.get("source_repo_env")
+        source_repo = os.environ.get(repo_env) if repo_env else None
+        if not source_repo:
+            raise ValueError(
+                f"--{adapter}-source-head is required when {repo_env or 'source_repo_env'} is unset"
+            )
+        source_head = git_head(Path(source_repo))
+    if hub_head is None:
+        hub_head = git_head(REPO_ROOT)
     conformance = os.environ.get(
         "ZEROSTACK_CONFORMANCE_BIN", "zerostack-shared-conformance"
     )
@@ -57,6 +92,10 @@ def run_one(adapter: str, descriptor: dict, binary: str | None, reports: Path) -
         descriptor.get("surface", "codemode"),
         "--reports-dir",
         str(reports / adapter),
+        "--source-head",
+        source_head,
+        "--hub-head",
+        hub_head,
     ]
     print("$", " ".join(probe))
     return subprocess.call(probe, cwd=REPO_ROOT)
@@ -70,6 +109,17 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--fszero-bin")
     parser.add_argument("--graphzero-bin")
     parser.add_argument("--tokenzero-bin")
+    parser.add_argument(
+        "--source-head",
+        help="exact source head for one selected engine; forbidden with multi-engine --all",
+    )
+    parser.add_argument("--fszero-source-head", help="exact FSZero repository head")
+    parser.add_argument("--graphzero-source-head", help="exact GraphZero repository head")
+    parser.add_argument("--tokenzero-source-head", help="exact TokenZero repository head")
+    parser.add_argument(
+        "--hub-head",
+        help="current hub repository head (default: git HEAD of the shared-suite repo)",
+    )
     parser.add_argument("--reference", action="store_true", help="run only the non-Pi reference adapter")
     args = parser.parse_args(argv)
     descriptors = load_descriptors()
@@ -77,6 +127,11 @@ def main(argv: list[str] | None = None) -> int:
         "fszero": args.fszero_bin,
         "graphzero": args.graphzero_bin,
         "tokenzero": args.tokenzero_bin,
+    }
+    source_heads = {
+        "fszero": args.fszero_source_head,
+        "graphzero": args.graphzero_source_head,
+        "tokenzero": args.tokenzero_source_head,
     }
     if args.all:
         selected = ["fszero", "graphzero", "tokenzero", "reference"]
@@ -99,9 +154,22 @@ def main(argv: list[str] | None = None) -> int:
     ]
     if missing:
         parser.error(f"missing explicit binary for: {', '.join(missing)}")
+    selected_engines = [item for item in selected if item != "reference"]
+    if args.source_head and len(selected_engines) > 1:
+        parser.error("--source-head is ambiguous with multiple engines; pass each --*-source-head")
     status = 0
     for adapter in selected:
-        status = max(status, run_one(adapter, descriptors[adapter], paths.get(adapter), args.reports_dir))
+        status = max(
+            status,
+            run_one(
+                adapter,
+                descriptors[adapter],
+                paths.get(adapter),
+                args.reports_dir,
+                source_heads.get(adapter) or args.source_head,
+                args.hub_head,
+            ),
+        )
     return status
 
 

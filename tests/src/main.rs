@@ -4,7 +4,8 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 use zerostack_shared_tests::fake_substrate::fake_mcp_main;
 use zerostack_shared_tests::{
-    CompletionStatus, ConformanceReport, Ns, RunConfig, Surface, run_conformance,
+    CompletionStatus, ConformanceReport, Ns, RunConfig, Surface, production_provenance,
+    run_conformance, valid_head,
 };
 
 /// Infer the served surface from the artifact filename.
@@ -52,6 +53,22 @@ struct Args {
     #[arg(long, default_value = "reports")]
     reports_dir: PathBuf,
 
+    /// Exact explicit source repository head (40..=64 lowercase hex).
+    ///
+    /// Required: a production receipt is immutable and must name the exact
+    /// source commit the harness was checked out at. Rejected when missing or
+    /// malformed — the run fails closed instead of writing a receipt without
+    /// provenance.
+    #[arg(long)]
+    source_head: Option<String>,
+
+    /// Current hub repository head (40..=64 lowercase hex).
+    ///
+    /// Required: a production receipt must name the current hub commit at
+    /// collection time. Rejected when missing or malformed.
+    #[arg(long)]
+    hub_head: Option<String>,
+
     /// Per-request timeout in seconds.
     #[arg(long, default_value_t = 5)]
     timeout_seconds: u64,
@@ -78,6 +95,11 @@ fn main() -> Result<()> {
     let args = Args::parse();
     let config = build_run_config(args)?;
     let report = run_conformance(&config);
+    // Production receipts are immutable: bind the exact source head, hub head,
+    // artifact hash/bytes, checks digest, and measured counts. Missing or
+    // invalid provenance was already rejected above; this is the last gate.
+    let provenance = production_provenance(&config, &report)?;
+    let report = report.with_provenance(provenance);
     finish_with_report(&report, &config.reports_dir)
 }
 
@@ -137,8 +159,35 @@ fn build_run_config(args: Args) -> Result<RunConfig> {
         })?,
     };
 
+    // Production provenance: the receipt is immutable, so it must name the
+    // exact explicit source head, the current hub head, and the tested
+    // artifact's SHA-256 and byte length. Missing or invalid provenance is a
+    // hard error BEFORE any check runs: a receipt without exact commits is
+    // not production evidence.
+    let source_head = args
+        .source_head
+        .context("--source-head <40..64 lowercase hex> is required for production provenance")?;
+    let hub_head = args
+        .hub_head
+        .context("--hub-head <40..64 lowercase hex> is required for production provenance")?;
+    if !valid_head(&source_head) {
+        bail!("--source-head {source_head:?} is not 40..=64 lowercase hex");
+    }
+    if !valid_head(&hub_head) {
+        bail!("--hub-head {hub_head:?} is not 40..=64 lowercase hex");
+    }
+
+    let artifact = std::fs::read(&bin)
+        .with_context(|| format!("reading artifact bytes of {}", bin.display()))?;
+    let artifact_bytes = artifact.len() as u64;
+    let artifact_sha256 = zero_abi::sha256_hex(&artifact);
+
     let mut config = RunConfig::new(ns, bin, surface, args.reports_dir);
     config.timeout = Duration::from_secs(args.timeout_seconds);
+    config.source_head = Some(source_head);
+    config.hub_head = Some(hub_head);
+    config.artifact_sha256 = Some(artifact_sha256);
+    config.artifact_bytes = Some(artifact_bytes);
     Ok(config)
 }
 

@@ -16,7 +16,6 @@ use regex::Regex;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use std::collections::{BTreeMap, BTreeSet};
-use std::fs;
 use std::io::{BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Child, ChildStdin, Command, Stdio};
@@ -196,6 +195,47 @@ impl CheckResult {
     }
 }
 
+/// Head grammar bounds shared with the two-phase `SourceHead` contract
+/// (repository heads are 40..=64 lowercase hex bytes).
+pub const MIN_SOURCE_HEAD_BYTES: usize = 40;
+pub const MAX_SOURCE_HEAD_BYTES: usize = 64;
+
+/// Immutable provenance bound to a production conformance receipt.
+///
+/// A production receipt is written once and never rewritten; every field here
+/// names the exact inputs that produced it: the explicit source repository
+/// head the harness was checked out at, the current hub repository head at
+/// collection time, the tested artifact's SHA-256 and byte length, a digest
+/// over this report's checks, and the measured pass/fail/skip counts.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct ReportProvenance {
+    /// Exact explicit source repository head (40..=64 lowercase hex).
+    pub source_head: String,
+    /// Current hub repository head at collection time (40..=64 lowercase hex).
+    pub hub_head: String,
+    /// SHA-256 (lowercase hex) of the tested artifact's exact bytes.
+    pub artifact_sha256: String,
+    /// Byte length of the tested artifact.
+    pub artifact_bytes: u64,
+    /// SHA-256 (lowercase hex) over the canonical JSON of this report's checks.
+    pub checks_digest: String,
+    /// Measured passing checks.
+    pub pass_count: u64,
+    /// Measured failing checks.
+    pub fail_count: u64,
+    /// Measured skipped checks.
+    pub skip_count: u64,
+}
+
+/// Whether `value` is a valid explicit source/hub head: 40..=64 lowercase hex.
+pub fn valid_head(value: &str) -> bool {
+    (MIN_SOURCE_HEAD_BYTES..=MAX_SOURCE_HEAD_BYTES).contains(&value.len())
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+}
+
 pub fn required_gate_ids(surface: Surface) -> Vec<&'static str> {
     match surface {
         // Plan-level G1-G10 require every plan gate.
@@ -238,6 +278,10 @@ pub struct ConformanceReport {
     pub completion_status: CompletionStatus,
     pub passed: bool,
     pub checks: Vec<CheckResult>,
+    /// Immutable provenance. Production receipts (written by the conformance
+    /// CLI) always carry `Some`; the CLI rejects a missing provenance before
+    /// it runs. `None` is reserved for in-memory test constructions.
+    pub provenance: Option<ReportProvenance>,
 }
 
 impl ConformanceReport {
@@ -275,17 +319,68 @@ impl ConformanceReport {
             completion_status,
             passed,
             checks,
+            provenance: None,
         }
     }
 
+    /// Immutable self-binding digest over this report's checks: SHA-256 of the
+    /// canonical (sorted-key) JSON of the checks array. Two reports with
+    /// identical checks share a digest; any check change changes it.
+    pub fn checks_digest(&self) -> String {
+        let value = serde_json::to_value(&self.checks).expect("checks serialize");
+        zero_abi::sha256_hex(zero_abi::canonical_json(&value).as_bytes())
+    }
+
+    /// Measured pass/fail/skip counts over this report's checks.
+    pub fn measured_counts(&self) -> (u64, u64, u64) {
+        let mut pass = 0u64;
+        let mut fail = 0u64;
+        let mut skip = 0u64;
+        for check in &self.checks {
+            match check.status {
+                GateStatus::Pass => pass += 1,
+                GateStatus::Fail => fail += 1,
+                GateStatus::Skipped => skip += 1,
+            }
+        }
+        (pass, fail, skip)
+    }
+
+    /// Builds the immutable provenance for this report from the exact inputs.
+    pub fn build_provenance(
+        &self,
+        source_head: impl Into<String>,
+        hub_head: impl Into<String>,
+        artifact_sha256: impl Into<String>,
+        artifact_bytes: u64,
+    ) -> ReportProvenance {
+        let (pass_count, fail_count, skip_count) = self.measured_counts();
+        ReportProvenance {
+            source_head: source_head.into(),
+            hub_head: hub_head.into(),
+            artifact_sha256: artifact_sha256.into(),
+            artifact_bytes,
+            checks_digest: self.checks_digest(),
+            pass_count,
+            fail_count,
+            skip_count,
+        }
+    }
+
+    /// Attaches immutable provenance. Production receipts always carry it.
+    pub fn with_provenance(mut self, provenance: ReportProvenance) -> Self {
+        self.provenance = Some(provenance);
+        self
+    }
+
+    pub fn provenance(&self) -> Option<&ReportProvenance> {
+        self.provenance.as_ref()
+    }
+
+    /// Writes the report under a surface-disjoint, collision-safe filename:
+    /// `{ns}-{surface}-{stamp}-{checks-digest-prefix}.json`.
     pub fn write_to_reports_dir(&self, reports_dir: &Path) -> Result<PathBuf> {
-        fs::create_dir_all(reports_dir)
-            .with_context(|| format!("creating {}", reports_dir.display()))?;
-        let stamp = chrono::Local::now().format("%Y-%m-%d-%H%M%S");
-        let path = reports_dir.join(format!("{}-{stamp}.json", self.ns));
-        let json = serde_json::to_string_pretty(self)?;
-        fs::write(&path, json).with_context(|| format!("writing {}", path.display()))?;
-        Ok(path)
+        crate::report::write_report_to_reports_dir(self, reports_dir)
     }
 }
 
@@ -566,6 +661,14 @@ pub struct RunConfig {
     pub surface: Surface,
     pub reports_dir: PathBuf,
     pub timeout: Duration,
+    /// Exact explicit source repository head; production runs always set it.
+    pub source_head: Option<String>,
+    /// Current hub repository head at collection time; production runs set it.
+    pub hub_head: Option<String>,
+    /// SHA-256 (lowercase hex) of the tested artifact's exact bytes.
+    pub artifact_sha256: Option<String>,
+    /// Byte length of the tested artifact.
+    pub artifact_bytes: Option<u64>,
 }
 
 impl RunConfig {
@@ -585,8 +688,42 @@ impl RunConfig {
             surface,
             reports_dir,
             timeout: Duration::from_secs(5),
+            source_head: None,
+            hub_head: None,
+            artifact_sha256: None,
+            artifact_bytes: None,
         }
     }
+}
+
+/// Builds the immutable provenance a production receipt must carry, or fails
+/// closed when any provenance input is missing. The conformance CLI always has
+/// all four inputs; a missing input means the run is not production-grade.
+pub fn production_provenance(
+    config: &RunConfig,
+    report: &ConformanceReport,
+) -> Result<ReportProvenance> {
+    let source_head = config
+        .source_head
+        .clone()
+        .context("production conformance requires --source-head")?;
+    let hub_head = config
+        .hub_head
+        .clone()
+        .context("production conformance requires --hub-head")?;
+    let artifact_sha256 = config
+        .artifact_sha256
+        .clone()
+        .context("production conformance requires the artifact SHA-256")?;
+    let artifact_bytes = config
+        .artifact_bytes
+        .context("production conformance requires the artifact byte length")?;
+    Ok(report.build_provenance(
+        source_head,
+        hub_head,
+        artifact_sha256,
+        artifact_bytes,
+    ))
 }
 
 pub fn run_conformance(config: &RunConfig) -> ConformanceReport {

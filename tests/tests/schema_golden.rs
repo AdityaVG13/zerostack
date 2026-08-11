@@ -177,6 +177,19 @@ fn harness_report_validator() -> jsonschema::Validator {
     jsonschema::Validator::new(&schema).unwrap()
 }
 
+fn report_provenance() -> serde_json::Value {
+    json!({
+        "source_head": "0123456789abcdef0123456789abcdef01234567",
+        "hub_head": "fedcba9876543210fedcba9876543210fedcba98",
+        "artifact_sha256": "ab".repeat(32),
+        "artifact_bytes": 4096,
+        "checks_digest": "cd".repeat(32),
+        "pass_count": 10,
+        "fail_count": 0,
+        "skip_count": 0
+    })
+}
+
 fn full_harness_report() -> serde_json::Value {
     // A complete PLANNER report: surface planner, plan contract 1.0, G1-G10.
     json!({
@@ -192,7 +205,8 @@ fn full_harness_report() -> serde_json::Value {
             "passed": true,
             "status": "pass",
             "details": []
-        })).collect::<Vec<_>>()
+        })).collect::<Vec<_>>(),
+        "provenance": report_provenance()
     })
 }
 
@@ -212,7 +226,8 @@ fn full_raw_harness_report() -> serde_json::Value {
             "passed": true,
             "status": "pass",
             "details": []
-        })).collect::<Vec<_>>()
+        })).collect::<Vec<_>>(),
+        "provenance": report_provenance()
     })
 }
 
@@ -231,6 +246,17 @@ fn harness_report_schema_pair_is_deterministic_and_accepts_full_shape() {
         harness_report_validator().is_valid(&full_raw_harness_report()),
         "a complete codemode raw-worker report (RW1-RW10) must validate"
     );
+}
+
+#[test]
+fn harness_report_schema_requires_non_null_provenance() {
+    let validator = harness_report_validator();
+    let mut missing = full_harness_report();
+    missing.as_object_mut().unwrap().remove("provenance");
+    assert!(!validator.is_valid(&missing));
+    let mut null = full_harness_report();
+    null["provenance"] = serde_json::Value::Null;
+    assert!(!validator.is_valid(&null));
 }
 
 #[test]

@@ -11,7 +11,8 @@
     "surface",
     "completion_status",
     "passed",
-    "checks"
+    "checks",
+    "provenance"
   ],
   "properties": {
     "ns": {
@@ -155,6 +156,54 @@
             }
           }
         ]
+      }
+    },
+    "provenance": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "source_head",
+        "hub_head",
+        "artifact_sha256",
+        "artifact_bytes",
+        "checks_digest",
+        "pass_count",
+        "fail_count",
+        "skip_count"
+      ],
+      "properties": {
+        "source_head": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{40,64}$"
+        },
+        "hub_head": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{40,64}$"
+        },
+        "artifact_sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "artifact_bytes": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "checks_digest": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "pass_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "fail_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "skip_count": {
+          "type": "integer",
+          "minimum": 0
+        }
       }
     }
   },
