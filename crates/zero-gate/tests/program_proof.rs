@@ -8,9 +8,15 @@
 //! exact error kind the fixture declares.
 
 use serde::Deserialize;
+use zero_abi::EngineIdentity;
 use zero_gate::{
-    GcReport, LifecycleReport, McpReport, PROGRAM_ASSEMBLY_SCHEMA_VERSION, PlannerReport,
-    ProgramDigest, ProgramReports, WorkerClosureKind, WorkerReport, assemble,
+    AppliedGcEvidenceV1, GcProducerEpochV1, GcReport, LifecycleReport, McpReport,
+    PROGRAM_ASSEMBLY_SCHEMA_VERSION, PlannerReport, ProgramDigest, ProgramReports,
+    WorkerClosureKind, WorkerReport, assemble,
+};
+use zero_store::{
+    GC_RECORD_TYPE_DRY_RUN, GC_SCHEMA_VERSION, GcCandidate, GcRunReceipt, GcRunState, GcVerdict,
+    gc_contract_digest_hex,
 };
 
 const FIXTURE: &str = include_str!("fixtures/program-evidence-v1.json");
@@ -44,6 +50,52 @@ struct ReportsShape {
     gc: Option<GcReport>,
 }
 
+fn bind_applied_gc(report: GcReport) -> GcReport {
+    if !report.after_lifecycle_close() || report.collected_objects() > zero_gate::MAX_GC_OBJECTS {
+        return GcReport::new(
+            report.schema_version(),
+            report.program_id(),
+            report.collected_objects(),
+            report.freed_bytes(),
+            report.after_lifecycle_close(),
+        );
+    }
+    let hashes = (0..report.collected_objects())
+        .map(|index| format!("{index:064x}"))
+        .collect::<Vec<_>>();
+    let receipt = GcRunReceipt {
+        schema_version: GC_SCHEMA_VERSION.into(),
+        record_type: GC_RECORD_TYPE_DRY_RUN.into(),
+        store_contract_digest: gc_contract_digest_hex(),
+        run_id: "frozen-program-fixture".into(),
+        store_root: "/tmp/frozen-program-fixture".into(),
+        evaluated_at: "2026-08-11T00:00:00.000Z".into(),
+        apply: true,
+        state: GcRunState::Complete,
+        objects: hashes
+            .iter()
+            .map(|hash| GcCandidate {
+                blob_hash: hash.clone(),
+                verdict: GcVerdict::Collect,
+                reason_codes: vec!["no-live-reference".into()],
+                evidence: vec!["frozen applied receipt".into()],
+            })
+            .collect(),
+        planned: hashes.clone(),
+        deleted: hashes,
+    };
+    let epochs = [
+        EngineIdentity::FsZero,
+        EngineIdentity::GraphZero,
+        EngineIdentity::TokenZero,
+    ]
+    .into_iter()
+    .map(|engine| GcProducerEpochV1 { engine, epoch: 1 })
+    .collect();
+    let applied = AppliedGcEvidenceV1::new(receipt, epochs, report.freed_bytes()).unwrap();
+    GcReport::new_applied(report.schema_version(), report.program_id(), applied)
+}
+
 fn to_reports(shape: ReportsShape) -> ProgramReports {
     let mut reports = ProgramReports::new();
     if let Some(report) = shape.planner {
@@ -59,7 +111,7 @@ fn to_reports(shape: ReportsShape) -> ProgramReports {
         reports = reports.lifecycle(report);
     }
     if let Some(report) = shape.gc {
-        reports = reports.gc(report);
+        reports = reports.gc(bind_applied_gc(report));
     }
     reports
 }
@@ -118,7 +170,7 @@ fn every_report_in_the_positive_fixture_is_real_evidence() {
     let worker = shape.worker.expect("worker report present");
     let mcp = shape.mcp.expect("mcp report present");
     let lifecycle = shape.lifecycle.expect("lifecycle report present");
-    let _gc = shape.gc.expect("gc report present");
+    let gc = bind_applied_gc(shape.gc.expect("gc report present"));
 
     assert_ne!(planner.plan_digest(), [0u8; 32]);
     assert!(planner.step_count() >= 1);
@@ -129,6 +181,7 @@ fn every_report_in_the_positive_fixture_is_real_evidence() {
     assert!(worker.executed_steps() >= 1);
     assert_ne!(mcp.tools_digest(), [0u8; 32]);
     assert!(lifecycle.executed_step_count() >= 1);
+    assert!(gc.applied().expect("applied GC receipt").validate());
 
     // The worker committed; the fixture must not rely on a fallback.
     assert_eq!(worker.closure_kind(), WorkerClosureKind::Commit);

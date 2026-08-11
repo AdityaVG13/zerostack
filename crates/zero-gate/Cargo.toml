@@ -20,6 +20,10 @@ criterion = "0.5"
 proptest = "1"
 stats_alloc = "0.1"
 
+[[bin]]
+name = "zerostack-program-evidence"
+path = "src/bin/program-evidence.rs"
+
 [[bench]]
 name = "decide"
 harness = false

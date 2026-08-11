@@ -6287,7 +6287,7 @@
     }
   ],
   "positive": {
-    "expected_program_digest": "4f176db748def4a9cf8f5c63dc78a82f832e739e322479ee57d2f23e52a4d62b",
+    "expected_program_digest": "9daa713d96a22bfb8cac3dc279b3169f685863c81edad33d512ee090835255bf",
     "reports": {
       "gc": {
         "after_lifecycle_close": true,

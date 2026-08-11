@@ -19,6 +19,7 @@ use zero_abi::{
 };
 use zero_codemode::session::{SESSION_SHUTDOWN_TOKEN_ENV, SESSION_TOKEN_ENV};
 use zero_codemode::worker::{ENGINE_ENV, SESSION_ID_ENV, STORE_ROOT_ENV};
+use zero_store::SharedCas;
 
 fn main() {
     for name in [SESSION_TOKEN_ENV, SESSION_SHUTDOWN_TOKEN_ENV] {
@@ -381,7 +382,7 @@ fn result(request: CallRequest) -> WorkerResult {
     let engine = parse_engine();
     let expose_approval = request.args["__approval_fixture"] == true;
     let approval_grant = request.approval_grant.clone();
-    let (mut value, refs) = opaque_chain_result(engine, &request).unwrap_or_else(|| {
+    let (mut value, mut refs) = opaque_chain_result(engine, &request).unwrap_or_else(|| {
         (
             json!({
                 "args": request.args,
@@ -391,6 +392,9 @@ fn result(request: CallRequest) -> WorkerResult {
             Vec::new(),
         )
     });
+    if let Some(reference) = request.args["__reachability_ref_fixture"].as_str() {
+        refs.push(reference.to_owned());
+    }
     if expose_approval {
         value["approval_grant"] = serde_json::to_value(&approval_grant).unwrap();
     }
@@ -452,7 +456,7 @@ fn opaque_chain_result(
                 .as_str()
                 .expect("opaque fixture requires payload_hex");
             let bytes = decode_hex(payload_hex).expect("opaque fixture payload_hex must be exact");
-            let digest = sha256_hex(&bytes);
+            let digest = publish_cas(&bytes);
             let reference = format!("fz://blob/{digest}");
             write_exact(&root.join("bytes").join(&digest), &bytes);
             Some((
@@ -472,7 +476,7 @@ fn opaque_chain_result(
                 root.join("bytes").join(source_digest).is_file(),
                 "opaque fixture fz object is unavailable"
             );
-            let digest = sha256_hex(source.as_bytes());
+            let digest = publish_cas(source.as_bytes());
             let reference = format!("gz://blob/{digest}");
             write_exact(
                 &root.join("graph").join(format!("{digest}.ref")),
@@ -496,7 +500,7 @@ fn opaque_chain_result(
                     .is_file(),
                 "opaque fixture gz object is unavailable"
             );
-            let digest = sha256_hex(source.as_bytes());
+            let digest = publish_cas(source.as_bytes());
             let reference = format!("tz://blob/{digest}");
             write_exact(
                 &root.join("token").join(format!("{digest}.ref")),
@@ -546,6 +550,13 @@ fn opaque_chain_result(
         }
         _ => None,
     }
+}
+
+fn publish_cas(bytes: &[u8]) -> String {
+    let store_root = PathBuf::from(std::env::var(STORE_ROOT_ENV).unwrap());
+    SharedCas::open(store_root)
+        .put(bytes)
+        .expect("publish opaque fixture bytes to canonical CAS")
 }
 
 fn opaque_chain_root() -> PathBuf {

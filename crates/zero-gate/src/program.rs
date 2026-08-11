@@ -29,7 +29,9 @@
 
 use serde::{Deserialize, Serialize};
 use sha2::{Digest as _, Sha256};
-use std::fmt;
+use std::{collections::BTreeSet, fmt};
+use zero_abi::EngineIdentity;
+use zero_store::{GcRunReceipt, GcRunState, gc_report_digest_hex};
 
 pub const PROGRAM_ASSEMBLY_SCHEMA_VERSION: u16 = 1;
 pub const PROGRAM_SOURCE_COUNT: usize = 5;
@@ -233,6 +235,35 @@ pub fn gc_report_digest(
     append_u64(&mut bytes, collected_objects);
     append_u64(&mut bytes, freed_bytes);
     append_u64(&mut bytes, u64::from(after_lifecycle_close));
+    hash_bytes(&bytes)
+}
+
+fn gc_report_digest_with_binding(
+    schema_version: u16,
+    program_id: ProgramDigest,
+    collected_objects: u64,
+    freed_bytes: u64,
+    after_lifecycle_close: bool,
+    binding: Option<&AppliedGcEvidenceV1>,
+) -> ProgramDigest {
+    let base = gc_report_digest(
+        schema_version,
+        program_id,
+        collected_objects,
+        freed_bytes,
+        after_lifecycle_close,
+    );
+    let mut bytes = Vec::new();
+    append_bounded(&mut bytes, b"zerostack.program.gc.applied.v1\0");
+    append_digest(&mut bytes, &base);
+    if let Some(binding) = binding {
+        append_bounded(&mut bytes, binding.run_receipt_digest.as_bytes());
+        for row in &binding.producer_epochs {
+            append_bounded(&mut bytes, row.engine.as_str().as_bytes());
+            append_u64(&mut bytes, row.epoch);
+        }
+        append_u64(&mut bytes, binding.verified_freed_bytes);
+    }
     hash_bytes(&bytes)
 }
 
@@ -520,6 +551,79 @@ impl LifecycleReport {
     }
 }
 
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct GcProducerEpochV1 {
+    pub engine: EngineIdentity,
+    pub epoch: u64,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct AppliedGcEvidenceV1 {
+    pub run_receipt: GcRunReceipt,
+    pub run_receipt_digest: String,
+    pub producer_epochs: Vec<GcProducerEpochV1>,
+    pub verified_freed_bytes: u64,
+}
+
+impl AppliedGcEvidenceV1 {
+    pub fn new(
+        run_receipt: GcRunReceipt,
+        mut producer_epochs: Vec<GcProducerEpochV1>,
+        verified_freed_bytes: u64,
+    ) -> Result<Self, String> {
+        producer_epochs.sort_by_key(|row| row.engine);
+        let run_receipt_digest =
+            gc_report_digest_hex(&run_receipt).map_err(|error| error.to_string())?;
+        let evidence = Self {
+            run_receipt,
+            run_receipt_digest,
+            producer_epochs,
+            verified_freed_bytes,
+        };
+        evidence
+            .validate()
+            .then_some(evidence)
+            .ok_or_else(|| "invalid applied GC evidence binding".to_string())
+    }
+
+    pub fn validate(&self) -> bool {
+        if !self.run_receipt.apply || self.run_receipt.state != GcRunState::Complete {
+            return false;
+        }
+        if gc_report_digest_hex(&self.run_receipt).ok().as_deref()
+            != Some(self.run_receipt_digest.as_str())
+        {
+            return false;
+        }
+        let engines = self
+            .producer_epochs
+            .iter()
+            .map(|row| row.engine)
+            .collect::<BTreeSet<_>>();
+        engines
+            == BTreeSet::from([
+                EngineIdentity::FsZero,
+                EngineIdentity::GraphZero,
+                EngineIdentity::TokenZero,
+            ])
+            && self.producer_epochs.len() == 3
+            && self.producer_epochs.iter().all(|row| row.epoch > 0)
+            && self
+                .producer_epochs
+                .windows(2)
+                .all(|pair| pair[0].engine < pair[1].engine)
+            && self
+                .run_receipt
+                .deleted
+                .iter()
+                .collect::<BTreeSet<_>>()
+                .len()
+                == self.run_receipt.deleted.len()
+    }
+}
+
 /// Garbage collector evidence: collection that happened after lifecycle closure.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
@@ -529,6 +633,8 @@ pub struct GcReport {
     collected_objects: u64,
     freed_bytes: u64,
     after_lifecycle_close: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    applied: Option<AppliedGcEvidenceV1>,
     digest: ProgramDigest,
 }
 
@@ -540,12 +646,13 @@ impl GcReport {
         freed_bytes: u64,
         after_lifecycle_close: bool,
     ) -> Self {
-        let digest = gc_report_digest(
+        let digest = gc_report_digest_with_binding(
             schema_version,
             program_id,
             collected_objects,
             freed_bytes,
             after_lifecycle_close,
+            None,
         );
         Self {
             schema_version,
@@ -553,6 +660,34 @@ impl GcReport {
             collected_objects,
             freed_bytes,
             after_lifecycle_close,
+            applied: None,
+            digest,
+        }
+    }
+
+    pub fn new_applied(
+        schema_version: u16,
+        program_id: ProgramDigest,
+        applied: AppliedGcEvidenceV1,
+    ) -> Self {
+        let collected_objects = applied.run_receipt.deleted.len() as u64;
+        let freed_bytes = applied.verified_freed_bytes;
+        let after_lifecycle_close = true;
+        let digest = gc_report_digest_with_binding(
+            schema_version,
+            program_id,
+            collected_objects,
+            freed_bytes,
+            after_lifecycle_close,
+            Some(&applied),
+        );
+        Self {
+            schema_version,
+            program_id,
+            collected_objects,
+            freed_bytes,
+            after_lifecycle_close,
+            applied: Some(applied),
             digest,
         }
     }
@@ -571,6 +706,9 @@ impl GcReport {
     }
     pub fn after_lifecycle_close(&self) -> bool {
         self.after_lifecycle_close
+    }
+    pub fn applied(&self) -> Option<&AppliedGcEvidenceV1> {
+        self.applied.as_ref()
     }
     /// Self-binding commitment over this report's fields, recomputed by assembly.
     pub fn digest(&self) -> ProgramDigest {
@@ -919,12 +1057,13 @@ pub fn assemble(reports: ProgramReports) -> Result<ProgramProof, ProgramAssembly
         ));
     }
     if gc.digest
-        != gc_report_digest(
+        != gc_report_digest_with_binding(
             gc.schema_version,
             gc.program_id,
             gc.collected_objects,
             gc.freed_bytes,
             gc.after_lifecycle_close,
+            gc.applied.as_ref(),
         )
     {
         return Err(ProgramAssemblyError::MalformedReport(EvidenceSource::Gc));
@@ -981,6 +1120,15 @@ pub fn assemble(reports: ProgramReports) -> Result<ProgramProof, ProgramAssembly
     if gc.collected_objects > MAX_GC_OBJECTS {
         return Err(ProgramAssemblyError::BoundsExceeded(EvidenceSource::Gc));
     }
+    let Some(applied_gc) = gc.applied.as_ref() else {
+        return Err(ProgramAssemblyError::MalformedReport(EvidenceSource::Gc));
+    };
+    if !applied_gc.validate()
+        || applied_gc.run_receipt.deleted.len() as u64 != gc.collected_objects
+        || applied_gc.verified_freed_bytes != gc.freed_bytes
+    {
+        return Err(ProgramAssemblyError::MalformedReport(EvidenceSource::Gc));
+    }
 
     let planner_digest = planner.digest;
     let worker_digest = worker.digest;
@@ -1027,6 +1175,57 @@ mod tests {
     fn effects_digest() -> ProgramDigest {
         hash_bytes(b"effects")
     }
+
+    fn applied_gc_report(id: ProgramDigest, count: usize, freed_bytes: u64) -> GcReport {
+        use zero_store::{
+            GC_RECORD_TYPE_DRY_RUN, GC_SCHEMA_VERSION, GcCandidate, GcVerdict,
+            gc_contract_digest_hex,
+        };
+        let hashes = (0..count)
+            .map(|index| format!("{index:064x}"))
+            .collect::<Vec<_>>();
+        let receipt = GcRunReceipt {
+            schema_version: GC_SCHEMA_VERSION.into(),
+            record_type: GC_RECORD_TYPE_DRY_RUN.into(),
+            store_contract_digest: gc_contract_digest_hex(),
+            run_id: "program-test-applied".into(),
+            store_root: "/tmp/program-test-applied".into(),
+            evaluated_at: "2026-08-11T00:00:00.000Z".into(),
+            apply: true,
+            state: GcRunState::Complete,
+            objects: hashes
+                .iter()
+                .map(|hash| GcCandidate {
+                    blob_hash: hash.clone(),
+                    verdict: GcVerdict::Collect,
+                    reason_codes: vec!["no-live-reference".into()],
+                    evidence: vec!["test applied receipt".into()],
+                })
+                .collect(),
+            planned: hashes.clone(),
+            deleted: hashes,
+        };
+        let applied = AppliedGcEvidenceV1::new(
+            receipt,
+            vec![
+                GcProducerEpochV1 {
+                    engine: EngineIdentity::FsZero,
+                    epoch: 1,
+                },
+                GcProducerEpochV1 {
+                    engine: EngineIdentity::GraphZero,
+                    epoch: 1,
+                },
+                GcProducerEpochV1 {
+                    engine: EngineIdentity::TokenZero,
+                    epoch: 1,
+                },
+            ],
+            freed_bytes,
+        )
+        .unwrap();
+        GcReport::new_applied(PROGRAM_ASSEMBLY_SCHEMA_VERSION, id, applied)
+    }
     fn output_digest() -> ProgramDigest {
         hash_bytes(b"output")
     }
@@ -1067,13 +1266,7 @@ mod tests {
                 3,
                 LifecycleState::Closed,
             ))
-            .gc(GcReport::new(
-                PROGRAM_ASSEMBLY_SCHEMA_VERSION,
-                id,
-                7,
-                4096,
-                true,
-            ))
+            .gc(applied_gc_report(id, 7, 4096))
     }
 
     #[test]
@@ -1373,7 +1566,7 @@ mod tests {
             3,
             LifecycleState::Closed,
         );
-        let g = GcReport::new(PROGRAM_ASSEMBLY_SCHEMA_VERSION, id, 7, 4096, true);
+        let g = applied_gc_report(id, 7, 4096);
         let all = vec![
             hex(&p.digest()),
             hex(&w.digest()),
@@ -1386,7 +1579,7 @@ mod tests {
             "a20e40ed615196a885eb41717bf8b5d114533d2e27209165f9fcb3bfa41dc085",
             "1183ce8e7e784a49623ae3cb02d8e8f634793f414cbc661eb97a78fca20ead16",
             "f837840cefed81facbb96c4cfa8d76a89e6601565c8b7f2a1d51ce08f974e1bd",
-            "a39167503feafc41a3ac84bc55757234992260366cc1f0da7d8a5e50e2dc3adb",
+            "99bffbba537270dd0c7599e60ae4c18633344a85e5404e80aca0f9d5331d2e82",
         ];
         assert_eq!(all, expected);
     }

@@ -1,5 +1,5 @@
 #![cfg(all(unix, feature = "worker-fixture"))]
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::{
     io::{BufRead, BufReader, Read, Write},
     os::unix::{fs::PermissionsExt, net::UnixStream},
@@ -10,7 +10,9 @@ use std::{
 use tempfile::TempDir;
 #[cfg(feature = "worker-fixture")]
 use zero_codemode::session::SessionExecutor;
-use zero_store::{ensure_layout, Engine, ResolvedStore, SharedCas};
+use zero_store::{
+    Engine, ResolvedStore, SharedCas, current_reachability_snapshot, ensure_layout, gc_project_id,
+};
 use zerostack_machine_permit::session_owner::ProcessIdentity;
 fn start(owner: ProcessIdentity) -> (TempDir, std::process::Child, String, String, u64) {
     start_configured(owner, |_, _| {})
@@ -277,14 +279,18 @@ fn authenticated_cross_surface_and_rejections() {
     );
     let invalid_shell = exact_result(d.path(), &read(&mut r));
     assert_eq!(invalid_shell["name"], "TypeError");
-    assert!(invalid_shell["message"]
-        .as_str()
-        .unwrap()
-        .contains("unknown option 'raw'"));
-    assert!(invalid_shell["message"]
-        .as_str()
-        .unwrap()
-        .contains(r#"mode: "exact""#));
+    assert!(
+        invalid_shell["message"]
+            .as_str()
+            .unwrap()
+            .contains("unknown option 'raw'")
+    );
+    assert!(
+        invalid_shell["message"]
+            .as_str()
+            .unwrap()
+            .contains(r#"mode: "exact""#)
+    );
     send(
         &mut s,
         json!({"type":"execute","id":3,"generation":generation,"root":"/","source":"return 1"}),
@@ -355,9 +361,11 @@ fn approval_grant_reaches_one_exact_worker_call_and_cannot_replay_or_leak() {
     assert_eq!(forwarded["root"], root.to_string_lossy().as_ref());
     assert_eq!(forwarded["operation"], "fs.write");
     assert_eq!(forwarded["effect"], "approval_required_mutation");
-    assert!(forwarded["request_id"]
-        .as_str()
-        .is_some_and(|id| !id.is_empty()));
+    assert!(
+        forwarded["request_id"]
+            .as_str()
+            .is_some_and(|id| !id.is_empty())
+    );
 
     let mut replay = grant;
     replay["request_id"] = json!(12);
@@ -389,10 +397,12 @@ fn approval_grant_reaches_one_exact_worker_call_and_cannot_replay_or_leak() {
     let unapproved = read(&mut reader);
     assert_eq!(unapproved["ok"], false, "{unapproved}");
     assert_eq!(unapproved["code"], "backend_execution");
-    assert!(unapproved["error"]
-        .as_str()
-        .unwrap()
-        .contains("worker approval required or denied"));
+    assert!(
+        unapproved["error"]
+            .as_str()
+            .unwrap()
+            .contains("worker approval required or denied")
+    );
 
     send(
         &mut stream,
@@ -682,6 +692,52 @@ fn opaque_handles_cross_fszero_graphzero_tokenzero_without_translating_bytes() {
     );
     assert_eq!(read(&mut reader)["ok"], true);
     assert!(session.wait().unwrap().success());
+    let project_id = gc_project_id(d.path()).unwrap();
+    for (producer, expected) in [
+        ("fszero", fs_ref),
+        ("graphzero", graph_ref),
+        ("tokenzero", token_ref),
+    ] {
+        let snapshot = current_reachability_snapshot(d.path(), producer, &project_id)
+            .unwrap()
+            .expect("shutdown must publish each engine snapshot");
+        assert_eq!(snapshot.epoch, 1);
+        assert_eq!(snapshot.blob_hashes, vec![expected[10..].to_string()]);
+    }
+}
+
+#[test]
+fn malformed_and_wrong_owner_worker_refs_fail_closed() {
+    let (d, mut session, token, shutdown_token, _) = start(ProcessIdentity::current().unwrap());
+    let socket = d.path().join("runtime/session.sock");
+    let (mut stream, mut reader, generation) = connect_authenticated(&socket, &token);
+    for (id, reference) in [
+        (1, "fz://blob/not-a-digest".to_string()),
+        (2, format!("gz://blob/{}", "a".repeat(64))),
+    ] {
+        let source = format!(
+            "return await zero.fs.compound('read', {{__reachability_ref_fixture:{reference:?}}});"
+        );
+        send(
+            &mut stream,
+            json!({"type":"execute","id":id,"generation":generation,"root":d.path(),"source":source}),
+        );
+        let response = read(&mut reader);
+        assert_eq!(response["ok"], false, "{response}");
+        assert!(
+            response["error"]
+                .as_str()
+                .unwrap_or_default()
+                .contains("worker ref"),
+            "{response}"
+        );
+    }
+    send(
+        &mut stream,
+        json!({"type":"shutdown","id":3,"token":shutdown_token}),
+    );
+    assert_eq!(read(&mut reader)["ok"], true);
+    assert!(session.wait().unwrap().success());
 }
 
 #[test]
@@ -770,6 +826,14 @@ fn replacement_cancels_inflight_and_suppresses_stale_result() {
     );
     assert_eq!(read(&mut current_reader)["ok"], true);
     assert!(session.wait().unwrap().success());
+    let project_id = gc_project_id(d.path()).unwrap();
+    for producer in ["fszero", "graphzero", "tokenzero"] {
+        let snapshot = current_reachability_snapshot(d.path(), producer, &project_id)
+            .unwrap()
+            .expect("replacement and shutdown must publish empty snapshots");
+        assert_eq!(snapshot.epoch, 2);
+        assert!(snapshot.blob_hashes.is_empty());
+    }
 }
 
 #[test]
@@ -2372,10 +2436,12 @@ fn unknown_authenticated_request_is_typed_and_connection_survives() {
     assert_eq!(rejected["id"], 700);
     assert_eq!(rejected["generation"], generation);
     assert_eq!(rejected["code"], "unknown_request_type");
-    assert!(rejected["error"]
-        .as_str()
-        .unwrap()
-        .contains("request rejected"));
+    assert!(
+        rejected["error"]
+            .as_str()
+            .unwrap()
+            .contains("request rejected")
+    );
 
     send(
         &mut stream,

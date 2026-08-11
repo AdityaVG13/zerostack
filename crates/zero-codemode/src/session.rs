@@ -40,7 +40,11 @@ use zero_process::{
     DEFAULT_ACTIVE_CPU_SECONDS, DEFAULT_ACTIVE_TREE_RSS_BYTES, DEFAULT_IDLE_TREE_RSS_BYTES,
     ProcessResourcePolicy, ResourceEnforcement, ResourceReceipt,
 };
-use zero_store::{Engine, ResolvedStore, ensure_layout};
+use zero_ref::{ZeroRefV1, ZeroScheme};
+use zero_store::{
+    Engine, ResolvedStore, SharedCas, current_reachability_snapshot, ensure_layout, gc_project_id,
+    publish_reachability_snapshot,
+};
 
 pub const SESSION_PROTOCOL: &str = "zerostack-session/v1";
 pub const MAX_SESSION_FRAME: usize = 1_048_576;
@@ -258,6 +262,7 @@ struct AggregateWorkerState {
     root: PathBuf,
     session_id: String,
     pins: BTreeMap<EngineIdentity, (String, String)>,
+    reachable_blobs: Mutex<BTreeMap<EngineIdentity, BTreeSet<String>>>,
     cancellation: CancellationSignal,
 }
 
@@ -498,6 +503,7 @@ impl AggregateConnector {
             root,
             session_id,
             pins: configured_pins,
+            reachable_blobs: Mutex::new(BTreeMap::new()),
             cancellation,
         });
         let (dispatch_sender, dispatch_receiver) =
@@ -1432,6 +1438,97 @@ fn acquire_dispatch_permit(
             ))
         })
 }
+fn engine_ref_scheme(engine: EngineIdentity) -> ZeroScheme {
+    match engine {
+        EngineIdentity::FsZero => ZeroScheme::Fz,
+        EngineIdentity::GraphZero => ZeroScheme::Gz,
+        EngineIdentity::TokenZero => ZeroScheme::Tz,
+    }
+}
+
+fn retain_worker_reachability(
+    state: &AggregateWorkerState,
+    engine: EngineIdentity,
+    refs: &[String],
+) -> Result<(), ConnectorError> {
+    let cas = SharedCas::open(&state.root);
+    let mut batch = BTreeSet::new();
+    for reference in refs {
+        if !reference.contains("://blob/") {
+            continue;
+        }
+        let parsed = ZeroRefV1::parse(reference).map_err(|error| {
+            ConnectorError::new(format!(
+                "invalid portable worker ref {reference:?}: {error}"
+            ))
+        })?;
+        if parsed.scheme != engine_ref_scheme(engine) {
+            return Err(ConnectorError::new(format!(
+                "worker ref {reference:?} is not owned by {}",
+                engine.as_str()
+            )));
+        }
+        cas.get_verified(&parsed.hash).map_err(|error| {
+            ConnectorError::new(format!(
+                "worker ref {reference:?} is unavailable from authorized CAS: {error}"
+            ))
+        })?;
+        batch.insert(parsed.hash);
+    }
+    let mut retained = state
+        .reachable_blobs
+        .lock()
+        .map_err(|_| ConnectorError::new("worker reachability lock poisoned"))?;
+    retained.entry(engine).or_default().extend(batch);
+    Ok(())
+}
+
+fn publish_worker_reachability(state: &AggregateWorkerState) -> Result<(), HostError> {
+    let project_id = gc_project_id(&state.root)
+        .map_err(|error| HostError::Connector(format!("derive GC project identity: {error}")))?;
+    let retained = state
+        .reachable_blobs
+        .lock()
+        .map_err(|_| HostError::Connector("worker reachability lock poisoned".into()))?
+        .clone();
+    let cas = SharedCas::open(&state.root);
+    for engine in [
+        EngineIdentity::FsZero,
+        EngineIdentity::GraphZero,
+        EngineIdentity::TokenZero,
+    ] {
+        let hashes = retained.get(&engine).cloned().unwrap_or_default();
+        for hash in &hashes {
+            cas.get_verified(hash).map_err(|error| {
+                HostError::Connector(format!(
+                    "{} reachability object {hash} failed closure verification: {error}",
+                    engine.as_str()
+                ))
+            })?;
+        }
+        let producer = engine.as_str();
+        let epoch = current_reachability_snapshot(&state.root, producer, &project_id)
+            .map_err(|error| {
+                HostError::Connector(format!("read {producer} reachability epoch: {error}"))
+            })?
+            .map_or(Ok(1), |snapshot| {
+                snapshot.epoch.checked_add(1).ok_or_else(|| {
+                    HostError::Connector(format!("{producer} reachability epoch overflow"))
+                })
+            })?;
+        publish_reachability_snapshot(
+            &state.root,
+            producer,
+            &project_id,
+            epoch,
+            &hashes.into_iter().collect::<Vec<_>>(),
+        )
+        .map_err(|error| {
+            HostError::Connector(format!("publish {producer} reachability: {error}"))
+        })?;
+    }
+    Ok(())
+}
 
 fn run_aggregate_dispatch(
     state: &AggregateWorkerState,
@@ -1470,6 +1567,7 @@ fn run_aggregate_dispatch(
     {
         return Err(ConnectorError::new("worker result binding mismatch"));
     }
+    retain_worker_reachability(state, dispatch.engine, &result.metadata.ownership.refs)?;
     let value =
         normalize_aggregate_result_value(dispatch.engine, &dispatch.request.op, result.value)?;
     serde_json::to_string(&serde_json::json!({"value": value, "metadata": result.metadata}))
@@ -1704,6 +1802,10 @@ impl SessionExecutor {
         }
     }
 
+    fn publish_reachability(&self) -> Result<(), HostError> {
+        publish_worker_reachability(&self.connector.state)
+    }
+
     pub fn cancellation(&self) -> SessionCancellation {
         SessionCancellation {
             host: self.cancelled.clone(),
@@ -1859,7 +1961,7 @@ enum SessionCommand {
         reply: SyncSender<Result<(), String>>,
     },
     Shutdown {
-        reply: SyncSender<()>,
+        reply: SyncSender<Result<(), String>>,
     },
 }
 
@@ -2390,7 +2492,7 @@ impl AggregateSession {
             })?;
             let settle_remaining =
                 SESSION_REPLACEMENT_SETTLE_TIMEOUT.saturating_sub(control_started.elapsed());
-            reply_rx.recv_timeout(settle_remaining).map_err(|error| {
+            let closure = reply_rx.recv_timeout(settle_remaining).map_err(|error| {
                 AggregateSessionError::new(
                     AggregateSessionFailureCode::BackendUnavailable,
                     generation,
@@ -2399,6 +2501,14 @@ impl AggregateSession {
                         "session shutdown did not settle within {}ms: {error}",
                         SESSION_REPLACEMENT_SETTLE_TIMEOUT.as_millis()
                     ),
+                )
+            })?;
+            closure.map_err(|detail| {
+                AggregateSessionError::new(
+                    AggregateSessionFailureCode::BackendUnavailable,
+                    generation,
+                    None,
+                    detail,
                 )
             })?;
         }
@@ -2557,21 +2667,39 @@ fn session_worker(
                 if let Ok(mut slot) = cancellation.lock() {
                     *slot = None;
                 }
+                let closed = executor
+                    .as_ref()
+                    .ok_or_else(|| "session executor is unavailable".to_string())
+                    .and_then(|executor| {
+                        executor
+                            .publish_reachability()
+                            .map_err(|error| error.to_string())
+                    });
                 drop(executor.take());
-                let result = start_session_executor(generation, &root).map(|next| {
-                    if let Ok(mut slot) = cancellation.lock() {
-                        *slot = Some(next.cancellation());
-                    }
-                    executor = Some(next);
-                });
+                let result = closed
+                    .and_then(|()| start_session_executor(generation, &root))
+                    .map(|next| {
+                        if let Ok(mut slot) = cancellation.lock() {
+                            *slot = Some(next.cancellation());
+                        }
+                        executor = Some(next);
+                    });
                 let _ = reply.send(result);
             }
             SessionCommand::Shutdown { reply } => {
                 if let Ok(mut slot) = cancellation.lock() {
                     *slot = None;
                 }
+                let result = executor
+                    .as_ref()
+                    .ok_or_else(|| "session executor is unavailable".to_string())
+                    .and_then(|executor| {
+                        executor
+                            .publish_reachability()
+                            .map_err(|error| error.to_string())
+                    });
                 drop(executor.take());
-                let _ = reply.send(());
+                let _ = reply.send(result);
                 break;
             }
         }
