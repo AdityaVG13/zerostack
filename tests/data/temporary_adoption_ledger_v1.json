@@ -2,10 +2,10 @@
   "schema": "zerostack.temporary-adoption-ledger.v1",
   "version": 1,
   "generated_from_heads": {
-    "zerostack": "001eba303ff4316ec4f2e85223ba307bd9461fca",
-    "fszero": "0cc3281419f8bdc96714dd12ab913cacad2cf08d",
-    "graphzero": "098306257adc563d5f45976d4420c68ceed721bd",
-    "tokenzero": "54c77c01bdc7c8a60b6c801ef63307f8f5544189"
+    "zerostack": "c06eeb38a905e7520770b26e30a1f0adddab9242",
+    "fszero": "5ceb193f191b0988dbe41c34a021f599cd10de8e",
+    "graphzero": "3d778f57e7390c1f0f6cd8777c8f5f69ba45a99a",
+    "tokenzero": "333e32cb1430ea893140f657dab396bd10434022"
   },
   "generated_at": "2026-08-10T23:00:00Z",
   "policy": "Empty after immutable hub publication, pinned engine adoption, targeted RCH evidence, approved retirement, and dogfood proof.",
