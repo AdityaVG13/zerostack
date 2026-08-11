@@ -1077,6 +1077,30 @@ fn connector_inflight_capacity_fails_loud_without_unbounded_queueing() {
 }
 
 #[test]
+fn settled_calls_do_not_impose_a_logical_operation_ceiling() {
+    let connector = Rc::new(C::ok());
+    let mut limits = lim();
+    limits.instruction_budget = 100_000;
+    let host = Host::new(limits, reg()).unwrap_or_else(|error| panic!("host: {error}"));
+    let value = host
+        .execute(
+            r#"for (let sequence = 0; sequence < 128; sequence += 1) {
+                 await zero.fs.read({sequence});
+               }
+               return {count: 128};"#,
+            connector.clone(),
+        )
+        .unwrap_or_else(|error| panic!("sequential aggregate plan: {error}"));
+
+    assert_eq!(value, json!({"count": 128}));
+    assert_eq!(connector.calls.borrow().len(), 128);
+    assert_eq!(
+        connector.calls.borrow().last().and_then(|call| call["sequence"].as_u64()),
+        Some(127)
+    );
+}
+
+#[test]
 fn unserializable_plan_result_degrades_instead_of_failing() {
     let host = Host::new(lim(), reg()).unwrap_or_else(|error| panic!("host: {error}"));
     let plan = r#"

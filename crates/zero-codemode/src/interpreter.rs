@@ -266,6 +266,7 @@ struct Interpreter<'tree> {
     receiver: Receiver<ConnectorCompletionMessage>,
     sender: SyncSender<ConnectorCompletionMessage>,
     promises: BTreeMap<u64, PromiseState<'tree>>,
+    inflight_connector_calls: usize,
     next_promise: u64,
     env: EnvRef<'tree>,
     cancelled: Arc<AtomicBool>,
@@ -308,6 +309,7 @@ impl<'tree> Interpreter<'tree> {
             receiver,
             sender,
             promises: BTreeMap::new(),
+            inflight_connector_calls: 0,
             next_promise: 1,
             env,
             cancelled,
@@ -1253,7 +1255,7 @@ impl<'tree> Interpreter<'tree> {
                 "arguments exceed JSON limit".into(),
             )));
         }
-        if self.promises.len() >= MAX_INFLIGHT_CONNECTOR_CALLS {
+        if self.inflight_connector_calls >= MAX_INFLIGHT_CONNECTOR_CALLS {
             return Err(Fault::Host(HostError::Data(
                 "connector in-flight capacity exhausted".into(),
             )));
@@ -1278,6 +1280,7 @@ impl<'tree> Interpreter<'tree> {
                 message: error.to_string(),
             })));
         }
+        self.inflight_connector_calls = self.inflight_connector_calls.saturating_add(1);
         Ok(Value::Promise(id))
     }
 
@@ -1445,6 +1448,7 @@ impl<'tree> Interpreter<'tree> {
                 completion.sequence
             )));
         }
+        self.inflight_connector_calls = self.inflight_connector_calls.saturating_sub(1);
         let state = match completion.result {
             Ok(encoded) if encoded.len() > self.host.limits.max_json_bytes => {
                 PromiseState::Rejected(Value::Error(ErrorValue {
@@ -2928,14 +2932,36 @@ fn binary<'tree>(
         )),
         "===" | "==" => Ok(Value::Bool(same_value(&left, &right))),
         "!==" | "!=" => Ok(Value::Bool(!same_value(&left, &right))),
-        "<" => Ok(Value::Bool(to_string(&left) < to_string(&right))),
-        ">" => Ok(Value::Bool(to_string(&left) > to_string(&right))),
-        "<=" => Ok(Value::Bool(to_string(&left) <= to_string(&right))),
-        ">=" => Ok(Value::Bool(to_string(&left) >= to_string(&right))),
+        "<" => Ok(Value::Bool(relational(&left, &right, |ordering| {
+            ordering.is_lt()
+        }))),
+        ">" => Ok(Value::Bool(relational(&left, &right, |ordering| {
+            ordering.is_gt()
+        }))),
+        "<=" => Ok(Value::Bool(relational(&left, &right, |ordering| {
+            ordering.is_le()
+        }))),
+        ">=" => Ok(Value::Bool(relational(&left, &right, |ordering| {
+            ordering.is_ge()
+        }))),
         _ => Err(HostError::UnsupportedSyntax(format!(
             "binary operator '{operator}' is not supported"
         ))),
     }
+}
+
+fn relational<'tree>(
+    left: &Value<'tree>,
+    right: &Value<'tree>,
+    predicate: impl FnOnce(std::cmp::Ordering) -> bool,
+) -> bool {
+    let ordering = match (left, right) {
+        (Value::String(left), Value::String(right)) => Some(left.cmp(right)),
+        _ => number(left).and_then(|left| {
+            number(right).and_then(|right| left.partial_cmp(&right))
+        }),
+    };
+    ordering.is_some_and(predicate)
 }
 
 fn unquote(value: &str) -> String {
