@@ -30,7 +30,10 @@ import subprocess
 import sys
 from pathlib import Path
 
-REPO = Path(__file__).resolve().parent.parent
+DEFAULT_REPO = Path(__file__).resolve().parent.parent
+# Compatibility hook for thin engine adapters that override the imported
+# module's repository root before calling main().
+REPO = DEFAULT_REPO
 
 # Absolute host path shapes. Windows C:\Users\ is covered by the Users
 # pattern after forward-slash normalization in json.
@@ -76,9 +79,10 @@ ALLOWLIST_LINE_RES: dict[str, list[re.Pattern[str]]] = {
 }
 
 
-def tracked_files() -> list[str]:
+def tracked_files(repo: Path | None = None) -> list[str]:
+    repo = REPO if repo is None else repo
     out = subprocess.run(
-        ["git", "ls-files"], cwd=REPO, capture_output=True, text=True, check=True
+        ["git", "ls-files"], cwd=repo, capture_output=True, text=True, check=True
     )
     return [line for line in out.stdout.splitlines() if line.strip()]
 
@@ -90,9 +94,10 @@ def line_allowlisted(rel: str, line: str) -> bool:
     return any(p.search(line) for p in patterns)
 
 
-def first_offender(rel: str) -> str | None:
+def first_offender(rel: str, repo: Path | None = None) -> str | None:
     """Return first host-path hit for a tracked path, or None if clean."""
-    path = REPO / rel
+    repo = REPO if repo is None else repo
+    path = repo / rel
     if not path.is_file():
         return None
     try:
@@ -107,11 +112,19 @@ def first_offender(rel: str) -> str | None:
     return None
 
 
-def main() -> int:
-    offenders = [hit for rel in tracked_files() if (hit := first_offender(rel))]
+def main(argv: list[str] | None = None) -> int:
+    args = sys.argv[1:] if argv is None else argv
+    if len(args) > 1:
+        print("usage: check_no_host_paths.py [repository-root]", file=sys.stderr)
+        return 2
+    repo = Path(args[0]).resolve() if args else REPO
+    if not (repo / ".git").exists():
+        print(f"repository root is not a Git checkout: {repo}", file=sys.stderr)
+        return 2
+    files = tracked_files(repo)
+    offenders = [hit for rel in files if (hit := first_offender(rel, repo))]
     if not offenders:
-        count = len(tracked_files())
-        print(f"no host paths in {count} tracked file(s)")
+        print(f"no host paths in {len(files)} tracked file(s)")
         return 0
     print("host paths found in tracked files:", file=sys.stderr)
     for o in offenders:
