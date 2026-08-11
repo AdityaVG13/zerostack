@@ -129,9 +129,10 @@ conformance/tests/*
 .bench-history/
 
 # --- Beads (local only; never publish tracker state) ---
-.beads/
 .bv/
 !conformance/schemas/two-phase-gate-v1.schema.json
 !conformance/src/
 !conformance/src/**
 !conformance/tests/two_phase_gate.rs
+# br doctor per-run artifacts
+.doctor/
