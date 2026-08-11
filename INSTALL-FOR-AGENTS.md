@@ -25,10 +25,10 @@ printf '%s\n' 'return await zero.fs.read({path:"Cargo.toml"});' \
 ## Build the Node binding
 
 ```sh
-rch exec -- env CARGO_TARGET_DIR=/tmp/rch_target_zerostack cargo build --locked -p zsx-node
+./scripts/build-node-prebuild.sh
 ```
 
-Set `ZSX_NATIVE_ADDON` to the built `zsx_node` dynamic library during local development. A packaged install uses the matching file under `bindings/node/prebuilds/<platform>-<arch>/zsx.node`.
+The script uses the size-tuned `release-node` profile, strips symbols, copies the addon, and rejects files at or above 20 MB. Set `ZSX_NATIVE_ADDON` to the built `zsx_node` dynamic library during local development. A packaged install uses the matching file under `bindings/node/prebuilds/<platform>-<arch>/zsx_node.node`.
 
 The loader fails when no exact addon exists. It never invokes Cargo, Git, or a sibling repository.
 
@@ -36,7 +36,7 @@ The loader fails when no exact addon exists. It never invokes Cargo, Git, or a s
 
 Use only the adapter for the active harness:
 
-- Pi: `pi-stack/pi/packages/pi-zsx-native`
+- Pi: `pi-stack/pi/packages/pi-zsx`
 - OMP: `pi-stack/omp/packages/omp-zsx-native`
 
 Both packages import `@zerostack/zsx-native` and call the same native session. They own only harness registration, cancellation forwarding, result rendering, and shutdown.

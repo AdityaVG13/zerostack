@@ -76,7 +76,7 @@ The production runtime links the three engine domain APIs through reviewed, pinn
 
 ## Installation status
 
-The native CLI and Node binding are verified from source. Thin private adapters live at `pi/packages/pi-zsx-native` and `omp/packages/omp-zsx-native` in `pi-stack`. Public registry publication and Windows native verification remain separate release gates.
+The native CLI and Node binding are verified from source. Thin private adapters live at `pi/packages/pi-zsx` and `omp/packages/omp-zsx-native` in `pi-stack`. Public registry publication and Windows native verification remain separate release gates.
 
 ## Roadmap
 

@@ -42,8 +42,8 @@ function missingAddonError(candidate, dir) {
   return new Error(
     'zsx-node: native addon not found at ' + candidate + '.\n' +
     'Install a prebuild, or build it yourself:\n' +
-    '  cd <ZeroStack repo> && cargo build --release -p zsx-node\n' +
-    '  cp target/release/' + builtLibraryName() + ' ' + prebuildPath + '\n' +
+    '  cd <ZeroStack repo> && cargo build --profile release-node -p zsx-node\n' +
+    '  cp target/release-node/' + builtLibraryName() + ' ' + prebuildPath + '\n' +
     'or set ZSX_NATIVE_ADDON=/absolute/path/to/zsx_node.node'
   );
 }

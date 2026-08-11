@@ -51,3 +51,15 @@ codegen-units = 1
 incremental = false
 lto = "fat"
 panic = "abort"
+
+# Native package profile: preserve release semantics while minimizing the
+# shipped Node addon. Keep this separate from release-perf so CLI benchmarks
+# remain tuned for runtime speed.
+[profile.release-node]
+inherits = "release"
+codegen-units = 1
+incremental = false
+lto = "fat"
+opt-level = "z"
+panic = "abort"
+strip = "symbols"
