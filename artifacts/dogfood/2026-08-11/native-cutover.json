@@ -9,6 +9,7 @@
   "claims": {
     "multi_hour_soak": "UNMEASURED",
     "performance": "UNMEASURED",
+    "windows_cross_compile": "EXTERNALLY BLOCKED: RCH worker lacks x86_64-w64-mingw32-gcc",
     "windows_native_host": "EXTERNALLY BLOCKED: no Windows host configured"
   },
   "defect_routed": {
