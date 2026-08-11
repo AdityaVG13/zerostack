@@ -56,21 +56,21 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use serde_json::Value;
 use tokenzero_core::operation_abi::{
-    DomainError, DomainErrorKind, SEMANTIC_CONTRACT_VERSION, contract_digest_hex,
+    contract_digest_hex, DomainError, DomainErrorKind, SEMANTIC_CONTRACT_VERSION,
 };
-use tokenzero_engine::wall::{WallDeadline, with_host_wall_deadline_and_cancel};
+use tokenzero_engine::wall::{with_host_wall_deadline_and_cancel, WallDeadline};
 use tokenzero_engine::{
-    DispatchSurface, EmbeddedDispatchError, EngineConfig, TokenZeroEngine, dispatch_operation,
-    execute_embedded_value,
+    dispatch_operation, execute_embedded_value, DispatchSurface, EmbeddedDispatchError,
+    EngineConfig, TokenZeroEngine,
 };
 use tokenzero_recovery::RecoveryStore;
 use zero_abi::{
     ApprovalMetadata, ApprovalState, CallRequest, EffectClass, EngineIdentity, EngineStageSpanV1,
-    EngineStageTimelineV1, RefOwnership, RevertMetadata, TOKEN_JOB_OPERATION_V1, WorkerResult,
-    WorkerResultMetadata, WorkerTokenAccountingV1, WorkerTokenCountKind,
+    EngineStageTimelineV1, RefOwnership, RevertMetadata, WorkerResult, WorkerResultMetadata,
+    WorkerTokenAccountingV1, WorkerTokenCountKind, TOKEN_JOB_OPERATION_V1,
 };
 use zero_ref::{ZeroRefV1, ZeroScheme};
-use zero_store::SharedCas;
+use zero_store::{Engine as StoreEngine, ResolvedStore, SharedCas};
 
 use crate::adapter::{
     AdapterBinding, AdapterCall, AdapterContractError, AdapterError, AdapterResponse, DomainAdapter,
@@ -118,6 +118,9 @@ impl TokenZeroAdapter {
     ) -> Result<Self, AdapterContractError> {
         let root = root.into();
         let mut config = EngineConfig::for_root(&root);
+        let resolved_store =
+            ResolvedStore::resolve_from_process(&root, StoreEngine::TokenZero, &[]);
+        config.cache_path = resolved_store.engine_dir().join("recovery-cache.json");
         // Mirror the raw-worker entry (`engine_from_options`): the seen-set
         // redundancy layer stays off for the composition path.
         config.session_dedup = false;
@@ -190,7 +193,7 @@ impl TokenZeroAdapter {
         outcome: Result<(Value, Vec<String>), DomainError>,
         elapsed: Duration,
     ) -> Result<AdapterResponse, AdapterError> {
-        let (value, domain_refs) = match outcome {
+        let (mut value, domain_refs) = match outcome {
             Ok(outcome) => outcome,
             Err(error) => {
                 return Err(AdapterError::new(
@@ -201,6 +204,7 @@ impl TokenZeroAdapter {
                 ));
             }
         };
+        bind_terminal_exact_expansion(request, &mut value);
         // 9lwo: advertised limits must be effective; an oversized value
         // becomes a typed error naming the limit, never a truncated result.
         let output_bytes = serde_json::to_vec(&value).map_or(0, |bytes| bytes.len());
@@ -572,6 +576,40 @@ fn checked_u64_count(field: &str, value: usize) -> Result<u64, String> {
     u64::try_from(value).map_err(|_| format!("{field} exceeds the raw-worker accounting range"))
 }
 
+fn bind_terminal_exact_expansion(request: &CallRequest, value: &mut Value) {
+    if request.op != "expand"
+        || value.get("status").and_then(Value::as_str) != Some("ok")
+        || value.get("mode").and_then(Value::as_str) != Some("exact")
+    {
+        return;
+    }
+    let Some(visible) = value
+        .get("visible")
+        .and_then(Value::as_str)
+        .map(str::to_owned)
+    else {
+        return;
+    };
+    let Some(object) = value.as_object_mut() else {
+        return;
+    };
+    object.insert("op".into(), Value::String("tz_expand".into()));
+    object.insert(
+        "tool_response".into(),
+        serde_json::json!({
+            "tool": "expand",
+            "status": "ok",
+            "mode": "exact",
+            "visible": {"kind": "capsule", "text": visible},
+            "recovery": {
+                "do_not_recompact": true,
+                "exact_bytes": true,
+                "terminal": true
+            }
+        }),
+    );
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -763,8 +801,10 @@ mod tests {
         // The host spills oversized final results to the resolved store CAS
         // and returns a spill envelope whose `ref` carries the finalized
         // `{"value", "metadata"}` record.
+        let mut finalization_ref = None;
         let finalized = if envelope.get("spilled").and_then(Value::as_bool) == Some(true) {
             let spill_ref = envelope["ref"].as_str().expect("spill ref");
+            finalization_ref = Some(spill_ref.to_string());
             let resolved_store = zero_store::ResolvedStore::resolve_from_process(
                 &root,
                 zero_store::Engine::TokenZero,
@@ -779,6 +819,29 @@ mod tests {
         } else {
             envelope
         };
+        if let Some(spill_ref) = finalization_ref {
+            let expanded = session
+                .execute(
+                    1,
+                    2,
+                    format!(
+                        "return await zero.token.expand({});",
+                        serde_json::to_string(&spill_ref).expect("ref serializes")
+                    ),
+                    Duration::from_secs(60),
+                )
+                .expect("finalization spill expands through the same session store");
+            assert_ne!(
+                expanded.value["spilled"],
+                json!(true),
+                "expanded finalization spill: {}",
+                expanded.value
+            );
+            assert_eq!(
+                expanded.value["content"]["value"]["value"]["visible"],
+                json!(serde_json::to_string(&finalized).expect("finalized result serializes"))
+            );
+        }
         // The finalized record is the host's `ZeroResultV1`-style envelope:
         // `content.value` holds the connector's `{"value", "metadata"}`.
         let content = &finalized["content"]["value"];
@@ -835,7 +898,7 @@ mod tests {
         let resolved = session
             .execute(
                 1,
-                2,
+                3,
                 format!(
                     "return await zero.token.expand({});",
                     serde_json::to_string(&format!("{blob_ref}#B0-800")).expect("ref serializes")
@@ -850,7 +913,7 @@ mod tests {
         let oversized = session
             .execute(
                 1,
-                3,
+                4,
                 format!(
                     "return await zero.token.expand({});",
                     serde_json::to_string(&blob_ref).expect("ref serializes")
