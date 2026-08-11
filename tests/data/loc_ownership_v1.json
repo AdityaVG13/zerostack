@@ -2,7 +2,7 @@
   "schema": "zerostack.loc-ownership.v1",
   "version": 1,
   "generated_from_heads": {
-    "zerostack": "146ec47ab9005d51ad8364ef05f2079a65bd626a",
+    "zerostack": "c06eeb38a905e7520770b26e30a1f0adddab9242",
     "fszero": "5ceb193f191b0988dbe41c34a021f599cd10de8e",
     "graphzero": "3d778f57e7390c1f0f6cd8777c8f5f69ba45a99a",
     "tokenzero": "333e32cb1430ea893140f657dab396bd10434022"
@@ -1469,7 +1469,7 @@
       "classification": "shared-candidate",
       "rule": "hub-owned-substrate",
       "justification": "hub implementation already owned by zsx-core",
-      "blob_digest": "9e1977d0e26399e69ea9c386faca6ad80e0dbd39",
+      "blob_digest": "d5b509a1ac36f97420a82e367a6fb9fb83d3f970",
       "hub_target": "zsx-core"
     },
     {
@@ -1529,7 +1529,7 @@
       "classification": "shared-candidate",
       "rule": "hub-owned-substrate",
       "justification": "hub implementation already owned by zsx-core",
-      "blob_digest": "3b32af4036251093c8b62a9c5f30413541bf6b7b",
+      "blob_digest": "6ab22631b5561fba462acf387f8c0ec895f3e540",
       "hub_target": "zsx-core"
     },
     {
@@ -1609,7 +1609,7 @@
       "classification": "shared-candidate",
       "rule": "hub-owned-substrate",
       "justification": "hub implementation already owned by zsx-node",
-      "blob_digest": "a84487689e5b8e2ceaf18d0c382950eadde2a6cb",
+      "blob_digest": "8ba17c18c711950b575a19f40eef36c226250a7e",
       "hub_target": "zsx-node"
     },
     {
@@ -1649,7 +1649,7 @@
       "classification": "shared-candidate",
       "rule": "hub-owned-substrate",
       "justification": "hub implementation already owned by zsx",
-      "blob_digest": "861d7919bb5c4f3d2a141b6622c2d91032422d8f",
+      "blob_digest": "8389bbb5445152ba44c56a7afa7ada2ee15aa8c7",
       "hub_target": "zsx"
     },
     {
