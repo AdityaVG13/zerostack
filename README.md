@@ -36,18 +36,13 @@ A ref is not a lossy summary. It is a compact pointer to recoverable output. Age
 
 Read [RACC and typed refs](docs/racc.md).
 
-## Two deployment modes
+## Native runtime and MCP compatibility
 
-Each engine supports exactly two integration modes:
+The canonical runtime is `zsx-core`. It embeds FSZero, GraphZero, and TokenZero domain adapters in one process. The `zsx` executable, Pi adapter, OMP adapter, and Node binding all use that same session authority. No worker process, session socket, or daemon exists.
 
-1. **Standard MCP adapter** -- the harness invokes individual MCP tools.
-2. **CodeMode** -- the harness executes a JavaScript plan in a constrained sandbox, batching or parallelizing many typed calls in one round trip.
+`zero-mcp` is a separate optional FastMCP compatibility carrier. A deployment chooses native CodeMode or MCP registration for a harness surface. It never exposes both catalogs at once.
 
-A deployment must choose **one mode only**. Never register the standard MCP adapters alongside CodeMode for the same engines. The active ZeroStack deployment uses **CodeMode only**.
-
-CodeMode follows the Cloudflare-style model: the agent writes a small JavaScript plan against a typed `zero` surface, composes calls locally, and returns only the final values or refs. This reduces round trips as well as visible tokens.
-
-Read [CodeMode and MCP mode](docs/codemode.md).
+Read [CodeMode and MCP compatibility](docs/codemode.md).
 
 ## Why the combination matters
 
@@ -77,21 +72,17 @@ The engines share contract-critical infrastructure through small foundation crat
 - **zero-process** -- native process identity, owner-death notification, and exact child-tree lifecycle primitives. Engines keep only thin compatibility adapters over this hub authority.
 - **zerostack-machine-permit** -- the shared machine-permit issue/verify surface and scoped permit-base contract for isolating permit roots. It delegates generic process identity to `zero-process`.
 
-Each engine still ships as a single statically linked binary with no runtime dependency on the others. Foundation crates are consumed at build time via pinned git dependencies, and each engine adopts updates on its own schedule.
+The production runtime links the three engine domain APIs through reviewed, pinned dependencies. Generic interpreter, lifecycle, store, ref, ABI, and MCP authority remains in this hub.
 
 ## Installation status
 
-TokenZero installation is documented in its [public repository](https://github.com/AdityaVG13/tokenzero).
-
-A unified Pi package, **pi-zerostack**, is in private development. It will eventually install and configure the complete stack. It is referenced here for roadmap clarity but is not published or supported for external installation yet. FSZero and GraphZero will receive public installation instructions when their repositories are released.
+The native CLI and Node binding are verified from source. Thin private adapters live at `pi/packages/pi-zsx-native` and `omp/packages/omp-zsx-native` in `pi-stack`. Public registry publication and Windows native verification remain separate release gates.
 
 ## Roadmap
 
-- Stabilize FSZero and GraphZero APIs and publish their repositories.
-- Finalize cross-engine RACC and conformance contracts.
 - Publish reproducible end-to-end benchmark methodology.
-- Release the pi-zerostack package with CodeMode-first setup.
-- Add supported adapters for harnesses that choose standard MCP mode.
+- Publish signed native Node prebuilds and the thin Pi and OMP packages.
+- Add supported adapters that select the optional MCP compatibility carrier.
 
 ## Current limitations
 

@@ -52,75 +52,25 @@ run.text;  // TypeError: unknown property 'text' ... available properties: ack, 
 
 Use `Object.keys(value)` to inspect an unfamiliar nested domain value. The strict guard applies recursively.
 
-## Install the `zs` wrapper
+## Run the native `zsx` executable
 
-The tracked Python wrapper supports Linux and macOS and has no third-party dependencies.
-
-~~~sh
-python3 scripts/install_zs.py --dry-run
-python3 scripts/install_zs.py
-python3 scripts/install_zs.py --verify
-zs --version
-~~~
-
-The default destination is `~/.kimi-code/bin/zs`. Use `--prefix DIR` for another user bin directory. Installation uses a temporary sibling, fsync, executable-mode preservation, and atomic replacement.
-
-Smoke from any directory while preserving engine root isolation:
+Build the canonical one-process runtime:
 
 ~~~sh
-zs -C . --verbose fs 'return await zero.fs.compound("list", { path: "." });'
-printf '%s
-' 'return await zero.graph.orient("delta");' | zs -C . graph -
-zs -C . fs-search 'read a file'
+rch exec -- env CARGO_TARGET_DIR=/tmp/rch_target_zerostack cargo build --locked -p zsx
+printf '%s\n' 'return await zero.fs.read({path:"Cargo.toml"});' \
+  | /tmp/rch_target_zerostack/debug/zsx exec -C "$PWD"
 ~~~
 
-`-C/--root` must precede the engine command. Plan paths stay relative to that validated root. `--verbose` reports wrapper and invoked engine version/revision. `--json` emits the complete engine result. Normal output preserves typed status and copyable scalar `fz://`, `gz://`, `tz://`, and `cm://` refs. Unpinned engines resolve through the same order as [binary discovery](#binary-discovery-for-embedded-harnesses), never from a live `target/release` tree: a Cargo build unlinks and replaces those files, so a build in one checkout would kill every concurrent session spawning from it. Binary overrides are `ZS_FSZERO_BIN`, `ZS_GRAPHZERO_BIN`, and `ZS_TOKENZERO_BIN`; `ZS_TIMEOUT_MS` changes the 120000 ms default.
+`zsx exec` reads a plan from stdin or `--file PLAN`. `-C ROOT` authorizes and canonicalizes one engine root. `--timeout-ms N` overrides the 30000 ms default.
 
-## Binary discovery for embedded harnesses
+The executable embeds `zsx-core` and all three domain adapters. It creates no engine worker, NDJSON pipe, session socket, or daemon. Pi and OMP load the same runtime through `@zerostack/zsx-native`; their adapters do not own execution authority.
 
-A harness needs four executables: the aggregate host `zerostack-codemode-host` and
-the `fszero-codemode` / `graphzero-codemode` / `tokenzero-codemode` raw workers. None of
-them belong in a config as an absolute path — a shipped config that names one
-developer's worktree resolves nothing on any other machine and fails at spawn
-time with a bare `ENOENT`.
+## Native addon selection for embedded harnesses
 
-Ask the host where things are instead:
+Pi and OMP import `@zerostack/zsx-native`. Its loader checks `ZSX_NATIVE_ADDON` first, then selects an exact packaged `prebuilds/<platform>-<arch>/zsx.node` file.
 
-~~~sh
-zerostack-codemode-host --locate
-~~~
-
-It prints a `zerostack.binary_discovery.v1` JSON report naming, per binary, either
-the resolved path and the rule that found it, or every candidate that was probed.
-
-Resolution order, highest precedence first:
-
-| Order | Source label | Location |
-| --- | --- | --- |
-| 1 | `zerostack_home` | `$ZEROSTACK_HOME/bin/<binary>` |
-| 2 | `dev_checkout` | `$ZEROSTACK_DEV_ROOT/<Repo>/target/release/<binary>` |
-| 3 | `xdg_data` | `$XDG_DATA_HOME/zerostack/bin/<binary>`, default `$HOME/.local/share/zerostack/bin` |
-| 4 | `platform_install` | `/usr/local/lib/zerostack/bin`, `/opt/zerostack/bin`, `/usr/lib/zerostack/bin`; on Windows the `LOCALAPPDATA` and Program Files equivalents |
-| 5 | `path` | each absolute `PATH` entry, in order |
-
-`ZEROSTACK_DEV_ROOT` is the documented dev-checkout override: point it at the
-parent directory holding the sibling `ZeroStack`, `FSZero`, `GraphZero`, and
-`TokenZero` checkouts and their `target/release` builds are used directly.
-
-Rules that keep resolution predictable:
-
-- An empty or whitespace-only variable is treated as unset. Exporting a blank
-  value is a shell artifact, not an instruction.
-- A relative install root, or a blank `PATH` entry meaning "current directory",
-  is skipped. Otherwise resolution would silently depend on the spawning cwd.
-- An explicit `XDG_DATA_HOME` replaces the `~/.local/share` default rather than
-  adding to it, so a redirect is honored instead of quietly bypassed.
-- Only a regular file with an execute bit is accepted, so a same-named directory
-  cannot shadow a real binary further down the order.
-- Each directory is probed once even if several rules name it.
-
-An engine that is not installed is reported as unresolved rather than aborting
-discovery; the harness decides which raw workers it actually requires.
+Missing and unsupported addons fail with typed errors. The loader never invokes Cargo, Git, a shell, or a sibling repository.
 
 ## Exclusive deployment rule
 
@@ -157,14 +107,12 @@ The hub-owned FastMCP carrier lives in the `zero-mcp` crate and uses
 concurrent callbacks. Zero and larger values are rejected. The `fastmcp`
 compatibility transport remains an optional feature of `zero-mcp`.
 
-## Harness-neutral raw-worker client
+## Legacy raw-worker conformance client
 
-The zero_codemode::worker module is the stable Rust ownership boundary between
-any harness and raw-worker v2 processes. It is independent of Pi and MCP,
-and engine runtimes. WorkerRegistry maps the closed EngineIdentity set
-(FsZero, GraphZero, TokenZero) to a WorkerFactory. A factory returns a
-WorkerSpec; WorkerClient alone owns spawn, framed stdin/stdout/stderr,
-handshake, dispatch, cancel, deadlines, shutdown, kill, and reap.
+`zero_codemode::worker` remains only for raw-worker v2 compatibility tests and
+protocol conformance. `zsx`, the Node binding, Pi, and OMP do not construct it.
+The module owns bounded spawn, framed I/O, handshake, cancellation, shutdown,
+and reap when a compatibility test explicitly creates a `WorkerClient`.
 
 Clients provide an explicit store root and session id in WorkerContext and pin
 worker revision, semantic contract digest, and operation registry digest in the

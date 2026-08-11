@@ -117,7 +117,9 @@ class TopologyTests(unittest.TestCase):
             self.assertEqual(set(command),{"id","runner","program","args","working_directory","purpose","env"})
         hub={x["id"]:x for x in self.manifest["hub"]["build_commands"]}
         self.assertEqual(hub["hub-workspace-check"]["args"],["check","--locked","--workspace","--all-targets"])
-        self.assertEqual(hub["hub-host-release"]["args"],["build","--locked","--release","-p","zero-codemode","--bin","zerostack-codemode-host"])
+        self.assertEqual(hub["hub-zsx-release"]["args"],["build","--locked","--release","-p","zsx","--bin","zsx"])
+        binaries={x["name"]:x for x in self.manifest["hub"]["binaries"]}
+        self.assertEqual(binaries["zsx"]["path"],"crates/zsx/src/main.rs")
         for command in hub.values(): assert_command(command,"zerostack")
         for engine in self.manifest["engines"]:
             target=engine["target"]; commands={x["id"]:x for x in target["build_commands"]}
@@ -137,14 +139,19 @@ class TopologyTests(unittest.TestCase):
         # per 2db9d25 "docs: keep architecture decisions private"), so the
         # test must not read the ADR from a clean checkout.
         self.assertEqual(raw["protocol"],"raw-worker-v2")
-        self.assertEqual(raw["runtime_owner"],"zerostack-codemode-host")
+        self.assertEqual(raw["runtime_owner"],"zero-codemode-legacy-conformance")
         self.assertEqual(raw["skew_policy"],"fail-closed")
         policy=self.manifest["canonical_engine_skeleton"]["feature_policy"]
         self.assertEqual(policy["worker_default_features"],[])
         for item in ("quickjs","js","surface-mcp","mcp-catalog","planner","nested-codemode","harness-routing"): self.assertIn(item,policy["worker_forbidden_features"])
-        self.assertEqual({x["kind"] for x in self.manifest["harness_adapters"]},{"plain-cli","mcp-claude-code","pi","third-party"})
-        self.assertTrue(all(x["entrypoint"]=="zerostack-codemode-host" and x["status"]=="thin-adapter" for x in self.manifest["harness_adapters"]))
-        self.assertEqual(self.manifest["canonical_engine_skeleton"]["host_client_contract"]["name"],"zerostack-host-client-v1")
+        self.assertEqual({x["kind"] for x in self.manifest["harness_adapters"]},{"plain-cli","mcp-claude-code","pi","omp","third-party"})
+        adapters={x["id"]:x for x in self.manifest["harness_adapters"]}
+        self.assertEqual(adapters["plain-cli"]["entrypoint"],"zsx")
+        self.assertEqual(adapters["mcp-claude-code"]["entrypoint"],"zero-mcp")
+        self.assertEqual(adapters["pi"]["entrypoint"],"@zerostack/zsx-native")
+        self.assertEqual(adapters["omp"]["entrypoint"],"@zerostack/zsx-native")
+        self.assertTrue(all(x["status"]=="thin-adapter" for x in adapters.values()))
+        self.assertEqual(self.manifest["canonical_engine_skeleton"]["host_client_contract"]["name"],"zsx-native-session-v1")
 
     def test_rejects_nonportable_paths_with_mutations(self)->None:
         bad_paths=["/tmp/root","../outside","a/../../outside","C:\\repo","\\\\server\\share","a\\b"]

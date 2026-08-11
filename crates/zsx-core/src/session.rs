@@ -1,18 +1,14 @@
 //! Single-process aggregate session authority, canonical in zsx-core.
 //!
-//! This session owns the same lifecycle the process compatibility path owns
-//! in `zero-codemode::session` (generation, bounded queue, approval replay
-//! ledger, replacement, shutdown), but its executor runs the registered
-//! `DomainAdapter`s in-process. Cancellation is per request: each execution
+//! The session owns generation, bounded admission, approval replay protection,
+//! replacement, and shutdown. Its executor calls registered [`DomainAdapter`]
+//! implementations in-process. Cancellation is per request: each execution
 //! runs under its own token, `cancel_request` stops one request while the
 //! session stays accepting, and whole-session termination remains available
 //! through [`ZsxSessionCancellation::cancel`]. Durable mutation attempt
 //! journals created at connector dispatch can be reconciled through
 //! [`ZsxSession::reconcile_request`] or [`ZsxSession::reconcile_all_attempts`]
-//! without ever calling an adapter. The zsx binary and any harness embedding
-//! zsx-core use this session; the
-//! process-backed `AggregateSession` remains only as an explicitly named
-//! compatibility path.
+//! without ever calling an adapter. Every harness embeds this native session.
 
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
@@ -26,23 +22,45 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use serde_json::Value;
 use zero_abi::EffectClass;
-use zero_codemode::worker::CancellationSignal;
+use zero_codemode::CancellationSignal;
 use zero_codemode::{Host, HostError};
 use zero_store::{Engine, ResolvedStore, ensure_layout};
 
 use crate::adapter::{AdapterBinding, DomainAdapter};
 use crate::connector::{
     AggregateExecutionContext, MAX_SESSION_APPROVAL_GRANTS, MAX_SESSION_APPROVAL_LIFETIME_MS,
-    MAX_SESSION_CONSUMED_APPROVALS, ZsxAttemptJournalStatus, ZsxConnector, attempts_root_for,
-    now_ms, reconcile_all_attempts, reconcile_request_attempts, registration,
+    MAX_SESSION_CONSUMED_APPROVALS, SessionApprovalGrantV1, ZsxAttemptJournalStatus, ZsxConnector,
+    attempts_root_for, now_ms, reconcile_all_attempts, reconcile_request_attempts, registration,
 };
 
-/// Approval grant wire type, shared with the process compatibility session.
-pub use zero_codemode::session::SessionApprovalGrantV1;
-/// Replacement reason wire type, shared with the process compatibility session.
-pub use zero_codemode::session::SessionReplacementReason;
-/// Replacement receipt wire type, shared with the process compatibility session.
-pub use zero_codemode::session::SessionReplacementReceipt;
+#[derive(Clone, Copy, Debug, serde::Deserialize, Eq, PartialEq, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SessionReplacementReason {
+    SessionStart,
+    BeforeSwitch,
+    BeforeFork,
+    WorkerRevisionChange,
+    Manual,
+}
+
+impl SessionReplacementReason {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::SessionStart => "session_start",
+            Self::BeforeSwitch => "before_switch",
+            Self::BeforeFork => "before_fork",
+            Self::WorkerRevisionChange => "worker_revision_change",
+            Self::Manual => "manual",
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct SessionReplacementReceipt {
+    pub previous_generation: u64,
+    pub generation: u64,
+    pub reason: SessionReplacementReason,
+}
 
 pub const SESSION_EXECUTION_QUEUE_CAPACITY: usize = 8;
 pub const SESSION_REPLACEMENT_SETTLE_TIMEOUT: Duration = Duration::from_secs(5);

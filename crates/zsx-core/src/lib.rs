@@ -8,9 +8,8 @@
 //! confined interpreter host; it never spawns a worker process and never
 //! serializes through NDJSON or a session socket.
 //!
-//! The process-backed compatibility path (raw-worker v2 child processes,
-//! `zerostack-session` socket server, `AggregateSession`) remains in
-//! `zero-codemode` under its explicit names and is never the zsx default.
+//! The previous session socket and raw-worker compatibility executables were
+//! removed after all native adapters passed the cutover gates.
 //!
 //! # Quick start
 //!

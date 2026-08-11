@@ -76,7 +76,7 @@ use zero_abi::{
     CallRequest, EngineIdentity, EngineStageTimelineV1, WorkerError, WorkerResult,
     WorkerTokenAccountingV1, WorkerTrace,
 };
-use zero_codemode::worker::CancellationSignal;
+use zero_codemode::CancellationSignal;
 
 /// Immutable identity a domain adapter advertises for one session.
 ///

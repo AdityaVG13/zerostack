@@ -22,7 +22,7 @@
 //! API) maps a Prepared journal to SafeToRetry and never redispatchable; no
 //! recovery path can call an adapter.
 //!
-//! The process-backed compatibility path remains in `zero-codemode::session`.
+//! No process-backed compatibility runtime remains after the native cutover.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
@@ -41,7 +41,7 @@ use zero_abi::{
     ApprovalState, CallRequest, CapabilityDescriptor, DigestV1, EffectClass, GlobalRegistration,
     WorkerResponseFrame, WorkerTrace, canonical_json, sha256, validate_response_frame,
 };
-use zero_codemode::worker::CancellationSignal;
+use zero_codemode::CancellationSignal;
 use zero_codemode::{
     Connector, ConnectorCompletion, ConnectorError, DispatchContext, HostError,
     MAX_INFLIGHT_CONNECTOR_CALLS,
@@ -62,8 +62,23 @@ use zerostack_machine_permit::{
 use crate::adapter::{AdapterCall, DomainAdapter};
 use crate::lower::{METHODS, lower};
 
-/// One session approval grant, wire-compatible with the process session.
-pub use zero_codemode::session::SessionApprovalGrantV1;
+/// One approval grant consumed by the native session.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct SessionApprovalGrantV1 {
+    pub schema: String,
+    pub grant_id: String,
+    pub engine: EngineIdentity,
+    pub root: String,
+    pub generation: u64,
+    pub request_id: u64,
+    pub operation: String,
+    pub effect: EffectClass,
+    pub authority_digest: String,
+    pub policy_digest: String,
+    pub issued_at_unix_ms: u64,
+    pub expires_at_unix_ms: u64,
+}
 
 pub const SESSION_APPROVAL_SCHEMA: &str = "zerostack.session.approval_grant.v1";
 pub const MAX_SESSION_APPROVAL_GRANTS: usize = 64;

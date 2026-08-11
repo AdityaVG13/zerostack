@@ -70,7 +70,7 @@ use zero_abi::{
     EngineStageTimelineV1, RefOwnership as WorkerRefOwnership, RevertMetadata, WorkerResult,
     WorkerResultMetadata,
 };
-use zero_codemode::worker::CancellationSignal;
+use zero_codemode::CancellationSignal;
 use zero_store::SharedCas;
 
 use crate::adapter::{AdapterBinding, AdapterCall, AdapterError, AdapterResponse, DomainAdapter};

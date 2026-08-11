@@ -16,9 +16,10 @@ class SurfaceSubstrateGuardTests(unittest.TestCase):
         temp = tempfile.TemporaryDirectory()
         self.addCleanup(temp.cleanup)
         root = Path(temp.name)
-        surface_path = root / "crates/zero-codemode/src/surface.rs"
+        surface_path = root / "crates/zero-abi/src/surface.rs"
         surface_path.parent.mkdir(parents=True)
         surface_path.write_text(surface, encoding="utf-8")
+        (root / "crates/zero-codemode/src").mkdir(parents=True, exist_ok=True)
         if worker_manifest:
             manifest = root / "crates/fszero-codemode/Cargo.toml"
             manifest.parent.mkdir(parents=True)
@@ -44,6 +45,15 @@ class SurfaceSubstrateGuardTests(unittest.TestCase):
             self._root(self.valid_surface() + "// rquickjs must never enter this module")
         )
         self.assertTrue(any("rquickjs" in error for error in errors))
+
+    def test_retired_sidecar_runtime_stays_absent(self):
+        root = self._root(self.valid_surface())
+        self.assertEqual(module.check_retired_hub_runtime(root), [])
+        retired = root / module.RETIRED_HUB_RUNTIME_PATHS[0]
+        retired.parent.mkdir(parents=True, exist_ok=True)
+        retired.write_text("fn main() {}\n", encoding="utf-8")
+        errors = module.check_retired_hub_runtime(root)
+        self.assertTrue(any("retired sidecar/runtime authority" in error for error in errors))
 
     def test_feature_exclusivity_requires_production_guard_shape(self):
         root = self._root(

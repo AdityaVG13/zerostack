@@ -52,7 +52,7 @@
       {
         "name": "zero-codemode",
         "path": "crates/zero-codemode",
-        "role": "host-and-worker-adapter",
+        "role": "restricted-interpreter-and-legacy-conformance",
         "status": "keep"
       },
       {
@@ -96,14 +96,44 @@
         "path": "crates/zerostack-machine-permit",
         "role": "hub-foundation",
         "status": "keep"
+      },
+      {
+        "name": "zero-process",
+        "path": "crates/zero-process",
+        "role": "hub-foundation",
+        "status": "keep"
+      },
+      {
+        "name": "zero-mcp",
+        "path": "crates/zero-mcp",
+        "role": "canonical-mcp-carrier",
+        "status": "keep"
+      },
+      {
+        "name": "zsx-core",
+        "path": "crates/zsx-core",
+        "role": "canonical-native-composition",
+        "status": "keep"
+      },
+      {
+        "name": "zsx-node",
+        "path": "crates/zsx-node",
+        "role": "native-node-binding",
+        "status": "keep"
+      },
+      {
+        "name": "zsx",
+        "path": "crates/zsx",
+        "role": "universal-native-cli",
+        "status": "keep"
       }
     ],
     "binaries": [
       {
-        "name": "zerostack-codemode-host",
-        "package": "zero-codemode",
-        "path": "crates/zero-codemode/src/bin/zerostack-codemode-host.rs",
-        "role": "aggregate-host",
+        "name": "zsx",
+        "package": "zsx",
+        "path": "crates/zsx/src/main.rs",
+        "role": "single-process-runtime",
         "status": "keep"
       },
       {
@@ -139,7 +169,7 @@
         }
       },
       {
-        "id": "hub-host-release",
+        "id": "hub-zsx-release",
         "runner": "rch",
         "program": "cargo",
         "args": [
@@ -147,12 +177,12 @@
           "--locked",
           "--release",
           "-p",
-          "zero-codemode",
+          "zsx",
           "--bin",
-          "zerostack-codemode-host"
+          "zsx"
         ],
         "working_directory": "zerostack",
-        "purpose": "Build aggregate host",
+        "purpose": "Build the canonical single-process ZSX executable",
         "env": {
           "CARGO_TARGET_DIR": ".rch-target/zerostack"
         }
@@ -220,8 +250,8 @@
       ]
     },
     "host_client_contract": {
-      "name": "zerostack-host-client-v1",
-      "entrypoint": "zerostack-codemode-host",
+      "name": "zsx-native-session-v1",
+      "entrypoint": "@zerostack/zsx-native",
       "stability": "public-versioned",
       "reference_bridge": "hub-owned"
     }
@@ -389,7 +419,7 @@
       "typed-failure-bypass",
       "private-protocol"
     ],
-    "runtime_owner": "zerostack-codemode-host",
+    "runtime_owner": "zero-codemode-legacy-conformance",
     "unknown_fields": "versioned",
     "skew_policy": "fail-closed"
   },
@@ -397,8 +427,8 @@
     {
       "id": "plain-cli",
       "kind": "plain-cli",
-      "entrypoint": "zerostack-codemode-host",
-      "transport": "stdio/public-host-client",
+      "entrypoint": "zsx",
+      "transport": "in-process-cli",
       "owns": [
         "argument-parsing",
         "terminal-rendering",
@@ -419,7 +449,7 @@
     {
       "id": "mcp-claude-code",
       "kind": "mcp-claude-code",
-      "entrypoint": "zerostack-codemode-host",
+      "entrypoint": "zero-mcp",
       "transport": "MCP-negotiated-stdio-or-http",
       "owns": [
         "MCP-transport",
@@ -441,8 +471,8 @@
     {
       "id": "pi",
       "kind": "pi",
-      "entrypoint": "zerostack-codemode-host",
-      "transport": "Pi-tool-call-bridge",
+      "entrypoint": "@zerostack/zsx-native",
+      "transport": "Pi-native-N-API",
       "owns": [
         "Pi-tool-presentation",
         "Pi-routing",
@@ -463,8 +493,8 @@
     {
       "id": "third-party",
       "kind": "third-party",
-      "entrypoint": "zerostack-codemode-host",
-      "transport": "reference-bridge",
+      "entrypoint": "zsx",
+      "transport": "in-process-cli",
       "owns": [
         "configuration",
         "host-lifecycle",
@@ -479,6 +509,27 @@
         "engine-private-runtime",
         "Pi-internals",
         "copied-worker-protocol"
+      ],
+      "status": "thin-adapter"
+    },
+    {
+      "id": "omp",
+      "kind": "omp",
+      "entrypoint": "@zerostack/zsx-native",
+      "transport": "OMP-native-N-API",
+      "owns": [
+        "OMP-tool-presentation",
+        "AbortSignal-forwarding",
+        "session-shutdown"
+      ],
+      "depends_on": [
+        "zsx-native-session-v1",
+        "hub-reference-bridge"
+      ],
+      "must_not_import": [
+        "engine-private-runtime",
+        "Pi-internals",
+        "process-lifecycle"
       ],
       "status": "thin-adapter"
     }

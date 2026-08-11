@@ -9,17 +9,6 @@ description = "Pure-safe generic CodeMode host foundation"
 default = []
 worker-fixture = []
 
-[[bin]]
-name = "zerostack-codemode-host"
-path = "src/bin/zerostack-codemode-host.rs"
-
-[[bin]]
-name = "zerostack-session"
-path = "src/bin/zerostack-session.rs"
-
-[[bin]]
-name = "zerostack"
-path = "src/bin/zerostack.rs"
 
 [[bin]]
 name = "zero-codemode-worker-fixture"
@@ -31,11 +20,9 @@ serde.workspace = true
 serde_json.workspace = true
 zero-abi = { path = "../zero-abi" }
 zero-store = { path = "../zero-store" }
-zero-ref = { path = "../zero-ref" }
 tree-sitter = "0.26.12"
 tree-sitter-javascript = "0.25.0"
 sha2.workspace = true
-zerostack-machine-permit = { path = "../zerostack-machine-permit" }
 zero-process = { path = "../zero-process" }
 
 [dev-dependencies]

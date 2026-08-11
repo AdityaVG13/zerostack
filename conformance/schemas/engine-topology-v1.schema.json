@@ -283,10 +283,10 @@
           ],
           "properties": {
             "name": {
-              "const": "zerostack-host-client-v1"
+              "const": "zsx-native-session-v1"
             },
             "entrypoint": {
-              "const": "zerostack-codemode-host"
+              "const": "@zerostack/zsx-native"
             },
             "stability": {
               "const": "public-versioned"
@@ -424,7 +424,7 @@
           }
         },
         "runtime_owner": {
-          "const": "zerostack-codemode-host"
+          "const": "zero-codemode-legacy-conformance"
         },
         "unknown_fields": {
           "const": "versioned"
@@ -461,11 +461,16 @@
               "plain-cli",
               "mcp-claude-code",
               "pi",
-              "third-party"
+              "third-party",
+              "omp"
             ]
           },
           "entrypoint": {
-            "const": "zerostack-codemode-host"
+            "enum": [
+              "zsx",
+              "zero-mcp",
+              "@zerostack/zsx-native"
+            ]
           },
           "transport": {
             "type": "string",

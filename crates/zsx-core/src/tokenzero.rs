@@ -698,7 +698,7 @@ mod tests {
             approval_grant: None,
             telemetry_request: None,
         };
-        let cancellation = zero_codemode::worker::CancellationSignal::new();
+        let cancellation = zero_codemode::CancellationSignal::new();
         let error = adapter
             .call(AdapterCall {
                 request: &request,

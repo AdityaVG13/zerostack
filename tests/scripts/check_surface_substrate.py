@@ -40,6 +40,12 @@ REQUIRED_HUB_MARKERS = (
     "WrongSurface",
     "#[serde(deny_unknown_fields)]",
 )
+RETIRED_HUB_RUNTIME_PATHS = (
+    "crates/zero-codemode/src/bin/zerostack-codemode-host.rs",
+    "crates/zero-codemode/src/bin/zerostack-session.rs",
+    "crates/zero-codemode/src/bin/zerostack.rs",
+    "crates/zero-codemode/src/session.rs",
+)
 WORKER_PACKAGES = {
     "fszero-mcp",
     "fszero-worker",
@@ -151,6 +157,14 @@ def check_hub_surface(root: Path) -> list[str]:
         if token in lowered
     )
     return errors
+
+
+def check_retired_hub_runtime(root: Path) -> list[str]:
+    return [
+        f"{root / relative}: retired sidecar/runtime authority must stay absent"
+        for relative in RETIRED_HUB_RUNTIME_PATHS
+        if (root / relative).is_file()
+    ]
 
 
 def rust_files(root: Path):
@@ -475,6 +489,7 @@ def scan_roots(roots: list[Path], strict_engines: bool = False) -> list[str]:
     # The first root is ZeroStack. Sibling roots do not contain the hub module;
     # they are checked only for worker dependency and feature exclusivity rules.
     errors.extend(check_hub_surface(roots[0]))
+    errors.extend(check_retired_hub_runtime(roots[0]))
     for root in roots[1:]:
         errors.extend(check_exclusive_features(root))
         errors.extend(check_worker_dependencies(root, strict_engines))

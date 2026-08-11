@@ -5,7 +5,6 @@ use std::fmt;
 use std::io::{BufRead, BufReader, Read, Write};
 use std::path::PathBuf;
 use std::process::{Command, ExitStatus, Stdio};
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Condvar, Mutex, mpsc};
 use std::thread;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
@@ -24,6 +23,8 @@ use zero_abi::{
 pub const STORE_ROOT_ENV: &str = "ZEROSTACK_STORE_ROOT";
 pub const SESSION_ID_ENV: &str = "ZEROSTACK_SESSION_ID";
 pub const ENGINE_ENV: &str = "ZEROSTACK_ENGINE";
+const SESSION_TOKEN_ENV: &str = "ZEROSTACK_SESSION_TOKEN";
+const SESSION_SHUTDOWN_TOKEN_ENV: &str = "ZEROSTACK_SESSION_SHUTDOWN_TOKEN";
 const GRAPHZERO_REPO_ENV: &str = "GRAPHZERO_REPO";
 const CANCEL_POLL: Duration = Duration::from_millis(10);
 
@@ -233,30 +234,7 @@ pub struct WorkerAccounting {
     pub stderr_bytes: u64,
 }
 
-#[derive(Debug, Clone, Default)]
-pub struct CancellationSignal(Arc<AtomicBool>);
-
-impl CancellationSignal {
-    pub fn new() -> Self {
-        Self::default()
-    }
-
-    /// Share the underlying flag with the interpreter, which cancels through
-    /// an `Arc<AtomicBool>` directly. The returned handle and this signal
-    /// observe the same flag, so one per-request token can drive both the
-    /// host runtime and adapter calls.
-    pub fn as_atomic(&self) -> Arc<AtomicBool> {
-        Arc::clone(&self.0)
-    }
-
-    pub fn cancel(&self) {
-        self.0.store(true, Ordering::Release);
-    }
-
-    pub fn is_cancelled(&self) -> bool {
-        self.0.load(Ordering::Acquire)
-    }
-}
+pub use crate::CancellationSignal;
 
 #[derive(Debug)]
 pub enum WorkerAdapterError {
@@ -407,8 +385,8 @@ impl WorkerClient {
             .env(STORE_ROOT_ENV, &spec.store_root)
             .env(SESSION_ID_ENV, &spec.session_id)
             .env(ENGINE_ENV, spec.engine.as_str())
-            .env_remove(crate::session::SESSION_TOKEN_ENV)
-            .env_remove(crate::session::SESSION_SHUTDOWN_TOKEN_ENV)
+            .env_remove(SESSION_TOKEN_ENV)
+            .env_remove(SESSION_SHUTDOWN_TOKEN_ENV)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
