@@ -60,7 +60,7 @@ fn skipped_required_gate() {
 }
 
 #[test]
-fn non_required_skip_is_partial_not_failed() {
+fn non_required_skip_does_not_cap_mcp_exposure() {
     let c = vec![
         CheckResult::pass("G1", "exposure"),
         CheckResult::skip(
@@ -70,12 +70,13 @@ fn non_required_skip_is_partial_not_failed() {
         ),
     ];
     let r = ConformanceReport::new(Ns::Fz, "fake", Surface::Mcp, c);
-    assert_eq!(r.completion_status, CompletionStatus::Partial);
-    assert!(!r.passed);
+    assert_eq!(r.completion_status, CompletionStatus::Complete);
+    assert!(r.passed);
+    assert_eq!(r.contract_version, "mcp-exposure-v1");
 }
 
 #[test]
-fn mcp_g1_only_cannot_false_green() {
+fn mcp_g1_pass_with_explicit_plan_skips_is_complete() {
     let mut c = vec![CheckResult::pass("G1", "exposure")];
     c.extend(CHECK_IDS[1..].iter().map(|id| {
         CheckResult::skip(
@@ -85,8 +86,24 @@ fn mcp_g1_only_cannot_false_green() {
         )
     }));
     let r = ConformanceReport::new(Ns::Fz, "fake", Surface::Mcp, c);
-    assert_eq!(r.completion_status, CompletionStatus::Partial);
-    assert!(!r.passed);
+    assert_eq!(r.completion_status, CompletionStatus::Complete);
+    assert!(r.passed);
+}
+
+#[test]
+fn mcp_missing_or_failed_exposure_is_not_complete() {
+    let missing = ConformanceReport::new(Ns::Fz, "fake", Surface::Mcp, vec![]);
+    assert_eq!(missing.completion_status, CompletionStatus::Partial);
+    assert!(!missing.passed);
+
+    let failed = ConformanceReport::new(
+        Ns::Fz,
+        "fake",
+        Surface::Mcp,
+        vec![CheckResult::fail("G1", "exposure", "missing")],
+    );
+    assert_eq!(failed.completion_status, CompletionStatus::Failed);
+    assert!(!failed.passed);
 }
 
 #[test]
@@ -99,8 +116,8 @@ fn serde_exposes_statuses_and_legacy_passed() {
         vec![CheckResult::pass("G1", "exposure"), s],
     );
     let v = serde_json::to_value(r).unwrap();
-    assert_eq!(v["passed"], false);
-    assert_eq!(v["completion_status"], "partial");
+    assert_eq!(v["passed"], true);
+    assert_eq!(v["completion_status"], "complete");
     assert_eq!(v["checks"][0]["status"], "pass");
     assert_eq!(v["checks"][1]["status"], "skipped");
     assert_eq!(v["checks"][1]["skip_reason"], "stable reason");

@@ -26,6 +26,8 @@ pub const CONTRACT_VERSION: &str = "1.0";
 /// `CONTRACT_VERSION`. A `*-codemode` report carries this so a report cannot
 /// overclaim plan-level scope.
 pub const RAW_WORKER_CONTRACT_VERSION: &str = "raw-worker-v2";
+/// MCP compatibility verifies only tool exposure and never claims plan semantics.
+pub const MCP_EXPOSURE_CONTRACT_VERSION: &str = "mcp-exposure-v1";
 /// Stable compatibility projection of the authoritative GATE_MAPPINGS table
 /// (plan-level G1-G10).
 pub const CHECK_IDS: [&str; 10] = ["G1", "G2", "G3", "G4", "G5", "G6", "G7", "G8", "G9", "G10"];
@@ -247,15 +249,14 @@ pub fn required_gate_ids(surface: Surface) -> Vec<&'static str> {
     }
 }
 
-/// Full-conformance scope ids for a surface. `Complete` requires every id in
-/// this set to be present and non-skipped (in addition to all required ids
-/// passing). MCP is capped at Partial because it only exercises exposure:
-/// its emitted G2-G10 skips never satisfy the plan-level scope.
+/// Full-conformance scope ids for each surface. `Complete` means every gate
+/// owned by that surface is present and non-skipped; explicit skips for gates
+/// owned by another surface remain diagnostic and do not cap completion.
 fn scope_gate_ids(surface: Surface) -> &'static [&'static str] {
     match surface {
         Surface::Planner => &CHECK_IDS,
         Surface::Codemode => &RAW_CHECK_IDS,
-        Surface::Mcp => &CHECK_IDS,
+        Surface::Mcp => &["G1"],
     }
 }
 
@@ -263,8 +264,9 @@ fn scope_gate_ids(surface: Surface) -> &'static [&'static str] {
 /// plan-level scope when it only ran raw-worker gates.
 fn surface_contract_version(surface: Surface) -> &'static str {
     match surface {
+        Surface::Planner => CONTRACT_VERSION,
         Surface::Codemode => RAW_WORKER_CONTRACT_VERSION,
-        Surface::Planner | Surface::Mcp => CONTRACT_VERSION,
+        Surface::Mcp => MCP_EXPOSURE_CONTRACT_VERSION,
     }
 }
 
@@ -718,12 +720,7 @@ pub fn production_provenance(
     let artifact_bytes = config
         .artifact_bytes
         .context("production conformance requires the artifact byte length")?;
-    Ok(report.build_provenance(
-        source_head,
-        hub_head,
-        artifact_sha256,
-        artifact_bytes,
-    ))
+    Ok(report.build_provenance(source_head, hub_head, artifact_sha256, artifact_bytes))
 }
 
 pub fn run_conformance(config: &RunConfig) -> ConformanceReport {
