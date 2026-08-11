@@ -272,6 +272,7 @@ fn spawn_worker(
         handshake_timeout: timeout,
         shutdown_timeout: Duration::from_secs(2),
         max_stderr_bytes: 65_536,
+        resource_policy: WorkerClientConfig::default().resource_policy,
         observer,
     };
     registry

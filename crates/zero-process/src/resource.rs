@@ -3,7 +3,7 @@
 use std::io;
 use std::process::Command;
 
-pub const DEFAULT_IDLE_TREE_RSS_BYTES: u64 = 128 * 1024 * 1024;
+pub const DEFAULT_IDLE_TREE_RSS_BYTES: u64 = 96 * 1024 * 1024;
 pub const DEFAULT_ACTIVE_TREE_RSS_BYTES: u64 = 256 * 1024 * 1024;
 pub const DEFAULT_ACTIVE_CPU_SECONDS: u64 = 300;
 
@@ -21,6 +21,39 @@ impl ProcessResourcePolicy {
             active_tree_rss_bytes: DEFAULT_ACTIVE_TREE_RSS_BYTES,
             cpu_seconds: DEFAULT_ACTIVE_CPU_SECONDS,
         }
+    }
+
+    /// Fail-closed share for one active child while the other prewarmed child
+    /// trees may remain at their idle shares. This keeps the worst case of
+    /// `workers` active children plus `workers - 1` idle prewarms within the
+    /// aggregate active budget.
+    pub fn share(self, workers: u64) -> io::Result<Self> {
+        if workers == 0 {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "resource budget worker count must be nonzero",
+            ));
+        }
+        let idle_tree_rss_bytes = self.idle_tree_rss_bytes / workers;
+        let reserved_idle = idle_tree_rss_bytes
+            .checked_mul(workers.saturating_sub(1))
+            .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "idle share overflow"))?;
+        let active_tree_rss_bytes = self
+            .active_tree_rss_bytes
+            .checked_sub(reserved_idle)
+            .ok_or_else(|| {
+                io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    "active budget below idle reserve",
+                )
+            })?
+            / workers;
+        Self {
+            idle_tree_rss_bytes,
+            active_tree_rss_bytes,
+            cpu_seconds: self.cpu_seconds / workers,
+        }
+        .validate()
     }
 
     pub fn validate(self) -> io::Result<Self> {
@@ -49,6 +82,7 @@ impl Default for ProcessResourcePolicy {
 pub enum ResourceEnforcement {
     WindowsJobObject,
     UnixInheritedPerProcess,
+    MacOsInheritedCpu,
     Unsupported,
 }
 
@@ -76,7 +110,9 @@ impl ResourceReceipt {
             cpu_seconds: policy.cpu_seconds,
             enforcement: if cfg!(windows) {
                 ResourceEnforcement::WindowsJobObject
-            } else if cfg!(all(unix, not(target_os = "macos"))) {
+            } else if cfg!(target_os = "macos") {
+                ResourceEnforcement::MacOsInheritedCpu
+            } else if cfg!(unix) {
                 ResourceEnforcement::UnixInheritedPerProcess
             } else {
                 ResourceEnforcement::Unsupported
@@ -122,14 +158,27 @@ pub(crate) fn configure_command(
 
 #[cfg(target_os = "macos")]
 pub(crate) fn configure_command(
-    _command: &mut Command,
+    command: &mut Command,
     policy: ProcessResourcePolicy,
 ) -> io::Result<ResourceReceipt> {
-    let receipt = ResourceReceipt::for_policy(policy.validate()?);
-    Err(io::Error::new(
-        io::ErrorKind::Unsupported,
-        format!("native aggregate process-tree resource enforcement unsupported: {receipt:?}"),
-    ))
+    use std::os::unix::process::CommandExt;
+
+    let policy = policy.validate()?;
+    // Darwin does not enforce RLIMIT_AS/RLIMIT_RSS. Enforce the inherited CPU
+    // limit and report that narrower native guarantee truthfully.
+    unsafe {
+        command.pre_exec(move || {
+            let cpu = libc::rlimit {
+                rlim_cur: policy.cpu_seconds as libc::rlim_t,
+                rlim_max: policy.cpu_seconds as libc::rlim_t,
+            };
+            if libc::setrlimit(libc::RLIMIT_CPU, &cpu) != 0 {
+                return Err(io::Error::last_os_error());
+            }
+            Ok(())
+        });
+    }
+    Ok(ResourceReceipt::for_policy(policy))
 }
 
 #[cfg(windows)]
@@ -159,15 +208,28 @@ mod tests {
     #[test]
     fn aggregate_defaults_are_exact_and_bounded() {
         let policy = ProcessResourcePolicy::active_default().validate().unwrap();
-        assert_eq!(policy.idle_tree_rss_bytes, 128 * 1024 * 1024);
+        assert_eq!(policy.idle_tree_rss_bytes, 96 * 1024 * 1024);
         assert_eq!(policy.active_tree_rss_bytes, 256 * 1024 * 1024);
         let receipt = ResourceReceipt::for_policy(policy);
         assert_eq!(receipt.schema, "zerostack.process.resource_receipt.v1");
-        if cfg!(any(windows, all(unix, not(target_os = "macos")))) {
+        if cfg!(any(windows, unix)) {
             assert_ne!(receipt.enforcement, ResourceEnforcement::Unsupported);
         } else {
             assert_eq!(receipt.enforcement, ResourceEnforcement::Unsupported);
         }
+    }
+
+    #[test]
+    fn three_worker_shares_stay_within_aggregate_budget() {
+        let aggregate = ProcessResourcePolicy::active_default();
+        let worker = aggregate.share(3).unwrap();
+        assert!(worker.idle_tree_rss_bytes * 3 <= aggregate.idle_tree_rss_bytes);
+        assert!(worker.active_tree_rss_bytes * 3 <= aggregate.active_tree_rss_bytes);
+        assert!(
+            worker.active_tree_rss_bytes * 3 + worker.idle_tree_rss_bytes * 2
+                <= aggregate.active_tree_rss_bytes
+        );
+        assert!(worker.cpu_seconds * 3 <= aggregate.cpu_seconds);
     }
 
     #[test]

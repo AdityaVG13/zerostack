@@ -177,6 +177,24 @@ fn authenticated_cross_surface_and_rejections() {
     let hello = read(&mut r);
     assert_eq!(hello["ok"], true);
     let generation = hello["generation"].as_u64().unwrap();
+    send(
+        &mut s,
+        json!({"type":"status","id":900,"generation":generation}),
+    );
+    let status = read(&mut r);
+    assert_eq!(status["ok"], true, "{status}");
+    assert_eq!(
+        status["result"]["schema"],
+        "zerostack.session.aggregate_resource_receipt.v1"
+    );
+    assert_eq!(status["result"]["workers"].as_array().unwrap().len(), 3);
+    let active_sum: u64 = status["result"]["workers"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|worker| worker["active_tree_rss_bytes"].as_u64().unwrap())
+        .sum();
+    assert!(active_sum <= status["result"]["active_tree_rss_bytes"].as_u64().unwrap());
     let source = r#"const a=await zero.fs.compound('read',{x:1});
         const b=await zero.token.shell('echo fixture');
         const c=await zero.token.read('Cargo.toml',{raw:true,fresh:true});
@@ -354,7 +372,7 @@ fn approval_grant_reaches_one_exact_worker_call_and_cannot_replay_or_leak() {
     session.wait().unwrap();
 }
 #[test]
-fn aggregate_promise_all_dispatches_slow_calls_in_parallel() {
+fn aggregate_promise_all_uses_one_bounded_parallel_wave() {
     let (directory, mut session, token, shutdown_token, _) =
         start_configured(ProcessIdentity::current().unwrap(), |command, _| {
             command.env("ZEROSTACK_TOKENZERO_RAW_ARGS", "sleep");
@@ -374,7 +392,7 @@ fn aggregate_promise_all_dispatches_slow_calls_in_parallel() {
             "id":1,
             "generation":generation,
             "root":directory.path(),
-            "source":r#"const calls = Array.from({length: 6}, (_, sequence) => {
+            "source":r#"const calls = Array.from({length: 3}, (_, sequence) => {
                 const ref = `tz://blob/${String(sequence).padStart(64, '0')}`;
                 return zero.token.expand(ref).then(value => value.content.value.value.args.ref);
             });
@@ -386,14 +404,14 @@ fn aggregate_promise_all_dispatches_slow_calls_in_parallel() {
     assert_eq!(response["ok"], true, "{response}");
     let exact = exact_result(directory.path(), &response);
     let expected = Value::Array(
-        (0..6)
+        (0..3)
             .map(|sequence| Value::String(format!("tz://blob/{sequence:064}")))
             .collect(),
     );
     assert_eq!(exact, expected);
     assert!(
         elapsed < Duration::from_secs(4),
-        "six two-second calls did not finish in one parallel wave: {elapsed:?}"
+        "three two-second calls did not finish in one bounded parallel wave: {elapsed:?}"
     );
     send(
         &mut stream,
@@ -1138,16 +1156,17 @@ fn real_workers_execute_one_cross_surface_plan() {
     );
     let response: Value = serde_json::from_slice(&output.stdout).unwrap();
     assert_eq!(response["ok"], true, "{response}");
+    let exact = exact_result(d.path(), &response);
     assert_eq!(
-        inline_public(&response["result"]["fs"])["metadata"]["ownership"]["engine"],
+        inline_public(&exact["fs"])["metadata"]["ownership"]["engine"],
         "fszero"
     );
     assert_eq!(
-        inline_public(&response["result"]["graph"])["metadata"]["ownership"]["engine"],
+        inline_public(&exact["graph"])["metadata"]["ownership"]["engine"],
         "graphzero"
     );
     assert_eq!(
-        inline_public(&response["result"]["token"])["metadata"]["ownership"]["engine"],
+        inline_public(&exact["token"])["metadata"]["ownership"]["engine"],
         "tokenzero"
     );
 }

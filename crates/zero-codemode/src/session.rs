@@ -36,6 +36,10 @@ use zerostack_machine_permit::{
     try_scoped_permit_base_for,
 };
 
+use zero_process::{
+    DEFAULT_ACTIVE_CPU_SECONDS, DEFAULT_ACTIVE_TREE_RSS_BYTES, DEFAULT_IDLE_TREE_RSS_BYTES,
+    ProcessResourcePolicy, ResourceEnforcement, ResourceReceipt,
+};
 use zero_store::{Engine, ResolvedStore, ensure_layout};
 
 pub const SESSION_PROTOCOL: &str = "zerostack-session/v1";
@@ -104,6 +108,10 @@ pub enum SessionRequest {
         timeout_ms: Option<u64>,
         #[serde(default)]
         approval_grants: Vec<SessionApprovalGrantV1>,
+    },
+    Status {
+        id: u64,
+        generation: u64,
     },
     Replace {
         id: u64,
@@ -206,14 +214,46 @@ const METHODS: &[(&str, &str)] = &[
 
 // Fixed session-owned dispatchers keep admission bounded and block on the
 // channel while idle. Bursts may launch at most this many raw workers total.
-const AGGREGATE_DISPATCH_THREADS: usize = 8;
-// Retain one warm raw worker per engine; surplus burst workers shut down before
-// their completion is published, so idle process count never grows with use.
+const AGGREGATE_DISPATCH_THREADS: usize = 3;
+// One prewarmed worker per engine is the full pool. Per-engine serialization
+// prevents burst workers from multiplying the aggregate native memory budget.
+const AGGREGATE_WORKER_COUNT: u64 = 3;
 const MAX_IDLE_WORKERS_PER_ENGINE: usize = 1;
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+pub struct WorkerResourceReceiptV1 {
+    pub engine: String,
+    pub platform: String,
+    pub enforcement: String,
+    pub idle_tree_rss_bytes: u64,
+    pub active_tree_rss_bytes: u64,
+    pub cpu_seconds: u64,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+pub struct AggregateResourceReceiptV1 {
+    pub schema: String,
+    pub profile: String,
+    pub idle_tree_rss_bytes: u64,
+    pub active_tree_rss_bytes: u64,
+    pub cpu_seconds: u64,
+    pub hard_tree_memory_enforced: bool,
+    pub workers: Vec<WorkerResourceReceiptV1>,
+}
+
+fn enforcement_name(enforcement: ResourceEnforcement) -> &'static str {
+    match enforcement {
+        ResourceEnforcement::WindowsJobObject => "windows_job_object",
+        ResourceEnforcement::UnixInheritedPerProcess => "unix_inherited_per_process",
+        ResourceEnforcement::MacOsInheritedCpu => "macos_inherited_cpu",
+        ResourceEnforcement::Unsupported => "unsupported",
+    }
+}
 
 struct AggregateWorkerState {
     registry: WorkerRegistry,
     workers: Mutex<BTreeMap<EngineIdentity, Vec<WorkerClient>>>,
+    resource_receipts: BTreeMap<EngineIdentity, ResourceReceipt>,
     worker_config: WorkerClientConfig,
     root: PathBuf,
     session_id: String,
@@ -418,8 +458,16 @@ impl AggregateConnector {
                 .register(engine, Arc::new(factory))
                 .map_err(worker_error)?;
         }
-        let worker_config = WorkerClientConfig::default();
+        let worker_config = WorkerClientConfig {
+            resource_policy: Some(
+                ProcessResourcePolicy::default()
+                    .share(AGGREGATE_WORKER_COUNT)
+                    .map_err(|error| HostError::Connector(error.to_string()))?,
+            ),
+            ..WorkerClientConfig::default()
+        };
         let mut workers = BTreeMap::new();
+        let mut resource_receipts = BTreeMap::new();
         for engine in [
             EngineIdentity::FsZero,
             EngineIdentity::GraphZero,
@@ -437,11 +485,15 @@ impl AggregateConnector {
                 .map_err(|error| {
                     HostError::Connector(format!("{} worker: {error}", engine.as_str()))
                 })?;
+            if let Some(receipt) = client.resource_receipt() {
+                resource_receipts.insert(engine, receipt.clone());
+            }
             workers.insert(engine, vec![client]);
         }
         let state = Arc::new(AggregateWorkerState {
             registry,
             workers: Mutex::new(workers),
+            resource_receipts,
             worker_config,
             root,
             session_id,
@@ -1404,8 +1456,8 @@ fn run_aggregate_dispatch(
     } else {
         Ok(())
     };
-    let result: WorkerResult = result?;
     checkin?;
+    let result: WorkerResult = result?;
     if matches!(
         result.metadata.approval.state,
         ApprovalState::Required | ApprovalState::Denied
@@ -1619,6 +1671,39 @@ impl SessionExecutor {
         self.connector.clear_approvals();
         result
     }
+    pub fn aggregate_resource_receipt(&self) -> AggregateResourceReceiptV1 {
+        let workers = self
+            .connector
+            .state
+            .resource_receipts
+            .iter()
+            .map(|(engine, receipt)| WorkerResourceReceiptV1 {
+                engine: engine.as_str().to_owned(),
+                platform: receipt.platform.to_owned(),
+                enforcement: enforcement_name(receipt.enforcement).to_owned(),
+                idle_tree_rss_bytes: receipt.idle_tree_rss_bytes,
+                active_tree_rss_bytes: receipt.active_tree_rss_bytes,
+                cpu_seconds: receipt.cpu_seconds,
+            })
+            .collect::<Vec<_>>();
+        let hard_tree_memory_enforced = workers.len() == AGGREGATE_WORKER_COUNT as usize
+            && self
+                .connector
+                .state
+                .resource_receipts
+                .values()
+                .all(ResourceReceipt::is_tree_enforced);
+        AggregateResourceReceiptV1 {
+            schema: "zerostack.session.aggregate_resource_receipt.v1".into(),
+            profile: "aggregate-default".into(),
+            idle_tree_rss_bytes: DEFAULT_IDLE_TREE_RSS_BYTES,
+            active_tree_rss_bytes: DEFAULT_ACTIVE_TREE_RSS_BYTES,
+            cpu_seconds: DEFAULT_ACTIVE_CPU_SECONDS,
+            hard_tree_memory_enforced,
+            workers,
+        }
+    }
+
     pub fn cancellation(&self) -> SessionCancellation {
         SessionCancellation {
             host: self.cancelled.clone(),
@@ -1765,6 +1850,9 @@ enum SessionCommand {
         timeout: Duration,
         approval_grants: Vec<SessionApprovalGrantV1>,
         reply: SyncSender<Result<Value, HostError>>,
+    },
+    Status {
+        reply: SyncSender<AggregateResourceReceiptV1>,
     },
     Replace {
         generation: u64,
@@ -2243,6 +2331,33 @@ impl AggregateSession {
             )),
         }
     }
+    pub fn resource_receipt(&self) -> Result<AggregateResourceReceiptV1, AggregateSessionError> {
+        let generation = self.generation()?;
+        let (reply_tx, reply_rx) = mpsc::sync_channel(1);
+        send_control_with_deadline(
+            &self.commands,
+            SessionCommand::Status { reply: reply_tx },
+            SESSION_REPLACEMENT_SETTLE_TIMEOUT,
+        )
+        .map_err(|detail| {
+            AggregateSessionError::new(
+                AggregateSessionFailureCode::BackendUnavailable,
+                generation,
+                None,
+                detail,
+            )
+        })?;
+        reply_rx
+            .recv_timeout(SESSION_REPLACEMENT_SETTLE_TIMEOUT)
+            .map_err(|error| {
+                AggregateSessionError::new(
+                    AggregateSessionFailureCode::BackendUnavailable,
+                    generation,
+                    None,
+                    format!("session resource status did not settle: {error}"),
+                )
+            })
+    }
 
     pub fn shutdown(&self) -> Result<u64, AggregateSessionError> {
         let (generation, should_send) = {
@@ -2414,6 +2529,7 @@ fn session_worker(
                 generation,
                 request_id,
                 source,
+
                 timeout,
                 approval_grants,
                 reply,
@@ -2431,6 +2547,11 @@ fn session_worker(
                         )
                     });
                 let _ = reply.send(result);
+            }
+            SessionCommand::Status { reply } => {
+                if let Some(executor) = executor.as_ref() {
+                    let _ = reply.send(executor.aggregate_resource_receipt());
+                }
             }
             SessionCommand::Replace { generation, reply } => {
                 if let Ok(mut slot) = cancellation.lock() {

@@ -420,7 +420,7 @@ fn handle_client(
             Err(error) => {
                 let request_type = raw_request.get("type").and_then(Value::as_str);
                 let code = if request_type.is_some_and(|kind| {
-                    !matches!(kind, "hello" | "execute" | "replace" | "shutdown")
+                    !matches!(kind, "hello" | "execute" | "status" | "replace" | "shutdown")
                 }) {
                     "unknown_request_type"
                 } else {
@@ -511,6 +511,52 @@ fn handle_client(
                             break;
                         }
                     }
+                }
+            }
+            SessionRequest::Status { id, generation } => {
+                if !ids.insert((generation, id)) {
+                    write_frame(
+                        &mut stream,
+                        &SessionResponse::typed_error(
+                            Some(id),
+                            active_generation,
+                            "duplicate_request_id",
+                            "duplicate request id",
+                        ),
+                    )?;
+                    continue;
+                }
+                if generation != active_generation {
+                    write_frame(
+                        &mut stream,
+                        &SessionResponse::typed_error(
+                            Some(id),
+                            active_generation,
+                            "stale_generation",
+                            "status generation does not match active generation",
+                        ),
+                    )?;
+                    continue;
+                }
+                match session.resource_receipt() {
+                    Ok(receipt) => write_frame(
+                        &mut stream,
+                        &SessionResponse::ok(
+                            Some(id),
+                            active_generation,
+                            serde_json::to_value(receipt)?,
+                        ),
+                    )?,
+                    Err(error) => write_frame(
+                        &mut stream,
+                        &SessionResponse::typed_error_with_retry(
+                            Some(id),
+                            active_generation,
+                            error.code.as_str(),
+                            error.to_string(),
+                            error.retry_after_ms,
+                        ),
+                    )?,
                 }
             }
             SessionRequest::Replace {

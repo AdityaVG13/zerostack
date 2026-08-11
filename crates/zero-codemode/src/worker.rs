@@ -10,7 +10,7 @@ use std::sync::{Arc, Condvar, Mutex, mpsc};
 use std::thread;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
-use zero_process::VerifiedChild;
+use zero_process::{ProcessResourcePolicy, ResourceReceipt, VerifiedChild};
 
 use zero_abi::raw_worker::EngineIdentity;
 use zero_abi::{
@@ -173,6 +173,7 @@ pub struct WorkerClientConfig {
     pub handshake_timeout: Duration,
     pub shutdown_timeout: Duration,
     pub max_stderr_bytes: usize,
+    pub resource_policy: Option<ProcessResourcePolicy>,
     pub observer: Option<WorkerObserver>,
 }
 
@@ -183,6 +184,7 @@ impl Default for WorkerClientConfig {
             handshake_timeout: Duration::from_secs(5),
             shutdown_timeout: Duration::from_secs(2),
             max_stderr_bytes: 65_536,
+            resource_policy: Some(ProcessResourcePolicy::default()),
             observer: None,
         }
     }
@@ -376,6 +378,7 @@ pub struct WorkerClient {
     output: mpsc::Receiver<OutputEvent>,
     stderr: Arc<(Mutex<StderrState>, Condvar)>,
     config: WorkerClientConfig,
+    resource_receipt: Option<ResourceReceipt>,
     negotiated_limits: ProtocolLimits,
     accounting: WorkerAccounting,
     last_output_bytes: u64,
@@ -401,12 +404,27 @@ impl WorkerClient {
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
-        // Every raw worker joins the hub-owned exact tree primitive: its own
-        // process group on Unix, its own kill-on-close Job Object on Windows.
-        // Teardown goes through that primitive only; no numeric pid is ever
-        // signaled.
-        let (child, pipes) = VerifiedChild::spawn_tree_with_pipes(command, &spec.session_id, 0)
-            .map_err(WorkerAdapterError::Spawn)?;
+        // Every raw worker joins the hub-owned exact tree primitive and runs
+        // under the configured native resource policy. Platforms that provide
+        // only partial enforcement state that limitation in the receipt.
+        let (child, pipes, resource_receipt) = match config.resource_policy {
+            Some(policy) => {
+                let (child, pipes, receipt) = VerifiedChild::spawn_tree_with_pipes_and_policy(
+                    command,
+                    &spec.session_id,
+                    0,
+                    policy,
+                )
+                .map_err(WorkerAdapterError::Spawn)?;
+                (child, pipes, Some(receipt))
+            }
+            None => {
+                let (child, pipes) =
+                    VerifiedChild::spawn_tree_with_pipes(command, &spec.session_id, 0)
+                        .map_err(WorkerAdapterError::Spawn)?;
+                (child, pipes, None)
+            }
+        };
         let stdin = match pipes.stdin {
             Some(pipe) => pipe,
             None => {
@@ -555,6 +573,7 @@ impl WorkerClient {
             output,
             stderr: stderr_state,
             config: config.clone(),
+            resource_receipt,
             negotiated_limits: config.limits.clone(),
             accounting: WorkerAccounting::default(),
             last_output_bytes: 0,
@@ -978,6 +997,10 @@ impl WorkerClient {
 
     pub fn negotiated_limits(&self) -> &ProtocolLimits {
         &self.negotiated_limits
+    }
+
+    pub fn resource_receipt(&self) -> Option<&ResourceReceipt> {
+        self.resource_receipt.as_ref()
     }
     pub fn process_id(&self) -> u32 {
         self.child.child_id()
