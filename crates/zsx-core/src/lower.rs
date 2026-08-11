@@ -1,8 +1,7 @@
 //! Canonical surface-to-domain lowering for the single-process ZSX core.
 //!
-//! This is the canonical copy of the aggregate lowering that the process
-//! compatibility path in `zero-codemode::session` also carries. Keep both
-//! copies in lockstep: any behavioral change here must land there too.
+//! `ZsxSession`, the `zsx` executable, and native harness bindings use this
+//! lowering authority directly. No process-backed compatibility copy remains.
 
 use serde_json::Value;
 use zero_abi::raw_worker::EngineIdentity;
