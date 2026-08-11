@@ -218,3 +218,79 @@ fn task_transaction_gate_rejects_missing_charge_receipt_and_irreversible_specula
         assert_fails(check_task_transaction(&mut fake));
     }
 }
+
+#[test]
+fn z4_native_counter_receipts_cover_every_supported_profile() {
+    let model: serde_json::Value =
+        serde_json::from_str(include_str!("../../conformance/models/causal-work-v3.json")).unwrap();
+    let supported = model["native_counter_profiles"]["supported"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|value| value.as_str().unwrap())
+        .collect::<std::collections::BTreeSet<_>>();
+    let receipts = [
+        (
+            "macos",
+            include_str!("../../conformance/models/causal-work-v3-native-macos-receipt.json"),
+        ),
+        (
+            "linux",
+            include_str!("../../conformance/models/causal-work-v3-native-linux-receipt.json"),
+        ),
+        (
+            "windows",
+            include_str!("../../conformance/models/causal-work-v3-native-windows-receipt.json"),
+        ),
+    ];
+    assert_eq!(
+        supported,
+        receipts
+            .iter()
+            .map(|(profile, _)| *profile)
+            .collect::<std::collections::BTreeSet<_>>()
+    );
+    for (profile, json) in receipts {
+        let receipt: serde_json::Value = serde_json::from_str(json).unwrap();
+        let correspondence = &receipt["correspondence"];
+        let collection = &receipt["dsr_collection_receipt"];
+        assert_eq!(receipt["schema_version"], 1);
+        assert_eq!(
+            receipt["model_or_spec_version"],
+            "zerostack.causal_work.native_counter.v1"
+        );
+        assert_eq!(
+            receipt["source_repository_heads"]["ZeroStack"],
+            "788821b82465835daef9c3ad6341f34da70a86be"
+        );
+        assert_eq!(
+            receipt["execution_authority"]["source_tree_digest"],
+            "0620283f80efbc3cef015fbf4ded90f492ad9bd2310eb188d72fa4c17ca0b0ce"
+        );
+        assert_eq!(receipt["platform_profile"]["os"], profile);
+        assert_eq!(receipt["platform_profile"]["native_evidence"], true);
+        assert_eq!(receipt["result"]["status"], "passed_native");
+        assert_eq!(receipt["result"]["parent_delta"], 4_096);
+        assert_eq!(receipt["result"]["adapter_delta"], 4_096);
+        assert_eq!(correspondence["evidence_mode"], "native");
+        assert_eq!(correspondence["platform_profile"], profile);
+        assert_eq!(correspondence["parent_window"]["start"], 0);
+        assert_eq!(correspondence["parent_window"]["end"], 4_096);
+        assert_eq!(correspondence["adapter_observed_delta"], 4_096);
+        assert_eq!(
+            correspondence["identity"],
+            correspondence["parent_window"]["identity"]
+        );
+        assert_eq!(
+            correspondence["adapter_binary_digest"],
+            receipt["output_artifact_hashes"]["adapter_binary"]
+        );
+        assert_eq!(
+            collection["artifact_sha256"],
+            correspondence["adapter_binary_digest"]
+        );
+        assert_eq!(collection["status"], "success");
+        assert_eq!(collection["exit_code"], 0);
+        assert_eq!(collection["method"], "native");
+    }
+}

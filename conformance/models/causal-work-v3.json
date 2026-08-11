@@ -37,7 +37,11 @@
   "legacy_v2": "readable mapping only; requires remeasurement and never becomes measured fact",
   "native_counter_profiles": {
     "preregistered": ["macos", "linux", "windows"],
-    "supported": [],
+    "supported": [
+      "macos",
+      "linux",
+      "windows"
+    ],
     "rch_is_native_evidence": false,
     "counter": "std.fs.file_length.bytes",
     "adapter": "successful std::io::Write byte count",
