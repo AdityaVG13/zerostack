@@ -15,6 +15,7 @@ use std::time::{Duration, Instant};
 use serde_json::{Map, Number, Value as JsonValue};
 use tree_sitter::{Node, Parser};
 use tree_sitter_javascript::LANGUAGE;
+use zero_abi::{canonical_json, sha256_hex};
 
 use crate::host::{
     ConnectorCompletionMessage, directly_expands_one_spill_ref, is_terminal_exact_token_expansion,
@@ -169,6 +170,8 @@ pub(super) fn execute(
     connector: Rc<dyn Connector>,
     cancelled: Arc<AtomicBool>,
     timeout: Duration,
+    generation: u64,
+    request_id: u64,
 ) -> Result<JsonValue, HostError> {
     crate::wrap::validate_plan(source, host.limits.max_plan_bytes).map_err(HostError::Plan)?;
     let mut parser = Parser::new();
@@ -190,10 +193,12 @@ pub(super) fn execute(
         connector,
         cancelled,
         timeout,
+        generation,
+        request_id,
     );
     let value = interpreter.run()?;
     let (serialized, degraded) = interpreter.serialize_public_json(&value)?;
-    let public: JsonValue = if degraded {
+    let mut public: JsonValue = if degraded {
         let refs = collect_refs(&serialized);
         serde_json::json!({
             "serialization_degraded": true,
@@ -203,6 +208,7 @@ pub(super) fn execute(
     } else {
         serialized
     };
+    public = interpreter.attach_step_receipt(public)?;
     let encoded =
         serde_json::to_string(&public).map_err(|error| HostError::Json(error.to_string()))?;
     if encoded.len() > host.max_visible_result_bytes
@@ -246,6 +252,11 @@ struct Interpreter<'tree> {
     microtasks: usize,
     depth: Rc<Cell<usize>>,
     max_depth: usize,
+    generation: u64,
+    request_id: u64,
+    step_entries: Vec<JsonValue>,
+    step_head: String,
+    step_bytes: usize,
 }
 
 impl<'tree> Interpreter<'tree> {
@@ -256,6 +267,8 @@ impl<'tree> Interpreter<'tree> {
         connector: Rc<dyn Connector>,
         cancelled: Arc<AtomicBool>,
         timeout: Duration,
+        generation: u64,
+        request_id: u64,
     ) -> Self {
         let (sender, receiver) = std::sync::mpsc::sync_channel(MAX_INFLIGHT_CONNECTOR_CALLS);
         let env = Rc::new(RefCell::new(Env {
@@ -281,6 +294,11 @@ impl<'tree> Interpreter<'tree> {
             microtasks: 0,
             depth,
             max_depth,
+            generation,
+            request_id,
+            step_entries: Vec::new(),
+            step_head: "0".repeat(64),
+            step_bytes: 0,
         };
         interpreter.install_globals();
         interpreter
@@ -346,6 +364,31 @@ impl<'tree> Interpreter<'tree> {
             .insert("Infinity".into(), Value::Number(f64::INFINITY));
         env.values
             .insert("globalThis".into(), Value::Namespace("globalThis".into()));
+        env.values
+            .insert("ctx".into(), Value::Namespace("ctx".into()));
+    }
+
+    fn attach_step_receipt(&self, result: JsonValue) -> Result<JsonValue, HostError> {
+        if self.step_entries.is_empty() {
+            return Ok(result);
+        }
+        let body = serde_json::json!({
+            "schema": "zerostack.codemode.step_receipt.v1",
+            "generation": self.generation,
+            "request_id": self.request_id,
+            "step_count": self.step_entries.len(),
+            "head_sha256": self.step_head,
+            "steps": self.step_entries,
+        });
+        let receipt_sha256 = sha256_hex(canonical_json(&body).as_bytes());
+        let execution_id = format!("cm://exec/{}-{}", self.generation, &receipt_sha256[..12]);
+        let mut receipt = body;
+        receipt["receipt_sha256"] = JsonValue::String(receipt_sha256);
+        Ok(serde_json::json!({
+            "execution_id": execution_id,
+            "result": result,
+            "step_receipt": receipt,
+        }))
     }
 
     fn run(&mut self) -> Result<Value<'tree>, HostError> {
@@ -1601,6 +1644,64 @@ impl<'tree> Interpreter<'tree> {
         }
     }
 
+    fn ctx_step(&mut self, args: Vec<Value<'tree>>) -> Result<Value<'tree>, Fault<'tree>> {
+        let name = match args.first() {
+            Some(Value::String(value)) if !value.is_empty() && value.len() <= 256 => value.clone(),
+            _ => {
+                return Err(Fault::Host(HostError::Data(
+                    "ctx.step expects a nonempty name of at most 256 bytes".into(),
+                )));
+            }
+        };
+        let callback = match args.get(1) {
+            Some(Value::Function(function)) => function.clone(),
+            _ => {
+                return Err(Fault::Host(HostError::Data(
+                    "ctx.step expects a callback function".into(),
+                )));
+            }
+        };
+        let invoked = self.call_function(callback, Vec::new())?;
+        let value = self.await_value(invoked)?;
+        let value_json = self.to_json(&value).map_err(Fault::Host)?;
+        let index = self.step_entries.len() as u64;
+        let body = serde_json::json!({
+            "index": index,
+            "name": name,
+            "generation": self.generation,
+            "request_id": self.request_id,
+            "previous_sha256": self.step_head,
+            "value": value_json,
+        });
+        let entry_sha256 = sha256_hex(canonical_json(&body).as_bytes());
+        let mut entry = body;
+        entry["entry_sha256"] = JsonValue::String(entry_sha256.clone());
+        let entry_bytes = canonical_json(&entry).len();
+        let next_bytes = self
+            .step_bytes
+            .checked_add(entry_bytes)
+            .ok_or_else(|| Fault::Host(HostError::Data("ctx.step receipt size overflow".into())))?;
+        let receipt_limit = self
+            .host
+            .limits
+            .max_json_bytes
+            .min(self.host.limits.memory_bytes / 4);
+        if next_bytes > receipt_limit {
+            return Err(Fault::Host(HostError::Data(format!(
+                "ctx.step receipt exceeds the {receipt_limit}-byte execution budget"
+            ))));
+        }
+        self.step_entries.try_reserve(1).map_err(|error| {
+            Fault::Host(HostError::Data(format!(
+                "ctx.step receipt allocation failed: {error}"
+            )))
+        })?;
+        self.step_entries.push(entry);
+        self.step_head = entry_sha256;
+        self.step_bytes = next_bytes;
+        Ok(value)
+    }
+
     fn namespace(
         &mut self,
         namespace: &str,
@@ -1608,6 +1709,8 @@ impl<'tree> Interpreter<'tree> {
         args: Vec<Value<'tree>>,
     ) -> Result<Value<'tree>, Fault<'tree>> {
         match (namespace, name) {
+            ("ctx", "step") => self.ctx_step(args),
+            ("ctx", "ref") => Ok(args.into_iter().next().unwrap_or(Value::Undefined)),
             ("Promise", "resolve") => Ok(self.new_promise(PromiseState::Fulfilled(
                 args.into_iter().next().unwrap_or(Value::Undefined),
             ))),
@@ -2876,7 +2979,61 @@ mod tests {
             Rc::new(NullConnector),
             Arc::new(AtomicBool::new(false)),
             Duration::from_secs(2),
+            0,
+            0,
         )
+    }
+
+    #[test]
+    fn ctx_step_seals_session_bound_receipt() {
+        let host = test_host(256 * 1024, 100_000);
+        let output = host
+            .execute_with_cancel_timeout_context(
+                "return ctx.step('gate', () => ({value: 42}));",
+                Rc::new(NullConnector),
+                Arc::new(AtomicBool::new(false)),
+                Duration::from_secs(2),
+                7,
+                11,
+            )
+            .unwrap();
+        assert_eq!(output["result"]["value"], 42);
+        assert_eq!(output["step_receipt"]["generation"], 7);
+        assert_eq!(output["step_receipt"]["request_id"], 11);
+        assert_eq!(output["step_receipt"]["step_count"], 1);
+        let receipt_sha = output["step_receipt"]["receipt_sha256"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+        let mut receipt_body = output["step_receipt"].clone();
+        receipt_body
+            .as_object_mut()
+            .unwrap()
+            .remove("receipt_sha256");
+        assert_eq!(
+            receipt_sha,
+            sha256_hex(canonical_json(&receipt_body).as_bytes())
+        );
+        let entry = &output["step_receipt"]["steps"][0];
+        assert_eq!(entry["entry_sha256"], output["step_receipt"]["head_sha256"]);
+    }
+
+    #[test]
+    fn ctx_step_rejects_invalid_callback_and_name_bounds() {
+        let host = test_host(256 * 1024, 100_000);
+        let connector = Rc::new(NullConnector);
+        let callback = host.execute("return ctx.step('gate', 42);", connector.clone());
+        assert!(
+            callback
+                .unwrap_err()
+                .to_string()
+                .contains("callback function")
+        );
+        let name = "x".repeat(257);
+        let error = host
+            .execute(&format!("return ctx.step('{name}', () => 1);"), connector)
+            .unwrap_err();
+        assert!(error.to_string().contains("at most 256 bytes"));
     }
 
     #[test]

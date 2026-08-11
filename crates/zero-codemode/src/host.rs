@@ -279,7 +279,14 @@ impl Host {
         connector: Rc<dyn Connector>,
         cancelled: Arc<AtomicBool>,
     ) -> Result<JsonValue, HostError> {
-        crate::interpreter::execute(self, plan, connector, cancelled, self.limits.wall_timeout)
+        self.execute_with_cancel_timeout_context(
+            plan,
+            connector,
+            cancelled,
+            self.limits.wall_timeout,
+            0,
+            0,
+        )
     }
 
     pub fn execute_with_cancel_timeout(
@@ -289,12 +296,26 @@ impl Host {
         cancelled: Arc<AtomicBool>,
         timeout: Duration,
     ) -> Result<JsonValue, HostError> {
+        self.execute_with_cancel_timeout_context(plan, connector, cancelled, timeout, 0, 0)
+    }
+
+    pub fn execute_with_cancel_timeout_context(
+        &self,
+        plan: &str,
+        connector: Rc<dyn Connector>,
+        cancelled: Arc<AtomicBool>,
+        timeout: Duration,
+        generation: u64,
+        request_id: u64,
+    ) -> Result<JsonValue, HostError> {
         crate::interpreter::execute(
             self,
             plan,
             connector,
             cancelled,
             timeout.min(self.limits.wall_timeout),
+            generation,
+            request_id,
         )
     }
 }

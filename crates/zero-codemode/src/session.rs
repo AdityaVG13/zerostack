@@ -1759,11 +1759,13 @@ impl SessionExecutor {
             self.connector.clear_approvals();
             return Err(error);
         }
-        let result = self.host.execute_with_cancel_timeout(
+        let result = self.host.execute_with_cancel_timeout_context(
             source,
             self.connector.clone(),
             self.cancelled.clone(),
             timeout,
+            generation,
+            request_id,
         );
         self.connector.clear_execution_context();
         self.connector.clear_approvals();

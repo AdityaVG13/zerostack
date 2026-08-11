@@ -18,6 +18,7 @@ use serde_json::{Value, json};
 use std::collections::BTreeMap;
 use std::path::Path;
 use std::time::Duration;
+use zero_abi::{canonical_json, sha256_hex};
 
 /// Run the full plan-level G1-G10 conformance for one planner artifact.
 ///
@@ -276,6 +277,57 @@ fn check_errors(_ns: Ns, client: &mut McpClient, execute_tool: &str) -> CheckRes
     CheckResult::with_details("G5", "errors", details)
 }
 
+fn canonical_inline_step_receipt(payload: &Value) -> bool {
+    let Some(receipt) = payload.get("step_receipt") else {
+        return false;
+    };
+    if receipt.get("schema").and_then(Value::as_str) != Some("zerostack.codemode.step_receipt.v1") {
+        return false;
+    }
+    let Some(generation) = receipt.get("generation").and_then(Value::as_u64) else {
+        return false;
+    };
+    let Some(request_id) = receipt.get("request_id").and_then(Value::as_u64) else {
+        return false;
+    };
+    let Some(steps) = receipt.get("steps").and_then(Value::as_array) else {
+        return false;
+    };
+    if steps.is_empty()
+        || receipt.get("step_count").and_then(Value::as_u64) != Some(steps.len() as u64)
+    {
+        return false;
+    }
+    let mut previous = "0".repeat(64);
+    for (index, step) in steps.iter().enumerate() {
+        if step.get("index").and_then(Value::as_u64) != Some(index as u64)
+            || step.get("generation").and_then(Value::as_u64) != Some(generation)
+            || step.get("request_id").and_then(Value::as_u64) != Some(request_id)
+            || step.get("previous_sha256").and_then(Value::as_str) != Some(previous.as_str())
+        {
+            return false;
+        }
+        let Some(claimed) = step.get("entry_sha256").and_then(Value::as_str) else {
+            return false;
+        };
+        let mut body = step.clone();
+        body.as_object_mut().unwrap().remove("entry_sha256");
+        if sha256_hex(canonical_json(&body).as_bytes()) != claimed {
+            return false;
+        }
+        previous = claimed.to_owned();
+    }
+    if receipt.get("head_sha256").and_then(Value::as_str) != Some(previous.as_str()) {
+        return false;
+    }
+    let Some(claimed) = receipt.get("receipt_sha256").and_then(Value::as_str) else {
+        return false;
+    };
+    let mut body = receipt.clone();
+    body.as_object_mut().unwrap().remove("receipt_sha256");
+    sha256_hex(canonical_json(&body).as_bytes()) == claimed
+}
+
 fn check_ctx_step(ns: Ns, client: &mut McpClient, execute_tool: &str) -> CheckResult {
     let plan = "return ctx.step('x', () => ({value: 42}));";
     match client.call_tool(execute_tool, json!({ "plan": plan, "form": "js" })) {
@@ -283,8 +335,9 @@ fn check_ctx_step(ns: Ns, client: &mut McpClient, execute_tool: &str) -> CheckRe
             let payload = extract_json_payload(&response).unwrap_or(response);
             let mut details = check_refs(ns, Some(&payload)).details;
             let refs = collect_refs(&payload);
-            if !refs.iter().any(|value| value.ends_with("/steps")) {
-                details.push("no steps ref returned for ctx.step execution".into());
+            let inline_receipt = canonical_inline_step_receipt(&payload);
+            if !inline_receipt && !refs.iter().any(|value| value.ends_with("/steps")) {
+                details.push("no canonical inline or recoverable steps receipt returned".into());
             }
             CheckResult::with_details("G6", "ctx.step", details)
         }
@@ -600,6 +653,32 @@ mod tests {
         // limit_probe_plan is the planner's per-limit violation generator.
         assert!(limit_probe_plan("max_output_bytes", 64).is_some());
         assert!(limit_probe_plan("max_wall_ms", 1).is_none());
+    }
+
+    #[test]
+    fn inline_step_receipt_requires_complete_digest_chain() {
+        let mut step = json!({
+            "index": 0,
+            "name": "gate",
+            "generation": 7,
+            "request_id": 11,
+            "previous_sha256": "0".repeat(64),
+            "value": {"value": 42},
+        });
+        step["entry_sha256"] = json!(sha256_hex(canonical_json(&step).as_bytes()));
+        let mut receipt = json!({
+            "schema": "zerostack.codemode.step_receipt.v1",
+            "generation": 7,
+            "request_id": 11,
+            "step_count": 1,
+            "head_sha256": step["entry_sha256"],
+            "steps": [step],
+        });
+        receipt["receipt_sha256"] = json!(sha256_hex(canonical_json(&receipt).as_bytes()));
+        let mut payload = json!({"step_receipt": receipt});
+        assert!(canonical_inline_step_receipt(&payload));
+        payload["step_receipt"]["steps"][0]["value"]["value"] = json!(43);
+        assert!(!canonical_inline_step_receipt(&payload));
     }
 
     #[test]

@@ -963,10 +963,16 @@ fn request_ids_are_global_per_generation() {
         &mut first,
         json!({
             "type":"execute","id":77,"generation":generation,
-            "root":d.path(),"source":"return 1;"
+            "root":d.path(),"source":"return ctx.step('gate', () => ({value: 1}));"
         }),
     );
-    assert_eq!(read(&mut first_reader)["result"], 1);
+    let first_result = read(&mut first_reader);
+    assert_eq!(first_result["result"]["result"]["value"], 1);
+    assert_eq!(
+        first_result["result"]["step_receipt"]["generation"],
+        generation
+    );
+    assert_eq!(first_result["result"]["step_receipt"]["request_id"], 77);
     send(
         &mut second,
         json!({
