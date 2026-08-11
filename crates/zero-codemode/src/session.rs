@@ -1,4 +1,12 @@
-//! Persistent aggregate CodeMode session over raw-worker v2 clients.
+//! Process-backed aggregate CodeMode session over raw-worker v2 clients.
+//!
+//! COMPATIBILITY PATH (explicitly named, never the zsx default): this module
+//! backs the `zerostack-session` socket server and the
+//! `zerostack-codemode-host` harness by spawning raw-worker v2 child
+//! processes. The canonical single-process ZSX path lives in `zsx-core`
+//! (in-process `DomainAdapter`s, no worker spawn, no NDJSON, no session
+//! socket). Keep this module's lowering and approval semantics in lockstep
+//! with `zsx-core::lower` / `zsx_core::session`.
 #![forbid(unsafe_code)]
 
 use crate::worker::{

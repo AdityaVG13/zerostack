@@ -977,8 +977,7 @@ mod tests {
         assert!(!receipt.is_native_evidence());
 
         let wire = serde_json::to_value(&receipt).unwrap();
-        let decoded: CounterCorrespondenceReceiptV1 =
-            serde_json::from_value(wire.clone()).unwrap();
+        let decoded: CounterCorrespondenceReceiptV1 = serde_json::from_value(wire.clone()).unwrap();
         assert_eq!(decoded, receipt);
         assert!(!decoded.is_native_evidence());
         assert_eq!(
@@ -1054,9 +1053,13 @@ mod tests {
 
         // A truly measured zero-delta window is a different wire shape: the
         // unmeasured case is never an alias for zero.
-        let zero_measured =
-            CausalWorkReceiptV1::build(d(9), measured(0), Vec::new(), ResiduePolicyV1::RejectUnclassified)
-                .unwrap();
+        let zero_measured = CausalWorkReceiptV1::build(
+            d(9),
+            measured(0),
+            Vec::new(),
+            ResiduePolicyV1::RejectUnclassified,
+        )
+        .unwrap();
         let zero_wire = serde_json::to_value(&zero_measured).unwrap();
         assert_eq!(zero_wire["outcome"], "measured");
         assert_eq!(zero_wire["receipt"]["observed_total"], 0);

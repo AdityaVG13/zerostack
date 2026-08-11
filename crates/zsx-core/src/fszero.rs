@@ -1,0 +1,710 @@
+//! Real FSZero in-process adapter (feature `fszero`).
+//!
+//! [`FsZeroAdapter`] runs the immutable FSZero revision API in-process: one
+//! [`FSZeroSession`] rooted at the session root, dispatched through the
+//! canonical typed dispatcher [`fs_zero::core::dispatch_codemode_method`].
+//! There is no worker process, no NDJSON framing, no session socket, and no
+//! MCP or CodeMode runtime: the adapter converts a canonical raw-worker-v2
+//! [`CallRequest`] into typed dispatcher arguments and converts the typed
+//! [`DispatchOutcome`] back into a bound [`WorkerResult`] — the same boundary
+//! conversion the raw worker performs, minus the transport.
+//!
+//! # Session thread
+//!
+//! The immutable revision's `FSZeroSession` owns a single-threaded fsqlite
+//! connection (`Rc<RefCell<...>>`), so it is not `Send`. The adapter therefore
+//! owns the session on one dedicated thread (named `zsx-fszero-session`) and
+//! is a channel façade over it: `call()` sends the cloned [`CallRequest`]
+//! plus the real session [`CancellationSignal`] and receives the fully
+//! converted [`AdapterResponse`] back. This mirrors the process path, where
+//! the FSZero worker owns its session in a single process, and matches the
+//! connector's per-engine serialization: one in-flight dispatch per engine.
+//!
+//! # Cancellation and deadline
+//!
+//! `call()` checks [`AdapterCall::cancellation`] and
+//! `request.deadline_unix_ms` before enqueueing, the session thread checks
+//! both again immediately before dispatch and after it returns, and `call()`
+//! re-checks after the reply arrives. The immutable revision's typed
+//! dispatcher does not consult the session request guard during kernel work
+//! (`request_expired` is only read by the MCP stdio/HTTP transports), so
+//! boundary checks are the cooperative granularity the raw worker path also
+//! provides.
+//!
+//! # Ref bridge
+//!
+//! FSZero mints `fz://blob/<sha256>` refs into its recovery store. The
+//! aggregate connector verifies every emitted blob ref against the shared
+//! CAS at `<session root>/blobs` ([`SharedCas::open`]); the adapter
+//! re-publishes each emitted blob's bytes there via `session.expand` plus
+//! [`SharedCas::put`], so reachability retention and later `fs.expand`
+//! recovery work in-process regardless of FSZero's own store layout.
+//!
+//! # Outcome envelope
+//!
+//! The result `value` mirrors the raw worker's envelope: the serialized
+//! [`DomainResult`] (operation, ok, ack, value, refs, mutated), the
+//! dispatcher's inline evidence when present, and the recovery payload
+//! (`ref` + `payload_utf8` / `payload_hex`) when the outcome minted one.
+//!
+//! # Approval mapping
+//!
+//! A mutation dispatched with a validated approval grant reports
+//! [`EffectClass::ApprovalRequiredMutation`] with `Granted` (the connector
+//! consumed and validated the grant before the call); a mutation without a
+//! grant reports `ReversibleMutation` with `NotRequired`, exactly like the
+//! raw worker — FSZero never gates on approvals itself.
+
+use std::path::PathBuf;
+use std::sync::mpsc::{self, Receiver, SyncSender};
+use std::thread::{self, JoinHandle};
+use std::time::Duration;
+
+use fs_zero::core::{DispatchOutcome, dispatch_codemode_method};
+use fs_zero::{
+    DomainError, DomainResult, FSZeroSession, OPERATION_ABI_VERSION, operation_abi_digest,
+};
+use serde_json::Value;
+use zero_abi::{
+    ApprovalMetadata, ApprovalState, CallRequest, EffectClass, EngineIdentity, EngineStageSpanV1,
+    EngineStageTimelineV1, RefOwnership as WorkerRefOwnership, RevertMetadata, WorkerResult,
+    WorkerResultMetadata,
+};
+use zero_codemode::worker::CancellationSignal;
+use zero_store::SharedCas;
+
+use crate::adapter::{AdapterBinding, AdapterCall, AdapterError, AdapterResponse, DomainAdapter};
+
+/// Canonical FSZero ref scheme.
+pub const FSZERO_REF_SCHEME: &str = "fz://";
+
+/// FSZero package version pinned by the immutable revision (`fs-zero` 0.1.0
+/// at commit `82fd21a`), used as the default worker revision exactly like the
+/// raw worker's `CARGO_PKG_VERSION` fallback.
+pub const FSZERO_PINNED_VERSION: &str = "0.1.0";
+
+/// How long [`FsZeroAdapter`]'s `Drop` waits for the session thread to stop.
+const SESSION_THREAD_STOP_TIMEOUT: Duration = Duration::from_secs(5);
+
+/// How long [`FsZeroAdapter::new`] waits for the session thread to open the
+/// store (SQLite open plus the integrity gate can take a while on large
+/// stores).
+const SESSION_INIT_TIMEOUT: Duration = Duration::from_secs(60);
+
+/// Mirror of the raw worker's revision resolution: `ZEROSTACK_WORKER_REVISION`
+/// wins when set, else the pinned revision version.
+fn worker_revision() -> String {
+    std::env::var("ZEROSTACK_WORKER_REVISION")
+        .ok()
+        .map(|value| value.trim().to_owned())
+        .filter(|value| !value.is_empty())
+        .unwrap_or_else(|| FSZERO_PINNED_VERSION.to_owned())
+}
+
+/// True when the request deadline has already elapsed.
+fn deadline_expired(request: &CallRequest) -> bool {
+    request
+        .deadline_unix_ms
+        .is_some_and(|deadline| crate::connector::now_ms() >= deadline)
+}
+
+/// Typed adapter failure carrying the request trace.
+fn adapter_error(kind: &str, message: impl Into<String>, request: &CallRequest) -> AdapterError {
+    AdapterError::new(kind, message, false, Some(request.trace.clone()))
+}
+
+/// Mirror of `RawWorkerV2::forbidden`: operations that never reach the typed
+/// dispatcher (planner / JavaScript / MCP surface-dispatch names).
+fn is_forbidden_operation(op: &str) -> bool {
+    matches!(
+        op,
+        "execute_code"
+            | "fz_execute_code"
+            | "codemode_search"
+            | "fz_codemode_search"
+            | "codemode_describe"
+            | "fz_codemode_describe"
+            | "tools/call"
+            | "tools/list"
+            | "fszero.exec"
+    )
+}
+
+/// Mirror of `domain_error_kind`: map FSZero error classes onto the
+/// raw-worker-v2 `WorkerError.kind` vocabulary.
+fn domain_error_kind(class: &str) -> String {
+    match class {
+        "invalid_argument" => "validation".into(),
+        "permission_denied" | "incompatible_contract" => "policy".into(),
+        "cancelled" => "cancelled".into(),
+        "deadline_exceeded" => "deadline_exceeded".into(),
+        "busy" => "busy".into(),
+        other => other.into(),
+    }
+}
+
+/// Mirror of `is_conformant_blob_ref`: an `fz://blob/` ref must carry exactly
+/// 64 lowercase hex characters; non-blob refs pass.
+fn is_conformant_blob_ref(reference: &str) -> bool {
+    let Some(hash) = reference.strip_prefix("fz://blob/") else {
+        return true;
+    };
+    hash.len() == 64
+        && hash
+            .bytes()
+            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+}
+
+/// Mirror of `collect_portable_refs`: gather `fz://`/`gz://`/`tz://` tokens
+/// embedded anywhere in the value (strings, arrays, objects).
+fn collect_portable_refs(value: &Value, refs: &mut Vec<String>) {
+    match value {
+        Value::String(text) => {
+            for token in text.split_whitespace() {
+                for prefix in ["fz://", "gz://", "tz://"] {
+                    if let Some(start) = token.find(prefix) {
+                        let candidate = token[start..]
+                            .trim_end_matches(['"', '\'', ',', ';', ')', '}', ']'])
+                            .to_string();
+                        if !refs.contains(&candidate) {
+                            refs.push(candidate);
+                        }
+                    }
+                }
+            }
+        }
+        Value::Array(items) => {
+            for item in items {
+                collect_portable_refs(item, refs);
+            }
+        }
+        Value::Object(map) => {
+            for item in map.values() {
+                collect_portable_refs(item, refs);
+            }
+        }
+        _ => {}
+    }
+}
+
+/// Mirror of `retain_valid_refs`: drop refs that are not byte-conformant and
+/// not expandable, reporting the first rejected ref so the boundary can fail
+/// closed exactly like the raw worker.
+fn retain_valid_refs(session: &FSZeroSession, refs: &mut Vec<String>) -> Option<String> {
+    let mut rejected = None;
+    refs.retain(|reference| {
+        let valid = is_conformant_blob_ref(reference)
+            && (!reference.starts_with("fz://blob/") || session.expand(reference).is_some());
+        if !valid && rejected.is_none() {
+            rejected = Some(reference.clone());
+        }
+        valid
+    });
+    rejected
+}
+
+/// One in-process dispatch command, executed on the session thread.
+enum SessionCommand {
+    Call {
+        request: CallRequest,
+        cancellation: CancellationSignal,
+        reply: SyncSender<Result<AdapterResponse, AdapterError>>,
+    },
+    Shutdown {
+        reply: SyncSender<()>,
+    },
+}
+
+/// Execute one canonical call against `session` and convert the outcome,
+/// entirely on the session thread (the session is not `Send`).
+fn run_call(
+    session: &mut FSZeroSession,
+    request: &CallRequest,
+    cancellation: &CancellationSignal,
+    root: &std::path::Path,
+    session_id: &str,
+) -> Result<AdapterResponse, AdapterError> {
+    if cancellation.is_cancelled() {
+        return Err(adapter_error(
+            "cancelled",
+            "fszero adapter cancelled",
+            request,
+        ));
+    }
+    if deadline_expired(request) {
+        return Err(adapter_error(
+            "deadline",
+            "fszero adapter deadline exceeded",
+            request,
+        ));
+    }
+    if is_forbidden_operation(&request.op) {
+        return Err(adapter_error(
+            "forbidden_op",
+            format!(
+                "fszero adapter refuses planner/JavaScript/MCP operation '{}'",
+                request.op
+            ),
+            request,
+        ));
+    }
+    let outcome: DispatchOutcome =
+        match dispatch_codemode_method(session, &request.op, &request.args) {
+            Ok(outcome) => outcome,
+            Err(error) => return Err(domain_error_to_adapter(&error, request)),
+        };
+    if cancellation.is_cancelled() {
+        return Err(adapter_error(
+            "cancelled",
+            "fszero adapter cancelled",
+            request,
+        ));
+    }
+    if deadline_expired(request) {
+        return Err(adapter_error(
+            "deadline",
+            "fszero adapter deadline exceeded",
+            request,
+        ));
+    }
+    let wall_ns = outcome.wall_ns.max(1);
+    let mut result: DomainResult = outcome.result;
+    if !result.ok {
+        let error = result.error.unwrap_or_else(|| {
+            DomainError::internal(format!(
+                "fszero operation '{}' failed without typed error",
+                request.op
+            ))
+        });
+        return Err(domain_error_to_adapter(&error, request));
+    }
+
+    // Ref collection mirrors the raw worker: registry refs first, then
+    // portable refs embedded in the value, then the requested ref.
+    let mut refs = result.refs.clone();
+    if let Some(value) = &result.value {
+        collect_portable_refs(value, &mut refs);
+    }
+    if let Some(reference) = request.args.get("ref").and_then(Value::as_str)
+        && ["fz://", "gz://", "tz://"]
+            .iter()
+            .any(|prefix| reference.starts_with(prefix))
+        && !refs.iter().any(|value| value == reference)
+    {
+        refs.push(reference.to_owned());
+    }
+    if let Some(rejected) = retain_valid_refs(session, &mut refs) {
+        return Err(adapter_error(
+            "ref_conformance",
+            format!(
+                "refusing to emit non-conformant ref {rejected:?}: fz://blob refs must be 64 lowercase hex characters and expandable"
+            ),
+            request,
+        ));
+    }
+
+    // Recovery payload enrichment mirrors the raw worker: when the outcome
+    // minted a recovery key, surface ref + payload inline.
+    if let Some(key) = outcome
+        .recovery_key
+        .as_deref()
+        .or_else(|| result.refs.first().map(String::as_str))
+        && let Some(bytes) = session.expand(key)
+    {
+        let portable_ref = refs
+            .iter()
+            .find(|value| value.starts_with("fz://"))
+            .cloned()
+            .unwrap_or_else(|| key.to_string());
+        let payload = match String::from_utf8(bytes) {
+            Ok(text) => serde_json::json!({
+                "ref": portable_ref,
+                "payload_utf8": text,
+            }),
+            Err(error) => {
+                let bytes = error.into_bytes();
+                let hex: String = bytes.iter().map(|byte| format!("{byte:02x}")).collect();
+                serde_json::json!({
+                    "ref": portable_ref,
+                    "payload_hex": hex,
+                    "bytes_len": bytes.len(),
+                })
+            }
+        };
+        result.value = Some(match result.value.take() {
+            Some(Value::Object(mut map)) => {
+                if let Value::Object(payload) = payload {
+                    map.extend(payload);
+                }
+                Value::Object(map)
+            }
+            Some(prior) => serde_json::json!({ "prior": prior, "recovered": payload }),
+            None => payload,
+        });
+    }
+    result.refs = refs.clone();
+
+    // Serialized DomainResult envelope plus inline evidence (worker parity:
+    // raw_worker_v2 merges evidence into the value object).
+    let mut value = serde_json::to_value(&result).unwrap_or(Value::Null);
+    if let (Some(evidence), Value::Object(map)) = (outcome.inline_evidence, &mut value) {
+        map.insert("evidence".into(), serde_json::json!(evidence));
+    }
+
+    // Bridge every emitted blob ref into the shared CAS the connector
+    // verifies against (`<session root>/blobs`). FSZero's own store may or
+    // may not dual-write a CAS; this publish is the deterministic in-process
+    // contract.
+    let cas = SharedCas::open(root);
+    for reference in &refs {
+        if !reference.starts_with("fz://blob/") {
+            continue;
+        }
+        let Some(bytes) = session.expand(reference) else {
+            continue;
+        };
+        cas.put(&bytes).map_err(|error| {
+            adapter_error(
+                "cas",
+                format!("cannot publish fszero ref {reference} to shared CAS: {error}"),
+                request,
+            )
+        })?;
+    }
+
+    let mutated = result.mutated;
+    let (effect, approval) = if mutated && request.approval_grant.is_some() {
+        let grant = request.approval_grant.as_ref().expect("checked above");
+        (
+            EffectClass::ApprovalRequiredMutation,
+            ApprovalMetadata {
+                state: ApprovalState::Granted,
+                approval_id: Some(grant.grant_id.clone()),
+                policy: Some(grant.policy_digest.clone()),
+            },
+        )
+    } else if mutated {
+        (
+            EffectClass::ReversibleMutation,
+            ApprovalMetadata {
+                state: ApprovalState::NotRequired,
+                approval_id: None,
+                policy: None,
+            },
+        )
+    } else {
+        (
+            EffectClass::ReadOnly,
+            ApprovalMetadata {
+                state: ApprovalState::NotRequired,
+                approval_id: None,
+                policy: None,
+            },
+        )
+    };
+    let journal_id = if mutated {
+        refs.iter()
+            .find(|value| value.contains("journal") || value.contains("undo"))
+            .cloned()
+    } else {
+        None
+    };
+    let engine_timeline = request
+        .telemetry_request
+        .as_ref()
+        .is_some_and(|value| value.engine_stage_timeline)
+        .then(|| EngineStageTimelineV1 {
+            total_ns: wall_ns,
+            spans: vec![EngineStageSpanV1 {
+                stage: "fszero.dispatch".into(),
+                start_ns: 0,
+                duration_ns: wall_ns,
+            }],
+        });
+
+    Ok(AdapterResponse {
+        result: WorkerResult {
+            value,
+            metadata: WorkerResultMetadata {
+                effect,
+                approval,
+                revert: RevertMetadata {
+                    supported: mutated,
+                    journal_id,
+                    rollback_op: mutated.then(|| "undo".into()),
+                },
+                ownership: WorkerRefOwnership {
+                    engine: EngineIdentity::FsZero,
+                    session_id: session_id.to_owned(),
+                    refs,
+                    snapshot: None,
+                },
+                trace: request.trace.clone(),
+            },
+        },
+        engine_timeline,
+        worker_token_accounting: None,
+    })
+}
+
+/// Convert one typed dispatcher failure into an adapter failure.
+fn domain_error_to_adapter(error: &DomainError, request: &CallRequest) -> AdapterError {
+    AdapterError::new(
+        domain_error_kind(&error.class),
+        error.message.clone(),
+        error.retryable,
+        Some(request.trace.clone()),
+    )
+}
+
+/// Session-thread main loop: owns the single-threaded [`FSZeroSession`] and
+/// serves one dispatch at a time.
+fn session_loop(
+    mut session: FSZeroSession,
+    receiver: Receiver<SessionCommand>,
+    root: PathBuf,
+    session_id: String,
+) {
+    while let Ok(command) = receiver.recv() {
+        match command {
+            SessionCommand::Call {
+                request,
+                cancellation,
+                reply,
+            } => {
+                let response = run_call(&mut session, &request, &cancellation, &root, &session_id);
+                let _ = reply.send(response);
+            }
+            SessionCommand::Shutdown { reply } => {
+                let _ = reply.send(());
+                break;
+            }
+        }
+    }
+}
+
+/// Real FSZero in-process adapter over one [`FSZeroSession`] owned by a
+/// dedicated session thread.
+pub struct FsZeroAdapter {
+    sender: SyncSender<SessionCommand>,
+    session_thread: Option<JoinHandle<()>>,
+    root: PathBuf,
+    binding: AdapterBinding,
+    /// True when the durable repo store could not be opened and the session
+    /// fell back to in-memory recovery (durable refs do not survive restart).
+    degraded: bool,
+}
+
+impl FsZeroAdapter {
+    /// Build the adapter over the immutable FSZero revision API rooted at
+    /// `root`, bound to `session_id`.
+    ///
+    /// Opens the durable repo store (`.zerostack`/`.fszero`) when possible;
+    /// falls back to in-memory recovery — never panics on store errors — and
+    /// reports the degradation through [`Self::degraded`].
+    pub fn new(root: impl Into<PathBuf>, session_id: &str) -> Self {
+        let root = root.into();
+        let root = root.canonicalize().unwrap_or(root);
+        // FSZero equates the semantic contract digest with the operation ABI
+        // digest (surface_handshake::local_capability).
+        let digest = operation_abi_digest();
+        let binding = AdapterBinding::new(
+            EngineIdentity::FsZero,
+            worker_revision(),
+            OPERATION_ABI_VERSION,
+            digest.clone(),
+            digest,
+            FSZERO_REF_SCHEME,
+        )
+        .expect("fszero binding is valid");
+        let (sender, receiver) = mpsc::sync_channel(1);
+        let (init_tx, init_rx) = mpsc::sync_channel(1);
+        let thread_session_id = session_id.to_owned();
+        let thread_root = root.clone();
+        // The session is not `Send` (single-threaded fsqlite connection), so
+        // it is created on the session thread itself; only the root path
+        // crosses the spawn boundary.
+        let session_thread = thread::Builder::new()
+            .name("zsx-fszero-session".into())
+            .spawn(move || {
+                let (session, degraded) = match FSZeroSession::try_with_repo_store(&thread_root) {
+                    Ok(session) => (session, false),
+                    Err(error) => {
+                        eprintln!(
+                            "zsx-core: FSZero durable store unavailable ({error}); using in-memory recovery"
+                        );
+                        (FSZeroSession::with_root(&thread_root), true)
+                    }
+                };
+                let _ = init_tx.send(degraded);
+                session_loop(session, receiver, thread_root, thread_session_id);
+            })
+            .expect("cannot start fszero session thread");
+        let degraded = init_rx
+            .recv_timeout(SESSION_INIT_TIMEOUT)
+            .expect("fszero session thread did not initialize");
+        Self {
+            sender,
+            session_thread: Some(session_thread),
+            root,
+            binding,
+            degraded,
+        }
+    }
+
+    /// True when the durable repo store was unavailable and the session runs
+    /// on in-memory recovery.
+    pub fn degraded(&self) -> bool {
+        self.degraded
+    }
+
+    /// The session root this adapter serves.
+    pub fn root(&self) -> &std::path::Path {
+        &self.root
+    }
+}
+
+impl Drop for FsZeroAdapter {
+    fn drop(&mut self) {
+        let (reply_tx, reply_rx) = mpsc::sync_channel(1);
+        if self
+            .sender
+            .send(SessionCommand::Shutdown { reply: reply_tx })
+            .is_ok()
+        {
+            let _ = reply_rx.recv_timeout(SESSION_THREAD_STOP_TIMEOUT);
+        }
+        if let Some(handle) = self.session_thread.take() {
+            let _ = handle.join();
+        }
+    }
+}
+
+impl DomainAdapter for FsZeroAdapter {
+    fn engine(&self) -> EngineIdentity {
+        EngineIdentity::FsZero
+    }
+
+    fn binding(&self) -> AdapterBinding {
+        self.binding.clone()
+    }
+
+    fn call(&self, call: AdapterCall<'_>) -> Result<AdapterResponse, AdapterError> {
+        let request = call.request;
+        // Cancellation and deadline are checked before enqueueing and again
+        // after the reply arrives; the session thread re-checks both right
+        // before and right after the dispatch itself.
+        if call.cancellation.is_cancelled() {
+            return Err(adapter_error(
+                "cancelled",
+                "fszero adapter cancelled",
+                request,
+            ));
+        }
+        if deadline_expired(request) {
+            return Err(adapter_error(
+                "deadline",
+                "fszero adapter deadline exceeded",
+                request,
+            ));
+        }
+        let (reply_tx, reply_rx) = mpsc::sync_channel(1);
+        let command = SessionCommand::Call {
+            request: request.clone(),
+            cancellation: call.cancellation.clone(),
+            reply: reply_tx,
+        };
+        self.sender
+            .send(command)
+            .map_err(|_| adapter_error("internal", "fszero session thread is gone", request))?;
+        let response = reply_rx
+            .recv()
+            .map_err(|_| adapter_error("internal", "fszero session thread is gone", request))??;
+        if call.cancellation.is_cancelled() {
+            return Err(adapter_error(
+                "cancelled",
+                "fszero adapter cancelled",
+                request,
+            ));
+        }
+        if deadline_expired(request) {
+            return Err(adapter_error(
+                "deadline",
+                "fszero adapter deadline exceeded",
+                request,
+            ));
+        }
+        Ok(response)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn binding_uses_the_immutable_revision_identity() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let adapter = FsZeroAdapter::new(dir.path(), "session-fszero");
+        assert_eq!(adapter.engine(), EngineIdentity::FsZero);
+        let binding = adapter.binding();
+        assert_eq!(binding.engine, EngineIdentity::FsZero);
+        assert_eq!(binding.ref_scheme, FSZERO_REF_SCHEME);
+        assert_eq!(binding.semantic_contract_version, OPERATION_ABI_VERSION);
+        assert_eq!(
+            binding.semantic_contract_digest, binding.operation_registry_digest,
+            "FSZero equates the contract digest with the operation ABI digest"
+        );
+        assert!(
+            binding.semantic_contract_digest.len() == 64
+                && binding
+                    .semantic_contract_digest
+                    .bytes()
+                    .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+        );
+    }
+
+    #[test]
+    fn forbidden_operations_never_reach_the_dispatcher() {
+        for op in [
+            "execute_code",
+            "fz_execute_code",
+            "codemode_search",
+            "fszero.exec",
+            "tools/call",
+        ] {
+            assert!(is_forbidden_operation(op), "{op} must be forbidden");
+        }
+        for op in ["fs.read", "fs.search", "fs.expand"] {
+            assert!(!is_forbidden_operation(op), "{op} must dispatch");
+        }
+    }
+
+    #[test]
+    fn blob_ref_conformance_mirrors_the_raw_worker() {
+        let valid = "fz://blob/".to_owned() + &"a".repeat(64);
+        assert!(is_conformant_blob_ref(&valid));
+        let short = "fz://blob/".to_owned() + &"b".repeat(63);
+        assert!(!is_conformant_blob_ref(&short));
+        let upper = "fz://blob/".to_owned() + &"C".repeat(64);
+        assert!(!is_conformant_blob_ref(&upper));
+        assert!(is_conformant_blob_ref("fz://codemode/execution/7"));
+    }
+
+    #[test]
+    fn portable_refs_are_collected_from_any_value_shape() {
+        let value = serde_json::json!({
+            "text": "see fz://blob/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa and (fz://blob/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb)",
+            "nested": ["gz://node/symbol", {"ref": "tz://blob/cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"}],
+        });
+        let mut refs = Vec::new();
+        collect_portable_refs(&value, &mut refs);
+        assert_eq!(refs.len(), 4);
+        assert!(
+            refs.contains(
+                &"fz://blob/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+                    .to_owned()
+            )
+        );
+    }
+}

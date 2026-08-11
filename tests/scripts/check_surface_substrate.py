@@ -50,7 +50,7 @@ WORKER_PACKAGES = {
 }
 WORKER_PATH_MARKERS = ("-worker", "-codemode")
 COMPAT_PACKAGE_SUFFIXES = ("-mcp", "-mcp-compat")
-HUB_TRANSPORT_DEPENDENCY = "zero-codemode"
+HUB_TRANSPORT_DEPENDENCY = "zero-mcp"
 FORBIDDEN_DEPENDENCIES = {
     "fastmcp-rust",
     "rquickjs",
@@ -131,7 +131,7 @@ class SurfaceGateError(AssertionError):
 
 
 def hub_surface_path(root: Path) -> Path:
-    return root / "crates" / "zero-codemode" / "src" / "surface.rs"
+    return root / "crates" / "zero-abi" / "src" / "surface.rs"
 
 
 def check_hub_surface(root: Path) -> list[str]:

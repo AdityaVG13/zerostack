@@ -420,7 +420,10 @@ fn handle_client(
             Err(error) => {
                 let request_type = raw_request.get("type").and_then(Value::as_str);
                 let code = if request_type.is_some_and(|kind| {
-                    !matches!(kind, "hello" | "execute" | "status" | "replace" | "shutdown")
+                    !matches!(
+                        kind,
+                        "hello" | "execute" | "status" | "replace" | "shutdown"
+                    )
                 }) {
                     "unknown_request_type"
                 } else {

@@ -234,7 +234,7 @@ class SurfaceSubstrateGuardTests(unittest.TestCase):
             [package]
             name = "graphzero-mcp-compat"
             [dependencies]
-            zero-codemode = { path = "../../../ZeroStack/crates/zero-codemode", features = ["fastmcp"] }
+            zero-mcp = { path = "../../../ZeroStack/crates/zero-mcp", features = ["fastmcp"] }
             """,
             encoding="utf-8",
         )

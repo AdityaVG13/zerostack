@@ -241,6 +241,14 @@ impl CancellationSignal {
         Self::default()
     }
 
+    /// Share the underlying flag with the interpreter, which cancels through
+    /// an `Arc<AtomicBool>` directly. The returned handle and this signal
+    /// observe the same flag, so one per-request token can drive both the
+    /// host runtime and adapter calls.
+    pub fn as_atomic(&self) -> Arc<AtomicBool> {
+        Arc::clone(&self.0)
+    }
+
     pub fn cancel(&self) {
         self.0.store(true, Ordering::Release);
     }

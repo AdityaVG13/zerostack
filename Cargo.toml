@@ -8,11 +8,15 @@ members = [
     "crates/zero-gate",
     "crates/zero-gauge",
     "crates/zero-ledger",
+    "crates/zero-mcp",
     "crates/zero-process",
     "crates/zero-ref",
     "crates/zero-store",
     "crates/zero-testkit",
     "crates/zerostack-machine-permit",
+    "crates/zsx",
+    "crates/zsx-core",
+    "crates/zsx-node",
     "tests",
 ]
 
@@ -32,9 +36,14 @@ sha2 = "0.11"
 # single-process zsx-core graph stays local and deterministic.
 [patch."https://github.com/AdityaVG13/zerostack"]
 zero-abi = { path = "crates/zero-abi" }
+zero-cert = { path = "crates/zero-cert" }
+zero-gate = { path = "crates/zero-gate" }
 zero-gauge = { path = "crates/zero-gauge" }
+zero-ledger = { path = "crates/zero-ledger" }
+zero-process = { path = "crates/zero-process" }
 zero-ref = { path = "crates/zero-ref" }
 zero-store = { path = "crates/zero-store" }
+zerostack-machine-permit = { path = "crates/zerostack-machine-permit" }
 
 [profile.release-perf]
 inherits = "release"

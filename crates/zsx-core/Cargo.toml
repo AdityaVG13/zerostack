@@ -8,22 +8,24 @@ description = "Single-process canonical ZSX composition: in-process DomainAdapte
 [features]
 default = []
 fixture-adapters = []
-# Real FSZero engine adapter (crates/fszero.rs) over the immutable FSZero
-# revision API (vendored snapshot `_fszero_vk62_head_82fd21a`, pinned commit
-# 82fd21a); enables the canonical in-process typed-dispatch path. The fs-zero
+# Real FSZero engine adapter over the engine's public domain API. The fs-zero
 # dependency builds with default-features = false so no MCP, CodeMode, watch,
 # or AST-sgrep surface is linked; sqlite-bundled keeps the durable store
 # deterministic on any host.
 fszero = ["dep:fs-zero"]
-# Real GraphZero engine adapter (crates/graphzero.rs) over the embedded
-# GraphZero query crate; enables the canonical in-process dispatch path.
+# Real GraphZero engine adapter over the embedded GraphZero query crate.
 graphzero = ["dep:graphzero-query"]
+# Real TokenZero engine adapter over the public embedded domain API.
+tokenzero = ["dep:tokenzero-core", "dep:tokenzero-engine", "dep:tokenzero-recovery"]
 
 [dependencies]
 serde.workspace = true
 serde_json.workspace = true
-fs-zero = { path = "../../../_fszero_vk62_head_82fd21a", default-features = false, features = ["sqlite-bundled"], optional = true }
+fs-zero = { path = "../../../FSZero", default-features = false, features = ["sqlite-bundled"], optional = true }
 graphzero-query = { path = "../../../GraphZero/crates/graphzero-query", optional = true }
+tokenzero-core = { path = "../../../TokenZero/crates/tokenzero-core", optional = true }
+tokenzero-engine = { path = "../../../TokenZero/crates/tokenzero-engine", optional = true }
+tokenzero-recovery = { path = "../../../TokenZero/crates/tokenzero-recovery", optional = true }
 zero-abi = { path = "../zero-abi" }
 zero-codemode = { path = "../zero-codemode" }
 zero-ref = { path = "../zero-ref" }

@@ -10,9 +10,73 @@ use std::fmt;
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use zero_abi::{CanonicalRegistry, EngineIdentity, RefOwnership, TelemetrySchema};
 
-use crate::{CapabilityDescriptor, GlobalRegistration, RegistrationError};
+use crate::{CanonicalRegistry, EngineIdentity, RefOwnership, RegistryEngine, TelemetrySchema};
+
+#[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CapabilityDescriptor {
+    pub surface: String,
+    pub method: String,
+}
+
+impl CapabilityDescriptor {
+    pub fn new(surface: impl Into<String>, method: impl Into<String>) -> Self {
+        Self {
+            surface: surface.into(),
+            method: method.into(),
+        }
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct GlobalRegistration {
+    pub root: String,
+    pub capabilities: Vec<CapabilityDescriptor>,
+}
+
+impl GlobalRegistration {
+    pub fn zero(capabilities: Vec<CapabilityDescriptor>) -> Self {
+        Self {
+            root: "zero".to_owned(),
+            capabilities,
+        }
+    }
+
+    pub fn validate(&self) -> Result<(), RegistrationError> {
+        validate_identifier(&self.root)
+            .map_err(|_| RegistrationError::InvalidGlobal(self.root.clone()))?;
+        let mut seen = BTreeSet::new();
+        for capability in &self.capabilities {
+            if validate_identifier(&capability.surface).is_err()
+                || validate_identifier(&capability.method).is_err()
+            {
+                return Err(RegistrationError::InvalidCapability(capability.clone()));
+            }
+            if !seen.insert(capability.clone()) {
+                return Err(RegistrationError::DuplicateCapability(capability.clone()));
+            }
+        }
+        Ok(())
+    }
+}
+
+fn validate_identifier(value: &str) -> Result<(), ()> {
+    if matches!(value, "__proto__" | "prototype" | "constructor") {
+        return Err(());
+    }
+    let mut chars = value.chars();
+    let first = chars.next().ok_or(())?;
+    if !(first == '_' || first == '$' || first.is_ascii_alphabetic()) {
+        return Err(());
+    }
+    if chars.all(|ch| ch == '_' || ch == '$' || ch.is_ascii_alphanumeric()) {
+        Ok(())
+    } else {
+        Err(())
+    }
+}
 
 pub const SURFACE_CONTRACT_VERSION: &str = "zerostack.surface/v1";
 
@@ -187,6 +251,29 @@ impl SurfaceRegistration {
     }
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum RegistrationError {
+    InvalidGlobal(String),
+    InvalidCapability(CapabilityDescriptor),
+    DuplicateCapability(CapabilityDescriptor),
+}
+
+impl fmt::Display for RegistrationError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::InvalidGlobal(name) => write!(f, "invalid global name: {name}"),
+            Self::InvalidCapability(cap) => {
+                write!(f, "invalid capability: {}.{}", cap.surface, cap.method)
+            }
+            Self::DuplicateCapability(cap) => {
+                write!(f, "duplicate capability: {}.{}", cap.surface, cap.method)
+            }
+        }
+    }
+}
+
+impl std::error::Error for RegistrationError {}
+
 #[derive(Clone, Debug, PartialEq)]
 pub enum SurfaceContractError {
     InvalidVersion(String),
@@ -195,7 +282,7 @@ pub enum SurfaceContractError {
     InvalidCapabilities(RegistrationError),
     RegistryEngineMismatch {
         expected: EngineIdentity,
-        actual: zero_abi::RegistryEngine,
+        actual: RegistryEngine,
     },
     EngineMismatch {
         field: &'static str,
@@ -260,37 +347,31 @@ impl fmt::Display for SurfaceContractError {
 
 impl std::error::Error for SurfaceContractError {}
 
-fn registry_matches_engine(registry: zero_abi::RegistryEngine, engine: EngineIdentity) -> bool {
+fn registry_matches_engine(registry: RegistryEngine, engine: EngineIdentity) -> bool {
     matches!(
         (registry, engine),
-        (zero_abi::RegistryEngine::FsZero, EngineIdentity::FsZero)
-            | (
-                zero_abi::RegistryEngine::GraphZero,
-                EngineIdentity::GraphZero
-            )
-            | (
-                zero_abi::RegistryEngine::TokenZero,
-                EngineIdentity::TokenZero
-            )
+        (RegistryEngine::FsZero, EngineIdentity::FsZero)
+            | (RegistryEngine::GraphZero, EngineIdentity::GraphZero)
+            | (RegistryEngine::TokenZero, EngineIdentity::TokenZero)
     )
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use serde_json::json;
-    use zero_abi::{
+    use crate::{
         ALL_DISPATCH_ERROR_CLASSES, ApprovalRequirement, CasLayout, EffectClass, EffectPolicy,
         HashAlgorithm, LayoutVersion, PermitRequirement, RegistryEngine, SharedCapability,
     };
+    use serde_json::json;
 
     fn adapter() -> DomainAdapterRegistration {
         DomainAdapterRegistration {
             engine: EngineIdentity::FsZero,
             registry: CanonicalRegistry {
-                version: zero_abi::CANONICAL_DISPATCH_VERSION.to_owned(),
+                version: crate::CANONICAL_DISPATCH_VERSION.to_owned(),
                 engine: RegistryEngine::FsZero,
-                operations: vec![zero_abi::CanonicalOperation {
+                operations: vec![crate::CanonicalOperation {
                     canonical_id: "fs.read".into(),
                     description: String::new(),
                     aliases: vec!["read".into()],
@@ -306,7 +387,7 @@ mod tests {
                 }],
                 resources: vec![],
             },
-            ref_ownership: zero_abi::RefOwnership {
+            ref_ownership: crate::RefOwnership {
                 engine: EngineIdentity::FsZero,
                 session_id: "session-1".into(),
                 refs: vec!["fz://ref-1".into()],
@@ -392,7 +473,7 @@ mod tests {
         assert!(matches!(
             duplicate.validate(),
             Err(SurfaceContractError::InvalidCapabilities(
-                crate::RegistrationError::DuplicateCapability(_)
+                RegistrationError::DuplicateCapability(_)
             ))
         ));
     }

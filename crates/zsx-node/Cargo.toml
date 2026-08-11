@@ -1,0 +1,19 @@
+[package]
+name = "zsx-node"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+description = "N-API cdylib exposing a single-process ZSX session (zsx-core) to Node.js"
+
+[lib]
+crate-type = ["cdylib"]
+name = "zsx_node"
+
+[dependencies]
+napi = { version = "3.12.0", features = ["serde-json", "napi6"] }
+napi-derive = "3.6.2"
+serde_json.workspace = true
+zsx-core = { path = "../zsx-core", features = ["fszero", "graphzero", "tokenzero"] }
+
+[build-dependencies]
+napi-build = "2.4.0"

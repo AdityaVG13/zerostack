@@ -26,6 +26,34 @@ use crate::{
 };
 
 static INTERPRETER_CREATIONS: AtomicU64 = AtomicU64::new(0);
+static PARSER_CREATIONS: AtomicU64 = AtomicU64::new(0);
+
+thread_local! {
+    /// Tree-sitter parsers are mutable but reusable. Keeping one per execution
+    /// thread removes grammar setup from every ZSX call without serializing
+    /// independent sessions behind a process-wide parser lock.
+    static PARSER: RefCell<Option<Parser>> = const { RefCell::new(None) };
+}
+
+fn parse_source(source: &str) -> Result<tree_sitter::Tree, HostError> {
+    PARSER.with(|slot| {
+        let mut slot = slot.borrow_mut();
+        if slot.is_none() {
+            let mut parser = Parser::new();
+            parser.set_language(&LANGUAGE.into()).map_err(|error| {
+                HostError::Runtime(format!("JavaScript parser setup failed: {error}"))
+            })?;
+            *slot = Some(parser);
+            PARSER_CREATIONS.fetch_add(1, Ordering::Relaxed);
+        }
+        let parser = slot.as_mut().ok_or_else(|| {
+            HostError::Runtime("JavaScript parser cache initialization failed".into())
+        })?;
+        parser
+            .parse(source, None)
+            .ok_or_else(|| HostError::Parse("parser returned no syntax tree".into()))
+    })
+}
 
 pub(crate) fn interpreter_creation_count() -> u64 {
     INTERPRETER_CREATIONS.load(Ordering::Relaxed)
@@ -174,13 +202,7 @@ pub(super) fn execute(
     request_id: u64,
 ) -> Result<JsonValue, HostError> {
     crate::wrap::validate_plan(source, host.limits.max_plan_bytes).map_err(HostError::Plan)?;
-    let mut parser = Parser::new();
-    parser
-        .set_language(&LANGUAGE.into())
-        .map_err(|error| HostError::Runtime(format!("JavaScript parser setup failed: {error}")))?;
-    let tree = parser
-        .parse(source, None)
-        .ok_or_else(|| HostError::Parse("parser returned no syntax tree".into()))?;
+    let tree = parse_source(source)?;
     if tree.root_node().has_error() {
         return Err(HostError::Parse("invalid JavaScript syntax".into()));
     }
@@ -2936,8 +2958,8 @@ fn unquote(value: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::HostLimits;
-    use crate::host::{CapabilityDescriptor, ConnectorError, GlobalRegistration};
+    use crate::host::ConnectorError;
+    use crate::{CapabilityDescriptor, GlobalRegistration, HostLimits};
 
     struct NullConnector;
 
@@ -2982,6 +3004,25 @@ mod tests {
             0,
             0,
         )
+    }
+
+    #[test]
+    fn execute_reuses_the_thread_local_parser() {
+        let host = test_host(256 * 1024, 100_000);
+        host.execute("return 1;", Rc::new(NullConnector)).unwrap();
+        let first = PARSER.with(|slot| {
+            slot.borrow()
+                .as_ref()
+                .map(|parser| std::ptr::from_ref(parser) as usize)
+        });
+        host.execute("return 2;", Rc::new(NullConnector)).unwrap();
+        let second = PARSER.with(|slot| {
+            slot.borrow()
+                .as_ref()
+                .map(|parser| std::ptr::from_ref(parser) as usize)
+        });
+        assert!(first.is_some());
+        assert_eq!(first, second);
     }
 
     #[test]

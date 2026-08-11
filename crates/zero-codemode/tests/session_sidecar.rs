@@ -157,35 +157,25 @@ fn connect_authenticated(
 }
 
 #[test]
-fn repeated_zsx_calls_use_distinct_request_ids() {
+fn repeated_execute_requests_use_distinct_request_ids() {
+    // The zsx client is in-process now; this exercises the retained
+    // zerostack-session compat server directly over its socket protocol.
     let (d, mut session, token, shutdown_token, generation) =
         start(ProcessIdentity::current().unwrap());
     let socket = d.path().join("runtime/session.sock");
+    let (mut stream, mut reader, _) = connect_authenticated(&socket, &token);
     let mut ids = std::collections::HashSet::new();
     for expected in [1_u64, 2] {
-        let mut command = Command::new(env!("CARGO_BIN_EXE_zsx"));
-        command
-            .args(["exec", "-C", d.path().to_str().unwrap()])
-            .env("ZEROSTACK_SESSION_SOCKET", &socket)
-            .env("ZEROSTACK_SESSION_TOKEN", &token)
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped());
-        let mut child = command.spawn().unwrap();
-        write!(child.stdin.take().unwrap(), "return {expected};").unwrap();
-        let output = child.wait_with_output().unwrap();
-        assert!(
-            output.status.success(),
-            "stdout={} stderr={}",
-            String::from_utf8_lossy(&output.stdout),
-            String::from_utf8_lossy(&output.stderr)
+        send(
+            &mut stream,
+            json!({"type":"execute","id":expected,"generation":generation,"root":d.path(),"source":format!("return {expected};"),"timeout_ms":30000}),
         );
-        let response: Value = serde_json::from_slice(&output.stdout).unwrap();
+        let response = read(&mut reader);
         assert_eq!(response["ok"], true, "{response}");
         assert_eq!(response["generation"], generation, "{response}");
+        assert_eq!(response["id"], expected, "{response}");
         assert!(ids.insert(response["id"].as_u64().unwrap()), "{response}");
     }
-    let (mut stream, mut reader, _) = connect_authenticated(&socket, &token);
     send(
         &mut stream,
         json!({"type":"shutdown","id":u64::MAX,"token":shutdown_token}),
@@ -1222,39 +1212,23 @@ fn owner_sigkill_interrupts_active_plan_under_one_second() {
 #[test]
 #[ignore = "requires verified FSZero, GraphZero, and TokenZero raw-worker artifacts"]
 fn real_workers_execute_one_cross_surface_plan() {
-    let d = TempDir::new().unwrap();
+    // The zsx client is in-process now; this drives the retained
+    // zerostack-session compat server directly over its socket protocol.
+    let (d, mut session, token, shutdown_token, generation) =
+        start(ProcessIdentity::current().unwrap());
     std::fs::write(d.path().join("fixture.txt"), "real worker fixture\n").unwrap();
-    let mut command = Command::new(env!("CARGO_BIN_EXE_zsx"));
-    command
-        .args(["exec", "-C", d.path().to_str().unwrap()])
-        .env_remove("ZEROSTACK_SESSION_SOCKET")
-        .env_remove("ZEROSTACK_SESSION_TOKEN")
-        .env_remove("ZEROSTACK_TEST_MODE")
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped());
-    let mut child = command.spawn().unwrap();
-    child
-        .stdin
-        .take()
-        .unwrap()
-        .write_all(
-            br#"
+    let socket = d.path().join("runtime/session.sock");
+    let (mut stream, mut reader, _) = connect_authenticated(&socket, &token);
+    send(
+        &mut stream,
+        json!({"type":"execute","id":1,"generation":generation,"root":d.path(),"source":r#"
             const fs = await zero.fs.compound('read', {path:'fixture.txt'});
             const graph = await zero.graph.index();
             const token = await zero.token.compact('real worker fixture');
             return {fs,graph,token};
-            "#,
-        )
-        .unwrap();
-    let output = child.wait_with_output().unwrap();
-    assert!(
-        output.status.success(),
-        "stdout={} stderr={}",
-        String::from_utf8_lossy(&output.stdout),
-        String::from_utf8_lossy(&output.stderr)
+        "#,"timeout_ms":30000}),
     );
-    let response: Value = serde_json::from_slice(&output.stdout).unwrap();
+    let response = read(&mut reader);
     assert_eq!(response["ok"], true, "{response}");
     let exact = exact_result(d.path(), &response);
     assert_eq!(
@@ -1269,6 +1243,12 @@ fn real_workers_execute_one_cross_surface_plan() {
         inline_public(&exact["token"])["metadata"]["ownership"]["engine"],
         "tokenzero"
     );
+    send(
+        &mut stream,
+        json!({"type":"shutdown","id":u64::MAX,"token":shutdown_token}),
+    );
+    assert_eq!(read(&mut reader)["ok"], true);
+    assert!(session.wait().unwrap().success());
 }
 
 // ── Native lifecycle/resource evidence (q6am gate) ──────────────────────
@@ -1291,7 +1271,6 @@ const Q6AM_SHUTDOWN_P95_MS: u64 = 250;
 const Q6AM_CRASH_REAP_P95_MS: u64 = 1_000;
 const Q6AM_COLD_START_TARGET_MS: u64 = 3_000;
 const Q6AM_COLD_START_HARD_CAP_MS: u64 = 5_000;
-const Q6AM_ZSX_ADDED_P95_US: u64 = 1_000;
 
 fn sha256_hex_file(path: &std::path::Path) -> String {
     use sha2::{Digest, Sha256};
@@ -1712,37 +1691,9 @@ fn native_lifecycle_resource_evidence_q6am_receipt() {
                         .iter()
                         .all(|worker| worker["hard_tree_memory_enforced"] == true)
             });
-    let zsx_plan = d.path().join("zsx-latency.js");
-    std::fs::write(&zsx_plan, "return 1;").unwrap();
-    let mut zsx_us = Vec::with_capacity(100);
-    for probe in 0..100_u64 {
-        let started = Instant::now();
-        let output = Command::new(env!("CARGO_BIN_EXE_zsx"))
-            .args([
-                "exec",
-                "-C",
-                d.path().to_str().unwrap(),
-                "--file",
-                zsx_plan.to_str().unwrap(),
-            ])
-            .env("ZEROSTACK_SESSION_SOCKET", &socket)
-            .env("ZEROSTACK_SESSION_TOKEN", &token)
-            .output()
-            .unwrap();
-        assert!(
-            output.status.success(),
-            "zsx probe {probe}: stdout={} stderr={}",
-            String::from_utf8_lossy(&output.stdout),
-            String::from_utf8_lossy(&output.stderr)
-        );
-        assert_eq!(
-            serde_json::from_slice::<Value>(&output.stdout).unwrap()["ok"],
-            true,
-            "zsx probe {probe}"
-        );
-        zsx_us.push(started.elapsed().as_micros() as u64);
-    }
-    zsx_us.sort_unstable();
+    // The zsx client runs in-process now (no session socket), so the old
+    // zsx process-overhead probe is gone; the compat server's own latency is
+    // measured by the warm-entry probes after the soak below.
     // Cold then warm cross-surface plan (real FSZero + GraphZero + TokenZero).
     let cross_surface = r#"const fs = await zero.fs.compound('read', {path:'fixture.txt'});
         const graph = await zero.graph.index();
@@ -1906,8 +1857,6 @@ fn native_lifecycle_resource_evidence_q6am_receipt() {
 
     // Shutdown latency and runtime cleanup.
 
-    let zsx_p95_us = percentile(&zsx_us, 95);
-    let zsx_added_p95_us = zsx_p95_us.saturating_sub(warm_entry_p95_us);
     let shutdown_started = Instant::now();
     send(
         &mut stream,
@@ -2079,12 +2028,6 @@ fn native_lifecycle_resource_evidence_q6am_receipt() {
             "us",
             Q6AM_WARM_ENTRY_P95_US,
             warm_entry_p95_us,
-        ),
-        threshold_at_most(
-            "zsx_added_p95",
-            "us",
-            Q6AM_ZSX_ADDED_P95_US,
-            zsx_added_p95_us,
         ),
         threshold_at_most(
             "cold_start_target",
@@ -2270,11 +2213,6 @@ fn native_lifecycle_resource_evidence_q6am_receipt() {
                 "entry_p50_us": warm_entry_p50_us,
                 "entry_p95_us": warm_entry_p95_us,
             },
-            "zsx": {
-                "probes": zsx_us.len(),
-                "p95_us": zsx_p95_us,
-                "added_p95_us": zsx_added_p95_us,
-            },
             "teardown": {
                 "normal_samples_ms": normal_teardown_ms,
                 "normal_p95_ms": normal_teardown_p95_ms,
@@ -2347,51 +2285,46 @@ fn native_lifecycle_resource_evidence_q6am_receipt() {
 }
 
 #[test]
-fn zsx_fallback_executes_and_rejects_partial_inherited_endpoint() {
-    let d = TempDir::new().unwrap();
-    let worker = env!("CARGO_BIN_EXE_zero-codemode-worker-fixture");
-    let mut command = Command::new(env!("CARGO_BIN_EXE_zsx"));
-    command
-        .args(["exec", "-C", d.path().to_str().unwrap()])
-        .env_remove("ZEROSTACK_SESSION_SOCKET")
-        .env_remove("ZEROSTACK_SESSION_TOKEN")
-        .env("ZEROSTACK_TEST_MODE", "1")
-        .env("ZERO_FSZERO_RAW_BIN", worker)
-        .env("ZERO_GRAPHZERO_RAW_BIN", worker)
-        .env("ZERO_TOKENZERO_RAW_BIN", worker)
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped());
-    let mut child = command.spawn().unwrap();
-    child
-        .stdin
-        .take()
-        .unwrap()
-        .write_all(b"return await zero.token.shell('printf zsx');")
-        .unwrap();
-    let output = child.wait_with_output().unwrap();
-    assert!(
-        output.status.success(),
-        "{}",
-        String::from_utf8_lossy(&output.stderr)
+fn compat_server_executes_plan_and_rejects_unauthenticated_execute() {
+    // The zsx client is in-process now; this keeps the retained
+    // zerostack-session compat server's execution and authentication
+    // guarantees covered over its raw socket protocol.
+    let (d, mut session, token, shutdown_token, generation) =
+        start(ProcessIdentity::current().unwrap());
+    let socket = d.path().join("runtime/session.sock");
+
+    let (mut stream, mut reader, _) = connect_authenticated(&socket, &token);
+    send(
+        &mut stream,
+        json!({"type":"execute","id":1,"generation":generation,"root":d.path(),"source":"return await zero.token.shell('printf zsx');","timeout_ms":30000}),
     );
-    let response: Value = serde_json::from_slice(&output.stdout).unwrap();
+    let response = read(&mut reader);
     assert_eq!(response["ok"], true, "{response}");
     assert_eq!(
         inline_public(&response["result"])["value"]["args"]["command"],
         "printf zsx"
     );
 
-    let output = Command::new(env!("CARGO_BIN_EXE_zsx"))
-        .args(["exec", "-C", d.path().to_str().unwrap()])
-        .env("ZEROSTACK_SESSION_SOCKET", d.path().join("missing.sock"))
-        .env_remove("ZEROSTACK_SESSION_TOKEN")
-        .stdin(Stdio::null())
-        .output()
-        .unwrap();
-    assert!(!output.status.success());
-    let response: Value = serde_json::from_slice(&output.stdout).unwrap();
-    assert_eq!(response["ok"], false);
-    assert_eq!(response["error"], "incomplete inherited session endpoint");
+    // An execute frame before a successful hello is rejected, and a
+    // partial inherited endpoint (socket without token) never authenticates.
+    let mut anonymous = UnixStream::connect(&socket).unwrap();
+    let mut anonymous_reader = BufReader::new(anonymous.try_clone().unwrap());
+    send(
+        &mut anonymous,
+        json!({"type":"execute","id":2,"generation":generation,"root":d.path(),"source":"return 1;","timeout_ms":1000}),
+    );
+    let rejected = read_rejection(&mut anonymous_reader);
+    assert!(
+        rejected.is_none() || rejected.as_ref().is_some_and(|value| value["ok"] == false),
+        "{rejected:?}"
+    );
+
+    send(
+        &mut stream,
+        json!({"type":"shutdown","id":u64::MAX,"token":shutdown_token}),
+    );
+    assert_eq!(read(&mut reader)["ok"], true);
+    assert!(session.wait().unwrap().success());
 }
 
 #[test]

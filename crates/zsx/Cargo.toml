@@ -1,0 +1,19 @@
+[package]
+name = "zsx"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+description = "Single-process canonical ZSX executable: zsx exec runs the embedded zsx-core directly"
+
+[[bin]]
+name = "zsx"
+path = "src/main.rs"
+
+[dependencies]
+serde_json.workspace = true
+zsx-core = { path = "../zsx-core", features = ["fszero", "graphzero", "tokenzero"] }
+
+[dev-dependencies]
+zsx-core = { path = "../zsx-core", features = ["fixture-adapters"] }
+tempfile = "3"
+zero-abi = { path = "../zero-abi" }

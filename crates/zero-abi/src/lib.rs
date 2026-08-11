@@ -27,6 +27,7 @@ pub mod reasoning;
 pub mod result;
 pub mod robust_snap;
 pub mod schema;
+pub mod surface;
 pub mod telemetry;
 pub mod zbf;
 
@@ -131,6 +132,10 @@ pub use robust_snap::{
 pub use schema::{
     canonical_json, canonical_schema_json, normalize_schema, schema_diff, schema_fingerprint_hex,
     schema_property_keys, schema_required_keys, schemas_structurally_equal,
+};
+pub use surface::{
+    CapabilityDescriptor, DomainAdapterRegistration, GlobalRegistration, RegistrationError,
+    SURFACE_CONTRACT_VERSION, SurfaceContractError, SurfaceKind, SurfaceRegistration,
 };
 pub use telemetry::{TelemetryCounter, TelemetryOverflow, TelemetrySchema, ZeroTelemetryV1};
 pub use zbf::{

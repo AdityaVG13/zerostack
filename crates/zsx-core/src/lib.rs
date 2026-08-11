@@ -49,20 +49,27 @@ pub mod fszero;
 #[cfg(feature = "graphzero")]
 pub mod graphzero;
 
+/// Real TokenZero engine adapter (feature `tokenzero`), over the immutable
+/// TokenZero revision API's canonical typed dispatcher
+/// (`TokenZeroEngine` + `dispatch_operation`). No worker process, NDJSON
+/// framing, session socket, MCP, or CodeMode runtime is involved.
+#[cfg(feature = "tokenzero")]
+pub mod tokenzero;
+
 pub use adapter::{
-    AdapterBinding, AdapterCall, AdapterContractError, AdapterError, AdapterResponse,
-    DomainAdapter,
+    AdapterBinding, AdapterCall, AdapterContractError, AdapterError, AdapterResponse, DomainAdapter,
 };
 pub use connector::SessionApprovalGrantV1;
-/// Bound untrusted error text for typed zsx envelopes.
-pub use zero_codemode::finalize_visible_error;
+pub use connector::ZsxAttemptJournalStatus;
 pub use lower::{METHODS, engine_for, lower};
 pub use session::{
     SESSION_EXECUTION_QUEUE_CAPACITY, SESSION_EXECUTOR_START_TIMEOUT,
-    SESSION_REPLACEMENT_SETTLE_TIMEOUT, SessionReplacementReceipt, SessionReplacementReason,
+    SESSION_REPLACEMENT_SETTLE_TIMEOUT, SessionReplacementReason, SessionReplacementReceipt,
     ZsxBuilder, ZsxExecutionResult, ZsxSession, ZsxSessionCancellation, ZsxSessionError,
     ZsxSessionFailureCode,
 };
+/// Bound untrusted error text for typed zsx envelopes.
+pub use zero_codemode::finalize_visible_error;
 
 use std::sync::atomic::{AtomicU64, Ordering};
 

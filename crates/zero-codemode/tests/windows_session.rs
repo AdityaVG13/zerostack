@@ -152,13 +152,37 @@ fn named_pipe_protocol_auth_execution_shutdown_and_cleanup() {
 }
 
 #[test]
-fn zsx_launches_native_pipe_sidecar_and_reaps_it() {
+fn compat_server_binds_execute_response_to_session_protocol() {
+    // The zsx client is in-process now; this keeps the retained
+    // zerostack-session compat server's protocol binding covered over the
+    // native named-pipe transport.
     let directory = TempDir::new().unwrap();
-    let mut command = Command::new(env!("CARGO_BIN_EXE_zsx"));
+    let nonce = format!(
+        "{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    );
+    let runtime = directory.path().join(format!("zerostack-session-{nonce}"));
+    let endpoint = pipe_name(&runtime);
+    let token = "a".repeat(64);
+    let shutdown_token = "b".repeat(64);
+    let owner = ProcessIdentity::current().unwrap().encode();
+    let mut command = Command::new(env!("CARGO_BIN_EXE_zerostack-session"));
     command
-        .args(["exec", "-C", directory.path().to_str().unwrap()])
-        .env_remove("ZEROSTACK_SESSION_SOCKET")
-        .env_remove("ZEROSTACK_SESSION_TOKEN")
+        .args([
+            "serve",
+            "--root",
+            directory.path().to_str().unwrap(),
+            "--runtime-dir",
+            runtime.to_str().unwrap(),
+            "--owner",
+            &owner,
+        ])
+        .env(SESSION_TOKEN_ENV, &token)
+        .env(SESSION_SHUTDOWN_TOKEN_ENV, &shutdown_token)
         .env("ZEROSTACK_TEST_MODE", "1")
         .env(
             "ZERO_FSZERO_RAW_BIN",
@@ -172,27 +196,61 @@ fn zsx_launches_native_pipe_sidecar_and_reaps_it() {
             "ZERO_TOKENZERO_RAW_BIN",
             env!("CARGO_BIN_EXE_zero-codemode-worker-fixture"),
         )
-        .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::inherit());
-    let mut child = command.spawn().unwrap();
-    child
-        .stdin
-        .take()
-        .unwrap()
-        .write_all(b"return await zero.token.shell('echo zsx-native')")
+    let (sidecar, pipes) =
+        VerifiedChild::spawn_tree_with_pipes(command, "windows-test", 0).unwrap();
+    let mut ready_reader = BufReader::new(pipes.stdout.unwrap());
+    let mut ready_frame = String::new();
+    ready_reader.read_line(&mut ready_frame).unwrap();
+    let ready: Value = serde_json::from_str(&ready_frame).unwrap();
+    assert_eq!(ready["type"], "ready", "{ready}");
+    assert_eq!(ready["protocol"], SESSION_PROTOCOL);
+    let generation = ready["generation"]
+        .as_u64()
+        .filter(|value| *value != 0)
         .unwrap();
+
+    let mut stream = PipeConnection::connect(&endpoint).unwrap();
+    stream.set_read_timeout(Some(Duration::from_secs(10)));
+    stream.set_write_timeout(Some(Duration::from_secs(2)));
+    let mut reader = BufReader::new(stream.try_clone().unwrap());
+    send(
+        &mut stream,
+        json!({"type":"hello","protocol":SESSION_PROTOCOL,"token":token}),
+    );
+    let hello = read(&mut reader);
+    assert_eq!(hello["ok"], true, "{hello}");
     let started = Instant::now();
-    let output = child.wait_with_output().unwrap();
-    assert!(output.status.success(), "zsx failed: {output:?}");
+    send(
+        &mut stream,
+        json!({
+            "type":"execute",
+            "id":1,
+            "generation":generation,
+            "root":directory.path(),
+            "source":"return await zero.token.shell('echo zsx-native')",
+            "timeout_ms":5_000
+        }),
+    );
+    let response = read(&mut reader);
     assert!(
         started.elapsed() < Duration::from_secs(10),
-        "zsx native lifecycle exceeded ten seconds: {:?}",
+        "compat server execute exceeded ten seconds: {:?}",
         started.elapsed()
     );
-    let response: Value = serde_json::from_slice(&output.stdout).unwrap();
     assert_eq!(response["ok"], true, "{response}");
     assert_eq!(response["protocol"], SESSION_PROTOCOL);
+    assert_eq!(response["generation"], generation);
+    send(
+        &mut stream,
+        json!({"type":"shutdown","id":2,"token":shutdown_token}),
+    );
+    let shutdown = read(&mut reader);
+    assert_eq!(shutdown["ok"], true, "{shutdown}");
+    assert!(sidecar.wait_for_exit(Duration::from_secs(1)));
+    sidecar.revoke().unwrap();
+    assert!(PipeConnection::connect(&endpoint).is_err());
 }
 
 fn start_session_for_crash(

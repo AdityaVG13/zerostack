@@ -1,0 +1,14 @@
+{
+  "name": "@zerostack/zsx-native",
+  "version": "0.1.0",
+  "description": "ZeroStack ZSX native binding. Loader-only package: selects ZSX_NATIVE_ADDON or a platform prebuild; never builds or spawns at runtime.",
+  "main": "loader.js",
+  "files": [
+    "loader.js",
+    "prebuilds/"
+  ],
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "license": "MIT OR Apache-2.0"
+}

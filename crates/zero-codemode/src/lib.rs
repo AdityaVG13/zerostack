@@ -7,11 +7,9 @@ mod edit_protocol;
 mod host;
 mod limits;
 pub mod manifest;
-pub mod mcp_transport;
 pub mod node;
 pub mod preflight;
 pub mod session;
-pub mod surface;
 pub mod worker;
 mod wrap;
 
@@ -24,11 +22,11 @@ pub use edit_protocol::{
     EDIT_PROTOCOL_VERSION, EditError, EditErrorClass, EditOp, EditPlan, RefKind, Side, classify_ref,
 };
 pub use host::{
-    CapabilityDescriptor, Connector, ConnectorCompletion, ConnectorError,
-    DEFAULT_MAX_VISIBLE_RESULT_BYTES, DispatchContext, GlobalRegistration, Host, HostError,
-    MAX_INFLIGHT_CONNECTOR_CALLS, MAX_RESULT_SPILL_ENVELOPE_BYTES, MAX_VISIBLE_ERROR_BYTES,
-    PUBLIC_RESULT_FIELDS, RESULT_SPILL_PREVIEW_BYTES, RESULT_SPILL_SCHEMA, RegistrationError,
-    finalize_visible_error, runtime_creation_count,
+    Connector, ConnectorCompletion, ConnectorError, DEFAULT_MAX_VISIBLE_RESULT_BYTES,
+    DispatchContext, Host, HostError, MAX_INFLIGHT_CONNECTOR_CALLS,
+    MAX_RESULT_SPILL_ENVELOPE_BYTES, MAX_VISIBLE_ERROR_BYTES, PUBLIC_RESULT_FIELDS,
+    RESULT_SPILL_PREVIEW_BYTES, RESULT_SPILL_SCHEMA, finalize_visible_error,
+    runtime_creation_count,
 };
 pub use limits::{HostLimits, LimitError};
 pub use manifest::{
@@ -37,15 +35,6 @@ pub use manifest::{
     NODE_ENV, RUNTIME_MODULE_ENV, Refusal, SUBSTRATE_MODULE_ENV, StorePaths, artifact_candidates,
     is_ephemeral, is_readable_file, locate_from_process, locate_manifest, manifest_order,
     render_manifest_human, resolve_artifact, store_paths_from_process,
-};
-#[cfg(feature = "fastmcp")]
-pub use mcp_transport::FastMcpTransport;
-pub use mcp_transport::{
-    DEFAULT_MCP_MAX_INFLIGHT, DEFAULT_MCP_TOOL_TIMEOUT, MAX_MCP_MAX_INFLIGHT, MAX_MCP_TOOL_TIMEOUT,
-    McpAliasMetadata, McpCallContext, McpDispatchError, McpDispatchOutput, McpDispatcher,
-    McpErrorPresentation, McpResourceOutput, McpResourceReader, McpServerIdentity, McpTextContent,
-    McpTransportConfig, McpTransportError, execute_call, execute_call_with_cancel,
-    validate_mcp_registration,
 };
 pub use node::{
     FNM_DEFAULT_ALIAS_SUBDIR, FNM_DIR_ENV, NODE_ORDER, NODE_SCHEMA, NodeCandidate, NodeEnv,
@@ -56,8 +45,8 @@ pub use preflight::{
     DOCTOR_SCHEMA, DoctorCheck, DoctorReport, doctor_report, locate_complete, locate_missing,
     render_doctor_human,
 };
-pub use surface::{
-    DomainAdapterRegistration, SURFACE_CONTRACT_VERSION, SurfaceContractError, SurfaceKind,
-    SurfaceRegistration,
-};
 pub use wrap::{PlanError, validate_plan, wrap_plan};
+pub use zero_abi::{
+    CapabilityDescriptor, DomainAdapterRegistration, GlobalRegistration, RegistrationError,
+    SURFACE_CONTRACT_VERSION, SurfaceContractError, SurfaceKind, SurfaceRegistration,
+};

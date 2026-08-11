@@ -139,7 +139,7 @@ See the [Release-N engine MCP compatibility policy](mcp-compatibility-policy.md)
 
 ### Shared surface registration
 
-`zero-codemode` exposes `SurfaceRegistration` as the hub-owned install-time
+`zero-abi` exposes `SurfaceRegistration` as the hub-owned install-time
 contract. An engine adapter supplies one `DomainAdapterRegistration` containing
 its `CanonicalRegistry`, effect/approval policy, `RefOwnership`, telemetry
 schema, and capability descriptors. The host converts only a CodeMode
@@ -152,9 +152,10 @@ an unrestricted JavaScript runtime, or engine-domain code. An engine compatibili
 thin MCP carrier, but that carrier must consume the same registration and must
 not reimplement the registry, result envelope, ref ownership, or telemetry.
 
-The hub-owned FastMCP carrier uses `McpTransportConfig`. It permits at most
-`MAX_MCP_MAX_INFLIGHT` (256) concurrent callbacks. Zero and larger values are
-rejected. The `fastmcp` compatibility transport remains an optional feature.
+The hub-owned FastMCP carrier lives in the `zero-mcp` crate and uses
+`McpTransportConfig`. It permits at most `MAX_MCP_MAX_INFLIGHT` (256)
+concurrent callbacks. Zero and larger values are rejected. The `fastmcp`
+compatibility transport remains an optional feature of `zero-mcp`.
 
 ## Harness-neutral raw-worker client
 

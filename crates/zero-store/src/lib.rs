@@ -16,6 +16,7 @@
 //! removal requires the exclusive one, so a collector's liveness recheck and
 //! its unlink cannot be split by a concurrent publisher.
 
+mod attempt_journal;
 mod cas;
 mod durable_journal;
 mod fs_replace;
@@ -25,6 +26,19 @@ mod metadata;
 mod store_root;
 mod zbf;
 
+pub use attempt_journal::{
+    ATTEMPT_BINDING_SCHEMA_VERSION_V1, ATTEMPT_JOURNAL_MAX_ENTRIES_V1,
+    ATTEMPT_JOURNAL_MAX_RECORD_BYTES_V1, ATTEMPT_JOURNAL_SCHEMA_VERSION_V1,
+    ATTEMPT_RECEIPT_SCHEMA_VERSION_V1, AttemptAbortReasonV1, AttemptBindingV1, AttemptBoundaryV1,
+    AttemptEntryV1, AttemptEvidenceV1, AttemptFailureCodeV1, AttemptFaultPlanV1,
+    AttemptJournalErrorV1, AttemptJournalPathsV1, AttemptRecoveryOutcomeV1,
+    AttemptRecoveryReceiptV1, AttemptStateV1, abort_attempt_v1, abort_attempt_with_fault_v1,
+    attempt_journal_contract_v1, mark_dispatch_crossed_v1, mark_dispatch_crossed_with_fault_v1,
+    mark_failed_v1, mark_failed_with_fault_v1, mark_indeterminate_v1,
+    mark_indeterminate_with_fault_v1, mark_succeeded_v1, mark_succeeded_with_fault_v1,
+    prepare_attempt_v1, prepare_attempt_with_fault_v1, read_attempt_entry_v1,
+    read_current_attempt_v1, recover_attempt_v1, recover_attempt_with_fault_v1,
+};
 pub use cas::{
     CAS_LAYOUT, CAS_LAYOUT_VERSION, CAS_MAX_OBJECT_BYTES, CAS_QUARANTINE_DIR, CAS_TEMP_REAP_AGE,
     CasError, PutOutcome, SharedCas,

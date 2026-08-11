@@ -1,4 +1,3 @@
-use std::collections::BTreeSet;
 use std::fmt;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
@@ -7,9 +6,8 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
-use serde::{Deserialize, Serialize};
 use serde_json::Value as JsonValue;
-use zero_abi::ZeroResultV1;
+use zero_abi::{CapabilityDescriptor, GlobalRegistration, RegistrationError, ZeroResultV1};
 use zero_store::SharedCas;
 
 use crate::{HostLimits, LimitError, PlanError};
@@ -18,71 +16,6 @@ static RUNTIME_CREATIONS: AtomicU64 = AtomicU64::new(0);
 
 pub fn runtime_creation_count() -> u64 {
     RUNTIME_CREATIONS.load(Ordering::Relaxed) + crate::interpreter::interpreter_creation_count()
-}
-
-#[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct CapabilityDescriptor {
-    pub surface: String,
-    pub method: String,
-}
-
-impl CapabilityDescriptor {
-    pub fn new(surface: impl Into<String>, method: impl Into<String>) -> Self {
-        Self {
-            surface: surface.into(),
-            method: method.into(),
-        }
-    }
-}
-
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct GlobalRegistration {
-    pub root: String,
-    pub capabilities: Vec<CapabilityDescriptor>,
-}
-
-impl GlobalRegistration {
-    pub fn zero(capabilities: Vec<CapabilityDescriptor>) -> Self {
-        Self {
-            root: "zero".to_owned(),
-            capabilities,
-        }
-    }
-
-    pub fn validate(&self) -> Result<(), RegistrationError> {
-        validate_identifier(&self.root)
-            .map_err(|_| RegistrationError::InvalidGlobal(self.root.clone()))?;
-        let mut seen = BTreeSet::new();
-        for capability in &self.capabilities {
-            if validate_identifier(&capability.surface).is_err()
-                || validate_identifier(&capability.method).is_err()
-            {
-                return Err(RegistrationError::InvalidCapability(capability.clone()));
-            }
-            if !seen.insert(capability.clone()) {
-                return Err(RegistrationError::DuplicateCapability(capability.clone()));
-            }
-        }
-        Ok(())
-    }
-}
-
-fn validate_identifier(value: &str) -> Result<(), ()> {
-    if matches!(value, "__proto__" | "prototype" | "constructor") {
-        return Err(());
-    }
-    let mut chars = value.chars();
-    let first = chars.next().ok_or(())?;
-    if !(first == '_' || first == '$' || first.is_ascii_alphabetic()) {
-        return Err(());
-    }
-    if chars.all(|ch| ch == '_' || ch == '$' || ch.is_ascii_alphanumeric()) {
-        Ok(())
-    } else {
-        Err(())
-    }
 }
 
 /// Deadline and serialization budget supplied to a connector dispatch.
@@ -319,29 +252,6 @@ impl Host {
         )
     }
 }
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub enum RegistrationError {
-    InvalidGlobal(String),
-    InvalidCapability(CapabilityDescriptor),
-    DuplicateCapability(CapabilityDescriptor),
-}
-
-impl fmt::Display for RegistrationError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::InvalidGlobal(name) => write!(f, "invalid global name: {name}"),
-            Self::InvalidCapability(cap) => {
-                write!(f, "invalid capability: {}.{}", cap.surface, cap.method)
-            }
-            Self::DuplicateCapability(cap) => {
-                write!(f, "duplicate capability: {}.{}", cap.surface, cap.method)
-            }
-        }
-    }
-}
-
-impl std::error::Error for RegistrationError {}
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum HostError {

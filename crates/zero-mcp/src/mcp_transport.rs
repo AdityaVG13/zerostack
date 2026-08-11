@@ -14,9 +14,9 @@ use std::time::{Duration, Instant};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use crate::{SurfaceContractError, SurfaceKind, SurfaceRegistration};
 #[cfg(feature = "fastmcp")]
 use zero_abi::CanonicalResource;
+use zero_abi::{SurfaceContractError, SurfaceKind, SurfaceRegistration};
 
 /// Default compatibility behavior: no hub-imposed outer deadline. Domain
 /// operations retain their own declared deadlines and remain cancellable.
@@ -1565,12 +1565,12 @@ mod tests {
     }
 
     fn test_registration(surface: SurfaceKind) -> SurfaceRegistration {
-        use crate::{CapabilityDescriptor, DomainAdapterRegistration};
         use zero_abi::{
             ALL_DISPATCH_ERROR_CLASSES, ApprovalRequirement, CanonicalOperation, CanonicalRegistry,
             EffectClass, EffectPolicy, EngineIdentity, PermitRequirement, RefOwnership,
             RegistryEngine, TelemetrySchema,
         };
+        use zero_abi::{CapabilityDescriptor, DomainAdapterRegistration};
 
         SurfaceRegistration::new(
             surface,
