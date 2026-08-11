@@ -49,10 +49,9 @@ use zero_codemode::{
 use zero_ref::{ZeroRefV1, ZeroScheme};
 use zero_store::{
     AttemptBindingV1, AttemptJournalPathsV1, AttemptRecoveryReceiptV1, AttemptStateV1,
-    DurableProfileIdV1, Engine as StoreEngine, ResolvedStore, SharedCas, atomic_write_file,
-    current_reachability_snapshot, gc_project_id, mark_dispatch_crossed_v1, mark_indeterminate_v1,
-    mark_succeeded_v1, prepare_attempt_v1, publish_reachability_snapshot, read_current_attempt_v1,
-    recover_attempt_v1,
+    DurableProfileIdV1, SharedCas, atomic_write_file, current_reachability_snapshot, gc_project_id,
+    mark_dispatch_crossed_v1, mark_indeterminate_v1, mark_succeeded_v1, prepare_attempt_v1,
+    publish_reachability_snapshot, read_current_attempt_v1, recover_attempt_v1,
 };
 use zerostack_machine_permit::{
     MachinePermit, MachinePermitHeartbeat, PERMIT_HEARTBEAT_INTERVAL, PermitOwnerMetadata,
@@ -250,13 +249,11 @@ fn mutation_effect_class(engine: EngineIdentity, operation: &str) -> Option<Effe
     }
 }
 
-/// Directory that hosts every mutation attempt journal for the session store
-/// rooted at `root` (canonicalized). Layout:
+/// Directory that hosts every mutation attempt journal below an explicit
+/// session state root. No ambient store resolver may redirect it. Layout:
 /// `<store>/attempts/g<generation>/r<request_id>/<seq>/attempt-<sequence>.json`.
 pub(crate) fn attempts_root_for(root: &Path) -> PathBuf {
-    ResolvedStore::resolve_from_process(root, StoreEngine::TokenZero, &[])
-        .engine_dir()
-        .join("attempts")
+    root.join("attempts")
 }
 
 fn attempt_sequence_seed(session_id: &str) -> u64 {
@@ -545,7 +542,10 @@ struct ZsxDispatch {
 pub(crate) struct ZsxState {
     adapters: BTreeMap<EngineIdentity, Arc<dyn DomainAdapter>>,
     engine_locks: [Mutex<()>; 3],
-    root: PathBuf,
+    /// Authorized workspace root used for dispatch/grant policy only.
+    workspace_root: PathBuf,
+    /// Session-owned durable state root used for CAS, journals, and GC.
+    state_root: PathBuf,
     session_id: String,
     reachable_blobs: Mutex<BTreeMap<EngineIdentity, BTreeSet<String>>>,
     /// Root of the per-request mutation attempt journals (durable store).
@@ -576,6 +576,15 @@ impl ZsxConnector {
         session_id: String,
         adapters: BTreeMap<EngineIdentity, Arc<dyn DomainAdapter>>,
     ) -> Result<Self, HostError> {
+        Self::new_with_state_root(root.clone(), root, session_id, adapters)
+    }
+
+    pub(crate) fn new_with_state_root(
+        workspace_root: PathBuf,
+        state_root: PathBuf,
+        session_id: String,
+        adapters: BTreeMap<EngineIdentity, Arc<dyn DomainAdapter>>,
+    ) -> Result<Self, HostError> {
         for (engine, adapter) in &adapters {
             adapter
                 .binding()
@@ -589,12 +598,13 @@ impl ZsxConnector {
                 )));
             }
         }
-        let attempts_root = attempts_root_for(&root);
+        let attempts_root = attempts_root_for(&state_root);
         let sequence_seed = attempt_sequence_seed(&session_id);
         let state = Arc::new(ZsxState {
             adapters,
             engine_locks: [Mutex::new(()), Mutex::new(()), Mutex::new(())],
-            root,
+            workspace_root,
+            state_root,
             session_id,
             reachable_blobs: Mutex::new(BTreeMap::new()),
             attempts_root,
@@ -955,7 +965,7 @@ fn run_dispatch(state: &ZsxState, dispatch: &ZsxDispatch) -> Result<String, Conn
                 .request
                 .validate_approval_grant(
                     dispatch.engine,
-                    state.root.to_str().unwrap_or_default(),
+                    state.workspace_root.to_str().unwrap_or_default(),
                     &state.session_id,
                     EffectClass::ApprovalRequiredMutation,
                     now_ms(),
@@ -1053,11 +1063,11 @@ fn acquire_dispatch_permit(
     let Some(class) = dispatch_permit_class(dispatch.engine, &dispatch.request.op) else {
         return Ok(None);
     };
-    let base = try_scoped_permit_base_for(class.as_str(), Some(&state.root)).map_err(|error| {
-        ConnectorError::new(format!("resolve {} permit scope: {error}", class.as_str()))
-    })?;
+    let base = try_scoped_permit_base_for(class.as_str(), Some(&state.workspace_root)).map_err(
+        |error| ConnectorError::new(format!("resolve {} permit scope: {error}", class.as_str())),
+    )?;
     let owner = PermitOwnerMetadata::new(
-        state.root.to_string_lossy(),
+        state.workspace_root.to_string_lossy(),
         dispatch.request.op.clone(),
         execution_session_ref(&state.session_id, dispatch.execution),
         execution_cell_ref(&state.session_id, dispatch.execution),
@@ -1093,7 +1103,7 @@ fn retain_reachability(
     engine: EngineIdentity,
     refs: &[String],
 ) -> Result<(), ConnectorError> {
-    let cas = SharedCas::open(&state.root);
+    let cas = SharedCas::open(&state.state_root);
     let mut batch = BTreeSet::new();
     for reference in refs {
         if !reference.contains("://blob/") {
@@ -1126,14 +1136,14 @@ fn retain_reachability(
 }
 
 fn publish_reachability(state: &ZsxState) -> Result<(), HostError> {
-    let project_id = gc_project_id(&state.root)
+    let project_id = gc_project_id(&state.state_root)
         .map_err(|error| HostError::Connector(format!("derive GC project identity: {error}")))?;
     let retained = state
         .reachable_blobs
         .lock()
         .map_err(|_| HostError::Connector("reachability lock poisoned".into()))?
         .clone();
-    let cas = SharedCas::open(&state.root);
+    let cas = SharedCas::open(&state.state_root);
     for engine in [
         EngineIdentity::FsZero,
         EngineIdentity::GraphZero,
@@ -1149,7 +1159,7 @@ fn publish_reachability(state: &ZsxState) -> Result<(), HostError> {
             })?;
         }
         let producer = engine.as_str();
-        let epoch = current_reachability_snapshot(&state.root, producer, &project_id)
+        let epoch = current_reachability_snapshot(&state.state_root, producer, &project_id)
             .map_err(|error| {
                 HostError::Connector(format!("read {producer} reachability epoch: {error}"))
             })?
@@ -1159,7 +1169,7 @@ fn publish_reachability(state: &ZsxState) -> Result<(), HostError> {
                 })
             })?;
         publish_reachability_snapshot(
-            &state.root,
+            &state.state_root,
             producer,
             &project_id,
             epoch,
@@ -1339,7 +1349,8 @@ mod tests {
         ZsxState {
             adapters: BTreeMap::new(),
             engine_locks: [Mutex::new(()), Mutex::new(()), Mutex::new(())],
-            root: root.to_path_buf(),
+            workspace_root: root.to_path_buf(),
+            state_root: root.to_path_buf(),
             session_id: session_id.to_owned(),
             reachable_blobs: Mutex::new(BTreeMap::new()),
             attempts_root: attempts_root_for(root),
@@ -1553,6 +1564,52 @@ mod tests {
         let first = attempts_root_for(&root);
         let second = attempts_root_for(&root);
         assert_eq!(first, second);
-        assert!(first.ends_with("attempts"));
+        assert_eq!(first, root.join("attempts"));
+    }
+
+    #[test]
+    fn distinct_state_root_contains_attempts_cas_and_gc_publication() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let workspace_root = dir.path().join("workspace");
+        let state_root = dir.path().join("state");
+        std::fs::create_dir_all(&workspace_root).expect("workspace root");
+        std::fs::create_dir_all(&state_root).expect("state root");
+
+        let connector = ZsxConnector::new_with_state_root(
+            workspace_root.clone(),
+            state_root.clone(),
+            "sess-state-root".to_owned(),
+            BTreeMap::new(),
+        )
+        .expect("connector");
+
+        assert_eq!(connector.state.workspace_root, workspace_root);
+        assert_eq!(connector.state.state_root, state_root);
+        assert_eq!(connector.state.attempts_root, state_root.join("attempts"));
+        let cas = SharedCas::open(&state_root);
+        let hash = cas.put(b"state-root-only ref").expect("publish CAS object");
+        retain_reachability(
+            &connector.state,
+            EngineIdentity::FsZero,
+            &[format!("fz://blob/{hash}")],
+        )
+        .expect("retain state-root ref");
+        connector
+            .publish_reachability()
+            .expect("publish reachability");
+
+        assert!(!workspace_root.join("gc").exists());
+        assert!(!workspace_root.join("blobs").exists());
+        let project_id = gc_project_id(&state_root).expect("project identity");
+        for producer in ["fszero", "graphzero", "tokenzero"] {
+            let snapshot = current_reachability_snapshot(&state_root, producer, &project_id)
+                .expect("read reachability")
+                .unwrap_or_else(|| panic!("missing {producer} reachability under state root"));
+            if producer == "fszero" {
+                assert_eq!(snapshot.blob_hashes, vec![hash.clone()]);
+            } else {
+                assert!(snapshot.blob_hashes.is_empty());
+            }
+        }
     }
 }
