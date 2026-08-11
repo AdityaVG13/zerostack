@@ -2,7 +2,7 @@
   "schema": "zerostack.temporary-adoption-ledger.v1",
   "version": 1,
   "generated_from_heads": {
-    "zerostack": "c06eeb38a905e7520770b26e30a1f0adddab9242",
+    "zerostack": "05177427a58cdb908b5026c385cda79f73488b58",
     "fszero": "5ceb193f191b0988dbe41c34a021f599cd10de8e",
     "graphzero": "3d778f57e7390c1f0f6cd8777c8f5f69ba45a99a",
     "tokenzero": "333e32cb1430ea893140f657dab396bd10434022"

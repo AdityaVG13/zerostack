@@ -2,7 +2,7 @@
   "schema": "zerostack.loc-ownership.v1",
   "version": 1,
   "generated_from_heads": {
-    "zerostack": "c06eeb38a905e7520770b26e30a1f0adddab9242",
+    "zerostack": "05177427a58cdb908b5026c385cda79f73488b58",
     "fszero": "5ceb193f191b0988dbe41c34a021f599cd10de8e",
     "graphzero": "3d778f57e7390c1f0f6cd8777c8f5f69ba45a99a",
     "tokenzero": "333e32cb1430ea893140f657dab396bd10434022"
@@ -349,47 +349,17 @@
       "classification": "shared-candidate",
       "rule": "hub-owned-substrate",
       "justification": "hub implementation already owned by zero-codemode",
-      "blob_digest": "212b67fa90dee0bdd546b9e9037523f0bf153552",
+      "blob_digest": "c834a9599d8ae1aebc4043faef420863676491e2",
       "hub_target": "zero-codemode"
     },
     {
       "repo": "zerostack",
-      "path": "crates/zero-codemode/src/bin/zerostack-codemode-host.rs",
+      "path": "crates/zero-codemode/src/cancellation.rs",
       "language": "Rust",
       "classification": "shared-candidate",
       "rule": "hub-owned-substrate",
       "justification": "hub implementation already owned by zero-codemode",
-      "blob_digest": "716994c59f8503d9b284268b5051aa46a0f8ee49",
-      "hub_target": "zero-codemode"
-    },
-    {
-      "repo": "zerostack",
-      "path": "crates/zero-codemode/src/bin/zerostack-session.rs",
-      "language": "Rust",
-      "classification": "shared-candidate",
-      "rule": "hub-owned-substrate",
-      "justification": "hub implementation already owned by zero-codemode",
-      "blob_digest": "4c18a1acd24f27aae6f1fa93b26a01f2dbd11881",
-      "hub_target": "zero-codemode"
-    },
-    {
-      "repo": "zerostack",
-      "path": "crates/zero-codemode/src/bin/zerostack.rs",
-      "language": "Rust",
-      "classification": "shared-candidate",
-      "rule": "hub-owned-substrate",
-      "justification": "hub implementation already owned by zero-codemode",
-      "blob_digest": "c7c5dbe816738e104229a9e4b13d9b41936ae3bc",
-      "hub_target": "zero-codemode"
-    },
-    {
-      "repo": "zerostack",
-      "path": "crates/zero-codemode/src/discovery.rs",
-      "language": "Rust",
-      "classification": "shared-candidate",
-      "rule": "hub-owned-substrate",
-      "justification": "hub implementation already owned by zero-codemode",
-      "blob_digest": "872cfc239b80da1282b4ea24f0e587dcea506910",
+      "blob_digest": "0ca34eab8532ebdfa76273023dd481f90e9f6dad",
       "hub_target": "zero-codemode"
     },
     {
@@ -429,7 +399,7 @@
       "classification": "shared-candidate",
       "rule": "hub-owned-substrate",
       "justification": "hub implementation already owned by zero-codemode",
-      "blob_digest": "bcbb53895cd1ae6d280d4107b709f30ad6d62785",
+      "blob_digest": "2c5dfb90bf897bbe6584fc749a0460ee0c510e73",
       "hub_target": "zero-codemode"
     },
     {
@@ -444,52 +414,12 @@
     },
     {
       "repo": "zerostack",
-      "path": "crates/zero-codemode/src/manifest.rs",
-      "language": "Rust",
-      "classification": "shared-candidate",
-      "rule": "hub-owned-substrate",
-      "justification": "hub implementation already owned by zero-codemode",
-      "blob_digest": "f64a22c087b945ee36f92a36b6728cc95897617a",
-      "hub_target": "zero-codemode"
-    },
-    {
-      "repo": "zerostack",
-      "path": "crates/zero-codemode/src/node.rs",
-      "language": "Rust",
-      "classification": "shared-candidate",
-      "rule": "hub-owned-substrate",
-      "justification": "hub implementation already owned by zero-codemode",
-      "blob_digest": "6c2d6084fda4ecc20fead1fca0c723161a47ecfc",
-      "hub_target": "zero-codemode"
-    },
-    {
-      "repo": "zerostack",
-      "path": "crates/zero-codemode/src/preflight.rs",
-      "language": "Rust",
-      "classification": "shared-candidate",
-      "rule": "hub-owned-substrate",
-      "justification": "hub implementation already owned by zero-codemode",
-      "blob_digest": "39e9d35efa3d2e6848732588372f72c92b850dc9",
-      "hub_target": "zero-codemode"
-    },
-    {
-      "repo": "zerostack",
-      "path": "crates/zero-codemode/src/session.rs",
-      "language": "Rust",
-      "classification": "shared-candidate",
-      "rule": "hub-owned-substrate",
-      "justification": "hub implementation already owned by zero-codemode",
-      "blob_digest": "67f2910678f53fedf0b650721d9b40f316b8c7ca",
-      "hub_target": "zero-codemode"
-    },
-    {
-      "repo": "zerostack",
       "path": "crates/zero-codemode/src/worker.rs",
       "language": "Rust",
       "classification": "shared-candidate",
       "rule": "hub-owned-substrate",
       "justification": "hub implementation already owned by zero-codemode",
-      "blob_digest": "223a2defc08b3d2b8eecced004d7e0addd70fe78",
+      "blob_digest": "27d4b76787ae3d6494395c81ee21c0d2e36dabd7",
       "hub_target": "zero-codemode"
     },
     {
@@ -500,26 +430,6 @@
       "rule": "hub-owned-substrate",
       "justification": "hub implementation already owned by zero-codemode",
       "blob_digest": "e60f01da4b58b6e8e4a7212fa96620b6ec8000cb",
-      "hub_target": "zero-codemode"
-    },
-    {
-      "repo": "zerostack",
-      "path": "crates/zero-codemode/tests/discovery_precedence.rs",
-      "language": "Rust",
-      "classification": "shared-candidate",
-      "rule": "hub-owned-substrate",
-      "justification": "hub implementation already owned by zero-codemode",
-      "blob_digest": "4059283c714405584deae0dde14bd502dfe54b6e",
-      "hub_target": "zero-codemode"
-    },
-    {
-      "repo": "zerostack",
-      "path": "crates/zero-codemode/tests/doctor.rs",
-      "language": "Rust",
-      "classification": "shared-candidate",
-      "rule": "hub-owned-substrate",
-      "justification": "hub implementation already owned by zero-codemode",
-      "blob_digest": "49fe8a006f2aa6f4a97e6d7baaed87fe76124c0c",
       "hub_target": "zero-codemode"
     },
     {
@@ -540,76 +450,6 @@
       "rule": "hub-owned-substrate",
       "justification": "hub implementation already owned by zero-codemode",
       "blob_digest": "0cef618a7660c4040485ba5b7b914c16c5e7cd18",
-      "hub_target": "zero-codemode"
-    },
-    {
-      "repo": "zerostack",
-      "path": "crates/zero-codemode/tests/locate_manifest.rs",
-      "language": "Rust",
-      "classification": "shared-candidate",
-      "rule": "hub-owned-substrate",
-      "justification": "hub implementation already owned by zero-codemode",
-      "blob_digest": "a86de555e61aeb3af97d92cc892fa6fae4d795e5",
-      "hub_target": "zero-codemode"
-    },
-    {
-      "repo": "zerostack",
-      "path": "crates/zero-codemode/tests/node_resolution.rs",
-      "language": "Rust",
-      "classification": "shared-candidate",
-      "rule": "hub-owned-substrate",
-      "justification": "hub implementation already owned by zero-codemode",
-      "blob_digest": "46e76f538bcb69a42f90e4a77ad1d58c550d9179",
-      "hub_target": "zero-codemode"
-    },
-    {
-      "repo": "zerostack",
-      "path": "crates/zero-codemode/tests/real_worker_smoke.rs",
-      "language": "Rust",
-      "classification": "shared-candidate",
-      "rule": "hub-owned-substrate",
-      "justification": "hub implementation already owned by zero-codemode",
-      "blob_digest": "4dc9565d5188231ae8fc62255fae6f9f2ba808e7",
-      "hub_target": "zero-codemode"
-    },
-    {
-      "repo": "zerostack",
-      "path": "crates/zero-codemode/tests/session_sidecar.rs",
-      "language": "Rust",
-      "classification": "shared-candidate",
-      "rule": "hub-owned-substrate",
-      "justification": "hub implementation already owned by zero-codemode",
-      "blob_digest": "78d9dde517fbc12f7ad0f159f9ded41b7ba4999d",
-      "hub_target": "zero-codemode"
-    },
-    {
-      "repo": "zerostack",
-      "path": "crates/zero-codemode/tests/sidecar_protocol.rs",
-      "language": "Rust",
-      "classification": "shared-candidate",
-      "rule": "hub-owned-substrate",
-      "justification": "hub implementation already owned by zero-codemode",
-      "blob_digest": "4659de1b411a17e2e68eddd9f97d7422e7ff845a",
-      "hub_target": "zero-codemode"
-    },
-    {
-      "repo": "zerostack",
-      "path": "crates/zero-codemode/tests/tokenzero_probe.rs",
-      "language": "Rust",
-      "classification": "shared-candidate",
-      "rule": "hub-owned-substrate",
-      "justification": "hub implementation already owned by zero-codemode",
-      "blob_digest": "6187596c912fb324f98fdbbe2fddede181819ced",
-      "hub_target": "zero-codemode"
-    },
-    {
-      "repo": "zerostack",
-      "path": "crates/zero-codemode/tests/windows_session.rs",
-      "language": "Rust",
-      "classification": "shared-candidate",
-      "rule": "hub-owned-substrate",
-      "justification": "hub implementation already owned by zero-codemode",
-      "blob_digest": "e071fd65570593b52936f3a3739f29216da0eef0",
       "hub_target": "zero-codemode"
     },
     {
@@ -1459,7 +1299,7 @@
       "classification": "shared-candidate",
       "rule": "hub-owned-substrate",
       "justification": "hub implementation already owned by zsx-core",
-      "blob_digest": "fffc1a7b919e753bdc135f8a875497c202e6f36d",
+      "blob_digest": "cd0b47fccb3398ad90e6ad9485b81fe0e36e3f43",
       "hub_target": "zsx-core"
     },
     {
@@ -1469,7 +1309,7 @@
       "classification": "shared-candidate",
       "rule": "hub-owned-substrate",
       "justification": "hub implementation already owned by zsx-core",
-      "blob_digest": "d5b509a1ac36f97420a82e367a6fb9fb83d3f970",
+      "blob_digest": "404f8271735dcd38df73e37b2ee5f4923bf57a1d",
       "hub_target": "zsx-core"
     },
     {
@@ -1489,7 +1329,7 @@
       "classification": "shared-candidate",
       "rule": "hub-owned-substrate",
       "justification": "hub implementation already owned by zsx-core",
-      "blob_digest": "1e5cb6e76c9a663a4671feae668e85d48d0f359b",
+      "blob_digest": "42f31fe444ba8b7f3fb15eb384bf3058713f22da",
       "hub_target": "zsx-core"
     },
     {
@@ -1509,7 +1349,7 @@
       "classification": "shared-candidate",
       "rule": "hub-owned-substrate",
       "justification": "hub implementation already owned by zsx-core",
-      "blob_digest": "96c8d67c4580e2c0b3938ec46090aa39e9ebdeac",
+      "blob_digest": "4a268b26ca10fb5faaaa66409432fed389632c9c",
       "hub_target": "zsx-core"
     },
     {
@@ -1529,7 +1369,7 @@
       "classification": "shared-candidate",
       "rule": "hub-owned-substrate",
       "justification": "hub implementation already owned by zsx-core",
-      "blob_digest": "6ab22631b5561fba462acf387f8c0ec895f3e540",
+      "blob_digest": "4f9ce6e48f9d5c4bd44669eeddbbb588babd9892",
       "hub_target": "zsx-core"
     },
     {
@@ -1539,7 +1379,7 @@
       "classification": "shared-candidate",
       "rule": "hub-owned-substrate",
       "justification": "hub implementation already owned by zsx-core",
-      "blob_digest": "10edad12b31599aee604c1008debb7debcebe961",
+      "blob_digest": "7b08dc06aa85c4533786d2da2a9be1506cc97231",
       "hub_target": "zsx-core"
     },
     {
@@ -1889,7 +1729,7 @@
       "classification": "shared-candidate",
       "rule": "hub-owned-substrate",
       "justification": "hub implementation already owned by zero-testkit",
-      "blob_digest": "4fc7fdacd1372d3837da58145d6f863c17edd9af",
+      "blob_digest": "c9e0cf293d4d489016c25a35535bcd386fafc069",
       "hub_target": "zero-testkit"
     },
     {
@@ -2159,7 +1999,7 @@
       "classification": "shared-candidate",
       "rule": "hub-owned-substrate",
       "justification": "hub implementation already owned by zero-testkit",
-      "blob_digest": "1269c6fc2bb7638c75b1a1273c13a1fe941ddc1d",
+      "blob_digest": "be9480da00e9654804c171b1fb56936a592d15fa",
       "hub_target": "zero-testkit"
     },
     {
@@ -2179,7 +2019,7 @@
       "classification": "shared-candidate",
       "rule": "hub-owned-substrate",
       "justification": "hub implementation already owned by zero-testkit",
-      "blob_digest": "ecf697361abc17516c494f3180d6f9be2880fba9",
+      "blob_digest": "8e8f345272a7435829e4a9aea7c4a1e7bd79bf65",
       "hub_target": "zero-testkit"
     },
     {
