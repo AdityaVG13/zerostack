@@ -129,25 +129,29 @@ fn run() -> Result<serde_json::Value, Box<dyn std::error::Error>> {
     if ready_generation.is_some_and(|ready| ready != generation) {
         return Err("session generation changed during startup".into());
     }
+    let request_nonce = random_capability()?;
+    let request_id = u64::from_str_radix(&request_nonce[..16], 16)?.max(1);
     send(
         &mut stream,
-        &serde_json::json!({"type":"execute","id":1,"generation":generation,"root":root,"source":source,"timeout_ms":30000}),
+        &serde_json::json!({"type":"execute","id":request_id,"generation":generation,"root":root,"source":source,"timeout_ms":30000}),
     )?;
     let result = read(&mut reader)?;
     if result["protocol"] != SESSION_PROTOCOL
-        || result["id"] != 1
+        || result["id"] != request_id
         || result["generation"] != generation
     {
         return Err("invalid execute response binding".into());
     }
     if let (Some(c), Some(stop_token)) = (child.as_mut(), shutdown_token) {
+        let shutdown_nonce = random_capability()?;
+        let shutdown_id = u64::from_str_radix(&shutdown_nonce[..16], 16)?.max(1);
         send(
             &mut stream,
-            &serde_json::json!({"type":"shutdown","id":2,"token":stop_token}),
+            &serde_json::json!({"type":"shutdown","id":shutdown_id,"token":stop_token}),
         )?;
         let stopped = read(&mut reader)?;
         if stopped["protocol"] != SESSION_PROTOCOL
-            || stopped["id"] != 2
+            || stopped["id"] != shutdown_id
             || stopped["generation"] != generation
             || stopped["ok"] != true
         {

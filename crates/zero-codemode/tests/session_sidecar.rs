@@ -1,5 +1,5 @@
 #![cfg(all(unix, feature = "worker-fixture"))]
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 use std::{
     io::{BufRead, BufReader, Read, Write},
     os::unix::{fs::PermissionsExt, net::UnixStream},
@@ -10,7 +10,7 @@ use std::{
 use tempfile::TempDir;
 #[cfg(feature = "worker-fixture")]
 use zero_codemode::session::SessionExecutor;
-use zero_store::{Engine, ResolvedStore, SharedCas, ensure_layout};
+use zero_store::{ensure_layout, Engine, ResolvedStore, SharedCas};
 use zerostack_machine_permit::session_owner::ProcessIdentity;
 fn start(owner: ProcessIdentity) -> (TempDir, std::process::Child, String, String, u64) {
     start_configured(owner, |_, _| {})
@@ -155,6 +155,44 @@ fn connect_authenticated(
 }
 
 #[test]
+fn repeated_zsx_calls_use_distinct_request_ids() {
+    let (d, mut session, token, shutdown_token, generation) =
+        start(ProcessIdentity::current().unwrap());
+    let socket = d.path().join("runtime/session.sock");
+    let mut ids = std::collections::HashSet::new();
+    for expected in [1_u64, 2] {
+        let mut command = Command::new(env!("CARGO_BIN_EXE_zsx"));
+        command
+            .args(["exec", "-C", d.path().to_str().unwrap()])
+            .env("ZEROSTACK_SESSION_SOCKET", &socket)
+            .env("ZEROSTACK_SESSION_TOKEN", &token)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped());
+        let mut child = command.spawn().unwrap();
+        write!(child.stdin.take().unwrap(), "return {expected};").unwrap();
+        let output = child.wait_with_output().unwrap();
+        assert!(
+            output.status.success(),
+            "stdout={} stderr={}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let response: Value = serde_json::from_slice(&output.stdout).unwrap();
+        assert_eq!(response["ok"], true, "{response}");
+        assert_eq!(response["generation"], generation, "{response}");
+        assert!(ids.insert(response["id"].as_u64().unwrap()), "{response}");
+    }
+    let (mut stream, mut reader, _) = connect_authenticated(&socket, &token);
+    send(
+        &mut stream,
+        json!({"type":"shutdown","id":u64::MAX,"token":shutdown_token}),
+    );
+    assert_eq!(read(&mut reader)["ok"], true);
+    assert!(session.wait().unwrap().success());
+}
+
+#[test]
 fn authenticated_cross_surface_and_rejections() {
     let (d, mut c, t, shutdown_token, _generation) = start(ProcessIdentity::current().unwrap());
     let sock = d.path().join("runtime/session.sock");
@@ -239,18 +277,14 @@ fn authenticated_cross_surface_and_rejections() {
     );
     let invalid_shell = exact_result(d.path(), &read(&mut r));
     assert_eq!(invalid_shell["name"], "TypeError");
-    assert!(
-        invalid_shell["message"]
-            .as_str()
-            .unwrap()
-            .contains("unknown option 'raw'")
-    );
-    assert!(
-        invalid_shell["message"]
-            .as_str()
-            .unwrap()
-            .contains(r#"mode: "exact""#)
-    );
+    assert!(invalid_shell["message"]
+        .as_str()
+        .unwrap()
+        .contains("unknown option 'raw'"));
+    assert!(invalid_shell["message"]
+        .as_str()
+        .unwrap()
+        .contains(r#"mode: "exact""#));
     send(
         &mut s,
         json!({"type":"execute","id":3,"generation":generation,"root":"/","source":"return 1"}),
@@ -321,11 +355,9 @@ fn approval_grant_reaches_one_exact_worker_call_and_cannot_replay_or_leak() {
     assert_eq!(forwarded["root"], root.to_string_lossy().as_ref());
     assert_eq!(forwarded["operation"], "fs.write");
     assert_eq!(forwarded["effect"], "approval_required_mutation");
-    assert!(
-        forwarded["request_id"]
-            .as_str()
-            .is_some_and(|id| !id.is_empty())
-    );
+    assert!(forwarded["request_id"]
+        .as_str()
+        .is_some_and(|id| !id.is_empty()));
 
     let mut replay = grant;
     replay["request_id"] = json!(12);
@@ -357,12 +389,10 @@ fn approval_grant_reaches_one_exact_worker_call_and_cannot_replay_or_leak() {
     let unapproved = read(&mut reader);
     assert_eq!(unapproved["ok"], false, "{unapproved}");
     assert_eq!(unapproved["code"], "backend_execution");
-    assert!(
-        unapproved["error"]
-            .as_str()
-            .unwrap()
-            .contains("worker approval required or denied")
-    );
+    assert!(unapproved["error"]
+        .as_str()
+        .unwrap()
+        .contains("worker approval required or denied"));
 
     send(
         &mut stream,
@@ -1171,6 +1201,1081 @@ fn real_workers_execute_one_cross_surface_plan() {
     );
 }
 
+// ── Native lifecycle/resource evidence (q6am gate) ──────────────────────
+//
+// Thresholds are named Q6AM_* and use only integer units (ms, us, ppm,
+// basis points, counts) so no float nondeterminism can enter the gate.
+const Q6AM_CANONICAL_SOAK_SECONDS: u64 = 1800;
+const Q6AM_SETTLE_SECONDS: u64 = 60;
+const Q6AM_STRESS_RSS_GROWTH_BYTES: u64 = 5 * 1024 * 1024;
+const Q6AM_IDLE_RSS_TARGET_BYTES: u64 = 96 * 1024 * 1024;
+const Q6AM_IDLE_RSS_HARD_CAP_BYTES: u64 = 128 * 1024 * 1024;
+const Q6AM_ACTIVE_RSS_CAP_BYTES: u64 = 256 * 1024 * 1024;
+const Q6AM_IDLE_RSS_DRIFT_BYTES: u64 = 5 * 1024 * 1024;
+const Q6AM_STABLE_COUNT_DRIFT: u64 = 0;
+const Q6AM_IDLE_CPU_AVG_BP: u64 = 10; // strictly less than 0.1%
+const Q6AM_IDLE_CPU_P99_BP: u64 = 100; // strictly less than 1%
+const Q6AM_WARM_ENTRY_P50_US: u64 = 1_000;
+const Q6AM_WARM_ENTRY_P95_US: u64 = 2_000;
+const Q6AM_SHUTDOWN_P95_MS: u64 = 250;
+const Q6AM_CRASH_REAP_P95_MS: u64 = 1_000;
+const Q6AM_COLD_START_TARGET_MS: u64 = 3_000;
+const Q6AM_COLD_START_HARD_CAP_MS: u64 = 5_000;
+const Q6AM_ZSX_ADDED_P95_US: u64 = 1_000;
+
+fn sha256_hex_file(path: &std::path::Path) -> String {
+    use sha2::{Digest, Sha256};
+    let bytes = std::fs::read(path)
+        .unwrap_or_else(|error| panic!("read {} for SHA-256: {error}", path.display()));
+    let mut hasher = Sha256::new();
+    hasher.update(&bytes);
+    let mut hex = String::with_capacity(64);
+    for byte in hasher.finalize() {
+        hex.push_str(&format!("{byte:02x}"));
+    }
+    hex
+}
+
+fn now_unix_ms() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_millis() as u64
+}
+
+/// "12.3" -> 1230 basis points (12.3%); integer-only parsing, no floats.
+fn parse_cpu_percent_bp(raw: &str) -> u64 {
+    let (whole, frac) = match raw.trim().split_once('.') {
+        Some((whole, frac)) => (whole, frac.chars().next().unwrap_or('0')),
+        None => (raw.trim(), '0'),
+    };
+    let whole: u64 = if whole.is_empty() {
+        0
+    } else {
+        whole.parse().unwrap_or(0)
+    };
+    let frac: u64 = frac.to_digit(10).unwrap_or(0) as u64;
+    whole
+        .saturating_mul(100)
+        .saturating_add(frac.saturating_mul(10))
+}
+
+/// `MM:SS.frac` or `HH:MM:SS.frac` cumulative CPU time in microseconds.
+fn parse_cpu_time_micros(raw: &str) -> u64 {
+    let mut parts = raw.trim().split(':').collect::<Vec<_>>();
+    let seconds = parts.pop().unwrap_or("0");
+    let (whole_seconds, fraction) = seconds.split_once('.').unwrap_or((seconds, ""));
+    let whole_seconds = whole_seconds.parse::<u64>().unwrap_or(0);
+    let mut fraction_micros = fraction.bytes().take(6).fold(0_u64, |value, byte| {
+        let digit = if byte.is_ascii_digit() {
+            u64::from(byte - b'0')
+        } else {
+            0
+        };
+        value.saturating_mul(10).saturating_add(digit)
+    });
+    for _ in fraction.len().min(6)..6 {
+        fraction_micros = fraction_micros.saturating_mul(10);
+    }
+    let whole_minutes = match parts.as_slice() {
+        [minutes] => minutes.parse::<u64>().unwrap_or(0),
+        [hours, minutes] => hours
+            .parse::<u64>()
+            .unwrap_or(0)
+            .saturating_mul(60)
+            .saturating_add(minutes.parse::<u64>().unwrap_or(0)),
+        _ => 0,
+    };
+    whole_minutes
+        .saturating_mul(60_000_000)
+        .saturating_add(whole_seconds.saturating_mul(1_000_000))
+        .saturating_add(fraction_micros)
+}
+
+#[test]
+fn cpu_time_parser_preserves_subsecond_precision() {
+    assert_eq!(parse_cpu_time_micros("0:00.46"), 460_000);
+    assert_eq!(parse_cpu_time_micros("12:34.5"), 754_500_000);
+    assert_eq!(parse_cpu_time_micros("01:02:03.004005"), 3_723_004_005);
+}
+
+fn lsof_available(pid: u32) -> bool {
+    Command::new("lsof")
+        .arg("-p")
+        .arg(pid.to_string())
+        .output()
+        .is_ok_and(|output| output.status.success())
+}
+
+fn count_fds(pid: u32, method: &str) -> Option<u64> {
+    match method {
+        "lsof" => {
+            let output = Command::new("lsof")
+                .arg("-p")
+                .arg(pid.to_string())
+                .output()
+                .ok()?;
+            if !output.status.success() {
+                return None;
+            }
+            let text = String::from_utf8_lossy(&output.stdout);
+            Some(
+                text.lines()
+                    .filter(|line| !line.starts_with("COMMAND"))
+                    .count() as u64,
+            )
+        }
+        "procfs" => {
+            let fd_dir = std::path::Path::new("/proc")
+                .join(pid.to_string())
+                .join("fd");
+            Some(std::fs::read_dir(fd_dir).ok()?.count() as u64)
+        }
+        _ => None,
+    }
+}
+
+fn fd_evidence_method(pid: u32) -> &'static str {
+    if lsof_available(pid) {
+        "lsof"
+    } else if std::path::Path::new("/proc")
+        .join(pid.to_string())
+        .join("fd")
+        .is_dir()
+    {
+        "procfs"
+    } else {
+        "unavailable"
+    }
+}
+
+fn native_thread_count(pid: u32) -> Option<u64> {
+    if cfg!(target_os = "macos") {
+        let output = Command::new("/bin/ps")
+            .args(["-M", "-p", &pid.to_string(), "-o", "pid="])
+            .output()
+            .ok()?;
+        if !output.status.success() {
+            return None;
+        }
+        return Some(
+            String::from_utf8_lossy(&output.stdout)
+                .lines()
+                .filter(|line| !line.trim().is_empty())
+                .count()
+                .saturating_sub(1) as u64,
+        );
+    }
+    None
+}
+
+#[derive(Clone)]
+struct TreeSample {
+    wall_unix_ms: u64,
+    rss_bytes: u64,
+    threads: u64,
+    processes: u64,
+    cpu_micros: u64,
+    cpu_percent_bp: u64,
+    fds: Option<u64>,
+    fd_evidence: &'static str,
+    pids: Vec<u32>,
+}
+
+/// One native evidence snapshot of the whole sidecar process tree (sidecar
+/// plus every descendant reachable through ppid), via ps(1) plus lsof(1)
+/// with a Linux /proc fallback for FD counts.
+fn sample_tree(sidecar_pid: u32) -> TreeSample {
+    let (all_processes, process_fields, field_count) = if cfg!(target_os = "macos") {
+        ("-A", "pid=,ppid=,rss=,%cpu=,time=", 5)
+    } else {
+        ("-e", "pid=,ppid=,rss=,pcpu=,time=,nlwp=", 6)
+    };
+    let output = Command::new("/bin/ps")
+        .args([all_processes, "-o", process_fields])
+        .output()
+        .unwrap_or_else(|error| panic!("native lifecycle evidence requires ps(1): {error}"));
+    assert!(
+        output.status.success(),
+        "ps(1) failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let mut rows: Vec<(u32, u32, u64, u64, u64, u64)> = Vec::new();
+    for line in String::from_utf8_lossy(&output.stdout).lines() {
+        let fields: Vec<&str> = line.split_whitespace().collect();
+        if fields.len() != field_count {
+            continue;
+        }
+        let (Ok(pid), Ok(ppid), Ok(rss_kb)) = (
+            fields[0].parse::<u32>(),
+            fields[1].parse::<u32>(),
+            fields[2].parse::<u64>(),
+        ) else {
+            continue;
+        };
+        let nlwp = if cfg!(target_os = "macos") {
+            0
+        } else {
+            let Ok(value) = fields[5].parse::<u64>() else {
+                continue;
+            };
+            value
+        };
+        rows.push((
+            pid,
+            ppid,
+            rss_kb,
+            parse_cpu_percent_bp(fields[3]),
+            parse_cpu_time_micros(fields[4]),
+            nlwp,
+        ));
+    }
+    let mut tree: std::collections::HashSet<u32> = std::collections::HashSet::from([sidecar_pid]);
+    loop {
+        let before = tree.len();
+        for &(pid, ppid, _, _, _, _) in &rows {
+            if tree.contains(&ppid) {
+                tree.insert(pid);
+            }
+        }
+        if tree.len() == before {
+            break;
+        }
+    }
+    let evidence = fd_evidence_method(sidecar_pid);
+    let mut sample = TreeSample {
+        wall_unix_ms: now_unix_ms(),
+        rss_bytes: 0,
+        threads: 0,
+        processes: 0,
+        cpu_micros: 0,
+        cpu_percent_bp: 0,
+        fds: Some(0),
+        fd_evidence: evidence,
+        pids: Vec::new(),
+    };
+    for &(pid, _, rss_kb, cpu_bp, cpu_secs, nlwp) in &rows {
+        if !tree.contains(&pid) {
+            continue;
+        }
+        sample.processes += 1;
+        sample.rss_bytes = sample.rss_bytes.saturating_add(rss_kb.saturating_mul(1024));
+        sample.threads = sample
+            .threads
+            .saturating_add(native_thread_count(pid).unwrap_or(nlwp));
+        sample.cpu_micros = sample.cpu_micros.saturating_add(cpu_secs);
+        sample.cpu_percent_bp = sample.cpu_percent_bp.saturating_add(cpu_bp);
+        sample.pids.push(pid);
+        if let Some(fds) = count_fds(pid, evidence) {
+            sample.fds = sample.fds.map(|total| total.saturating_add(fds));
+        } else {
+            sample.fds = None;
+        }
+    }
+    sample.pids.sort_unstable();
+    sample
+}
+
+fn percentile(values: &[u64], numerator: usize) -> u64 {
+    assert!(!values.is_empty());
+    values[((values.len() * numerator).div_ceil(100)).saturating_sub(1)]
+}
+
+fn threshold_at_most(name: &str, unit: &str, limit: u64, observed: u64) -> Value {
+    json!({
+        "name": name,
+        "unit": unit,
+        "comparison": "at_most",
+        "limit": limit,
+        "observed": observed,
+        "pass": observed <= limit,
+    })
+}
+
+fn threshold_less_than(name: &str, unit: &str, limit: u64, observed: u64) -> Value {
+    json!({
+        "name": name,
+        "unit": unit,
+        "comparison": "less_than",
+        "limit": limit,
+        "observed": observed,
+        "pass": observed < limit,
+    })
+}
+
+fn threshold_true(name: &str, observed: bool) -> Value {
+    json!({
+        "name": name,
+        "unit": "bool",
+        "comparison": "required_true",
+        "observed": observed,
+        "pass": observed,
+    })
+}
+
+fn command_stdout(program: &str, args: &[&str]) -> Option<String> {
+    let output = Command::new(program).args(args).output().ok()?;
+    output
+        .status
+        .success()
+        .then(|| String::from_utf8_lossy(&output.stdout).trim().to_string())
+}
+
+fn valid_git_head(value: &str) -> bool {
+    matches!(value.len(), 40 | 64) && value.bytes().all(|byte| byte.is_ascii_hexdigit())
+}
+
+/// Native lifecycle/resource evidence gate. Runs real FSZero/GraphZero/
+/// TokenZero workers, a warm cross-surface plan, 10,000 mixed calls, full
+/// sidecar process-tree sampling via ps(1)/lsof(1), a configurable soak,
+/// and writes canonical JSON to ZEROSTACK_LIFECYCLE_RECEIPT.
+///
+/// Environment contract (all read from the parent environment):
+/// - ZERO_FSZERO_RAW_BIN, ZERO_GRAPHZERO_RAW_BIN, ZERO_TOKENZERO_RAW_BIN
+///   (required): verified real raw-worker binaries. ZEROSTACK_TEST_MODE is
+///   cleared so the workers run in normal (non-fixture) mode.
+/// - ZEROSTACK_LIFECYCLE_RECEIPT (required): path of the JSON receipt.
+/// - ZEROSTACK_LIFECYCLE_SOAK_SECONDS (optional, default 1800): soak length
+///   in seconds. Exactly 1800 is canonical; any other value is a clearly
+///   labeled noncanonical developer short run whose receipt can never pass.
+/// - ZEROSTACK_SOURCE_HEAD and ZEROSTACK_HUB_HEAD (required): the exact hub
+///   evidence-subject commit. ZERO_{FSZERO,GRAPHZERO,TOKENZERO}_SOURCE_HEAD
+///   (required): exact engine source commits bound to the worker artifacts.
+///
+/// Requires native ps(1); lsof(1) is preferred for FD evidence with a Linux
+/// /proc fallback when absent. The receipt says pass only when the soak is
+/// canonical and every q6am threshold passes.
+#[test]
+#[ignore = "native lifecycle/resource gate; requires real ZERO_*_RAW_BIN workers, ps(1)/lsof(1), a canonical 1800s soak, and writes canonical JSON to ZEROSTACK_LIFECYCLE_RECEIPT; run explicitly on an idle release-gate host"]
+fn native_lifecycle_resource_evidence_q6am_receipt() {
+    let fszero = std::env::var("ZERO_FSZERO_RAW_BIN")
+        .expect("ZERO_FSZERO_RAW_BIN must name a verified real FSZero raw worker");
+    let graphzero = std::env::var("ZERO_GRAPHZERO_RAW_BIN")
+        .expect("ZERO_GRAPHZERO_RAW_BIN must name a verified real GraphZero raw worker");
+    let tokenzero = std::env::var("ZERO_TOKENZERO_RAW_BIN")
+        .expect("ZERO_TOKENZERO_RAW_BIN must name a verified real TokenZero raw worker");
+    let receipt_path = std::env::var("ZEROSTACK_LIFECYCLE_RECEIPT")
+        .expect("ZEROSTACK_LIFECYCLE_RECEIPT must name the canonical JSON receipt path");
+    let soak_seconds: u64 = std::env::var("ZEROSTACK_LIFECYCLE_SOAK_SECONDS")
+        .map(|value| {
+            value.parse().unwrap_or_else(|error| {
+                panic!("ZEROSTACK_LIFECYCLE_SOAK_SECONDS={value:?}: {error}")
+            })
+        })
+        .unwrap_or(Q6AM_CANONICAL_SOAK_SECONDS);
+    assert!(
+        soak_seconds >= 1,
+        "ZEROSTACK_LIFECYCLE_SOAK_SECONDS must be >= 1"
+    );
+    let canonical = soak_seconds == Q6AM_CANONICAL_SOAK_SECONDS;
+    let source_head = std::env::var("ZEROSTACK_SOURCE_HEAD")
+        .expect("ZEROSTACK_SOURCE_HEAD must bind the evidence-subject commit");
+    let hub_head = std::env::var("ZEROSTACK_HUB_HEAD")
+        .expect("ZEROSTACK_HUB_HEAD must bind the evidence-subject commit");
+    let fszero_head = std::env::var("ZERO_FSZERO_SOURCE_HEAD")
+        .expect("ZERO_FSZERO_SOURCE_HEAD must bind the real worker source");
+    let graphzero_head = std::env::var("ZERO_GRAPHZERO_SOURCE_HEAD")
+        .expect("ZERO_GRAPHZERO_SOURCE_HEAD must bind the real worker source");
+    let repository_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .and_then(std::path::Path::parent)
+        .expect("zero-codemode must remain under the workspace root");
+    let repository_root_text = repository_root
+        .to_str()
+        .expect("workspace root must be UTF-8");
+    let repository_head = command_stdout("git", &["-C", repository_root_text, "rev-parse", "HEAD"]);
+    let repository_status = command_stdout(
+        "git",
+        &[
+            "-C",
+            repository_root_text,
+            "status",
+            "--porcelain=v1",
+            "--untracked-files=all",
+        ],
+    );
+    let repository_clean = repository_status.as_deref() == Some("");
+    let tokenzero_head = std::env::var("ZERO_TOKENZERO_SOURCE_HEAD")
+        .expect("ZERO_TOKENZERO_SOURCE_HEAD must bind the real worker source");
+
+    let sidecar_sha = sha256_hex_file(std::path::Path::new(env!(
+        "CARGO_BIN_EXE_zerostack-session"
+    )));
+    let fszero_sha = sha256_hex_file(std::path::Path::new(&fszero));
+    let graphzero_sha = sha256_hex_file(std::path::Path::new(&graphzero));
+    let tokenzero_sha = sha256_hex_file(std::path::Path::new(&tokenzero));
+
+    let cold_start_started = Instant::now();
+    let (d, mut session, token, shutdown_token, generation) =
+        start_configured(ProcessIdentity::current().unwrap(), |command, _| {
+            command
+                .env("ZERO_FSZERO_RAW_BIN", &fszero)
+                .env("ZERO_GRAPHZERO_RAW_BIN", &graphzero)
+                .env("ZERO_TOKENZERO_RAW_BIN", &tokenzero)
+                .env_remove("ZEROSTACK_TEST_MODE");
+        });
+    let cold_start_ms = cold_start_started.elapsed().as_millis() as u64;
+    std::fs::write(d.path().join("fixture.txt"), "lifecycle fixture\n").unwrap();
+    let socket = d.path().join("runtime/session.sock");
+    let (mut stream, mut reader, observed_generation) = connect_authenticated(&socket, &token);
+    assert_eq!(observed_generation, generation);
+    stream
+        .set_read_timeout(Some(Duration::from_secs(30)))
+        .unwrap();
+
+    send(
+        &mut stream,
+        json!({"type":"status","id":0,"generation":generation}),
+    );
+    let resource_status = read(&mut reader);
+    assert_eq!(resource_status["ok"], true, "{resource_status}");
+    assert_eq!(
+        resource_status["result"]["schema"],
+        "zerostack.session.aggregate_resource_receipt.v1"
+    );
+    let hard_tree_memory_enforced =
+        resource_status["result"]["workers"]
+            .as_array()
+            .is_some_and(|workers| {
+                workers.len() == 3
+                    && workers
+                        .iter()
+                        .all(|worker| worker["hard_tree_memory_enforced"] == true)
+            });
+    let zsx_plan = d.path().join("zsx-latency.js");
+    std::fs::write(&zsx_plan, "return 1;").unwrap();
+    let mut zsx_us = Vec::with_capacity(100);
+    for probe in 0..100_u64 {
+        let started = Instant::now();
+        let output = Command::new(env!("CARGO_BIN_EXE_zsx"))
+            .args([
+                "exec",
+                "-C",
+                d.path().to_str().unwrap(),
+                "--file",
+                zsx_plan.to_str().unwrap(),
+            ])
+            .env("ZEROSTACK_SESSION_SOCKET", &socket)
+            .env("ZEROSTACK_SESSION_TOKEN", &token)
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "zsx probe {probe}: stdout={} stderr={}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert_eq!(
+            serde_json::from_slice::<Value>(&output.stdout).unwrap()["ok"],
+            true,
+            "zsx probe {probe}"
+        );
+        zsx_us.push(started.elapsed().as_micros() as u64);
+    }
+    zsx_us.sort_unstable();
+    // Cold then warm cross-surface plan (real FSZero + GraphZero + TokenZero).
+    let cross_surface = r#"const fs = await zero.fs.compound('read', {path:'fixture.txt'});
+        const graph = await zero.graph.index();
+        const token = await zero.token.compact('lifecycle fixture');
+        return {fs,graph,token};"#;
+    let cold_started = Instant::now();
+    send(
+        &mut stream,
+        json!({"type":"execute","id":1,"generation":generation,"root":d.path(),"source":cross_surface,"timeout_ms":30000}),
+    );
+    let cold_response = read(&mut reader);
+    assert_eq!(cold_response["ok"], true, "{cold_response}");
+    let cold_plan_ms = cold_started.elapsed().as_millis() as u64;
+    let warm_started = Instant::now();
+    send(
+        &mut stream,
+        json!({"type":"execute","id":2,"generation":generation,"root":d.path(),"source":cross_surface,"timeout_ms":30000}),
+    );
+    let warm_response = read(&mut reader);
+    assert_eq!(warm_response["ok"], true, "{warm_response}");
+    let warm_plan_ms = warm_started.elapsed().as_millis() as u64;
+
+    // Baseline tree sample, then 10,000 mixed calls in batches of 2,000 with
+    // a full ps/lsof tree sample after every batch (stress growth evidence).
+    let baseline = sample_tree(session.id());
+    let stress_started = Instant::now();
+    let mut stress_samples = Vec::new();
+    let mut generation_drift = 0_u64;
+    let mut next_id = 3_u64;
+    for _batch in 1..=5_u64 {
+        for _offset in 0..2_000_u64 {
+            let id = next_id;
+            next_id += 1;
+            let source = match id % 6 {
+                0 | 1 => "return await zero.fs.compound('read', {path:'fixture.txt'});".to_string(),
+                2 | 3 => "return await zero.graph.index();".to_string(),
+                _ => format!("return await zero.token.compact('mix-{id}');"),
+            };
+            send(
+                &mut stream,
+                json!({"type":"execute","id":id,"generation":generation,"root":d.path(),"source":source,"timeout_ms":30000}),
+            );
+            let settled = read(&mut reader);
+            assert_eq!(settled["ok"], true, "stress call {id}: {settled}");
+            if settled["generation"] != generation {
+                generation_drift += 1;
+            }
+            assert_eq!(
+                settled["generation"], generation,
+                "generation drift at stress call {id}: {settled}"
+            );
+        }
+        stress_samples.push(sample_tree(session.id()));
+    }
+    let stress_elapsed_seconds = stress_started.elapsed().as_secs();
+    let post_stress = stress_samples.last().cloned().unwrap();
+    let stress_growth_rss_bytes = post_stress.rss_bytes.saturating_sub(baseline.rss_bytes);
+    let active_peak_rss_bytes = stress_samples
+        .iter()
+        .map(|sample| sample.rss_bytes)
+        .max()
+        .unwrap_or(post_stress.rss_bytes);
+    let stress_growth_fds = match (baseline.fds, post_stress.fds) {
+        (Some(base), Some(later)) => Some(later.saturating_sub(base)),
+        _ => None,
+    };
+    let stress_growth_threads = post_stress.threads.saturating_sub(baseline.threads);
+    let stress_growth_processes = post_stress.processes.saturating_sub(baseline.processes);
+
+    // The acceptance window begins only after a bounded settle interval. A
+    // noncanonical developer run uses one second so it stays quick, but can
+    // never produce pass=true.
+    thread::sleep(Duration::from_secs(if canonical {
+        Q6AM_SETTLE_SECONDS
+    } else {
+        1
+    }));
+    let idle_baseline = sample_tree(session.id());
+    let soak_deadline = Instant::now() + Duration::from_secs(soak_seconds);
+    let sample_interval = Duration::from_secs((soak_seconds / 30).clamp(1, 60));
+    let mut soak_samples = Vec::new();
+    loop {
+        let now = Instant::now();
+        if now >= soak_deadline {
+            break;
+        }
+        let wait = sample_interval.min(soak_deadline.saturating_duration_since(now));
+        thread::sleep(wait);
+        soak_samples.push(sample_tree(session.id()));
+    }
+    let idle_last = soak_samples.last().unwrap_or(&idle_baseline);
+    let soak_process_drift = soak_samples
+        .iter()
+        .map(|sample| sample.processes.abs_diff(idle_baseline.processes))
+        .max()
+        .unwrap_or(0);
+    let soak_thread_drift = soak_samples
+        .iter()
+        .map(|sample| sample.threads.abs_diff(idle_baseline.threads))
+        .max()
+        .unwrap_or(0);
+    let soak_fd_drift = match idle_baseline.fds {
+        Some(base) => soak_samples
+            .iter()
+            .map(|sample| sample.fds.map(|fds| fds.abs_diff(base)))
+            .collect::<Option<Vec<_>>>()
+            .and_then(|values| values.into_iter().max()),
+        None => None,
+    };
+    let idle_min_rss_bytes = std::iter::once(idle_baseline.rss_bytes)
+        .chain(soak_samples.iter().map(|sample| sample.rss_bytes))
+        .min()
+        .unwrap();
+    let idle_max_rss_bytes = std::iter::once(idle_baseline.rss_bytes)
+        .chain(soak_samples.iter().map(|sample| sample.rss_bytes))
+        .max()
+        .unwrap();
+    let idle_rss_drift_bytes = idle_max_rss_bytes.saturating_sub(idle_min_rss_bytes);
+    let idle_cpu_delta_micros = idle_last
+        .cpu_micros
+        .saturating_sub(idle_baseline.cpu_micros);
+    let idle_cpu_avg_bp =
+        idle_cpu_delta_micros.saturating_mul(10_000) / soak_seconds.saturating_mul(1_000_000);
+    let mut idle_cpu_samples_bp = soak_samples
+        .iter()
+        .map(|sample| sample.cpu_percent_bp)
+        .collect::<Vec<_>>();
+    idle_cpu_samples_bp.sort_unstable();
+    let idle_cpu_p99_bp = if idle_cpu_samples_bp.is_empty() {
+        idle_baseline.cpu_percent_bp
+    } else {
+        percentile(&idle_cpu_samples_bp, 99)
+    };
+
+    // Warm entry distribution after the soak. The existing zsx process-overhead
+    // gate remains separate; this measures the sidecar protocol itself.
+    let mut idle_us = Vec::with_capacity(100);
+    for _probe in 0..100_u64 {
+        let id = next_id;
+        next_id += 1;
+        let started = Instant::now();
+        send(
+            &mut stream,
+            json!({"type":"execute","id":id,"generation":generation,"root":d.path(),"source":"return 1;","timeout_ms":5000}),
+        );
+        let settled = read(&mut reader);
+        assert_eq!(settled["ok"], true, "idle probe {id}: {settled}");
+        assert_eq!(settled["generation"], generation, "{settled}");
+        idle_us.push(started.elapsed().as_micros() as u64);
+    }
+    idle_us.sort_unstable();
+    let warm_entry_p50_us = percentile(&idle_us, 50);
+    let warm_entry_p95_us = percentile(&idle_us, 95);
+    let final_identities = soak_samples
+        .last()
+        .map(|sample| &sample.pids)
+        .unwrap_or(&baseline.pids)
+        .iter()
+        .filter_map(|pid| ProcessIdentity::capture(*pid).ok())
+        .collect::<Vec<_>>();
+
+    // Shutdown latency and runtime cleanup.
+
+    let zsx_p95_us = percentile(&zsx_us, 95);
+    let zsx_added_p95_us = zsx_p95_us.saturating_sub(warm_entry_p95_us);
+    let shutdown_started = Instant::now();
+    send(
+        &mut stream,
+        json!({"type":"shutdown","id":next_id,"token":shutdown_token}),
+    );
+    let stopped = read(&mut reader);
+    assert_eq!(stopped["ok"], true, "{stopped}");
+    assert!(session.wait().unwrap().success());
+    let shutdown_ms = shutdown_started.elapsed().as_millis() as u64;
+    let socket_gone = !socket.exists();
+    let runtime_gone = !d.path().join("runtime").exists();
+    let tree_empty = final_identities
+        .iter()
+        .all(|identity| !identity.is_live().unwrap_or(false));
+    let runtime_cleanup = socket_gone && runtime_gone && tree_empty;
+
+    // Twenty native trials establish p95 teardown instead of treating one
+    // successful sample as a distribution. Each trial prewarms the same three
+    // real workers under a fresh session-owned runtime.
+    let mut normal_teardown_ms = vec![shutdown_ms];
+    for trial in 1..20_u64 {
+        let (trial_dir, mut trial_session, trial_token, trial_shutdown_token, _) =
+            start_configured(ProcessIdentity::current().unwrap(), |command, _| {
+                command
+                    .env("ZERO_FSZERO_RAW_BIN", &fszero)
+                    .env("ZERO_GRAPHZERO_RAW_BIN", &graphzero)
+                    .env("ZERO_TOKENZERO_RAW_BIN", &tokenzero)
+                    .env_remove("ZEROSTACK_TEST_MODE");
+            });
+        let trial_socket = trial_dir.path().join("runtime/session.sock");
+        let (mut trial_stream, mut trial_reader, _) =
+            connect_authenticated(&trial_socket, &trial_token);
+        let trial_identities = sample_tree(trial_session.id())
+            .pids
+            .into_iter()
+            .filter_map(|pid| ProcessIdentity::capture(pid).ok())
+            .collect::<Vec<_>>();
+        let started = Instant::now();
+        send(
+            &mut trial_stream,
+            json!({"type":"shutdown","id":20_000 + trial,"token":trial_shutdown_token}),
+        );
+        assert_eq!(read(&mut trial_reader)["ok"], true);
+        assert!(trial_session.wait().unwrap().success());
+        normal_teardown_ms.push(started.elapsed().as_millis() as u64);
+        assert!(!trial_socket.exists());
+        assert!(!trial_dir.path().join("runtime").exists());
+        assert!(
+            trial_identities
+                .iter()
+                .all(|identity| !identity.is_live().unwrap_or(false)),
+            "normal teardown left a captured process alive"
+        );
+    }
+    normal_teardown_ms.sort_unstable();
+    let normal_teardown_p95_ms = percentile(&normal_teardown_ms, 95);
+
+    let mut crash_reap_ms = Vec::with_capacity(20);
+    for _trial in 0..20_u64 {
+        let mut owner = Command::new("sleep").arg("30").spawn().unwrap();
+        let owner_identity = ProcessIdentity::capture(owner.id()).unwrap();
+        let (trial_dir, mut trial_session, _, _, _) =
+            start_configured(owner_identity, |command, _| {
+                command
+                    .env("ZERO_FSZERO_RAW_BIN", &fszero)
+                    .env("ZERO_GRAPHZERO_RAW_BIN", &graphzero)
+                    .env("ZERO_TOKENZERO_RAW_BIN", &tokenzero)
+                    .env_remove("ZEROSTACK_TEST_MODE");
+            });
+        let trial_runtime = trial_dir.path().join("runtime");
+        let trial_identities = sample_tree(trial_session.id())
+            .pids
+            .into_iter()
+            .filter_map(|pid| ProcessIdentity::capture(pid).ok())
+            .collect::<Vec<_>>();
+        let started = Instant::now();
+        owner.kill().unwrap();
+        owner.wait().unwrap();
+        assert!(trial_session.wait().unwrap().success());
+        crash_reap_ms.push(started.elapsed().as_millis() as u64);
+        assert!(!trial_runtime.exists());
+        assert!(
+            trial_identities
+                .iter()
+                .all(|identity| !identity.is_live().unwrap_or(false)),
+            "owner crash left a captured process alive"
+        );
+    }
+    crash_reap_ms.sort_unstable();
+    let crash_reap_p95_ms = percentile(&crash_reap_ms, 95);
+
+    // Exact q6am threshold table. Missing FD evidence is a failure, not a
+    // successful skip, because the canonical gate requires stable FDs.
+    let mut thresholds = vec![
+        threshold_at_most(
+            "stress_rss_growth",
+            "bytes",
+            Q6AM_STRESS_RSS_GROWTH_BYTES,
+            stress_growth_rss_bytes,
+        ),
+        threshold_at_most(
+            "stress_thread_growth",
+            "threads",
+            Q6AM_STABLE_COUNT_DRIFT,
+            stress_growth_threads,
+        ),
+        threshold_at_most(
+            "stress_process_growth",
+            "processes",
+            Q6AM_STABLE_COUNT_DRIFT,
+            stress_growth_processes,
+        ),
+        threshold_at_most(
+            "active_tree_rss",
+            "bytes",
+            Q6AM_ACTIVE_RSS_CAP_BYTES,
+            active_peak_rss_bytes,
+        ),
+        threshold_at_most(
+            "idle_tree_rss_target",
+            "bytes",
+            Q6AM_IDLE_RSS_TARGET_BYTES,
+            idle_max_rss_bytes,
+        ),
+        threshold_at_most(
+            "idle_tree_rss_hard_cap",
+            "bytes",
+            Q6AM_IDLE_RSS_HARD_CAP_BYTES,
+            idle_max_rss_bytes,
+        ),
+        threshold_at_most(
+            "idle_rss_drift",
+            "bytes",
+            Q6AM_IDLE_RSS_DRIFT_BYTES,
+            idle_rss_drift_bytes,
+        ),
+        threshold_at_most(
+            "soak_process_drift",
+            "processes",
+            Q6AM_STABLE_COUNT_DRIFT,
+            soak_process_drift,
+        ),
+        threshold_at_most(
+            "soak_thread_drift",
+            "threads",
+            Q6AM_STABLE_COUNT_DRIFT,
+            soak_thread_drift,
+        ),
+        threshold_less_than(
+            "idle_cpu_average",
+            "basis_points",
+            Q6AM_IDLE_CPU_AVG_BP,
+            idle_cpu_avg_bp,
+        ),
+        threshold_less_than(
+            "idle_cpu_p99",
+            "basis_points",
+            Q6AM_IDLE_CPU_P99_BP,
+            idle_cpu_p99_bp,
+        ),
+        threshold_at_most(
+            "warm_entry_p50",
+            "us",
+            Q6AM_WARM_ENTRY_P50_US,
+            warm_entry_p50_us,
+        ),
+        threshold_at_most(
+            "warm_entry_p95",
+            "us",
+            Q6AM_WARM_ENTRY_P95_US,
+            warm_entry_p95_us,
+        ),
+        threshold_at_most(
+            "zsx_added_p95",
+            "us",
+            Q6AM_ZSX_ADDED_P95_US,
+            zsx_added_p95_us,
+        ),
+        threshold_at_most(
+            "cold_start_target",
+            "ms",
+            Q6AM_COLD_START_TARGET_MS,
+            cold_start_ms,
+        ),
+        threshold_at_most(
+            "cold_start_hard_cap",
+            "ms",
+            Q6AM_COLD_START_HARD_CAP_MS,
+            cold_start_ms,
+        ),
+        threshold_at_most(
+            "normal_shutdown_p95",
+            "ms",
+            Q6AM_SHUTDOWN_P95_MS,
+            normal_teardown_p95_ms,
+        ),
+        threshold_at_most(
+            "owner_crash_reap_p95",
+            "ms",
+            Q6AM_CRASH_REAP_P95_MS,
+            crash_reap_p95_ms,
+        ),
+        threshold_true("runtime_cleanup", runtime_cleanup),
+        threshold_true("hard_tree_memory_enforced", hard_tree_memory_enforced),
+        threshold_true("heads_match", source_head == hub_head),
+        threshold_true(
+            "heads_valid",
+            [
+                &source_head,
+                &hub_head,
+                &fszero_head,
+                &graphzero_head,
+                &tokenzero_head,
+            ]
+            .into_iter()
+            .all(|head| valid_git_head(head)),
+        ),
+        threshold_true("release_profile", !cfg!(debug_assertions)),
+        threshold_true(
+            "source_head_matches_repository",
+            repository_head.as_deref() == Some(source_head.as_str()),
+        ),
+        threshold_true("repository_clean", repository_clean),
+    ];
+    thresholds.push(match stress_growth_fds {
+        Some(growth) => {
+            threshold_at_most("stress_fd_growth", "fds", Q6AM_STABLE_COUNT_DRIFT, growth)
+        }
+        None => json!({
+            "name": "stress_fd_growth",
+            "unit": "fds",
+            "comparison": "required_evidence",
+            "observed": null,
+            "pass": false,
+            "failure": "fd evidence unavailable",
+        }),
+    });
+    thresholds.push(match soak_fd_drift {
+        Some(drift) => threshold_at_most("soak_fd_drift", "fds", Q6AM_STABLE_COUNT_DRIFT, drift),
+        None => json!({
+            "name": "soak_fd_drift",
+            "unit": "fds",
+            "comparison": "required_evidence",
+            "observed": null,
+            "pass": false,
+            "failure": "fd evidence unavailable",
+        }),
+    });
+    let all_pass = thresholds.iter().all(|threshold| threshold["pass"] == true);
+
+    let receipt = json!({
+        "schema": "zerostack.lifecycle_receipt.v1",
+        "producer": "crates/zero-codemode/tests/session_sidecar.rs::native_lifecycle_resource_evidence_q6am_receipt",
+        "receipt_sha256": "0".repeat(64),
+        "receipt_sha256_convention": "sha256(canonical_json(receipt_sha256=64_ascii_zeroes))",
+        "canonical": canonical,
+        "canonical_soak_seconds": Q6AM_CANONICAL_SOAK_SECONDS,
+        "soak_seconds": soak_seconds,
+        "settle_seconds": if canonical { Q6AM_SETTLE_SECONDS } else { 1 },
+        "noncanonical_reason": if canonical {
+            Value::Null
+        } else {
+            json!("developer short soak: ZEROSTACK_LIFECYCLE_SOAK_SECONDS != 1800; evidence only, cannot pass")
+        },
+        "pass": canonical && all_pass,
+        "captured_at_unix_ms": SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_millis() as u64,
+        "invocation": {
+            "test_binary": std::env::current_exe().unwrap(),
+            "test_name": "native_lifecycle_resource_evidence_q6am_receipt",
+            "profile": if cfg!(debug_assertions) { "debug" } else { "release" },
+            "soak_env": soak_seconds.to_string(),
+            "receipt_path": receipt_path,
+        },
+        "heads": {
+            "evidence_subject": source_head,
+            "hub": hub_head,
+            "engines": {
+                "fszero": fszero_head,
+                "graphzero": graphzero_head,
+                "tokenzero": tokenzero_head,
+            },
+        },
+        "artifacts": {
+            "sidecar": {
+                "path": env!("CARGO_BIN_EXE_zerostack-session"),
+                "sha256": sidecar_sha,
+            },
+            "workers": {
+                "fszero": { "path": fszero, "sha256": fszero_sha },
+                "graphzero": { "path": graphzero, "sha256": graphzero_sha },
+                "tokenzero": { "path": tokenzero, "sha256": tokenzero_sha },
+            },
+        },
+        "repository": {
+            "root": repository_root,
+            "observed_head": repository_head,
+            "status_porcelain": repository_status,
+        },
+        "resource_policy": resource_status["result"].clone(),
+        "measurements": {
+            "cold_start_ms": cold_start_ms,
+            "cold_plan_ms": cold_plan_ms,
+            "warm_plan_ms": warm_plan_ms,
+            "stress_calls": 10_000,
+            "stress_elapsed_seconds": stress_elapsed_seconds,
+            "generation_drift": generation_drift,
+            "baseline": {
+                "wall_unix_ms": baseline.wall_unix_ms,
+                "rss_bytes": baseline.rss_bytes,
+                "threads": baseline.threads,
+                "processes": baseline.processes,
+                "cpu_micros": baseline.cpu_micros,
+                "cpu_percent_bp": baseline.cpu_percent_bp,
+                "fds": baseline.fds,
+            },
+            "post_stress": {
+                "wall_unix_ms": post_stress.wall_unix_ms,
+                "rss_bytes": post_stress.rss_bytes,
+                "threads": post_stress.threads,
+                "processes": post_stress.processes,
+                "cpu_micros": post_stress.cpu_micros,
+                "cpu_percent_bp": post_stress.cpu_percent_bp,
+                "fds": post_stress.fds,
+            },
+            "stress_growth": {
+                "rss_bytes": stress_growth_rss_bytes,
+                "fds": stress_growth_fds,
+                "threads": stress_growth_threads,
+                "processes": stress_growth_processes,
+            },
+            "stress_samples": stress_samples.iter().map(|sample| json!({
+                "wall_unix_ms": sample.wall_unix_ms,
+                "rss_bytes": sample.rss_bytes,
+                "threads": sample.threads,
+                "processes": sample.processes,
+                "cpu_micros": sample.cpu_micros,
+                "cpu_percent_bp": sample.cpu_percent_bp,
+                "fds": sample.fds,
+            })).collect::<Vec<_>>(),
+            "soak_samples": soak_samples.iter().map(|sample| json!({
+                "wall_unix_ms": sample.wall_unix_ms,
+                "rss_bytes": sample.rss_bytes,
+                "threads": sample.threads,
+                "processes": sample.processes,
+                "cpu_micros": sample.cpu_micros,
+                "cpu_percent_bp": sample.cpu_percent_bp,
+                "fds": sample.fds,
+            })).collect::<Vec<_>>(),
+            "idle": {
+                "rss_min_bytes": idle_min_rss_bytes,
+                "rss_max_bytes": idle_max_rss_bytes,
+                "rss_drift_bytes": idle_rss_drift_bytes,
+                "cpu_delta_micros": idle_cpu_delta_micros,
+                "cpu_average_basis_points": idle_cpu_avg_bp,
+                "cpu_p99_basis_points": idle_cpu_p99_bp,
+                "entry_probes": idle_us.len(),
+                "entry_p50_us": warm_entry_p50_us,
+                "entry_p95_us": warm_entry_p95_us,
+            },
+            "zsx": {
+                "probes": zsx_us.len(),
+                "p95_us": zsx_p95_us,
+                "added_p95_us": zsx_added_p95_us,
+            },
+            "teardown": {
+                "normal_samples_ms": normal_teardown_ms,
+                "normal_p95_ms": normal_teardown_p95_ms,
+                "owner_crash_samples_ms": crash_reap_ms,
+                "owner_crash_p95_ms": crash_reap_p95_ms,
+            },
+            "runtime_cleanup": {
+                "socket_gone": socket_gone,
+                "runtime_dir_gone": runtime_gone,
+                "process_tree_empty": tree_empty,
+            },
+        },
+        "thresholds": thresholds,
+        "platform": {
+            "os": std::env::consts::OS,
+            "arch": std::env::consts::ARCH,
+            "os_image": command_stdout("uname", &["-a"]),
+            "toolchain": command_stdout("rustc", &["-Vv"]),
+            "cpu": command_stdout("sysctl", &["-n", "machdep.cpu.brand_string"])
+                .or_else(|| command_stdout("lscpu", &[])),
+            "ram": command_stdout("sysctl", &["-n", "hw.memsize"])
+                .or_else(|| command_stdout("free", &["-b"])),
+            "process_sampler": "ps",
+            "fd_evidence": baseline.fd_evidence,
+        },
+    });
+    if let Some(parent) = std::path::Path::new(&receipt_path).parent() {
+        std::fs::create_dir_all(parent).unwrap();
+    }
+    let mut receipt = receipt;
+    let zeroed = zero_abi::canonical_json(&receipt);
+    receipt["receipt_sha256"] = json!(zero_abi::sha256_hex(zeroed.as_bytes()));
+    let sealed_digest = receipt["receipt_sha256"].as_str().unwrap().to_string();
+    let mut digest_check = receipt.clone();
+    digest_check["receipt_sha256"] = json!("0".repeat(64));
+    assert_eq!(
+        zero_abi::sha256_hex(zero_abi::canonical_json(&digest_check).as_bytes()),
+        sealed_digest,
+        "lifecycle receipt self-digest convention must verify"
+    );
+    let canonical_bytes = zero_abi::canonical_json(&receipt).into_bytes();
+    let mut output = std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&receipt_path)
+        .unwrap_or_else(|error| panic!("create immutable receipt {receipt_path}: {error}"));
+    output
+        .write_all(&canonical_bytes)
+        .and_then(|()| output.sync_all())
+        .unwrap_or_else(|error| panic!("write receipt {receipt_path}: {error}"));
+    println!(
+        "zerostack lifecycle receipt canonical={canonical} pass={} written to {receipt_path}",
+        receipt["pass"]
+    );
+    if canonical {
+        assert!(
+            receipt["pass"] == true,
+            "q6am lifecycle gate failed: receipt at {receipt_path} records pass=false; inspect the thresholds array"
+        );
+    } else {
+        assert_eq!(
+            receipt["canonical"], false,
+            "short noncanonical run must be labeled noncanonical"
+        );
+        assert_eq!(
+            receipt["pass"], false,
+            "a noncanonical short run must never emit a passing canonical receipt"
+        );
+    }
+}
+
 #[test]
 fn zsx_fallback_executes_and_rejects_partial_inherited_endpoint() {
     let d = TempDir::new().unwrap();
@@ -1267,12 +2372,10 @@ fn unknown_authenticated_request_is_typed_and_connection_survives() {
     assert_eq!(rejected["id"], 700);
     assert_eq!(rejected["generation"], generation);
     assert_eq!(rejected["code"], "unknown_request_type");
-    assert!(
-        rejected["error"]
-            .as_str()
-            .unwrap()
-            .contains("request rejected")
-    );
+    assert!(rejected["error"]
+        .as_str()
+        .unwrap()
+        .contains("request rejected"));
 
     send(
         &mut stream,
