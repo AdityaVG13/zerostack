@@ -23,7 +23,7 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use serde_json::Value;
 use zero_abi::EffectClass;
 use zero_codemode::CancellationSignal;
-use zero_codemode::{Host, HostError};
+use zero_codemode::{ExecutionMetrics, Host, HostError};
 
 use crate::adapter::{AdapterBinding, DomainAdapter};
 use crate::connector::{
@@ -169,6 +169,18 @@ pub struct ZsxExecutionResult {
     pub generation: u64,
     pub request_id: u64,
     pub value: Value,
+    pub metrics: ZsxExecutionMetrics,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, serde::Serialize)]
+pub struct ZsxExecutionMetrics {
+    pub host: ExecutionMetrics,
+    pub engine_wall_ns: [u64; 3],
+    pub engine_dispatches: [u64; 3],
+    pub engine_wall_ns_sum: u64,
+    /// Host wall not attributed to measured adapter calls. Parallel adapter
+    /// intervals can overlap, so this is a conservative lower bound.
+    pub runtime_overhead_lower_bound_ns: u64,
 }
 
 #[derive(Debug)]
@@ -193,7 +205,7 @@ enum ZsxCommand {
         source: String,
         timeout: Duration,
         approval_grants: Vec<SessionApprovalGrantV1>,
-        reply: SyncSender<Result<Value, HostError>>,
+        reply: SyncSender<Result<(Value, ZsxExecutionMetrics), HostError>>,
     },
     Replace {
         generation: u64,
@@ -303,7 +315,7 @@ impl ZsxExecutor {
         source: &str,
         timeout: Duration,
         approval_grants: Vec<SessionApprovalGrantV1>,
-    ) -> Result<Value, HostError> {
+    ) -> Result<(Value, ZsxExecutionMetrics), HostError> {
         // A cancel_request that arrived before this request started must
         // prevent any dispatch. The pending-cancellation check and the
         // installation of the fresh request token happen under one lock so a
@@ -347,7 +359,8 @@ impl ZsxExecutor {
         }
         self.connector
             .set_request_cancellation(signal.worker.clone());
-        let result = self.host.execute_with_cancel_timeout_context(
+        self.connector.reset_dispatch_metrics();
+        let outcome = self.host.execute_measured_with_cancel_timeout_context(
             source,
             self.connector.clone(),
             signal.host.clone(),
@@ -355,11 +368,37 @@ impl ZsxExecutor {
             generation,
             request_id,
         );
+        let mut result = outcome.result;
+        let host_metrics = outcome.metrics;
+        if result.is_err() {
+            signal.cancel();
+            if let Err(tail_error) = self
+                .connector
+                .wait_for_dispatch_idle(Duration::from_secs(5))
+            {
+                result = Err(tail_error);
+            }
+        }
+        let dispatch = self.connector.dispatch_metrics();
+        let engine_wall_ns_sum = dispatch
+            .wall_ns
+            .iter()
+            .copied()
+            .fold(0_u64, u64::saturating_add);
+        let metrics = ZsxExecutionMetrics {
+            runtime_overhead_lower_bound_ns: host_metrics
+                .wall_time_ns
+                .saturating_sub(engine_wall_ns_sum),
+            host: host_metrics,
+            engine_wall_ns: dispatch.wall_ns,
+            engine_dispatches: dispatch.dispatches,
+            engine_wall_ns_sum,
+        };
         self.connector.clear_request_cancellation();
         self.connector.clear_execution_context();
         self.connector.clear_approvals();
         clear_active();
-        result
+        result.map(|value| (value, metrics))
     }
 
     fn publish_reachability(&self) -> Result<(), HostError> {
@@ -876,7 +915,7 @@ impl ZsxSession {
             })?;
             slot.cancelled_requests.remove(&(generation, request_id))
         };
-        let value = match backend_result {
+        let (value, metrics) = match backend_result {
             Ok(Ok(value)) => Ok(value),
             Ok(Err(error)) => {
                 let code = if request_cancelled {
@@ -902,6 +941,7 @@ impl ZsxSession {
             generation,
             request_id,
             value,
+            metrics,
         })
     }
 
@@ -1355,6 +1395,7 @@ fn start_session_executor(
             Duration::from_secs(1),
             Vec::new(),
         )
+        .map(|_| ())
         .map_err(|error| format!("session prewarm failed: {error}"))?;
     Ok(executor)
 }

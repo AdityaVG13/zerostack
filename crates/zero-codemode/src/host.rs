@@ -6,6 +6,7 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
+use serde::Serialize;
 use serde_json::Value as JsonValue;
 use zero_abi::{CapabilityDescriptor, GlobalRegistration, RegistrationError, ZeroResultV1};
 use zero_store::SharedCas;
@@ -132,6 +133,33 @@ pub const MAX_RESULT_SPILL_ENVELOPE_BYTES: usize = 2_000;
 /// Bound for typed error text emitted by a model-facing adapter.
 pub const MAX_VISIBLE_ERROR_BYTES: usize = 1_024;
 
+/// Honest runtime accounting for one aggregate interpreter execution.
+///
+/// Logical operations count capability calls. Connector dispatches count
+/// accepted calls at the host boundary; a connector that fuses work below
+/// that boundary must report its own engine-pass accounting separately.
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize)]
+pub struct ExecutionMetrics {
+    pub logical_operations: u64,
+    pub connector_dispatches: u64,
+    pub physical_dispatches: u64,
+    pub peak_inflight_connector_calls: usize,
+    pub peak_retained_promises: usize,
+    pub peak_estimated_promise_bytes: usize,
+    pub backpressure_events: u64,
+    pub instructions: u64,
+    pub microtasks: usize,
+    pub wall_time_ns: u64,
+    pub first_saturation_cause: Option<String>,
+}
+
+/// Result plus accounting. Metrics remain available when execution fails.
+#[derive(Debug)]
+pub struct ExecutionOutcome {
+    pub result: Result<JsonValue, HostError>,
+    pub metrics: ExecutionMetrics,
+}
+
 /// Bound untrusted error text without splitting UTF-8. The typed error code
 /// remains the authority; the human text is diagnostic only.
 pub fn finalize_visible_error(value: &str) -> String {
@@ -206,6 +234,38 @@ impl Host {
         self.execute_with_cancel(plan, connector, Arc::new(AtomicBool::new(false)))
     }
 
+    /// Execute one plan and retain aggregate scheduling/resource telemetry.
+    pub fn execute_measured(&self, plan: &str, connector: Rc<dyn Connector>) -> ExecutionOutcome {
+        self.execute_measured_with_cancel_timeout_context(
+            plan,
+            connector,
+            Arc::new(AtomicBool::new(false)),
+            self.limits.wall_timeout,
+            0,
+            0,
+        )
+    }
+
+    pub fn execute_measured_with_cancel_timeout_context(
+        &self,
+        plan: &str,
+        connector: Rc<dyn Connector>,
+        cancelled: Arc<AtomicBool>,
+        timeout: Duration,
+        generation: u64,
+        request_id: u64,
+    ) -> ExecutionOutcome {
+        crate::interpreter::execute_measured(
+            self,
+            plan,
+            connector,
+            cancelled,
+            timeout.min(self.limits.wall_timeout),
+            generation,
+            request_id,
+        )
+    }
+
     pub fn execute_with_cancel(
         &self,
         plan: &str,
@@ -270,6 +330,7 @@ pub enum HostError {
     Json(String),
     ResultTooLarge { actual: usize, maximum: usize },
     ResultSpill(String),
+    MemoryLimit { requested: usize, maximum: usize },
     MicrotaskLimit,
     DeadlineExceeded,
     FuelExhausted,
@@ -296,6 +357,12 @@ impl fmt::Display for HostError {
                 write!(f, "result is {actual} bytes; maximum is {maximum}")
             }
             Self::ResultSpill(message) => write!(f, "result spill failed: {message}"),
+            Self::MemoryLimit { requested, maximum } => {
+                write!(
+                    f,
+                    "memory budget exceeded: requested {requested} bytes; maximum is {maximum}"
+                )
+            }
             Self::MicrotaskLimit => f.write_str("microtask ceiling exceeded"),
             Self::DeadlineExceeded => f.write_str("wall-clock deadline exceeded"),
             Self::FuelExhausted => f.write_str("instruction budget exhausted"),

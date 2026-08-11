@@ -89,6 +89,39 @@ struct CoordinatedConnector {
     completions: RefCell<Vec<(u64, ConnectorCompletion)>>,
 }
 
+struct TailConnector {
+    completions: Arc<std::sync::atomic::AtomicU64>,
+}
+
+impl Connector for TailConnector {
+    fn dispatch(
+        &self,
+        _: &CapabilityDescriptor,
+        args_json: &str,
+        _: DispatchContext,
+        completion: ConnectorCompletion,
+    ) -> Result<(), ConnectorError> {
+        let sequence = serde_json::from_str::<Value>(args_json)
+            .map_err(|error| ConnectorError::new(error.to_string()))?["sequence"]
+            .as_u64()
+            .ok_or_else(|| ConnectorError::new("missing sequence"))?;
+        let completions = Arc::clone(&self.completions);
+        let finish = move || {
+            let _ = completion.complete(Ok(json!({"sequence":sequence}).to_string()));
+            completions.fetch_add(1, Ordering::Release);
+        };
+        if sequence == 0 {
+            finish();
+        } else {
+            thread::spawn(move || {
+                thread::sleep(Duration::from_millis(20));
+                finish();
+            });
+        }
+        Ok(())
+    }
+}
+
 impl Connector for CoordinatedConnector {
     fn dispatch(
         &self,
@@ -140,6 +173,7 @@ fn lim() -> HostLimits {
         Duration::from_millis(250),
         10_000,
         64,
+        MAX_INFLIGHT_CONNECTOR_CALLS,
         16 * 1024,
         16 * 1024,
     )
@@ -1053,26 +1087,76 @@ fn promise_all_dispatches_concurrently_and_settles_fifo_completions() {
 }
 
 #[test]
-fn connector_inflight_capacity_fails_loud_without_unbounded_queueing() {
-    let connector = Rc::new(CoordinatedConnector {
-        expected: MAX_INFLIGHT_CONNECTOR_CALLS,
-        completions: RefCell::new(Vec::new()),
+fn promise_race_leaves_no_asynchronous_connector_tail() {
+    let completions = Arc::new(std::sync::atomic::AtomicU64::new(0));
+    let connector = Rc::new(TailConnector {
+        completions: Arc::clone(&completions),
     });
+    let host = Host::new(lim(), reg()).unwrap_or_else(|error| panic!("host: {error}"));
+    let started = Instant::now();
+    let value = host
+        .execute(
+            "return await Promise.race([zero.fs.read({sequence:0}),zero.fs.read({sequence:1})]);",
+            connector,
+        )
+        .unwrap_or_else(|error| panic!("race plan: {error}"));
+    assert_eq!(value["content"]["value"]["sequence"], 0);
+    assert_eq!(completions.load(Ordering::Acquire), 2);
+    assert!(
+        started.elapsed() >= Duration::from_millis(15),
+        "host returned before the losing dispatch settled"
+    );
+}
+
+#[test]
+fn connector_inflight_capacity_applies_bounded_backpressure() {
+    let connector = Rc::new(C::ok());
     let mut limits = lim();
     limits.microtask_ceiling = 1_024;
+    limits.max_inflight_connector_calls = 4;
     let host = Host::new(limits, reg()).unwrap_or_else(|error| panic!("host: {error}"));
-    let calls = MAX_INFLIGHT_CONNECTOR_CALLS + 1;
+    let calls = 9;
     let plan = format!(
         "const calls=Array.from({{length:{calls}}},(_,sequence)=>zero.fs.read({{sequence}}));return await Promise.all(calls);"
     );
-    let error = host
-        .execute(&plan, connector)
-        .expect_err("capacity overflow must fail");
-    assert!(
-        error
-            .to_string()
-            .contains("connector in-flight capacity exhausted"),
-        "{error}"
+    let outcome = host.execute_measured(&plan, connector.clone());
+    let values = outcome
+        .result
+        .unwrap_or_else(|error| panic!("backpressured plan: {error}"));
+    assert_eq!(values.as_array().map(Vec::len), Some(calls));
+    assert_eq!(connector.calls.borrow().len(), calls);
+    assert_eq!(outcome.metrics.logical_operations, calls as u64);
+    assert_eq!(outcome.metrics.connector_dispatches, calls as u64);
+    assert_eq!(outcome.metrics.physical_dispatches, calls as u64);
+    assert_eq!(outcome.metrics.peak_inflight_connector_calls, 4);
+    assert!(outcome.metrics.backpressure_events >= 2);
+    assert_eq!(
+        outcome.metrics.first_saturation_cause.as_deref(),
+        Some("connector_concurrency")
+    );
+}
+
+#[test]
+fn connector_promise_retention_obeys_the_memory_budget() {
+    let connector = Rc::new(C::ok());
+    let mut limits = lim();
+    limits.instruction_budget = 100_000;
+    limits.microtask_ceiling = 10_000;
+    limits.max_inflight_connector_calls = 5_000;
+    let host = Host::new(limits, reg()).unwrap_or_else(|error| panic!("host: {error}"));
+    let outcome = host.execute_measured(
+        "const calls=Array.from({length:5000},(_,sequence)=>zero.fs.read({sequence}));return await Promise.all(calls);",
+        connector.clone(),
+    );
+    let error = outcome
+        .result
+        .expect_err("retained promises must fit the memory budget");
+    assert!(matches!(error, HostError::MemoryLimit { .. }), "{error}");
+    assert_eq!(connector.calls.borrow().len(), 4_096);
+    assert_eq!(outcome.metrics.peak_retained_promises, 4_096);
+    assert_eq!(
+        outcome.metrics.first_saturation_cause.as_deref(),
+        Some("memory_budget")
     );
 }
 
@@ -1082,20 +1166,29 @@ fn settled_calls_do_not_impose_a_logical_operation_ceiling() {
     let mut limits = lim();
     limits.instruction_budget = 100_000;
     let host = Host::new(limits, reg()).unwrap_or_else(|error| panic!("host: {error}"));
-    let value = host
-        .execute(
-            r#"for (let sequence = 0; sequence < 128; sequence += 1) {
+    let outcome = host.execute_measured(
+        r#"for (let sequence = 0; sequence < 128; sequence += 1) {
                  await zero.fs.read({sequence});
                }
                return {count: 128};"#,
-            connector.clone(),
-        )
+        connector.clone(),
+    );
+    let value = outcome
+        .result
         .unwrap_or_else(|error| panic!("sequential aggregate plan: {error}"));
 
     assert_eq!(value, json!({"count": 128}));
     assert_eq!(connector.calls.borrow().len(), 128);
+    assert_eq!(outcome.metrics.logical_operations, 128);
+    assert_eq!(outcome.metrics.connector_dispatches, 128);
+    assert_eq!(outcome.metrics.peak_inflight_connector_calls, 1);
+    assert_eq!(outcome.metrics.peak_retained_promises, 1);
     assert_eq!(
-        connector.calls.borrow().last().and_then(|call| call["sequence"].as_u64()),
+        connector
+            .calls
+            .borrow()
+            .last()
+            .and_then(|call| call["sequence"].as_u64()),
         Some(127)
     );
 }
@@ -1168,14 +1261,19 @@ fn deep_nested_evaluation_is_capped_with_typed_error() {
 #[test]
 fn array_from_huge_length_is_rejected_before_allocation() {
     let host = Host::new(lim(), reg()).unwrap_or_else(|error| panic!("host: {error}"));
-    let error = host
-        .execute(
-            "return Array.from({length: 1000000000000});",
-            Rc::new(C::ok()),
-        )
+    let outcome = host.execute_measured(
+        "return Array.from({length: 1000000000000});",
+        Rc::new(C::ok()),
+    );
+    let error = outcome
+        .result
         .expect_err("huge array-like length must be rejected");
-    assert!(matches!(error, HostError::Data(_)), "{error}");
-    assert!(error.to_string().contains("memory limit"), "{error}");
+    assert!(matches!(error, HostError::MemoryLimit { .. }), "{error}");
+    assert!(error.to_string().contains("memory budget"), "{error}");
+    assert_eq!(
+        outcome.metrics.first_saturation_cause.as_deref(),
+        Some("memory_budget")
+    );
 }
 
 #[test]

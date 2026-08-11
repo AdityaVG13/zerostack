@@ -15,9 +15,9 @@ pub use edit_protocol::{
 };
 pub use host::{
     Connector, ConnectorCompletion, ConnectorError, DEFAULT_MAX_VISIBLE_RESULT_BYTES,
-    DispatchContext, Host, HostError, MAX_INFLIGHT_CONNECTOR_CALLS,
-    MAX_RESULT_SPILL_ENVELOPE_BYTES, MAX_VISIBLE_ERROR_BYTES, PUBLIC_RESULT_FIELDS,
-    RESULT_SPILL_PREVIEW_BYTES, RESULT_SPILL_SCHEMA, finalize_visible_error,
+    DispatchContext, ExecutionMetrics, ExecutionOutcome, Host, HostError,
+    MAX_INFLIGHT_CONNECTOR_CALLS, MAX_RESULT_SPILL_ENVELOPE_BYTES, MAX_VISIBLE_ERROR_BYTES,
+    PUBLIC_RESULT_FIELDS, RESULT_SPILL_PREVIEW_BYTES, RESULT_SPILL_SCHEMA, finalize_visible_error,
     runtime_creation_count,
 };
 pub use limits::{HostLimits, LimitError};

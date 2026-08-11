@@ -32,7 +32,7 @@ use std::sync::{
     mpsc::{self, Receiver, SyncSender, TrySendError},
 };
 use std::thread::{self, JoinHandle};
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -551,6 +551,15 @@ pub(crate) struct ZsxState {
     /// Root of the per-request mutation attempt journals (durable store).
     attempts_root: PathBuf,
     consumed_approval_grants: Mutex<BTreeSet<String>>,
+    engine_wall_ns: [AtomicU64; 3],
+    engine_dispatches: [AtomicU64; 3],
+    outstanding_dispatches: AtomicU64,
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub(crate) struct EngineDispatchMetrics {
+    pub wall_ns: [u64; 3],
+    pub dispatches: [u64; 3],
 }
 
 #[derive(Default)]
@@ -609,6 +618,9 @@ impl ZsxConnector {
             reachable_blobs: Mutex::new(BTreeMap::new()),
             attempts_root,
             consumed_approval_grants: Mutex::new(BTreeSet::new()),
+            engine_wall_ns: [const { AtomicU64::new(0) }; 3],
+            engine_dispatches: [const { AtomicU64::new(0) }; 3],
+            outstanding_dispatches: AtomicU64::new(0),
         });
         let (dispatch_sender, dispatch_receiver) = mpsc::sync_channel(MAX_INFLIGHT_CONNECTOR_CALLS);
         let dispatch_receiver = Arc::new(Mutex::new(dispatch_receiver));
@@ -660,6 +672,41 @@ impl ZsxConnector {
         if let Ok(mut active) = self.execution_context.lock() {
             *active = None;
         }
+    }
+
+    pub(crate) fn reset_dispatch_metrics(&self) {
+        for value in self
+            .state
+            .engine_wall_ns
+            .iter()
+            .chain(self.state.engine_dispatches.iter())
+        {
+            value.store(0, Ordering::Relaxed);
+        }
+    }
+
+    pub(crate) fn dispatch_metrics(&self) -> EngineDispatchMetrics {
+        EngineDispatchMetrics {
+            wall_ns: std::array::from_fn(|index| {
+                self.state.engine_wall_ns[index].load(Ordering::Relaxed)
+            }),
+            dispatches: std::array::from_fn(|index| {
+                self.state.engine_dispatches[index].load(Ordering::Relaxed)
+            }),
+        }
+    }
+
+    pub(crate) fn wait_for_dispatch_idle(&self, timeout: Duration) -> Result<(), HostError> {
+        let deadline = Instant::now() + timeout;
+        while self.state.outstanding_dispatches.load(Ordering::Acquire) != 0 {
+            if Instant::now() >= deadline {
+                return Err(HostError::Connector(
+                    "aggregate dispatches did not stop after cancellation".into(),
+                ));
+            }
+            thread::sleep(Duration::from_millis(1));
+        }
+        Ok(())
     }
 
     fn execution_context(&self) -> Result<AggregateExecutionContext, ConnectorError> {
@@ -870,15 +917,24 @@ impl Connector for ZsxConnector {
             cancellation: request_cancellation,
             journal,
         };
+        self.state
+            .outstanding_dispatches
+            .fetch_add(1, Ordering::AcqRel);
         match sender.try_send(dispatch) {
             Ok(()) => Ok(()),
             Err(TrySendError::Full(_)) => {
+                self.state
+                    .outstanding_dispatches
+                    .fetch_sub(1, Ordering::Release);
                 if let Some((_, grant)) = taken_approval {
                     self.restore_approval(grant)?;
                 }
                 Err(ConnectorError::new("aggregate dispatch capacity exhausted"))
             }
             Err(TrySendError::Disconnected(_)) => {
+                self.state
+                    .outstanding_dispatches
+                    .fetch_sub(1, Ordering::Release);
                 if let Some((_, grant)) = taken_approval {
                     self.restore_approval(grant)?;
                 }
@@ -899,6 +955,7 @@ fn aggregate_dispatch_loop(state: Arc<ZsxState>, receiver: Arc<Mutex<Receiver<Zs
         };
         let result = run_dispatch(&state, &dispatch);
         let _ = dispatch.completion.complete(result);
+        state.outstanding_dispatches.fetch_sub(1, Ordering::Release);
     }
 }
 
@@ -947,6 +1004,7 @@ fn run_dispatch(state: &ZsxState, dispatch: &ZsxDispatch) -> Result<String, Conn
         .lock()
         .map_err(|_| ConnectorError::new("engine serialization lock poisoned"))?;
     let mut journal = dispatch.journal.clone();
+    let engine_started = Instant::now();
     let result = {
         let _engine_guard = engine_busy;
         if dispatch.context.is_expired() || dispatch.cancellation.is_cancelled() {
@@ -990,6 +1048,14 @@ fn run_dispatch(state: &ZsxState, dispatch: &ZsxDispatch) -> Result<String, Conn
                 ConnectorError::new(format!("{} adapter: {error}", dispatch.engine.as_str()))
             })
     };
+    let engine_index = engine_index(dispatch.engine);
+    let engine_wall_ns = engine_started
+        .elapsed()
+        .as_nanos()
+        .try_into()
+        .unwrap_or(u64::MAX);
+    state.engine_wall_ns[engine_index].fetch_add(engine_wall_ns, Ordering::Relaxed);
+    state.engine_dispatches[engine_index].fetch_add(1, Ordering::Relaxed);
     let response = match result {
         Ok(response) => response,
         Err(error) => {
@@ -1207,6 +1273,7 @@ pub(crate) fn host_limits() -> Result<zero_codemode::HostLimits, HostError> {
         Duration::from_secs(30),
         10_000_000,
         16_384,
+        MAX_INFLIGHT_CONNECTOR_CALLS,
         256 * 1024,
         16 * 1024 * 1024,
     )
@@ -1355,6 +1422,9 @@ mod tests {
             reachable_blobs: Mutex::new(BTreeMap::new()),
             attempts_root: attempts_root_for(root),
             consumed_approval_grants: Mutex::new(BTreeSet::new()),
+            engine_wall_ns: [const { AtomicU64::new(0) }; 3],
+            engine_dispatches: [const { AtomicU64::new(0) }; 3],
+            outstanding_dispatches: AtomicU64::new(0),
         }
     }
 

@@ -9,6 +9,9 @@ pub struct HostLimits {
     pub wall_timeout: Duration,
     pub instruction_budget: u64,
     pub microtask_ceiling: usize,
+    /// Maximum connector calls admitted concurrently. This bounds queueing,
+    /// not the total logical operations an execution may perform.
+    pub max_inflight_connector_calls: usize,
     pub max_plan_bytes: usize,
     pub max_json_bytes: usize,
 }
@@ -21,6 +24,7 @@ impl HostLimits {
         wall_timeout: Duration,
         instruction_budget: u64,
         microtask_ceiling: usize,
+        max_inflight_connector_calls: usize,
         max_plan_bytes: usize,
         max_json_bytes: usize,
     ) -> Result<Self, LimitError> {
@@ -30,6 +34,7 @@ impl HostLimits {
             wall_timeout,
             instruction_budget,
             microtask_ceiling,
+            max_inflight_connector_calls,
             max_plan_bytes,
             max_json_bytes,
         };
@@ -53,6 +58,9 @@ impl HostLimits {
         if self.microtask_ceiling == 0 {
             return Err(LimitError::Zero("microtask_ceiling"));
         }
+        if self.max_inflight_connector_calls == 0 {
+            return Err(LimitError::Zero("max_inflight_connector_calls"));
+        }
         if self.max_plan_bytes == 0 {
             return Err(LimitError::Zero("max_plan_bytes"));
         }
@@ -71,6 +79,7 @@ impl Default for HostLimits {
             wall_timeout: Duration::from_secs(2),
             instruction_budget: 100_000,
             microtask_ceiling: 1_024,
+            max_inflight_connector_calls: crate::MAX_INFLIGHT_CONNECTOR_CALLS,
             max_plan_bytes: 256 * 1024,
             max_json_bytes: 1024 * 1024,
         }

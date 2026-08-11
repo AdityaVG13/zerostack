@@ -22,7 +22,8 @@ use crate::host::{
     normalize_public_result, spill_result,
 };
 use crate::{
-    Connector, ConnectorCompletion, DispatchContext, Host, HostError, MAX_INFLIGHT_CONNECTOR_CALLS,
+    Connector, ConnectorCompletion, DispatchContext, ExecutionMetrics, ExecutionOutcome, Host,
+    HostError,
 };
 
 static INTERPRETER_CREATIONS: AtomicU64 = AtomicU64::new(0);
@@ -69,6 +70,12 @@ const MAX_DEPTH_HARD_CAP: usize = 128;
 
 /// Ceiling for `to_string` coercion recursion, independent of host limits.
 const MAX_TO_STRING_DEPTH: usize = 128;
+
+/// Conservative retained cost for one connector promise, including its map
+/// node, completion state, normalized result tree, and allocator overhead.
+/// This converts the explicit memory budget into backpressure/failure without
+/// imposing an operation-count ceiling on sequential plans.
+const ESTIMATED_CONNECTOR_PROMISE_BYTES: usize = 4 * 1024;
 
 /// RAII recursion-depth guard. Every entry increments the shared counter and
 /// the guard's `Drop` decrements it on every return path, including errors
@@ -201,6 +208,62 @@ pub(super) fn execute(
     generation: u64,
     request_id: u64,
 ) -> Result<JsonValue, HostError> {
+    execute_measured(
+        host, source, connector, cancelled, timeout, generation, request_id,
+    )
+    .result
+}
+
+pub(super) fn execute_measured(
+    host: &Host,
+    source: &str,
+    connector: Rc<dyn Connector>,
+    cancelled: Arc<AtomicBool>,
+    timeout: Duration,
+    generation: u64,
+    request_id: u64,
+) -> ExecutionOutcome {
+    let started = Instant::now();
+    let metrics = Rc::new(RefCell::new(ExecutionMetrics::default()));
+    let result = execute_inner(
+        host,
+        source,
+        connector,
+        cancelled,
+        timeout,
+        generation,
+        request_id,
+        Rc::clone(&metrics),
+    );
+    let mut metrics = metrics.borrow().clone();
+    metrics.wall_time_ns = started.elapsed().as_nanos().try_into().unwrap_or(u64::MAX);
+    if metrics.first_saturation_cause.is_none() {
+        metrics.first_saturation_cause = match &result {
+            Err(HostError::DeadlineExceeded) => Some("deadline".into()),
+            Err(HostError::FuelExhausted) => Some("instruction_budget".into()),
+            Err(HostError::MicrotaskLimit) => Some("microtask_budget".into()),
+            Err(HostError::MemoryLimit { .. }) => Some("memory_budget".into()),
+            Err(HostError::ResultTooLarge { .. } | HostError::ResultSpill(_)) => {
+                Some("output_budget".into())
+            }
+            Err(HostError::Cancelled) => Some("cancellation".into()),
+            _ => None,
+        };
+    }
+    ExecutionOutcome { result, metrics }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn execute_inner(
+    host: &Host,
+    source: &str,
+    connector: Rc<dyn Connector>,
+    cancelled: Arc<AtomicBool>,
+    timeout: Duration,
+    generation: u64,
+    request_id: u64,
+    metrics: Rc<RefCell<ExecutionMetrics>>,
+) -> Result<JsonValue, HostError> {
     crate::wrap::validate_plan(source, host.limits.max_plan_bytes).map_err(HostError::Plan)?;
     let tree = parse_source(source)?;
     if tree.root_node().has_error() {
@@ -218,7 +281,9 @@ pub(super) fn execute(
         generation,
         request_id,
     );
-    let value = interpreter.run()?;
+    let value = interpreter.run();
+    *metrics.borrow_mut() = interpreter.metrics_snapshot();
+    let value = value?;
     let (serialized, degraded) = interpreter.serialize_public_json(&value)?;
     let mut public: JsonValue = if degraded {
         let refs = collect_refs(&serialized);
@@ -280,6 +345,7 @@ struct Interpreter<'tree> {
     step_entries: Vec<JsonValue>,
     step_head: String,
     step_bytes: usize,
+    metrics: ExecutionMetrics,
 }
 
 impl<'tree> Interpreter<'tree> {
@@ -293,7 +359,8 @@ impl<'tree> Interpreter<'tree> {
         generation: u64,
         request_id: u64,
     ) -> Self {
-        let (sender, receiver) = std::sync::mpsc::sync_channel(MAX_INFLIGHT_CONNECTOR_CALLS);
+        let (sender, receiver) =
+            std::sync::mpsc::sync_channel(host.limits.max_inflight_connector_calls);
         let env = Rc::new(RefCell::new(Env {
             values: BTreeMap::new(),
             parent: None,
@@ -323,6 +390,7 @@ impl<'tree> Interpreter<'tree> {
             step_entries: Vec::new(),
             step_head: "0".repeat(64),
             step_bytes: 0,
+            metrics: ExecutionMetrics::default(),
         };
         interpreter.install_globals();
         interpreter
@@ -416,7 +484,7 @@ impl<'tree> Interpreter<'tree> {
     }
 
     fn run(&mut self) -> Result<Value<'tree>, HostError> {
-        match self.exec(self.root) {
+        let result = match self.exec(self.root) {
             Ok(Control::Return(value)) => {
                 self.await_value(value).map_err(|fault| self.fault(fault))
             }
@@ -426,7 +494,35 @@ impl<'tree> Interpreter<'tree> {
                 "loop control escaped its loop".into(),
             )),
             Err(Fault::Host(error)) => Err(error),
+        };
+        if result.is_ok() {
+            self.finish_inflight()?;
         }
+        result
+    }
+
+    fn finish_inflight(&mut self) -> Result<(), HostError> {
+        while self.inflight_connector_calls > 0 {
+            self.tick()?;
+            self.drain()?;
+            if self.inflight_connector_calls == 0 {
+                break;
+            }
+            match self.receiver.recv_timeout(
+                self.deadline
+                    .saturating_duration_since(Instant::now())
+                    .min(Duration::from_millis(25)),
+            ) {
+                Ok(completion) => self.settle(completion)?,
+                Err(RecvTimeoutError::Timeout) => {}
+                Err(RecvTimeoutError::Disconnected) => {
+                    return Err(HostError::Connector(
+                        "connector completion channel closed".into(),
+                    ));
+                }
+            }
+        }
+        Ok(())
     }
 
     fn tick(&mut self) -> Result<(), HostError> {
@@ -441,6 +537,13 @@ impl<'tree> Interpreter<'tree> {
             return Err(HostError::FuelExhausted);
         }
         Ok(())
+    }
+
+    fn metrics_snapshot(&self) -> ExecutionMetrics {
+        let mut metrics = self.metrics.clone();
+        metrics.instructions = self.instructions;
+        metrics.microtasks = self.microtasks;
+        metrics
     }
 
     fn exec(&mut self, node: Node<'tree>) -> Result<Control<'tree>, Fault<'tree>> {
@@ -819,7 +922,19 @@ impl<'tree> Interpreter<'tree> {
                     .named_child(0)
                     .ok_or_else(|| Fault::Host(self.unsupported("await without expression")))?;
                 let value = self.eval(expression)?;
-                self.await_value(value)
+                let transient_promise = if expression.kind() == "call_expression" {
+                    match &value {
+                        Value::Promise(id) => Some(*id),
+                        _ => None,
+                    }
+                } else {
+                    None
+                };
+                let result = self.await_value(value);
+                if let Some(id) = transient_promise {
+                    self.release_settled_promise(id);
+                }
+                result
             }
             "call_expression" => self.eval_call(node),
             "member_expression" | "subscript_expression" => self.eval_member(node),
@@ -1255,15 +1370,39 @@ impl<'tree> Interpreter<'tree> {
                 "arguments exceed JSON limit".into(),
             )));
         }
-        if self.inflight_connector_calls >= MAX_INFLIGHT_CONNECTOR_CALLS {
-            return Err(Fault::Host(HostError::Data(
-                "connector in-flight capacity exhausted".into(),
-            )));
+        self.metrics.logical_operations = self.metrics.logical_operations.saturating_add(1);
+        self.wait_for_dispatch_slot()?;
+        let retained_promises = self.promises.len().checked_add(1).ok_or_else(|| {
+            Fault::Host(HostError::MemoryLimit {
+                requested: usize::MAX,
+                maximum: self.host.limits.memory_bytes,
+            })
+        })?;
+        let estimated_promise_bytes = retained_promises
+            .checked_mul(ESTIMATED_CONNECTOR_PROMISE_BYTES)
+            .unwrap_or(usize::MAX);
+        if estimated_promise_bytes > self.host.limits.memory_bytes {
+            self.metrics
+                .first_saturation_cause
+                .get_or_insert_with(|| "memory_budget".into());
+            return Err(Fault::Host(HostError::MemoryLimit {
+                requested: estimated_promise_bytes,
+                maximum: self.host.limits.memory_bytes,
+            }));
         }
         let id = self.next_promise;
-        self.next_promise = self.next_promise.saturating_add(1);
+        self.next_promise = self
+            .next_promise
+            .checked_add(1)
+            .ok_or_else(|| Fault::Host(HostError::Data("promise sequence exhausted".into())))?;
         self.promises
             .insert(id, PromiseState::Pending(PromiseKind::Connector));
+        self.metrics.peak_retained_promises =
+            self.metrics.peak_retained_promises.max(self.promises.len());
+        self.metrics.peak_estimated_promise_bytes = self
+            .metrics
+            .peak_estimated_promise_bytes
+            .max(estimated_promise_bytes);
         let completion = ConnectorCompletion::new(id, self.sender.clone());
         if let Err(error) = self.connector.dispatch(
             &descriptor,
@@ -1281,7 +1420,45 @@ impl<'tree> Interpreter<'tree> {
             })));
         }
         self.inflight_connector_calls = self.inflight_connector_calls.saturating_add(1);
+        self.metrics.connector_dispatches = self.metrics.connector_dispatches.saturating_add(1);
+        self.metrics.physical_dispatches = self.metrics.physical_dispatches.saturating_add(1);
+        self.metrics.peak_inflight_connector_calls = self
+            .metrics
+            .peak_inflight_connector_calls
+            .max(self.inflight_connector_calls);
         Ok(Value::Promise(id))
+    }
+
+    fn wait_for_dispatch_slot(&mut self) -> Result<(), Fault<'tree>> {
+        let limit = self.host.limits.max_inflight_connector_calls;
+        if self.inflight_connector_calls < limit {
+            return Ok(());
+        }
+        self.metrics.backpressure_events = self.metrics.backpressure_events.saturating_add(1);
+        self.metrics
+            .first_saturation_cause
+            .get_or_insert_with(|| "connector_concurrency".into());
+        while self.inflight_connector_calls >= limit {
+            self.tick().map_err(Fault::Host)?;
+            self.drain().map_err(Fault::Host)?;
+            if self.inflight_connector_calls < limit {
+                break;
+            }
+            match self.receiver.recv_timeout(
+                self.deadline
+                    .saturating_duration_since(Instant::now())
+                    .min(Duration::from_millis(25)),
+            ) {
+                Ok(completion) => self.settle(completion).map_err(Fault::Host)?,
+                Err(RecvTimeoutError::Timeout) => {}
+                Err(RecvTimeoutError::Disconnected) => {
+                    return Err(Fault::Host(HostError::Connector(
+                        "connector completion channel closed".into(),
+                    )));
+                }
+            }
+        }
+        Ok(())
     }
 
     fn await_value(&mut self, value: Value<'tree>) -> Result<Value<'tree>, Fault<'tree>> {
@@ -1289,6 +1466,15 @@ impl<'tree> Interpreter<'tree> {
             return Ok(value);
         };
         self.resolve(id)
+    }
+
+    fn release_settled_promise(&mut self, id: u64) {
+        if matches!(
+            self.promises.get(&id),
+            Some(PromiseState::Fulfilled(_) | PromiseState::Rejected(_) | PromiseState::Failed(_))
+        ) {
+            self.promises.remove(&id);
+        }
     }
 
     fn resolve(&mut self, id: u64) -> Result<Value<'tree>, Fault<'tree>> {
@@ -1818,10 +2004,10 @@ impl<'tree> Interpreter<'tree> {
                                 ))
                             })?;
                         if staged_allocation > self.host.limits.memory_bytes {
-                            return Err(Fault::Host(HostError::Data(format!(
-                                "Array.from string staging of {staged_allocation} bytes exceeds memory limit of {} bytes",
-                                self.host.limits.memory_bytes
-                            ))));
+                            return Err(Fault::Host(HostError::MemoryLimit {
+                                requested: staged_allocation,
+                                maximum: self.host.limits.memory_bytes,
+                            }));
                         }
                         let mut characters = Vec::new();
                         characters.try_reserve_exact(length).map_err(|error| {
@@ -1885,10 +2071,10 @@ impl<'tree> Interpreter<'tree> {
                         ))
                     })?;
                 if allocation > self.host.limits.memory_bytes {
-                    return Err(Fault::Host(HostError::Data(format!(
-                        "Array.from allocation of {allocation} bytes exceeds memory limit of {} bytes",
-                        self.host.limits.memory_bytes
-                    ))));
+                    return Err(Fault::Host(HostError::MemoryLimit {
+                        requested: allocation,
+                        maximum: self.host.limits.memory_bytes,
+                    }));
                 }
                 let remaining = self
                     .host
@@ -2145,10 +2331,10 @@ impl<'tree> Interpreter<'tree> {
                 let count = raw_count.floor();
                 let maximum = self.host.limits.memory_bytes / value.len();
                 if count >= usize::MAX as f64 || count > maximum as f64 {
-                    return Err(Fault::Host(HostError::Data(format!(
-                        "String.repeat allocation exceeds memory limit of {} bytes",
-                        self.host.limits.memory_bytes
-                    ))));
+                    return Err(Fault::Host(HostError::MemoryLimit {
+                        requested: usize::MAX,
+                        maximum: self.host.limits.memory_bytes,
+                    }));
                 }
                 let count = count as usize;
                 let bytes = value.len().checked_mul(count).ok_or_else(|| {
@@ -2157,10 +2343,10 @@ impl<'tree> Interpreter<'tree> {
                     ))
                 })?;
                 if bytes > self.host.limits.memory_bytes {
-                    return Err(Fault::Host(HostError::Data(format!(
-                        "String.repeat allocation exceeds memory limit of {} bytes",
-                        self.host.limits.memory_bytes
-                    ))));
+                    return Err(Fault::Host(HostError::MemoryLimit {
+                        requested: bytes,
+                        maximum: self.host.limits.memory_bytes,
+                    }));
                 }
                 Ok(Value::String(value.repeat(count)))
             }
@@ -2215,10 +2401,10 @@ impl<'tree> Interpreter<'tree> {
                     ))
                 })?;
                 if output_bytes > self.host.limits.memory_bytes {
-                    return Err(Fault::Host(HostError::Data(format!(
-                        "String.padStart allocation exceeds memory limit of {} bytes",
-                        self.host.limits.memory_bytes
-                    ))));
+                    return Err(Fault::Host(HostError::MemoryLimit {
+                        requested: output_bytes,
+                        maximum: self.host.limits.memory_bytes,
+                    }));
                 }
                 let mut output = String::with_capacity(output_bytes);
                 output.extend(pad.chars().cycle().take(needed));
@@ -3008,6 +3194,7 @@ mod tests {
             Duration::from_secs(2),
             instruction_budget,
             64,
+            crate::MAX_INFLIGHT_CONNECTOR_CALLS,
             256 * 1024,
             16 * 1024 * 1024,
         )

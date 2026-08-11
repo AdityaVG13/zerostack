@@ -13,6 +13,7 @@ pub const METHODS: &[(&str, &str)] = &[
     ("fs", "plan"),
     ("fs", "structural"),
     ("fs", "compound"),
+    ("fs", "world"),
     ("fs", "read_many"),
     ("fs", "list_many"),
     ("fs", "search_many"),
@@ -387,6 +388,44 @@ pub fn lower(
         };
         return Ok((engine, op.into(), compound_args));
     }
+    if surface == "fs" && method == "world" {
+        let args = if let Some(items) = input.as_array() {
+            if items.is_empty() || items.len() > 2 {
+                return Err(ConnectorError::new(
+                    "fs.world requires an action and optional options object",
+                ));
+            }
+            let action = items[0]
+                .as_str()
+                .ok_or_else(|| ConnectorError::new("fs.world action must be a string"))?;
+            if let Some(options) = items.get(1) {
+                let mut object = options
+                    .as_object()
+                    .cloned()
+                    .ok_or_else(|| ConnectorError::new("fs.world options must be an object"))?;
+                if object.contains_key("action") || object.contains_key("arg") {
+                    return Err(ConnectorError::new(
+                        "fs.world options must not repeat action or arg",
+                    ));
+                }
+                object.insert("action".into(), Value::String(action.into()));
+                Value::Object(object)
+            } else if matches!(action, "fork") || action.contains(':') {
+                serde_json::json!({"arg": action})
+            } else {
+                serde_json::json!({"action": action})
+            }
+        } else if input.is_object() {
+            input
+        } else if let Some(action) = input.as_str() {
+            serde_json::json!({"arg": action})
+        } else {
+            return Err(ConnectorError::new(
+                "fs.world requires an action string or object",
+            ));
+        };
+        return Ok((engine, "fs.world".into(), args));
+    }
     if surface == "fs" {
         let (op, key) = match method {
             "read_many" => ("fs.readMany", "paths"),
@@ -490,6 +529,22 @@ mod tests {
             EngineIdentity::FsZero,
             "fs.read",
             json!({"path":"src/lib.rs"}),
+        );
+        assert_lower(
+            "fs",
+            "world",
+            json!(["commit", {"world":"W7"}]),
+            EngineIdentity::FsZero,
+            "fs.world",
+            json!({"action":"commit","world":"W7"}),
+        );
+        assert_lower(
+            "fs",
+            "world",
+            json!("newbatch:a.txt:a|A;;b.txt:b|B"),
+            EngineIdentity::FsZero,
+            "fs.world",
+            json!({"arg":"newbatch:a.txt:a|A;;b.txt:b|B"}),
         );
         assert_lower(
             "fs",

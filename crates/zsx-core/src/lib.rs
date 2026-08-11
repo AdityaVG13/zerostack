@@ -64,8 +64,8 @@ pub use lower::{METHODS, engine_for, lower};
 pub use session::{
     SESSION_EXECUTION_QUEUE_CAPACITY, SESSION_EXECUTOR_START_TIMEOUT,
     SESSION_REPLACEMENT_SETTLE_TIMEOUT, SessionReplacementReason, SessionReplacementReceipt,
-    ZsxBuilder, ZsxExecutionResult, ZsxSession, ZsxSessionCancellation, ZsxSessionError,
-    ZsxSessionFailureCode,
+    ZsxBuilder, ZsxExecutionMetrics, ZsxExecutionResult, ZsxSession, ZsxSessionCancellation,
+    ZsxSessionError, ZsxSessionFailureCode,
 };
 /// Bound untrusted error text for typed zsx envelopes.
 pub use zero_codemode::finalize_visible_error;
