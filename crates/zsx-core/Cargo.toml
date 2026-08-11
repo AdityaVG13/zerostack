@@ -1,0 +1,34 @@
+[package]
+name = "zsx-core"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+description = "Single-process canonical ZSX composition: in-process DomainAdapter contract, aggregate connector, and session authority"
+
+[features]
+default = []
+fixture-adapters = []
+# Real FSZero engine adapter (crates/fszero.rs) over the immutable FSZero
+# revision API (vendored snapshot `_fszero_vk62_head_82fd21a`, pinned commit
+# 82fd21a); enables the canonical in-process typed-dispatch path. The fs-zero
+# dependency builds with default-features = false so no MCP, CodeMode, watch,
+# or AST-sgrep surface is linked; sqlite-bundled keeps the durable store
+# deterministic on any host.
+fszero = ["dep:fs-zero"]
+# Real GraphZero engine adapter (crates/graphzero.rs) over the embedded
+# GraphZero query crate; enables the canonical in-process dispatch path.
+graphzero = ["dep:graphzero-query"]
+
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true
+fs-zero = { path = "../../../_fszero_vk62_head_82fd21a", default-features = false, features = ["sqlite-bundled"], optional = true }
+graphzero-query = { path = "../../../GraphZero/crates/graphzero-query", optional = true }
+zero-abi = { path = "../zero-abi" }
+zero-codemode = { path = "../zero-codemode" }
+zero-ref = { path = "../zero-ref" }
+zero-store = { path = "../zero-store" }
+zerostack-machine-permit = { path = "../zerostack-machine-permit" }
+
+[dev-dependencies]
+tempfile = "3"
