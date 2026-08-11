@@ -10,7 +10,8 @@
     "multi_hour_soak": "UNMEASURED",
     "performance": "UNMEASURED",
     "windows_cross_compile": "EXTERNALLY BLOCKED: RCH worker lacks x86_64-w64-mingw32-gcc",
-    "windows_native_host": "EXTERNALLY BLOCKED: no Windows host configured"
+    "windows_native_host": "EXTERNALLY BLOCKED: no Windows host configured",
+    "yield_wait": "NOT APPLICABLE: native in-process execute awaits one N-API task; there is no sidecar cell or zero_wait lifecycle"
   },
   "defect_routed": {
     "fix_commit": "ff36b021e779994813a32a38a0b08c852bf06300",
@@ -18,7 +19,7 @@
     "result": "passed",
     "symptom": "sequential same-root native sessions reused g1/r1/1 and hit already_terminal"
   },
-  "finished_at": "2026-08-11T08:27:56Z",
+  "finished_at": "2026-08-11T08:49:51Z",
   "harnesses": {
     "omp": {
       "active_cancellation": {
@@ -51,6 +52,13 @@
           "ok": true,
           "output": "Succeeded.",
           "wall_ms": 14922
+        },
+        {
+          "mutation_verified": "native dogfood new marker",
+          "name": "aggregate_mutate_spill_expand",
+          "ok": true,
+          "output": "aggregate, FS read/search/edit, GraphZero index/blast, TokenZero shell, spill, and bounded ref expansion succeeded",
+          "wall_ms": 20600
         }
       ],
       "version": "omp/17.2.12"
@@ -86,12 +94,26 @@
           "ok": true,
           "output": "Succeeded.",
           "wall_ms": 6845
+        },
+        {
+          "mutation_verified": "native dogfood new marker",
+          "name": "aggregate_mutate_spill_expand",
+          "ok": true,
+          "output": "aggregate, FS read/search/edit, GraphZero index/blast, TokenZero shell, spill, and bounded ref expansion succeeded",
+          "wall_ms": 12892
         }
       ],
       "version": "0.84.1"
     }
   },
   "native_addon": {
+    "bounded_literal_smoke": {
+      "claim_scope": "direct in-process literal smoke only; not a model-visible or product performance claim",
+      "max_ms": 0.127167,
+      "p50_ms": 0.049459,
+      "p95_ms": 0.072959,
+      "runs": 100
+    },
     "clean_package_smoke": "passed",
     "node": "v24.14.1",
     "platform": "darwin-arm64",
