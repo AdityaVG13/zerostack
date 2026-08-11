@@ -491,6 +491,31 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
+def collect_artifact_facts(args: argparse.Namespace, config: dict[str, Any]) -> dict[str, Any]:
+    senpi_fact = git_fact(args.senpi_root)
+    if senpi_fact["head"] != config["comparison"]["assembly_manifest"]["senpi_revision"]:
+        raise RuntimeError("Senpi revision does not match the frozen identity")
+    expected_zero_revision = (
+        args.zerostack_revision
+        or config["comparison"]["assembly_manifest"]["zerostack_revision"]
+    )
+    zero_fact = git_fact(args.zerostack_root)
+    if zero_fact["head"] != expected_zero_revision:
+        raise RuntimeError("ZeroStack revision does not match the expected identity")
+    return {
+        "host": host_facts(),
+        "senpi": senpi_fact,
+        "zerostack": {
+            **zero_fact,
+            "binary_sha256": digest_file(args.zerostack_host),
+            "binary_version": run_text([str(args.zerostack_host), "--version"]),
+        },
+        "runner_sha256": digest_file(Path(__file__)),
+        "driver_sha256": digest_file(args.driver),
+        "config_sha256": digest_file(args.identity),
+    }
+
+
 def main() -> int:
     run_started_unix_ns = time.time_ns()
     args = parse_args()
@@ -507,27 +532,7 @@ def main() -> int:
             raise RuntimeError(f"missing file: {path}")
     config = json.loads(args.identity.read_text())
     profile = config["profiles"][args.profile]
-    senpi_fact = git_fact(args.senpi_root)
-    if senpi_fact["head"] != config["comparison"]["assembly_manifest"]["senpi_revision"]:
-        raise RuntimeError("Senpi revision does not match the frozen identity")
-    expected_zero_revision = (
-        args.zerostack_revision
-        or config["comparison"]["assembly_manifest"]["zerostack_revision"]
-    )
-    if zero_fact["head"] != expected_zero_revision:
-        raise RuntimeError("ZeroStack revision does not match the expected identity")
-    facts = {
-        "host": host_facts(),
-        "senpi": senpi_fact,
-        "zerostack": {
-            **zero_fact,
-            "binary_sha256": digest_file(args.zerostack_host),
-            "binary_version": run_text([str(args.zerostack_host), "--version"]),
-        },
-        "runner_sha256": digest_file(Path(__file__)),
-        "driver_sha256": digest_file(args.driver),
-        "config_sha256": digest_file(args.identity),
-    }
+    facts = collect_artifact_facts(args, config)
     identity_sources, identity_digests = comparison_identity(config, facts)
     delegate_value = "x" * config["comparison"]["tool_authority_sandbox"]["delegate_payload_bytes"]
     workloads = {row["id"]: row for row in config["workloads"]}
