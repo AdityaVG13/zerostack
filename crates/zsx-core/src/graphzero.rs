@@ -51,6 +51,34 @@ use zero_store::SharedCas;
 use crate::adapter::{AdapterBinding, AdapterCall, AdapterError, AdapterResponse, DomainAdapter};
 use crate::connector::now_ms;
 
+fn collect_graph_blob_refs(value: &serde_json::Value, refs: &mut Vec<String>) {
+    match value {
+        serde_json::Value::String(text) => {
+            for token in text.split_whitespace() {
+                if let Some(start) = token.find("gz://blob/") {
+                    let candidate = token[start..]
+                        .trim_end_matches(['"', '\'', ',', ';', ')', '}', ']'])
+                        .to_string();
+                    if !refs.contains(&candidate) {
+                        refs.push(candidate);
+                    }
+                }
+            }
+        }
+        serde_json::Value::Array(items) => {
+            for item in items {
+                collect_graph_blob_refs(item, refs);
+            }
+        }
+        serde_json::Value::Object(map) => {
+            for item in map.values() {
+                collect_graph_blob_refs(item, refs);
+            }
+        }
+        _ => {}
+    }
+}
+
 /// In-process GraphZero domain adapter.
 ///
 /// Owns one [`EmbeddedGraphZero`] handle (store/repo roots, shared CAS) and
@@ -246,7 +274,9 @@ impl DomainAdapter for GraphZeroAdapter {
         let context = self.engine_context(request);
         match private_worker_dispatch(&context, &request.op, &request.args) {
             Ok(result) => {
-                self.bridge_blob_refs(&result.refs, request)?;
+                let mut refs = result.refs.clone();
+                collect_graph_blob_refs(&result.value, &mut refs);
+                self.bridge_blob_refs(&refs, request)?;
                 Ok(AdapterResponse {
                 result: WorkerResult {
                     value: result.value,
@@ -265,7 +295,7 @@ impl DomainAdapter for GraphZeroAdapter {
                         ownership: RefOwnership {
                             engine: EngineIdentity::GraphZero,
                             session_id: self.session_id.clone(),
-                            refs: result.refs,
+                            refs,
                             snapshot: None,
                         },
                         trace,
@@ -368,5 +398,14 @@ mod tests {
             effect_class_for_request("reserve", &serde_json::json!({"action":"declare"})),
             EffectClass::Irreversible
         );
+    }
+
+    #[test]
+    fn collects_fragment_refs_embedded_in_graph_results() {
+        let reference = format!("gz://blob/{}#B16-35", "a".repeat(64));
+        let value = serde_json::json!({"nested":[{"ref":reference}]});
+        let mut refs = Vec::new();
+        collect_graph_blob_refs(&value, &mut refs);
+        assert_eq!(refs, vec![reference]);
     }
 }
