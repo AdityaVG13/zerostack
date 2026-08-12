@@ -56,7 +56,7 @@
 //! raw worker — FSZero never gates on approvals itself.
 
 use std::path::PathBuf;
-use std::sync::mpsc::{self, Receiver, SyncSender};
+use std::sync::mpsc::{self, Receiver, RecvTimeoutError, SyncSender};
 use std::thread::{self, JoinHandle};
 use std::time::Duration;
 
@@ -91,6 +91,11 @@ const SESSION_THREAD_STOP_TIMEOUT: Duration = Duration::from_secs(5);
 /// stores).
 const SESSION_INIT_TIMEOUT: Duration = Duration::from_secs(60);
 
+/// Maximum time a connector dispatcher waits before re-checking cancellation.
+/// FSZero kernel work remains on its dedicated session thread; abandoning a
+/// cancelled reply must never pin one of the shared aggregate dispatchers.
+const CALL_REPLY_POLL_INTERVAL: Duration = Duration::from_millis(5);
+
 /// Mirror of the raw worker's revision resolution: `ZEROSTACK_WORKER_REVISION`
 /// wins when set, else the pinned revision version.
 fn worker_revision() -> String {
@@ -111,6 +116,40 @@ fn deadline_expired(request: &CallRequest) -> bool {
 /// Typed adapter failure carrying the request trace.
 fn adapter_error(kind: &str, message: impl Into<String>, request: &CallRequest) -> AdapterError {
     AdapterError::new(kind, message, false, Some(request.trace.clone()))
+}
+
+fn receive_call_response(
+    reply: &Receiver<Result<AdapterResponse, AdapterError>>,
+    cancellation: &CancellationSignal,
+    request: &CallRequest,
+) -> Result<AdapterResponse, AdapterError> {
+    loop {
+        if cancellation.is_cancelled() {
+            return Err(adapter_error(
+                "cancelled",
+                "fszero adapter cancelled while awaiting dispatch",
+                request,
+            ));
+        }
+        if deadline_expired(request) {
+            return Err(adapter_error(
+                "deadline",
+                "fszero adapter deadline exceeded while awaiting dispatch",
+                request,
+            ));
+        }
+        match reply.recv_timeout(CALL_REPLY_POLL_INTERVAL) {
+            Ok(response) => return response,
+            Err(RecvTimeoutError::Timeout) => {}
+            Err(RecvTimeoutError::Disconnected) => {
+                return Err(adapter_error(
+                    "internal",
+                    "fszero session thread is gone",
+                    request,
+                ));
+            }
+        }
+    }
 }
 
 /// Mirror of `RawWorkerV2::forbidden`: operations that never reach the typed
@@ -655,9 +694,7 @@ impl DomainAdapter for FsZeroAdapter {
         self.sender
             .send(command)
             .map_err(|_| adapter_error("internal", "fszero session thread is gone", request))?;
-        let response = reply_rx
-            .recv()
-            .map_err(|_| adapter_error("internal", "fszero session thread is gone", request))??;
+        let response = receive_call_response(&reply_rx, &call.cancellation, request)?;
         if call.cancellation.is_cancelled() {
             return Err(adapter_error(
                 "cancelled",
@@ -679,6 +716,28 @@ impl DomainAdapter for FsZeroAdapter {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::time::Instant;
+    use zero_abi::WorkerTrace;
+
+    fn test_request(deadline_unix_ms: Option<u64>) -> CallRequest {
+        CallRequest {
+            request_id: "reply-poll".into(),
+            op: "fs.read".into(),
+            args: serde_json::json!({"path":"README.md"}),
+            deadline_unix_ms,
+            trace: WorkerTrace {
+                runtime_id: "test".into(),
+                cell_id: "test".into(),
+                request_id: "reply-poll".into(),
+                trace_id: "reply-poll".into(),
+                parent_span_id: None,
+                worker_revision: "test".into(),
+                contract_digest: "0".repeat(64),
+            },
+            approval_grant: None,
+            telemetry_request: None,
+        }
+    }
 
     #[test]
     fn binding_uses_the_immutable_revision_identity() {
@@ -744,5 +803,35 @@ mod tests {
                     .to_owned()
             )
         );
+    }
+
+    #[test]
+    fn cancelled_reply_wait_releases_the_shared_dispatcher_promptly() {
+        let (_reply_tx, reply_rx) = mpsc::sync_channel(1);
+        let cancellation = CancellationSignal::new();
+        let cancel_signal = cancellation.clone();
+        let cancel = std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(15));
+            cancel_signal.cancel();
+        });
+        let started = Instant::now();
+        let error = receive_call_response(&reply_rx, &cancellation, &test_request(None))
+            .expect_err("cancelled wait must stop");
+        cancel.join().expect("cancellation thread");
+        assert_eq!(error.error.kind, "cancelled");
+        assert!(started.elapsed() < Duration::from_millis(100));
+    }
+
+    #[test]
+    fn expired_reply_wait_releases_the_shared_dispatcher_promptly() {
+        let (_reply_tx, reply_rx) = mpsc::sync_channel(1);
+        let cancellation = CancellationSignal::new();
+        let error = receive_call_response(
+            &reply_rx,
+            &cancellation,
+            &test_request(Some(crate::connector::now_ms().saturating_sub(1))),
+        )
+        .expect_err("expired wait must stop");
+        assert_eq!(error.error.kind, "deadline");
     }
 }
