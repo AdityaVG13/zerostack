@@ -626,6 +626,18 @@ fn wrong_property_inside_a_domain_array_fails_loud() {
 }
 
 #[test]
+fn wrong_connector_property_is_a_catchable_type_error() {
+    let host = Host::new(lim(), reg()).unwrap_or_else(|error| panic!("host: {error}"));
+    let value = host
+        .execute(
+            "const r=await zero.fs.read({});try{return r.missing;}catch(error){return [error.name,error.message.includes(\"unknown property 'missing'\")];}",
+            Rc::new(C::ok()),
+        )
+        .expect("TypeError must be catchable");
+    assert_eq!(value, json!(["TypeError", true]));
+}
+
+#[test]
 fn known_properties_stay_readable_through_the_strict_guard() {
     let connector = Rc::new(C {
         calls: RefCell::new(vec![]),

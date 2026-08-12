@@ -1710,10 +1710,13 @@ impl<'tree> Interpreter<'tree> {
                     None => {
                         let object = value.borrow();
                         match object.access {
-                            ObjectAccess::Strict => Err(Fault::Host(HostError::Data(format!(
-                                "unknown property '{key}' on connector result; available properties: {}",
-                                object.fields.keys().cloned().collect::<Vec<_>>().join(", ")
-                            )))),
+                            ObjectAccess::Strict => Err(Fault::Throw(Value::Error(ErrorValue {
+                                name: "TypeError".into(),
+                                message: format!(
+                                    "unknown property '{key}' on connector result; available properties: {}",
+                                    object.fields.keys().cloned().collect::<Vec<_>>().join(", ")
+                                ),
+                            }))),
                             ObjectAccess::CapabilityRoot
                                 if matches!(key, "then" | "toJSON" | "toString") =>
                             {
