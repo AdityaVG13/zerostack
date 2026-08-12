@@ -41,10 +41,12 @@ use graphzero_query::{
     EmbeddedGraphZero, SEMANTIC_CONTRACT_VERSION, contract_digest_hex, private_worker_dispatch,
     resolve_operation,
 };
+use graphzero_store::{ExpandResolver, GzRef};
 use zero_abi::{
     ApprovalMetadata, ApprovalState, CallRequest, EffectClass, EngineIdentity, RefOwnership,
     RevertMetadata, WorkerError, WorkerResult, WorkerResultMetadata,
 };
+use zero_store::SharedCas;
 
 use crate::adapter::{AdapterBinding, AdapterCall, AdapterError, AdapterResponse, DomainAdapter};
 use crate::connector::now_ms;
@@ -58,6 +60,7 @@ use crate::connector::now_ms;
 #[derive(Clone, Debug)]
 pub struct GraphZeroAdapter {
     embedded: EmbeddedGraphZero,
+    shared_cas_root: PathBuf,
     session_id: String,
     binding: AdapterBinding,
 }
@@ -71,7 +74,7 @@ impl GraphZeroAdapter {
     pub fn new(repo_root: impl Into<PathBuf>, session_id: impl Into<String>) -> Self {
         let repo_root = repo_root.into();
         let store_root = repo_root.join(".graphzero");
-        Self::new_with_store_root(repo_root, store_root, session_id)
+        Self::new_with_store_root(repo_root.clone(), store_root, repo_root, session_id)
     }
 
     /// Build over `repo_root` while placing durable GraphZero state below an
@@ -82,13 +85,15 @@ impl GraphZeroAdapter {
         session_id: impl Into<String>,
     ) -> Self {
         let repo_root = repo_root.into();
-        let store_root = state_root.into().join("graphzero");
-        Self::new_with_store_root(repo_root, store_root, session_id)
+        let state_root = state_root.into();
+        let store_root = state_root.join("graphzero");
+        Self::new_with_store_root(repo_root, store_root, state_root, session_id)
     }
 
     fn new_with_store_root(
         repo_root: PathBuf,
         store_root: PathBuf,
+        shared_cas_root: PathBuf,
         session_id: impl Into<String>,
     ) -> Self {
         let embedded = EmbeddedGraphZero::new(store_root, Some(repo_root));
@@ -104,6 +109,7 @@ impl GraphZeroAdapter {
         .expect("graphzero adapter binding is valid");
         Self {
             embedded,
+            shared_cas_root,
             session_id,
             binding,
         }
@@ -150,6 +156,60 @@ impl GraphZeroAdapter {
         }
         context
     }
+
+    /// Publish every emitted GraphZero blob into the aggregate session CAS.
+    /// GraphZero may satisfy a ref from its legacy flat blob store or its
+    /// engine-local CAS. The aggregate connector authorizes only the sibling
+    /// CAS at `shared_cas_root`, so bridge exact verified bytes before the
+    /// response crosses that boundary.
+    fn bridge_blob_refs(
+        &self,
+        refs: &[String],
+        request: &CallRequest,
+    ) -> Result<(), AdapterError> {
+        let resolver = ExpandResolver::new(self.embedded.store_root(), self.embedded.repo_root())
+            .map_err(|error| {
+                AdapterError::new(
+                    "cas",
+                    format!("cannot open GraphZero ref resolver: {error}"),
+                    false,
+                    Some(request.trace.clone()),
+                )
+            })?;
+        let target = SharedCas::open(&self.shared_cas_root);
+        for reference in refs {
+            let Ok(GzRef::Blob { hash, .. }) = GzRef::parse(reference) else {
+                continue;
+            };
+            let resolution = resolver.resolve_blob(&hash, reference).map_err(|error| {
+                AdapterError::new(
+                    "cas",
+                    format!("cannot resolve GraphZero ref {reference}: {error}"),
+                    false,
+                    Some(request.trace.clone()),
+                )
+            })?;
+            let published = target.put(&resolution.bytes).map_err(|error| {
+                AdapterError::new(
+                    "cas",
+                    format!("cannot publish GraphZero ref {reference}: {error}"),
+                    false,
+                    Some(request.trace.clone()),
+                )
+            })?;
+            if published != hash {
+                return Err(AdapterError::new(
+                    "cas",
+                    format!(
+                        "GraphZero ref {reference} resolved to digest {published}, expected {hash}"
+                    ),
+                    false,
+                    Some(request.trace.clone()),
+                ));
+            }
+        }
+        Ok(())
+    }
 }
 
 impl DomainAdapter for GraphZeroAdapter {
@@ -185,7 +245,9 @@ impl DomainAdapter for GraphZeroAdapter {
         }
         let context = self.engine_context(request);
         match private_worker_dispatch(&context, &request.op, &request.args) {
-            Ok(result) => Ok(AdapterResponse {
+            Ok(result) => {
+                self.bridge_blob_refs(&result.refs, request)?;
+                Ok(AdapterResponse {
                 result: WorkerResult {
                     value: result.value,
                     metadata: WorkerResultMetadata {
@@ -211,7 +273,8 @@ impl DomainAdapter for GraphZeroAdapter {
                 },
                 engine_timeline: None,
                 worker_token_accounting: None,
-            }),
+                })
+            }
             Err(error) => Err(AdapterError {
                 error: Box::new(WorkerError {
                     kind: error.kind.as_str().into(),
@@ -233,5 +296,62 @@ fn effect_class_for_op(op: &str) -> EffectClass {
     match resolve_operation(op).map(|operation| operation.mutability) {
         Some(Mutability::ReadOnly) => EffectClass::ReadOnly,
         Some(Mutability::StoreOnly) | None => EffectClass::Irreversible,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use zero_abi::WorkerTrace;
+
+    fn request() -> CallRequest {
+        CallRequest {
+            request_id: "graph-cas-bridge".into(),
+            op: "verify".into(),
+            args: serde_json::json!({}),
+            deadline_unix_ms: None,
+            trace: WorkerTrace {
+                runtime_id: "test".into(),
+                cell_id: "test".into(),
+                request_id: "graph-cas-bridge".into(),
+                trace_id: "graph-cas-bridge".into(),
+                parent_span_id: None,
+                worker_revision: "test".into(),
+                contract_digest: "0".repeat(64),
+            },
+            approval_grant: None,
+            telemetry_request: None,
+        }
+    }
+
+    #[test]
+    fn bridges_legacy_graph_blob_into_aggregate_shared_cas() {
+        let repo = tempfile::tempdir().expect("repo");
+        let state = tempfile::tempdir().expect("state");
+        let adapter = GraphZeroAdapter::new_with_state_root(
+            repo.path(),
+            state.path(),
+            "graph-cas-bridge",
+        );
+        let bytes = b"graphzero aggregate CAS bridge";
+        let reference = adapter
+            .embedded()
+            .put_blob(bytes)
+            .expect("publish graph blob")
+            .gz_ref;
+
+        adapter
+            .bridge_blob_refs(std::slice::from_ref(&reference), &request())
+            .expect("bridge ref");
+
+        let hash = reference
+            .strip_prefix("gz://blob/")
+            .expect("blob reference");
+        assert_eq!(
+            SharedCas::open(state.path())
+                .get_verified(hash)
+                .expect("aggregate CAS object"),
+            bytes
+        );
     }
 }
