@@ -31,7 +31,7 @@ zero-abi = { path = "../zero-abi" }
 zero-codemode = { path = "../zero-codemode" }
 zero-ref = { path = "../zero-ref" }
 zero-store = { path = "../zero-store" }
-zerostack-machine-permit = { path = "../zerostack-machine-permit" }
+zero-machine-permit = { path = "../zerostack-machine-permit" }
 
 [dev-dependencies]
 tempfile = "3"

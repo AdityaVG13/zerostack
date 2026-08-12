@@ -189,7 +189,7 @@ class SurfaceSubstrateGuardTests(unittest.TestCase):
         [package]
         name = "graphzero-worker"
         [dependencies]
-        zerostack-machine-permit = "1"
+        zero-machine-permit = "1"
         """
         root = self._root(self.valid_surface(), manifest)
         self.assertTrue(module.check_worker_dependencies(root, False))
@@ -204,7 +204,7 @@ class SurfaceSubstrateGuardTests(unittest.TestCase):
             name = "fs-zero"
             [dependencies]
             zero-codemode = { optional = true }
-            zerostack-machine-permit = { optional = true }
+            zero-machine-permit = { optional = true }
             """,
             encoding="utf-8",
         )
@@ -324,14 +324,14 @@ class SurfaceSubstrateGuardTests(unittest.TestCase):
             host-permit = ["dep:permit"]
             [dependencies]
             js = { package = "rquickjs", version = "1", optional = true }
-            permit = { package = "zerostack-machine-permit", version = "1", optional = true }
+            permit = { package = "zero-machine-permit", version = "1", optional = true }
             gate = { package = "zero-gate", version = "1" }
             """,
             encoding="utf-8",
         )
         errors = module.check_worker_dependencies(root, True)
         self.assertTrue(any("forbidden 'rquickjs'" in error for error in errors))
-        self.assertTrue(any("forbidden 'zerostack-machine-permit'" in error for error in errors))
+        self.assertTrue(any("forbidden 'zero-machine-permit'" in error for error in errors))
         self.assertTrue(any("forbidden 'zero-gate'" in error for error in errors))
         self.assertTrue(any("quickjs-runtime" in error for error in errors))
         self.assertTrue(any("host-permit" in error for error in errors))
@@ -346,7 +346,7 @@ class SurfaceSubstrateGuardTests(unittest.TestCase):
         )
         (source / "quickjs.rs").write_text("fn dormant() {}\n", encoding="utf-8")
         (source / "permit.rs").write_text(
-            "use zerostack_machine_permit::MachinePermit;\n",
+            "use zero_machine_permit::MachinePermit;\n",
             encoding="utf-8",
         )
         (source / "host_permit.rs").write_text("fn acquire() {}\n", encoding="utf-8")
@@ -381,16 +381,16 @@ class SurfaceSubstrateGuardTests(unittest.TestCase):
             [package]
             name = "domain-identity"
             [dependencies]
-            zerostack-machine-permit = "1"
+            zero-machine-permit = "1"
             """,
             encoding="utf-8",
         )
         (source / "lib.rs").write_text(
-            "pub use zerostack_machine_permit::session_owner::ProcessIdentity;\n",
+            "pub use zero_machine_permit::session_owner::ProcessIdentity;\n",
             encoding="utf-8",
         )
         errors = module.check_worker_dependencies(root, True)
-        self.assertTrue(any("zerostack-machine-permit" in error for error in errors))
+        self.assertTrue(any("zero-machine-permit" in error for error in errors))
         self.assertEqual(module.check_engine_sources(root, True), [])
 
     def test_strict_source_scan_excludes_tests_and_allows_thin_adapter(self):
@@ -401,7 +401,7 @@ class SurfaceSubstrateGuardTests(unittest.TestCase):
         source = root / "src"
         source.mkdir()
         (source / "legacy_tests.rs").write_text(
-            "use zerostack_machine_permit::MachinePermit;\n",
+            "use zero_machine_permit::MachinePermit;\n",
             encoding="utf-8",
         )
         (source / "adapter.rs").write_text(

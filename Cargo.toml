@@ -43,7 +43,7 @@ zero-ledger = { path = "crates/zero-ledger" }
 zero-process = { path = "crates/zero-process" }
 zero-ref = { path = "crates/zero-ref" }
 zero-store = { path = "crates/zero-store" }
-zerostack-machine-permit = { path = "crates/zerostack-machine-permit" }
+zero-machine-permit = { path = "crates/zerostack-machine-permit" }
 
 [profile.release-perf]
 inherits = "release"

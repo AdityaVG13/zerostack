@@ -92,7 +92,7 @@
         "status": "keep"
       },
       {
-        "name": "zerostack-machine-permit",
+        "name": "zero-machine-permit",
         "path": "crates/zerostack-machine-permit",
         "role": "hub-foundation",
         "status": "keep"

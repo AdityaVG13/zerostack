@@ -54,7 +54,7 @@ use zero_store::{
     mark_dispatch_crossed_v1, mark_indeterminate_v1, mark_succeeded_v1, prepare_attempt_v1,
     publish_reachability_snapshot, read_current_attempt_v1, recover_attempt_v1,
 };
-use zerostack_machine_permit::{
+use zero_machine_permit::{
     MachinePermit, MachinePermitHeartbeat, PERMIT_HEARTBEAT_INTERVAL, PermitOwnerMetadata,
     try_scoped_permit_base_for,
 };

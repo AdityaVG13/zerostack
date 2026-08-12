@@ -350,7 +350,7 @@ name = "README documents machine-permit foundation crate"
 status = "present"
 weight = 0.007751937984
 evidence = ["README.md", "crates/zerostack-machine-permit/"]
-notes = "README documents the zerostack-machine-permit foundation crate."
+notes = "README documents the zero-machine-permit foundation crate."
 
 [[feature]]
 id = "F-HUB-RAW-WORKER-DOC"

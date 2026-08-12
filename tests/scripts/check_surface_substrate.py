@@ -29,6 +29,7 @@ FORBIDDEN_HUB_TOKENS = (
     "quickjs",
     "machine-permit",
     "zerostack-machine-permit",
+    "zero-machine-permit",
     "mcp_catalog",
     "mcp-catalog",
 )
@@ -61,11 +62,13 @@ FORBIDDEN_DEPENDENCIES = {
     "fastmcp-rust",
     "rquickjs",
     "zerostack-machine-permit",
+    "zero-machine-permit",
     "zero-codemode",
 }
 ENGINE_LOCAL_DEPENDENCIES = {
     "rquickjs",
     "zerostack-machine-permit",
+    "zero-machine-permit",
     "zero-gate",
 }
 EXCLUDED_GUARD_PATH_PARTS = {
@@ -93,7 +96,7 @@ FORBIDDEN_ENGINE_SOURCE_PATTERNS = (
         "engine-local machine permit",
         re.compile(
             r"\bMachinePermit\b"
-            r"|\bzerostack_machine_permit::(?:MachinePermit|scoped_permit_base)\b"
+            r"|\b(?:zerostack_machine_permit|zero_machine_permit)::(?:MachinePermit|scoped_permit_base)\b"
         ),
     ),
     (

@@ -70,7 +70,7 @@ The engines share contract-critical infrastructure through small foundation crat
 - **zero-ref** -- the ZeroRef v1 portable blob ref: parser, canonical formatter, fragment selection, and the shared golden-vector fixture. One grammar, one selection algebra, byte-identical across engines.
 - **zero-store** -- the canonical content-addressed store layout (blobs/sha256/hh/hash) with the crash-safe, concurrency-safe publish protocol and digest-verified reads.
 - **zero-process** -- native process identity, owner-death notification, and exact child-tree lifecycle primitives. Engines keep only thin compatibility adapters over this hub authority.
-- **zerostack-machine-permit** -- the shared machine-permit issue/verify surface and scoped permit-base contract for isolating permit roots. It delegates generic process identity to `zero-process`.
+- **zero-machine-permit** -- the shared machine-permit issue/verify surface and scoped permit-base contract for isolating permit roots. It delegates generic process identity to `zero-process`. All publishable foundation packages use the `zero-*` prefix; the source directory retains its historical path until a separately approved filesystem cleanup.
 
 The production runtime links the three engine domain APIs through reviewed, pinned dependencies. Generic interpreter, lifecycle, store, ref, ABI, and MCP authority remains in this hub.
 
