@@ -154,7 +154,10 @@ fn in_process_dispatch_proves_one_process_and_no_worker_spawn() {
     #[cfg(target_os = "linux")]
     {
         let children = child_pids();
-        assert!(children.is_empty(), "test process has children: {children:?}");
+        assert!(
+            children.is_empty(),
+            "test process has children: {children:?}"
+        );
     }
 
     session.shutdown().expect("shutdown settles");
@@ -309,12 +312,12 @@ fn zsx_exec_runs_the_embedded_core_in_one_process() {
         .stderr(std::process::Stdio::piped())
         .spawn()
         .expect("zsx binary spawns");
-    child
-        .stdin
-        .take()
-        .unwrap()
-        .write_all(b"return await zero.token.shell('printf zsx');")
-        .unwrap();
+    #[cfg(not(windows))]
+    let plan = b"return await zero.token.shell('printf zsx');".as_slice();
+    #[cfg(windows)]
+    let plan =
+        b"return await zero.token.shell(['cmd','/d','/s','/c','set /p =zsx<nul']);".as_slice();
+    child.stdin.take().unwrap().write_all(plan).unwrap();
     let output = child.wait_with_output().expect("zsx exec completes");
     assert!(
         output.status.success(),
