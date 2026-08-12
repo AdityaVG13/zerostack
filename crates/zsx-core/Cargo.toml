@@ -14,7 +14,7 @@ fixture-adapters = []
 # deterministic on any host.
 fszero = ["dep:fs-zero"]
 # Real GraphZero engine adapter over the embedded GraphZero query crate.
-graphzero = ["dep:graphzero-query"]
+graphzero = ["dep:graphzero-query", "dep:graphzero-store"]
 # Real TokenZero engine adapter over the public embedded domain API.
 tokenzero = ["dep:tokenzero-core", "dep:tokenzero-engine", "dep:tokenzero-recovery"]
 
@@ -23,6 +23,7 @@ serde.workspace = true
 serde_json.workspace = true
 fs-zero = { path = "../../../FSZero", default-features = false, features = ["sqlite-bundled"], optional = true }
 graphzero-query = { path = "../../../GraphZero/crates/graphzero-query", optional = true }
+graphzero-store = { path = "../../../GraphZero/crates/graphzero-store", optional = true }
 tokenzero-core = { path = "../../../TokenZero/crates/tokenzero-core", optional = true }
 tokenzero-engine = { path = "../../../TokenZero/crates/tokenzero-engine", optional = true }
 tokenzero-recovery = { path = "../../../TokenZero/crates/tokenzero-recovery", optional = true }
