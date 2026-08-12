@@ -921,7 +921,10 @@ fn bounded_writer_handles_nonreading_workers_without_orphans() {
             default_deadline_ms: 80,
             ..zero_abi::raw_worker::ProtocolLimits::default()
         },
-        handshake_timeout: Duration::from_millis(80),
+        // Process startup can exceed the 80 ms protocol deadline under a
+        // loaded test runner. Leave enough time for the fixture to publish
+        // its descendant PID before testing bounded non-reading teardown.
+        handshake_timeout: Duration::from_millis(500),
         shutdown_timeout: Duration::from_millis(80),
         ..WorkerClientConfig::default()
     };
