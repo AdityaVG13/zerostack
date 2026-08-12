@@ -315,8 +315,8 @@ fn zsx_exec_runs_the_embedded_core_in_one_process() {
     #[cfg(not(windows))]
     let plan = b"return await zero.token.shell('printf zsx');".as_slice();
     #[cfg(windows)]
-    let plan =
-        b"return await zero.token.shell(['cmd','/d','/s','/c','set /p =zsx<nul']);".as_slice();
+    let plan = b"return await zero.token.shell({args:['cmd','/d','/s','/c','set /p =zsx<nul']});"
+        .as_slice();
     child.stdin.take().unwrap().write_all(plan).unwrap();
     let output = child.wait_with_output().expect("zsx exec completes");
     assert!(
