@@ -17,19 +17,39 @@
 
 #![forbid(unsafe_code)]
 
+#[cfg(feature = "full")]
 pub mod aggregate_broker_gate;
+#[cfg(feature = "full")]
 pub mod assembly_kat;
+#[cfg(feature = "full")]
 pub mod authority;
+#[cfg(feature = "full")]
 pub mod invalidation_contract;
+#[cfg(feature = "full")]
 pub mod journal_fault_matrix;
+#[cfg(feature = "full")]
 pub mod kernel_fixture;
+#[cfg(feature = "full")]
 pub mod ledger_conservation;
+#[cfg(feature = "full")]
 pub mod raw_v2_slice;
+#[cfg(feature = "full")]
 pub mod robust_snap_model;
+#[cfg(feature = "full")]
 pub mod zero_bench_r;
 
 use serde::{Deserialize, Serialize};
 use std::fmt;
+use zero_abi::{DEFAULT_MAX_FRAME_BYTES, FrameCodecError, WorkerResponseFrame};
+
+/// Decode non-empty NDJSON responses through the canonical raw-worker codec.
+pub fn decode_worker_transcript(bytes: &[u8]) -> Result<Vec<WorkerResponseFrame>, FrameCodecError> {
+    bytes
+        .split(|byte| *byte == b'\n')
+        .filter(|line| !line.is_empty())
+        .map(|line| zero_abi::decode_response_frame(line, DEFAULT_MAX_FRAME_BYTES))
+        .collect()
+}
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub struct PromiseId(pub String);
@@ -553,6 +573,20 @@ pub fn run_all(harness: &mut dyn EngineHarness) -> Vec<SuiteReport> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn transcript_decoder_rejects_unknown_fields() {
+        let canonical = b"{\"kind\":\"shutdown_ack\"}\n";
+        assert!(matches!(
+            decode_worker_transcript(canonical).as_deref(),
+            Ok([WorkerResponseFrame::ShutdownAck])
+        ));
+        let mutant = b"{\"kind\":\"shutdown_ack\",\"extra\":true}\n";
+        assert_eq!(
+            decode_worker_transcript(mutant).unwrap_err().kind(),
+            "invalid_frame"
+        );
+    }
 
     #[derive(Default)]
     struct FakeHarness {
