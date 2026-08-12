@@ -1,0 +1,99 @@
+{
+  "ns": "tz",
+  "bin": "tokenzero-mcp",
+  "contract_version": "1.0",
+  "surface": "mcp",
+  "completion_status": "partial",
+  "passed": false,
+  "checks": [
+    {
+      "id": "G1",
+      "name": "exposure",
+      "passed": true,
+      "status": "pass",
+      "details": []
+    },
+    {
+      "id": "G2",
+      "name": "refs",
+      "passed": false,
+      "status": "skipped",
+      "skip_reason": "not applicable to the MCP surface; requires planner execution",
+      "details": []
+    },
+    {
+      "id": "G3",
+      "name": "telemetry",
+      "passed": false,
+      "status": "skipped",
+      "skip_reason": "not applicable to the MCP surface; requires planner execution",
+      "details": []
+    },
+    {
+      "id": "G4",
+      "name": "leak-proof",
+      "passed": false,
+      "status": "skipped",
+      "skip_reason": "not applicable to the MCP surface; requires planner execution",
+      "details": []
+    },
+    {
+      "id": "G5",
+      "name": "errors",
+      "passed": false,
+      "status": "skipped",
+      "skip_reason": "not applicable to the MCP surface; requires planner execution",
+      "details": []
+    },
+    {
+      "id": "G6",
+      "name": "ctx.step",
+      "passed": false,
+      "status": "skipped",
+      "skip_reason": "not applicable to the MCP surface; requires planner execution",
+      "details": []
+    },
+    {
+      "id": "G7",
+      "name": "limits",
+      "passed": false,
+      "status": "skipped",
+      "skip_reason": "not applicable to the MCP surface; requires planner execution",
+      "details": []
+    },
+    {
+      "id": "G8",
+      "name": "mutation",
+      "passed": false,
+      "status": "skipped",
+      "skip_reason": "not applicable to the MCP surface; requires planner execution",
+      "details": []
+    },
+    {
+      "id": "G9",
+      "name": "coalescing",
+      "passed": false,
+      "status": "skipped",
+      "skip_reason": "not applicable to the MCP surface; requires planner execution",
+      "details": []
+    },
+    {
+      "id": "G10",
+      "name": "sandbox-denial",
+      "passed": false,
+      "status": "skipped",
+      "skip_reason": "not applicable to the MCP surface; requires planner execution",
+      "details": []
+    }
+  ],
+  "provenance": {
+    "source_head": "54c77c01bdc7c8a60b6c801ef63307f8f5544189",
+    "hub_head": "bb036615c2107c930a008f8028923dc91b029a5a",
+    "artifact_sha256": "8f90f28de33e2fed7450050edba5fcc9938a040f1e984778aafc5f0596066748",
+    "artifact_bytes": 43723792,
+    "checks_digest": "8a84c52ca971f5669bcb0a37d29d0478b9ea6483691c1c654af616e344e13a3b",
+    "pass_count": 1,
+    "fail_count": 0,
+    "skip_count": 9
+  }
+}

@@ -1,4 +1,13 @@
 {
+  "assembly": {
+    "abiContractDigest": "f9320787ce17676c1eff1b2e38f1897ca40f9a72a02d5d72ffba37d70aa70d70",
+    "dispatchBoundary": "before_dispatch",
+    "generatedBy": "tests/scripts/generate_program_assembly.py",
+    "manifest": "conformance/models/program-assembly-2026-08-11.json",
+    "manifestDigest": "f08798a4510e8e17a3692f02a0e9ee262321317a12abea25815ed5226a081c74",
+    "mismatchFailureCode": "manifest_digest_mismatch",
+    "validation": "zero_abi::validate_assembly_pre_dispatch_v1"
+  },
   "capturedAt": "2026-08-11T00:38:50.546168Z",
   "claims": {
     "allThreeEnginesReturned": true,
@@ -30,7 +39,7 @@
         "checks": "G1 measured; G2-G10 explicit not-applicable skips",
         "completionStatus": "partial",
         "failCount": 0,
-        "report": "tests/reports/fszero/fz-mcp-2026-08-10-202712-8a84c52ca971f566.json",
+        "report": "tests/data/program-aggregate-reports/fz-mcp-2026-08-10-202712-8a84c52ca971f566.json",
         "reportSha256": "07d8c19551b2aa753d82e9c6af55529fbf8673cb633b46cd9a0b1750d75b3ae1"
       },
       "sourceHead": "d6ce69c5dfc2a2bccb457a535757bc44de51e928",
@@ -39,7 +48,7 @@
         "artifactSha256": "b7d66c309ef6ed112f4b03eb507066273f3cf609de6a6e5cf1dfb257c11e8cf3",
         "checks": "RW1-RW10",
         "completionStatus": "complete",
-        "report": "tests/reports/fszero/fz-codemode-2026-08-10-202743-54d853632fc08a3b.json",
+        "report": "tests/data/program-aggregate-reports/fz-codemode-2026-08-10-202743-54d853632fc08a3b.json",
         "reportSha256": "7ad773f98d1d8773551ebb336c7be25863ec52ceb7c0f6b2e77ccc74d92a226d"
       }
     },
@@ -63,7 +72,7 @@
         "checks": "G1 measured; G2-G10 explicit not-applicable skips",
         "completionStatus": "partial",
         "failCount": 0,
-        "report": "tests/reports/graphzero/gz-mcp-2026-08-10-202719-8a84c52ca971f566.json",
+        "report": "tests/data/program-aggregate-reports/gz-mcp-2026-08-10-202719-8a84c52ca971f566.json",
         "reportSha256": "4a90844a2b28420b0aa30d1c62b32c4857eca81c3254c5446149577fb39e3364"
       },
       "sourceHead": "098306257adc563d5f45976d4420c68ceed721bd",
@@ -72,7 +81,7 @@
         "artifactSha256": "adbe6999adfc1c3fae995b439e3330e6e146f89272849a23018b8f48a4b973f1",
         "checks": "RW1-RW10",
         "completionStatus": "complete",
-        "report": "tests/reports/graphzero/gz-codemode-2026-08-10-203756-54d853632fc08a3b.json",
+        "report": "tests/data/program-aggregate-reports/gz-codemode-2026-08-10-203756-54d853632fc08a3b.json",
         "reportSha256": "bb8f5a58fbaaddeedf07402eea93d1cf1c5e8f0a3c788e0790d8feef830acefd"
       }
     },
@@ -99,7 +108,7 @@
         "checks": "G1 measured; G2-G10 explicit not-applicable skips",
         "completionStatus": "partial",
         "failCount": 0,
-        "report": "tests/reports/tokenzero/tz-mcp-2026-08-10-202726-8a84c52ca971f566.json",
+        "report": "tests/data/program-aggregate-reports/tz-mcp-2026-08-10-202726-8a84c52ca971f566.json",
         "reportSha256": "b3eb4e0f1856f06b5bd7f5f2abf52330384eed6bf748a5c6966323246863ea7f"
       },
       "sourceHead": "54c77c01bdc7c8a60b6c801ef63307f8f5544189",
@@ -108,7 +117,7 @@
         "artifactSha256": "2332b859809bc4964fafedaa55a2d3be74cee6c2f59d5037c722e4d4b0b0eccf",
         "checks": "RW1-RW10",
         "completionStatus": "complete",
-        "report": "tests/reports/tokenzero/tz-codemode-2026-08-10-203806-54d853632fc08a3b.json",
+        "report": "tests/data/program-aggregate-reports/tz-codemode-2026-08-10-203806-54d853632fc08a3b.json",
         "reportSha256": "11bbf60da7d123c15dbb083386e7c8f64e3d01e8a9a7647ed9688bf17ca709f3"
       }
     }

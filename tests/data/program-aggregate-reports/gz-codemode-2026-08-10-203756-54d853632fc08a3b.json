@@ -1,0 +1,90 @@
+{
+  "ns": "gz",
+  "bin": "graphzero-codemode",
+  "contract_version": "raw-worker-v2",
+  "surface": "codemode",
+  "completion_status": "complete",
+  "passed": true,
+  "checks": [
+    {
+      "id": "RW1",
+      "name": "artifact_exposure",
+      "passed": true,
+      "status": "pass",
+      "details": []
+    },
+    {
+      "id": "RW2",
+      "name": "recoverable_refs",
+      "passed": true,
+      "status": "pass",
+      "details": []
+    },
+    {
+      "id": "RW3",
+      "name": "telemetry_accounting",
+      "passed": true,
+      "status": "pass",
+      "details": []
+    },
+    {
+      "id": "RW4",
+      "name": "output_bounds",
+      "passed": true,
+      "status": "pass",
+      "details": []
+    },
+    {
+      "id": "RW5",
+      "name": "typed_errors",
+      "passed": true,
+      "status": "pass",
+      "details": []
+    },
+    {
+      "id": "RW6",
+      "name": "session_continuity",
+      "passed": true,
+      "status": "pass",
+      "details": []
+    },
+    {
+      "id": "RW7",
+      "name": "frame_limits",
+      "passed": true,
+      "status": "pass",
+      "details": []
+    },
+    {
+      "id": "RW8",
+      "name": "domain_mutation",
+      "passed": true,
+      "status": "pass",
+      "details": []
+    },
+    {
+      "id": "RW9",
+      "name": "process_reuse",
+      "passed": true,
+      "status": "pass",
+      "details": []
+    },
+    {
+      "id": "RW10",
+      "name": "planner_refusal",
+      "passed": true,
+      "status": "pass",
+      "details": []
+    }
+  ],
+  "provenance": {
+    "source_head": "098306257adc563d5f45976d4420c68ceed721bd",
+    "hub_head": "bb036615c2107c930a008f8028923dc91b029a5a",
+    "artifact_sha256": "adbe6999adfc1c3fae995b439e3330e6e146f89272849a23018b8f48a4b973f1",
+    "artifact_bytes": 36005824,
+    "checks_digest": "54d853632fc08a3b9ec64faec2df7efac28616ed83b088c9ced52127ad966884",
+    "pass_count": 10,
+    "fail_count": 0,
+    "skip_count": 0
+  }
+}
