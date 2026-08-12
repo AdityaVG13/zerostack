@@ -235,6 +235,7 @@ impl ResolvedStore {
 
         if env.shared_opt_in
             && let Some(store) = pin_value.clone()
+            && !literal_tilde_root(&store)
         {
             let inside = store_is_under_project_root(&store, &repo_root);
             let (mode, project_key, engine_dir) = if inside {
@@ -343,14 +344,23 @@ impl ResolvedStore {
     /// Machine-readable account of how this root was chosen.
     pub fn report(&self, env: &StoreEnv) -> StoreResolutionReport {
         let mut warnings = Vec::new();
-        match self.mode {
-            StoreMode::Legacy if self.pin_set() && !env.shared_opt_in => warnings.push(format!(
-                "store root pin ignored: set {SHARED_STORE_OPT_IN_ENV} or the engine alias to opt in"
-            )),
-            StoreMode::LocalUnified if self.pin_set() => warnings.push(format!(
-                "store root pin ignored: project-local {LOCAL_STORE_DIR} takes precedence"
-            )),
-            _ => {}
+        if self.pin_value().is_some_and(literal_tilde_root) {
+            warnings.push(
+                "configured store root rejected: pin starts with a literal '~' path component"
+                    .to_string(),
+            );
+        } else {
+            match self.mode {
+                StoreMode::Legacy if self.pin_set() && !env.shared_opt_in => {
+                    warnings.push(format!(
+                        "store root pin ignored: set {SHARED_STORE_OPT_IN_ENV} or the engine alias to opt in"
+                    ));
+                }
+                StoreMode::LocalUnified if self.pin_set() => warnings.push(format!(
+                    "store root pin ignored: project-local {LOCAL_STORE_DIR} takes precedence"
+                )),
+                _ => {}
+            }
         }
         if local_marker_is_symlink(&self.repo_root) {
             warnings.push(format!(
@@ -1033,6 +1043,15 @@ mod tests {
             let env = StoreEnv::new(Some(OsString::from(pin)), true);
             let resolved = ResolvedStore::resolve(repo.path(), Engine::TokenZero, &env);
 
+            assert_eq!(resolved.mode(), StoreMode::Legacy);
+            assert_eq!(resolved.engine_dir(), absolutize(repo.path()).join(".tokenzero"));
+            assert!(
+                resolved
+                    .report(&env)
+                    .warnings
+                    .iter()
+                    .any(|warning| warning.contains("literal '~'"))
+            );
             let error = ensure_layout(&resolved).unwrap_err();
             assert_eq!(error.kind(), std::io::ErrorKind::InvalidInput);
             assert!(error.to_string().contains("literal '~'"));
