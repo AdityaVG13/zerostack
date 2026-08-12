@@ -649,6 +649,30 @@ fn unsupported_map_and_set_globals_fail_at_construction() {
 }
 
 #[test]
+fn ctx_result_payload_and_refs_hide_transport_nesting() {
+    let connector = Rc::new(C {
+        calls: RefCell::new(vec![]),
+        fail: false,
+        delay: Duration::ZERO,
+        result: Some(
+            json!({
+                "metadata":{"ownership":{"refs":["fz://blob/abc"]}},
+                "value":{"operation":"fs.read","value":{"payload_utf8":"hello"},"refs":["fz://blob/abc"]}
+            })
+            .to_string(),
+        ),
+    });
+    let host = Host::new(lim(), reg()).unwrap_or_else(|error| panic!("host: {error}"));
+    let value = host
+        .execute(
+            "const r=await zero.fs.read({});return [ctx.result(r).operation,ctx.payload(r).payload_utf8,ctx.refs(r)[0]];",
+            connector,
+        )
+        .expect("ergonomic helpers");
+    assert_eq!(value, json!(["fs.read", "hello", "fz://blob/abc"]));
+}
+
+#[test]
 fn known_properties_stay_readable_through_the_strict_guard() {
     let connector = Rc::new(C {
         calls: RefCell::new(vec![]),

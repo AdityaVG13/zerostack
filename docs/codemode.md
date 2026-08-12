@@ -52,6 +52,17 @@ run.text;  // TypeError: unknown property 'text' ... available properties: ack, 
 
 Use `Object.keys(value)` to inspect an unfamiliar nested domain value. The strict guard applies recursively.
 
+For composed plans, `ctx` provides transport-safe helpers so callers do not
+hard-code nested envelope paths:
+
+~~~js
+const read = await zero.fs.compound("read", { path: "README.md" });
+const domain = ctx.result(read);   // validated domain result
+const payload = ctx.payload(read); // domain result's value
+const refs = ctx.refs(read);       // ownership refs, or []
+return { operation: domain.operation, text: payload.payload_utf8, refs };
+~~~
+
 ## Run the native `zsx` executable
 
 Build the canonical one-process runtime:

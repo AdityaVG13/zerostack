@@ -138,6 +138,45 @@ struct ObjectValue<'tree> {
     access: ObjectAccess,
 }
 
+fn object_field<'tree>(value: &Value<'tree>, key: &str) -> Option<Value<'tree>> {
+    match value {
+        Value::Object(object) => object.borrow().fields.get(key).cloned(),
+        _ => None,
+    }
+}
+
+fn ergonomic_result<'tree>(value: Value<'tree>) -> Value<'tree> {
+    let Some(content) = object_field(&value, "content") else {
+        return value;
+    };
+    let Some(inline) = object_field(&content, "value") else {
+        return content;
+    };
+    if object_field(&inline, "metadata").is_some() {
+        object_field(&inline, "value").unwrap_or(inline)
+    } else {
+        inline
+    }
+}
+
+fn ergonomic_payload<'tree>(value: Value<'tree>) -> Value<'tree> {
+    let result = ergonomic_result(value);
+    object_field(&result, "value").unwrap_or(result)
+}
+
+fn ergonomic_refs<'tree>(value: Value<'tree>) -> Value<'tree> {
+    if let Some(content) = object_field(&value, "content")
+        && let Some(inline) = object_field(&content, "value")
+        && let Some(metadata) = object_field(&inline, "metadata")
+        && let Some(ownership) = object_field(&metadata, "ownership")
+        && let Some(refs) = object_field(&ownership, "refs")
+    {
+        return refs;
+    }
+    let result = ergonomic_result(value);
+    object_field(&result, "refs").unwrap_or_else(|| new_array(Vec::new()))
+}
+
 #[derive(Clone, Debug)]
 struct FunctionValue<'tree> {
     parameters: Node<'tree>,
@@ -1924,6 +1963,15 @@ impl<'tree> Interpreter<'tree> {
         match (namespace, name) {
             ("ctx", "step") => self.ctx_step(args),
             ("ctx", "ref") => Ok(args.into_iter().next().unwrap_or(Value::Undefined)),
+            ("ctx", "result") => Ok(ergonomic_result(
+                args.into_iter().next().unwrap_or(Value::Undefined),
+            )),
+            ("ctx", "payload") => Ok(ergonomic_payload(
+                args.into_iter().next().unwrap_or(Value::Undefined),
+            )),
+            ("ctx", "refs") => Ok(ergonomic_refs(
+                args.into_iter().next().unwrap_or(Value::Undefined),
+            )),
             ("Promise", "resolve") => Ok(self.new_promise(PromiseState::Fulfilled(
                 args.into_iter().next().unwrap_or(Value::Undefined),
             ))),
