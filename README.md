@@ -38,7 +38,7 @@ Read [RACC and typed refs](docs/racc.md).
 
 ## Native runtime and MCP compatibility
 
-The canonical runtime is `zsx-core`. It embeds FSZero, GraphZero, and TokenZero domain adapters in one process. The `zsx` executable, Pi adapter, OMP adapter, and Node binding all use that same session authority. No worker process, session socket, or daemon exists.
+The canonical runtime is `zsx-core`. It embeds FSZero, GraphZero, and TokenZero domain adapters in one process. The `zsx` executable, Pi adapter, OMP adapter, and Node binding all use that same session authority, including configured Pi subagents. No worker process, session socket, or daemon exists.
 
 `zero-mcp` is a separate optional FastMCP compatibility carrier. A deployment chooses native CodeMode or MCP registration for a harness surface. It never exposes both catalogs at once.
 
