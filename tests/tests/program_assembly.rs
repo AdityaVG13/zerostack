@@ -1,8 +1,10 @@
+use std::fmt::Write;
 use std::fs;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use serde_json::Value;
+use sha2::{Digest, Sha256};
 use zero_abi::{
     AssemblyFailureCodeV1, AssemblyManifestV1, DigestV1, EngineIdentity,
     validate_assembly_pre_dispatch_v1,
@@ -29,6 +31,25 @@ fn manifest() -> AssemblyManifestV1 {
             .expect("program assembly"),
     )
     .expect("program assembly JSON")
+}
+
+fn native_matrix() -> Value {
+    serde_json::from_slice(
+        &fs::read(
+            root().join("conformance/models/packaged-codemode-native-matrix-2026-08-12.json"),
+        )
+        .expect("packaged native matrix"),
+    )
+    .expect("packaged native matrix JSON")
+}
+
+fn sha256_hex(bytes: &[u8]) -> String {
+    Sha256::digest(bytes)
+        .iter()
+        .fold(String::with_capacity(64), |mut hex, byte| {
+            write!(hex, "{byte:02x}").expect("writing to String cannot fail");
+            hex
+        })
 }
 
 #[test]
@@ -113,7 +134,11 @@ fn reject_before_dispatch(
         dispatches.fetch_add(1, Ordering::SeqCst);
     }
     assert_eq!(validation.unwrap_err().code(), expected_code);
-    assert_eq!(dispatches.load(Ordering::SeqCst), 0, "worker dispatch occurred");
+    assert_eq!(
+        dispatches.load(Ordering::SeqCst),
+        0,
+        "worker dispatch occurred"
+    );
 }
 
 #[test]
@@ -134,4 +159,69 @@ fn assembly_identity_mutants_fail_typed_before_worker_dispatch() {
         |expected| expected.workers[1].capability_catalog_digest = DigestV1::ZERO,
         AssemblyFailureCodeV1::CapabilityCatalogDigestMismatch,
     );
+}
+
+#[test]
+fn packaged_native_matrix_binds_three_hosts_and_targeted_inputs() {
+    let matrix = native_matrix();
+    assert_eq!(
+        matrix["schema"],
+        "zerostack.packaged_codemode.native_matrix.v1"
+    );
+    assert_eq!(
+        matrix["assembly_manifest_digest"],
+        evidence()["assembly"]["manifestDigest"]
+    );
+
+    let command = matrix["verifier"]["exact_command"]
+        .as_str()
+        .expect("exact verifier command");
+    assert!(command.contains("--test program_assembly"));
+    assert!(command.contains("--test canonical_mixed"));
+    assert!(command.contains("--test one_process"));
+    assert!(!command.contains("--workspace"));
+
+    let expected_platforms = [
+        "native-macos-aarch64",
+        "native-linux-aarch64",
+        "native-windows-x86_64-msvc",
+    ];
+    let receipts = matrix["platform_receipts"]
+        .as_array()
+        .expect("platform receipts");
+    assert_eq!(receipts.len(), expected_platforms.len());
+    for (receipt, expected_platform) in receipts.iter().zip(expected_platforms) {
+        assert_eq!(receipt["platform_profile"], expected_platform);
+        assert_eq!(receipt["result"], "passed_native");
+        assert!(receipt["failure_code"].is_null());
+        for head in receipt["source_repository_heads"]
+            .as_object()
+            .expect("source heads")
+            .values()
+        {
+            let head = head.as_str().expect("source head string");
+            assert_eq!(head.len(), 40);
+            assert!(head.bytes().all(|byte| byte.is_ascii_hexdigit()));
+        }
+        for digest in receipt["output_artifact_hashes"]
+            .as_object()
+            .expect("artifact hashes")
+            .values()
+        {
+            let digest = digest.as_str().expect("artifact digest string");
+            assert_eq!(digest.len(), 64);
+            assert!(digest.bytes().all(|byte| byte.is_ascii_hexdigit()));
+        }
+    }
+
+    for (path, expected) in matrix["input_fixture_hashes"]
+        .as_object()
+        .expect("input fixture hashes")
+    {
+        let bytes = fs::read(root().join(path)).expect("bound fixture remains tracked");
+        assert_eq!(
+            sha256_hex(&bytes),
+            expected.as_str().expect("fixture digest")
+        );
+    }
 }
