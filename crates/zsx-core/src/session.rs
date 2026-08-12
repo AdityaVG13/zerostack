@@ -66,7 +66,10 @@ pub const SESSION_EXECUTION_QUEUE_CAPACITY: usize = 8;
 /// Canonical model-visible JSON byte budget. This avoids a durable spill for
 /// a tiny read plus its execution receipt while retaining a hard inline cap;
 /// tokenizer-specific certification remains a separate TokenZero boundary.
-const SESSION_VISIBLE_RESULT_BYTES: usize = 4 * 1024;
+// 12 KiB: small command outputs (git status, test tails, directory listings)
+// stay inline instead of degrading to an opaque spill receipt; anything
+// larger still spills with a real head-of-content preview.
+const SESSION_VISIBLE_RESULT_BYTES: usize = 12 * 1024;
 pub const SESSION_REPLACEMENT_SETTLE_TIMEOUT: Duration = Duration::from_secs(5);
 pub const SESSION_EXECUTOR_START_TIMEOUT: Duration = Duration::from_secs(5);
 

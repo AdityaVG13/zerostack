@@ -119,7 +119,7 @@ impl std::error::Error for ConnectorError {}
 pub const RESULT_SPILL_SCHEMA: &str = "zerostack.codemode.result_spill.v1";
 
 /// Upper bound on the inline preview carried beside a spilled result ref.
-pub const RESULT_SPILL_PREVIEW_BYTES: usize = 256;
+pub const RESULT_SPILL_PREVIEW_BYTES: usize = 512;
 
 /// Conservative byte ceiling for aggregate values shown directly to a model.
 /// Receipts label bytes only; tokenizer-specific visible-token certification
@@ -558,7 +558,29 @@ pub(crate) fn spill_result(cas_root: &Path, encoded: &str) -> Result<JsonValue, 
         .put(encoded.as_bytes())
         .map_err(|error| HostError::ResultSpill(error.to_string()))?;
     let reference = format!("tz://blob/{hash}");
-    let preview = "[exact result omitted; expand ref]";
+    // Real head-of-content preview: a spill receipt that hides everything
+    // behind "[exact result omitted]" makes small-but-spilled results
+    // unusable without a second expand round trip.
+    let mut preview_end = encoded.len().min(RESULT_SPILL_PREVIEW_BYTES);
+    while preview_end > 0 && !encoded.is_char_boundary(preview_end) {
+        preview_end -= 1;
+    }
+    // JSON escaping can expand up to 6x; shrink until the escaped form stays
+    // inside twice the raw preview budget so the envelope cap always holds.
+    while preview_end > 0 {
+        let escaped_len = serde_json::to_string(&encoded[..preview_end])
+            .map(|escaped| escaped.len())
+            .unwrap_or(usize::MAX);
+        if escaped_len <= RESULT_SPILL_PREVIEW_BYTES * 2 {
+            break;
+        }
+        preview_end /= 2;
+        while preview_end > 0 && !encoded.is_char_boundary(preview_end) {
+            preview_end -= 1;
+        }
+    }
+    let preview_truncated = preview_end < encoded.len();
+    let preview = &encoded[..preview_end];
     debug_assert!(preview.len() <= RESULT_SPILL_PREVIEW_BYTES);
     let raw_bytes = encoded.len();
     let mut envelope = serde_json::json!({
@@ -569,7 +591,7 @@ pub(crate) fn spill_result(cas_root: &Path, encoded: &str) -> Result<JsonValue, 
         "bytes": raw_bytes,
         "preview": preview,
         "previewBytes": preview.len(),
-        "previewTruncated": true,
+        "previewTruncated": preview_truncated,
         "receipt": {
             "schema": "zerostack.codemode.result_finalization_receipt.v1",
             "rawResultJsonBytes": raw_bytes,
