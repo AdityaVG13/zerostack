@@ -3,8 +3,8 @@
 #
 # Fails if tracked files carry environment-specific state: absolute host paths
 # (/Users/<name>, /home/<name>, C:\\Users\\<name>), literal "~" path
-# components that no shell will expand, or an unscrubbed beads export (br
-# stamps source_repo_path with the author's absolute workspace path).
+# components that no shell will expand. Beads runtime state is root-ignored
+# and therefore outside this tracked-file gate.
 #
 # Each sub-gate owns its own allowlist policy; this script only sequences them
 # so a contributor has one command to run (zerostack-no-hardcoded-environment-audit-4j6q).
@@ -18,8 +18,7 @@ cd "$repo_root"
 status=0
 for gate in \
   "scripts/check_no_host_paths.py" \
-  "scripts/check_no_literal_tilde_paths.py" \
-  "scripts/scrub_beads_export.py --check"; do
+  "scripts/check_no_literal_tilde_paths.py"; do
   echo "== $gate"
   # shellcheck disable=SC2086
   if ! python3 $gate; then

@@ -14,11 +14,11 @@
     "unauthorized_root_and_store_isolation": "covered by packaged conformance and shared-CAS root-isolation tests cited by zerostack-1cj7 closure"
   },
   "harness": {
-    "explicit_state_root": "/Users/aditya/.cache/pi-zsx/sessions/f6765d7ca089c40e52b10374",
+    "explicit_state_root": "~/.cache/pi-zsx/sessions/f6765d7ca089c40e52b10374",
     "local_main_manifest_sha256": "bcecfcbf7aabdfbf849b9b384eb7dd2321e75cf136ec31fe2aded7d9d7182fbd",
     "native_addon": {
       "bytes": 13457120,
-      "path": "/Users/aditya/Developer/pi-stack/pi/packages/pi-zsx/.local/zsx_node.node",
+      "path": "~/Developer/pi-stack/pi/packages/pi-zsx/.local/zsx_node.node",
       "sha256": "ead368f5e1bbede36238c4ec0d844231dec31756aca1cfcda8c125dbff2ac877"
     },
     "package": "pi-zsx",
@@ -65,11 +65,11 @@
       "worker-muse": "Timeout: 300000ms; tools include zero_execute"
     },
     "runtime_sources": [
-      "/Users/aditya/Developer/pi-stack/pi/packages/pi-optimized-subagents/agents/worker-muse.md",
-      "/Users/aditya/Developer/pi-stack/pi/packages/pi-optimized-subagents/agents/worker-flash.md",
-      "/Users/aditya/Developer/pi-stack/pi/packages/pi-optimized-subagents/agents/worker.md",
-      "/Users/aditya/Developer/pi-stack/pi/packages/pi-optimized-subagents/src/runs/shared/subagent-control.ts",
-      "/Users/aditya/.pi/agent/settings.json"
+      "~/Developer/pi-stack/pi/packages/pi-optimized-subagents/agents/worker-muse.md",
+      "~/Developer/pi-stack/pi/packages/pi-optimized-subagents/agents/worker-flash.md",
+      "~/Developer/pi-stack/pi/packages/pi-optimized-subagents/agents/worker.md",
+      "~/Developer/pi-stack/pi/packages/pi-optimized-subagents/src/runs/shared/subagent-control.ts",
+      "~/.pi/agent/settings.json"
     ]
   },
   "representative_child": {

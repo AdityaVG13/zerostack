@@ -44,6 +44,7 @@ log.txt
 .tokenzero/
 .asgrep/
 blobs/
+/gc/
 **/plan-journals/
 **/*.journal
 **/*.lock
@@ -129,6 +130,7 @@ conformance/tests/*
 .bench-history/
 
 # --- Beads (local only; never publish tracker state) ---
+.beads/
 .bv/
 !conformance/schemas/two-phase-gate-v1.schema.json
 !conformance/src/
