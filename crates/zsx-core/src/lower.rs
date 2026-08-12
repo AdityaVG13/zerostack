@@ -36,6 +36,7 @@ pub const METHODS: &[(&str, &str)] = &[
     ("token", "read"),
     ("token", "job"),
     ("token", "shell"),
+    ("help", "search"),
 ];
 
 /// Map a public surface name to its single engine.
@@ -426,7 +427,7 @@ pub fn lower(
             "resolve" => "fs.resolve",
             _ => {
                 return Err(ConnectorError::new(
-                    "unsupported planner-free fs.compound operation",
+                    "unsupported planner-free fs.compound operation; discover call shapes with zero.help.search({query})",
                 ));
             }
         };
@@ -476,7 +477,7 @@ pub fn lower(
             "list_many" => ("fs.listMany", "items"),
             "search_many" => ("fs.searchMany", "queries"),
             "ast_search_many" => ("fs.astSearchMany", "items"),
-            _ => return Err(ConnectorError::new("unsupported fs method")),
+            _ => return Err(ConnectorError::new("unsupported fs method; discover call shapes with zero.help.search({query})")),
         };
         return Ok((engine, op.into(), vector_args(&input, key)));
     }
@@ -501,7 +502,7 @@ pub fn lower(
                 }
             }
             "index" => Value::Object(Default::default()),
-            _ => return Err(ConnectorError::new("unsupported graph method")),
+            _ => return Err(ConnectorError::new("unsupported graph method; discover call shapes with zero.help.search({query})")),
         };
         return Ok((engine, method.into(), args));
     }
@@ -528,7 +529,7 @@ pub fn lower(
             "shell",
             token_method_args(&input, "shell", "command", TOKEN_SHELL_OPTIONS)?,
         ),
-        _ => return Err(ConnectorError::new("unsupported token method")),
+        _ => return Err(ConnectorError::new("unsupported token method; discover call shapes with zero.help.search({query})")),
     };
     Ok((engine, op.into(), args))
 }

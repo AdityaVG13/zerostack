@@ -887,6 +887,13 @@ impl Connector for ZsxConnector {
     ) -> Result<(), ConnectorError> {
         let input: Value = serde_json::from_str(args_json)
             .map_err(|error| ConnectorError::new(error.to_string()))?;
+        // `zero.help.search` is a host-side discovery op: answered
+        // synchronously from the static catalog, no engine dispatch, so a
+        // speculative discovery call can never fail as unknown or stale.
+        if capability.surface == "help" {
+            let value = crate::help::help_search(&input);
+            return completion.complete(Ok(value.to_string()));
+        }
         let (engine, op, args) = lower(&capability.surface, &capability.method, input)?;
         let request_cancellation = self.request_cancellation()?;
         if context.is_expired() || request_cancellation.is_cancelled() {

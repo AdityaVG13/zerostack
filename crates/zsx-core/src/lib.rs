@@ -30,6 +30,7 @@
 
 mod adapter;
 mod connector;
+mod help;
 mod lower;
 mod session;
 mod verdict;
