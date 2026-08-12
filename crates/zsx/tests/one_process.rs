@@ -152,10 +152,10 @@ fn in_process_dispatch_proves_one_process_and_no_worker_spawn() {
     // No worker process was spawned anywhere in zsx-core.
     assert_eq!(process_spawn_count(), 0, "zsx-core spawned a child process");
     #[cfg(target_os = "linux")]
-    assert!(
-        child_pids().is_empty(),
-        "test process has children: {child_pids:?}"
-    );
+    {
+        let children = child_pids();
+        assert!(children.is_empty(), "test process has children: {children:?}");
+    }
 
     session.shutdown().expect("shutdown settles");
     assert_eq!(process_spawn_count(), 0);
