@@ -89,9 +89,13 @@ jobs:
         with:
           workspaces: ZeroStack
       - run: cargo test -p zerostack-shared-tests --test program_assembly -- --test-threads=1
+      - run: cargo test -p zerostack-shared-tests --test canonical_dispatch -- --test-threads=1
+      - run: cargo test -p zerostack-shared-tests --test raw_worker_v2 -- --test-threads=1
+      - run: cargo test -p zero-codemode --test host_contract -- --test-threads=1
       - run: cargo test -p zsx-core --features fszero,graphzero,tokenzero --test canonical_mixed -- --test-threads=1
       - run: cargo test -p zsx-core --features fszero,graphzero,tokenzero --test request_cancellation -- --test-threads=1
       - run: cargo test -p zsx --test one_process -- --test-threads=1
+      - run: cargo test -p zsx-node -- --test-threads=1
 
   # Local engine reports are ignored runtime evidence. CI cannot attest their freshness.
   privacy:
