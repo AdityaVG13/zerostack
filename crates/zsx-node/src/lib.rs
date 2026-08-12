@@ -1,17 +1,19 @@
 //! zsx-node: N-API cdylib binding a single-process ZSX session to Node.js.
 //!
 //! Exposes one class, `NativeZsxSession`, over the canonical in-process
-//! [`zsx_core::ZsxSession`]: the constructor builds one real full session
-//! (executor thread, aggregate connector, confined host) with the three
-//! domain adapters registered — the same composition the `zsx exec` binary
-//! uses.
+//! [`zsx_core::ZsxSession`]: the constructor records configuration, then
+//! `initialize()` or the first `execute()` builds one real full session on a
+//! libuv worker (executor thread, aggregate connector, confined host) with
+//! the three domain adapters registered — the same composition the `zsx exec`
+//! binary uses.
 //!
 //! - `execute(plan, timeoutMs, signal?)` assigns a bounded per-generation
 //!   request id and returns an `AsyncTask` (a Promise); the blocking plan
 //!   runs on the libuv threadpool and resolves to the canonical JSON
 //!   envelope. An `AbortSignal` cancels that one request.
-//! - `status()`, `reconcile()`, `shutdown()` are control-plane wrappers;
-//!   `shutdown` only stops the in-process worker thread.
+//! - `initialize()`, `reconcilePending()`, `reconcile()`, and `shutdown()`
+//!   are asynchronous control-plane wrappers; `status()` is a non-blocking
+//!   snapshot and `shutdown` only stops the in-process worker thread.
 //!
 //! The addon never spawns a process, never opens a socket, and never speaks
 //! NDJSON: everything below is the zsx-core in-process path, which

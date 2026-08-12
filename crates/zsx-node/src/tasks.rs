@@ -12,8 +12,6 @@ use std::time::Duration;
 use napi::bindgen_prelude::{ToNapiValue, TypeName, ValueType};
 use napi::{Env, Result, Task};
 
-use zsx_core::SessionReplacementReason;
-
 use crate::core::SessionCore;
 use crate::envelope::Envelope;
 use crate::error;
@@ -91,9 +89,30 @@ impl Task for ExecuteTask {
         if self.cancelled.load(Ordering::Acquire) {
             return Ok(self.cancelled());
         }
+        let session = match catch_unwind(AssertUnwindSafe(|| self.core.initialize())) {
+            Ok(Ok(session)) => session,
+            Ok(Err(err)) => {
+                return Ok(Envelope::from_zsx_error(
+                    self.generation,
+                    self.request_id,
+                    &err,
+                ));
+            }
+            Err(_panic) => return Ok(Envelope::panic(self.generation, self.request_id)),
+        };
+        // Abort may arrive while lazy initialization runs. Re-check before
+        // dispatch so a cancelled cold request cannot execute a mutation.
+        if self.cancelled.load(Ordering::Acquire) {
+            return Ok(self.cancelled());
+        }
         let outcome = catch_unwind(AssertUnwindSafe(|| {
-            self.core
-                .execute(self.generation, self.request_id, &self.plan, self.timeout)
+            self.core.execute_ready(
+                &session,
+                self.generation,
+                self.request_id,
+                &self.plan,
+                self.timeout,
+            )
         }));
         match outcome {
             Ok(Ok(result)) if !self.cancelled.load(Ordering::Acquire) => {
@@ -122,6 +141,8 @@ impl Task for ExecuteTask {
 /// Control-plane operation carried by [`ControlTask`].
 #[derive(Clone, Copy)]
 pub enum ControlOp {
+    /// Build the canonical three-engine session on libuv's worker pool.
+    Initialize,
     /// Manual reconcile: replace the session generation
     /// (`zsx_core` `replace(.., SessionReplacementReason::Manual)`).
     Reconcile,
@@ -136,6 +157,13 @@ pub struct ControlTask {
 }
 
 impl ControlTask {
+    pub fn initialize(core: Arc<SessionCore>) -> Self {
+        Self {
+            core,
+            op: ControlOp::Initialize,
+        }
+    }
+
     pub fn reconcile(core: Arc<SessionCore>) -> Self {
         Self {
             core,
@@ -165,18 +193,24 @@ impl Task for ControlTask {
 
     fn compute(&mut self) -> Result<ControlOutcome> {
         catch_unwind(AssertUnwindSafe(|| match self.op {
-            ControlOp::Reconcile => {
+            ControlOp::Initialize => {
                 let generation = self
                     .core
-                    .generation()
-                    .map_err(|err| error::zsx_error("reconcile", &err))?;
+                    .initialize()
+                    .and_then(|session| session.generation())
+                    .map_err(|err| error::zsx_error("initialize", &err))?;
+                Ok(ControlOutcome {
+                    kind: "initialize",
+                    generation,
+                    previous_generation: None,
+                    reason: None,
+                })
+            }
+            ControlOp::Reconcile => {
                 let receipt = self
                     .core
-                    .session()
-                    .replace(generation, SessionReplacementReason::Manual)
+                    .reconcile()
                     .map_err(|err| error::zsx_error("reconcile", &err))?;
-                // The generation advanced: the request id space resets.
-                self.core.reset_request_ids();
                 Ok(ControlOutcome {
                     kind: "reconcile",
                     generation: receipt.generation,
@@ -187,10 +221,8 @@ impl Task for ControlTask {
             ControlOp::Shutdown => {
                 let generation = self
                     .core
-                    .session()
                     .shutdown()
                     .map_err(|err| error::zsx_error("shutdown", &err))?;
-                self.core.mark_terminated();
                 Ok(ControlOutcome {
                     kind: "shutdown",
                     generation,
@@ -221,5 +253,37 @@ impl Task for ControlTask {
                 .insert("reason".to_string(), serde_json::json!(reason));
         }
         Ok(JsEnvelope(v))
+    }
+}
+
+/// Scan durable mutation attempts without blocking Node's event loop.
+pub struct ReconcilePendingTask {
+    core: Arc<SessionCore>,
+}
+
+impl ReconcilePendingTask {
+    pub fn new(core: Arc<SessionCore>) -> Self {
+        Self { core }
+    }
+}
+
+impl Task for ReconcilePendingTask {
+    type Output = String;
+    type JsValue = String;
+
+    fn compute(&mut self) -> Result<String> {
+        catch_unwind(AssertUnwindSafe(|| {
+            let statuses = self
+                .core
+                .reconcile_pending()
+                .map_err(|err| error::zsx_error("reconcilePending", &err))?;
+            serde_json::to_string(&statuses)
+                .map_err(|err| error::message("reconcilePending", err.to_string()))
+        }))
+        .unwrap_or_else(|_| Err(error::panic_error("reconcilePending")))
+    }
+
+    fn resolve(&mut self, _env: Env, output: String) -> Result<String> {
+        Ok(output)
     }
 }

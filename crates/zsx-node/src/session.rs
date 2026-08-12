@@ -1,21 +1,18 @@
 //! The `NativeZsxSession` N-API class.
 //!
-//! Constructor builds one real full `zsx_core::ZsxSession` (executor thread,
-//! aggregate connector, confined host) with the three domain adapters
-//! registered — the same composition `zsx exec` uses. `execute` is async;
-//! `status` is a fast sync read; `reconcile` and `shutdown` run on the
-//! threadpool because they can block on the session worker.
+//! Construction only records configuration. `initialize()` and the first
+//! `execute()` build the real full `zsx_core::ZsxSession` on libuv's worker
+//! pool, so engine startup never blocks Node's event loop. `status` remains a
+//! fast sync read; reconcile and shutdown also run on the worker pool.
 
 use std::sync::Arc;
 use std::time::Duration;
 
-use napi::bindgen_prelude::{AbortSignal, AsyncTask};
-use napi_derive::napi;
-use zsx_core::ZsxSession;
-
 use crate::core::{DEFAULT_TIMEOUT_MS, SessionCore};
 use crate::error;
-use crate::tasks::{ControlTask, ExecuteTask};
+use crate::tasks::{ControlTask, ExecuteTask, ReconcilePendingTask};
+use napi::bindgen_prelude::{AbortSignal, AsyncTask};
+use napi_derive::napi;
 
 /// One real full ZSX session exposed to Node.js.
 #[napi]
@@ -25,31 +22,28 @@ pub struct NativeZsxSession {
 
 #[napi]
 impl NativeZsxSession {
-    /// Build one real full session rooted at `root`, with optional mutable
-    /// state isolated below `state_root`.
+    /// Record one session rooted at `root`, with optional mutable state
+    /// isolated below `state_root`.
     ///
-    /// This is the canonical in-process zsx-core composition: the session
-    /// worker thread, the aggregate connector, and the confined interpreter
-    /// host with the three domain adapters (FSZero, GraphZero, TokenZero)
-    /// registered. No process is spawned and no socket is opened.
+    /// The canonical in-process zsx-core composition is initialized lazily by
+    /// an async task. No process is spawned and no socket is opened.
     #[napi(constructor)]
     pub fn new(
         root: String,
         session_id: Option<String>,
         state_root: Option<String>,
     ) -> napi::Result<Self> {
-        let mut builder = ZsxSession::builder(&root);
-        if let Some(state_root) = state_root {
-            builder = builder.with_state_root(state_root);
-        }
-        let session = match session_id {
-            Some(session_id) => builder.with_session_id(session_id).build_canonical(),
-            None => builder.build_canonical(),
-        }
-        .map_err(|err| error::zsx_error("constructor", &err))?;
         Ok(Self {
-            core: Arc::new(SessionCore::new(session)),
+            core: Arc::new(SessionCore::new(root, session_id, state_root)),
         })
+    }
+
+    /// Initialize all three domain engines asynchronously. Calling this is
+    /// optional because `execute()` initializes lazily, but hosts can await it
+    /// to surface startup failures before accepting a tool call.
+    #[napi]
+    pub fn initialize(&self) -> AsyncTask<ControlTask> {
+        AsyncTask::new(ControlTask::initialize(Arc::clone(&self.core)))
     }
 
     /// Execute one plan asynchronously.
@@ -69,10 +63,7 @@ impl NativeZsxSession {
         timeout_ms: Option<u32>,
         signal: Option<AbortSignal>,
     ) -> napi::Result<AsyncTask<ExecuteTask>> {
-        let generation = self
-            .core
-            .generation()
-            .map_err(|err| error::zsx_error("execute", &err))?;
+        let generation = self.core.generation();
         let request_id = self
             .core
             .allocate_request_id()
@@ -104,16 +95,16 @@ impl NativeZsxSession {
     /// canonical in-process path).
     #[napi]
     pub fn status(&self) -> napi::Result<SessionStatus> {
-        let generation = self
-            .core
-            .generation()
-            .map_err(|err| error::zsx_error("status", &err))?;
+        let generation = self.core.generation();
+        let ready = self.core.is_ready();
         Ok(SessionStatus {
             generation: generation as u32,
             state: if self.core.is_terminated() {
                 "stopped".to_string()
-            } else {
+            } else if ready {
                 "running".to_string()
+            } else {
+                "idle".to_string()
             },
             inflight: self.core.inflight() as u32,
             aborted: self.core.aborted() as u32,
@@ -126,14 +117,8 @@ impl NativeZsxSession {
     /// redispatching effects. Harnesses call this before manual generation
     /// replacement after an interrupted native process.
     #[napi]
-    pub fn reconcile_pending(&self) -> napi::Result<String> {
-        let statuses = self
-            .core
-            .session()
-            .reconcile_all_attempts()
-            .map_err(|err| error::zsx_error("reconcilePending", &err))?;
-        serde_json::to_string(&statuses)
-            .map_err(|err| napi::Error::from_reason(format!("reconcilePending: {err}")))
+    pub fn reconcile_pending(&self) -> AsyncTask<ReconcilePendingTask> {
+        AsyncTask::new(ReconcilePendingTask::new(Arc::clone(&self.core)))
     }
 
     /// Manual reconcile: replace the session generation (zsx-core
@@ -158,7 +143,8 @@ pub struct SessionStatus {
     /// Active session generation (u32 snapshot; reconciles are far rarer
     /// than the u64 space zsx-core keeps).
     pub generation: u32,
-    /// `"running"` while the session worker thread is alive, `"stopped"` after `shutdown()`.
+    /// `"idle"` before lazy initialization, `"running"` while the session
+    /// worker is alive, and `"stopped"` after `shutdown()`.
     pub state: String,
     /// Requests admitted but not yet settled.
     pub inflight: u32,
