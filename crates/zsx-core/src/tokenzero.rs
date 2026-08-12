@@ -233,10 +233,21 @@ impl TokenZeroAdapter {
         // becomes a typed error naming the limit, never a truncated result.
         let output_bytes = serde_json::to_vec(&value).map_or(0, |bytes| bytes.len());
         if output_bytes > MAX_OUTPUT_BYTES {
+            let range_hint = request
+                .args
+                .get("ref")
+                .and_then(Value::as_str)
+                .filter(|reference| !reference.contains('#'))
+                .map(|reference| {
+                    format!(
+                        "; retry with {reference}#B0-32768 and continue with later byte ranges"
+                    )
+                })
+                .unwrap_or_default();
             return Err(AdapterError::new(
                 "output_too_large",
                 format!(
-                    "operation result is {output_bytes} bytes; the advertised max_output_bytes limit is {MAX_OUTPUT_BYTES}"
+                    "operation result is {output_bytes} bytes; the advertised max_output_bytes limit is {MAX_OUTPUT_BYTES}{range_hint}"
                 ),
                 false,
                 Some(request.trace.clone()),
@@ -823,6 +834,30 @@ mod tests {
         for op in ["read", "find", "expand", "recall", "job"] {
             assert_eq!(effect_class(op), EffectClass::ReadOnly, "{op}");
         }
+    }
+
+    #[test]
+    fn oversized_bare_expand_error_provides_a_fragment_retry() {
+        let reference = format!("tz://blob/{}", "a".repeat(64));
+        let request = CallRequest {
+            request_id: "request-expand".into(),
+            op: "expand".into(),
+            args: json!({"ref":reference}),
+            deadline_unix_ms: None,
+            trace: test_trace(),
+            approval_grant: None,
+            telemetry_request: None,
+        };
+        let adapter = TokenZeroAdapter::new("/tmp", "session-expand").expect("adapter builds");
+        let error = adapter
+            .bind_outcome(
+                &request,
+                Ok((json!({"visible":"x".repeat(MAX_OUTPUT_BYTES)}), Vec::new())),
+                Duration::ZERO,
+            )
+            .expect_err("oversized result must fail");
+        assert_eq!(error.error.kind, "output_too_large");
+        assert!(error.error.message.contains("#B0-32768"));
     }
 
     #[test]
