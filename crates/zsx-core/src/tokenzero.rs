@@ -1085,7 +1085,10 @@ mod tests {
             .expect("expand executes");
         // The expand result may itself spill; the call must at least succeed.
         if resolved.value.get("spilled").and_then(Value::as_bool) != Some(true) {
-            assert_eq!(resolved.value["value"]["status"], json!("ok"));
+            assert_eq!(
+                resolved.value["content"]["value"]["value"]["status"],
+                json!("ok")
+            );
         }
         let oversized = session
             .execute(
