@@ -26,6 +26,30 @@ python3 scripts/install_zerostack.py uninstall
 
 `--allow-unsigned` exists only for local fixture development and must never be used for a release. The bundle contract is `tests/contracts/release-bundle-v1.schema.json`; every manifest binds the exact ZeroStack, FSZero, GraphZero, and TokenZero source heads.
 
+Fresh installs record CodeMode as the selected surface. Existing upgrades preserve their prior selection. Engine MCP is available only through the explicit `--compat-mcp` flag and always emits a maintenance-only warning on stderr; it never writes the warning to protocol stdout. Use `--codemode` on an upgrade to leave compatibility mode explicitly. The installer records selection for harness adapter generation, but it never registers both surfaces or mutates a harness configuration itself.
+
+Harness adapters must consume typed startup argv instead of assembling shell commands:
+
+```sh
+python3 scripts/install_zerostack.py startup --project-root "$PWD" --json
+```
+
+The returned `zerostack.startup_argv.v1` object contains `program`, an `argv` array, and `shell:false`, all bound to the verified active release and manifest digest. Pre-feature development state has no recorded surface; run `install` or `upgrade` once before `verify` or `startup`.
+
+## Installed store layout
+
+The default prefix is `~/.local/share/zerostack`:
+
+```text
+bin/                 stable launchers
+current              atomic POSIX pointer to releases/<version>-<platform>
+current.txt          atomic Windows pointer (Windows only)
+install-state.json   active/previous release, surface, digests, signature status
+releases/            immutable verified release directories retained for rollback
+```
+
+Runtime project stores are not placed in the install prefix. `zsx -C <root>` resolves the project/session store through `zero-store`; the canonical content-addressed layout remains `blobs/sha256/<first-two-hex>/<full-sha256>`. Uninstall removes launchers and active state but intentionally preserves `releases/` as rollback/recovery data until the operator deletes it.
+
 ## Developer source-build requirements
 
 - Rust toolchain and `rch`

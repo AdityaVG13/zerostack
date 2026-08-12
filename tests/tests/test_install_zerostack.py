@@ -36,7 +36,14 @@ def make_bundle(root: Path, version: str, output: str) -> Path:
     bundle = root / f"bundle-{version}"
     binary = bundle / "bin" / "zsx"
     binary.parent.mkdir(parents=True)
-    payload = f"#!/bin/sh\nprintf '%s\\n' {json.dumps(output)}\n".encode()
+    payload = (
+        "#!/bin/sh\n"
+        "if [ \"$#\" -gt 0 ]; then\n"
+        "  printf '%s\\n' \"$@\"\n"
+        "else\n"
+        f"  printf '%s\\n' {json.dumps(output)}\n"
+        "fi\n"
+    ).encode()
     binary.write_bytes(payload)
     binary.chmod(0o755)
     manifest = {
@@ -86,7 +93,8 @@ class PrebuiltInstallerTests(unittest.TestCase):
                 check=False,
             )
             self.assertEqual(installed.returncode, 0, installed.stderr)
-            self.assertTrue(json.loads(installed.stdout)["ok"])
+            installed_state = json.loads(installed.stdout)["state"]
+            self.assertEqual(installed_state["selected_surface"], "codemode")
             verified = subprocess.run(
                 command + ["verify", "--prefix", str(prefix), "--json"],
                 capture_output=True,
@@ -95,6 +103,58 @@ class PrebuiltInstallerTests(unittest.TestCase):
             )
             self.assertEqual(verified.returncode, 0, verified.stderr)
             self.assertTrue(json.loads(verified.stdout)["ok"])
+            generated = subprocess.run(
+                command
+                + [
+                    "startup",
+                    "--prefix",
+                    str(prefix),
+                    "--project-root",
+                    str(root / "project with spaces"),
+                    "--json",
+                ],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            self.assertEqual(generated.returncode, 0, generated.stderr)
+            startup = json.loads(generated.stdout)["state"]
+            self.assertEqual(startup["schema"], "zerostack.startup_argv.v1")
+            self.assertIs(startup["shell"], False)
+            self.assertEqual(startup["argv"][:2], ["exec", "-C"])
+            self.assertTrue(startup["argv"][2].endswith("project with spaces"))
+            observed_argv = subprocess.check_output(
+                [startup["program"], *startup["argv"]], text=True
+            ).splitlines()
+            self.assertEqual(observed_argv, startup["argv"])
+
+    def test_compatibility_requires_flag_warns_and_is_preserved_on_upgrade(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            first = make_bundle(root, "1.0.0", "one")
+            second = make_bundle(root, "1.1.0", "two")
+            prefix = root / "install"
+            command = [
+                sys.executable,
+                str(ROOT / "scripts" / "install_zerostack.py"),
+                "install",
+                "--bundle",
+                str(first),
+                "--prefix",
+                str(prefix),
+                "--allow-unsigned",
+                "--compat-mcp",
+                "--json",
+            ]
+            completed = subprocess.run(command, capture_output=True, text=True, check=False)
+            self.assertEqual(completed.returncode, 0, completed.stderr)
+            self.assertEqual(json.loads(completed.stdout)["state"]["selected_surface"], "mcp")
+            self.assertIn("maintenance-only", completed.stderr)
+
+            preserved = installer.install_bundle(prefix, second, None, True)
+            self.assertEqual(preserved["selected_surface"], "mcp")
+            switched = installer.install_bundle(prefix, second, None, True, "codemode")
+            self.assertEqual(switched["selected_surface"], "codemode")
 
     def test_install_upgrade_verify_rollback_and_uninstall(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

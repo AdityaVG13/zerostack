@@ -383,7 +383,13 @@ def switch_current(prefix: Path, identifier: str) -> None:
     os.replace(temporary, prefix / "current")
 
 
-def install_bundle(prefix: Path, root: Path, public_key: str | None, allow_unsigned: bool) -> dict[str, Any]:
+def install_bundle(
+    prefix: Path,
+    root: Path,
+    public_key: str | None,
+    allow_unsigned: bool,
+    surface_override: str | None = None,
+) -> dict[str, Any]:
     manifest = load_manifest(root)
     if manifest["platform"] != current_platform():
         raise InstallError(
@@ -393,6 +399,17 @@ def install_bundle(prefix: Path, root: Path, public_key: str | None, allow_unsig
     verified = verify_artifacts(root, manifest)
     incoming_manifest_sha256 = sha256_file(root / MANIFEST)
     identifier = release_id(manifest)
+    old_state = read_state(prefix)
+    old_current = old_state.get("current")
+    old_surface = old_state.get("selected_surface")
+    if surface_override is not None:
+        if surface_override not in ("codemode", "mcp"):
+            raise InstallError(f"unsupported execution surface: {surface_override!r}")
+        selected_surface = surface_override
+    elif old_current and old_surface in ("codemode", "mcp"):
+        selected_surface = old_surface
+    else:
+        selected_surface = "codemode"
     releases = prefix / "releases"
     releases.mkdir(parents=True, exist_ok=True)
     destination = releases / identifier
@@ -417,8 +434,6 @@ def install_bundle(prefix: Path, root: Path, public_key: str | None, allow_unsig
                 shutil.rmtree(stage)
     installed_manifest = load_manifest(destination)
     verify_artifacts(destination, installed_manifest)
-    old_state = read_state(prefix)
-    old_current = old_state.get("current")
     previous = old_state.get("previous") if old_current == identifier else old_current
     release_states = old_state.get("releases")
     if not isinstance(release_states, dict):
@@ -436,6 +451,7 @@ def install_bundle(prefix: Path, root: Path, public_key: str | None, allow_unsig
         "signature_status": signature_status,
         "manifest_sha256": incoming_manifest_sha256,
         "releases": release_states,
+        "selected_surface": selected_surface,
     }
     write_state(prefix, state)
     switch_current(prefix, identifier)
@@ -444,6 +460,8 @@ def install_bundle(prefix: Path, root: Path, public_key: str | None, allow_unsig
 
 def verify_install(prefix: Path) -> dict[str, Any]:
     state = read_state(prefix)
+    if state.get("selected_surface") not in ("codemode", "mcp"):
+        raise InstallError("install state has no valid selected execution surface")
     current = state.get("current")
     if not isinstance(current, str) or not current:
         raise InstallError("ZeroStack is not installed")
@@ -492,6 +510,30 @@ def rollback(prefix: Path) -> dict[str, Any]:
     return state
 
 
+def startup_spec(prefix: Path, project_root: Path) -> dict[str, Any]:
+    state = verify_install(prefix)
+    if state["selected_surface"] != "codemode":
+        raise InstallError("generated aggregate startup argv is available only for CodeMode")
+    current = state["current"]
+    release = prefix / "releases" / current
+    manifest = load_manifest(release)
+    raw_entrypoint = manifest["entrypoints"].get("zsx")
+    if not isinstance(raw_entrypoint, str):
+        raise InstallError("bundle does not declare the required zsx entrypoint")
+    program = release / safe_relative(raw_entrypoint)
+    if not program.is_file():
+        raise InstallError("verified zsx entrypoint is missing")
+    return {
+        "schema": "zerostack.startup_argv.v1",
+        "selected_surface": "codemode",
+        "release": current,
+        "manifest_sha256": state["manifest_sha256"],
+        "program": str(program),
+        "argv": ["exec", "-C", str(project_root.expanduser().resolve())],
+        "shell": False,
+    }
+
+
 def uninstall(prefix: Path) -> None:
     state = read_state(prefix)
     manifest: dict[str, Any] | None = None
@@ -511,11 +553,26 @@ def uninstall(prefix: Path) -> None:
 
 def parser() -> argparse.ArgumentParser:
     command = argparse.ArgumentParser(description=__doc__)
-    command.add_argument("action", choices=("install", "upgrade", "verify", "rollback", "status", "uninstall"))
+    command.add_argument(
+        "action",
+        choices=("install", "upgrade", "verify", "rollback", "startup", "status", "uninstall"),
+    )
     command.add_argument("--bundle", help="bundle directory, archive, or https URL")
     command.add_argument("--prefix", type=Path, default=Path.home() / ".local/share/zerostack")
+    command.add_argument("--project-root", type=Path, help="project root for generated CodeMode startup argv")
     command.add_argument("--public-key", default=os.environ.get("ZEROSTACK_RELEASE_PUBLIC_KEY"))
     command.add_argument("--allow-unsigned", action="store_true", help="development fixtures only; never for releases")
+    surface = command.add_mutually_exclusive_group()
+    surface.add_argument(
+        "--compat-mcp",
+        action="store_true",
+        help="explicitly select maintenance-only engine MCP compatibility",
+    )
+    surface.add_argument(
+        "--codemode",
+        action="store_true",
+        help="explicitly switch an existing compatibility install to CodeMode",
+    )
     command.add_argument("--json", action="store_true")
     return command
 
@@ -527,12 +584,23 @@ def main() -> int:
         if args.action in ("install", "upgrade"):
             if not args.bundle:
                 raise InstallError(f"{args.action} requires --bundle")
+            surface_override = "mcp" if args.compat_mcp else "codemode" if args.codemode else None
             with materialized_bundle(args.bundle) as root:
-                result: Any = install_bundle(prefix, root, args.public_key, args.allow_unsigned)
+                result: Any = install_bundle(
+                    prefix,
+                    root,
+                    args.public_key,
+                    args.allow_unsigned,
+                    surface_override,
+                )
         elif args.action == "verify":
             result = verify_install(prefix)
         elif args.action == "rollback":
             result = rollback(prefix)
+        elif args.action == "startup":
+            if args.project_root is None:
+                raise InstallError("startup requires --project-root")
+            result = startup_spec(prefix, args.project_root)
         elif args.action == "status":
             result = read_state(prefix)
         else:
@@ -546,8 +614,15 @@ def main() -> int:
         return 1
     if args.json:
         print(json.dumps({"ok": True, "state": result}, sort_keys=True))
+    elif args.action == "startup":
+        print(json.dumps([result["program"], *result["argv"]]))
     else:
         print(f"{args.action}: {result.get('current') or 'not installed'}")
+    if result.get("selected_surface") == "mcp":
+        print(
+            "WARNING: engine MCP compatibility is maintenance-only; CodeMode is the supported default.",
+            file=os.sys.stderr,
+        )
     return 0
 
 

@@ -76,7 +76,7 @@ The production runtime links the three engine domain APIs through reviewed, pinn
 
 ## Installation status
 
-The native CLI and Node binding are verified from source. A provider-independent installer for signed prebuilt bundles supports install, upgrade, integrity verification, rollback, and uninstall without Git, Cargo, Rust, or package-manager mutation; see [`INSTALL-FOR-AGENTS.md`](INSTALL-FOR-AGENTS.md). Thin private adapters live at `pi/packages/pi-zsx` and `omp/packages/omp-zsx-native` in `pi-stack`. Publishing signed platform bundles, public registry packages, and Windows native verification remain separate release gates.
+The native CLI and Node binding are verified from source. A provider-independent installer for signed prebuilt bundles supports install, upgrade, integrity verification, rollback, and uninstall without Git, Cargo, Rust, or package-manager mutation; see [`INSTALL-FOR-AGENTS.md`](INSTALL-FOR-AGENTS.md). The machine-readable [release matrix](release/release-matrix-v1.json) covers macOS arm64/x64, Linux arm64/x64, and Windows x64. Thin private adapters live at `pi/packages/pi-zsx` and `omp/packages/omp-zsx-native` in `pi-stack`. Publishing signed platform bundles, public registry packages, and Windows native verification remain separate release gates.
 
 ## Roadmap
 
