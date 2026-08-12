@@ -638,6 +638,17 @@ fn wrong_connector_property_is_a_catchable_type_error() {
 }
 
 #[test]
+fn unsupported_map_and_set_globals_fail_at_construction() {
+    let host = Host::new(lim(), reg()).unwrap_or_else(|error| panic!("host: {error}"));
+    for source in ["return new Map();", "return new Set();"] {
+        let error = host
+            .execute(source, Rc::new(C::ok()))
+            .expect_err("unsupported collection global must fail");
+        assert!(error.to_string().contains("unknown identifier"), "{error}");
+    }
+}
+
+#[test]
 fn known_properties_stay_readable_through_the_strict_guard() {
     let connector = Rc::new(C {
         calls: RefCell::new(vec![]),

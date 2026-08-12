@@ -420,8 +420,6 @@ impl<'tree> Interpreter<'tree> {
             "Array",
             "Date",
             "RegExp",
-            "Map",
-            "Set",
             "URL",
             "URLSearchParams",
             "Promise",
