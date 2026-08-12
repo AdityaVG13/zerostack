@@ -248,6 +248,7 @@ fn mutation_effect_class(engine: EngineIdentity, operation: &str) -> Option<Effe
     match (engine, operation) {
         (EngineIdentity::FsZero, "fs.edit") => Some(EffectClass::ReversibleMutation),
         (EngineIdentity::FsZero, "fs.write") => Some(EffectClass::ApprovalRequiredMutation),
+        (EngineIdentity::FsZero, "fs.transact") => Some(EffectClass::ReversibleMutation),
         (EngineIdentity::GraphZero, "index" | "remember") => Some(EffectClass::ReversibleMutation),
         (EngineIdentity::TokenZero, "ingest") => Some(EffectClass::Irreversible),
         (EngineIdentity::TokenZero, "shell") => Some(EffectClass::Irreversible),

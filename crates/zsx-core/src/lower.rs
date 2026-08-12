@@ -16,6 +16,7 @@ pub const METHODS: &[(&str, &str)] = &[
     ("fs", "world"),
     ("fs", "edit"),
     ("fs", "write"),
+    ("fs", "transact"),
     ("fs", "read_many"),
     ("fs", "list_many"),
     ("fs", "search_many"),
@@ -376,6 +377,22 @@ pub fn lower(
         };
         return Ok((engine, format!("fs.{method}"), args));
     }
+    // All-or-nothing multi-step mutation: zero.fs.transact([step, ...]) or
+    // zero.fs.transact(step, ...). Steps are objects; FSZero owns semantics.
+    if surface == "fs" && method == "transact" {
+        let steps = match input.as_array() {
+            Some(items) if items.len() == 1 && items[0].is_array() => items[0].clone(),
+            Some(items) if !items.is_empty() && items.iter().all(Value::is_object) => {
+                Value::Array(items.clone())
+            }
+            _ => {
+                return Err(ConnectorError::new(
+                    "fs.transact takes one non-empty array of step objects",
+                ));
+            }
+        };
+        return Ok((engine, "fs.transact".into(), serde_json::json!({"steps": steps})));
+    }
     if surface == "fs" && method == "compound" {
         let (name, compound_args) = if let Some(items) = input.as_array() {
             (
@@ -677,6 +694,32 @@ mod tests {
         for input in [json!([]), json!(["c.txt"]), json!([{}, {}]), json!("c.txt")] {
             assert!(lower("fs", "edit", input.clone()).is_err());
             assert!(lower("fs", "write", input).is_err());
+        }
+
+        assert!(METHODS.contains(&("fs", "transact")));
+        let steps = json!([
+            {"op":"edit","path":"a.rs","find":"x","replace":"y"},
+            {"op":"write","path":"b.txt","content":"z","base":null}
+        ]);
+        assert_lower(
+            "fs",
+            "transact",
+            json!([steps.clone()]),
+            EngineIdentity::FsZero,
+            "fs.transact",
+            json!({"steps": steps.clone()}),
+        );
+        // Spread form: zero.fs.transact(step, step).
+        assert_lower(
+            "fs",
+            "transact",
+            steps.clone(),
+            EngineIdentity::FsZero,
+            "fs.transact",
+            json!({"steps": steps}),
+        );
+        for input in [json!([]), json!("steps"), json!(["a", "b"])] {
+            assert!(lower("fs", "transact", input).is_err());
         }
     }
 
