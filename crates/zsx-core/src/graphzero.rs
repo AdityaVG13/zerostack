@@ -251,7 +251,7 @@ impl DomainAdapter for GraphZeroAdapter {
                 result: WorkerResult {
                     value: result.value,
                     metadata: WorkerResultMetadata {
-                        effect: effect_class_for_op(&request.op),
+                        effect: effect_class_for_request(&request.op, &request.args),
                         approval: ApprovalMetadata {
                             state: ApprovalState::NotRequired,
                             approval_id: None,
@@ -292,7 +292,10 @@ impl DomainAdapter for GraphZeroAdapter {
 
 /// Effect class for one canonical operation, mirroring the raw-worker-v2
 /// classification (`graphzero_query::surface_handshake::v2::effect_class_for_op`).
-fn effect_class_for_op(op: &str) -> EffectClass {
+fn effect_class_for_request(op: &str, args: &serde_json::Value) -> EffectClass {
+    if op == "reserve" && args.get("action").and_then(serde_json::Value::as_str) == Some("list") {
+        return EffectClass::ReadOnly;
+    }
     match resolve_operation(op).map(|operation| operation.mutability) {
         Some(Mutability::ReadOnly) => EffectClass::ReadOnly,
         Some(Mutability::StoreOnly) | None => EffectClass::Irreversible,
@@ -352,6 +355,18 @@ mod tests {
                 .get_verified(hash)
                 .expect("aggregate CAS object"),
             bytes
+        );
+    }
+
+    #[test]
+    fn reserve_list_is_read_only_but_reserve_mutations_remain_irreversible() {
+        assert_eq!(
+            effect_class_for_request("reserve", &serde_json::json!({"action":"list"})),
+            EffectClass::ReadOnly
+        );
+        assert_eq!(
+            effect_class_for_request("reserve", &serde_json::json!({"action":"declare"})),
+            EffectClass::Irreversible
         );
     }
 }

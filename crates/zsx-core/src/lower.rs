@@ -275,7 +275,10 @@ pub fn lower(
             .ok_or_else(|| ConnectorError::new("token.expand requires ref"))?;
         let (engine, op, key) = if reference.starts_with("fz://") {
             (EngineIdentity::FsZero, "fs.expand", "ref")
-        } else if reference.starts_with("gz://") {
+        } else if reference.starts_with("gz://")
+            || reference.starts_with("g:")
+            || reference.starts_with("q:")
+        {
             (EngineIdentity::GraphZero, "expand", "reference")
         } else if reference.starts_with("tz://") {
             (EngineIdentity::TokenZero, "expand", "ref")
@@ -597,6 +600,22 @@ mod tests {
             EngineIdentity::TokenZero,
             "find",
             json!({"query":"Widget"}),
+        );
+        assert_lower(
+            "token",
+            "expand",
+            json!("g:42"),
+            EngineIdentity::GraphZero,
+            "expand",
+            json!({"reference":"g:42"}),
+        );
+        assert_lower(
+            "token",
+            "expand",
+            json!("q:abc"),
+            EngineIdentity::GraphZero,
+            "expand",
+            json!({"reference":"q:abc"}),
         );
     }
 
