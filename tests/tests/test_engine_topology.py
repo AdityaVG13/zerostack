@@ -153,6 +153,15 @@ class TopologyTests(unittest.TestCase):
         self.assertTrue(all(x["status"]=="thin-adapter" for x in adapters.values()))
         self.assertEqual(self.manifest["canonical_engine_skeleton"]["host_client_contract"]["name"],"zsx-native-session-v1")
 
+    def test_canonical_migration_quality_gate_is_uniform(self)->None:
+        policy=self.manifest["canonical_engine_skeleton"]["quality_gate_policy"]
+        self.assertEqual(policy["repositories"],["zerostack","tokenzero","fszero","graphzero"])
+        self.assertEqual(policy["runner"],"rch")
+        self.assertEqual(policy["rustfmt_args"],["fmt","--all","--","--check"])
+        self.assertEqual(policy["clippy_args_template"],["clippy","-p","<package>","--all-targets","--no-deps","--","-D","warnings"])
+        self.assertEqual(policy["activation"],"required-before-canonical-migration")
+        self.assertEqual(policy["existing_debt_policy"],"does-not-weaken-migration-gate")
+
     def test_rejects_nonportable_paths_with_mutations(self)->None:
         bad_paths=["/tmp/root","../outside","a/../../outside","C:\\repo","\\\\server\\share","a\\b"]
         for bad in bad_paths:

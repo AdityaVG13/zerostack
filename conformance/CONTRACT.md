@@ -22,6 +22,10 @@ Raw claim and freeze fields, source order, pristine hashes, duplicate digest obs
 
 Every claim starts `NOT_YET_PROVEN`. Every freeze starts `UNIMPLEMENTED`. `VERIFIED_AT_FREEZE` is non-public. Only Z8 can authorize public promotion. Target, package, workload, metric, denominator, threshold, and cache identities are preregistrations, not evidence that a platform or release gate passed.
 
+## Canonical engine migration gates
+
+`engine-topology-v1.json` defines the crate roles, binary names, dependency direction, and raw-worker boundary for ZeroStack, TokenZero, FSZero, and GraphZero. A package cannot enter the canonical topology until both quality gates pass through `rch`: `cargo fmt --all -- --check` and `cargo clippy -p <package> --all-targets --no-deps -- -D warnings`. Existing repository-wide lint or format debt does not weaken this per-package migration gate.
+
 ## 1. Scope
 
 ZeroStack CodeMode v1.0 defines the machine-checkable contract shared by FSZero (`fz`), TokenZero (`tz`), and GraphZero (`gz`). A conforming substrate exposes a launch-mode-selected CodeMode MCP surface, accepts recipe, JSON, and JavaScript plans, returns ref-first execution artifacts, emits the telemetry vocabulary below, and enforces every limit it declares.

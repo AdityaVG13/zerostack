@@ -241,6 +241,33 @@
       "host_feature_owner": "zero-codemode",
       "adapter_feature_owner": "hub-adapter-package"
     },
+    "quality_gate_policy": {
+      "repositories": [
+        "zerostack",
+        "tokenzero",
+        "fszero",
+        "graphzero"
+      ],
+      "runner": "rch",
+      "rustfmt_args": [
+        "fmt",
+        "--all",
+        "--",
+        "--check"
+      ],
+      "clippy_args_template": [
+        "clippy",
+        "-p",
+        "<package>",
+        "--all-targets",
+        "--no-deps",
+        "--",
+        "-D",
+        "warnings"
+      ],
+      "activation": "required-before-canonical-migration",
+      "existing_debt_policy": "does-not-weaken-migration-gate"
+    },
     "binary_policy": {
       "cli_suffix": "",
       "worker_suffix": "-codemode",

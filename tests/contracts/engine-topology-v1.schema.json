@@ -167,6 +167,7 @@
       "required": [
         "roles",
         "feature_policy",
+        "quality_gate_policy",
         "binary_policy",
         "host_client_contract"
       ],
@@ -244,6 +245,57 @@
             },
             "adapter_feature_owner": {
               "const": "hub-adapter-package"
+            }
+          }
+        },
+        "quality_gate_policy": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "repositories",
+            "runner",
+            "rustfmt_args",
+            "clippy_args_template",
+            "activation",
+            "existing_debt_policy"
+          ],
+          "properties": {
+            "repositories": {
+              "const": [
+                "zerostack",
+                "tokenzero",
+                "fszero",
+                "graphzero"
+              ]
+            },
+            "runner": {
+              "const": "rch"
+            },
+            "rustfmt_args": {
+              "const": [
+                "fmt",
+                "--all",
+                "--",
+                "--check"
+              ]
+            },
+            "clippy_args_template": {
+              "const": [
+                "clippy",
+                "-p",
+                "<package>",
+                "--all-targets",
+                "--no-deps",
+                "--",
+                "-D",
+                "warnings"
+              ]
+            },
+            "activation": {
+              "const": "required-before-canonical-migration"
+            },
+            "existing_debt_policy": {
+              "const": "does-not-weaken-migration-gate"
             }
           }
         },
