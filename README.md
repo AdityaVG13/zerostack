@@ -76,11 +76,11 @@ The production runtime links the three engine domain APIs through reviewed, pinn
 
 ## Installation status
 
-The native CLI and Node binding are verified from source. Thin private adapters live at `pi/packages/pi-zsx` and `omp/packages/omp-zsx-native` in `pi-stack`. Public registry publication and Windows native verification remain separate release gates.
+The native CLI and Node binding are verified from source. A provider-independent installer for signed prebuilt bundles supports install, upgrade, integrity verification, rollback, and uninstall without Git, Cargo, Rust, or package-manager mutation; see [`INSTALL-FOR-AGENTS.md`](INSTALL-FOR-AGENTS.md). Thin private adapters live at `pi/packages/pi-zsx` and `omp/packages/omp-zsx-native` in `pi-stack`. Publishing signed platform bundles, public registry packages, and Windows native verification remain separate release gates.
 
 ## Roadmap
 
-- Publish reproducible end-to-end benchmark methodology.
+- Publish signed platform bundles using the checked-in release-bundle contract.
 - Publish signed native Node prebuilds and the thin Pi and OMP packages.
 - Add supported adapters that select the optional MCP compatibility carrier.
 
