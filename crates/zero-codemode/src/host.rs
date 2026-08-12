@@ -322,6 +322,7 @@ pub enum HostError {
     UnsupportedSyntax(String),
     Data(String),
     Execution(String),
+    VerdictRejected(String),
     Runtime(String),
     JavaScript(String),
     MethodNotFound(String),
@@ -347,6 +348,7 @@ impl fmt::Display for HostError {
             Self::UnsupportedSyntax(message) => write!(f, "unsupported syntax: {message}"),
             Self::Data(message) => write!(f, "data error: {message}"),
             Self::Execution(message) => write!(f, "execution error: {message}"),
+            Self::VerdictRejected(message) => write!(f, "verdict rejected: {message}"),
             Self::Runtime(message) => write!(f, "runtime error: {message}"),
             Self::JavaScript(message)
             | Self::MethodNotFound(message)

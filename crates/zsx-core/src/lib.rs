@@ -32,6 +32,7 @@ mod adapter;
 mod connector;
 mod lower;
 mod session;
+mod verdict;
 
 #[cfg(feature = "fixture-adapters")]
 pub mod fixture;
@@ -66,6 +67,10 @@ pub use session::{
     SESSION_REPLACEMENT_SETTLE_TIMEOUT, SessionReplacementReason, SessionReplacementReceipt,
     ZsxBuilder, ZsxExecutionMetrics, ZsxExecutionResult, ZsxSession, ZsxSessionCancellation,
     ZsxSessionError, ZsxSessionFailureCode,
+};
+pub use verdict::{
+    VERDICT_LOOP_RECEIPT_SCHEMA, VerdictDecision, VerdictLoopEnvelope, VerdictLoopReceiptV1,
+    VerdictLoopResult,
 };
 /// Bound untrusted error text for typed zsx envelopes.
 pub use zero_codemode::finalize_visible_error;

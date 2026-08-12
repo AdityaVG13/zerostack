@@ -31,6 +31,7 @@ use crate::connector::{
     MAX_SESSION_CONSUMED_APPROVALS, SessionApprovalGrantV1, ZsxAttemptJournalStatus, ZsxConnector,
     attempts_root_for, now_ms, reconcile_all_attempts, reconcile_request_attempts, registration,
 };
+use crate::verdict::{VerdictLoopEnvelope, VerdictLoopResult};
 
 #[derive(Clone, Copy, Debug, serde::Deserialize, Eq, PartialEq, serde::Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -85,6 +86,7 @@ pub enum ZsxSessionFailureCode {
     MethodNotFound,
     SurfaceNotFound,
     BackendExecution,
+    VerdictRejected,
     /// The request was cancelled through its per-request token before it
     /// settled. The session itself remains accepting.
     Cancelled,
@@ -107,6 +109,7 @@ impl ZsxSessionFailureCode {
             Self::MethodNotFound => "method_not_found",
             Self::SurfaceNotFound => "surface_not_found",
             Self::BackendExecution => "backend_execution",
+            Self::VerdictRejected => "verdict_rejected",
             Self::Cancelled => "cancelled",
             Self::Internal => "internal",
         }
@@ -115,6 +118,7 @@ impl ZsxSessionFailureCode {
 
 fn backend_failure_code(error: &HostError) -> ZsxSessionFailureCode {
     match error {
+        HostError::VerdictRejected(_) => ZsxSessionFailureCode::VerdictRejected,
         HostError::MethodNotFound(_) => ZsxSessionFailureCode::MethodNotFound,
         HostError::SurfaceNotFound(_) => ZsxSessionFailureCode::SurfaceNotFound,
         _ => ZsxSessionFailureCode::BackendExecution,
@@ -209,7 +213,9 @@ enum ZsxCommand {
         source: String,
         timeout: Duration,
         approval_grants: Vec<SessionApprovalGrantV1>,
-        reply: SyncSender<Result<(Value, ZsxExecutionMetrics), HostError>>,
+        verdict_envelope: Option<VerdictLoopEnvelope>,
+        reply:
+            SyncSender<Result<(Value, ZsxExecutionMetrics, Option<VerdictLoopResult>), HostError>>,
     },
     Replace {
         generation: u64,
@@ -294,12 +300,7 @@ impl ZsxExecutor {
         let connector = std::rc::Rc::new(if state_root == root {
             ZsxConnector::new(root, session_id, adapters)?
         } else {
-            ZsxConnector::new_with_state_root(
-                root,
-                state_root.clone(),
-                session_id,
-                adapters,
-            )?
+            ZsxConnector::new_with_state_root(root, state_root.clone(), session_id, adapters)?
         });
         let limits = crate::connector::host_limits()?;
         let host = Host::new(limits, registration())?
@@ -319,7 +320,8 @@ impl ZsxExecutor {
         source: &str,
         timeout: Duration,
         approval_grants: Vec<SessionApprovalGrantV1>,
-    ) -> Result<(Value, ZsxExecutionMetrics), HostError> {
+        verdict_envelope: Option<VerdictLoopEnvelope>,
+    ) -> Result<(Value, ZsxExecutionMetrics, Option<VerdictLoopResult>), HostError> {
         // A cancel_request that arrived before this request started must
         // prevent any dispatch. The pending-cancellation check and the
         // installation of the fresh request token happen under one lock so a
@@ -363,6 +365,13 @@ impl ZsxExecutor {
         }
         self.connector
             .set_request_cancellation(signal.worker.clone());
+        if let Err(error) = self.connector.install_verdict_meter(verdict_envelope) {
+            self.connector.clear_request_cancellation();
+            self.connector.clear_execution_context();
+            self.connector.clear_approvals();
+            clear_active();
+            return Err(error);
+        }
         self.connector.reset_dispatch_metrics();
         let outcome = self.host.execute_measured_with_cancel_timeout_context(
             source,
@@ -402,7 +411,17 @@ impl ZsxExecutor {
         self.connector.clear_execution_context();
         self.connector.clear_approvals();
         clear_active();
-        result.map(|value| (value, metrics))
+        let verdict = match result.as_ref() {
+            Ok(value) => match self.connector.finish_verdict_meter(value) {
+                Ok(verdict) => verdict,
+                Err(error) => return Err(error),
+            },
+            Err(_) => {
+                self.connector.clear_verdict_meter();
+                None
+            }
+        };
+        result.map(|value| (value, metrics, verdict))
     }
 
     fn publish_reachability(&self) -> Result<(), HostError> {
@@ -581,16 +600,14 @@ impl ZsxBuilder {
                     session_id.as_str(),
                 )
             })
-            .map_err(
-                |error| {
-                    ZsxSessionError::new(
-                        ZsxSessionFailureCode::BackendUnavailable,
-                        0,
-                        None,
-                        format!("cannot construct TokenZero adapter: {error}"),
-                    )
-                },
-            )?,
+            .map_err(|error| {
+                ZsxSessionError::new(
+                    ZsxSessionFailureCode::BackendUnavailable,
+                    0,
+                    None,
+                    format!("cannot construct TokenZero adapter: {error}"),
+                )
+            })?,
         );
         self.fszero(fszero)
             .graphzero(graphzero)
@@ -814,7 +831,8 @@ impl ZsxSession {
         source: impl Into<String>,
         timeout: Duration,
     ) -> Result<ZsxExecutionResult, ZsxSessionError> {
-        self.execute_with_approvals(generation, request_id, source, timeout, Vec::new())
+        self.execute_internal(generation, request_id, source, timeout, Vec::new(), None)
+            .map(|(result, _)| result)
     }
 
     pub fn execute_with_approvals(
@@ -825,6 +843,55 @@ impl ZsxSession {
         timeout: Duration,
         approval_grants: Vec<SessionApprovalGrantV1>,
     ) -> Result<ZsxExecutionResult, ZsxSessionError> {
+        self.execute_internal(
+            generation,
+            request_id,
+            source,
+            timeout,
+            approval_grants,
+            None,
+        )
+        .map(|(result, _)| result)
+    }
+
+    /// Execute one bounded server-side verdict loop. The plan may compose and
+    /// poll ordinary typed capabilities, but its only public value is the
+    /// exact string `pass` or `fail`; accounting is returned separately.
+    pub fn execute_verdict_loop(
+        &self,
+        generation: u64,
+        request_id: u64,
+        source: impl Into<String>,
+        timeout: Duration,
+        envelope: VerdictLoopEnvelope,
+    ) -> Result<VerdictLoopResult, ZsxSessionError> {
+        let (_, verdict) = self.execute_internal(
+            generation,
+            request_id,
+            source,
+            timeout,
+            Vec::new(),
+            Some(envelope),
+        )?;
+        verdict.ok_or_else(|| {
+            ZsxSessionError::new(
+                ZsxSessionFailureCode::BackendExecution,
+                generation,
+                Some(request_id),
+                "verdict loop completed without a receipt",
+            )
+        })
+    }
+
+    fn execute_internal(
+        &self,
+        generation: u64,
+        request_id: u64,
+        source: impl Into<String>,
+        timeout: Duration,
+        approval_grants: Vec<SessionApprovalGrantV1>,
+        verdict_envelope: Option<VerdictLoopEnvelope>,
+    ) -> Result<(ZsxExecutionResult, Option<VerdictLoopResult>), ZsxSessionError> {
         let (reply_tx, reply_rx) = mpsc::sync_channel(1);
         let approval_ids = {
             let mut state = self.lock_state(Some(request_id))?;
@@ -870,6 +937,7 @@ impl ZsxSession {
             source: source.into(),
             timeout,
             approval_grants,
+            verdict_envelope,
             reply: reply_tx,
         }) {
             Ok(()) => {}
@@ -919,7 +987,7 @@ impl ZsxSession {
             })?;
             slot.cancelled_requests.remove(&(generation, request_id))
         };
-        let (value, metrics) = match backend_result {
+        let (value, metrics, verdict) = match backend_result {
             Ok(Ok(value)) => Ok(value),
             Ok(Err(error)) => {
                 let code = if request_cancelled {
@@ -941,12 +1009,15 @@ impl ZsxSession {
                 format!("session executor dropped the result: {error}"),
             )),
         }?;
-        Ok(ZsxExecutionResult {
-            generation,
-            request_id,
-            value,
-            metrics,
-        })
+        Ok((
+            ZsxExecutionResult {
+                generation,
+                request_id,
+                value,
+                metrics,
+            },
+            verdict,
+        ))
     }
 
     /// Reconcile the durable mutation attempt journals of one request.
@@ -1304,6 +1375,7 @@ fn session_worker(
                 source,
                 timeout,
                 approval_grants,
+                verdict_envelope,
                 reply,
             } => {
                 let result = executor
@@ -1316,6 +1388,7 @@ fn session_worker(
                             &source,
                             timeout,
                             approval_grants,
+                            verdict_envelope,
                         )
                     });
                 let _ = reply.send(result);
@@ -1398,6 +1471,7 @@ fn start_session_executor(
             "return null",
             Duration::from_secs(1),
             Vec::new(),
+            None,
         )
         .map(|_| ())
         .map_err(|error| format!("session prewarm failed: {error}"))?;

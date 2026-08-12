@@ -39,7 +39,8 @@ use serde_json::{Value, json};
 use zero_abi::raw_worker::{ApprovalGrant as WorkerApprovalGrant, EngineIdentity};
 use zero_abi::{
     ApprovalState, CallRequest, CapabilityDescriptor, DigestV1, EffectClass, GlobalRegistration,
-    WorkerResponseFrame, WorkerTrace, canonical_json, sha256, validate_response_frame,
+    TelemetryRequestV1, WorkerRequestFrame, WorkerResponseFrame, WorkerTrace, canonical_json,
+    encode_frame, sha256, validate_response_frame,
 };
 use zero_codemode::CancellationSignal;
 use zero_codemode::{
@@ -60,6 +61,7 @@ use zerostack_machine_permit::{
 
 use crate::adapter::{AdapterCall, DomainAdapter};
 use crate::lower::{METHODS, lower};
+use crate::verdict::{VerdictLoopEnvelope, VerdictLoopResult, VerdictMeter};
 
 /// One approval grant consumed by the native session.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -558,6 +560,7 @@ pub(crate) struct ZsxState {
     engine_wall_ns: [AtomicU64; 3],
     engine_dispatches: [AtomicU64; 3],
     outstanding_dispatches: AtomicU64,
+    verdict_meter: Mutex<Option<VerdictMeter>>,
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -625,6 +628,7 @@ impl ZsxConnector {
             engine_wall_ns: [const { AtomicU64::new(0) }; 3],
             engine_dispatches: [const { AtomicU64::new(0) }; 3],
             outstanding_dispatches: AtomicU64::new(0),
+            verdict_meter: Mutex::new(None),
         });
         let (dispatch_sender, dispatch_receiver) = mpsc::sync_channel(MAX_INFLIGHT_CONNECTOR_CALLS);
         let dispatch_receiver = Arc::new(Mutex::new(dispatch_receiver));
@@ -711,6 +715,46 @@ impl ZsxConnector {
             thread::sleep(Duration::from_millis(1));
         }
         Ok(())
+    }
+
+    pub(crate) fn install_verdict_meter(
+        &self,
+        envelope: Option<VerdictLoopEnvelope>,
+    ) -> Result<(), HostError> {
+        let mut active = self
+            .state
+            .verdict_meter
+            .lock()
+            .map_err(|_| HostError::Connector("verdict meter lock poisoned".into()))?;
+        if active.is_some() {
+            return Err(HostError::Connector(
+                "verdict meter was not cleared after the prior execution".into(),
+            ));
+        }
+        *active = envelope
+            .map(VerdictMeter::new)
+            .transpose()
+            .map_err(HostError::VerdictRejected)?;
+        Ok(())
+    }
+
+    pub(crate) fn finish_verdict_meter(
+        &self,
+        value: &Value,
+    ) -> Result<Option<VerdictLoopResult>, HostError> {
+        self.state
+            .verdict_meter
+            .lock()
+            .map_err(|_| HostError::Connector("verdict meter lock poisoned".into()))?
+            .take()
+            .map(|meter| meter.finish(value).map_err(HostError::VerdictRejected))
+            .transpose()
+    }
+
+    pub(crate) fn clear_verdict_meter(&self) {
+        if let Ok(mut active) = self.state.verdict_meter.lock() {
+            active.take();
+        }
     }
 
     fn execution_context(&self) -> Result<AggregateExecutionContext, ConnectorError> {
@@ -882,6 +926,12 @@ impl Connector for ZsxConnector {
         let approval_grant = taken_approval
             .as_ref()
             .map(|(worker_grant, _)| worker_grant.clone());
+        let metered = self
+            .state
+            .verdict_meter
+            .lock()
+            .map_err(|_| ConnectorError::new("verdict meter lock poisoned"))?
+            .is_some();
         let request = CallRequest {
             request_id: id,
             op,
@@ -897,8 +947,37 @@ impl Connector for ZsxConnector {
             ),
             trace,
             approval_grant,
-            telemetry_request: None,
+            telemetry_request: metered.then_some(TelemetryRequestV1 {
+                engine_stage_timeline: false,
+                worker_token_accounting: true,
+            }),
         };
+        if metered {
+            let input_bytes = encode_frame(
+                &WorkerRequestFrame::Call {
+                    request: request.clone(),
+                },
+                zero_abi::DEFAULT_MAX_FRAME_BYTES,
+            )
+            .map_err(|error| ConnectorError::new(format!("meter request frame: {error}")))?
+            .len()
+            .try_into()
+            .map_err(|_| ConnectorError::new("meter request frame size overflowed"))?;
+            let reserve = self
+                .state
+                .verdict_meter
+                .lock()
+                .map_err(|_| ConnectorError::new("verdict meter lock poisoned"))?
+                .as_mut()
+                .expect("meter presence checked")
+                .reserve_dispatch(input_bytes);
+            if let Err(error) = reserve {
+                if let Some((_, grant)) = taken_approval {
+                    self.restore_approval(grant)?;
+                }
+                return Err(ConnectorError::new(error));
+            }
+        }
         let journal = mutation_effect_class(engine, &request.op)
             .map(|effect_class| {
                 let journal_dir = journal_dir_for(&self.state.attempts_root, execution, sequence);
@@ -958,6 +1037,12 @@ fn aggregate_dispatch_loop(state: Arc<ZsxState>, receiver: Arc<Mutex<Receiver<Zs
             break;
         };
         let result = run_dispatch(&state, &dispatch);
+        if let Err(error) = &result
+            && let Ok(mut meter) = state.verdict_meter.lock()
+            && let Some(meter) = meter.as_mut()
+        {
+            meter.fail(format!("verdict-loop connector failure: {error}"));
+        }
         let _ = dispatch.completion.complete(result);
         state.outstanding_dispatches.fetch_sub(1, Ordering::Release);
     }
@@ -1078,6 +1163,28 @@ fn run_dispatch(state: &ZsxState, dispatch: &ZsxDispatch) -> Result<String, Conn
             let _ = indeterminate_mutation_journal(journal);
         }
         return Err(error);
+    }
+    {
+        let mut active = state
+            .verdict_meter
+            .lock()
+            .map_err(|_| ConnectorError::new("verdict meter lock poisoned"))?;
+        if let Some(meter) = active.as_mut() {
+            let frame = WorkerResponseFrame::Result {
+                request_id: dispatch.request.request_id.clone(),
+                result: response.result.clone(),
+                engine_timeline: response.engine_timeline.clone(),
+                worker_token_accounting: response.worker_token_accounting.clone(),
+            };
+            let output_bytes = encode_frame(&frame, zero_abi::DEFAULT_MAX_FRAME_BYTES)
+                .map_err(|error| ConnectorError::new(format!("meter response frame: {error}")))?
+                .len()
+                .try_into()
+                .map_err(|_| ConnectorError::new("meter response frame size overflowed"))?;
+            meter
+                .record_response(output_bytes, response.worker_token_accounting.as_ref())
+                .map_err(ConnectorError::new)?;
+        }
     }
     let result_value = serde_json::to_value(&response.result)
         .map_err(|error| ConnectorError::new(error.to_string()))?;

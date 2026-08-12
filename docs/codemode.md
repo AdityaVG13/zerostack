@@ -72,6 +72,24 @@ Pi and OMP import `@zerostack/zsx-native`. Its loader checks `ZSX_NATIVE_ADDON` 
 
 Missing and unsupported addons fail with typed errors. The loader never invokes Cargo, Git, a shell, or a sibling repository.
 
+## Bounded verdict loops
+
+`ZsxSession::execute_verdict_loop` runs a server-side plan under a declared
+`VerdictLoopEnvelope`. The envelope caps logical dispatches, encoded raw-worker
+request and response bytes, and cumulative raw, visible, recovery, billed, and
+cached token accounting. Every dispatch requests `WorkerTokenAccountingV1`;
+missing, malformed, estimated, overflowed, or over-budget accounting is a
+typed `verdict_rejected` failure and remains terminal even if plan JavaScript
+catches the capability rejection.
+
+The plan may compose ordinary capabilities, including launching a background
+TokenZero shell job and polling `zero.token.job`, but it must return exactly
+the string `pass` or `fail`. The model-visible decision and
+`VerdictLoopReceiptV1` are separate Rust values. The receipt records exact JSON
+bytes for the final atom, encoded frame bytes, tokenizer/count-kind labels, and
+leaves `exact_ref_tokens` unknown when a worker cannot certify it. The raw
+worker remains planner-free; no JavaScript runtime or catalog enters an engine.
+
 ## Exclusive deployment rule
 
 Choose exactly one:

@@ -85,11 +85,30 @@ impl FixtureAdapter {
     fn result(&self, request: &CallRequest) -> WorkerResult {
         let expose_approval = request.args["__approval_fixture"] == true;
         let approval_grant = request.approval_grant.clone();
-        let mut value = json!({
-            "args": request.args,
-            "store_root": self.root,
-            "session_id": self.session_id,
-        });
+        let mut value = if self.engine == EngineIdentity::TokenZero && request.op == "shell" {
+            json!({"job":"fixture-job","cursor":0,"version":0})
+        } else if self.engine == EngineIdentity::TokenZero
+            && request.op == zero_abi::TOKEN_JOB_OPERATION_V1
+        {
+            json!({
+                "id":request.args["id"],
+                "status":"exited",
+                "exitCode":0,
+                "tail":"ok",
+                "tailUtf8Lossless":true,
+                "tailBytes":2,
+                "logBytes":2,
+                "cursor":2,
+                "version":1,
+                "changed":true
+            })
+        } else {
+            json!({
+                "args": request.args,
+                "store_root": self.root,
+                "session_id": self.session_id,
+            })
+        };
         let mut refs = Vec::new();
         if let Some(reference) = request.args["__reachability_ref_fixture"].as_str() {
             refs.push(reference.to_owned());
@@ -157,6 +176,14 @@ impl DomainAdapter for FixtureAdapter {
     fn call(&self, call: AdapterCall<'_>) -> Result<AdapterResponse, AdapterError> {
         self.calls.fetch_add(1, Ordering::Relaxed);
         let request = call.request;
+        if request.args["__fixture_fail"] == true {
+            return Err(AdapterError::new(
+                "fixture_failure",
+                "fixture adapter failed by request",
+                false,
+                Some(request.trace.clone()),
+            ));
+        }
         if call.cancellation.is_cancelled() {
             return Err(AdapterError::new(
                 "cancelled",
@@ -218,16 +245,30 @@ impl DomainAdapter for FixtureAdapter {
                 },
             ],
         });
-        let worker_token_accounting = requested_accounting.then(|| WorkerTokenAccountingV1 {
-            tokenizer_id: "fixture-tokenizer-v1".into(),
-            count_kind: WorkerTokenCountKind::Exact,
-            raw_tokens: 8,
-            visible_tokens: 4,
-            recovery_tokens: 0,
-            billed_tokens: 8,
-            cached_tokens: 2,
-            exact_ref_tokens: Some(0),
-        });
+        let worker_token_accounting = (requested_accounting
+            && request.args["__fixture_accounting"] != "missing")
+            .then(|| WorkerTokenAccountingV1 {
+                tokenizer_id: if request.args["__fixture_accounting"] == "estimate" {
+                    "estimator:fixture-v1".into()
+                } else {
+                    "fixture-tokenizer-v1".into()
+                },
+                count_kind: if request.args["__fixture_accounting"] == "estimate" {
+                    WorkerTokenCountKind::Estimate
+                } else {
+                    WorkerTokenCountKind::Exact
+                },
+                raw_tokens: if request.args["__fixture_accounting"] == "max" {
+                    u64::MAX
+                } else {
+                    8
+                },
+                visible_tokens: 4,
+                recovery_tokens: 0,
+                billed_tokens: 8,
+                cached_tokens: 2,
+                exact_ref_tokens: Some(0),
+            });
         Ok(AdapterResponse {
             result: self.result(request),
             engine_timeline,
