@@ -253,10 +253,10 @@ pub fn object_identity_hex(bytes: &[u8]) -> String {
 /// the stable structured wire shape; it does not extend the v1 text grammar.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct SpanRef {
-    pub object_id: ObjectId,
-    pub byte_start: u64,
     pub byte_len: u64,
+    pub byte_start: u64,
     pub object_digest: Digest,
+    pub object_id: ObjectId,
     pub span_digest: Digest,
 }
 
