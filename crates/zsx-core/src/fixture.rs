@@ -85,7 +85,10 @@ impl FixtureAdapter {
     fn result(&self, request: &CallRequest) -> WorkerResult {
         let expose_approval = request.args["__approval_fixture"] == true;
         let approval_grant = request.approval_grant.clone();
-        let mut value = if self.engine == EngineIdentity::TokenZero && request.op == "shell" {
+        let mut value = if self.engine == EngineIdentity::TokenZero
+            && request.op == "shell"
+            && request.args["background"] == true
+        {
             json!({"job":"fixture-job","cursor":0,"version":0})
         } else if self.engine == EngineIdentity::TokenZero
             && request.op == zero_abi::TOKEN_JOB_OPERATION_V1
