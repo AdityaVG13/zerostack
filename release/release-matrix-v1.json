@@ -1,5 +1,11 @@
 {
   "schema": "zerostack.release_matrix.v1",
+  "policy": {
+    "purpose": "local_conformance_only",
+    "publication_allowed": false,
+    "tagging_allowed": false,
+    "pi_zsx": "internal_unpublished"
+  },
   "bundle_contract": "tests/contracts/release-bundle-v1.schema.json",
   "default_surface": "codemode",
   "startup": {

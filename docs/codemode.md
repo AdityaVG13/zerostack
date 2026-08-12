@@ -114,7 +114,9 @@ Never register both for the same deployment. Duplicate surfaces waste context, c
 
 CodeMode is not a fourth engine. It is an execution mode over TokenZero, FSZero, and GraphZero.
 
-See the [Release-N engine MCP compatibility policy](mcp-compatibility-policy.md) for defaults, maintenance scope, migration, and staged removal gates.
+See the [engine MCP compatibility policy](mcp-compatibility-policy.md) for the
+default, maintenance scope, local migration, permanent no-release boundary, and
+source-removal rule.
 
 ### Shared surface registration
 

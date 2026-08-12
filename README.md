@@ -74,16 +74,19 @@ The engines share contract-critical infrastructure through small foundation crat
 
 The production runtime links the three engine domain APIs through reviewed, pinned dependencies. Generic interpreter, lifecycle, store, ref, ABI, and MCP authority remains in this hub.
 
-## Installation status
+## Development use only
 
-The native CLI and Node binding are verified from source. A provider-independent installer for signed prebuilt bundles supports install, upgrade, integrity verification, rollback, and uninstall without Git, Cargo, Rust, or package-manager mutation; see [`INSTALL-FOR-AGENTS.md`](INSTALL-FOR-AGENTS.md). The machine-readable [release matrix](release/release-matrix-v1.json) covers macOS arm64/x64, Linux arm64/x64, and Windows x64. Thin private adapters live at `pi/packages/pi-zsx` and `omp/packages/omp-zsx-native` in `pi-stack`. Publishing signed platform bundles, public registry packages, and Windows native verification remain separate release gates.
+ZeroStack has no release or publication lifecycle. It is public only because
+FSZero, GraphZero, and TokenZero consume this shared base. Do not publish tags,
+bundles, registry packages, native prebuilds, or harness adapters from this
+repository. The checked-in installer and platform matrix are local development
+and conformance fixtures only. See [`INSTALL-FOR-AGENTS.md`](INSTALL-FOR-AGENTS.md).
 
-## Roadmap
-
-- Publish signed platform bundles using the checked-in release-bundle contract.
-- Publish signed native Node prebuilds and the thin Pi and OMP packages.
-- Add supported adapters that select the optional MCP compatibility carrier.
+`pi-zsx` is an internal adapter under active development in `pi-stack`. It must
+not be published without new, explicit owner approval.
 
 ## Current limitations
 
-ZeroStack is not yet a complete public install. Only TokenZero is publicly available, benchmark artifacts may describe evolving implementations, and private components can change before release. Status labels in this README are the source of truth.
+ZeroStack is not a public installable product. Benchmark artifacts may describe
+evolving implementations, and private components can change without a release
+cadence. Status labels in this README are the source of truth.

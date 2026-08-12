@@ -30,6 +30,15 @@ class ReleaseMatrixTests(unittest.TestCase):
 
     def test_matrix_matches_installer_platform_support(self) -> None:
         self.assertEqual(self.matrix["schema"], "zerostack.release_matrix.v1")
+        self.assertEqual(
+            self.matrix["policy"],
+            {
+                "purpose": "local_conformance_only",
+                "publication_allowed": False,
+                "tagging_allowed": False,
+                "pi_zsx": "internal_unpublished",
+            },
+        )
         platforms = {entry["id"] for entry in self.matrix["platforms"]}
         self.assertEqual(platforms, EXPECTED_PLATFORMS)
         self.assertEqual(platforms, installer.SUPPORTED_PLATFORMS)
