@@ -14,6 +14,8 @@ pub const METHODS: &[(&str, &str)] = &[
     ("fs", "structural"),
     ("fs", "compound"),
     ("fs", "world"),
+    ("fs", "edit"),
+    ("fs", "write"),
     ("fs", "read_many"),
     ("fs", "list_many"),
     ("fs", "search_many"),
@@ -352,6 +354,28 @@ pub fn lower(
             serde_json::json!({"query":query}),
         ));
     }
+    // Direct mutation surface: zero.fs.edit({...}) / zero.fs.write({...}).
+    // One options object (positionally or bare) passed through unchanged so
+    // the FSZero dispatcher owns arg semantics, including the CAS `base`
+    // gate (null = must-not-exist create, fz://blob/<sha256> = compare-
+    // and-swap against current content).
+    if surface == "fs" && (method == "edit" || method == "write") {
+        let args = if let Some(items) = input.as_array() {
+            if items.len() != 1 || !items[0].is_object() {
+                return Err(ConnectorError::new(
+                    "fs.edit and fs.write take exactly one options object",
+                ));
+            }
+            items[0].clone()
+        } else if input.is_object() {
+            input
+        } else {
+            return Err(ConnectorError::new(
+                "fs.edit and fs.write take exactly one options object",
+            ));
+        };
+        return Ok((engine, format!("fs.{method}"), args));
+    }
     if surface == "fs" && method == "compound" {
         let (name, compound_args) = if let Some(items) = input.as_array() {
             (
@@ -617,6 +641,43 @@ mod tests {
             "expand",
             json!({"reference":"q:abc"}),
         );
+    }
+
+    #[test]
+    fn fs_edit_and_write_lower_to_fszero_with_args_passthrough() {
+        assert!(METHODS.contains(&("fs", "edit")));
+        assert!(METHODS.contains(&("fs", "write")));
+        assert_lower(
+            "fs",
+            "edit",
+            json!([{"path":"a.rs","find":"old","replace":"new",
+                    "base":"fz://blob/aa"}]),
+            EngineIdentity::FsZero,
+            "fs.edit",
+            json!({"path":"a.rs","find":"old","replace":"new",
+                   "base":"fz://blob/aa"}),
+        );
+        assert_lower(
+            "fs",
+            "write",
+            json!([{"path":"b.txt","content":"x","base":null}]),
+            EngineIdentity::FsZero,
+            "fs.write",
+            json!({"path":"b.txt","content":"x","base":null}),
+        );
+        // Bare object (non-positional) form also passes through.
+        assert_lower(
+            "fs",
+            "write",
+            json!({"path":"c.txt","content":"y"}),
+            EngineIdentity::FsZero,
+            "fs.write",
+            json!({"path":"c.txt","content":"y"}),
+        );
+        for input in [json!([]), json!(["c.txt"]), json!([{}, {}]), json!("c.txt")] {
+            assert!(lower("fs", "edit", input.clone()).is_err());
+            assert!(lower("fs", "write", input).is_err());
+        }
     }
 
     #[test]
