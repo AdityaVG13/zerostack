@@ -27,7 +27,9 @@ pub fn exec(
 ) -> Result<Value, Box<dyn std::error::Error>> {
     let root = root.canonicalize()?;
     let session_id = format!("zsx-{:x}", std::process::id());
+    let state_root = root.join(".zerostack");
     let session = ZsxSession::builder(root)
+        .with_state_root(state_root)
         .with_session_id(session_id)
         .build_canonical()?;
     let result = session.execute(1, 1, source, timeout)?;

@@ -376,6 +376,16 @@ impl TokenZeroAdapter {
     /// engine persists its store before returning, so a miss on the first
     /// read usually means our handle predates the write.
     fn resolve_payload(&self, hash: &str) -> Result<Vec<u8>, AdapterError> {
+        // Modern TokenZero blob refs are published to the engine's shared CAS,
+        // which is derived from the configured recovery-cache path. The legacy
+        // RecoveryStore lookup below is still needed for non-CAS compatibility
+        // records, but cannot resolve a full-hash blob by itself.
+        if let Some(cas) = tokenzero_recovery::shared_cas::SharedCas::detect_from_cache_path(
+            &self.engine.config.cache_path,
+        ) && let Ok(payload) = cas.resolve(hash)
+        {
+            return Ok(payload);
+        }
         let store = self.recovery.get_or_init(|| {
             Mutex::new(RecoveryStore::new(Some(
                 self.engine.config.cache_path.clone(),
