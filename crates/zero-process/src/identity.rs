@@ -10,8 +10,8 @@ use windows_sys::Win32::Security::TOKEN_ACCESS_MASK;
 use windows_sys::Win32::Storage::FileSystem::SYNCHRONIZE;
 #[cfg(windows)]
 use windows_sys::Win32::System::Threading::{
-    CreateEventW, GetCurrentProcess, GetProcessTimes, INFINITE, OpenProcess, OpenProcessToken,
-    PROCESS_ACCESS_RIGHTS, PROCESS_QUERY_LIMITED_INFORMATION, WaitForSingleObject,
+    CreateEventW, GetCurrentProcess, GetProcessTimes, OpenProcess, OpenProcessToken,
+    WaitForSingleObject, INFINITE, PROCESS_ACCESS_RIGHTS, PROCESS_QUERY_LIMITED_INFORMATION,
 };
 
 #[cfg(unix)]
@@ -306,28 +306,36 @@ fn capture(_: u32) -> io::Result<Option<ProcessIdentity>> {
         "session owner identity unsupported",
     ))
 }
+/// Adopt a uniquely owned Unix fd. `OwnedFd` closes it on every return path,
+/// including `is_live()?` I/O errors that used to skip the manual `close`.
+#[cfg(any(target_os = "linux", target_os = "android", target_os = "macos"))]
+fn adopt_owned_fd(raw: libc::c_int) -> io::Result<std::os::fd::OwnedFd> {
+    use std::os::fd::{FromRawFd, OwnedFd};
+    if raw < 0 {
+        Err(io::Error::last_os_error())
+    } else {
+        // SAFETY: `raw` is a freshly created, uniquely owned descriptor.
+        Ok(unsafe { OwnedFd::from_raw_fd(raw) })
+    }
+}
+
 #[cfg(any(target_os = "linux", target_os = "android"))]
 fn wait_for_exit(id: &ProcessIdentity) -> Result<(), OwnerWatchError> {
+    use std::os::fd::AsRawFd;
     // SAFETY: pidfd_open returns a fresh owned fd (or -1); flags are 0.
-    let fd =
+    let raw =
         unsafe { libc::syscall(libc::SYS_pidfd_open, id.pid as libc::pid_t, 0) as libc::c_int };
-    if fd < 0 {
-        return Err(io::Error::last_os_error().into());
-    }
+    let fd = adopt_owned_fd(raw)?;
     if !id.is_live()? {
-        // SAFETY: `fd` is uniquely owned here and not used after this close.
-        unsafe { libc::close(fd) };
         return Err(OwnerWatchError::IdentityChanged);
     }
     let mut p = libc::pollfd {
-        fd,
+        fd: fd.as_raw_fd(),
         events: libc::POLLIN,
         revents: 0,
     };
     // SAFETY: `p` is one initialized pollfd naming our owned pidfd.
     let rc = unsafe { libc::poll(&mut p, 1, -1) };
-    // SAFETY: `fd` is uniquely owned here and not used after this close.
-    unsafe { libc::close(fd) };
     if rc < 0 {
         Err(io::Error::last_os_error().into())
     } else {
@@ -336,14 +344,10 @@ fn wait_for_exit(id: &ProcessIdentity) -> Result<(), OwnerWatchError> {
 }
 #[cfg(target_os = "macos")]
 fn wait_for_exit(id: &ProcessIdentity) -> Result<(), OwnerWatchError> {
+    use std::os::fd::AsRawFd;
     // SAFETY: kqueue takes no arguments and returns an owned descriptor or -1.
-    let q = unsafe { libc::kqueue() };
-    if q < 0 {
-        return Err(io::Error::last_os_error().into());
-    }
+    let q = adopt_owned_fd(unsafe { libc::kqueue() })?;
     if !id.is_live()? {
-        // SAFETY: `q` is uniquely owned here and not used after this close.
-        unsafe { libc::close(q) };
         return Err(OwnerWatchError::IdentityChanged);
     }
     let c = libc::kevent {
@@ -355,16 +359,20 @@ fn wait_for_exit(id: &ProcessIdentity) -> Result<(), OwnerWatchError> {
         udata: std::ptr::null_mut(),
     };
     // SAFETY: `q` is live; `c` is a fully initialized changelist of length 1.
-    let registered = unsafe { libc::kevent(q, &c, 1, std::ptr::null_mut(), 0, std::ptr::null()) };
+    let registered = unsafe {
+        libc::kevent(
+            q.as_raw_fd(),
+            &c,
+            1,
+            std::ptr::null_mut(),
+            0,
+            std::ptr::null(),
+        )
+    };
     if registered < 0 {
-        let error = io::Error::last_os_error();
-        // SAFETY: `q` is uniquely owned here and not used after this close.
-        unsafe { libc::close(q) };
-        return Err(error.into());
+        return Err(io::Error::last_os_error().into());
     }
     if !id.is_live()? {
-        // SAFETY: `q` is uniquely owned here and not used after this close.
-        unsafe { libc::close(q) };
         return Err(OwnerWatchError::IdentityChanged);
     }
     let mut event = libc::kevent {
@@ -378,27 +386,30 @@ fn wait_for_exit(id: &ProcessIdentity) -> Result<(), OwnerWatchError> {
     let rc = loop {
         // SAFETY: `q` is live; nchanges=0 with a null changelist; eventlist is one
         // initialized kevent the kernel overwrites.
-        let rc = unsafe { libc::kevent(q, std::ptr::null(), 0, &mut event, 1, std::ptr::null()) };
+        let rc = unsafe {
+            libc::kevent(
+                q.as_raw_fd(),
+                std::ptr::null(),
+                0,
+                &mut event,
+                1,
+                std::ptr::null(),
+            )
+        };
         if rc < 0 && io::Error::last_os_error().kind() == io::ErrorKind::Interrupted {
             continue;
         }
         break rc;
     };
-    let error = if rc < 0 {
-        Some(io::Error::last_os_error())
+    if rc < 0 {
+        Err(io::Error::last_os_error().into())
     } else if event.flags & libc::EV_ERROR != 0 {
-        Some(io::Error::from_raw_os_error(event.data as i32))
+        Err(io::Error::from_raw_os_error(event.data as i32).into())
     } else if event.ident != id.pid as usize || event.filter != libc::EVFILT_PROC {
-        Some(io::Error::new(
-            io::ErrorKind::InvalidData,
-            "unexpected owner watcher event",
-        ))
+        Err(io::Error::new(io::ErrorKind::InvalidData, "unexpected owner watcher event").into())
     } else {
-        None
-    };
-    // SAFETY: `q` is uniquely owned here and not used after this close.
-    unsafe { libc::close(q) };
-    error.map_or(Ok(()), |error| Err(error.into()))
+        Ok(())
+    }
 }
 #[cfg(all(
     unix,
@@ -554,6 +565,20 @@ mod tests {
             OwnerWatcher::new(id),
             Err(OwnerWatchError::IdentityChanged)
         ))
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn owner_watch_waits_for_short_lived_child() {
+        let mut child = std::process::Command::new("/bin/sleep")
+            .arg("0.2")
+            .spawn()
+            .unwrap();
+        let id = ProcessIdentity::capture(child.id()).unwrap();
+        let watcher = OwnerWatcher::new(id.clone()).unwrap();
+        watcher.wait().unwrap();
+        let _ = child.wait();
+        assert!(!id.is_live().unwrap());
     }
 
     #[test]
