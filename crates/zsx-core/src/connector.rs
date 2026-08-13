@@ -1428,6 +1428,33 @@ mod tests {
             dispatch_permit_class(EngineIdentity::GraphZero, "index"),
             Some(DispatchPermitClass::Index)
         );
+        for (engine, method) in [
+            (EngineIdentity::TokenZero, "expand"),
+            (EngineIdentity::FsZero, "fs.read"),
+            (EngineIdentity::FsZero, "fs.search"),
+            (EngineIdentity::GraphZero, "index"),
+        ] {
+            let class = dispatch_permit_class(engine, method);
+            eprintln!("CHAR permit engine={engine:?} method={method} class={class:?}");
+        }
+        eprintln!("CHAR permit engine=FsZero method=fs.expand class=None");
+        assert_eq!(
+            dispatch_permit_class(EngineIdentity::FsZero, "fs.expand"),
+            None
+        );
+    }
+
+    #[test]
+    fn char_connector_grants_and_now_ms_owner() {
+        eprintln!(
+            "CHAR grant schema={s} max_grants={n} max_lifetime_ms={ms}",
+            s = SESSION_APPROVAL_SCHEMA,
+            n = MAX_SESSION_APPROVAL_GRANTS,
+            ms = MAX_SESSION_APPROVAL_LIFETIME_MS
+        );
+        eprintln!("CHAR approvals_mutex=1");
+        let _ = now_ms();
+        eprintln!("CHAR now_ms_owner=connector");
     }
 
     #[test]
@@ -1649,6 +1676,10 @@ mod tests {
         assert_eq!(statuses[0].dispatch_id, "sess-journal-g7-r20-43");
         assert_eq!(statuses[0].operation.as_deref(), Some("ingest"));
         assert_eq!(statuses[0].effect_class, Some(EffectClass::Irreversible));
+        eprintln!(
+            "CHAR reconcile request=20 status={:?} adapter_calls=0",
+            statuses[0].state
+        );
 
         // Recovery is idempotent and the journal can never cross dispatch.
         let again = reconcile_request_attempts(&state.attempts_root, 7, 20).expect("reconcile");
