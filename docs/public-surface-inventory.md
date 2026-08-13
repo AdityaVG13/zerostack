@@ -10,8 +10,8 @@ No path was deleted, untracked, or added to the active `.gitignore`.
 | `crates/` | 130 | 2,635,241 | Keep. Production Rust authority. |
 | `conformance/` | 49 | 625,945 | Keep pending per-artifact review. Cross-engine contracts, schemas, models, and proof receipts. |
 | `docs/` | 11 | 117,495 | Keep user and architecture docs. Review the five legacy `docs/racc/` files after `docs/racc-r.md` exists. |
-| `scripts/` | 8 | 43,368 | Keep install, portability, and repository policy checks. |
-| `README.md`, `INSTALL-FOR-AGENTS.md` | 2 | 22,951 | Keep as the human and agent entry points. |
+| `scripts/` | (install CLIs removed) | — | Policy/portability checks only. `zs` and installers parked during corpus shift. |
+| `README.md`, `INSTALL-FOR-AGENTS.md` | 2 | — | README is the human entry. INSTALL-FOR-AGENTS is a parked stub, not an installer. |
 | `Cargo.toml` | 1 | 616 | Keep as the workspace manifest. |
 | `.github/` | 1 | 3,486 | Keep reviewed CI. A second workflow is untracked agent work and is not classified here. |
 | `formal/lean/` | untracked work | 18,828 | Intended public formal authority after its bead passes the pinned build and trust gates. |

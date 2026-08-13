@@ -9,7 +9,7 @@
   "bundle_contract": "tests/contracts/release-bundle-v1.schema.json",
   "default_surface": "codemode",
   "startup": {
-    "generator": "python3 scripts/install_zerostack.py startup --project-root <project-root> --json",
+    "generator": "parked -- install CLI removed during corpus shift",
     "schema": "zerostack.startup_argv.v1",
     "shell": false,
     "argv": ["exec", "-C", "<project-root>"]

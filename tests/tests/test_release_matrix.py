@@ -1,18 +1,11 @@
 from __future__ import annotations
 
-import importlib.util
 import json
 from pathlib import Path, PurePosixPath
 import unittest
 
 ROOT = Path(__file__).resolve().parents[2]
 MATRIX_PATH = ROOT / "release" / "release-matrix-v1.json"
-INSTALLER_SPEC = importlib.util.spec_from_file_location(
-    "install_zerostack_matrix", ROOT / "scripts" / "install_zerostack.py"
-)
-assert INSTALLER_SPEC is not None and INSTALLER_SPEC.loader is not None
-installer = importlib.util.module_from_spec(INSTALLER_SPEC)
-INSTALLER_SPEC.loader.exec_module(installer)
 
 EXPECTED_PLATFORMS = {
     "darwin-arm64",
@@ -41,7 +34,6 @@ class ReleaseMatrixTests(unittest.TestCase):
         )
         platforms = {entry["id"] for entry in self.matrix["platforms"]}
         self.assertEqual(platforms, EXPECTED_PLATFORMS)
-        self.assertEqual(platforms, installer.SUPPORTED_PLATFORMS)
 
     def test_default_is_codemode_and_compatibility_is_explicit_and_safe(self) -> None:
         self.assertEqual(self.matrix["default_surface"], "codemode")
@@ -49,7 +41,7 @@ class ReleaseMatrixTests(unittest.TestCase):
         self.assertEqual(startup["schema"], "zerostack.startup_argv.v1")
         self.assertIs(startup["shell"], False)
         self.assertEqual(startup["argv"], ["exec", "-C", "<project-root>"])
-        self.assertIn(" startup ", startup["generator"])
+        self.assertIn("parked", startup["generator"])
         compatibility = self.matrix["compatibility"]
         self.assertEqual(compatibility["surface"], "mcp")
         self.assertEqual(compatibility["installer_flag"], "--compat-mcp")

@@ -79,8 +79,8 @@ The production runtime links the three engine domain APIs through reviewed, pinn
 ZeroStack has no release or publication lifecycle. It is public only because
 FSZero, GraphZero, and TokenZero consume this shared base. Do not publish tags,
 bundles, registry packages, native prebuilds, or harness adapters from this
-repository. The checked-in installer and platform matrix are local development
-and conformance fixtures only. See [`INSTALL-FOR-AGENTS.md`](INSTALL-FOR-AGENTS.md).
+repository. There is no install CLI in this tree right now (`scripts/zs` and
+the installer scripts are parked). See [`INSTALL-FOR-AGENTS.md`](INSTALL-FOR-AGENTS.md).
 
 `pi-zsx` is an internal adapter under active development in `pi-stack`. It must
 not be published without new, explicit owner approval.

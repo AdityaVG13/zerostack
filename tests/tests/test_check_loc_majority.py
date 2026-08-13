@@ -48,7 +48,7 @@ class LocMajorityTests(unittest.TestCase):
                 "Swift",
             },
         )
-        self.assertEqual(module.language_for("scripts/zs", b"#!/usr/bin/env python3\n"), "Python")
+        self.assertEqual(module.language_for("scripts/check_no_host_paths.py", b"#!/usr/bin/env python3\n"), "Python")
         self.assertIsNone(module.language_for("README", b"plain text\n"))
 
     def test_threshold_equality_is_not_a_pass(self) -> None:

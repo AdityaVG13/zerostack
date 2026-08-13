@@ -8,7 +8,6 @@ REPO = Path(__file__).parents[2]  # ZeroStack/
 
 # Active sample carriers that document the public zero.* CodeMode surface.
 ACTIVE_SAMPLE_FILES = [
-    REPO / "INSTALL-FOR-AGENTS.md",
     REPO / "README.md",
     *sorted((REPO / "docs").glob("*.md")),
 ]
