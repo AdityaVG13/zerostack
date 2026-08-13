@@ -27,7 +27,7 @@ def install(source: Path, destination: Path) -> None:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--prefix", type=Path, default=Path.home() / ".kimi-code/bin", help="installation directory (default: ~/.kimi-code/bin)")
+    parser.add_argument("--prefix", type=Path, default=Path.home() / ".local/bin", help="installation directory (default: ~/.local/bin)")
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--verify", action="store_true")
     args = parser.parse_args(); source, destination = Path(__file__).with_name("zs"), args.prefix.expanduser() / "zs"
