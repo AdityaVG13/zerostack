@@ -533,7 +533,7 @@ where
         cancelled: Arc::clone(&cancelled),
     };
     let (sender, receiver) = mpsc::sync_channel(1);
-    let _worker = thread::Builder::new()
+    let worker = thread::Builder::new()
         .name("zerostack-mcp-tool".into())
         .spawn(move || {
             let _permit = permit;
@@ -550,15 +550,15 @@ where
         })?;
 
     let started = Instant::now();
-    loop {
+    let outcome = loop {
         if externally_cancelled() {
             cancelled.store(true, Ordering::Release);
-            return Err(McpDispatchError::cancelled().with_op(operation));
+            break Err(McpDispatchError::cancelled().with_op(operation));
         }
         let elapsed = started.elapsed();
         if !config.tool_timeout.is_zero() && elapsed >= config.tool_timeout {
             cancelled.store(true, Ordering::Release);
-            return Err(McpDispatchError::timeout(operation, config.tool_timeout));
+            break Err(McpDispatchError::timeout(operation, config.tool_timeout));
         }
         let wait = if config.tool_timeout.is_zero() {
             CANCELLATION_POLL
@@ -570,16 +570,18 @@ where
                 if error.kind == "cancelled"
                     && deadline.is_some_and(|deadline| Instant::now() >= deadline) =>
             {
-                return Err(McpDispatchError::timeout(operation, config.tool_timeout));
+                break Err(McpDispatchError::timeout(operation, config.tool_timeout));
             }
-            Ok(result) => return result,
+            Ok(result) => break result,
             Err(mpsc::RecvTimeoutError::Timeout) => continue,
             Err(mpsc::RecvTimeoutError::Disconnected) => {
                 cancelled.store(true, Ordering::Release);
-                return Err(McpDispatchError::disconnected(operation));
+                break Err(McpDispatchError::disconnected(operation));
             }
         }
-    }
+    };
+    let _ = worker.join();
+    outcome
 }
 
 #[cfg(feature = "fastmcp")]
