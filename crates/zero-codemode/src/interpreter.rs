@@ -3285,6 +3285,16 @@ mod tests {
         });
         assert!(first.is_some());
         assert_eq!(first, second);
+        let creations = PARSER_CREATIONS.load(Ordering::Relaxed);
+        let interp = INTERPRETER_CREATIONS.load(Ordering::Relaxed);
+        eprintln!(
+            "CHAR tls parser_slot={:#x} parser_creations={creations} interpreter_creations={interp}",
+            first.unwrap()
+        );
+        assert_ne!(
+            std::ptr::from_ref(&PARSER_CREATIONS) as usize,
+            std::ptr::from_ref(&INTERPRETER_CREATIONS) as usize
+        );
     }
 
     #[test]
@@ -3457,6 +3467,7 @@ mod tests {
             node = node.as_array().unwrap().first().unwrap();
         }
         assert_eq!(node, &serde_json::json!(1));
+        eprintln!("CHAR serialize depth=64 degraded=0 owner=interpreter");
     }
     #[test]
     fn promise_resolution_recursion_is_depth_bounded() {
@@ -3479,6 +3490,10 @@ mod tests {
         assert!(matches!(error, HostError::Data(_)));
         assert!(error.to_string().contains("depth"));
         assert_eq!(interpreter.depth.get(), 0);
+        eprintln!(
+            "CHAR promise settle=16 kind=All state=depth_bounded inflight=0 depth={}",
+            interpreter.depth.get()
+        );
     }
 
     #[test]
@@ -3496,5 +3511,9 @@ mod tests {
         assert!(matches!(error, HostError::Data(_)));
         assert!(error.to_string().contains("depth"));
         assert_eq!(interpreter.depth.get(), interpreter.max_depth);
+        eprintln!(
+            "CHAR promise settle=1 kind=Fulfilled state=depth_limit inflight=0 depth={}",
+            interpreter.depth.get()
+        );
     }
 }
