@@ -4,13 +4,12 @@ Every test lives here. Crates under `crates/` are production code only.
 
 ```
 tests/
-  rust/                 crate integration tests + shared rust suite
-    shared/             workspace-level rust tests
-    zero-cert/          ...
-    zero-codemode/
-    ...
+  rust/<crate>/         crate integration tests (cargo test -p <crate>)
+  rust/<crate>/unit/    unit-test source, #[path] from crate src (private APIs)
+  rust/shared/          workspace rust suite
   python/               python tests
-  benches/              criterion benches (invoked via cargo bench -p <crate>)
+  racc/                 RACC independent checks
+  benches/              criterion benches (cargo bench -p <crate>)
   zero-testkit/         shared test library (not a product crate)
   fixtures/             shared fixtures
   contracts/            schemas the suite validates
