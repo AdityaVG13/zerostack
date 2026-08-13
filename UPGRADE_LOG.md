@@ -690,3 +690,177 @@ Remaining C-class / skipped (unchanged from pass 2, plus the FSZero crate-level 
 | ZeroStack/conformance | anyhow/clap/libc/regex | lock stale | latest | skipped |
 | FSZero lock | anyhow 1.0.102, libc 0.2.186 | lock stale | 1.0.104 / 0.2.189 | not this family |
 | GraphZero lock | regex | 1.12.4 | 1.13.1 | not this family |
+
+---
+
+# Pass 4 -- 2026-08-13 -- crate-local direct deps (same major, not workspace-inherited)
+
+**Mission:** Bump versions written in **member** `Cargo.toml` files (not `[workspace.dependencies]`) that are behind latest **stable** on the **same major**. Also refresh GraphZero `tools_gen` nested lock serde / serde_json. No majors. No 0.x line jumps. No ZeroStack `Cargo.lock`. No commit.
+
+## Summary
+
+- **Updated:** 3 named crates (`serde_json`, `rayon`, `serde` family in nested lock)
+- **Already at latest (left alone):** 15+ crate-local pins (see list)
+- **Skipped / PRESERVE:** jsonschema 0.26, criterion 0.5, fsqlite 0.1.19, ed25519-dalek 2, scip 0.8.1, getrandom 0.2, GraphZero workspace sha2 0.10
+- **Failed:** 0
+- **Checks:** serde_json + rayon -- skipped (lock already on target; compile cannot break). `gen-fixture` -- rch preflight failed 3x (see Issues)
+
+**Method:** crates.io `GET /api/v1/crates/{name}` → `crate.max_stable_version` (User-Agent `ZeroStack-library-updater-pass4/1.0`). One crate at a time.
+
+## crates.io max_stable (this pass)
+
+| Crate | max_stable | Notes |
+|-------|------------|-------|
+| serde | **1.0.229** | same as pass 3 |
+| serde_json | **1.0.151** | same as pass 3 |
+| rayon | **1.12.0** | 1.11+ deprecates `iter::repeatn` (old name kept) |
+| napi / napi-derive / napi-build | 3.12.1 / 3.6.3 / 2.4.1 | already current |
+| tree-sitter | 0.26.12 | already current |
+| notify | 8.2.0 | 9.0.0-rc.4 is pre-release -- stay 8.2.0 |
+| frankensearch / tempfile / sha2 | 0.3.2 / 3.27.0 / 0.11.0 | already current |
+| jsonschema | 0.49.9 | SKIP -- 0.x break |
+| criterion | 0.8.2 | SKIP -- 0.x break |
+| fsqlite | 0.3.0 | SKIP -- 0.x break |
+| ed25519-dalek | 3.0.0 | SKIP -- major |
+| scip | 0.9.0 | SKIP -- 0.x |
+| getrandom | 0.4.3 | SKIP -- major |
+
+## Research
+
+### serde_json: 1.0.150 → 1.0.151
+- **Breaking:** None
+- **Change:** additive `RawValue::from_string_unchecked` ([#1331](https://github.com/serde-rs/json/pull/1331)). Release: https://github.com/serde-rs/json/releases/tag/v1.0.151 (2026-07-20)
+- **FSZero lock:** already 1.0.151 (pass 2/3). Manifest pin only.
+
+### serde: 1.0.228 → 1.0.229 (tools_gen lock only)
+- **Breaking:** None for 1.0 consumers
+- **Change:** serde_derive updates to syn 3 (https://github.com/serde-rs/serde/releases/tag/v1.0.229, 2026-07-18). Companions: serde_core / serde_derive 1.0.229; lock now has syn 2.0.118 **and** syn 3.0.3
+- **tools_gen `Cargo.toml`:** still `serde_json = "1"` (range already admits latest)
+
+### rayon: 1.10 → 1.12 (declared floor)
+- **Breaking:** None. 1.11 renamed `iter::repeatn` → `iter::repeat_n` (old name deprecated, still present). FSZero uses `std::iter::repeat_n`, not rayon `repeatn`.
+- **FSZero lock:** already 1.12.0. Floor raise only; no lock rewrite.
+
+## Updates
+
+### FSZero -- crate-local pins
+
+| Crate | File | From | To | Lock | Tests |
+|-------|------|------|----|------|-------|
+| serde_json | `crates/fszero/Cargo.toml` | 1.0.150 | 1.0.151 | already 1.0.151 | check skipped -- lock unchanged |
+| rayon | `crates/fs-zero/Cargo.toml`, `crates/fszero-engine/Cargo.toml` | 1.10 | 1.12 | already 1.12.0 | check skipped -- lock unchanged |
+
+`fsqlite` / `fsqlite-core` stayed **0.1.19**.
+
+### GraphZero -- `crates/graphzero-scip/tools_gen` nested lock
+
+One crate at a time. `CARGO_TARGET_DIR=/tmp/rch_target_graphzero`. Did **not** touch untracked `scripts/perf/`.
+
+| Crate | Lock from | Lock to | Companion |
+|-------|-----------|---------|-----------|
+| serde_json | 1.0.150 | 1.0.151 | -- |
+| serde | 1.0.228 | 1.0.229 | serde_core 1.0.228→1.0.229, serde_derive 1.0.228→1.0.229, **adds syn 3.0.3** (syn 2.0.118 remains) |
+
+**Check:** `rch exec -- env CARGO_TARGET_DIR=/tmp/rch_target_graphzero cargo check -p gen-fixture` (cwd `tools_gen`) -- **not verified**. Three attempts: workers failed preflight. `rch diagnose`/`admit` said offload-eligible; verbose log showed project identity canonicalized to `/Users/aditya/AI` instead of GraphZero. Local fallback disabled. Did not invent green.
+
+`scip` stayed **0.8.1**. `ed25519-dalek` stayed **2**. Workspace `sha2` stayed **0.10**.
+
+### ZeroStack -- crate-local
+
+No same-major bump. napi/tree-sitter already latest. jsonschema/criterion skipped.
+
+### TokenZero -- crate-local
+
+No same-major bump. `getrandom` 0.2 and `criterion` 0.5 skipped. Other crate-local third-party (`ah-ah-ah` 0.1, `tiktoken-rs` 0.12, fuzz `arbitrary`/`libfuzzer-sys`) already current.
+
+## Already correct (crate-local, same major, left alone)
+
+Named pins / ranges already on latest stable (or caret already admits latest; lock current):
+
+1. **napi** 3.12.1 (`zsx-node`)
+2. **napi-derive** 3.6.3 (`zsx-node`)
+3. **napi-build** 2.4.1 (`zsx-node`)
+4. **tree-sitter** 0.26.12 (`zero-codemode`, `graphzero-extract`)
+5. **tree-sitter-javascript** 0.25.0 (`zero-codemode`)
+6. **frankensearch** 0.3.2 (`fs-zero`, `fszero-engine`)
+7. **notify** 8.2.0 (`fs-zero`, `graphzero-store`)
+8. **tempfile** 3.27.0 / `3` (`fs-zero`, `fszero-engine`, `fszero-store`, tests, ZeroStack members)
+9. **thiserror** `2` (`zero-store`) -- lock 2.0.20
+10. **clap** `4` (`graphzero`, ZeroStack tests/conformance) -- lock 4.6.6
+11. **libc** `0.2` (`zero-process`, `graphzero-store`, `graphzero-engine`) -- latest 0.2.189 (lock may still lag in some trees; range admits)
+12. **windows-sys** `0.61` (`zero-process`, `zerostack-machine-permit`) -- latest 0.61.2
+13. **proptest** `1` -- lock 1.11.0
+14. **sha2** 0.11.0 (FSZero crate-local)
+15. **hex** `0.4` (`graphzero-pack`) -- lock 0.4.3
+16. **protobuf** `3.7` (`graphzero-scip`, `tools_gen`) -- lock 3.7.2
+17. **tiktoken-rs** `0.12` (`tokenzero-core` dev)
+
+## Failed Updates
+
+None rolled back.
+
+## Issues
+
+- **rch + nested workspace:** `tools_gen` check could not run. `rch` resolved `canonical_root` to `/Users/aditya/AI` (parent of the four repos) when cwd was `GraphZero/crates/graphzero-scip/tools_gen`. Three `rch exec` attempts: `all workers failed preflight checks`; local fallback off. `papercuts` CLI/MCP not available in this harness -- logged here.
+- GraphZero untracked `scripts/perf/` is rival/unrelated; not touched (one-writer).
+- ZeroStack `conformance/Cargo.lock` still stale (anyhow/clap/libc/regex) -- lock-only, not crate-local pin; out of this pass.
+- FSZero main lock still has transitive anyhow 1.0.102 / libc 0.2.186 -- not crate-local pins.
+- GraphZero main lock still has regex 1.12.4 -- not crate-local pin.
+
+## PRESERVE (verified unchanged)
+
+- Hub git pin `bd721f7fc4866b24dec0c552da3d96bd8d816fbc`
+- Path deps; nightly-2026-05-31
+- ZeroStack `Cargo.lock` still gitignored -- **not added**
+- GraphZero `scripts/perf/` untracked; not touched
+- No commit, no push, no `git add .`
+
+## Security Notes
+
+No `cargo audit` (targeted pin/lock only; no full-workspace cargo).
+
+## Commands Used
+
+```bash
+# crates.io max_stable for crate-local names
+python3  # urllib GET https://crates.io/api/v1/crates/{name}
+
+# FSZero -- Cargo.toml only (lock already current)
+# edited crates/fszero/Cargo.toml          serde_json 1.0.150 -> 1.0.151
+# edited crates/fs-zero/Cargo.toml         rayon 1.10 -> 1.12
+# edited crates/fszero-engine/Cargo.toml   rayon 1.10 -> 1.12
+
+# GraphZero tools_gen lock
+cd /Users/aditya/AI/GraphZero/crates/graphzero-scip/tools_gen
+env CARGO_TARGET_DIR=/tmp/rch_target_graphzero cargo update -p serde_json
+env CARGO_TARGET_DIR=/tmp/rch_target_graphzero cargo update -p serde
+rch exec -- env CARGO_TARGET_DIR=/tmp/rch_target_graphzero cargo check -p gen-fixture
+# ^ preflight failed x3
+```
+
+## Post-Upgrade Checklist
+
+- [x] crates.io researched before each bump
+- [x] One crate at a time
+- [x] No major / 0.x line jump
+- [x] No lockfile added to ZeroStack
+- [x] Hub pin preserved
+- [ ] `gen-fixture` compile -- **not verified** (rch preflight)
+- [ ] Changes committed -- **not committed** (operator instruction)
+
+## Handoff for pass 5
+
+Remaining C-class / lock-only leftovers:
+
+| Repo | name | current | latest | Why still waiting |
+|------|------|---------|--------|-------------------|
+| ZeroStack | jsonschema | 0.26.2 | 0.49.9 | 0.x major |
+| ZeroStack + TokenZero | criterion | 0.5.1 | 0.8.2 | 0.x major |
+| FSZero | fsqlite / fsqlite-core | 0.1.19 | 0.3.0 | 0.x major |
+| GraphZero | ed25519-dalek | 2.2.0 | 3.0.0 | major |
+| GraphZero | scip | 0.8.1 | 0.9.0 | 0.x |
+| GraphZero | sha2 | 0.10 (ws) / 0.10.9 lock | 0.11.0 | line change -- pass 5/6 |
+| TokenZero | getrandom | 0.2.17 | 0.4.3 | major |
+| ZeroStack/conformance | anyhow/clap/libc/regex | lock stale | latest | lock-only, not crate-local |
+| FSZero lock | anyhow 1.0.102, libc 0.2.186 | lock stale | 1.0.104 / 0.2.189 | lock-only |
+| GraphZero lock | regex | 1.12.4 | 1.13.1 | lock-only |
