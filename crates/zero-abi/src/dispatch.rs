@@ -520,18 +520,21 @@ impl DispatchMachine {
         self.canonical_id = Some(canonical_id);
         self.diagnostic = Some(diagnostic);
         self.stage = DispatchStage::ValidateArguments;
-        Ok(self
-            .operation()
-            .expect("resolved operation remains in registry"))
+        if self.operation().is_none() {
+            return Err(self.poison(DispatchContractError::new(
+                DispatchErrorClass::InvalidStageTransition,
+                "resolved operation is missing from the registry",
+            )));
+        }
+        self.required_operation()
     }
 
     pub fn validate_arguments(&mut self, args: &Value) -> Result<(), DispatchContractError> {
         self.require_stage(DispatchStage::ValidateArguments)?;
-        let schema = self
-            .operation()
-            .expect("validate stage always has an operation")
-            .args_schema
-            .clone();
+        let schema = match self.required_operation() {
+            Ok(operation) => operation.args_schema.clone(),
+            Err(error) => return Err(self.poison(error)),
+        };
         if let Err(message) = validate_schema_value(&schema, args, "$") {
             return Err(self.poison(DispatchContractError::new(
                 DispatchErrorClass::InvalidArguments,
@@ -544,11 +547,10 @@ impl DispatchMachine {
 
     pub fn authorize_effect(&mut self, grant: EffectGrant) -> Result<(), DispatchContractError> {
         self.require_stage(DispatchStage::AuthorizeEffect)?;
-        let required = self
-            .operation()
-            .expect("authorize stage always has an operation")
-            .effect_policy
-            .effect_class;
+        let required = match self.required_operation() {
+            Ok(operation) => operation.effect_policy.effect_class,
+            Err(error) => return Err(self.poison(error)),
+        };
         if grant.effect_class() != required {
             return Err(self.poison(DispatchContractError::new(
                 DispatchErrorClass::UnauthorizedEffect,
@@ -569,11 +571,10 @@ impl DispatchMachine {
         approval: Option<ApprovalGrant>,
     ) -> Result<(), DispatchContractError> {
         self.require_stage(DispatchStage::AcquireAuthority)?;
-        let operation = self
-            .operation()
-            .expect("acquisition stage always has an operation");
-        let canonical_operation_id = operation.canonical_id.clone();
-        let policy = operation.effect_policy;
+        let (canonical_operation_id, policy) = match self.required_operation() {
+            Ok(operation) => (operation.canonical_id.clone(), operation.effect_policy),
+            Err(error) => return Err(self.poison(error)),
+        };
 
         if let Err(error) =
             validate_permit_authority(policy, &canonical_operation_id, permit.as_ref())
@@ -605,6 +606,15 @@ impl DispatchMachine {
         self.require_stage(DispatchStage::Result)?;
         self.stage = DispatchStage::Complete;
         Ok(())
+    }
+
+    fn required_operation(&self) -> Result<&CanonicalOperation, DispatchContractError> {
+        self.operation().ok_or_else(|| {
+            DispatchContractError::new(
+                DispatchErrorClass::InvalidStageTransition,
+                "operation missing after successful stage transition",
+            )
+        })
     }
 
     fn require_stage(&mut self, expected: DispatchStage) -> Result<(), DispatchContractError> {
@@ -859,7 +869,7 @@ fn validate_typed_constraints(
         "array" => validate_array_constraints(schema, value, path),
         "string" | "number" | "integer" => validate_scalar_constraints(),
         "boolean" | "null" => Ok(()),
-        _ => unreachable!("schema type was checked"),
+        other => Err(format!("unsupported schema type {other:?} at {path}")),
     }
 }
 
@@ -873,7 +883,9 @@ fn validate_object_constraints(
     value: &Value,
     path: &str,
 ) -> Result<(), String> {
-    let value = value.as_object().expect("object type was checked");
+    let Some(value) = value.as_object() else {
+        return Err(format!("expected object at {path}"));
+    };
     let properties = schema_properties(schema, path)?;
     validate_required_properties(schema, value, path)?;
     for (key, child) in value {
@@ -942,12 +954,10 @@ fn validate_array_constraints(
     let Some(item_schema) = schema.get("items") else {
         return Ok(());
     };
-    for (index, item) in value
-        .as_array()
-        .expect("array type was checked")
-        .iter()
-        .enumerate()
-    {
+    let Some(items) = value.as_array() else {
+        return Err(format!("expected array at {path}"));
+    };
+    for (index, item) in items.iter().enumerate() {
         validate_schema_value(item_schema, item, &format!("{path}[{index}]"))?;
     }
     Ok(())

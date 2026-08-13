@@ -14,11 +14,12 @@ pub fn sha256(bytes: &[u8]) -> [u8; 32] {
 
 /// SHA-256 of arbitrary bytes as lowercase hex.
 pub fn sha256_hex(bytes: &[u8]) -> String {
+    const HEX: &[u8; 16] = b"0123456789abcdef";
     let digest = sha256(bytes);
     let mut out = String::with_capacity(64);
     for b in digest {
-        out.push(char::from_digit(u32::from(b >> 4), 16).unwrap());
-        out.push(char::from_digit(u32::from(b & 0x0f), 16).unwrap());
+        out.push(char::from(HEX[usize::from(b >> 4)]));
+        out.push(char::from(HEX[usize::from(b & 0x0f)]));
     }
     out
 }

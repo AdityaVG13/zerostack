@@ -56,7 +56,10 @@ fn is_listable_object_name(name: &str) -> bool {
 /// Ensure fan-out parent dirs exist and are real directories (no symlink substitution).
 fn ensure_object_publish_dirs(parent: &Path) -> Result<(), CasError> {
     fs::create_dir_all(parent).map_err(|e| io_err("create object directory", e))?;
-    for level in [parent, parent.parent().expect("sha256 level")] {
+    let sha256_level = parent.parent().ok_or_else(|| {
+        CasError::Malformed("object path is missing the sha256 directory level".into())
+    })?;
+    for level in [parent, sha256_level] {
         let meta = fs::symlink_metadata(level).map_err(|e| io_err("stat object directory", e))?;
         if !meta.file_type().is_dir() {
             return Err(CasError::Malformed(
@@ -340,7 +343,9 @@ impl SharedCas {
             return Ok(outcome);
         }
 
-        let parent = dest.parent().expect("object path always has a parent");
+        let parent = dest.parent().ok_or_else(|| {
+            CasError::Malformed("object path is missing a parent directory".into())
+        })?;
         ensure_object_publish_dirs(parent)?;
         reap_stale_temps(parent, CAS_TEMP_REAP_AGE);
         // Converging on a concurrent publisher's identical object is a dedup,
@@ -408,36 +413,36 @@ impl SharedCas {
         hash: &str,
         next_sequence: &mut impl FnMut() -> u64,
     ) -> Result<(fs::File, PathBuf), CasError> {
-        (0..TEMP_CREATE_ATTEMPTS)
-            .find_map(|attempt| {
-                let tmp = parent.join(format!(
-                    "{TEMP_PREFIX}{}-{}-{}",
-                    &hash[..8],
-                    std::process::id(),
-                    next_sequence()
-                ));
-                match fs::OpenOptions::new()
-                    .write(true)
-                    .create_new(true)
-                    .open(&tmp)
-                {
-                    Ok(file) => Some(Ok((file, tmp))),
-                    Err(error)
-                        if error.kind() == std::io::ErrorKind::AlreadyExists
-                            && attempt + 1 < TEMP_CREATE_ATTEMPTS =>
-                    {
-                        None
-                    }
-                    Err(error) => Some(Err(io_err(
+        for attempt in 0..TEMP_CREATE_ATTEMPTS {
+            let tmp = parent.join(format!(
+                "{TEMP_PREFIX}{}-{}-{}",
+                &hash[..8],
+                std::process::id(),
+                next_sequence()
+            ));
+            match fs::OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .open(&tmp)
+            {
+                Ok(file) => return Ok((file, tmp)),
+                Err(error)
+                    if error.kind() == std::io::ErrorKind::AlreadyExists
+                        && attempt + 1 < TEMP_CREATE_ATTEMPTS => {}
+                Err(error) => {
+                    return Err(io_err(
                         &format!(
                             "create temp object after {} unique-name attempt(s)",
                             attempt + 1
                         ),
                         error,
-                    ))),
+                    ));
                 }
-            })
-            .expect("terminal temp-create attempt always returns a result")
+            }
+        }
+        Err(CasError::Io(
+            "create temp object: no unique name after all attempts".into(),
+        ))
     }
 
     #[allow(clippy::too_many_arguments)]

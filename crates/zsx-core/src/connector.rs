@@ -971,14 +971,19 @@ impl Connector for ZsxConnector {
             .len()
             .try_into()
             .map_err(|_| ConnectorError::new("meter request frame size overflowed"))?;
-            let reserve = self
-                .state
-                .verdict_meter
-                .lock()
-                .map_err(|_| ConnectorError::new("verdict meter lock poisoned"))?
-                .as_mut()
-                .expect("meter presence checked")
-                .reserve_dispatch(input_bytes);
+            let reserve = {
+                let mut meter = self
+                    .state
+                    .verdict_meter
+                    .lock()
+                    .map_err(|_| ConnectorError::new("verdict meter lock poisoned"))?;
+                let Some(meter) = meter.as_mut() else {
+                    return Err(ConnectorError::new(
+                        "verdict meter missing after presence check",
+                    ));
+                };
+                meter.reserve_dispatch(input_bytes)
+            };
             if let Err(error) = reserve {
                 if let Some((_, grant)) = taken_approval {
                     self.restore_approval(grant)?;

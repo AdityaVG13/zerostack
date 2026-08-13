@@ -5,7 +5,7 @@ use std::fmt;
 use std::io::{BufRead, BufReader, Read, Write};
 use std::path::PathBuf;
 use std::process::{Command, ExitStatus, Stdio};
-use std::sync::{Arc, Condvar, Mutex, mpsc};
+use std::sync::{mpsc, Arc, Condvar, Mutex};
 use std::thread;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
@@ -13,11 +13,11 @@ use zero_process::{ProcessResourcePolicy, ResourceReceipt, VerifiedChild};
 
 use zero_abi::raw_worker::EngineIdentity;
 use zero_abi::{
-    CallRequest, CancelRequest, EngineStageTimelineV1, FrameCodecError, HandshakeAck,
-    HandshakeRequest, ProtocolLimits, RAW_WORKER_PROTOCOL_VERSION, ShutdownRequest,
-    TIMELINE_CLOSURE_TOLERANCE_NS_V1, TelemetryRequestV1, WorkerRequestFrame, WorkerResponseFrame,
-    WorkerResult, WorkerTokenAccountingV1, decode_response_frame, encode_frame,
-    raw_worker_protocol_digest_hex, validate_handshake_request,
+    decode_response_frame, encode_frame, raw_worker_protocol_digest_hex,
+    validate_handshake_request, CallRequest, CancelRequest, EngineStageTimelineV1, FrameCodecError,
+    HandshakeAck, HandshakeRequest, ProtocolLimits, ShutdownRequest, TelemetryRequestV1,
+    WorkerRequestFrame, WorkerResponseFrame, WorkerResult, WorkerTokenAccountingV1,
+    RAW_WORKER_PROTOCOL_VERSION, TIMELINE_CLOSURE_TOLERANCE_NS_V1,
 };
 
 pub const STORE_ROOT_ENV: &str = "ZEROSTACK_STORE_ROOT";
@@ -49,16 +49,19 @@ pub struct WorkerSpec {
 }
 
 impl WorkerSpec {
-    fn handshake(&self) -> HandshakeRequest {
-        HandshakeRequest {
+    fn handshake(&self) -> Result<HandshakeRequest, WorkerAdapterError> {
+        let root = self.store_root.to_str().ok_or_else(|| {
+            WorkerAdapterError::Configuration("store_root must be valid UTF-8".into())
+        })?;
+        Ok(HandshakeRequest {
             protocol_version: RAW_WORKER_PROTOCOL_VERSION.into(),
-            root: self.store_root.to_str().expect("validated UTF-8").into(),
+            root: root.into(),
             session_id: self.session_id.clone(),
             expected_engine: self.engine,
             expected_worker_revision: Some(self.expected_worker_revision.clone()),
             expected_contract_digest: self.expected_contract_digest.clone(),
             expected_registry_digest: Some(self.expected_registry_digest.clone()),
-        }
+        })
     }
 }
 
@@ -569,7 +572,13 @@ impl WorkerClient {
             shutdown: false,
         };
         client.observe(WorkerEvent::Started, None, Duration::ZERO, 0, 0);
-        let request = spec.handshake();
+        let request = match spec.handshake() {
+            Ok(request) => request,
+            Err(error) => {
+                client.kill_and_reap();
+                return Err(error);
+            }
+        };
         let started = Instant::now();
         let handshake_deadline = match checked_deadline(config.handshake_timeout, None) {
             Ok(deadline) => deadline,

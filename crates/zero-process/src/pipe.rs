@@ -298,7 +298,12 @@ impl PipeListener {
                 _ => return Err(error),
             }
         }
-        let handle = self.next.take().expect("instance present");
+        let handle = self.next.take().ok_or_else(|| {
+            io::Error::new(
+                io::ErrorKind::Other,
+                "named pipe listener has no pending instance",
+            )
+        })?;
         let connection = PipeConnection::from_handle(handle, true)?;
         self.spawn_instance(false)?;
         Ok(connection)

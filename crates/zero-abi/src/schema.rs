@@ -5,7 +5,7 @@
 //! sets. Description/title text is ignored so prose edits do not mask real
 //! drift.
 
-use serde_json::{Map, Value, json};
+use serde_json::{json, Map, Value};
 use std::collections::BTreeSet;
 
 use crate::digest::sha256_hex;
@@ -86,15 +86,10 @@ pub fn normalize_schema(value: &Value) -> Value {
                     "properties" | "patternProperties" | "definitions" | "$defs" => {
                         normalize_schema_map(v)
                     }
-                    "items" => {
-                        if v.is_array() {
-                            Value::Array(
-                                v.as_array().unwrap().iter().map(normalize_schema).collect(),
-                            )
-                        } else {
-                            normalize_schema(v)
-                        }
-                    }
+                    "items" => match v.as_array() {
+                        Some(items) => Value::Array(items.iter().map(normalize_schema).collect()),
+                        None => normalize_schema(v),
+                    },
                     "additionalProperties"
                     | "additionalItems"
                     | "not"

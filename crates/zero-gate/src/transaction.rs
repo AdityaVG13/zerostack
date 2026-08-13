@@ -12,17 +12,17 @@
 use std::fmt;
 
 use serde::{Deserialize, Serialize};
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 use sha2::{Digest as _, Sha256};
 use zero_abi::{
-    ArtifactOwnerV1, DigestV1, EffectClass, EffectProgramV1, EffectRollbackV1,
-    TypedEffectOperationV1, canonical_json,
+    canonical_json, ArtifactOwnerV1, DigestV1, EffectClass, EffectProgramV1, EffectRollbackV1,
+    TypedEffectOperationV1,
 };
 use zero_cert::EffectAcceptedV1;
 use zero_store::{
+    abort_journal_v1, commit_journal_v1, prepare_journal_v1, recover_journal_v1,
     ContinuationCartridgeV1, DurableProfileIdV1, JournalBindingV1, JournalErrorV1,
-    JournalFailureCodeV1, JournalPathsV1, RecoveryOutcomeV1, RecoveryReceiptV1, abort_journal_v1,
-    commit_journal_v1, prepare_journal_v1, recover_journal_v1,
+    JournalFailureCodeV1, JournalPathsV1, RecoveryOutcomeV1, RecoveryReceiptV1,
 };
 
 pub const TRANSACTION_CONTRACT_VERSION_V1: u16 = 1;
@@ -264,7 +264,13 @@ impl EffectResourceClosureV1 {
             ResourceIsolationModeV1::Transactional => {
                 ResourceRestorationModeV1::TransactionRollback
             }
-            ResourceIsolationModeV1::Unsupported => unreachable!(),
+            ResourceIsolationModeV1::Unsupported => {
+                return Err(TransactionErrorV1::new(
+                    TransactionFailureCodeV1::UnsupportedIsolation,
+                    Some(self.requirement),
+                    "unsupported isolation or restoration blocks speculation",
+                ));
+            }
         };
         if self.restoration != expected {
             return Err(TransactionErrorV1::new(
@@ -1350,14 +1356,14 @@ mod tests {
     use std::borrow::Cow;
     use tempfile::tempdir;
     use zero_abi::{
-        CwirVerifierClassV1, EffectTargetV1, EffectVerificationPlanV1, EffectVerificationStepV1,
-        TypedEffectOperationV1, sha256,
+        sha256, CwirVerifierClassV1, EffectTargetV1, EffectVerificationPlanV1,
+        EffectVerificationStepV1, TypedEffectOperationV1,
     };
     use zero_cert::{
-        CompletenessWitness, EffectVerificationOutcomeV1, EvidenceCertificate, ObjectId,
-        OperatorLock, Provenance, Query, Resolver, SpanRef, accept_effect_verification_v1, verify,
+        accept_effect_verification_v1, verify, CompletenessWitness, EffectVerificationOutcomeV1,
+        EvidenceCertificate, ObjectId, OperatorLock, Provenance, Query, Resolver, SpanRef,
     };
-    use zero_store::{DurableProfileIdV1, initialize_published_root_v1};
+    use zero_store::{initialize_published_root_v1, DurableProfileIdV1};
 
     fn digest(byte: u8) -> DigestV1 {
         DigestV1::from_bytes([byte; 32])

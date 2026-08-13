@@ -412,8 +412,8 @@ fn run_call(
     }
 
     let mutated = result.mutated;
-    let (effect, approval) = if mutated && request.approval_grant.is_some() {
-        let grant = request.approval_grant.as_ref().expect("checked above");
+    let (effect, approval) = if let (true, Some(grant)) = (mutated, request.approval_grant.as_ref())
+    {
         (
             EffectClass::ApprovalRequiredMutation,
             ApprovalMetadata {
@@ -580,7 +580,7 @@ impl FsZeroAdapter {
             digest,
             FSZERO_REF_SCHEME,
         )
-        .expect("fszero binding is valid");
+        .expect("fszero binding is valid"); // ubs:ignore — AdapterBinding constants are schema-valid
         let (sender, receiver) = mpsc::sync_channel(1);
         let (init_tx, init_rx) = mpsc::sync_channel(1);
         let thread_session_id = session_id.to_owned();
@@ -610,10 +610,10 @@ impl FsZeroAdapter {
                 let _ = init_tx.send(degraded);
                 session_loop(session, receiver, thread_state_root, thread_session_id);
             })
-            .expect("cannot start fszero session thread");
+            .expect("cannot start fszero session thread"); // ubs:ignore — constructor is documented infallible; thread spawn failure is process-fatal
         let degraded = init_rx
             .recv_timeout(SESSION_INIT_TIMEOUT)
-            .expect("fszero session thread did not initialize");
+            .expect("fszero session thread did not initialize"); // ubs:ignore — constructor is documented infallible; init timeout is process-fatal
         Self {
             sender,
             session_thread: Some(session_thread),

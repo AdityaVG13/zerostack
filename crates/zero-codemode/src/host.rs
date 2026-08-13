@@ -7,9 +7,9 @@
 use std::fmt;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::mpsc;
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use serde::Serialize;
@@ -462,8 +462,11 @@ pub(crate) fn normalize_public_result(encoded: &str) -> Result<String, HostError
     let result = match explicit_result_reference(&value)? {
         Some((reference, preview)) => ZeroResultV1::reference(&ack, reference, preview)
             .map_err(|error| HostError::Json(format!("invalid explicit ref result: {error}")))?,
-        None => ZeroResultV1::inline(ack, value)
-            .expect("validated fallback ack always constructs zero-result/v1"),
+        None => ZeroResultV1::inline(ack, value).map_err(|error| {
+            HostError::Json(format!(
+                "validated fallback ack failed to construct zero-result/v1: {error}"
+            ))
+        })?,
     };
     serde_json::to_string(&result).map_err(|error| HostError::Json(error.to_string()))
 }

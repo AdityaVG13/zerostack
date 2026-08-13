@@ -4,30 +4,31 @@
 //! receipts are linear capabilities. Their fields are private, they are not
 //! cloneable, and only the preceding phase can construct the next phase.
 
-use crate::deoptimization::{BaselineExecutionReceiptV1, deoptimization_contract_digest_v1};
+use crate::deoptimization::{deoptimization_contract_digest_v1, BaselineExecutionReceiptV1};
 use crate::quality::{
-    QualityAdmissionRecordV1, QualityAdmissionV1, QualityEvidenceClassV1, QualityGuaranteeV1,
-    QualitySelectionV1, quality_envelope_contract_digest_v1,
+    quality_envelope_contract_digest_v1, QualityAdmissionRecordV1, QualityAdmissionV1,
+    QualityEvidenceClassV1, QualityGuaranteeV1, QualitySelectionV1,
 };
 use crate::semantic_cut::{
-    SemanticCutCertificateRecordV1, SemanticCutEvidenceV1, semantic_cut_contract_digest_v1,
+    semantic_cut_contract_digest_v1, SemanticCutCertificateRecordV1, SemanticCutEvidenceV1,
 };
 use crate::transaction::{
-    RestorationScopeV1, TransactionDispositionV1, TransactionReceiptV1,
-    transaction_contract_digest_v1,
+    transaction_contract_digest_v1, RestorationScopeV1, TransactionDispositionV1,
+    TransactionReceiptV1,
 };
 use serde::{Deserialize, Serialize};
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 use sha2::{Digest as _, Sha256};
 use std::collections::BTreeSet;
 use std::fmt;
 use zero_abi::{
-    ArtifactOwnerV1, DigestV1 as AbiDigestV1, DurableProfileV1, ReasoningContractV1,
-    RobustSnapCertificate, SnapLevel, StrictReasoningAdmissionRecordV1, StrictReasoningAdmissionV1,
-    ZbfArtifactKindV1, ZbfObjectV1, canonical_json, raw_worker::EffectClass,
-    reasoning_contract_digest_v1, verify_strict_no_downshift_v1, zbf_contract_digest_v1,
+    canonical_json, raw_worker::EffectClass, reasoning_contract_digest_v1,
+    verify_strict_no_downshift_v1, zbf_contract_digest_v1, ArtifactOwnerV1,
+    DigestV1 as AbiDigestV1, DurableProfileV1, ReasoningContractV1, RobustSnapCertificate,
+    SnapLevel, StrictReasoningAdmissionRecordV1, StrictReasoningAdmissionV1, ZbfArtifactKindV1,
+    ZbfObjectV1,
 };
-use zero_cert::{EffectAcceptedV1, VerifiedEvidence, effect_witness_contract_digest_v1};
+use zero_cert::{effect_witness_contract_digest_v1, EffectAcceptedV1, VerifiedEvidence};
 
 pub const TWO_PHASE_SCHEMA_VERSION: u16 = 5;
 pub const GUARD_COUNT: usize = 10;
@@ -1438,11 +1439,23 @@ fn validate_g2(request: &PrepareRequest) -> Result<(), KernelError> {
     let verify = instructions
         .iter()
         .position(|step| matches!(step, ControllerInstruction::Verify))
-        .expect("verify count checked");
+        .ok_or_else(|| {
+            KernelError::at(
+                FailureCode::InvalidPlan,
+                Guard::G2FinitePlan,
+                "plan verify instruction missing after count check",
+            )
+        })?;
     let visible = instructions
         .iter()
         .position(|step| matches!(step, ControllerInstruction::BufferVisible))
-        .expect("buffer count checked");
+        .ok_or_else(|| {
+            KernelError::at(
+                FailureCode::InvalidPlan,
+                Guard::G2FinitePlan,
+                "plan buffer instruction missing after count check",
+            )
+        })?;
     if verify >= visible {
         return Err(KernelError::at(
             FailureCode::InvalidPlan,
@@ -1798,7 +1811,7 @@ pub struct BrokeredExecution {
 
 impl BrokeredExecution {
     pub fn dispatch(&mut self, owner: PeerOwner, usage: ResourceUsage) -> Result<(), KernelError> {
-        self.expect(ControllerInstruction::Dispatch { owner })?;
+        self.expect(ControllerInstruction::Dispatch { owner })?; // ubs:ignore — BrokeredExecution::expect instruction matcher, not Result::expect
         let next = self.usage.checked_add(usage).ok_or_else(|| {
             KernelError::execution(FailureCode::BoundExceeded, "resource counter overflow")
         })?;
@@ -1810,13 +1823,13 @@ impl BrokeredExecution {
     }
 
     pub fn deterministic_transform(&mut self) -> Result<(), KernelError> {
-        self.expect(ControllerInstruction::DeterministicTransform)?;
+        self.expect(ControllerInstruction::DeterministicTransform)?; // ubs:ignore — BrokeredExecution::expect instruction matcher, not Result::expect
         self.advance();
         Ok(())
     }
 
     pub fn record_verification(&mut self, evidence_digest: DigestV1) -> Result<(), KernelError> {
-        self.expect(ControllerInstruction::Verify)?;
+        self.expect(ControllerInstruction::Verify)?; // ubs:ignore — BrokeredExecution::expect instruction matcher, not Result::expect
         if is_zero(&evidence_digest) {
             return Err(KernelError::execution(
                 FailureCode::IncompleteExecution,
@@ -1829,7 +1842,7 @@ impl BrokeredExecution {
     }
 
     pub fn stage_effect(&mut self, effect: StagedEffect) -> Result<(), KernelError> {
-        self.expect(ControllerInstruction::StageEffect)?;
+        self.expect(ControllerInstruction::StageEffect)?; // ubs:ignore — BrokeredExecution::expect instruction matcher, not Result::expect
         if effect.effect_class != self.request.effect_class
             || is_zero(&effect.effect_digest)
             || self.request.evidence.safety_shield.action_digest != Some(effect.effect_digest)
@@ -1868,7 +1881,7 @@ impl BrokeredExecution {
     }
 
     pub fn buffer_visible(&mut self, bytes: &[u8]) -> Result<(), KernelError> {
-        self.expect(ControllerInstruction::BufferVisible)?;
+        self.expect(ControllerInstruction::BufferVisible)?; // ubs:ignore — BrokeredExecution::expect instruction matcher, not Result::expect
         let new_len = self
             .buffered_visible
             .len()
@@ -1902,7 +1915,7 @@ impl BrokeredExecution {
         mut self,
         closure: TransactionClosure,
     ) -> Result<ReadyToFinalize, KernelError> {
-        self.expect(ControllerInstruction::CloseTransaction)?;
+        self.expect(ControllerInstruction::CloseTransaction)?; // ubs:ignore — BrokeredExecution::expect instruction matcher, not Result::expect
         self.advance();
         if self.next_instruction != self.request.plan.instructions.len()
             || self.verification_digest.is_none()
@@ -2965,15 +2978,14 @@ mod tests {
     use crate::transaction::RestorationScopeV1;
     use std::{borrow::Cow, collections::BTreeMap};
     use zero_abi::{
-        CwirVerifierClassV1, EffectProgramV1, EffectRollbackV1, EffectTargetV1,
+        sha256, CwirVerifierClassV1, EffectProgramV1, EffectRollbackV1, EffectTargetV1,
         EffectVerificationPlanV1, EffectVerificationStepV1, NativeStatePolicyV1,
-        ProtectedEffectClassV1, ProtectedEffectSet, ProtectedEffectV1, ROBUST_SNAP_MODEL_VERSION,
-        TypedEffectOperationV1, WorldFiberDescriptor, sha256,
+        ProtectedEffectClassV1, ProtectedEffectSet, ProtectedEffectV1, TypedEffectOperationV1,
+        WorldFiberDescriptor, ROBUST_SNAP_MODEL_VERSION,
     };
     use zero_cert::{
-        CompletenessWitness, EffectVerificationOutcomeV1, EvidenceCertificate, ObjectId,
-        OperatorLock, Provenance, Query, Resolver, SpanRef, TestId, accept_effect_verification_v1,
-        verify,
+        accept_effect_verification_v1, verify, CompletenessWitness, EffectVerificationOutcomeV1,
+        EvidenceCertificate, ObjectId, OperatorLock, Provenance, Query, Resolver, SpanRef, TestId,
     };
 
     fn digest(byte: u8) -> DigestV1 {

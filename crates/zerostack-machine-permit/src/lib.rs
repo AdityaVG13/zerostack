@@ -122,7 +122,7 @@ impl Drop for MachinePermitHeartbeat {
 /// Repo-scoped permit base below the current user's private runtime directory.
 pub fn scoped_permit_base(class: &str) -> PathBuf {
     try_scoped_permit_base(class)
-        .unwrap_or_else(|error| panic!("resolve configured permit scope root: {error}"))
+        .unwrap_or_else(|error| panic!("resolve configured permit scope root: {error}")) // ubs:ignore — documented panicking wrapper; library callers use try_scoped_permit_base
 }
 
 /// Fallible repo-scoped permit base resolution for acquisition paths.
@@ -132,7 +132,7 @@ pub fn try_scoped_permit_base(class: &str) -> io::Result<PathBuf> {
 
 pub fn scoped_permit_base_for(class: &str, scope_root: Option<&Path>) -> PathBuf {
     try_scoped_permit_base_for(class, scope_root)
-        .unwrap_or_else(|error| panic!("resolve configured permit scope root: {error}"))
+        .unwrap_or_else(|error| panic!("resolve configured permit scope root: {error}")) // ubs:ignore — documented panicking wrapper; library callers use try_scoped_permit_base_for
 }
 
 /// Resolve an explicit scope root without ever hashing an uncanonicalized path.
@@ -701,10 +701,9 @@ impl WaiterIntent {
     }
 
     fn live_competitors(&self) -> Result<Vec<(u128, String)>, AcquireError> {
-        let waiters = self
-            .path
-            .parent()
-            .expect("waiter intent always has a parent");
+        let waiters = self.path.parent().ok_or_else(|| {
+            AcquireError::Fatal("codemode permit waiter intent is missing a parent directory".into())
+        })?;
         let entries = fs::read_dir(waiters).map_err(|e| {
             AcquireError::Fatal(format!(
                 "read codemode permit waiters {}: {e}",
