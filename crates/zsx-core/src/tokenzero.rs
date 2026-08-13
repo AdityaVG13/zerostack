@@ -1110,8 +1110,9 @@ mod tests {
 
     #[test]
     fn request_frame_roundtrip_keeps_trace_binding() {
-        // The adapter echoes the trace verbatim; prove the trace the connector
-        // builds survives typed frame validation unchanged.
+        // The adapter echoes the trace verbatim; the connector rejects any
+        // other binding. A valid frame that is never dispatched would hide a
+        // dropped echo.
         let binding = AdapterBinding::new(
             EngineIdentity::TokenZero,
             worker_revision(),
@@ -1121,26 +1122,38 @@ mod tests {
             "tz://",
         )
         .expect("binding is valid");
-        let trace = WorkerTrace {
-            runtime_id: "runtime".into(),
-            cell_id: "cell".into(),
+        let request = CallRequest {
             request_id: "request-1".into(),
-            trace_id: "request-1".into(),
-            parent_span_id: None,
-            worker_revision: binding.worker_revision.clone(),
-            contract_digest: binding.semantic_contract_digest.clone(),
+            op: "read".into(),
+            args: json!({"path": "."}),
+            deadline_unix_ms: Some(30_000),
+            trace: WorkerTrace {
+                runtime_id: "runtime".into(),
+                cell_id: "cell".into(),
+                request_id: "request-1".into(),
+                trace_id: "request-1".into(),
+                parent_span_id: None,
+                worker_revision: binding.worker_revision.clone(),
+                contract_digest: binding.semantic_contract_digest.clone(),
+            },
+            approval_grant: None,
+            telemetry_request: None,
         };
         let frame = WorkerRequestFrame::Call {
-            request: CallRequest {
-                request_id: "request-1".into(),
-                op: "read".into(),
-                args: json!({"path": "."}),
-                deadline_unix_ms: Some(30_000),
-                trace,
-                approval_grant: None,
-                telemetry_request: None,
-            },
+            request: request.clone(),
         };
         zero_abi::validate_request_frame(&frame).expect("connector-shaped call frame is valid");
+        let adapter = TokenZeroAdapter::new("/tmp", "session-tz").expect("adapter builds");
+        let response = adapter
+            .bind_outcome(
+                &request,
+                Ok((json!({"ok": true}), Vec::new())),
+                Duration::ZERO,
+            )
+            .expect("small bind must succeed");
+        assert_eq!(
+            response.result.metadata.trace, request.trace,
+            "adapter must echo request.trace verbatim"
+        );
     }
 }

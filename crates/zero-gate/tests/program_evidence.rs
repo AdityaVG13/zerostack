@@ -365,7 +365,7 @@ fn cli_fails_closed_on_noncanonical_manifest() {
 
 #[test]
 fn fail_closed_reports_are_typed_and_distinct() {
-    // Missing class vs stale head vs digest mismatch must be distinguishable.
+    // Missing class vs stale head vs malformed report must be distinguishable.
     let base = TempDir::new().unwrap();
     let mut manifest = valid_manifest(base.path());
     manifest.engines.get_mut("fz").unwrap().files.remove("gc");
@@ -376,8 +376,16 @@ fn fail_closed_reports_are_typed_and_distinct() {
     );
 
     let manifest = valid_manifest(base.path());
-    let stale = assemble_program_evidence(&manifest, fs_load).unwrap();
-    let _ = stale; // fresh manifest assembles; stale is checked by the CLI tests above
+    let stale_path = manifest.engines["gz"].files["worker"].clone();
+    let stale = artifact_value(EvidenceClassV1::Worker, &manifest.source_head, &head(0x99));
+    std::fs::write(&stale_path, sealed_artifact_bytes(stale)).unwrap();
+    let stale_head = assemble_program_evidence(&manifest, fs_load).unwrap_err();
+    assert_eq!(
+        stale_head.failure_code(),
+        &ProgramEvidenceFailureV1::StaleHead
+    );
+
+    let manifest = valid_manifest(base.path());
     let mut value = artifact_value(
         EvidenceClassV1::Mcp,
         &manifest.source_head,
