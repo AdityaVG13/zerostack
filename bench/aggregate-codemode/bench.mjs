@@ -51,6 +51,11 @@ const config = {
 if (!Number.isFinite(config.toleranceRelative) || config.toleranceRelative < 0) {
   throw new Error("--tolerance-relative must be nonnegative");
 }
+if (config.toleranceRelative >= 0.5) {
+  console.error(
+    "aggregate-codemode: tolerance-relative>=0.50 is a smoke window, not a keep-gate",
+  );
+}
 
 const addonPath = path.resolve(values.addon);
 const addon = { exports: {} };
