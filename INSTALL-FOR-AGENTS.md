@@ -20,7 +20,7 @@ the owner gives new explicit publication approval in the future.
 From the ZeroStack checkout:
 
 ```sh
-rch exec -- env CARGO_TARGET_DIR=/tmp/rch_target_zerostack cargo build --locked -p zsx
+rch exec -- env CARGO_TARGET_DIR=/tmp/rch_target_zerostack cargo build -p zsx
 /tmp/rch_target_zerostack/debug/zsx --version
 printf '%s\n' 'return await zero.fs.read({path:"Cargo.toml"});' \
   | /tmp/rch_target_zerostack/debug/zsx exec -C "$PWD"
