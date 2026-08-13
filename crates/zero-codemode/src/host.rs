@@ -1,3 +1,9 @@
+//! CodeMode host execute façade.
+//!
+//! Routes plans through the interpreter + connector. Spill / result
+//! normalization stay here. Do not split unless EXP-012 is SEAM_CONFIRMED
+//! and this file grows past the Rust soft threshold.
+
 use std::fmt;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
