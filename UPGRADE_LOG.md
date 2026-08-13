@@ -1185,3 +1185,119 @@ rch exec -- env CARGO_TARGET_DIR=/tmp/rch_target_graphzero cargo check -p graphz
 | TokenZero | getrandom | 0.2 | 0.4.3 | `fill` rename + rustflags backends |
 | ZS + TZ benches | `criterion::black_box` | deprecated | `std::hint::black_box` | >10 sites in TZ `tokenzero-core` |
 | GraphZero | `{:x}` digest | 3 leftover files | `fast_hex` | why + reserve; pack/store done |
+
+---
+
+# Pass 7 -- 2026-08-13 -- Python manifests only
+
+**Mission:** Re-verify all four trees for `pyproject.toml`, `requirements*.txt`, `uv.lock`, `poetry.lock`. Bump any behind third-party Python dep with `uv` (never pip). Leave manifests unchanged if none. Do not bump Rust. Do not touch `scripts/perf`. No commit.
+
+## Summary
+
+| Metric | Count |
+|--------|-------|
+| **Updated** | 0 |
+| **Skipped / PRESERVE** | Python 3.13 interpreter pin (not a package); empty product trees |
+| **Failed (rolled back)** | 0 |
+| **Requires attention** | 0 Python; Rust leftovers unchanged from pass 6 |
+
+**Finding:** zero third-party Python packages in any of the four repos. Nothing to bump.
+
+## Manifest inventory (re-verified)
+
+`find` + `git ls-files` for `pyproject.toml`, `requirements*.txt`, `uv.lock`, `poetry.lock`, `Pipfile`, `setup.py`, `setup.cfg`.
+
+| Repo | Python manifests | Third-party deps |
+|------|------------------|------------------|
+| **ZeroStack** | none (git ls-files empty; no untracked product manifests) | n/a |
+| **FSZero** | none | n/a |
+| **GraphZero** | `pyproject.toml`, `uv.lock`, `.python-version` | **none** (`dependencies = []`) |
+| **TokenZero** | none (false positive: `.pi-subagents/.../91_requirements_review.md` is markdown, not a requirements file) | n/a |
+
+No `requirements*.txt`, `poetry.lock`, `Pipfile`, `setup.py`, or `setup.cfg` in any product tree.
+
+## GraphZero Python contract (already correct)
+
+Inspected files:
+
+1. `GraphZero/pyproject.toml` -- `graphzero-python-tools` 0.0.0; `requires-python = ">=3.13,<3.14"`; `dependencies = []`; `[tool.uv] package = false`. Comment: stdlib-only benchmark drivers; lock used by `uv run --locked`.
+2. `GraphZero/uv.lock` -- `version = 1`, `revision = 3`, `requires-python = "==3.13.*"`, single `[[package]]` `graphzero-python-tools` 0.0.0 `source = { virtual = "." }`.
+3. `GraphZero/.python-version` -- `3.13` (interpreter minor pin, not a PyPI package).
+4. `GraphZero/scripts/test_python_benchmark_environment.py` -- contract test: import closure is stdlib + local `stats`; asserts empty deps and no third-party lock entries.
+
+**PRESERVE:** do not widen `requires-python` to 3.14. Drivers have not been audited against any other interpreter; contract test hard-asserts `>=3.13,<3.14`.
+
+## Updates
+
+None. No `uv add`. No `pyproject.toml` / `uv.lock` edit.
+
+## Already correct (left alone)
+
+1. **GraphZero `pyproject.toml`** -- empty `dependencies`; interpreter bound only.
+2. **GraphZero `uv.lock`** -- virtual project only; `uv lock --check` matched (Resolved 1 package).
+3. **GraphZero `.python-version`** -- `3.13` matches `requires-python` / lock `==3.13.*`.
+4. **ZeroStack** -- no Python product manifest; nothing to upgrade.
+5. **FSZero** -- no Python product manifest; nothing to upgrade.
+6. **TokenZero** -- no Python product manifest; nothing to upgrade.
+
+## Failed Updates
+
+None.
+
+## Needs Attention
+
+- **Python:** none. No behind packages.
+- **Rust leftovers (not this pass):** jsonschema 0.26, fsqlite 0.1.19, scip 0.8.1, getrandom 0.2, `criterion::black_box`, GraphZero `{:x}` digest leftovers. Unchanged.
+- **GraphZero `scripts/perf/`** untracked rival; not touched (one-writer).
+- **ZeroStack `graphzero-query` path** still blocks workspace cargo; irrelevant to Python.
+
+## PRESERVE (verified unchanged)
+
+- All Rust `Cargo.toml` / `Cargo.lock` (this pass did not invoke cargo)
+- Hub git pin `bd721f7fc4866b24dec0c552da3d96bd8d816fbc`
+- GraphZero Python 3.13 bound and empty dep list
+- GraphZero `scripts/perf/` untracked; not touched
+- No commit, no push, no `git add .`
+
+## Security Notes
+
+No `pip-audit` -- zero third-party packages to audit. `uv lock --check` is the lock integrity check.
+
+## Commands Used
+
+```bash
+# Discovery (all four repos)
+find <repo> -name 'pyproject.toml' -o -name 'requirements*.txt' -o -name 'uv.lock' \
+  -o -name 'poetry.lock' -o -name 'Pipfile' -o -name 'setup.py' -o -name '.python-version'
+git ls-files -- pyproject.toml '**/pyproject.toml' 'requirements*.txt' uv.lock poetry.lock
+
+# GraphZero verification
+cd /Users/aditya/AI/GraphZero
+uv --version                         # uv 0.12.3
+uv lock --check                      # Resolved 1 package; exit 0
+uv tree --locked                     # graphzero-python-tools v0.0.0 only
+python3 -m unittest scripts.test_python_benchmark_environment -v
+# 4 tests OK (0.016s)
+```
+
+## Post-Upgrade Checklist
+
+- [x] All four trees re-verified for Python manifests
+- [x] `uv lock --check` + contract unittest (no third-party deps)
+- [x] No Rust bump
+- [x] `scripts/perf` not touched
+- [x] No lockfile added to ZeroStack (Python)
+- [ ] Changes committed -- **not committed** (operator instruction; this pass only appends this log)
+
+## Handoff (Rust leftovers; Python closed)
+
+Python is closed: nothing to upgrade. Remaining items are Rust-only from pass 6:
+
+| Repo | name | current | latest | Why still waiting |
+|------|------|---------|--------|-------------------|
+| ZeroStack | jsonschema | 0.26.2 | 0.49.9 | API likely ok; blocked by `graphzero-query` workspace load |
+| FSZero | fsqlite / fsqlite-core | 0.1.19 | 0.3.0 | 0.x redesign; >10 files |
+| GraphZero | scip | 0.8.1 | 0.9.0 | Range oneof generated bindings |
+| TokenZero | getrandom | 0.2 | 0.4.3 | `fill` rename + rustflags backends |
+| ZS + TZ benches | `criterion::black_box` | deprecated | `std::hint::black_box` | >10 sites in TZ `tokenzero-core` |
+| GraphZero | `{:x}` digest | 3 leftover files | `fast_hex` | why + reserve; pack/store done |
