@@ -10,10 +10,10 @@ crate-type = ["cdylib"]
 name = "zsx_node"
 
 [dependencies]
-napi = { version = "3.12.0", features = ["serde-json", "napi6"] }
-napi-derive = "3.6.2"
+napi = { version = "3.12.1", features = ["serde-json", "napi6"] }
+napi-derive = "3.6.3"
 serde_json.workspace = true
 zsx-core = { path = "../zsx-core", features = ["fszero", "graphzero", "tokenzero"] }
 
 [build-dependencies]
-napi-build = "2.4.0"
+napi-build = "2.4.1"

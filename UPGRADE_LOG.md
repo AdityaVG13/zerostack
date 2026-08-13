@@ -403,3 +403,148 @@ Recommended order (smallest / safest first):
 | GraphZero | scip | 0.8.1 | 0.9.0 |
 | GraphZero | sha2 | 0.10.9 | 0.11.0 |
 | TokenZero | getrandom | 0.2.17 | 0.4.3 |
+
+---
+
+# Pass 2 -- 2026-08-13 -- lockfile-compatible in-semver only
+
+**Mission:** Refresh Cargo.lock / declared patch pins that already allow latest stable. No majors, no 0.x breaking lines, no lockfile added to ZeroStack, no hub pin change, no commit.
+
+## Summary
+
+- **Updated:** 15 named crates (+ expected companion lock packages)
+- **Skipped / PRESERVE:** majors, 0.x line jumps, hub git `bd721f7`, path deps, ZeroStack `conformance/Cargo.lock`, ZeroStack workspace `Cargo.lock` (gitignored)
+- **Failed:** 0
+- **Needs attention:** FSZero `ignore` 0.4.33 only resolved after `regex-automata` 0.4.18 (see below)
+
+## Updates
+
+### ZeroStack -- declared pin bumps only (`crates/zsx-node/Cargo.toml`)
+
+No lockfile written or staged (`**/*.lock` gitignored). Census already had these versions in the ignored lock.
+
+| Crate | From | To | Breaking | Tests |
+|-------|------|----|----------|-------|
+| napi | 3.12.0 | 3.12.1 | None (fix: stop unloading addons with live native code; WASI registration randomness). Source: https://napi.rs/changelog/napi | check skipped -- lock already on 3.12.1 |
+| napi-derive | 3.6.2 | 3.6.3 | None (local package bump of napi-derive-backend) | skipped |
+| napi-build | 2.4.0 | 2.4.1 | None (same addon-unload fix as napi 3.12.1) | skipped |
+
+### FSZero -- `cargo update -p` within existing ranges
+
+One crate at a time. `CARGO_TARGET_DIR=/tmp/rch_target_fszero`.
+
+| Crate | Lock from | Lock to | Notes |
+|-------|-----------|---------|-------|
+| ignore | 0.4.30 | 0.4.33 | First `-p ignore` stopped at 0.4.32 (`available: 0.4.33`). 0.4.33 requires `regex-automata ^0.4.18`. After `-p regex` landed 0.4.18, second `-p ignore` reached 0.4.33. |
+| memchr | 2.8.2 | 2.8.3 | patch |
+| regex | 1.12.4 | 1.13.1 | also `regex-automata` 0.4.14 → 0.4.18 |
+| rusqlite | 0.40.1 | 0.40.2 | also `libsqlite3-sys` 0.38.1 → 0.38.2. Release: MSRV lowered to 1.88.0 only. |
+
+**Check:** `rch exec -- env CARGO_TARGET_DIR=/tmp/rch_target_fszero cargo check -p fszero-store` -- **PASS** (exit 0). Two pre-existing unused-fn warnings in `recovery/pack.rs`. `fsqlite`/`fsqlite-core` stayed **0.1.19**.
+
+### GraphZero -- `cargo update -p` within ranges
+
+One crate at a time. `CARGO_TARGET_DIR=/tmp/rch_target_graphzero`.
+
+| Crate | Lock from | Lock to | Companion |
+|-------|-----------|---------|-----------|
+| anyhow | 1.0.102 | 1.0.104 | -- |
+| clap | 4.6.1 | 4.6.6 | clap_builder 4.6.0→4.6.6, clap_derive 4.6.1→4.6.4 |
+| bytemuck | 1.25.0 | 1.25.2 | -- |
+| crossbeam-queue | 0.3.12 | 0.3.13 | -- |
+| libc | 0.2.186 | 0.2.189 | -- |
+
+**Not bumped (mission):** ed25519-dalek 2.2.0, scip 0.8.1, sha2 0.10.9 + 0.11.0. Check skipped -- patch/lock-only, no native sys crate.
+
+### TokenZero -- declared pins + `cargo update -p`
+
+`Cargo.toml` workspace pins then lock refresh. `CARGO_TARGET_DIR=/tmp/rch_target_tokenzero`.
+
+| Crate | Declared from → to | Lock from → to | Breaking |
+|-------|--------------------|----------------|----------|
+| thiserror | 2.0.19 → 2.0.20 | 2.0.19 → 2.0.20 (+ thiserror-impl) | None. Clippy `redundant_field_names` suppression in generated code ([#454](https://github.com/dtolnay/thiserror/pull/454)). |
+| rusqlite | 0.40.1 → 0.40.2 | 0.40.1 → 0.40.2 (+ libsqlite3-sys 0.38.1→0.38.2) | None. 0.40.2 only lowers MSRV to 1.88.0. |
+| serde_json | 1.0.150 → 1.0.151 | already 1.0.151 | Additive only: `RawValue::from_string_unchecked` ([#1331](https://github.com/serde-rs/json/pull/1331)). `-p serde_json` locked 0 packages. |
+
+`cargo update -p thiserror` also rewrote rusqlite in the same lock pass because the workspace pin was already 0.40.2. Subsequent `-p rusqlite` was a no-op.
+
+**Check:** `rch exec -- env CARGO_TARGET_DIR=/tmp/rch_target_tokenzero cargo check -p tokenzero-pulse` -- **PASS** (exit 0). criterion stayed **0.5.1**. getrandom stayed **0.2.17** (plus existing transitive 0.3.4 / 0.4.2).
+
+## Failed Updates
+
+None.
+
+## Needs Attention
+
+- FSZero `ignore` 0.4.33 is gated on `regex-automata >= 0.4.18`. Updating ignore before regex left the lock at 0.4.32. Order matters.
+- ZeroStack `conformance/Cargo.lock` still stale (anyhow 1.0.103, clap 4.6.1, libc 0.2.186, regex 1.12.4). Explicitly skipped this pass.
+- FSZero lock still has transitive anyhow 1.0.102 and libc 0.2.186 (not in this pass's crate list).
+- GraphZero lock still has regex 1.12.4 (not in this pass's crate list).
+- `zsx-core` path to missing `graphzero-query` is unchanged (census item; not an in-semver bump). First accidental `cargo update` from ZeroStack CWD failed on that path -- expected.
+
+## PRESERVE (verified unchanged)
+
+- Hub git pin `bd721f7fc4866b24dec0c552da3d96bd8d816fbc` in FSZero / GraphZero / TokenZero manifests and locks.
+- Path deps; nightly-2026-05-31; no `cas.rs` edits.
+- GraphZero `scripts/perf/` remains untracked rival/unrelated; not touched.
+
+## Security Notes
+
+No `cargo audit` this pass (in-semver lock/pin only; no full-workspace cargo).
+
+## Commands Used
+
+```bash
+# ZeroStack
+# edited crates/zsx-node/Cargo.toml only
+
+# FSZero
+cd /Users/aditya/AI/FSZero
+env CARGO_TARGET_DIR=/tmp/rch_target_fszero cargo update -p ignore
+env CARGO_TARGET_DIR=/tmp/rch_target_fszero cargo update -p memchr
+env CARGO_TARGET_DIR=/tmp/rch_target_fszero cargo update -p regex
+env CARGO_TARGET_DIR=/tmp/rch_target_fszero cargo update -p rusqlite
+env CARGO_TARGET_DIR=/tmp/rch_target_fszero cargo update -p ignore   # 0.4.32 -> 0.4.33
+rch exec -- env CARGO_TARGET_DIR=/tmp/rch_target_fszero cargo check -p fszero-store
+
+# GraphZero
+cd /Users/aditya/AI/GraphZero
+env CARGO_TARGET_DIR=/tmp/rch_target_graphzero cargo update -p anyhow
+env CARGO_TARGET_DIR=/tmp/rch_target_graphzero cargo update -p clap
+env CARGO_TARGET_DIR=/tmp/rch_target_graphzero cargo update -p bytemuck
+env CARGO_TARGET_DIR=/tmp/rch_target_graphzero cargo update -p crossbeam-queue
+env CARGO_TARGET_DIR=/tmp/rch_target_graphzero cargo update -p libc
+
+# TokenZero
+# edited workspace pins in Cargo.toml
+cd /Users/aditya/AI/TokenZero
+env CARGO_TARGET_DIR=/tmp/rch_target_tokenzero cargo update -p thiserror
+env CARGO_TARGET_DIR=/tmp/rch_target_tokenzero cargo update -p rusqlite
+env CARGO_TARGET_DIR=/tmp/rch_target_tokenzero cargo update -p serde_json
+rch exec -- env CARGO_TARGET_DIR=/tmp/rch_target_tokenzero cargo check -p tokenzero-pulse
+```
+
+## Post-Upgrade Checklist
+
+- [x] Targeted `cargo check` for rusqlite consumers (fszero-store, tokenzero-pulse)
+- [ ] Full test suite -- not run (out of scope; no full-workspace cargo)
+- [x] No lockfile added to ZeroStack
+- [x] Hub pin preserved
+- [ ] Changes committed -- **not committed** (orchestrator commits)
+
+## Handoff for pass 3
+
+Remaining C-class / skipped:
+
+| Repo | name | current | latest | Why still waiting |
+|------|------|---------|--------|-------------------|
+| ZeroStack | jsonschema | 0.26.2 | 0.49.9 | 0.x major |
+| ZeroStack + TokenZero | criterion | 0.5.1 | 0.8.2 | 0.x major |
+| FSZero | fsqlite / fsqlite-core | 0.1.19 | 0.3.0 | 0.x major |
+| GraphZero | ed25519-dalek | 2.2.0 | 3.0.0 | major |
+| GraphZero | scip | 0.8.1 | 0.9.0 | 0.x |
+| GraphZero | sha2 | 0.10.9 (ws) | 0.11.0 | line change |
+| TokenZero | getrandom | 0.2.17 | 0.4.3 | major |
+| ZeroStack/conformance | anyhow/clap/libc/regex | lock stale | latest | skipped this pass |
+| FSZero | anyhow 1.0.102, libc 0.2.186 | lock stale | 1.0.104 / 0.2.189 | not in pass-2 list |
+| GraphZero | regex | 1.12.4 | 1.13.1 | not in pass-2 list |
