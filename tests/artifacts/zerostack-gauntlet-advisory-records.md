@@ -29,3 +29,18 @@ Product remediations stay on the dedicated bug beads.
 | p8-cass-blocker | cass CLI missing |
 | p8-excluded-predicate | excluded rows not 8-form |
 | p9-score-family-category | family≠category adapter |
+| p1-engine-identity-triple | self-compare hazard recorded |
+| p1-keep-gate-absent | keep-gate absent; design pack only |
+| p11i1-mcp-orphan | F-MCP present, no dependents |
+| p11i2-ci-ghost-node-tests | CI/windows/zsx-node test gap |
+| p11i2-gz-heuristic-refs | GraphZero string-scan refs; rewrite pending |
+| p11i2-loader-no-digest | loader existsSync only |
+| p11i2-zs-mcp-plan-catalog | zs MCP/plan/catalog leak; design pack exists |
+| p2-quickjs-adr-conflict | ADR 0001/0004 vs 0005 |
+| p2-weight-schema-dual | global-sum vs per-category |
+| p3-external-tool-identities | oracle identities missing |
+| p3-preflight-still-yellow | preflight yellow |
+| p3-property-regressions-absent | property regressions absent |
+| p3-roundtrip-unwrapped | roundtrip unwrapped |
+| p3-self-oracle-no-baseline | self-oracle no baseline |
+| p6-crash-cas-permit-sidecar-abi | CAS permit sidecar ABI unwired |
