@@ -713,9 +713,19 @@ impl<'tree> Interpreter<'tree> {
                         parts
                             .into_iter()
                             .filter_map(|part| {
+                                // `{ x }` is a bare shorthand node with no
+                                // key/name field. `{ x: y }` / `{ x: { y } }`
+                                // are pair_pattern children that do.
                                 let key = part
                                     .child_by_field_name("key")
-                                    .or_else(|| part.child_by_field_name("name"))?;
+                                    .or_else(|| part.child_by_field_name("name"))
+                                    .or_else(|| {
+                                        matches!(
+                                            part.kind(),
+                                            "shorthand_property_identifier_pattern" | "identifier"
+                                        )
+                                        .then_some(part)
+                                    })?;
                                 let field = object
                                     .fields
                                     .get(self.text(key))
@@ -741,10 +751,7 @@ impl<'tree> Interpreter<'tree> {
                             .into_iter()
                             .enumerate()
                             .map(|(index, part)| {
-                                (
-                                    part,
-                                    items.get(index).cloned().unwrap_or(Value::Undefined),
-                                )
+                                (part, items.get(index).cloned().unwrap_or(Value::Undefined))
                             })
                             .collect()
                     };
@@ -2244,8 +2251,7 @@ impl<'tree> Interpreter<'tree> {
                         }
                         None => {
                             return Err(Fault::Host(HostError::Data(
-                                "Object.defineProperty descriptor must provide get or value"
-                                    .into(),
+                                "Object.defineProperty descriptor must provide get or value".into(),
                             )));
                         }
                     }
@@ -3234,9 +3240,7 @@ fn relational<'tree>(
 ) -> bool {
     let ordering = match (left, right) {
         (Value::String(left), Value::String(right)) => Some(left.cmp(right)),
-        _ => number(left).and_then(|left| {
-            number(right).and_then(|right| left.partial_cmp(&right))
-        }),
+        _ => number(left).and_then(|left| number(right).and_then(|right| left.partial_cmp(&right))),
     };
     ordering.is_some_and(predicate)
 }
@@ -3456,6 +3460,25 @@ mod tests {
     }
 
     #[test]
+    fn shorthand_object_destructure_binds_the_property() {
+        let host = test_host(256 * 1024, 100_000);
+        let output = host
+            .execute(
+                "const { x } = { x: 7, y: 9 }; return x;",
+                Rc::new(NullConnector),
+            )
+            .unwrap();
+        assert_eq!(output, serde_json::json!(7));
+        let renamed = host
+            .execute(
+                "const { x: y } = { x: 3 }; return y;",
+                Rc::new(NullConnector),
+            )
+            .unwrap();
+        assert_eq!(renamed, serde_json::json!(3));
+    }
+
+    #[test]
     fn nested_destructure_of_cyclic_object_does_not_panic() {
         let host = test_host(256 * 1024, 100_000);
         let output = host
@@ -3513,7 +3536,9 @@ mod tests {
             )
             .unwrap_err();
         assert!(
-            error.to_string().contains("JSON.parse input exceeds JSON limit"),
+            error
+                .to_string()
+                .contains("JSON.parse input exceeds JSON limit"),
             "unexpected error: {error}"
         );
         let ok = host
