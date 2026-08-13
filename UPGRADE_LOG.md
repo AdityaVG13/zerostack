@@ -1031,3 +1031,157 @@ env CARGO_TARGET_DIR=/tmp/rch_target_fszero cargo update -p libc
 | GraphZero | scip | 0.8.1 | 0.9.0 | 0.x |
 | TokenZero | getrandom | 0.2.17 | 0.4.3 | major |
 | ZS + TZ benches | `criterion::black_box` | deprecated | `std::hint::black_box` | >5 sites; GraphZero already migrated |
+
+---
+
+# Pass 6 -- 2026-08-13 -- Rust majors (research first; bump only if <10 files and not a design change)
+
+**Mission:** Research each 0.x / major candidate via crates.io + GitHub changelog / rustsec. Bump only if migration is <10 files and not a design change. `rch cargo check -p` one crate; rollback on fail (max 3). Never full-workspace cargo. ZeroStack no `Cargo.lock`. No commit.
+
+## Summary
+
+- **Updated:** 1 named crate (`ed25519-dalek` 2 → 3 in GraphZero `graphzero-pack`)
+- **Unblocked leftover (not a major):** 2 GraphZero `sha2` 0.11 `{:x}` sites in `graphzero-store` (pass 5 leftover; blocked the dalek check)
+- **Skipped:** jsonschema, fsqlite / fsqlite-core, scip, getrandom, `criterion::black_box`
+- **Failed / rolled back:** jsonschema 0.26 → 0.49 (workspace load blocked by pre-existing `graphzero-query` path; rolled back after 1 attempt)
+- **Needs attention:** remaining GraphZero `{:x}` digest sites in `graphzero-why` (2) and `graphzero-reserve` (1); scip Range oneof; fsqlite 0.3 pager redesign
+
+**crates.io max_stable (this pass):** jsonschema 0.49.9, fsqlite / fsqlite-core 0.3.0, ed25519-dalek 3.0.0, scip 0.9.0, getrandom 0.4.3.
+
+## Research
+
+### jsonschema: ZeroStack 0.26.2 → 0.49.9 -- SKIP / rolled back
+- **Sources:** https://crates.io/crates/jsonschema (max_stable 0.49.9); https://github.com/Stranger6667/jsonschema/blob/master/CHANGELOG.md ; docs.rs `Validator` 0.49.9
+- **Call sites (4 rust + 2 toml):** `tests/src/schema.rs`, `tests/src/racc.rs`, `tests/rust/shared/zero_result_v1.rs`, `tests/rust/shared/schema_golden.rs`, plus `tests/Cargo.toml` and excluded `conformance/Cargo.toml`.
+- **API we use:** `validator_for`, `Validator::new`, `validate` (first error), `iter_errors`. All still exist on 0.49 (`Validator<F: Json = SerdeJson>`). Not a call-site rewrite.
+- **Still 0.x with many majors in between:** 0.29 builder ownership, 0.35/0.36 apply/meta, 0.37 private `ValidationError` fields, 0.46 Registry prepare. Our code does not touch those. Default features now include `tls-aws-lc-rs`.
+- **Attempt 1:** pin `tests/Cargo.toml` 0.26 → 0.49. `rch exec -- env CARGO_TARGET_DIR=/tmp/rch_target_zerostack cargo check -p zerostack-shared-tests` -- **FAIL** at workspace load: `zsx-core` path `../../../GraphZero/crates/graphzero-query` missing (census / pass 5 blocker). Not a jsonschema compile error; cannot evidence green.
+- **Action:** rolled back `tests/Cargo.toml` to 0.26. `conformance/` left at 0.26 (out of named tests-crate candidate; same workspace-load wall).
+
+### fsqlite / fsqlite-core: FSZero 0.1.19 → 0.3.0 -- SKIP
+- **Sources:** crates.io `fsqlite` / `fsqlite-core` max_stable 0.3.0 (published 2026-08-13). Facade 11314 → 20847 SLoC; core 119703 → 153615 SLoC. Intermediate 0.2.0 already exists. Repo: https://github.com/Dicklesworthstone/frankensqlite
+- **Call sites:** 12 rust files (`fsqlite::Connection` / `SqliteValue` / `TraceEvent`, plus `fsqlite_core::connection::hot_path_profile_*`) and 3 manifests (`fs-zero`, `fszero-store`, `fszero-engine`). Recovery store + page-leak regression are pinned to 0.1.19 writer semantics.
+- **Why skip:** 0.x line jump + facade/core redesign (0.1 → 0.2 → 0.3). 12 rust files already exceeds the 10-file migration cap. Not a drop-in pin.
+
+### ed25519-dalek: GraphZero 2.2.0 → 3.0.0 -- UPDATED
+- **Sources:** https://crates.io/crates/ed25519-dalek (3.0.0); https://github.com/dalek-cryptography/curve25519-dalek/blob/main/ed25519-dalek/CHANGELOG.md ; rustsec RUSTSEC-2022-0093 is v1-only (already on v2).
+- **3.0 breaks:** edition 2024 / MSRV 1.85 (already our toolchain); remove `std` feature (`Error` in core); pkcs8 `SignatureAlgorithmIdentifier` (we do not use pkcs8); `signature` 3 / `sha2` 0.11 / `getrandom` 0.4 / `rand_core` 0.10.
+- **Signing API we use:** `SigningKey::from_bytes`, `Signer::sign`, `verifying_key()`, `Signature::from_bytes(&[u8; 64])`, `Verifier::verify`. All still present on 3.0. Not a broad signing-API rewrite. 4 rust files + 1 toml (<10).
+- **Migration:** 1 manifest line. No rust source edits for dalek itself.
+- **Check:** `rch exec -- env CARGO_TARGET_DIR=/tmp/rch_target_graphzero cargo check -p graphzero-pack`
+  - Attempt 1: **FAIL** on pre-existing pass 5 leftover: `format!("{:x}", Sha256::digest/finalize)` in `graphzero-store` (`hybrid-array` has no `LowerHex`). Not a dalek error (`ed25519-dalek 3.0.0` had not been reached).
+  - Attempt 2: switch those 2 sites to `crate::fast_hex(...as_slice())`. **PASS** (exit 0). Compiled `ed25519-dalek 3.0.0` + `signature 3.0.0` + `curve25519-dalek 5.0.0` + `sha2 0.11.0`.
+- **Lock:** direct pack line is 3.0.0. Transitive `ed25519-dalek 2.2.0` + `sha2 0.10.9` remain (fastmcp / other). Do not force-unify.
+
+### scip: GraphZero 0.8.1 → 0.9.0 -- SKIP
+- **Sources:** crates.io max_stable 0.9.0; https://github.com/scip-code/scip/releases/tag/v0.9.0
+- **0.9 change:** PR #387 "Make ranges typed `oneof`s". Generated rust bindings: 5875 → 6541 SLoC.
+- **Our usage:** `scip::types` in `decode.rs`, `ingest.rs`, `tools_gen/src/main.rs`. Tests construct `Occurrence { range: vec![i32], ... }` and `ingest` reads `occ.range.len()` / `&occ.range` as `[i32]`.
+- **Why skip:** generated protocol/bindings churn. Range oneof is a design change, not a pin bump.
+
+### getrandom: TokenZero 0.2 → 0.4.3 -- SKIP
+- **Sources:** https://github.com/rust-random/getrandom/blob/master/CHANGELOG.md
+- **0.3 break:** `getrandom` / `getrandom_uninit` renamed to `fill` / `fill_uninit`; `js` / `custom` / `rdrand` features replaced by `getrandom_backend` rustflags. **0.4:** edition 2024 / MSRV 1.85; `sys_rng` feature.
+- **Call site:** 1 -- `getrandom::getrandom(&mut key)` in `tokenzero-recovery/src/lib.rs`. Not drop-in.
+- **Why skip:** instruction is SKIP unless drop-in. Feature-flag + rename is not drop-in.
+
+### criterion::black_box (optional) -- SKIP
+- Confirmed 0.8 deprecates `criterion::black_box` for `std::hint::black_box` (pass 5).
+- TokenZero `tokenzero-core` benches alone: 1 file, ~17 sites (>10). Recovery benches add 4 more files.
+- ZeroStack: 4 bench files across 4 crates.
+- Instruction: only if <10 sites in ONE crate; no 20-file sweep.
+
+## Updates
+
+### GraphZero -- ed25519-dalek 2 → 3 + sha2 format leftovers
+
+| Item | From | To | Notes |
+|------|------|----|-------|
+| `crates/graphzero-pack/Cargo.toml` `ed25519-dalek` | 2 (`rand_core`) | 3 (`rand_core`) | signing API unchanged for our sites |
+| lock `ed25519-dalek` (direct) | 2.2.0 | 3.0.0 | + `ed25519` 3.0.0, `signature` 3.0.0, `curve25519-dalek` 5.0.0, `rand_core` 0.10.1 |
+| lock `ed25519-dalek` (transitive) | 2.2.0 | 2.2.0 | stays; still pulls `sha2` 0.10.9 |
+| `graphzero-store` `ordinals.rs` / `publish.rs` | `format!("{:x}", digest)` | `crate::fast_hex(...as_slice())` | pass 5 sha2 0.11 leftover; 2 files |
+
+**Check:** `rch exec -- env CARGO_TARGET_DIR=/tmp/rch_target_graphzero cargo check -p graphzero-pack` -- **PASS** (exit 0).
+
+## Skipped
+
+| Repo | name | current | latest | Reason |
+|------|------|---------|--------|--------|
+| ZeroStack | jsonschema | 0.26.2 | 0.49.9 | 0.x; check blocked by `graphzero-query`; rolled back |
+| ZeroStack/conformance | jsonschema | 0.26 | 0.49.9 | excluded workspace; same API, not the named tests crate |
+| FSZero | fsqlite / fsqlite-core | 0.1.19 | 0.3.0 | 0.x API redesign; 12 rust files + pager/store coupling |
+| GraphZero | scip | 0.8.1 | 0.9.0 | generated Range oneof bindings churn |
+| TokenZero | getrandom | 0.2 | 0.4.3 | `getrandom` → `fill`; feature flags rewritten; not drop-in |
+| ZS + TZ | `criterion::black_box` | deprecated | `std::hint::black_box` | TZ `tokenzero-core` >10 sites; not a one-crate <10 fix |
+
+## Failed Updates (Rolled Back)
+
+### jsonschema: 0.26 → 0.49 (ZeroStack `tests/`)
+- **Reason:** `cargo check -p zerostack-shared-tests` cannot load the workspace (`zsx-core` → missing `graphzero-query`).
+- **Attempted fixes:** 1 attempt (pin + rch check). No local compile path without touching the missing-path defect.
+- **Rolled back to:** 0.26 in `tests/Cargo.toml`. ZeroStack tree clean of this pass.
+
+## Needs Attention
+
+- **ZeroStack `graphzero-query` path** still blocks every workspace `cargo` invocation (jsonschema, benches).
+- **GraphZero `{:x}` digest leftovers** (not required for pack check): `graphzero-why/src/ingest.rs`, `graphzero-why/src/store.rs`, `graphzero-reserve/src/ledger.rs`.
+- **Transitive `ed25519-dalek` 2.2.0** remains next to 3.0.0 (fastmcp). Dual `sha2` 0.10.9 + 0.11.0 remains.
+- **fsqlite 0.3** needs a dedicated pager/store migration, not a pin bump.
+- **scip 0.9 Range oneof** needs a `graphzero-scip` ingest rewrite.
+
+## PRESERVE (verified unchanged)
+
+- Hub git pin `bd721f7fc4866b24dec0c552da3d96bd8d816fbc`
+- Path deps; nightly-2026-05-31
+- ZeroStack `Cargo.lock` still gitignored -- **not added**
+- GraphZero `scripts/perf/` untracked rival; not touched
+- fsqlite 0.1.19, jsonschema 0.26, scip 0.8.1, getrandom 0.2
+- No commit, no push, no `git add .`
+
+## Security Notes
+
+No `cargo audit` (targeted pin/lock only; no full-workspace cargo). rustsec for dalek: RUSTSEC-2022-0093 is v1; we were already on v2 and are now on v3. No new rustsec forcing the skipped majors.
+
+## Commands Used
+
+```bash
+# crates.io max_stable
+# GET https://crates.io/api/v1/crates/{jsonschema,fsqlite,fsqlite-core,ed25519-dalek,scip,getrandom}
+
+# ZeroStack -- rolled back
+# edited tests/Cargo.toml  jsonschema 0.26 -> 0.49
+rch exec -- env CARGO_TARGET_DIR=/tmp/rch_target_zerostack cargo check -p zerostack-shared-tests
+# ^ FAIL: missing graphzero-query (pre-existing)
+# reverted tests/Cargo.toml  jsonschema 0.49 -> 0.26
+
+# GraphZero
+# edited crates/graphzero-pack/Cargo.toml  ed25519-dalek 2 -> 3
+rch exec -- env CARGO_TARGET_DIR=/tmp/rch_target_graphzero cargo check -p graphzero-pack
+# ^ FAIL: sha2 0.11 {:x} in graphzero-store
+# edited ordinals.rs + publish.rs  format!("{:x}", ...) -> crate::fast_hex(...as_slice())
+rch exec -- env CARGO_TARGET_DIR=/tmp/rch_target_graphzero cargo check -p graphzero-pack
+# ^ PASS
+```
+
+## Post-Upgrade Checklist
+
+- [x] Research each candidate before any edit
+- [x] One crate at a time
+- [x] jsonschema rolled back after failed check
+- [x] fsqlite / scip / getrandom / black_box skipped with reasons
+- [x] `graphzero-pack` check after dalek 3
+- [x] No lockfile added to ZeroStack
+- [x] Hub pin preserved
+- [ ] Changes committed -- **not committed** (operator instruction)
+
+## Handoff for pass 7
+
+| Repo | name | current | latest | Why still waiting |
+|------|------|---------|--------|-------------------|
+| ZeroStack | jsonschema | 0.26.2 | 0.49.9 | API likely ok; blocked by `graphzero-query` workspace load |
+| FSZero | fsqlite / fsqlite-core | 0.1.19 | 0.3.0 | 0.x redesign; >10 files |
+| GraphZero | scip | 0.8.1 | 0.9.0 | Range oneof generated bindings |
+| TokenZero | getrandom | 0.2 | 0.4.3 | `fill` rename + rustflags backends |
+| ZS + TZ benches | `criterion::black_box` | deprecated | `std::hint::black_box` | >10 sites in TZ `tokenzero-core` |
+| GraphZero | `{:x}` digest | 3 leftover files | `fast_hex` | why + reserve; pack/store done |
