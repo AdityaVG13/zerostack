@@ -548,3 +548,145 @@ Remaining C-class / skipped:
 | ZeroStack/conformance | anyhow/clap/libc/regex | lock stale | latest | skipped this pass |
 | FSZero | anyhow 1.0.102, libc 0.2.186 | lock stale | 1.0.104 / 0.2.189 | not in pass-2 list |
 | GraphZero | regex | 1.12.4 | 1.13.1 | not in pass-2 list |
+
+---
+
+# Pass 3 -- 2026-08-13 -- workspace.dependencies serde / serde_json / sha2 (+ cousins)
+
+**Mission:** Bump declared `[workspace.dependencies]` (or workspace-root `[dependencies]`) pins that are behind latest **stable** on the **same major** (or same `0.x` minor line). Target family: `serde`, `serde_json`, `sha2`, and cousins (`serde_derive`/`serde_core` via serde, `toml`, `hex`, `digest`). No majors. No `0.x` line jumps. `sha2 0.10 → 0.11` deferred to pass 5/6.
+
+## Summary
+
+- **Updated:** 0
+- **Already at latest (left alone):** 10 declared workspace pins + GraphZero caret-`1` serde family
+- **Skipped / PRESERVE:** GraphZero `sha2 = "0.10"` (line change), hub git pins, path deps, crate-level (non-workspace) pins
+- **Failed:** 0
+- **Checks:** none -- no bump that could break compile
+
+**Method:** crates.io `GET /api/v1/crates/{name}` → `crate.max_stable_version` (User-Agent `ZeroStack-library-updater-pass3/1.0`). Compared to each repo's `[workspace.dependencies]` only.
+
+## crates.io max_stable (this pass)
+
+| Crate | max_stable | newest | Created (max_stable) |
+|-------|------------|--------|----------------------|
+| serde | **1.0.229** | 1.0.229 | 2026-07-18 |
+| serde_json | **1.0.151** | 1.0.151 | 2026-07-20 |
+| serde_derive / serde_core | 1.0.229 | 1.0.229 | (serde family; not independently pinned) |
+| sha2 | **0.11.0** | 0.11.0 | 2026-03-25 |
+| toml | **1.1.4+spec-1.1.0** | same | 2026-07-28 |
+| hex | 0.4.3 | 0.4.3 | -- |
+| digest | 0.11.3 | 0.11.3 | -- |
+
+No newer stable than the pass-1 census for this family.
+
+## Already at latest (not edited)
+
+### ZeroStack `[workspace.dependencies]`
+
+| Pin | Declared | Locked (local, gitignored) | crates.io | Action |
+|-----|----------|----------------------------|-----------|--------|
+| serde | 1.0.229 | 1.0.229 | 1.0.229 | leave |
+| serde_json | 1.0.151 | 1.0.151 | 1.0.151 | leave |
+| sha2 | 0.11 | 0.11.0 (+ transitive 0.10.9) | 0.11.0 | leave |
+
+No other serde/sha2 cousins in this table.
+
+### FSZero `[workspace.dependencies]`
+
+No third-party crates. Table is hub git pins (`bd721f7…`) + path members only. Nothing in-family to bump.
+
+Member crates declare their own `serde`/`serde_json`/`sha2` (not workspace pins). Out of this pass's exclusive scope. Note only:
+
+| Location | Declared | Latest same-line | Note |
+|----------|----------|------------------|------|
+| `crates/fszero/Cargo.toml` | serde_json **1.0.150** | 1.0.151 | crate-level pin, 1 patch behind; **not** `[workspace.dependencies]` |
+| `fszero-core` / `fszero-store` / `fs-zero` / `fszero-engine` | serde `1`, serde_json `1`, sha2 `0.11.0` | already latest | crate-level ranges |
+
+### GraphZero `[workspace.dependencies]`
+
+| Pin | Declared | Locked | crates.io | Action |
+|-----|----------|--------|-----------|--------|
+| serde | `1` (features derive) | 1.0.229 | 1.0.229 | leave -- caret already admits latest |
+| serde_json | `1` | 1.0.151 | 1.0.151 | leave |
+| sha2 | **0.10** | 0.10.9 (+ transitive 0.11.0) | 0.11.0 | **PRESERVE** -- 0.10→0.11 is pass 5/6 |
+| tempfile | 3.27 | 3.27.0 | 3.27.0 | leave (not in-family; already current) |
+
+`hex = "0.4"` lives in `crates/graphzero-pack/Cargo.toml` (crate-level). Lock already 0.4.3 == latest. Not a workspace pin.
+
+Nested `crates/graphzero-scip/tools_gen/Cargo.lock` still has serde 1.0.228 / serde_json 1.0.150. tools_gen is its own tiny workspace (`serde_json = "1"`). Lock refresh is not a workspace-pin edit; left for a later lock pass.
+
+### TokenZero `[workspace.dependencies]`
+
+| Pin | Declared | Locked | crates.io | Action |
+|-----|----------|--------|-----------|--------|
+| serde | 1.0.229 | 1.0.229 | 1.0.229 | leave |
+| serde_json | 1.0.151 | 1.0.151 | 1.0.151 | leave (already raised in pass 2) |
+| sha2 | 0.11.0 | 0.11.0 (+ transitive 0.10.9) | 0.11.0 | leave |
+| toml | 1.1.4 | 1.1.4+spec-1.1.0 | 1.1.4+spec-1.1.0 | leave (serde cousin) |
+
+Spot-check of other TokenZero exact workspace pins (not this family's job, but none were stale vs crates.io tonight): anyhow 1.0.104, clap 4.6.6, thiserror 2.0.20, rusqlite 0.40.2, regex 1.13.1, memchr 2.8.3, tempfile 3.27.0.
+
+## Updates
+
+None. No `Cargo.toml` edit. No `cargo update`. No `cargo check`.
+
+## Failed Updates
+
+None.
+
+## Needs Attention / out of exclusive scope
+
+- GraphZero workspace `sha2 = "0.10"` still the only in-family declared pin not on latest stable. Intentional deferral (digest 0.10 vs 0.11).
+- FSZero `crates/fszero/Cargo.toml` `serde_json = "1.0.150"` is the only **declared** serde-family pin still one patch behind. Not a workspace pin; did not edit.
+- GraphZero `tools_gen` lock still on serde 1.0.228 / serde_json 1.0.150.
+- Transitive `sha2 0.10.9` remains in all four main locks next to direct `0.11.0` (ZeroStack / FSZero / TokenZero) or next to workspace `0.10` (GraphZero). Do not force-unify transitives.
+
+## PRESERVE (verified unchanged)
+
+- Hub git pin `bd721f7fc4866b24dec0c552da3d96bd8d816fbc`
+- Path deps; nightly-2026-05-31
+- ZeroStack `Cargo.lock` still gitignored -- not added
+- GraphZero `scripts/perf/` untracked; not touched
+- No commit, no push, no `git add .`
+
+## Security Notes
+
+No `cargo audit` (no version change).
+
+## Commands Used
+
+```bash
+# crates.io max_stable_version for serde / serde_json / sha2 / toml / cousins
+python3  # urllib GET https://crates.io/api/v1/crates/{name}
+
+# lock extract (read-only)
+# ZeroStack/FSZero/GraphZero/TokenZero Cargo.lock + extras
+```
+
+## Post-Upgrade Checklist
+
+- [x] crates.io researched before any edit
+- [x] No major / 0.x line jump
+- [x] GraphZero sha2 left on 0.10
+- [x] No lockfile added to ZeroStack
+- [x] Hub pin preserved
+- [ ] Changes committed -- **not committed** (orchestrator commits; this pass has no Cargo.toml delta)
+
+## Handoff for pass 4
+
+Remaining C-class / skipped (unchanged from pass 2, plus the FSZero crate-level serde_json note):
+
+| Repo | name | current | latest | Why still waiting |
+|------|------|---------|--------|-------------------|
+| ZeroStack | jsonschema | 0.26.2 | 0.49.9 | 0.x major |
+| ZeroStack + TokenZero | criterion | 0.5.1 | 0.8.2 | 0.x major |
+| FSZero | fsqlite / fsqlite-core | 0.1.19 | 0.3.0 | 0.x major |
+| FSZero | fszero crate serde_json | 1.0.150 | 1.0.151 | crate-level, not workspace |
+| GraphZero | ed25519-dalek | 2.2.0 | 3.0.0 | major |
+| GraphZero | scip | 0.8.1 | 0.9.0 | 0.x |
+| GraphZero | sha2 | 0.10 (ws) / 0.10.9 lock | 0.11.0 | line change -- pass 5/6 |
+| GraphZero | tools_gen lock serde/json | 1.0.228 / 1.0.150 | 1.0.229 / 1.0.151 | nested lock, not ws pin |
+| TokenZero | getrandom | 0.2.17 | 0.4.3 | major |
+| ZeroStack/conformance | anyhow/clap/libc/regex | lock stale | latest | skipped |
+| FSZero lock | anyhow 1.0.102, libc 0.2.186 | lock stale | 1.0.104 / 0.2.189 | not this family |
+| GraphZero lock | regex | 1.12.4 | 1.13.1 | not this family |
