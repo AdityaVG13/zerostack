@@ -15,7 +15,7 @@ zero-ref = { path = "../zero-ref" }
 
 [dev-dependencies]
 allocation-counter = "0.8"
-criterion = "0.5"
+criterion = "0.8"
 proptest = "1"
 
 [[bench]]

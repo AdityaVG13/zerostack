@@ -864,3 +864,170 @@ Remaining C-class / lock-only leftovers:
 | ZeroStack/conformance | anyhow/clap/libc/regex | lock stale | latest | lock-only, not crate-local |
 | FSZero lock | anyhow 1.0.102, libc 0.2.186 | lock stale | 1.0.104 / 0.2.189 | lock-only |
 | GraphZero lock | regex | 1.12.4 | 1.13.1 | lock-only |
+
+---
+
+# Pass 5 -- 2026-08-13 -- shared pin alignment (same crate, same latest stable where majors already match)
+
+**Mission:** Align crates that appear in more than one of the four repos with mismatched versions on a line they already share. Research first. `rch cargo check -p` one crate if compile could break. Never full-workspace cargo. ZeroStack no `Cargo.lock`. No commit.
+
+## Summary
+
+- **Updated:** 7 named crates (sha2 pin, criterion pin, leftover same-major locks)
+- **Already aligned (3+ repos, left alone):** serde 1.0.229, serde_json 1.0.151, tempfile 3.27.0, proptest 1.11.0, notify 8.2.0, tree-sitter 0.26.12, rusqlite 0.40.2 (FS+TZ locks already current)
+- **Skipped / PRESERVE:** fsqlite 0.1, jsonschema 0.26, ed25519-dalek 2, scip 0.8, getrandom 0.2 (not same-major); ZeroStack workspace/`conformance` locks (gitignored)
+- **Failed:** 0 rollbacks
+- **Needs attention:** `criterion::black_box` deprecated on 0.8; ZeroStack bench check blocked by existing `graphzero-query` path
+
+**crates.io max_stable (this pass):** sha2 0.11.0, criterion 0.8.2, regex 1.13.1, anyhow 1.0.104, clap 4.6.6, libc 0.2.189 (1.0.0-alpha.4 is pre-release -- stay 0.2), rusqlite 0.40.2.
+
+## Research
+
+### sha2: GraphZero 0.10 → 0.11.0
+- **Breaking (digest 0.11):** `generic-array` → `hybrid-array`; `core_api` → `block_api`; `CoreWrapper` / `VariableOutput` removed; `io::Write` moved to `digest_io`. MSRV 1.85. Source: https://github.com/RustCrypto/hashes/blob/master/sha2/CHANGELOG.md ; https://github.com/RustCrypto/traits/blob/master/digest/CHANGELOG.md
+- **Call sites:** 27 GraphZero files, all `Sha256::new` / `update` / `finalize` / `digest` / `{:x}`. No `CoreWrapper`, no `generic-array`, no `io::Write`.
+- **Migration size:** 1 manifest line + lock re-resolve. Not a design change. Under the 10-file edit threshold.
+- **Unify-to-single-line:** `cargo update -p sha2@0.10.9 --precise 0.11.0` **refused** -- `ed25519-dalek 2.2.0` (and git `fastmcp-protocol`) still require `sha2 ^0.10`. Dual lock lines remain, matching hub/FS/Token.
+
+### criterion: ZeroStack + TokenZero 0.5 → 0.8.2
+- **0.6:** `html_reports` no longer default. **0.7:** `async_tokio` feature; plotting optional. **0.8:** `csv_output` no longer default; `SamplingMode::Auto`; `Throughput::BytesDecimal`; rustc-hash 2; ciborium 0.3; MSRV 1.88. Source: https://github.com/bheisler/criterion.rs/blob/master/CHANGELOG.md
+- **ZS/TZ benches** use classic `Criterion` / `criterion_group!` / `criterion_main!` / `Throughput::Bytes` / `BenchmarkId` / `BatchSize` -- same surface GraphZero already runs on 0.8.
+- **Files edited:** 6 `Cargo.toml` (4 ZS + 2 TZ). No bench source edits. Small.
+- **Deprecation:** 0.8 deprecates `criterion::black_box` in favor of `std::hint::black_box`. GraphZero benches already migrated. TZ `tokenzero-core` benches: 17 warning sites. ZS benches still import `criterion::black_box`. >5 sites -- logged, not rewritten this pass.
+
+### leftover same-major locks
+- regex / anyhow / clap / libc / rusqlite already share major across repos. Stale locks only. rusqlite already 0.40.2 after pass 2.
+
+## Updates
+
+### GraphZero -- sha2 workspace pin + regex lock
+
+| Item | From | To | Notes |
+|------|------|----|-------|
+| `Cargo.toml` `[workspace.dependencies] sha2` | 0.10 | 0.11 | members inherit |
+| lock `sha2` (workspace crates) | 0.10.9 | 0.11.0 | re-resolved by `cargo check -p graphzero-types` |
+| lock `sha2` (ed25519-dalek, fastmcp-protocol) | 0.10.9 | 0.10.9 | must stay |
+| lock `regex` | 1.12.4 | 1.13.1 | also `regex-automata` 0.4.14 → 0.4.18 |
+
+**Check:** `rch exec -- env CARGO_TARGET_DIR=/tmp/rch_target_graphzero cargo check -p graphzero-types` -- **PASS** (exit 0). Compiled `sha2 0.11.0` + `digest 0.11.3`.
+
+### ZeroStack -- criterion pin only (no lock)
+
+| File | From | To |
+|------|------|----|
+| `crates/zero-cert/Cargo.toml` | 0.5 | 0.8 |
+| `crates/zero-gate/Cargo.toml` | 0.5 | 0.8 |
+| `crates/zero-ledger/Cargo.toml` | 0.5 | 0.8 |
+| `crates/zero-ref/Cargo.toml` | 0.5 | 0.8 |
+
+**Check:** `rch exec -- env CARGO_TARGET_DIR=/tmp/rch_target_zerostack cargo check -p zero-cert --benches` -- **not verified**. Remote + local both fail on pre-existing `zsx-core` path `../../../GraphZero/crates/graphzero-query` (missing). Not introduced by this pass.
+
+### TokenZero -- criterion pin + libc lock
+
+| Item | From | To | Companion |
+|------|------|----|-----------|
+| `tokenzero-core` / `tokenzero-recovery` `criterion` | 0.5 | 0.8 | lock 0.5.1 → 0.8.2; criterion-plot 0.5.0 → 0.8.2; itertools 0.10.5 → 0.13.0; adds alloca 0.4.0, page_size 0.6.0; removes is-terminal 0.4.17 |
+| lock `libc` | 0.2.186 | 0.2.189 | -- |
+
+**Check:** `rch exec -- env CARGO_TARGET_DIR=/tmp/rch_target_tokenzero cargo check -p tokenzero-core --benches` -- **PASS** (exit 0). 17 `criterion::black_box` deprecation warnings. No errors.
+
+### FSZero -- leftover locks only
+
+| Crate | Lock from | Lock to |
+|-------|-----------|---------|
+| anyhow | 1.0.102 | 1.0.104 |
+| libc | 0.2.186 | 0.2.189 |
+
+regex already 1.13.1, rusqlite already 0.40.2. Check skipped -- patch/lock-only, no native sys crate bump beyond libc patch.
+
+## Already aligned (3+ repos, not edited this pass)
+
+1. **serde** 1.0.229 -- all four
+2. **serde_json** 1.0.151 -- all four (FS crate-local raised in pass 4)
+3. **tempfile** 3.27.0 -- all four
+4. **proptest** 1.11.0 -- all four
+5. **notify** 8.2.0 -- FS + GZ
+6. **tree-sitter** 0.26.12 -- ZS + GZ
+7. **rusqlite** 0.40.2 -- FS + TZ locks already current
+8. **sha2 0.11** -- now all four direct pins (this pass closed GZ)
+
+## Failed Updates
+
+None rolled back.
+
+## Needs Attention
+
+- **`criterion::black_box` deprecated in 0.8.** GraphZero already uses `std::hint::black_box`. TZ `hotpaths.rs` has 17 sites; ZS four bench files still import `criterion::black_box`. Mechanical, but >5 sites -- follow-up, not this pass.
+- **ZeroStack bench compile** blocked by missing `graphzero-query` path in `zsx-core` (census item). Criterion 0.8 API compatibility evidenced by TokenZero `tokenzero-core --benches` PASS.
+- **ZeroStack `conformance/Cargo.lock`** still stale (anyhow 1.0.103, clap 4.6.1, libc 0.2.186, regex 1.12.4) -- file is gitignored (`**/*.lock`). Not written.
+- Transitive **sha2 0.10.9** remains next to 0.11.0 in GZ/FS/TZ (ed25519-dalek / fastmcp / other transitives). Do not force-unify.
+
+## PRESERVE (verified unchanged)
+
+- Hub git pin `bd721f7fc4866b24dec0c552da3d96bd8d816fbc`
+- Path deps; nightly-2026-05-31
+- ZeroStack `Cargo.lock` still gitignored -- **not added**
+- GraphZero `scripts/perf/` untracked rival; not touched
+- fsqlite 0.1.19, jsonschema 0.26, ed25519-dalek 2.2.0, scip 0.8.1, getrandom 0.2
+- No commit, no push, no `git add .`
+
+## Security Notes
+
+No `cargo audit` (targeted pin/lock only; no full-workspace cargo).
+
+## Commands Used
+
+```bash
+# crates.io max_stable
+python3  # urllib GET https://crates.io/api/v1/crates/{name}
+
+# GraphZero
+# edited Cargo.toml  sha2 0.10 -> 0.11
+cd /Users/aditya/AI/GraphZero
+env CARGO_TARGET_DIR=/tmp/rch_target_graphzero cargo update -p sha2
+# ^ ambiguous (0.10.9 + 0.11.0 already in lock)
+env CARGO_TARGET_DIR=/tmp/rch_target_graphzero cargo update -p sha2@0.10.9 --precise 0.11.0
+# ^ FAIL: ed25519-dalek 2.2.0 requires sha2 ^0.10
+env CARGO_TARGET_DIR=/tmp/rch_target_graphzero cargo update -p regex
+rch exec -- env CARGO_TARGET_DIR=/tmp/rch_target_graphzero cargo check -p graphzero-types
+
+# ZeroStack -- Cargo.toml only
+# edited crates/zero-{cert,gate,ledger,ref}/Cargo.toml  criterion 0.5 -> 0.8
+rch exec -- env CARGO_TARGET_DIR=/tmp/rch_target_zerostack cargo check -p zero-cert --benches
+# ^ FAIL: missing graphzero-query (pre-existing)
+
+# TokenZero
+# edited crates/tokenzero-{core,recovery}/Cargo.toml  criterion 0.5 -> 0.8
+cd /Users/aditya/AI/TokenZero
+env CARGO_TARGET_DIR=/tmp/rch_target_tokenzero cargo update -p criterion
+env CARGO_TARGET_DIR=/tmp/rch_target_tokenzero cargo update -p libc
+rch exec -- env CARGO_TARGET_DIR=/tmp/rch_target_tokenzero cargo check -p tokenzero-core --benches
+
+# FSZero
+cd /Users/aditya/AI/FSZero
+env CARGO_TARGET_DIR=/tmp/rch_target_fszero cargo update -p anyhow
+env CARGO_TARGET_DIR=/tmp/rch_target_fszero cargo update -p libc
+```
+
+## Post-Upgrade Checklist
+
+- [x] Research before each bump
+- [x] One crate at a time for lock updates
+- [x] No fsqlite / jsonschema / ed25519-dalek / scip / getrandom majors
+- [x] No lockfile added to ZeroStack
+- [x] Hub pin preserved
+- [x] `graphzero-types` check after sha2
+- [x] `tokenzero-core --benches` check after criterion
+- [ ] `zero-cert --benches` -- **blocked** (graphzero-query path)
+- [ ] Changes committed -- **not committed** (operator instruction)
+
+## Handoff for pass 6 (majors only)
+
+| Repo | name | current | latest | Why still waiting |
+|------|------|---------|--------|-------------------|
+| ZeroStack | jsonschema | 0.26.2 | 0.49.9 | 0.x major |
+| FSZero | fsqlite / fsqlite-core | 0.1.19 | 0.3.0 | 0.x major |
+| GraphZero | ed25519-dalek | 2.2.0 | 3.0.0 | major (also pins transitive sha2 0.10) |
+| GraphZero | scip | 0.8.1 | 0.9.0 | 0.x |
+| TokenZero | getrandom | 0.2.17 | 0.4.3 | major |
+| ZS + TZ benches | `criterion::black_box` | deprecated | `std::hint::black_box` | >5 sites; GraphZero already migrated |
