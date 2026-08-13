@@ -22,6 +22,60 @@ const REPLACE_BACKOFF_MS: u64 = 10;
 
 static TEMP_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 
+/// How a durable write treats `sync_all` failures.
+///
+/// Network mounts (smbfs/nfs) often return ENOTSUP/EPERM from `sync_all`.
+/// Engines must keep serving on those mounts; they cannot take
+/// [`DurableJournalV2`](crate::DurableJournalV2)'s fatal-sync path.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum SyncPolicy {
+    /// `sync_all` errors are fatal, including ENOTSUP/EPERM.
+    #[default]
+    Required,
+    /// ENOTSUP/EPERM (and `ErrorKind::Unsupported` / `PermissionDenied`) succeed.
+    /// Every other I/O error is still fatal.
+    TolerateUnsupported,
+    /// Skip `sync_all`. Use only on the session-delta hot path.
+    Never,
+}
+
+/// True when `sync_all` failed because the mount cannot fsync, not because
+/// the write is in doubt. Matches TokenZero's smbfs/nfs classification:
+/// macOS smbfs reports ENOTSUP/EOPNOTSUPP as `Uncategorized`.
+pub fn sync_unsupported(err: &io::Error) -> bool {
+    if matches!(
+        err.kind(),
+        io::ErrorKind::Unsupported | io::ErrorKind::PermissionDenied
+    ) {
+        return true;
+    }
+    #[cfg(target_vendor = "apple")]
+    const UNSUPPORTED_CODES: &[i32] = &[45, 102]; // ENOTSUP, EOPNOTSUPP
+    #[cfg(all(unix, not(target_vendor = "apple")))]
+    const UNSUPPORTED_CODES: &[i32] = &[95, 524]; // EOPNOTSUPP, ENOTSUP
+    #[cfg(not(unix))]
+    const UNSUPPORTED_CODES: &[i32] = &[];
+
+    err.raw_os_error()
+        .is_some_and(|code| UNSUPPORTED_CODES.contains(&code))
+}
+
+/// Absorb fsync failures that mean "this filesystem cannot fsync".
+pub fn tolerate_unsupported_sync(result: io::Result<()>) -> io::Result<()> {
+    match result {
+        Err(err) if sync_unsupported(&err) => Ok(()),
+        other => other,
+    }
+}
+
+fn apply_file_sync(file: &File, policy: SyncPolicy) -> io::Result<()> {
+    match policy {
+        SyncPolicy::Never => Ok(()),
+        SyncPolicy::Required => file.sync_all(),
+        SyncPolicy::TolerateUnsupported => tolerate_unsupported_sync(file.sync_all()),
+    }
+}
+
 /// Windows error codes that indicate another handle briefly blocks the
 /// destination: ERROR_ACCESS_DENIED (5), ERROR_SHARING_VIOLATION (32),
 /// ERROR_LOCK_VIOLATION (33).
@@ -69,16 +123,22 @@ fn open_unique_temp(parent: &Path, file_name: &OsStr) -> io::Result<(File, PathB
     }
 }
 
-/// Write all bytes, fsync the temp, then replace onto dest.
-/// Order is load-bearing: never replace before `sync_all` on the temp.
+/// Write all bytes, optionally fsync the temp, then replace onto dest.
+/// Order is load-bearing: never replace before the chosen sync policy runs.
 ///
 /// The parent directory fsync deliberately lives in [atomic_write_file], after
 /// this function has reported that dest is published: once the rename lands the
 /// bytes are visible to every reader, so a later directory-sync failure means
 /// "present but not proven durable", never "not written".
-fn write_sync_replace(mut file: File, temp: &Path, dest: &Path, bytes: &[u8]) -> io::Result<()> {
+fn write_sync_replace(
+    mut file: File,
+    temp: &Path,
+    dest: &Path,
+    bytes: &[u8],
+    policy: SyncPolicy,
+) -> io::Result<()> {
     file.write_all(bytes)?;
-    file.sync_all()?;
+    apply_file_sync(&file, policy)?;
     drop(file);
     replace_file(temp, dest)
 }
@@ -99,16 +159,23 @@ pub(crate) fn sync_dir(dir: &Path) -> io::Result<()> {
 
 /// Atomically publish bytes at dest without ever exposing a truncated file.
 ///
-/// The uniquely-created sibling prevents concurrent processes from sharing a
-/// temp path. The temp file is synced before replacement; on Unix the parent
-/// directory is synced afterwards so the rename survives a crash.
+/// Uses [`SyncPolicy::Required`]: the temp is synced before replacement.
 pub fn atomic_write_file(dest: &Path, bytes: &[u8]) -> io::Result<()> {
+    atomic_write_file_with_sync(dest, bytes, SyncPolicy::Required)
+}
+
+/// [`atomic_write_file`] with an explicit fsync policy for optional-fsync mounts.
+pub fn atomic_write_file_with_sync(
+    dest: &Path,
+    bytes: &[u8],
+    policy: SyncPolicy,
+) -> io::Result<()> {
     let parent = dest.parent().unwrap_or_else(|| Path::new("."));
     fs::create_dir_all(parent)?;
     let file_name = dest.file_name().unwrap_or_else(|| OsStr::new("artifact"));
 
     let (file, temp) = open_unique_temp(parent, file_name)?;
-    let published = write_sync_replace(file, &temp, dest, bytes);
+    let published = write_sync_replace(file, &temp, dest, bytes, policy);
     if published.is_err() {
         let _ = fs::remove_file(&temp);
         return published;
@@ -116,7 +183,13 @@ pub fn atomic_write_file(dest: &Path, bytes: &[u8]) -> io::Result<()> {
     // dest is published. A failed directory fsync leaves the new bytes visible,
     // so returning Err here would make callers retry or report a write that in
     // fact succeeded; the weaker durability guarantee is not a failed write.
-    let _ = sync_dir(parent);
+    if policy != SyncPolicy::Never {
+        let _ = match policy {
+            SyncPolicy::Required => sync_dir(parent),
+            SyncPolicy::TolerateUnsupported => tolerate_unsupported_sync(sync_dir(parent)),
+            SyncPolicy::Never => Ok(()),
+        };
+    }
     Ok(())
 }
 
@@ -199,5 +272,25 @@ mod tests {
     fn sync_dir_reports_a_bad_directory() {
         let dir = tempdir().unwrap();
         assert!(sync_dir(&dir.path().join("missing")).is_err());
+    }
+
+    #[test]
+    fn never_policy_still_publishes_whole_bytes() {
+        let dir = tempdir().unwrap();
+        let dest = dir.path().join("artifact.json");
+        atomic_write_file_with_sync(&dest, b"unsynced", SyncPolicy::Never).unwrap();
+        assert_eq!(fs::read(&dest).unwrap(), b"unsynced");
+        assert!(temps_in(dir.path()).is_empty());
+    }
+
+    #[test]
+    fn tolerate_unsupported_absorbs_permission_denied_only() {
+        let denied = io::Error::new(io::ErrorKind::PermissionDenied, "eperm");
+        assert!(sync_unsupported(&denied));
+        assert!(tolerate_unsupported_sync(Err(denied)).is_ok());
+
+        let nospace = io::Error::new(io::ErrorKind::StorageFull, "enospc");
+        assert!(!sync_unsupported(&nospace));
+        assert!(tolerate_unsupported_sync(Err(nospace)).is_err());
     }
 }

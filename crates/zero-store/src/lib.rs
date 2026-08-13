@@ -23,6 +23,7 @@ mod fs_replace;
 mod gc;
 mod gc_lock;
 mod metadata;
+mod session_wal;
 mod store_root;
 mod zbf;
 
@@ -56,7 +57,10 @@ pub use durable_journal::{
     record_owner_death_v1, record_owner_death_with_fault_v1, recover_journal_v1,
     recover_journal_with_fault_v1,
 };
-pub use fs_replace::{atomic_write_file, replace_file};
+pub use fs_replace::{
+    SyncPolicy, atomic_write_file, atomic_write_file_with_sync, replace_file, sync_unsupported,
+    tolerate_unsupported_sync,
+};
 pub use gc::{
     BeforeUnlinkHook, DEFAULT_GC_REPORT_LIMIT, DryRunReport, GC_MAX_BLOB_HASHES,
     GC_MAX_EVIDENCE_ITEMS, GC_MAX_OWNER_HOST_BYTES, GC_MAX_PRODUCER_ID_BYTES,
@@ -75,6 +79,12 @@ pub use gc_lock::{
     COORDINATOR_LOCK, GC_DIR, LOCK_DEADLINE, LockMode, StoreLock, coordinator_lock_path,
 };
 pub use metadata::ObservationMetadata;
+pub use session_wal::{
+    AppendOutcome, FileIdentity, Replay, SESSION_WAL_DEFAULT_MAX_REPLAY_BYTES,
+    SESSION_WAL_DEFAULT_MAX_SEALED_SEGMENTS, SESSION_WAL_MAX_RECORD_BYTES,
+    SESSION_WAL_MIN_SEGMENT_BYTES, SESSION_WAL_SCHEMA_VERSION_V1, SessionWal, SessionWalConfig,
+    SessionWalError, session_wal_contract_v1,
+};
 pub use zbf::{
     DurableProfileIdV1, DurableProfileV1, ZBF_CONTAINER_FLAG_V1, ZBF_CONTRACT_VERSION_V1,
     ZBF_HEADER_LEN_V1, ZBF_MAGIC_V1, ZBF_MAX_CHILDREN_V1, ZBF_MAX_DEPTH_V1,
