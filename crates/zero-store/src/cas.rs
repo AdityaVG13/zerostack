@@ -753,6 +753,13 @@ mod tests {
     }
 
     #[test]
+    fn layout_goldens_are_the_shared_contract() {
+        assert_eq!(crate::BLOBS_DIR, "blobs");
+        assert_eq!(CAS_LAYOUT, "blobs/sha256/<hh>/<hash>");
+        assert_eq!(CAS_LAYOUT_VERSION, 1);
+    }
+
+    #[test]
     fn size_policy_is_enforced_on_put() {
         let dir = tempdir().unwrap();
         let cas = SharedCas::open(dir.path());
