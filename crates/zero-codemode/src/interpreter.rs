@@ -702,31 +702,54 @@ impl<'tree> Interpreter<'tree> {
             }
             "object_pattern" => {
                 if let Value::Object(object) = value {
-                    let object = object.borrow();
                     let mut cursor = node.walk();
-                    for part in node.named_children(&mut cursor) {
-                        let Some(key) = part
-                            .child_by_field_name("key")
-                            .or_else(|| part.child_by_field_name("name"))
-                        else {
-                            continue;
-                        };
-                        let field = object
-                            .fields
-                            .get(self.text(key))
-                            .cloned()
-                            .unwrap_or(Value::Undefined);
-                        let target = part.child_by_field_name("value").unwrap_or(key);
+                    let parts: Vec<_> = node.named_children(&mut cursor).collect();
+                    // Snapshot fields and drop the RefCell borrow before
+                    // recursive bind. Nested pair patterns can alias the
+                    // same object (`const { self: { x: y } } = obj` when
+                    // `obj.self === obj`) and would otherwise panic.
+                    let bindings: Vec<(Node<'tree>, Value<'tree>)> = {
+                        let object = object.borrow();
+                        parts
+                            .into_iter()
+                            .filter_map(|part| {
+                                let key = part
+                                    .child_by_field_name("key")
+                                    .or_else(|| part.child_by_field_name("name"))?;
+                                let field = object
+                                    .fields
+                                    .get(self.text(key))
+                                    .cloned()
+                                    .unwrap_or(Value::Undefined);
+                                let target = part.child_by_field_name("value").unwrap_or(key);
+                                Some((target, field))
+                            })
+                            .collect()
+                    };
+                    for (target, field) in bindings {
                         self.bind(target, field);
                     }
                 }
             }
             "array_pattern" => {
                 if let Value::Array(items) = value {
-                    let items = items.borrow();
                     let mut cursor = node.walk();
-                    for (index, part) in node.named_children(&mut cursor).enumerate() {
-                        self.bind(part, items.get(index).cloned().unwrap_or(Value::Undefined));
+                    let parts: Vec<_> = node.named_children(&mut cursor).collect();
+                    let bindings: Vec<(Node<'tree>, Value<'tree>)> = {
+                        let items = items.borrow();
+                        parts
+                            .into_iter()
+                            .enumerate()
+                            .map(|(index, part)| {
+                                (
+                                    part,
+                                    items.get(index).cloned().unwrap_or(Value::Undefined),
+                                )
+                            })
+                            .collect()
+                    };
+                    for (part, item) in bindings {
+                        self.bind(part, item);
                     }
                 }
             }
@@ -2184,6 +2207,27 @@ impl<'tree> Interpreter<'tree> {
                         "Object.defineProperty target must be a mutable user object".into(),
                     )));
                 };
+                let defined = match &descriptor {
+                    Value::Object(descriptor) => {
+                        // Clone get/value out before mutating `target`. The
+                        // same object can be both target and descriptor
+                        // (`Object.defineProperty(o, "x", o)`); holding
+                        // borrow_mut + borrow on one RefCell panics.
+                        let descriptor = descriptor.borrow();
+                        if let Some(getter) = descriptor.fields.get("get").cloned() {
+                            Some(Ok(getter))
+                        } else if let Some(value) = descriptor.fields.get("value").cloned() {
+                            Some(Err(value))
+                        } else {
+                            None
+                        }
+                    }
+                    _ => {
+                        return Err(Fault::Host(HostError::Data(
+                            "Object.defineProperty descriptor must be an object".into(),
+                        )));
+                    }
+                };
                 {
                     let mut object = target.borrow_mut();
                     if !matches!(object.access, ObjectAccess::Open) {
@@ -2191,23 +2235,17 @@ impl<'tree> Interpreter<'tree> {
                             "cannot define property '{key}' on an immutable object"
                         ))));
                     }
-                    match descriptor {
-                        Value::Object(descriptor) => {
-                            let descriptor = descriptor.borrow();
-                            if let Some(getter) = descriptor.fields.get("get").cloned() {
-                                object.getters.insert(key, getter);
-                            } else if let Some(value) = descriptor.fields.get("value").cloned() {
-                                object.fields.insert(key, value);
-                            } else {
-                                return Err(Fault::Host(HostError::Data(
-                                    "Object.defineProperty descriptor must provide get or value"
-                                        .into(),
-                                )));
-                            }
+                    match defined {
+                        Some(Ok(getter)) => {
+                            object.getters.insert(key, getter);
                         }
-                        _ => {
+                        Some(Err(value)) => {
+                            object.fields.insert(key, value);
+                        }
+                        None => {
                             return Err(Fault::Host(HostError::Data(
-                                "Object.defineProperty descriptor must be an object".into(),
+                                "Object.defineProperty descriptor must provide get or value"
+                                    .into(),
                             )));
                         }
                     }
@@ -3411,6 +3449,42 @@ mod tests {
         let error = interpreter.to_json(&value).unwrap_err();
         assert!(matches!(error, HostError::Data(_)));
         assert!(error.to_string().contains("cyclic"));
+    }
+
+    #[test]
+    fn nested_destructure_of_cyclic_object_does_not_panic() {
+        let host = test_host(256 * 1024, 100_000);
+        let output = host
+            .execute(
+                "const obj = { x: 7 }; obj.self = obj; const { self: { x: y } } = obj; return y;",
+                Rc::new(NullConnector),
+            )
+            .unwrap();
+        assert_eq!(output, serde_json::json!(7));
+    }
+
+    #[test]
+    fn nested_destructure_of_cyclic_array_does_not_panic() {
+        let host = test_host(256 * 1024, 100_000);
+        let output = host
+            .execute(
+                "const arr = []; arr.push(arr); const [[x]] = arr; return typeof x;",
+                Rc::new(NullConnector),
+            )
+            .unwrap();
+        assert_eq!(output, serde_json::json!("object"));
+    }
+
+    #[test]
+    fn define_property_with_self_descriptor_does_not_panic() {
+        let host = test_host(256 * 1024, 100_000);
+        let output = host
+            .execute(
+                "const o = { value: 4 }; Object.defineProperty(o, 'x', o); return o.x;",
+                Rc::new(NullConnector),
+            )
+            .unwrap();
+        assert_eq!(output, serde_json::json!(4));
     }
 
     #[test]
