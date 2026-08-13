@@ -398,6 +398,16 @@ def summaries(samples: list[dict[str, Any]]) -> dict[str, Any]:
     return result
 
 
+def _reap_process(process: subprocess.Popen[str] | None) -> None:
+    if process is None or process.poll() is not None:
+        return
+    process.kill()
+    try:
+        process.wait(timeout=5)
+    except subprocess.TimeoutExpired:
+        pass
+
+
 def start_arms(args: argparse.Namespace, scratch: Path) -> dict[str, JsonLineArm]:
     isolated_home = scratch / "home"
     fixture = scratch / "fixture"
@@ -421,37 +431,46 @@ def start_arms(args: argparse.Namespace, scratch: Path) -> dict[str, JsonLineArm
     context_manager = args.senpi_root / "packages/senpi-codemode/src/kernels/js/context-manager.ts"
     if not tsx.is_file() or not context_manager.is_file():
         raise RuntimeError("Senpi must be built after `npm ci --ignore-scripts && npm run build`")
-    senpi_process = subprocess.Popen(
-        [str(tsx), str(args.driver), str(context_manager), str(fixture)],
-        cwd=args.senpi_root,
-        env=environment,
-        text=True,
-        stdin=subprocess.PIPE,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        bufsize=1,
-    )
-    zero_process = subprocess.Popen(
-        [str(args.zerostack_host)],
-        cwd=fixture,
-        env=environment,
-        text=True,
-        stdin=subprocess.PIPE,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        bufsize=1,
-    )
-    arms: dict[str, JsonLineArm] = {
-        "senpi": SenpiArm("senpi", senpi_process),
-        "zerostack": ZeroStackArm("zerostack", zero_process),
-    }
-    senpi_ready = arms["senpi"].read()
-    zero_ready = arms["zerostack"].read()
-    if senpi_ready.get("protocol") != PROTOCOL:
-        raise RuntimeError(f"unexpected Senpi ready frame: {senpi_ready}")
-    if zero_ready.get("protocol") != "zerostack-codemode-host/v1":
-        raise RuntimeError(f"unexpected ZeroStack ready frame: {zero_ready}")
-    return arms
+    senpi_process: subprocess.Popen[str] | None = None
+    zero_process: subprocess.Popen[str] | None = None
+    handed_off = False
+    try:
+        senpi_process = subprocess.Popen(
+            [str(tsx), str(args.driver), str(context_manager), str(fixture)],
+            cwd=args.senpi_root,
+            env=environment,
+            text=True,
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            bufsize=1,
+        )
+        zero_process = subprocess.Popen(
+            [str(args.zerostack_host)],
+            cwd=fixture,
+            env=environment,
+            text=True,
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            bufsize=1,
+        )
+        arms: dict[str, JsonLineArm] = {
+            "senpi": SenpiArm("senpi", senpi_process),
+            "zerostack": ZeroStackArm("zerostack", zero_process),
+        }
+        senpi_ready = arms["senpi"].read()
+        zero_ready = arms["zerostack"].read()
+        if senpi_ready.get("protocol") != PROTOCOL:
+            raise RuntimeError(f"unexpected Senpi ready frame: {senpi_ready}")
+        if zero_ready.get("protocol") != "zerostack-codemode-host/v1":
+            raise RuntimeError(f"unexpected ZeroStack ready frame: {zero_ready}")
+        handed_off = True
+        return arms
+    finally:
+        if not handed_off:
+            _reap_process(senpi_process)
+            _reap_process(zero_process)
 
 
 def comparison_identity(config: dict[str, Any], facts: dict[str, Any]) -> tuple[dict[str, Any], dict[str, str]]:
@@ -612,9 +631,7 @@ def main() -> int:
             request_id += 1
     finally:
         for arm in arms.values():
-            if arm.process.poll() is None:
-                arm.process.kill()
-                arm.process.wait(timeout=5)
+            _reap_process(arm.process)
         scratch_owner.cleanup()
     warnings = [
         "diagnostic only: journaled edit, cancellation, and 1MiB finalization workloads are not implemented",

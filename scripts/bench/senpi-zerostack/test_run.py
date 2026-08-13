@@ -5,10 +5,12 @@ from __future__ import annotations
 
 import argparse
 import importlib.util
+import io
 import sys
+import tempfile
 import unittest
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 
 HERE = Path(__file__).resolve().parent
@@ -98,6 +100,40 @@ class ArtifactFactTests(unittest.TestCase):
     ) -> None:
         facts = run.collect_artifact_facts(fixture_args(zerostack_revision="e" * 40), CONFIG)
         self.assertEqual(facts["zerostack"]["head"], "e" * 40)
+
+
+class StartArmsCleanupTests(unittest.TestCase):
+    def test_handshake_failure_reaps_both_children(self) -> None:
+        senpi = Mock()
+        zero = Mock()
+        for process in (senpi, zero):
+            process.poll.return_value = None
+            process.stdin = io.StringIO()
+            process.stdout = io.StringIO("")
+            process.stderr = io.StringIO("")
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            tsx = root / "node_modules/.bin/tsx"
+            context = root / "packages/senpi-codemode/src/kernels/js/context-manager.ts"
+            tsx.parent.mkdir(parents=True)
+            context.parent.mkdir(parents=True)
+            tsx.write_text("tsx\n", encoding="utf-8")
+            context.write_text("context\n", encoding="utf-8")
+            args = argparse.Namespace(
+                senpi_root=root,
+                driver=root / "driver.ts",
+                zerostack_host=root / "zsx",
+            )
+            with (
+                patch.object(run.subprocess, "Popen", side_effect=[senpi, zero]),
+                patch.object(run.SenpiArm, "read", side_effect=RuntimeError("no ready")),
+            ):
+                with self.assertRaisesRegex(RuntimeError, "no ready"):
+                    run.start_arms(args, root / "scratch")
+        senpi.kill.assert_called_once()
+        zero.kill.assert_called_once()
+        senpi.wait.assert_called_once()
+        zero.wait.assert_called_once()
 
 
 if __name__ == "__main__":
