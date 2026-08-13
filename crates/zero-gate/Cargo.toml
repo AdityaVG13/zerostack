@@ -1,4 +1,6 @@
 [package]
+autobenches = false
+autotests = false
 name = "zero-gate"
 version = "0.1.0"
 edition.workspace = true
@@ -27,3 +29,28 @@ path = "src/bin/program-evidence.rs"
 [[bench]]
 name = "decide"
 harness = false
+path = "../../tests/benches/zero-gate/decide.rs"
+
+[[test]]
+name = "aggregate_program_receipt"
+path = "../../tests/rust/zero-gate/aggregate_program_receipt.rs"
+
+[[test]]
+name = "allocation"
+path = "../../tests/rust/zero-gate/allocation.rs"
+
+[[test]]
+name = "program_evidence"
+path = "../../tests/rust/zero-gate/program_evidence.rs"
+
+[[test]]
+name = "program_proof"
+path = "../../tests/rust/zero-gate/program_proof.rs"
+
+[[test]]
+name = "properties"
+path = "../../tests/rust/zero-gate/properties.rs"
+
+[[test]]
+name = "real_gc"
+path = "../../tests/rust/zero-gate/real_gc.rs"

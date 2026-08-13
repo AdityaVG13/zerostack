@@ -1862,5 +1862,5 @@ mod canonical_scope_tests {
 }
 
 #[cfg(test)]
-#[path = "lib_inline_tests.rs"]
+#[path = "../../../tests/rust/zerostack-machine-permit/lib_inline_tests.rs"]
 mod tests;

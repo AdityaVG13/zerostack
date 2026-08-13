@@ -1,4 +1,5 @@
 [package]
+autotests = false
 name = "zsx-core"
 version = "0.1.0"
 edition.workspace = true
@@ -35,3 +36,23 @@ zero-machine-permit = { path = "../zerostack-machine-permit" }
 
 [dev-dependencies]
 tempfile = "3"
+
+[[test]]
+name = "aggregate_world"
+path = "../../tests/rust/zsx-core/aggregate_world.rs"
+
+[[test]]
+name = "canonical_mixed"
+path = "../../tests/rust/zsx-core/canonical_mixed.rs"
+
+[[test]]
+name = "request_cancellation"
+path = "../../tests/rust/zsx-core/request_cancellation.rs"
+
+[[test]]
+name = "verdict_loop"
+path = "../../tests/rust/zsx-core/verdict_loop.rs"
+
+[[test]]
+name = "verdict_loop_canonical"
+path = "../../tests/rust/zsx-core/verdict_loop_canonical.rs"

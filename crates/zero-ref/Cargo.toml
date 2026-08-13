@@ -1,4 +1,6 @@
 [package]
+autobenches = false
+autotests = false
 name = "zero-ref"
 version = "0.1.0"
 edition.workspace = true
@@ -17,3 +19,16 @@ serde_json = { workspace = true }
 [[bench]]
 name = "parse"
 harness = false
+path = "../../tests/benches/zero-ref/parse.rs"
+
+[[test]]
+name = "golden_vectors"
+path = "../../tests/rust/zero-ref/golden_vectors.rs"
+
+[[test]]
+name = "property_identity"
+path = "../../tests/rust/zero-ref/property_identity.rs"
+
+[[test]]
+name = "span_ref"
+path = "../../tests/rust/zero-ref/span_ref.rs"

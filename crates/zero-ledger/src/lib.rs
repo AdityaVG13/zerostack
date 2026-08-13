@@ -4,7 +4,7 @@
 //!
 //! This crate is the single home for RACC token accounting arithmetic so that
 //! TokenZero, FSZero, GraphZero and the CodeMode host all account identically.
-//! It ports the ledger/receipt subset of docs/racc/RACC_CONTRACT.rs.
+//! It ports the ledger/receipt subset of racc/RACC_CONTRACT.rs.
 //!
 //! Properties enforced here:
 //!

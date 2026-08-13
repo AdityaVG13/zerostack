@@ -1,4 +1,5 @@
 [package]
+autotests = false
 name = "zerostack-shared-tests"
 version = "0.1.0"
 edition.workspace = true
@@ -17,7 +18,7 @@ sha2.workspace = true
 tempfile = "3"
 zero-abi = { path = "../crates/zero-abi" }
 zero-codemode = { path = "../crates/zero-codemode" }
-zero-testkit = { path = "../crates/zero-testkit" }
+zero-testkit = { path = "zero-testkit" }
 
 [dev-dependencies]
 proptest = "1"
@@ -25,3 +26,47 @@ proptest = "1"
 [[bin]]
 name = "zerostack-shared-conformance"
 path = "src/main.rs"
+
+[[test]]
+name = "canonical_dispatch"
+path = "rust/shared/canonical_dispatch.rs"
+
+[[test]]
+name = "check_mapping"
+path = "rust/shared/check_mapping.rs"
+
+[[test]]
+name = "invalidation_freshness"
+path = "rust/shared/invalidation_freshness.rs"
+
+[[test]]
+name = "program_assembly"
+path = "rust/shared/program_assembly.rs"
+
+[[test]]
+name = "racc_gates"
+path = "rust/shared/racc_gates.rs"
+
+[[test]]
+name = "raw_worker_v2"
+path = "rust/shared/raw_worker_v2.rs"
+
+[[test]]
+name = "report_status"
+path = "rust/shared/report_status.rs"
+
+[[test]]
+name = "schema_golden"
+path = "rust/shared/schema_golden.rs"
+
+[[test]]
+name = "surface_registration"
+path = "rust/shared/surface_registration.rs"
+
+[[test]]
+name = "two_phase_gate"
+path = "rust/shared/two_phase_gate.rs"
+
+[[test]]
+name = "zero_result_v1"
+path = "rust/shared/zero_result_v1.rs"

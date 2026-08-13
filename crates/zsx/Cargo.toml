@@ -1,4 +1,5 @@
 [package]
+autotests = false
 name = "zsx"
 version = "0.1.0"
 edition.workspace = true
@@ -17,3 +18,7 @@ zsx-core = { path = "../zsx-core", features = ["fszero", "graphzero", "tokenzero
 zsx-core = { path = "../zsx-core", features = ["fixture-adapters"] }
 tempfile = "3"
 zero-abi = { path = "../zero-abi" }
+
+[[test]]
+name = "one_process"
+path = "../../tests/rust/zsx/one_process.rs"

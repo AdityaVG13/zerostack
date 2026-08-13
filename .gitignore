@@ -85,7 +85,6 @@ beads_compliance_audit/
 archive/
 docs/adr/
 docs/internal/
-benchmarks/
 packages/
 reports/
 fuzz/
@@ -94,15 +93,36 @@ scripts/__pycache__/
 __pycache__/
 *.py[cod]
 
+# Artifacts stay on disk; never publish
+/artifacts/
+tests/artifacts/
+tests/reports/
+.ubs-loop/
+
+# Benchmarks catalog only (no harness dumps)
+benchmarks/**
+!benchmarks/
+!benchmarks/README.md
+!benchmarks/benchmarks.md
+
 # Private local runtime evidence; not a repository/CI attestation.
 conformance/reports/
+conformance/fixtures/
+conformance/scripts/
+conformance/src/
+conformance/tests/
+conformance/Cargo.toml
+conformance/Cargo.lock
+conformance/ATTESTATION.md
 
-# Conformance allowlist: ship contracts/schemas/models + topology suite only
+# Conformance allowlist: contracts, authority, models, schemas
 conformance/*
 !conformance/
 !conformance/CONTRACT.md
 !conformance/authority/
 !conformance/authority/**
+!conformance/contracts/
+!conformance/contracts/**
 !conformance/engine-topology-v1.json
 !conformance/models/
 !conformance/models/**
@@ -122,9 +142,7 @@ conformance/schemas/*
 !conformance/schemas/reinvestment-selection-v1.schema.json
 !conformance/schemas/zerobench-r-run-v1.schema.json
 !conformance/schemas/zerobench-r-report-v1.schema.json
-!conformance/tests/
-conformance/tests/*
-!conformance/tests/test_engine_topology.py
+!conformance/schemas/two-phase-gate-v1.schema.json
 
 # Local bench history
 .bench-history/
@@ -132,9 +150,5 @@ conformance/tests/*
 # --- Beads (local only; never publish tracker state) ---
 .beads/
 .bv/
-!conformance/schemas/two-phase-gate-v1.schema.json
-!conformance/src/
-!conformance/src/**
-!conformance/tests/two_phase_gate.rs
 # br doctor per-run artifacts
 .doctor/

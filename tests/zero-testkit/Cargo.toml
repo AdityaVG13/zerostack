@@ -1,0 +1,48 @@
+[package]
+name = "zero-testkit"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+description = "Shared, transport-neutral ZeroStack engine promise suites"
+autoexamples = false
+
+[features]
+default = ["full"]
+full = [
+    "dep:serde_json",
+    "dep:tempfile",
+    "dep:zero-cert",
+    "dep:zero-gate",
+    "dep:zero-ledger",
+    "dep:zero-store",
+]
+
+[dependencies]
+serde.workspace = true
+serde_json = { workspace = true, optional = true }
+zero-abi = { path = "../../crates/zero-abi" }
+zero-cert = { path = "../../crates/zero-cert", optional = true }
+zero-gate = { path = "../../crates/zero-gate", optional = true }
+zero-ledger = { path = "../../crates/zero-ledger", optional = true }
+zero-store = { path = "../../crates/zero-store", optional = true }
+tempfile = { version = "3", optional = true }
+
+[[bin]]
+name = "z4-native-counter"
+path = "examples/native_counter_correspondence.rs"
+required-features = ["full"]
+
+[[bin]]
+name = "z5-native-broker"
+path = "examples/native_broker_boundary.rs"
+required-features = ["full"]
+
+[[bin]]
+name = "z6-native-journal"
+path = "examples/native_durable_journal.rs"
+required-features = ["full"]
+
+[[bin]]
+name = "z-v2-raw-baseline"
+path = "examples/raw_v2_baseline.rs"
+required-features = ["full"]

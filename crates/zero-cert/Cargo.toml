@@ -1,4 +1,6 @@
 [package]
+autobenches = false
+autotests = false
 name = "zero-cert"
 version = "0.1.0"
 edition.workspace = true
@@ -19,3 +21,16 @@ proptest = "1"
 [[bench]]
 name = "verify"
 harness = false
+path = "../../tests/benches/zero-cert/verify.rs"
+
+[[test]]
+name = "effect_witness"
+path = "../../tests/rust/zero-cert/effect_witness.rs"
+
+[[test]]
+name = "golden_vectors"
+path = "../../tests/rust/zero-cert/golden_vectors.rs"
+
+[[test]]
+name = "property"
+path = "../../tests/rust/zero-cert/property.rs"

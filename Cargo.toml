@@ -12,7 +12,7 @@ members = [
     "crates/zero-process",
     "crates/zero-ref",
     "crates/zero-store",
-    "crates/zero-testkit",
+    "tests/zero-testkit",
     "crates/zerostack-machine-permit",
     "crates/zsx",
     "crates/zsx-core",

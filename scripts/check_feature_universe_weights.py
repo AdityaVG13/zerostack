@@ -10,7 +10,7 @@ from collections import Counter
 from pathlib import Path
 from typing import Any, cast
 
-MATRIX_PATH = Path(__file__).resolve().parents[1] / "docs/contracts/supported_surface_matrix.toml"
+MATRIX_PATH = Path(__file__).resolve().parents[1] / "conformance/contracts/supported_surface_matrix.toml"
 ALLOWED_STATUSES = ("present", "partial", "missing", "excluded")
 WEIGHT_TOLERANCE = 1e-9
 

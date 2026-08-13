@@ -87,8 +87,8 @@
       },
       {
         "name": "zero-testkit",
-        "path": "crates/zero-testkit",
-        "role": "hub-foundation",
+        "path": "tests/zero-testkit",
+        "role": "test-support",
         "status": "keep"
       },
       {

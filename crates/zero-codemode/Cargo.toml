@@ -1,4 +1,5 @@
 [package]
+autotests = false
 name = "zero-codemode"
 version = "0.1.0"
 edition.workspace = true
@@ -28,3 +29,19 @@ zero-process = { path = "../zero-process" }
 [dev-dependencies]
 tempfile = "3"
 serde_json.workspace = true
+
+[[test]]
+name = "aggregate_scale"
+path = "../../tests/rust/zero-codemode/aggregate_scale.rs"
+
+[[test]]
+name = "edit_protocol_conformance"
+path = "../../tests/rust/zero-codemode/edit_protocol_conformance.rs"
+
+[[test]]
+name = "host_contract"
+path = "../../tests/rust/zero-codemode/host_contract.rs"
+
+[[test]]
+name = "worker_adapter"
+path = "../../tests/rust/zero-codemode/worker_adapter.rs"

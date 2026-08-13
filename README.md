@@ -34,7 +34,7 @@ ZeroStack is built on **recovery-aware context compression (RACC)**. Large tool 
 
 A ref is not a lossy summary. It is a compact pointer to recoverable output. Agents can pass refs between steps, expand only the exact lines or symbols they need, and avoid paying repeatedly for the same bytes. This keeps the working context small while preserving access to evidence.
 
-Read [RACC and typed refs](docs/racc.md).
+Read [RACC and typed refs](racc/RACC.md).
 
 ## Native runtime and MCP compatibility
 
@@ -79,8 +79,8 @@ The production runtime links the three engine domain APIs through reviewed, pinn
 ZeroStack has no release or publication lifecycle. It is public only because
 FSZero, GraphZero, and TokenZero consume this shared base. Do not publish tags,
 bundles, registry packages, native prebuilds, or harness adapters from this
-repository. There is no install CLI in this tree right now (`scripts/zs` and
-the installer scripts are parked). See [`INSTALL-FOR-AGENTS.md`](INSTALL-FOR-AGENTS.md).
+repository. There is no public install path. Local development builds `zsx`
+from this checkout.
 
 `pi-zsx` is an internal adapter under active development in `pi-stack`. It must
 not be published without new, explicit owner approval.
