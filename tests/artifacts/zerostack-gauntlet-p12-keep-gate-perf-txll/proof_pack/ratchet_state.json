@@ -1,0 +1,5 @@
+{
+  "uninitialized": true,
+  "reason": "three-pillar observations and conformal_band.status=calibrated are not present; do not apply-ratchet",
+  "bead": "zerostack-gauntlet-p12-keep-gate-perf-txll"
+}
