@@ -1301,3 +1301,115 @@ Python is closed: nothing to upgrade. Remaining items are Rust-only from pass 6:
 | TokenZero | getrandom | 0.2 | 0.4.3 | `fill` rename + rustflags backends |
 | ZS + TZ benches | `criterion::black_box` | deprecated | `std::hint::black_box` | >10 sites in TZ `tokenzero-core` |
 | GraphZero | `{:x}` digest | 3 leftover files | `fast_hex` | why + reserve; pack/store done |
+
+---
+
+# Pass 8 -- 2026-08-13 -- Node/JS manifests only
+
+**Mission:** Re-verify every `package.json` / `package-lock.json` / `yarn.lock` / `pnpm-lock.yaml` in ZeroStack, FSZero, GraphZero, TokenZero. Bump any behind npm dep (`npm i X@latest` or edit package.json). Leave manifests unchanged if none. Do not bump Rust or Python. No commit.
+
+## Summary
+
+| Metric | Count |
+|--------|-------|
+| **Updated** | 0 |
+| **Skipped / PRESERVE** | gitignored video helper script-pin (`hyperframes@0.7.36`); pruned archive |
+| **Failed (rolled back)** | 0 |
+| **Requires attention** | 0 Node; Rust leftovers unchanged from pass 6 |
+
+**Finding:** zero declared npm packages (`dependencies` / `devDependencies` / `peerDependencies` / `optionalDependencies`) in any of the four trees. Nothing to bump.
+
+## Manifest inventory (re-verified)
+
+`find` + `git ls-files` for `package.json`, `package-lock.json`, `yarn.lock`, `pnpm-lock.yaml`, `npm-shrinkwrap.json`. Parsed every on-disk `package.json` for dep keys.
+
+| Repo | Tracked Node manifests | Declared npm deps |
+|------|------------------------|-------------------|
+| **ZeroStack** | `bindings/node/package.json` | **none** |
+| **FSZero** | none | n/a |
+| **GraphZero** | `benchmarks/foreign_corpora/fixtures/ts-mini/package.json` | **none** |
+| **TokenZero** | `package/npm/package.json` | **none** |
+
+No `yarn.lock`, `pnpm-lock.yaml`, or `npm-shrinkwrap.json` in any tree.
+
+**On disk, gitignored (read, not upgrade targets):**
+- `ZeroStack/videos/tokenzero-v120/package.json` + empty `package-lock.json` (`.gitignore` `videos/`) -- no dep keys; scripts pin `npx --yes hyperframes@0.7.36` (npm latest **0.7.107**, not deprecated)
+- `ZeroStack/archive/pruned-20260730/packages/aggregate-runtime/package.json` (`.gitignore` `archive/`) -- no dep keys
+
+Did **not** add `hyperframes` as a dependency or rewrite the gitignored video scripts. That is a tool pin via `npx`, not a package.json dependency field, and the tree is not a product package.
+
+## Updates
+
+None. No `npm i`. No `package.json` / lockfile edit.
+
+## Already correct (left alone)
+
+1. **ZeroStack `bindings/node/package.json`** -- `@zerostack/zsx-native` 0.1.0; loader-only (`loader.js` + `prebuilds/`); `engines.node >=18`; no dep keys.
+2. **TokenZero `package/npm/package.json`** -- `@tokenzero/cli` 1.4.0; bin + `node --test`; scripts use stdlib only; no dep keys.
+3. **GraphZero `benchmarks/foreign_corpora/fixtures/ts-mini/package.json`** -- `ts-mini-foreign-corpus` 0.1.0 private fixture; name/version/private only.
+4. **FSZero** -- no `package.json` / lockfile on disk or in git; nothing to upgrade.
+5. **ZeroStack `videos/tokenzero-v120/package.json`** (gitignored) -- no dep keys; empty lock (`packages.""` only); left unchanged.
+6. **ZeroStack `archive/.../aggregate-runtime/package.json`** (gitignored, pruned) -- no dep keys; left unchanged.
+
+## Failed Updates
+
+None.
+
+## Needs Attention
+
+- **Node:** none. No behind declared packages.
+- **Rust leftovers (not this pass):** jsonschema 0.26, fsqlite 0.1.19, scip 0.8.1, getrandom 0.2, `criterion::black_box`, GraphZero `{:x}` digest leftovers. Unchanged.
+- **GraphZero `scripts/perf/`** untracked rival; not touched (one-writer).
+- **ZeroStack `graphzero-query` path** still blocks workspace cargo; irrelevant to Node.
+
+## PRESERVE (verified unchanged)
+
+- All five on-disk `package.json` files (byte-for-byte)
+- All Rust `Cargo.toml` / `Cargo.lock` (this pass did not invoke cargo)
+- All Python manifests (this pass did not invoke uv)
+- Hub git pin `bd721f7fc4866b24dec0c552da3d96bd8d816fbc`
+- GraphZero `scripts/perf/` untracked; not touched
+- Video helper `hyperframes@0.7.36` script pin (gitignored; not a declared dep)
+- No commit, no push, no `git add .`
+
+## Security Notes
+
+No `npm audit` -- zero declared packages to audit. No lockfile with resolved third-party packages.
+
+## Commands Used
+
+```bash
+# Discovery (all four repos)
+find <repo> \( -name 'package.json' -o -name 'package-lock.json' \
+  -o -name 'yarn.lock' -o -name 'pnpm-lock.yaml' -o -name 'npm-shrinkwrap.json' \) \
+  -not -path '*/node_modules/*' -not -path '*/.git/*'
+git ls-files -- 'package.json' '**/package.json' 'package-lock.json' \
+  '**/package-lock.json' 'yarn.lock' 'pnpm-lock.yaml'
+git check-ignore -v videos/tokenzero-v120/package.json archive/.../package.json
+
+# Parse dep keys (Python json) -- all five package.json: dependencies absent
+# npm registry (video helper pin only; not installed)
+curl https://registry.npmjs.org/hyperframes/latest   # 0.7.107, not deprecated
+```
+
+## Post-Upgrade Checklist
+
+- [x] All four trees re-verified for Node manifests
+- [x] Every on-disk `package.json` parsed; no declared deps
+- [x] No Rust or Python bump
+- [x] `scripts/perf` not touched
+- [x] No lockfile added
+- [ ] Changes committed -- **not committed** (operator instruction; this pass only appends this log)
+
+## Handoff (Rust leftovers; Python + Node closed)
+
+Python (pass 7) and Node (this pass) are closed: nothing to upgrade. Remaining items are Rust-only from pass 6:
+
+| Repo | name | current | latest | Why still waiting |
+|------|------|---------|--------|-------------------|
+| ZeroStack | jsonschema | 0.26.2 | 0.49.9 | API likely ok; blocked by `graphzero-query` workspace load |
+| FSZero | fsqlite / fsqlite-core | 0.1.19 | 0.3.0 | 0.x redesign; >10 files |
+| GraphZero | scip | 0.8.1 | 0.9.0 | Range oneof generated bindings |
+| TokenZero | getrandom | 0.2 | 0.4.3 | `fill` rename + rustflags backends |
+| ZS + TZ benches | `criterion::black_box` | deprecated | `std::hint::black_box` | >10 sites in TZ `tokenzero-core` |
+| GraphZero | `{:x}` digest | 3 leftover files | `fast_hex` | why + reserve; pack/store done |
