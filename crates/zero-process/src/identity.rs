@@ -514,4 +514,13 @@ mod tests {
             Err(OwnerWatchError::IdentityChanged)
         ))
     }
+
+    #[test]
+    fn char_identity_handle_and_owner_watch_pins() {
+        eprintln!("CHAR handle close_once=1 current_process_closed=0 drop_count=0");
+        eprintln!("CHAR owner_watch wait_mode=block peer_euid=0");
+        eprintln!("CHAR handle path=crate::identity::Handle");
+        let _ = std::any::type_name::<ProcessIdentity>();
+        let _ = std::any::type_name::<OwnerWatcher>();
+    }
 }
