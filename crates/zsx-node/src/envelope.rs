@@ -124,7 +124,8 @@ impl Envelope {
             if let Some(metrics) = &self.metrics {
                 v.insert("metrics".into(), serde_json::json!(metrics));
             }
-        } else if let Some(err) = &self.error {
+        }
+        if let Some(err) = &self.error {
             let mut e = serde_json::Map::new();
             e.insert("code".into(), serde_json::json!(err.code));
             e.insert("detail".into(), serde_json::json!(err.detail));

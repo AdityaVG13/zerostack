@@ -580,7 +580,22 @@ where
             }
         }
     };
-    let _ = worker.join();
+    match &outcome {
+        Ok(_) => {
+            let _ = worker.join();
+        }
+        Err(error) if error.kind == "cancelled" || error.kind == "timeout" => {
+            if let Ok(late) = receiver.try_recv() {
+                let _ = worker.join();
+                return late;
+            }
+            // Dispatch ignored cancel; do not block the handler thread.
+            drop(worker);
+        }
+        Err(_) => {
+            let _ = worker.join();
+        }
+    }
     outcome
 }
 

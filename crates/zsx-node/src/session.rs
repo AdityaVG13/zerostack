@@ -50,12 +50,12 @@ impl NativeZsxSession {
     ///
     /// Assigns a bounded per-generation request id and returns a Promise of
     /// the canonical zsx envelope:
-    /// `{ protocol, ok, generation, request_id, result | error: { code, detail, retry_after_ms? } }`.
+    /// `{ protocol, ok, generation, request_id, result?, error? }`.
     /// `timeoutMs` defaults to 30000. When `signal` aborts, that one request
     /// is cancelled: if the async work has not started the Promise rejects
-    /// with `AbortError`; if it is in flight the late result is discarded
-    /// and the Promise resolves `{ ok: false, error: { code: "cancelled" } }`,
-    /// bounded by the request timeout.
+    /// with `AbortError`; if it is in flight and execute already finished,
+    /// the Promise resolves `{ ok: false, result, error: { code: "commit_race" } }`.
+    /// A late backend error still resolves `{ ok: false, error: { code: "cancelled" } }`.
     #[napi]
     pub fn execute(
         &self,
