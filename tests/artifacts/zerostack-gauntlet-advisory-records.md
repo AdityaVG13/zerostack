@@ -44,3 +44,18 @@ Product remediations stay on the dedicated bug beads.
 | p3-roundtrip-unwrapped | roundtrip unwrapped |
 | p3-self-oracle-no-baseline | self-oracle no baseline |
 | p6-crash-cas-permit-sidecar-abi | CAS permit sidecar ABI unwired |
+| p2-spec-conflicts-unsigned | Phase 2 spec conflicts unsigned |
+| p3-identity-discriminator | identity discriminator not wired |
+| p4-unlabeled-tiers | unlabeled EquivalenceTier |
+| p4-dual-tree-drift | dual-tree golden drift |
+| p4-unsigned-bless | unsigned bless policy |
+| p5-no-comprehensive-bench | no broad-gate binary |
+| p5-scripts-bench-missed | scripts-bench families missed |
+| p5-ledger-charge-accumulates | ledger charge accumulates |
+| p5-bench-history-gitignored | bench-history gitignored |
+| p6-metamorphic-absent | no TransformFamily |
+| p6-eprocess-absent | no sequential e-value |
+| p7-abi-remainder | ABI remainder unenrolled |
+| p7-gate-remainder | gate remainder unenrolled |
+| p7-census-remainder | 3027-pub census remainder |
+| p7-warm-read | native-warm-read unenrolled |
