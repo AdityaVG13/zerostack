@@ -7,16 +7,13 @@
 //!
 //! Canonical policy: `tokenzero-mcp/CODEMODE_MACHINE_PERMITS.md`.
 
+use std::fmt::Write as _;
 use std::fs;
-use std::hash::{BuildHasher, Hasher};
 use std::io::{self, Write};
 use std::marker::PhantomData;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
-use std::sync::{
-    Arc, Condvar, Mutex,
-    atomic::{AtomicU64, Ordering},
-};
+use std::sync::{Arc, Condvar, Mutex};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
@@ -611,7 +608,8 @@ impl MachinePermit {
     ) -> Result<Self, TryPermit> {
         match fs::create_dir(path) {
             Ok(()) => {
-                let cookie = owner_cookie();
+                let cookie = owner_cookie()
+                    .map_err(|e| TryPermit::Fatal(format!("mint codemode permit cookie: {e}")))?;
                 let identity_owner = format!(
                     "{}-{}-{:?}",
                     std::process::id(),
@@ -669,7 +667,8 @@ impl WaiterIntent {
             ))
         })?;
         let started_at = epoch_millis();
-        let cookie = owner_cookie();
+        let cookie = owner_cookie()
+            .map_err(|e| AcquireError::Fatal(format!("mint codemode permit waiter cookie: {e}")))?;
         let owner = format!("{}-{started_at}-{cookie}", std::process::id());
         let path = waiters.join(&owner);
         fs::create_dir(&path).map_err(|e| {
@@ -1300,7 +1299,10 @@ fn quarantine_exact(path: &Path, observed_identity: Option<&[u8]>) -> bool {
         .file_name()
         .and_then(|name| name.to_str())
         .unwrap_or("permit");
-    let quarantine = parent.join(format!(".{name}.reclaim-{}", owner_cookie()));
+    let Ok(cookie) = owner_cookie() else {
+        return false;
+    };
+    let quarantine = parent.join(format!(".{name}.reclaim-{cookie}"));
     if fs::rename(path, &quarantine).is_err() {
         return false;
     }
@@ -1335,26 +1337,14 @@ fn reclaim_dead(path: &Path) -> bool {
     incomplete_identity_stale(path) && quarantine_exact(path, observed.as_deref())
 }
 
-static COOKIE_SEQUENCE: AtomicU64 = AtomicU64::new(0);
-
-fn owner_cookie() -> String {
-    let sequence = COOKIE_SEQUENCE.fetch_add(1, Ordering::Relaxed);
-    let mut halves = [0u64; 2];
-    for (index, half) in halves.iter_mut().enumerate() {
-        let mut hasher = std::collections::hash_map::RandomState::new().build_hasher();
-        hasher.write_u64(sequence);
-        hasher.write_u32(std::process::id());
-        hasher.write_u128(epoch_nanos());
-        hasher.write_usize(index);
-        *half = hasher.finish();
+fn owner_cookie() -> io::Result<String> {
+    let mut bytes = [0u8; 16];
+    zero_process::fill_random(&mut bytes)?;
+    let mut out = String::with_capacity(32);
+    for byte in bytes {
+        let _ = write!(out, "{byte:02x}");
     }
-    format!("{:016x}{:016x}", halves[0], halves[1])
-}
-
-fn epoch_nanos() -> u128 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map_or(0, |value| value.as_nanos())
+    Ok(out)
 }
 
 /// Legacy exclusive layout put `pid`/`owner` directly under `base`. Slot layout

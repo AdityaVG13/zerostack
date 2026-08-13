@@ -21,7 +21,7 @@ fn fencing_test_path(label: &str) -> PathBuf {
     std::env::temp_dir().join(format!(
         "zerostack-fencing-{label}-{}-{}",
         std::process::id(),
-        owner_cookie()
+        owner_cookie().expect("os rng")
     ))
 }
 
@@ -200,7 +200,7 @@ fn heartbeat_is_cookie_fenced_against_a_replaced_owner() {
     let permit =
         MachinePermit::acquire(&path, Instant::now() + Duration::from_secs(2), "old-owner")
             .expect("acquire old owner");
-    let replacement_cookie = owner_cookie();
+    let replacement_cookie = owner_cookie().expect("os rng");
     let replacement_started = epoch_millis();
     publish_identity(
         &path,
@@ -1183,6 +1183,19 @@ fn sanitize_permit_class_rejects_path_metacharacters() {
         "slash class must not appear in basename: {name}"
     );
     assert!(!name.contains('/') && !name.contains(".."));
+}
+
+#[test]
+fn owner_cookie_is_os_entropy_hex() {
+    let first = owner_cookie().expect("os rng");
+    let second = owner_cookie().expect("os rng");
+    assert_eq!(first.len(), 32);
+    assert!(
+        first.bytes().all(|byte| byte.is_ascii_hexdigit()),
+        "cookie must be hex: {first}"
+    );
+    assert_ne!(first, second, "successive cookies must not collide");
+    assert_ne!(first, "0".repeat(32));
 }
 
 #[cfg(unix)]

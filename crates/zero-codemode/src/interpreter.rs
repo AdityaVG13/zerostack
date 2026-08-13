@@ -2253,14 +2253,18 @@ impl<'tree> Interpreter<'tree> {
                 Ok(Value::Object(target))
             }
             ("JSON", "parse") => {
-                let json: JsonValue =
-                    serde_json::from_str(&to_string(args.first().unwrap_or(&Value::Undefined)))
-                        .map_err(|error| {
-                            Fault::Throw(Value::Error(ErrorValue {
-                                name: "SyntaxError".into(),
-                                message: error.to_string(),
-                            }))
-                        })?;
+                let encoded = to_string(args.first().unwrap_or(&Value::Undefined));
+                if encoded.len() > self.host.limits.max_json_bytes {
+                    return Err(Fault::Host(HostError::Data(
+                        "JSON.parse input exceeds JSON limit".into(),
+                    )));
+                }
+                let json: JsonValue = serde_json::from_str(&encoded).map_err(|error| {
+                    Fault::Throw(Value::Error(ErrorValue {
+                        name: "SyntaxError".into(),
+                        message: error.to_string(),
+                    }))
+                })?;
                 self.convert_from_json(json, false).map_err(Fault::Host)
             }
             ("JSON", "stringify") => Ok(Value::String(
@@ -3485,6 +3489,37 @@ mod tests {
             )
             .unwrap();
         assert_eq!(output, serde_json::json!(4));
+    }
+
+    #[test]
+    fn json_parse_rejects_input_over_max_json_bytes() {
+        let limits = HostLimits::new(
+            16 * 1024 * 1024,
+            256 * 1024,
+            Duration::from_secs(2),
+            100_000,
+            64,
+            crate::MAX_INFLIGHT_CONNECTOR_CALLS,
+            256 * 1024,
+            32,
+        )
+        .unwrap();
+        let host = Host::new(limits, GlobalRegistration::zero(vec![])).unwrap();
+        let payload = format!("\"{}\"", "x".repeat(64));
+        let error = host
+            .execute(
+                &format!("return JSON.parse({payload:?});"),
+                Rc::new(NullConnector),
+            )
+            .unwrap_err();
+        assert!(
+            error.to_string().contains("JSON.parse input exceeds JSON limit"),
+            "unexpected error: {error}"
+        );
+        let ok = host
+            .execute("return JSON.parse('{\"a\":1}');", Rc::new(NullConnector))
+            .unwrap();
+        assert_eq!(ok, serde_json::json!({"a": 1}));
     }
 
     #[test]
