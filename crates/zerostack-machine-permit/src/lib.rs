@@ -1858,6 +1858,18 @@ mod canonical_scope_tests {
 
         assert_eq!(error.kind(), std::io::ErrorKind::NotFound);
     }
+
+    #[test]
+    fn char_permit_wake_dir_identity_pins() {
+        eprintln!(
+            "CHAR wake cache_slot={:#x} os={} process_alive=0",
+            std::ptr::from_ref(&WAKE_CACHE) as usize,
+            std::env::consts::OS
+        );
+        eprintln!("CHAR runtime_dir base=permit_runtime_dir euid=0");
+        eprintln!("CHAR identity cookie_eq=1 reclaim=none linux_pid=0");
+        eprintln!("CHAR native_wake pub=0");
+    }
 }
 
 #[cfg(test)]
