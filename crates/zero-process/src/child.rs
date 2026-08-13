@@ -929,7 +929,8 @@ impl Drop for VerifiedChildInner {
 #[cfg(unix)]
 fn terminate_owned_child(child: &mut Child, grace: Duration) -> io::Result<SignalOutcome> {
     let pid = child.id();
-    // Exact by ownership: this pid belongs to our unreaped child.
+    // SAFETY: `pid` is the unreaped Child's id; an unreaped child pins the
+    // pid so it cannot be recycled. SIGTERM is delivered only to that process.
     if unsafe { libc::kill(pid as i32, libc::SIGTERM) } == -1 {
         let error = io::Error::last_os_error();
         if error.raw_os_error() == Some(libc::ESRCH) {
@@ -948,7 +949,8 @@ fn terminate_owned_child(child: &mut Child, grace: Duration) -> io::Result<Signa
         }
         std::thread::sleep(Duration::from_millis(10));
     }
-    // Escalation: still our unreaped child, so the pid is still pinned.
+    // SAFETY: still our unreaped child after the grace window; SIGKILL
+    // targets the same pinned pid.
     if unsafe { libc::kill(pid as i32, libc::SIGKILL) } == -1 {
         return Err(io::Error::last_os_error());
     }
@@ -1028,8 +1030,7 @@ impl JobHandle {
         if job.is_null() {
             return Err(io::Error::last_os_error());
         }
-        // SAFETY: `job` is valid and the extended limit carrier is initialized.
-        let mut info: JOBOBJECT_EXTENDED_LIMIT_INFORMATION = unsafe { std::mem::zeroed() };
+        let mut info = JOBOBJECT_EXTENDED_LIMIT_INFORMATION::default();
         info.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
         if let Some(policy) = policy {
             info.BasicLimitInformation.LimitFlags |=
@@ -1038,6 +1039,8 @@ impl JobHandle {
                 policy.cpu_seconds.saturating_mul(10_000_000) as i64;
             info.JobMemoryLimit = policy.active_tree_rss_bytes as usize;
         }
+        // SAFETY: `job` is a valid CreateJobObjectW handle; `info` is a fully
+        // initialized extended-limit carrier of the matching size.
         let rc = unsafe {
             SetInformationJobObject(
                 job,
@@ -1073,9 +1076,9 @@ impl JobHandle {
 // (terminate) or during exclusive `revoke`/`Drop`; `JobHandle` is not Clone and
 // the owning `Arc` is its sole owner, so the handle is closed exactly once.
 #[cfg(windows)]
-unsafe impl Send for JobHandle {}
+unsafe impl Send for JobHandle {} // ubs:ignore — FFI wrapper, invariants: unique RAII owner of a job HANDLE
 #[cfg(windows)]
-unsafe impl Sync for JobHandle {}
+unsafe impl Sync for JobHandle {} // ubs:ignore — FFI wrapper, invariants: unique RAII owner of a job HANDLE
 
 #[cfg(windows)]
 impl Drop for JobHandle {
@@ -1241,7 +1244,7 @@ fn terminate_tree_child(
 /// never `Ok(true)`, so no later numeric group signal targets a recycled id.
 #[cfg(unix)]
 fn child_exited_no_reap(child: &Child) -> io::Result<bool> {
-    let mut info: libc::siginfo_t = unsafe { std::mem::zeroed() };
+    let mut info: libc::siginfo_t = unsafe { std::mem::zeroed() }; // ubs:ignore — FFI wrapper, invariants: siginfo_t is a C union; waitid requires a zeroed out-param and writes every field later read via si_pid()
     // SAFETY: `P_PID` targets only our owned child's pid; `WNOWAIT` observes
     // without reaping; `WNOHANG` returns immediately when no state changed.
     let rc = unsafe {
@@ -1256,6 +1259,8 @@ fn child_exited_no_reap(child: &Child) -> io::Result<bool> {
         // POSIX specifies `si_pid == 0` when WNOHANG found no waitable status.
         // `si_signo` is not a portable discriminator here (Darwin leaves it
         // zero even when the exited child is reported).
+        // SAFETY: waitid returned 0, so `info` holds a kernel-written siginfo_t;
+        // POSIX defines si_pid == 0 for WNOHANG with no waitable status.
         Ok(unsafe { info.si_pid() } != 0)
     } else {
         // ECHILD means the waitable root pin is already gone: the numeric
@@ -1330,6 +1335,8 @@ pub fn escalate_detached(
     if let Err(error) = verify_pidfd_identity(fd, &expected) {
         return finish(fd, Err(error));
     }
+    // SAFETY: `fd` is a pidfd uniquely owned here and identity-verified
+    // against `expected`; SIGTERM is sent through the kernel-pinned fd.
     if unsafe {
         libc::syscall(
             libc::SYS_pidfd_send_signal,
@@ -1357,6 +1364,8 @@ pub fn escalate_detached(
     if let Err(error) = verify_pidfd_identity(fd, &expected) {
         return finish(fd, Err(error));
     }
+    // SAFETY: same pinned pidfd after re-verify; SIGKILL still cannot target
+    // a recycled pid.
     if unsafe {
         libc::syscall(
             libc::SYS_pidfd_send_signal,
@@ -1426,8 +1435,15 @@ fn resume_primary_thread(pid: u32) -> io::Result<()> {
     // SAFETY: TH32CS_SNAPTHREAD with pid 0 snapshots all threads; Handle owns
     // the returned snapshot and rejects NULL/INVALID_HANDLE_VALUE.
     let snapshot = Handle::new(unsafe { CreateToolhelp32Snapshot(TH32CS_SNAPTHREAD, 0) })?;
-    let mut entry: THREADENTRY32 = unsafe { std::mem::zeroed() };
-    entry.dwSize = std::mem::size_of::<THREADENTRY32>() as u32;
+    let mut entry = THREADENTRY32 {
+        dwSize: std::mem::size_of::<THREADENTRY32>() as u32,
+        cntUsage: 0,
+        th32ThreadID: 0,
+        th32OwnerProcessID: 0,
+        tpBasePri: 0,
+        tpDeltaPri: 0,
+        dwFlags: 0,
+    };
     // SAFETY: snapshot is valid and entry is initialized with dwSize.
     if unsafe { Thread32First(snapshot.raw(), &mut entry) } == 0 {
         return Err(io::Error::last_os_error());

@@ -16,6 +16,8 @@ use windows_sys::Win32::System::Threading::{
 
 #[cfg(unix)]
 pub fn current_euid() -> u32 {
+    // SAFETY: geteuid has no preconditions, reads process credentials only, and
+    // does not retain pointers or mutate Rust-managed memory.
     unsafe { libc::geteuid() }
 }
 
@@ -35,6 +37,8 @@ pub fn peer_euid(stream: &std::os::unix::net::UnixStream) -> io::Result<u32> {
             gid: 0,
         };
         let mut len = std::mem::size_of::<libc::ucred>() as libc::socklen_t;
+        // SAFETY: `fd` is a live UnixStream raw fd; `cred`/`len` are stack
+        // out-params sized for `ucred`. SO_PEERCRED writes peer credentials.
         let rc = unsafe {
             libc::getsockopt(
                 fd,
@@ -53,6 +57,8 @@ pub fn peer_euid(stream: &std::os::unix::net::UnixStream) -> io::Result<u32> {
     {
         let mut euid = 0;
         let mut egid = 0;
+        // SAFETY: `fd` is a live UnixStream raw fd; both out-params are
+        // initialized uid_t/gid_t the kernel writes on success.
         let rc = unsafe { libc::getpeereid(fd, &mut euid, &mut egid) };
         if rc != 0 {
             return Err(io::Error::last_os_error());
@@ -170,6 +176,8 @@ impl OwnerWatcher {
         {
             // Blocking wait on the retained handle: no polling, and the
             // handle closes exactly once when `self` drops after this call.
+            // SAFETY: `self.handle` is the unique RAII process handle captured
+            // at watch creation; INFINITE waits until that incarnation exits.
             let rc = unsafe { WaitForSingleObject(self.handle.raw(), INFINITE) };
             if rc == WAIT_OBJECT_0 {
                 Ok(())
@@ -207,6 +215,8 @@ fn capture(pid: u32) -> io::Result<Option<ProcessIdentity>> {
 fn capture(pid: u32) -> io::Result<Option<ProcessIdentity>> {
     let mut info = std::mem::MaybeUninit::<libc::proc_bsdinfo>::zeroed();
     let expected = std::mem::size_of::<libc::proc_bsdinfo>() as libc::c_int;
+    // SAFETY: `info` is a zeroed MaybeUninit of exactly sizeof(proc_bsdinfo);
+    // PROC_PIDTBSDINFO writes that struct or returns 0 / a short length.
     let rc = unsafe {
         libc::proc_pidinfo(
             pid as libc::pid_t,
@@ -225,7 +235,8 @@ fn capture(pid: u32) -> io::Result<Option<ProcessIdentity>> {
             "short proc_pidinfo response",
         ));
     }
-    let info = unsafe { info.assume_init() };
+    // SAFETY: rc == expected means the kernel wrote every byte of proc_bsdinfo.
+    let info = unsafe { info.assume_init() }; // ubs:ignore — FFI wrapper, invariants: proc_pidinfo returned the full sizeof(proc_bsdinfo)
     Ok(Some(ProcessIdentity {
         pid,
         start_key: format!("{}:{}", info.pbi_start_tvsec, info.pbi_start_tvusec),
@@ -263,10 +274,10 @@ fn capture(pid: u32) -> io::Result<Option<ProcessIdentity>> {
         WAIT_OBJECT_0 => return Ok(None),
         _ => return Err(io::Error::last_os_error()),
     }
-    let mut creation: FILETIME = unsafe { std::mem::zeroed() };
-    let mut exit: FILETIME = unsafe { std::mem::zeroed() };
-    let mut kernel: FILETIME = unsafe { std::mem::zeroed() };
-    let mut user: FILETIME = unsafe { std::mem::zeroed() };
+    let mut creation = empty_filetime();
+    let mut exit = empty_filetime();
+    let mut kernel = empty_filetime();
+    let mut user = empty_filetime();
     // SAFETY: the handle names the live process `pid`; all four FILETIMEs are
     // initialized zeroed buffers of the correct size.
     if unsafe {
@@ -297,12 +308,14 @@ fn capture(_: u32) -> io::Result<Option<ProcessIdentity>> {
 }
 #[cfg(any(target_os = "linux", target_os = "android"))]
 fn wait_for_exit(id: &ProcessIdentity) -> Result<(), OwnerWatchError> {
+    // SAFETY: pidfd_open returns a fresh owned fd (or -1); flags are 0.
     let fd =
         unsafe { libc::syscall(libc::SYS_pidfd_open, id.pid as libc::pid_t, 0) as libc::c_int };
     if fd < 0 {
         return Err(io::Error::last_os_error().into());
     }
     if !id.is_live()? {
+        // SAFETY: `fd` is uniquely owned here and not used after this close.
         unsafe { libc::close(fd) };
         return Err(OwnerWatchError::IdentityChanged);
     }
@@ -311,7 +324,9 @@ fn wait_for_exit(id: &ProcessIdentity) -> Result<(), OwnerWatchError> {
         events: libc::POLLIN,
         revents: 0,
     };
+    // SAFETY: `p` is one initialized pollfd naming our owned pidfd.
     let rc = unsafe { libc::poll(&mut p, 1, -1) };
+    // SAFETY: `fd` is uniquely owned here and not used after this close.
     unsafe { libc::close(fd) };
     if rc < 0 {
         Err(io::Error::last_os_error().into())
@@ -321,11 +336,13 @@ fn wait_for_exit(id: &ProcessIdentity) -> Result<(), OwnerWatchError> {
 }
 #[cfg(target_os = "macos")]
 fn wait_for_exit(id: &ProcessIdentity) -> Result<(), OwnerWatchError> {
+    // SAFETY: kqueue takes no arguments and returns an owned descriptor or -1.
     let q = unsafe { libc::kqueue() };
     if q < 0 {
         return Err(io::Error::last_os_error().into());
     }
     if !id.is_live()? {
+        // SAFETY: `q` is uniquely owned here and not used after this close.
         unsafe { libc::close(q) };
         return Err(OwnerWatchError::IdentityChanged);
     }
@@ -337,18 +354,30 @@ fn wait_for_exit(id: &ProcessIdentity) -> Result<(), OwnerWatchError> {
         data: 0,
         udata: std::ptr::null_mut(),
     };
+    // SAFETY: `q` is live; `c` is a fully initialized changelist of length 1.
     let registered = unsafe { libc::kevent(q, &c, 1, std::ptr::null_mut(), 0, std::ptr::null()) };
     if registered < 0 {
         let error = io::Error::last_os_error();
+        // SAFETY: `q` is uniquely owned here and not used after this close.
         unsafe { libc::close(q) };
         return Err(error.into());
     }
     if !id.is_live()? {
+        // SAFETY: `q` is uniquely owned here and not used after this close.
         unsafe { libc::close(q) };
         return Err(OwnerWatchError::IdentityChanged);
     }
-    let mut event: libc::kevent = unsafe { std::mem::zeroed() };
+    let mut event = libc::kevent {
+        ident: 0,
+        filter: 0,
+        flags: 0,
+        fflags: 0,
+        data: 0,
+        udata: std::ptr::null_mut(),
+    };
     let rc = loop {
+        // SAFETY: `q` is live; nchanges=0 with a null changelist; eventlist is one
+        // initialized kevent the kernel overwrites.
         let rc = unsafe { libc::kevent(q, std::ptr::null(), 0, &mut event, 1, std::ptr::null()) };
         if rc < 0 && io::Error::last_os_error().kind() == io::ErrorKind::Interrupted {
             continue;
@@ -367,6 +396,7 @@ fn wait_for_exit(id: &ProcessIdentity) -> Result<(), OwnerWatchError> {
     } else {
         None
     };
+    // SAFETY: `q` is uniquely owned here and not used after this close.
     unsafe { libc::close(q) };
     error.map_or(Ok(()), |error| Err(error.into()))
 }
@@ -466,20 +496,31 @@ impl Drop for Handle {
     }
 }
 
+// SAFETY: HANDLE is a kernel object id. `Handle` is the unique RAII owner
+// (!Clone; Drop closes exactly once). Windows allows the handle to be used
+// from any thread of the owning process.
 #[cfg(windows)]
-unsafe impl Send for Handle {}
+unsafe impl Send for Handle {} // ubs:ignore — FFI wrapper, invariants: unique RAII owner of a kernel HANDLE
 #[cfg(windows)]
-unsafe impl Sync for Handle {}
+unsafe impl Sync for Handle {} // ubs:ignore — FFI wrapper, invariants: unique RAII owner of a kernel HANDLE
 
 /// Compare the creation time of the process named by `handle` against the
 /// captured start key. This is the exactness proof: the retained handle names
 /// one specific process incarnation, so a recycled pid can never pass.
 #[cfg(windows)]
+fn empty_filetime() -> FILETIME {
+    FILETIME {
+        dwLowDateTime: 0,
+        dwHighDateTime: 0,
+    }
+}
+
+#[cfg(windows)]
 fn identity_via_handle(handle: &Handle, expected: &ProcessIdentity) -> io::Result<bool> {
-    let mut creation: FILETIME = unsafe { std::mem::zeroed() };
-    let mut exit: FILETIME = unsafe { std::mem::zeroed() };
-    let mut kernel: FILETIME = unsafe { std::mem::zeroed() };
-    let mut user: FILETIME = unsafe { std::mem::zeroed() };
+    let mut creation = empty_filetime();
+    let mut exit = empty_filetime();
+    let mut kernel = empty_filetime();
+    let mut user = empty_filetime();
     // SAFETY: `handle` is a valid open process handle with query access.
     if unsafe {
         GetProcessTimes(

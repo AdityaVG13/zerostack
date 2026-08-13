@@ -166,6 +166,7 @@ pub(crate) fn configure_command(
     let policy = policy.validate()?;
     // Darwin does not enforce RLIMIT_AS/RLIMIT_RSS. Enforce the inherited CPU
     // limit and report that narrower native guarantee truthfully.
+    // SAFETY: the closure only invokes async-signal-safe setrlimit before exec.
     unsafe {
         command.pre_exec(move || {
             let cpu = libc::rlimit {

@@ -28,7 +28,7 @@ use windows_sys::Win32::Storage::FileSystem::{
     CreateFileW, FILE_FLAG_FIRST_PIPE_INSTANCE, FILE_FLAG_OVERLAPPED, OPEN_EXISTING,
     PIPE_ACCESS_DUPLEX, ReadFile, WriteFile,
 };
-use windows_sys::Win32::System::IO::{CancelIoEx, OVERLAPPED};
+use windows_sys::Win32::System::IO::{CancelIoEx, OVERLAPPED, OVERLAPPED_0};
 use windows_sys::Win32::System::Memory::{LPTR, LocalAlloc};
 use windows_sys::Win32::System::Pipes::{
     ConnectNamedPipe, CreateNamedPipeW, GetNamedPipeClientProcessId, GetNamedPipeServerProcessId,
@@ -136,8 +136,23 @@ impl Drop for LocalBuffer {
     }
 }
 
-unsafe impl Send for LocalBuffer {}
-unsafe impl Sync for LocalBuffer {}
+// SAFETY: LocalBuffer uniquely owns a LocalAlloc pointer; it is !Clone and
+// Drop calls LocalFree exactly once. `ptr()` is crate-private.
+unsafe impl Send for LocalBuffer {} // ubs:ignore — FFI wrapper, invariants: unique LocalAlloc owner
+unsafe impl Sync for LocalBuffer {} // ubs:ignore — FFI wrapper, invariants: unique LocalAlloc owner
+
+/// Zeroed OVERLAPPED with our completion event. All fields are integer/handle
+/// POD; the anonymous union is the documented Offset/Pointer overlay.
+fn overlapped_with_event(event: HANDLE) -> OVERLAPPED {
+    OVERLAPPED {
+        Internal: 0,
+        InternalHigh: 0,
+        Anonymous: OVERLAPPED_0 {
+            Pointer: ptr::null_mut(),
+        },
+        hEvent: event,
+    }
+}
 
 /// Explicit security descriptor with a DACL granting only the current user.
 /// The descriptor and ACL allocations are both owned by this RAII struct, so
@@ -251,8 +266,7 @@ impl PipeListener {
         };
         let raw = instance.raw();
         let event = Handle::create_event(false)?;
-        let mut overlapped: OVERLAPPED = unsafe { std::mem::zeroed() };
-        overlapped.hEvent = event.raw();
+        let mut overlapped = overlapped_with_event(event.raw());
         // SAFETY: raw is our own pipe instance; overlapped is zeroed with a
         // fresh event; the instance was created with FILE_FLAG_OVERLAPPED.
         let rc = unsafe { ConnectNamedPipe(raw, &mut overlapped) };
@@ -517,8 +531,7 @@ impl PipeConnection {
             .unwrap_or_else(|poisoned| poisoned.into_inner());
         // SAFETY: clear any completion left by a synchronous prior read.
         unsafe { ResetEvent(self.state.read_event.raw()) };
-        let mut overlapped: OVERLAPPED = unsafe { std::mem::zeroed() };
-        overlapped.hEvent = self.state.read_event.raw();
+        let mut overlapped = overlapped_with_event(self.state.read_event.raw());
         let mut read = 0u32;
         // SAFETY: our pipe handle, a caller buffer, and a zeroed OVERLAPPED
         // with our event; the instance was created with FILE_FLAG_OVERLAPPED.
@@ -582,8 +595,7 @@ impl PipeConnection {
             .unwrap_or_else(|poisoned| poisoned.into_inner());
         // SAFETY: clear any completion left by a synchronous prior write.
         unsafe { ResetEvent(self.state.write_event.raw()) };
-        let mut overlapped: OVERLAPPED = unsafe { std::mem::zeroed() };
-        overlapped.hEvent = self.state.write_event.raw();
+        let mut overlapped = overlapped_with_event(self.state.write_event.raw());
         let mut written = 0u32;
         // SAFETY: our pipe handle, a caller buffer, and a zeroed OVERLAPPED.
         let rc = unsafe {
