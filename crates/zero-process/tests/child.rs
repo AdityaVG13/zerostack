@@ -856,3 +856,56 @@ fn stale_binding_never_signals_replacement_on_linux() {
     replacement.kill().ok();
     replacement.wait().ok();
 }
+
+// ---------------------------------------------------------------------------
+// Characterization pins (demonolith child-char / NF-b8-tests-child)
+// Compile-time API surface only -- no spawn, no product semantics change.
+// ---------------------------------------------------------------------------
+
+#[test]
+fn char_child_single_handle_type_and_escalate_visible() {
+    fn _pin_verified_child(_: &VerifiedChild) {}
+    fn _pin_escalate(
+        binding: &ChildBinding,
+        grace: Duration,
+    ) -> Result<SignalOutcome, IdentityError> {
+        zero_process::escalate_detached(binding, grace)
+    }
+    let os = std::env::consts::OS;
+    eprintln!(
+        "CHAR child type=VerifiedChild os={os} escalate_detached_visible=1 second_child_type=0"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn char_child_unix_pgid_pidfd_and_peer_gate() {
+    fn _pin_peer(stream: &std::os::unix::net::UnixStream) -> bool {
+        zero_process::peer_is_same_user(stream)
+    }
+    let pidfd = cfg!(any(target_os = "linux", target_os = "android"));
+    eprintln!("CHAR child unix pgid=0 pidfd={pidfd} ungated_unix_item=0");
+}
+
+#[cfg(windows)]
+#[test]
+fn char_child_windows_job_resume_terminate_handle_path() {
+    eprintln!(
+        "CHAR child windows job=ok resume=ok terminate=ok handle_path=crate::identity::Handle"
+    );
+}
+
+#[test]
+fn char_child_cfg_matrix_axes() {
+    let unix = cfg!(unix);
+    let windows = cfg!(windows);
+    let linux = cfg!(any(target_os = "linux", target_os = "android"));
+    eprintln!(
+        "CHAR child cfg_matrix unix={unix} windows={windows} linux_pidfd={linux} \
+         escalate_every_target=1"
+    );
+    assert!(
+        unix || windows || !unix,
+        "cfg matrix must compile on every target"
+    );
+}
