@@ -584,6 +584,14 @@ impl ZsxBuilder {
                 session_id.as_str(),
             )
         });
+        if fszero.degraded() {
+            return Err(ZsxSessionError::new(
+                ZsxSessionFailureCode::BackendUnavailable,
+                0,
+                None,
+                "FSZero durable store unavailable; refusing silent in-memory fallback",
+            ));
+        }
         let graphzero = Arc::new(if state_root == root {
             crate::graphzero::GraphZeroAdapter::new(&root, session_id.as_str())
         } else {
