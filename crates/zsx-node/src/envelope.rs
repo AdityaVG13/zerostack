@@ -9,7 +9,7 @@
 use serde_json::Value;
 use zsx_core::{ZsxExecutionMetrics, ZsxExecutionResult, ZsxSessionError};
 
-use crate::core::{CODE_CANCELLED, CODE_PANIC};
+use crate::core::{CODE_CANCELLED, CODE_COMMIT_RACE, CODE_PANIC};
 
 /// Protocol label for the in-process zsx result envelope.
 pub const ZSX_PROTOCOL: &str = "zerostack.zsx.v1";
@@ -42,6 +42,23 @@ impl Envelope {
             result: Some(result.value),
             metrics: Some(result.metrics),
             error: None,
+        }
+    }
+
+    /// Execute finished after AbortSignal. Keep the result so a committed
+    /// mutation is not silently reported as cancelled.
+    pub fn commit_race(generation: u64, request_id: u64, result: ZsxExecutionResult) -> Self {
+        Self {
+            ok: false,
+            generation,
+            request_id,
+            result: Some(result.value),
+            metrics: Some(result.metrics),
+            error: Some(EnvelopeError {
+                code: CODE_COMMIT_RACE.to_string(),
+                detail: "execute completed after abort; mutation may have committed".to_string(),
+                retry_after_ms: None,
+            }),
         }
     }
 
@@ -97,35 +114,25 @@ impl Envelope {
     /// Convert the envelope into canonical serde_json (resolved on the main
     /// thread via the `JsEnvelope` task value).
     pub fn to_value(&self) -> serde_json::Value {
-        let mut v = serde_json::json!({
-            "protocol": ZSX_PROTOCOL,
-            "ok": self.ok,
-            "generation": self.generation,
-            "request_id": self.request_id,
-        });
+        let mut v = serde_json::Map::new();
+        v.insert("protocol".into(), serde_json::json!(ZSX_PROTOCOL));
+        v.insert("ok".into(), serde_json::json!(self.ok));
+        v.insert("generation".into(), serde_json::json!(self.generation));
+        v.insert("request_id".into(), serde_json::json!(self.request_id));
         if let Some(result) = &self.result {
-            v.as_object_mut()
-                .expect("envelope is an object")
-                .insert("result".to_string(), result.clone());
+            v.insert("result".into(), result.clone());
             if let Some(metrics) = &self.metrics {
-                v.as_object_mut()
-                    .expect("envelope is an object")
-                    .insert("metrics".to_string(), serde_json::json!(metrics));
+                v.insert("metrics".into(), serde_json::json!(metrics));
             }
         } else if let Some(err) = &self.error {
-            let mut e = serde_json::json!({
-                "code": err.code,
-                "detail": err.detail,
-            });
+            let mut e = serde_json::Map::new();
+            e.insert("code".into(), serde_json::json!(err.code));
+            e.insert("detail".into(), serde_json::json!(err.detail));
             if let Some(ms) = err.retry_after_ms {
-                e.as_object_mut()
-                    .expect("error object")
-                    .insert("retry_after_ms".to_string(), serde_json::json!(ms));
+                e.insert("retry_after_ms".into(), serde_json::json!(ms));
             }
-            v.as_object_mut()
-                .expect("envelope is an object")
-                .insert("error".to_string(), e);
+            v.insert("error".into(), serde_json::Value::Object(e));
         }
-        v
+        serde_json::Value::Object(v)
     }
 }

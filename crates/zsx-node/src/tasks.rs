@@ -4,9 +4,9 @@
 //! `catch_unwind(AssertUnwindSafe)` so a backend panic becomes a typed
 //! envelope instead of unwinding across the FFI boundary.
 
-use std::panic::{AssertUnwindSafe, catch_unwind};
-use std::sync::Arc;
+use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 use std::time::Duration;
 
 use napi::bindgen_prelude::{ToNapiValue, TypeName, ValueType};
@@ -118,8 +118,12 @@ impl Task for ExecuteTask {
             Ok(Ok(result)) if !self.cancelled.load(Ordering::Acquire) => {
                 Ok(Envelope::ok(self.generation, self.request_id, result))
             }
-            // Aborted while in flight: discard the late result.
-            Ok(Ok(_)) => Ok(self.cancelled()),
+            // Aborted while in flight: surface CommitRace, keep the result.
+            Ok(Ok(result)) => Ok(Envelope::commit_race(
+                self.generation,
+                self.request_id,
+                result,
+            )),
             Ok(Err(err)) if !self.cancelled.load(Ordering::Acquire) => Ok(
                 Envelope::from_zsx_error(self.generation, self.request_id, &err),
             ),
@@ -235,24 +239,16 @@ impl Task for ControlTask {
     }
 
     fn resolve(&mut self, _env: Env, output: ControlOutcome) -> Result<JsEnvelope> {
-        let mut v = serde_json::json!({
-            "kind": output.kind,
-            "generation": output.generation,
-        });
+        let mut v = serde_json::Map::new();
+        v.insert("kind".into(), serde_json::json!(output.kind));
+        v.insert("generation".into(), serde_json::json!(output.generation));
         if let Some(previous) = output.previous_generation {
-            v.as_object_mut()
-                .expect("control outcome is an object")
-                .insert(
-                    "previous_generation".to_string(),
-                    serde_json::json!(previous),
-                );
+            v.insert("previous_generation".into(), serde_json::json!(previous));
         }
         if let Some(reason) = output.reason {
-            v.as_object_mut()
-                .expect("control outcome is an object")
-                .insert("reason".to_string(), serde_json::json!(reason));
+            v.insert("reason".into(), serde_json::json!(reason));
         }
-        Ok(JsEnvelope(v))
+        Ok(JsEnvelope(serde_json::Value::Object(v)))
     }
 }
 

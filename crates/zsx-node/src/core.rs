@@ -33,6 +33,7 @@ pub const DEFAULT_TIMEOUT_MS: u64 = 30_000;
 /// zsx-core has no `Cancelled` failure variant today; the addon resolves the
 /// typed envelope itself (see the expected-signatures report).
 pub const CODE_CANCELLED: &str = "cancelled";
+pub const CODE_COMMIT_RACE: &str = "commit_race";
 
 /// Addon-level failure code for a panic contained by `catch_unwind`.
 pub const CODE_PANIC: &str = "internal_panic";
