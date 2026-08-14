@@ -180,3 +180,91 @@ fn legacy_kind_code_is_snake_case_for_every_kind() {
     assert_eq!(legacy_kind_code(ZeroExecuteKindV6::Cancelled), "cancelled");
     assert_eq!(legacy_kind_code(ZeroExecuteKindV6::FailedNoAuthority), "failed_no_authority");
 }
+
+// V6-R5 (ZS-VIEW-010): a decision-bearing outcome binds the typed decision
+// view root when the harness supplied the view context; absent a context the
+// envelope leaves `decision_view_root` empty -- a root is never fabricated.
+
+use zero_abi::{CompletenessGradeV6, DecisionViewV6};
+
+fn view_context() -> DecisionViewContextV1 {
+    DecisionViewContextV1::new("tc://root/ab12", "cl://lens/34cd", false)
+        .expect("view context builds")
+        .with_evidence(vec!["fz://blob/evidence-a".into()], vec![])
+        .expect("evidence binds")
+        .with_expansions(vec!["exp:1".into()])
+        .expect("expansions bind")
+}
+
+#[test]
+fn decision_required_with_view_context_binds_decision_view_root() {
+    let context = view_context();
+    let ledger = ledger()
+        .with_decision_view(context.clone())
+        .expect("context attaches");
+    let envelope = decision_required(&decision_payload(), 1, 7, Some("/repo"), &ledger)
+        .expect("decision required envelope builds with a view");
+
+    let bound_root = envelope
+        .decision_view_root()
+        .expect("decision view root is bound");
+    assert_eq!(bound_root.len(), 64, "root is lowercase hex sha256");
+
+    // The session states only what it can prove: the decision that surfaced,
+    // the unresolved question, and an Observed grade. Rebuild the same view
+    // from payload + context and verify the envelope bound exactly its
+    // digest root.
+    let view = DecisionViewV6::new(
+        context.task_contract_root,
+        "/repo",
+        context.causal_lens_root,
+        vec!["dec:1".into()],
+        context.evidence_refs,
+        context.omitted_classes,
+        context.expansion_handles,
+        CompletenessGradeV6::Observed,
+        Some("which test strategy?".into()),
+        context.baseline_escape,
+        None,
+    )
+    .expect("rebuilt view builds");
+    assert_eq!(bound_root, view.root());
+    view.verify_root(bound_root).expect("bound root verifies");
+
+    // The root survives the envelope JSON round trip.
+    let decoded = round_trip(&envelope);
+    assert_eq!(
+        decoded.decision_view_root(),
+        Some(bound_root),
+        "decision view root survives the round trip"
+    );
+}
+
+#[test]
+fn decision_required_without_view_context_leaves_decision_view_root_absent() {
+    let envelope = decision_required(&decision_payload(), 1, 7, Some("/repo"), &ledger())
+        .expect("decision required envelope builds");
+    assert!(
+        envelope.decision_view_root().is_none(),
+        "without a harness-supplied view context no root may be fabricated"
+    );
+}
+
+#[test]
+fn view_context_rejects_fabricated_roots_fail_closed() {
+    assert!(
+        DecisionViewContextV1::new("", "cl://lens/34cd", false).is_err(),
+        "an empty task contract root must be rejected"
+    );
+    assert!(
+        DecisionViewContextV1::new("tc://root/ab12", "", false).is_err(),
+        "an empty causal lens root must be rejected"
+    );
+
+    let mut bad = view_context();
+    bad.evidence_refs = vec!["".into()];
+    assert!(
+        ledger().with_decision_view(bad).is_err(),
+        "an empty evidence ref must fail at the envelope context"
+    );
+}

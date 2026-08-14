@@ -27,11 +27,19 @@
 //! request_id, result?, error?}`) so existing consumers keep working with
 //! unchanged failure codes (`decision_required`, `cancelled`, ...) while the
 //! V6 envelope carries the semantic payload.
+//!
+//! V6-R5 (ZS-VIEW-010): a decision-bearing outcome optionally binds the
+//! typed [`DecisionViewV6`] into the envelope's `decision_view_root`. The
+//! session can only build the view honestly when the harness supplies the
+//! roots the session cannot prove ([`DecisionViewContextV1`] through
+//! [`SessionEnvelopeContextV1::with_decision_view`]); with no context, the
+//! envelope leaves `decision_view_root` absent -- a root is never
+//! fabricated.
 
 use serde_json::{Value, json};
 use zero_abi::{
-    AuditEventRangeV1, DecisionRequiredV1, ZeroExecuteErrorV6, ZeroExecuteFieldsV6,
-    ZeroExecuteKindV6, ZeroExecuteResultV6,
+    AuditEventRangeV1, DecisionRequiredV1, DecisionViewErrorV6, DecisionViewV6,
+    ZeroExecuteErrorV6, ZeroExecuteFieldsV6, ZeroExecuteKindV6, ZeroExecuteResultV6,
 };
 
 /// Protocol label of the legacy zsx envelope shape the conversion emits,
@@ -49,10 +57,15 @@ pub struct SessionEnvelopeContextV1 {
     pub resource_ledger_root: String,
     /// Inclusive audit event range the envelope must carry.
     pub audit_event_range: AuditEventRangeV1,
+    /// Optional harness-supplied decision-view context (V6-R5). When
+    /// present, a decision-bearing outcome binds the typed [`DecisionViewV6`]
+    /// root into `decision_view_root`; when absent the field stays empty --
+    /// the session never fabricates a view root.
+    pub decision_view: Option<DecisionViewContextV1>,
 }
 
 impl SessionEnvelopeContextV1 {
-    /// Fail-closed construction: validates both fields immediately.
+    /// Fail-closed construction: validates the mandatory fields immediately.
     pub fn new(
         resource_ledger_root: impl Into<String>,
         audit_event_range: AuditEventRangeV1,
@@ -60,9 +73,22 @@ impl SessionEnvelopeContextV1 {
         let context = Self {
             resource_ledger_root: resource_ledger_root.into(),
             audit_event_range,
+            decision_view: None,
         };
         context.validate()?;
         Ok(context)
+    }
+
+    /// Attach a harness-supplied decision-view context (V6-R5). Fail-closed:
+    /// an invalid context is rejected so no envelope can bind a fabricated
+    /// view root.
+    pub fn with_decision_view(
+        mut self,
+        context: DecisionViewContextV1,
+    ) -> Result<Self, String> {
+        context.validate()?;
+        self.decision_view = Some(context);
+        Ok(self)
     }
 
     pub fn validate(&self) -> Result<(), String> {
@@ -74,9 +100,96 @@ impl SessionEnvelopeContextV1 {
         }
         self.audit_event_range
             .validate()
-            .map_err(|error| error.to_string())
+            .map_err(|error| error.to_string())?;
+        if let Some(context) = &self.decision_view {
+            context.validate()?;
+        }
+        Ok(())
     }
 }
+
+/// Harness-supplied decision-view facts the session cannot prove (V6-R5,
+/// ZS-VIEW-010): the engine roots the execution was bound to and the
+/// evidence/expansion surface of the decision. Fail-closed construction:
+/// empty roots are rejected, so a view built from this context can never
+/// carry a fabricated anchor.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct DecisionViewContextV1 {
+    /// Root of the task contract this execution is bound to (harness-proven).
+    pub task_contract_root: String,
+    /// Root of the causal lens this execution is bound to (harness-proven).
+    pub causal_lens_root: String,
+    /// Content refs of the evidence actually present for this decision.
+    pub evidence_refs: Vec<String>,
+    /// Evidence classes the view declares omitted (never populated by the
+    /// session; a `Proved` claim would fail certification).
+    pub omitted_classes: Vec<String>,
+    /// Expansion handles the harness bound for this decision's view.
+    pub expansion_handles: Vec<String>,
+    /// Whether the baseline escape hatch was open for this execution.
+    pub baseline_escape: bool,
+}
+
+impl DecisionViewContextV1 {
+    /// Fail-closed construction: both roots must be nonempty.
+    pub fn new(
+        task_contract_root: impl Into<String>,
+        causal_lens_root: impl Into<String>,
+        baseline_escape: bool,
+    ) -> Result<Self, String> {
+        let context = Self {
+            task_contract_root: task_contract_root.into(),
+            causal_lens_root: causal_lens_root.into(),
+            evidence_refs: Vec::new(),
+            omitted_classes: Vec::new(),
+            expansion_handles: Vec::new(),
+            baseline_escape,
+        };
+        context.validate()?;
+        Ok(context)
+    }
+
+    /// Bind the evidence surface: refs of evidence actually present and
+    /// classes declared omitted. Entries must be nonempty.
+    pub fn with_evidence(
+        mut self,
+        evidence_refs: Vec<String>,
+        omitted_classes: Vec<String>,
+    ) -> Result<Self, String> {
+        self.evidence_refs = evidence_refs;
+        self.omitted_classes = omitted_classes;
+        self.validate()?;
+        Ok(self)
+    }
+
+    /// Bind the expansion handles available for this decision's view.
+    /// Entries must be nonempty.
+    pub fn with_expansions(mut self, expansion_handles: Vec<String>) -> Result<Self, String> {
+        self.expansion_handles = expansion_handles;
+        self.validate()?;
+        Ok(self)
+    }
+
+    pub fn validate(&self) -> Result<(), String> {
+        if self.task_contract_root.is_empty() {
+            return Err("task_contract_root must be nonempty: the session never fabricates a task contract anchor".into());
+        }
+        if self.causal_lens_root.is_empty() {
+            return Err("causal_lens_root must be nonempty: the session never fabricates a causal lens anchor".into());
+        }
+        for (field, entries) in [
+            ("evidence_refs", &self.evidence_refs),
+            ("omitted_classes", &self.omitted_classes),
+            ("expansion_handles", &self.expansion_handles),
+        ] {
+            if entries.iter().any(String::is_empty) {
+                return Err(format!("{field} entries must be nonempty"));
+            }
+        }
+        Ok(())
+    }
+}
+
 
 fn with_project_root(project_root: Option<&str>) -> ZeroExecuteFieldsV6 {
     ZeroExecuteFieldsV6 {
@@ -92,6 +205,13 @@ fn with_project_root(project_root: Option<&str>) -> ZeroExecuteFieldsV6 {
 /// (ZS-ADAPTER-004) has an opaque anchor. The zero-abi constructor
 /// re-validates: question, nonempty choices, and continuation handle are
 /// mandatory for this kind.
+///
+/// V6-R5: when the harness supplied a [`DecisionViewContextV1`], the typed
+/// [`DecisionViewV6`] is built from the payload plus the context, its digest
+/// root is bound into `decision_view_root`, and a fail-closed build failure
+/// fails the envelope construction ([`ZeroExecuteErrorV6::InvalidDecisionView`]).
+/// With no context the field stays absent -- a view root is never
+/// fabricated.
 pub fn decision_required(
     payload: &DecisionRequiredV1,
     generation: u64,
@@ -99,7 +219,7 @@ pub fn decision_required(
     project_root: Option<&str>,
     ledger: &SessionEnvelopeContextV1,
 ) -> Result<ZeroExecuteResultV6, ZeroExecuteErrorV6> {
-    let fields = ZeroExecuteFieldsV6 {
+    let mut fields = ZeroExecuteFieldsV6 {
         continuation_handle: Some(format!(
             "zsx://g{generation}-r{request_id}/{}",
             payload.decision_id
@@ -108,10 +228,47 @@ pub fn decision_required(
         choices: payload.choices.iter().cloned().map(Value::String).collect(),
         ..with_project_root(project_root)
     };
+    if let Some(context) = &ledger.decision_view {
+        let view = build_decision_view(payload, project_root, context)
+            .map_err(|error| ZeroExecuteErrorV6::InvalidDecisionView(error.to_string()))?;
+        fields.decision_view_root = Some(view.root());
+    }
     ZeroExecuteResultV6::decision_required(
         fields,
         ledger.resource_ledger_root.clone(),
         ledger.audit_event_range,
+    )
+}
+
+/// Build the typed decision view for a decision-bearing outcome (V6-R5).
+///
+/// The session states only what it can prove: `supported_decisions` is the
+/// decision id that actually surfaced, `unresolved_question` is the payload
+/// question that was left unresolved, and `completeness_grade` is
+/// `Observed` -- the session cannot certify `Proved`/`BoundedComplete`
+/// coverage. The engine roots and evidence/expansion surface come from the
+/// harness context. A missing project root fails closed: a view without a
+/// project root would carry a fabricated anchor.
+fn build_decision_view(
+    payload: &DecisionRequiredV1,
+    project_root: Option<&str>,
+    context: &DecisionViewContextV1,
+) -> Result<DecisionViewV6, DecisionViewErrorV6> {
+    let project_root = project_root
+        .ok_or(DecisionViewErrorV6::EmptyRoot("project_root"))?
+        .to_owned();
+    DecisionViewV6::new(
+        context.task_contract_root.clone(),
+        project_root,
+        context.causal_lens_root.clone(),
+        vec![payload.decision_id.clone()],
+        context.evidence_refs.clone(),
+        context.omitted_classes.clone(),
+        context.expansion_handles.clone(),
+        zero_abi::CompletenessGradeV6::Observed,
+        Some(payload.question.clone()),
+        context.baseline_escape,
+        None,
     )
 }
 

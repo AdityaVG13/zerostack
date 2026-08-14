@@ -19,6 +19,7 @@ pub mod capability;
 pub mod continuation;
 pub mod cwir;
 pub mod decision;
+pub mod decision_view;
 pub mod digest;
 pub mod dispatch;
 pub mod effect;
@@ -72,6 +73,10 @@ pub use decision::{
     ContingentPolicyRuleV1, ContingentPolicyV1, DecisionErrorV1, DecisionRequiredV1,
     ObservationClassV1, ObservedMatchV1, PolicyResolutionV1, SemanticDecisionPointV1,
     verdict_permits_selection,
+};
+pub use decision_view::{
+    CompletenessGradeV6, DecisionViewBindingV6, DecisionViewErrorV6, DecisionViewV6,
+    DECISION_VIEW_SCHEMA_ID_V6,
 };
 pub use continuation::{
     ContinuationCompactRecordV1, ContinuationErrorV1, ContinuationHandleV1, ContinuationRootsV1,

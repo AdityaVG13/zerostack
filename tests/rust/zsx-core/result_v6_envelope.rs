@@ -14,8 +14,8 @@ use zero_abi::{
     AuditEventRangeV1, EffectClass, EngineIdentity, ZeroExecuteKindV6, ZERO_EXECUTE_ABI_VERSION_V6,
 };
 use zsx_core::{
-    SessionApprovalGrantV1, SessionEnvelopeContextV1, ZsxSession, ZsxSessionFailureCode,
-    fixture::fixture_adapters, legacy_envelope_value,
+    DecisionViewContextV1, SessionApprovalGrantV1, SessionEnvelopeContextV1, ZsxSession,
+    ZsxSessionFailureCode, fixture::fixture_adapters, legacy_envelope_value,
 };
 
 fn now_ms() -> u64 {
@@ -221,6 +221,86 @@ fn execute_with_approvals_v6_rejection_yields_failed_no_authority_envelope() {
     assert_eq!(
         legacy["error"]["code"],
         serde_json::json!("failed_no_authority")
+    );
+
+    session.shutdown().expect("shutdown");
+}
+
+#[test]
+fn execute_v6_decision_bearing_execution_binds_decision_view_root() {
+    let (root, session) = fixture_session();
+    let root_path = root.path().canonicalize().unwrap();
+    let context = DecisionViewContextV1::new("tc://root/ab12", "cl://lens/34cd", false)
+        .expect("view context builds")
+        .with_evidence(vec!["fz://blob/evidence-a".into()], vec![])
+        .expect("evidence binds")
+        .with_expansions(vec!["exp:1".into()])
+        .expect("expansions bind");
+    let plan = format!(
+        "const point = {POINT}; return await zero.decision.require(point, 'fast');"
+    );
+    let result = session
+        .execute_v6(
+            1,
+            1,
+            plan,
+            Duration::from_secs(5),
+            ledger().with_decision_view(context.clone()).expect("context attaches"),
+        )
+        .expect("decision boundary returns a V6 result, not a bare error");
+
+    let envelope = result
+        .envelope
+        .expect("an uncovered decision point must emit a V6 envelope");
+    assert_eq!(envelope.kind(), ZeroExecuteKindV6::DecisionRequired);
+    let bound_root = envelope
+        .decision_view_root()
+        .expect("the dispatch path binds the decision view root");
+    assert_eq!(bound_root.len(), 64);
+
+    // Rebuild the view from the surfaced decision id plus the harness
+    // context and verify the envelope bound exactly its digest root.
+    let view = zero_abi::DecisionViewV6::new(
+        "tc://root/ab12",
+        root_path.to_str().expect("root is utf-8"),
+        "cl://lens/34cd",
+        vec!["dec:1".into()],
+        vec!["fz://blob/evidence-a".into()],
+        Vec::<String>::new(),
+        vec!["exp:1".into()],
+        zero_abi::CompletenessGradeV6::Observed,
+        Some("which test strategy?".into()),
+        false,
+        None,
+    )
+    .expect("dispatch view rebuilds");
+    assert_eq!(bound_root, view.root());
+    view.verify_root(bound_root).expect("bound root verifies");
+
+    // The bound root survives the envelope JSON round trip.
+    let round_tripped: zero_abi::ZeroExecuteResultV6 =
+        serde_json::from_value(serde_json::to_value(&envelope).unwrap()).unwrap();
+    assert_eq!(round_tripped.decision_view_root().unwrap(), bound_root);
+
+    session.shutdown().expect("shutdown");
+}
+
+#[test]
+fn execute_v6_decision_bearing_execution_without_view_context_leaves_root_absent() {
+    let (_root, session) = fixture_session();
+    let plan = format!(
+        "const point = {POINT}; return await zero.decision.require(point, 'fast');"
+    );
+    let result = session
+        .execute_v6(1, 1, plan, Duration::from_secs(5), ledger())
+        .expect("decision boundary returns a V6 result, not a bare error");
+    let envelope = result
+        .envelope
+        .expect("an uncovered decision point must emit a V6 envelope");
+    assert_eq!(envelope.kind(), ZeroExecuteKindV6::DecisionRequired);
+    assert!(
+        envelope.decision_view_root().is_none(),
+        "no harness-supplied view context, no fabricated view root"
     );
 
     session.shutdown().expect("shutdown");

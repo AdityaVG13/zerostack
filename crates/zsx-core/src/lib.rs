@@ -66,8 +66,8 @@ pub use connector::SessionApprovalGrantV1;
 pub use connector::ZsxAttemptJournalStatus;
 pub use lower::{METHODS, engine_for, lower};
 pub use result_v6::{
-    SESSION_V6_ENVELOPE_LEGACY_PROTOCOL, SessionEnvelopeContextV1, legacy_envelope_value,
-    legacy_kind_code,
+    SESSION_V6_ENVELOPE_LEGACY_PROTOCOL, SessionEnvelopeContextV1, DecisionViewContextV1,
+    legacy_envelope_value, legacy_kind_code,
 };
 pub use session::{
     SESSION_EXECUTION_QUEUE_CAPACITY, SESSION_EXECUTOR_START_TIMEOUT,

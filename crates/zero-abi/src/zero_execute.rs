@@ -562,6 +562,9 @@ pub enum ZeroExecuteErrorV6 {
     ForbiddenRoot(&'static str),
     EmptyChoices,
     EmptyUnknownReasons,
+    /// A decision-bearing envelope requested a decision view but the typed
+    /// view failed fail-closed construction or certification (V6-R5).
+    InvalidDecisionView(String),
 }
 
 impl fmt::Display for ZeroExecuteErrorV6 {
@@ -588,6 +591,9 @@ impl fmt::Display for ZeroExecuteErrorV6 {
             Self::EmptyChoices => write!(formatter, "DecisionRequired requires nonempty choices"),
             Self::EmptyUnknownReasons => {
                 write!(formatter, "Unknown/fallback kinds require nonempty unknown_reasons")
+            }
+            Self::InvalidDecisionView(detail) => {
+                write!(formatter, "decision view construction failed: {detail}")
             }
         }
     }
