@@ -23,6 +23,8 @@ mod fs_replace;
 mod gc;
 mod gc_lock;
 mod metadata;
+mod migrations;
+mod scrub;
 mod session_wal;
 mod store_root;
 mod zbf;
@@ -45,17 +47,24 @@ pub use cas::{
     CasError, CasReadGate, PutOutcome, SharedCas,
 };
 pub use durable_journal::{
-    AbortReasonV1, ContinuationCartridgeV1, DURABLE_BINDING_SCHEMA_VERSION_V1,
+    AbortReasonV1, BindingLeaseV1, ContinuationCartridgeV1, ContinuationCartridgeV2,
+    DURABLE_BINDING_SCHEMA_VERSION_V1, DURABLE_BINDING_SCHEMA_VERSION_V2,
     DURABLE_JOURNAL_MAX_RECORD_BYTES_V1, DURABLE_JOURNAL_SCHEMA_VERSION_V2,
-    DURABLE_RECEIPT_SCHEMA_VERSION_V1, DurableJournalV2, FaultPlanV1, JournalBindingV1,
-    JournalBoundaryV1, JournalErrorV1, JournalFailureCodeV1, JournalPathsV1, JournalRecordV1,
-    JournalStateV1, OwnerDeathReceiptV1, PublishedRootV1, RecoveryOutcomeV1, RecoveryReceiptV1,
-    RootPublicationReceipt, abort_journal_v1, abort_journal_with_fault_v1, commit_journal_v1,
-    commit_journal_with_fault_v1, durable_journal_contract_v1, initialize_published_root_v1,
-    initialize_published_root_with_fault_v1, prepare_journal_v1, prepare_journal_with_fault_v1,
-    read_continuation_cartridge_v1, read_journal_record_v1, read_published_root_v1,
-    record_owner_death_v1, record_owner_death_with_fault_v1, recover_journal_v1,
-    recover_journal_with_fault_v1,
+    DURABLE_JOURNAL_SCHEMA_VERSION_V3, DURABLE_LEASE_SCHEMA_VERSION_V1,
+    DURABLE_RECEIPT_SCHEMA_VERSION_V1, DurableJournalV2, DurableJournalV3, FaultPlanV1,
+    JournalBindingLike, JournalBindingV1, JournalBindingV2, JournalBoundaryV1, JournalErrorV1,
+    JournalFailureCodeV1, JournalPathsV1, JournalRecordV1, JournalStateV1,
+    OwnerDeathReceiptV1, PublishedRootV1, RecoveryOutcomeV1, RecoveryReceiptV1,
+    RootPublicationReceipt, abort_journal_v1, abort_journal_v2, abort_journal_with_fault_v1,
+    abort_journal_with_fault_v2, commit_journal_v1, commit_journal_v2,
+    commit_journal_with_fault_v1, commit_journal_with_fault_v2, durable_journal_contract_v1,
+    initialize_published_root_v1, initialize_published_root_with_fault_v1, prepare_journal_v1,
+    prepare_journal_v2, prepare_journal_with_fault_v1, prepare_journal_with_fault_v2,
+    read_continuation_cartridge_v1, read_continuation_cartridge_v2, read_journal_record_v1,
+    read_journal_record_v2, read_published_root_v1, record_owner_death_v1,
+    record_owner_death_v2, record_owner_death_with_fault_v1, record_owner_death_with_fault_v2,
+    recover_journal_v1, recover_journal_v2, recover_journal_with_fault_v1,
+    recover_journal_with_fault_v2, verify_committed_binding_v2,
 };
 pub use fs_replace::{
     SyncPolicy, atomic_write_file, atomic_write_file_with_sync, replace_file, sync_unsupported,
@@ -79,6 +88,19 @@ pub use gc_lock::{
     COORDINATOR_LOCK, GC_DIR, LOCK_DEADLINE, LockMode, StoreLock, coordinator_lock_path,
 };
 pub use metadata::ObservationMetadata;
+pub use migrations::{
+    MIGRATION_MARKER_DOMAIN_V1, MIGRATION_RECEIPT_DOMAIN_V1, MIGRATION_RECEIPT_SCHEMA_VERSION_V1,
+    MIGRATION_STEP_DOMAIN_V1, MigrationErrorV1, MigrationMarkerV1, MigrationReceiptV1,
+    MigrationStepOutcomeV1, MigrationStepV1, MigrationTransformV1, STORE_FORMAT_MAX_KNOWN_VERSION_V1,
+    STORE_FORMAT_SCHEMA_VERSION_V1, STORE_FORMAT_VERSION_CURRENT_V1, STORE_FORMAT_VERSION_FILENAME,
+    StoreFormatVersionV1, detect_store_format_version_v1, ensure_format_supported_v1,
+    production_migration_steps_v1, run_store_migrations_v1,
+};
+pub use scrub::{
+    SCRUB_MAX_OBJECT_BYTES_V1, SCRUB_MAX_OBJECTS_PER_PASS_V1, SCRUB_SCHEMA_VERSION_V1,
+    ScrubConfigV1, ScrubErrorV1, ScrubFindingKindV1, ScrubFindingV1, ScrubReceiptV1,
+    read_scrub_receipt_v1, run_scrub_v1,
+};
 pub use session_wal::{
     AppendOutcome, FileIdentity, Replay, SESSION_WAL_DEFAULT_MAX_REPLAY_BYTES,
     SESSION_WAL_DEFAULT_MAX_SEALED_SEGMENTS, SESSION_WAL_MAX_RECORD_BYTES,

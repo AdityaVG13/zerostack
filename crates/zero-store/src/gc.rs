@@ -401,7 +401,7 @@ pub fn gc_atomic_write(path: &Path, bytes: &[u8]) -> io::Result<()> {
     atomic_write_file(path, bytes)
 }
 
-fn gc_join(store_root: &Path, parts: &[&str]) -> PathBuf {
+pub(crate) fn gc_join(store_root: &Path, parts: &[&str]) -> PathBuf {
     parts
         .iter()
         .fold(store_root.join("gc"), |p, part| p.join(part))
@@ -707,7 +707,7 @@ fn is_valid_hash(s: &str) -> bool {
     s.len() == 64 && s.bytes().all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f'))
 }
 
-fn is_valid_pin_id(s: &str) -> bool {
+pub(crate) fn is_valid_pin_id(s: &str) -> bool {
     !s.is_empty()
         && s.len() <= 128
         && s.as_bytes()[0].is_ascii_alphanumeric()
