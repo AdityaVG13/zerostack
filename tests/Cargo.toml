@@ -28,6 +28,10 @@ name = "zerostack-shared-conformance"
 path = "src/main.rs"
 
 [[test]]
+name = "cache_entry_cross_repo"
+path = "rust/shared/cache_entry_cross_repo.rs"
+
+[[test]]
 name = "canonical_dispatch"
 path = "rust/shared/canonical_dispatch.rs"
 
