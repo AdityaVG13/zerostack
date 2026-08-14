@@ -22,6 +22,7 @@ pub mod digest;
 pub mod dispatch;
 pub mod effect;
 pub mod freshness;
+pub mod identity;
 pub mod job;
 pub mod raw_worker;
 pub mod reasoning;
@@ -71,6 +72,17 @@ pub use decision::{
     verdict_permits_selection,
 };
 pub use digest::{contract_digest, contract_digest_hex, sha256, sha256_hex};
+pub use identity::{
+    CancellationSemanticsV1, CONTRACT_VERSION_V1, CoverageGradeV1, EventLogV1, EventRecordV1,
+    FallbackPolicyV1, HarnessContractV1, MessageOrderingV1,
+    IdentityErrorV1, ObjectClassV1, PayloadFormationReceiptV1, ProjectSuccessorCasV1,
+    ProtectedDimensionV1, ProtectedScopeObligationsV1, ROOTED_ABI_VERSION_V6, ROOT_HASH_ALGORITHM,
+    ScopeObligationV1, SerializationSchemeV1, SideEffectPolicyV1, StructuredTaskContractV1,
+    SuccessorOutcomeV1,
+    SuccessorRecordV1, SuccessorUnchangedReasonV1, TaskBudgetV1, TranscriptPolicyV1,
+    canonical_object_bytes,
+    event_log_genesis, object_root, root_preimage, verify_object_root,
+};
 pub use dispatch::{
     ALL_DISPATCH_ERROR_CLASSES, ApprovalGrant, ApprovalRequirement, CANONICAL_DISPATCH_VERSION,
     CanonicalOperation, CanonicalRegistry, CanonicalResource, DispatchContractError,
