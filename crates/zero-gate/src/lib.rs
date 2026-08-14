@@ -37,6 +37,7 @@ pub mod residency;
 pub mod semantic_cut;
 pub mod transaction;
 pub mod two_phase;
+pub mod verifier_registry;
 pub mod verdict;
 pub use aggregate::*;
 pub use asset::*;
@@ -55,6 +56,7 @@ pub use residency::*;
 pub use semantic_cut::*;
 pub use transaction::*;
 pub use two_phase::*;
+pub use verifier_registry::*;
 pub use verdict::*;
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
