@@ -648,6 +648,8 @@ fn unsupported_map_and_set_globals_fail_at_construction() {
     }
 }
 
+// `ctx.payload` yields the exact payload text from a `payload_utf8` receipt
+// (never parsed); `ctx.result` / `ctx.refs` keep hiding transport nesting.
 #[test]
 fn ctx_result_payload_and_refs_hide_transport_nesting() {
     let connector = Rc::new(C {
@@ -665,11 +667,69 @@ fn ctx_result_payload_and_refs_hide_transport_nesting() {
     let host = Host::new(lim(), reg()).unwrap_or_else(|error| panic!("host: {error}"));
     let value = host
         .execute(
-            "const r=await zero.fs.read({});return [ctx.result(r).operation,ctx.payload(r).payload_utf8,ctx.refs(r)[0]];",
+            "const r=await zero.fs.read({});return [ctx.result(r).operation,ctx.payload(r),ctx.refs(r)[0]];",
             connector,
         )
         .expect("ergonomic helpers");
     assert_eq!(value, json!(["fs.read", "hello", "fz://blob/abc"]));
+}
+
+// Destructuring a connector result (an object) with an array pattern used to
+// skip binding silently and surface later as "unknown identifier"; it must
+// fail loud at the destructure site with a repair hint.
+#[test]
+fn destructuring_a_connector_result_fails_loud_at_the_site() {
+    let connector = Rc::new(C::ok());
+    let host = Host::new(lim(), reg()).unwrap_or_else(|error| panic!("host: {error}"));
+    let error = host
+        .execute(
+            "const [a, b] = await zero.fs.read({}); return a;",
+            connector,
+        )
+        .expect_err("array-destructuring an object must fail");
+    let text = error.to_string();
+    assert!(text.contains("cannot destructure"), "{text}");
+    assert!(text.contains("array pattern"), "{text}");
+}
+
+// Unsupported string methods must name the supported set so a failing plan
+// can self-correct without a docs round-trip.
+#[test]
+fn unsupported_string_method_error_lists_supported_methods() {
+    let connector = Rc::new(C::ok());
+    let host = Host::new(lim(), reg()).unwrap_or_else(|error| panic!("host: {error}"));
+    let error = host
+        .execute("return 'abc'.match('b');", connector)
+        .expect_err("match is unsupported");
+    let text = error.to_string();
+    assert!(text.contains("string method 'match'"), "{text}");
+    assert!(text.contains("supported: includes"), "{text}");
+}
+
+// ctx.payload on a payload_utf8 receipt returns the exact text; a caller that
+// knows the payload is JSON parses it explicitly.
+#[test]
+fn ctx_payload_text_round_trips_through_json_parse() {
+    let connector = Rc::new(C {
+        calls: RefCell::new(vec![]),
+        fail: false,
+        delay: Duration::ZERO,
+        result: Some(
+            json!({
+                "metadata":{"ownership":{"refs":["fz://blob/abc"]}},
+                "value":{"operation":"fs.read_many","value":{"payload_utf8":"[\"alpha\",\"beta\"]"},"refs":["fz://blob/abc"]}
+            })
+            .to_string(),
+        ),
+    });
+    let host = Host::new(lim(), reg()).unwrap_or_else(|error| panic!("host: {error}"));
+    let value = host
+        .execute(
+            "const files = await zero.fs.read({}); const texts = JSON.parse(ctx.payload(files)); return texts[1];",
+            connector,
+        )
+        .expect("payload text parses");
+    assert_eq!(value, json!("beta"));
 }
 
 #[test]

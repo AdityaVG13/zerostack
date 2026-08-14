@@ -159,6 +159,20 @@ fn ergonomic_result<'tree>(value: Value<'tree>) -> Value<'tree> {
     }
 }
 
+/// Human-readable kind label for destructure/type faults.
+fn value_kind(value: &Value<'_>) -> &'static str {
+    match value {
+        Value::Undefined => "undefined",
+        Value::Null => "null",
+        Value::Bool(_) => "a boolean",
+        Value::Number(_) => "a number",
+        Value::String(_) => "a string",
+        Value::Array(_) => "an array",
+        Value::Object(_) => "an object (connector result?)",
+        _ => "this value",
+    }
+}
+
 fn ergonomic_payload<'tree>(value: Value<'tree>) -> Value<'tree> {
     let result = ergonomic_result(value);
     object_field(&result, "value").unwrap_or(result)
@@ -687,12 +701,12 @@ impl<'tree> Interpreter<'tree> {
                 .map(|child| self.eval(child))
                 .transpose()?
                 .unwrap_or(Value::Undefined);
-            self.bind(name, value);
+            self.bind(name, value)?;
         }
         Ok(())
     }
 
-    fn bind(&mut self, node: Node<'tree>, value: Value<'tree>) {
+    fn bind(&mut self, node: Node<'tree>, value: Value<'tree>) -> Result<(), Fault<'tree>> {
         match node.kind() {
             "identifier" | "shorthand_property_identifier_pattern" => {
                 self.env
@@ -737,8 +751,15 @@ impl<'tree> Interpreter<'tree> {
                             .collect()
                     };
                     for (target, field) in bindings {
-                        self.bind(target, field);
+                        self.bind(target, field)?;
                     }
+                } else {
+                    // Silent skip here surfaced later as a misleading
+                    // "unknown identifier"; fail loud at the destructure site.
+                    return Err(Fault::Host(HostError::Data(format!(
+                        "cannot destructure {} with an object pattern; bind the result to one name first and access its fields (e.g. `const out = await ...; out.content`)",
+                        value_kind(&value),
+                    ))));
                 }
             }
             "array_pattern" => {
@@ -756,12 +777,18 @@ impl<'tree> Interpreter<'tree> {
                             .collect()
                     };
                     for (part, item) in bindings {
-                        self.bind(part, item);
+                        self.bind(part, item)?;
                     }
+                } else {
+                    return Err(Fault::Host(HostError::Data(format!(
+                        "cannot destructure {} with an array pattern; connector results are objects — bind to one name first (e.g. `const files = await zero.fs.read_many([...]); files.content`)",
+                        value_kind(&value),
+                    ))));
                 }
             }
             _ => {}
         }
+        Ok(())
     }
 
     fn for_statement(&mut self, node: Node<'tree>) -> Result<Control<'tree>, Fault<'tree>> {
@@ -833,7 +860,7 @@ impl<'tree> Interpreter<'tree> {
                     left.child_by_field_name("name")
                         .ok_or_else(|| self.unsupported("for-in binding"))?,
                     item,
-                );
+                )?;
             } else {
                 self.assign(left, item)?;
             }
@@ -891,7 +918,7 @@ impl<'tree> Interpreter<'tree> {
             let value = value.clone();
             if let Some(handler) = node.child_by_field_name("handler") {
                 if let Some(parameter) = handler.child_by_field_name("parameter") {
-                    self.bind(parameter, value);
+                    self.bind(parameter, value)?;
                 }
                 result = self.statement(
                     handler
@@ -1366,7 +1393,7 @@ impl<'tree> Interpreter<'tree> {
                 env.clone(),
                 parameter,
                 args.get(index).cloned().unwrap_or(Value::Undefined),
-            );
+            )?;
         }
         let previous = self.env.clone();
         self.env = env;
@@ -1386,13 +1413,19 @@ impl<'tree> Interpreter<'tree> {
         result
     }
 
-    fn bind_in(&mut self, env: EnvRef<'tree>, node: Node<'tree>, value: Value<'tree>) {
+    fn bind_in(
+        &mut self,
+        env: EnvRef<'tree>,
+        node: Node<'tree>,
+        value: Value<'tree>,
+    ) -> Result<(), Fault<'tree>> {
         if node.kind() == "identifier" {
             env.borrow_mut()
                 .values
                 .insert(self.text(node).into(), value);
+            Ok(())
         } else {
-            self.bind(node, value);
+            self.bind(node, value)
         }
     }
 
@@ -2050,9 +2083,9 @@ impl<'tree> Interpreter<'tree> {
             ("ctx", "result") => Ok(ergonomic_result(
                 args.into_iter().next().unwrap_or(Value::Undefined),
             )),
-            ("ctx", "payload") => Ok(ergonomic_payload(
-                args.into_iter().next().unwrap_or(Value::Undefined),
-            )),
+            ("ctx", "payload") => {
+                self.ctx_payload(args.into_iter().next().unwrap_or(Value::Undefined))
+            }
             ("ctx", "refs") => Ok(ergonomic_refs(
                 args.into_iter().next().unwrap_or(Value::Undefined),
             )),
@@ -2470,7 +2503,9 @@ impl<'tree> Interpreter<'tree> {
                         .collect(),
                 ))
             }
-            _ => Err(Fault::Host(self.unsupported_name(name, "string method"))),
+            _ => Err(Fault::Host(HostError::UnsupportedSyntax(format!(
+                "string method '{name}' is not supported in CodeMode (supported: includes, indexOf, startsWith, endsWith, split, slice, substring, trim, toLowerCase, toUpperCase, repeat, padStart; compose these instead of match/replace)"
+            )))),
         }
     }
 
@@ -3003,6 +3038,26 @@ impl<'tree> Interpreter<'tree> {
             return self.source[argument.end_byte()..node.end_byte()].trim();
         }
         ""
+    }
+
+    /// `ctx.payload`: canonical exact-payload accessor. After the ergonomic
+    /// unwrap, one deterministic rule: a `payload_utf8` receipt yields the
+    /// exact payload text (never parsed — exact stays exact; callers
+    /// `JSON.parse` when they know the payload is JSON), then
+    /// `content.value.value` / `content.value` / `content`, then the
+    /// unwrapped value itself.
+    fn ctx_payload(&mut self, value: Value<'tree>) -> Result<Value<'tree>, Fault<'tree>> {
+        let base = ergonomic_payload(value);
+        if let Some(Value::String(encoded)) = object_field(&base, "payload_utf8") {
+            return Ok(Value::String(encoded));
+        }
+        if let Some(content) = object_field(&base, "content") {
+            if let Some(inner) = object_field(&content, "value") {
+                return Ok(object_field(&inner, "value").unwrap_or(inner));
+            }
+            return Ok(content);
+        }
+        Ok(base)
     }
 
     fn unsupported(&self, kind: &str) -> HostError {
