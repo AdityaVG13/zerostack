@@ -93,7 +93,9 @@ pub use residency::{
     SESSION_Q99_REPORT_SCHEMA, SessionQ99ReportV1, TierQ99ReportV1, tier_of_engine,
 };
 /// Bound untrusted error text for typed zsx envelopes.
-pub use zero_codemode::finalize_visible_error;
+pub use zero_codemode::{
+    finalize_visible_error, GateRuleUsageV1, GateUsageReportV1,
+};
 
 use std::sync::atomic::{AtomicU64, Ordering};
 

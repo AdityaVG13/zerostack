@@ -101,6 +101,10 @@ pub enum ZsxSessionFailureCode {
     /// expired, cross-project, revoked-epoch, already-consumed, or
     /// unoffered-choice (V6-R2, ZS-ADAPTER-004).
     ContinuationRefused,
+    /// The contingent policy attached to an execute request failed
+    /// validation and was refused before any execution began (V6-R3,
+    /// ZS-EXEC-004/007): fail closed, never run with a defective policy.
+    InvalidPolicy,
     Internal,
 }
 
@@ -124,6 +128,7 @@ impl ZsxSessionFailureCode {
             Self::DecisionRequired => "decision_required",
             Self::Cancelled => "cancelled",
             Self::ContinuationRefused => "continuation_refused",
+            Self::InvalidPolicy => "invalid_policy",
             Self::Internal => "internal",
         }
     }
@@ -197,13 +202,16 @@ pub struct ZsxExecutionResult {
 /// One settled execution before legacy/V6 projection: the raw backend
 /// outcome plus the per-request cancellation fact, kept raw so the V6
 /// envelope projection (V6-R1) can prove its kinds from the typed
-/// [`HostError`] instead of a lossy code string.
+/// [`HostError`] instead of a lossy code string. `policy_report` rides the
+/// outcome of a policy execution (V6-R3) and is captured from the gate
+/// before it is restored, on success and failure alike.
 #[derive(Debug)]
 pub(crate) struct ZsxSettledExecution {
     pub result: Option<ZsxExecutionResult>,
     pub verdict: Option<VerdictLoopResult>,
     pub backend_error: Option<HostError>,
     pub request_cancelled: bool,
+    pub policy_report: Option<zero_codemode::GateUsageReportV1>,
 }
 
 impl ZsxSettledExecution {
@@ -228,7 +236,9 @@ impl ZsxSettledExecution {
 /// [`zero_abi::ZeroExecuteResultV6`] envelope. `envelope` is `None` only
 /// when no V6 kind is provable at the session boundary -- plain success
 /// without a safety verdict and content roots, or a transport/lifecycle
-/// failure -- per the honesty law in [`crate::result_v6`].
+/// failure -- per the honesty law in [`crate::result_v6`]. `policy_report`
+/// is the honest usage report of the contingent policy attached to this
+/// execution (V6-R3): `None` when no policy rode in.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ZsxExecutionResultV6 {
     pub generation: u64,
@@ -237,6 +247,10 @@ pub struct ZsxExecutionResultV6 {
     pub metrics: Option<ZsxExecutionMetrics>,
     pub error: Option<ZsxSessionError>,
     pub envelope: Option<zero_abi::ZeroExecuteResultV6>,
+    /// Honest per-rule usage of the attached contingent policy over this
+    /// execution: every rule with its match count and the explicit list of
+    /// rules that never matched. `None` when no policy was attached.
+    pub policy_report: Option<zero_codemode::GateUsageReportV1>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, serde::Serialize)]
@@ -273,11 +287,25 @@ enum ZsxCommand {
         timeout: Duration,
         approval_grants: Vec<SessionApprovalGrantV1>,
         verdict_envelope: Option<VerdictLoopEnvelope>,
-        /// One-shot contingent policy that supplies a resumed decision; a
-        /// resume re-executes the recorded plan with this gate (V6-R2).
-        resume_gate: Option<zero_abi::ContingentPolicyV1>,
-        reply:
-            SyncSender<Result<(Value, ZsxExecutionMetrics, Option<VerdictLoopResult>), HostError>>,
+        /// One-shot contingent policy installed on the host decision gate
+        /// for exactly this execution (V6-R2 continuation resume; V6-R3
+        /// ordinary execute requests with an attached policy). The gate is
+        /// restored to the policy-less fail-closed state after settle.
+        contingent_policy: Option<zero_abi::ContingentPolicyV1>,
+        /// The policy usage report rides the outcome on success AND backend
+        /// failure alike: a policy that never matched an observation is
+        /// honest bookkeeping even when the plan aborted.
+        reply: SyncSender<
+            Result<
+                (
+                    Value,
+                    ZsxExecutionMetrics,
+                    Option<VerdictLoopResult>,
+                    Option<zero_codemode::GateUsageReportV1>,
+                ),
+                (HostError, Option<zero_codemode::GateUsageReportV1>),
+            >,
+        >,
     },
     Replace {
         generation: u64,
@@ -519,12 +547,17 @@ impl ZsxExecutor {
     }
 
     /// Execute one plan with the host's decision gate temporarily replaced
-    /// by a one-shot contingent policy (V6-R2 continuation resume). The gate
-    /// is installed immediately before the plan runs and restored to the
-    /// policy-less fail-closed state when the execution settles, whatever
-    /// the outcome. The executor is single-threaded, so the host gate is
-    /// only ever consulted by this execution.
-    fn execute_with_resume_policy(
+    /// by the attached contingent policy (V6-R2 continuation resume; V6-R3
+    /// ordinary execute requests). The policy is validated fail-closed
+    /// first -- a defective policy is refused before the gate is touched and
+    /// before any execution begins. The gate is installed immediately before
+    /// the plan runs and restored to the policy-less fail-closed state when
+    /// the execution settles, whatever the outcome; the honest usage report
+    /// is captured from the gate between settle and restore, so it always
+    /// describes exactly this execution (success and abort alike). The
+    /// executor is single-threaded, so the host gate is only ever consulted
+    /// by this execution.
+    fn execute_with_contingent_policy(
         &mut self,
         generation: u64,
         request_id: u64,
@@ -533,7 +566,23 @@ impl ZsxExecutor {
         approval_grants: Vec<SessionApprovalGrantV1>,
         verdict_envelope: Option<VerdictLoopEnvelope>,
         policy: &zero_abi::ContingentPolicyV1,
-    ) -> Result<(Value, ZsxExecutionMetrics, Option<VerdictLoopResult>), HostError> {
+    ) -> Result<
+        (
+            Value,
+            ZsxExecutionMetrics,
+            Option<VerdictLoopResult>,
+            Option<zero_codemode::GateUsageReportV1>,
+        ),
+        (HostError, Option<zero_codemode::GateUsageReportV1>),
+    > {
+        policy.validate().map_err(|error| {
+            (
+                HostError::Data(format!(
+                    "invalid contingent policy refused before execution: {error}"
+                )),
+                None,
+            )
+        })?;
         self.host
             .set_decision_gate(zero_codemode::DecisionGate::new(Some(policy.clone())));
         let outcome = self.execute_with_context(
@@ -544,9 +593,13 @@ impl ZsxExecutor {
             approval_grants,
             verdict_envelope,
         );
+        let policy_report = self.host.decision_gate_usage_report();
         self.host
             .set_decision_gate(zero_codemode::DecisionGate::default());
-        outcome
+        match outcome {
+            Ok((value, metrics, verdict)) => Ok((value, metrics, verdict, policy_report)),
+            Err(error) => Err((error, policy_report)),
+        }
     }
 
     fn publish_reachability(&self) -> Result<(), HostError> {
@@ -1082,6 +1135,116 @@ impl ZsxSession {
                     metrics: None,
                     error: Some(error),
                     envelope: Some(envelope),
+                    policy_report: None,
+                })
+            }
+            Err(error) => Err(error),
+        }
+    }
+
+    /// Execute one plan with a typed contingent policy attached (V6-R3,
+    /// ZS-EXEC-004/007): the policy rides the ordinary execute request and
+    /// is installed on the host's decision gate for exactly this execution
+    /// (restored to the policy-less fail-closed state after settle), so
+    /// covered decision points resolve within one call and uncovered ones
+    /// still abort with `DecisionRequired`. The policy is validated
+    /// fail-closed before anything executes -- a defective policy is
+    /// refused with `InvalidPolicy` without consuming the request id.
+    /// Every policy rule is reported honestly in `policy_report`, including
+    /// rules that never matched (unused-rule report), on success and abort
+    /// alike.
+    pub fn execute_with_policy_v6(
+        &self,
+        generation: u64,
+        request_id: u64,
+        source: impl Into<String>,
+        policy: &zero_abi::ContingentPolicyV1,
+        timeout: Duration,
+        ledger: crate::result_v6::SessionEnvelopeContextV1,
+    ) -> Result<ZsxExecutionResultV6, ZsxSessionError> {
+        self.execute_with_approvals_and_policy_v6(
+            generation,
+            request_id,
+            source,
+            policy,
+            timeout,
+            Vec::new(),
+            ledger,
+        )
+    }
+
+    /// Execute with approval grants plus a typed contingent policy attached
+    /// (V6-R3, ZS-EXEC-004/007). The policy is validated fail-closed before
+    /// admission: an invalid policy is refused synchronously with
+    /// `InvalidPolicy` and the request id is not consumed. The policy is
+    /// installed on the host decision gate for exactly this execution and
+    /// restored after settle; covered observations resolve within one call,
+    /// uncovered ones abort with the typed `DecisionRequired`, and the
+    /// result carries the honest per-rule usage report (unused rules are
+    /// listed, never silently dropped).
+    pub fn execute_with_approvals_and_policy_v6(
+        &self,
+        generation: u64,
+        request_id: u64,
+        source: impl Into<String>,
+        policy: &zero_abi::ContingentPolicyV1,
+        timeout: Duration,
+        approval_grants: Vec<SessionApprovalGrantV1>,
+        ledger: crate::result_v6::SessionEnvelopeContextV1,
+    ) -> Result<ZsxExecutionResultV6, ZsxSessionError> {
+        ledger.validate().map_err(|detail| {
+            ZsxSessionError::new(
+                ZsxSessionFailureCode::Internal,
+                generation,
+                Some(request_id),
+                format!("invalid V6 envelope context: {detail}"),
+            )
+        })?;
+        policy.validate().map_err(|detail| {
+            ZsxSessionError::new(
+                ZsxSessionFailureCode::InvalidPolicy,
+                generation,
+                Some(request_id),
+                format!("invalid contingent policy refused before execution: {detail}"),
+            )
+        })?;
+        let project_root = self.lock_state(Some(request_id))?.root.clone();
+        match self.execute_settled(
+            generation,
+            request_id,
+            source,
+            timeout,
+            approval_grants,
+            None,
+            Some(policy.clone()),
+        ) {
+            Ok(settled) => {
+                self.project_v6(generation, request_id, settled, project_root, &ledger)
+            }
+            Err(error)
+                if matches!(
+                    error.code,
+                    ZsxSessionFailureCode::InvalidApproval
+                        | ZsxSessionFailureCode::ApprovalReplay
+                ) =>
+            {
+                let envelope = crate::result_v6::failed_no_authority(Some(&project_root), &ledger)
+                    .map_err(|build| {
+                        ZsxSessionError::new(
+                            ZsxSessionFailureCode::Internal,
+                            generation,
+                            Some(request_id),
+                            format!("envelope projection failed: {build}"),
+                        )
+                    })?;
+                Ok(ZsxExecutionResultV6 {
+                    generation,
+                    request_id,
+                    value: None,
+                    metrics: None,
+                    error: Some(error),
+                    envelope: Some(envelope),
+                    policy_report: None,
                 })
             }
             Err(error) => Err(error),
@@ -1128,6 +1291,7 @@ impl ZsxSession {
                                 metrics: None,
                                 error: legacy_error,
                                 envelope: None,
+                                policy_report: settled.policy_report,
                             });
                         }
                     }
@@ -1149,6 +1313,7 @@ impl ZsxSession {
             metrics: settled.result.as_ref().map(|result| result.metrics.clone()),
             error: legacy_error,
             envelope,
+            policy_report: settled.policy_report,
         })
     }
 
@@ -1194,7 +1359,7 @@ impl ZsxSession {
         timeout: Duration,
         approval_grants: Vec<SessionApprovalGrantV1>,
         verdict_envelope: Option<VerdictLoopEnvelope>,
-        resume_gate: Option<zero_abi::ContingentPolicyV1>,
+        contingent_policy: Option<zero_abi::ContingentPolicyV1>,
     ) -> Result<ZsxSettledExecution, ZsxSessionError> {
         let (reply_tx, reply_rx) = mpsc::sync_channel(1);
         let approval_ids = {
@@ -1242,7 +1407,7 @@ impl ZsxSession {
             timeout,
             approval_grants,
             verdict_envelope,
-            resume_gate,
+            contingent_policy,
             reply: reply_tx,
         }) {
             Ok(()) => {}
@@ -1292,8 +1457,8 @@ impl ZsxSession {
             })?;
             slot.cancelled_requests.remove(&(generation, request_id))
         };
-        let (result, verdict, backend_error) = match backend_result {
-            Ok(Ok((value, metrics, verdict))) => (
+        let (result, verdict, backend_error, policy_report) = match backend_result {
+            Ok(Ok((value, metrics, verdict, policy_report))) => (
                 Some(ZsxExecutionResult {
                     generation,
                     request_id,
@@ -1302,8 +1467,9 @@ impl ZsxSession {
                 }),
                 verdict,
                 None,
+                policy_report,
             ),
-            Ok(Err(error)) => (None, None, Some(error)),
+            Ok(Err((error, policy_report))) => (None, None, Some(error), policy_report),
             Err(error) => {
                 return Err(ZsxSessionError::new(
                     ZsxSessionFailureCode::BackendUnavailable,
@@ -1318,6 +1484,7 @@ impl ZsxSession {
             verdict,
             backend_error,
             request_cancelled,
+            policy_report,
         })
     }
 
@@ -1953,13 +2120,16 @@ fn session_worker(
                 timeout,
                 approval_grants,
                 verdict_envelope,
-                resume_gate,
+                contingent_policy,
                 reply,
             } => {
                 let result = match executor.as_mut() {
-                    None => Err(HostError::Runtime("session executor is unavailable".into())),
-                    Some(executor) => match resume_gate {
-                        Some(policy) => executor.execute_with_resume_policy(
+                    None => Err((
+                        HostError::Runtime("session executor is unavailable".into()),
+                        None,
+                    )),
+                    Some(executor) => match contingent_policy {
+                        Some(policy) => executor.execute_with_contingent_policy(
                             generation,
                             request_id,
                             &source,
@@ -1968,14 +2138,17 @@ fn session_worker(
                             verdict_envelope,
                             &policy,
                         ),
-                        None => executor.execute_with_context(
-                            generation,
-                            request_id,
-                            &source,
-                            timeout,
-                            approval_grants,
-                            verdict_envelope,
-                        ),
+                        None => executor
+                            .execute_with_context(
+                                generation,
+                                request_id,
+                                &source,
+                                timeout,
+                                approval_grants,
+                                verdict_envelope,
+                            )
+                            .map(|(value, metrics, verdict)| (value, metrics, verdict, None))
+                            .map_err(|error| (error, None)),
                     },
                 };
                 let _ = reply.send(result);

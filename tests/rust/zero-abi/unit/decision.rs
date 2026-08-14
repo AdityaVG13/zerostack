@@ -47,14 +47,16 @@
         assert_eq!(
             policy.resolve(&point, "fast"),
             PolicyResolutionV1::Selected {
-                alternative: "run_fast".into()
+                alternative: "run_fast".into(),
+                rule_index: 0
             }
         );
         // Any matches everything else offered.
         assert_eq!(
             policy.resolve(&point, "slow"),
             PolicyResolutionV1::Selected {
-                alternative: "run_full".into()
+                alternative: "run_full".into(),
+                rule_index: 1
             }
         );
         // Different observation class never matches.
@@ -123,9 +125,11 @@
             PolicyResolutionV1::PolicyError(DecisionErrorV1::AlternativeNotOffered {
                 decision_id,
                 alternative,
+                rule_index,
             }) => {
                 assert_eq!(decision_id, "dec:1");
                 assert_eq!(alternative, "not_offered");
+                assert_eq!(rule_index, 0);
             }
             other => panic!("expected AlternativeNotOffered, got {other:?}"),
         }

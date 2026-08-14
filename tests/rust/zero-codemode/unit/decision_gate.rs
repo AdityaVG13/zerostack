@@ -215,3 +215,80 @@
             outcome.result
         );
     }
+
+    /// V6-R3: the gate reports which rules matched and which never did, in
+    /// policy order, after one execution.
+    #[test]
+    fn usage_report_tracks_matched_and_unused_rules() {
+        let host = test_host(100_000).with_decision_gate(DecisionGate::new(Some(policy(vec![
+            rule(ObservedMatchV1::Exact { value: "fast".into() }, "run_fast"),
+            rule(ObservedMatchV1::Exact { value: "slow".into() }, "run_full"),
+        ]))));
+        let outcome = host.execute_measured(&require_plan(), Rc::new(NullConnector));
+        assert!(outcome.result.is_ok(), "covered decision resolves");
+        let report = host
+            .decision_gate_usage_report()
+            .expect("a policy execution reports usage");
+        assert_eq!(report.observations, 1);
+        assert_eq!(report.rules.len(), 2);
+        assert_eq!(report.rules[0].rule_index, 0);
+        assert_eq!(report.rules[0].matched_observations, 1);
+        assert_eq!(report.rules[1].rule_index, 1);
+        assert_eq!(report.rules[1].matched_observations, 0);
+        assert_eq!(report.unused_rule_indexes, vec![1]);
+    }
+
+    /// V6-R3: with no policy attached there is nothing to report.
+    #[test]
+    fn usage_report_is_none_without_policy() {
+        let host = test_host(100_000);
+        let outcome = host.execute_measured(&require_plan(), Rc::new(NullConnector));
+        assert!(matches!(&outcome.result, Err(HostError::DecisionRequired(_))));
+        assert!(host.decision_gate_usage_report().is_none());
+    }
+
+    /// V6-R3: an uncovered observation aborts, and the report still lists
+    /// every rule as unused -- the coverage gap is visible, never silently
+    /// dropped.
+    #[test]
+    fn uncovered_observation_reports_all_rules_unused() {
+        let host = test_host(100_000).with_decision_gate(DecisionGate::new(Some(policy(vec![
+            rule(ObservedMatchV1::Exact { value: "fast".into() }, "run_fast"),
+        ]))));
+        let plan = format!(
+            "const point = {}; return await zero.decision.require(point, 'unexpected');",
+            point_json(&["run_fast", "run_full"])
+        );
+        let outcome = host.execute_measured(&plan, Rc::new(NullConnector));
+        assert!(matches!(&outcome.result, Err(HostError::DecisionRequired(_))));
+        let report = host
+            .decision_gate_usage_report()
+            .expect("a policy execution reports usage");
+        assert_eq!(report.observations, 1);
+        assert_eq!(report.rules[0].matched_observations, 0);
+        assert_eq!(report.unused_rule_indexes, vec![0]);
+    }
+
+    /// V6-R3: a matched rule that selects an unoffered alternative still
+    /// counts as used in the report -- the abort is loud and the usage is
+    /// honest.
+    #[test]
+    fn policy_error_rule_counts_as_matched() {
+        let host = test_host(100_000).with_decision_gate(DecisionGate::new(Some(policy(vec![
+            rule(ObservedMatchV1::Any, "not_offered"),
+        ]))));
+        let outcome = host.execute_measured(&require_plan(), Rc::new(NullConnector));
+        assert!(
+            matches!(
+                &outcome.result,
+                Err(HostError::Data(message)) if message.contains("decision policy error")
+            ),
+            "expected loud policy error, got {:?}",
+            outcome.result
+        );
+        let report = host
+            .decision_gate_usage_report()
+            .expect("a policy execution reports usage");
+        assert_eq!(report.rules[0].matched_observations, 1);
+        assert!(report.unused_rule_indexes.is_empty());
+    }

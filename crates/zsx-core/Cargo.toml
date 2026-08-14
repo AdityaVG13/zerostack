@@ -83,3 +83,8 @@ path = "../../tests/rust/zsx-core/verdict_loop_canonical.rs"
 name = "continuation_resume"
 path = "../../tests/rust/zsx-core/continuation_resume.rs"
 required-features = ["fixture-adapters"]
+
+[[test]]
+name = "execute_with_policy"
+path = "../../tests/rust/zsx-core/execute_with_policy.rs"
+required-features = ["fixture-adapters"]

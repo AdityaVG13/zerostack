@@ -24,7 +24,11 @@ pub enum DecisionErrorV1 {
     InvalidObservationClass(String),
     InvalidDecisionPoint(String),
     InvalidPolicyRule(String),
-    AlternativeNotOffered { decision_id: String, alternative: String },
+    AlternativeNotOffered {
+        decision_id: String,
+        alternative: String,
+        rule_index: usize,
+    },
     InvalidPolicy(String),
 }
 
@@ -41,9 +45,10 @@ impl fmt::Display for DecisionErrorV1 {
             Self::AlternativeNotOffered {
                 decision_id,
                 alternative,
+                rule_index,
             } => write!(
                 formatter,
-                "policy rule selects alternative {alternative} not offered by decision point {decision_id}"
+                "policy rule {rule_index} selects alternative {alternative} not offered by decision point {decision_id}"
             ),
             Self::InvalidPolicy(detail) => write!(formatter, "invalid policy: {detail}"),
         }
@@ -278,7 +283,7 @@ impl ContingentPolicyV1 {
         point: &SemanticDecisionPointV1,
         observed_value: &str,
     ) -> PolicyResolutionV1 {
-        for rule in &self.rules {
+        for (rule_index, rule) in self.rules.iter().enumerate() {
             if rule.observation_class != point.observation_class {
                 continue;
             }
@@ -297,10 +302,12 @@ impl ContingentPolicyV1 {
                 return PolicyResolutionV1::PolicyError(DecisionErrorV1::AlternativeNotOffered {
                     decision_id: point.decision_id.clone(),
                     alternative: rule.select_alternative.clone(),
+                    rule_index,
                 });
             }
             return PolicyResolutionV1::Selected {
                 alternative: rule.select_alternative.clone(),
+                rule_index,
             };
         }
         PolicyResolutionV1::Uncovered {
@@ -323,9 +330,11 @@ impl ContingentPolicyV1 {
 /// Result of resolving a decision point against a contingent policy.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum PolicyResolutionV1 {
-    /// A covering rule selected an offered alternative. This is the ONLY
-    /// resolution that lets execution continue within one call.
-    Selected { alternative: String },
+    /// A covering rule selected an offered alternative, carrying the index
+    /// of the matching rule (policy order) so callers can report usage
+    /// honestly. This is the ONLY resolution that lets execution continue
+    /// within one call.
+    Selected { alternative: String, rule_index: usize },
     /// No rule covered the observation; the decision must be surfaced as
     /// `DecisionRequired` and execution must stop (no private selection).
     Uncovered { decision_required: DecisionRequiredV1 },

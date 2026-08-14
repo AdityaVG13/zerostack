@@ -232,17 +232,28 @@ impl Host {
     }
 
     /// Replace the decision gate for the next execution. Used by the session
-    /// continuation runtime (V6-R2) to resume an aborted plan with the
-    /// model's decision supplied as a one-shot contingent policy; the caller
-    /// restores the policy-less gate after the execution settles. The
-    /// interpreter consults the gate only while a plan runs, so replacing it
-    /// between executions is safe on the single-threaded session executor.
+    /// runtime (V6-R2 continuation resume; V6-R3 ordinary execute requests
+    /// with an attached contingent policy) to run a plan with the supplied
+    /// policy as the gate; the caller restores the policy-less gate after
+    /// the execution settles. The interpreter consults the gate only while a
+    /// plan runs, so replacing it between executions is safe on the
+    /// single-threaded session executor.
     pub fn set_decision_gate(&mut self, gate: DecisionGate) {
         self.decision_gate = gate;
     }
 
     pub(crate) fn decision_gate(&self) -> &DecisionGate {
         &self.decision_gate
+    }
+
+    /// Honest usage report of the decision gate's attached policy over the
+    /// last execution (V6-R3, ZS-EXEC-004/007): every rule with its match
+    /// count plus the explicit unused-rule list. `None` when no policy is
+    /// attached. The session captures this between the execution settling
+    /// and restoring the policy-less gate, so the report always describes
+    /// exactly the execution it rode in on.
+    pub fn decision_gate_usage_report(&self) -> Option<crate::GateUsageReportV1> {
+        self.decision_gate.usage_report()
     }
 
     /// Publish results larger than `max_json_bytes` into the content-addressed

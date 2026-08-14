@@ -11,7 +11,10 @@ pub mod worker;
 mod wrap;
 pub use cancellation::CancellationSignal;
 
-pub use decision_gate::{DECISION_REQUIRE_METHOD, DECISION_SURFACE, DecisionGate, GateResolutionV1};
+pub use decision_gate::{
+    DECISION_REQUIRE_METHOD, DECISION_SURFACE, DecisionGate, GateResolutionV1, GateRuleUsageV1,
+    GateUsageReportV1,
+};
 
 pub use edit_protocol::{
     EDIT_PROTOCOL_VERSION, EditError, EditErrorClass, EditOp, EditPlan, RefKind, Side, classify_ref,
