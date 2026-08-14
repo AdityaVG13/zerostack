@@ -33,6 +33,7 @@ mod connector;
 mod help;
 mod lower;
 mod residency;
+mod result_v6;
 mod session;
 mod verdict;
 
@@ -64,11 +65,15 @@ pub use adapter::{
 pub use connector::SessionApprovalGrantV1;
 pub use connector::ZsxAttemptJournalStatus;
 pub use lower::{METHODS, engine_for, lower};
+pub use result_v6::{
+    SESSION_V6_ENVELOPE_LEGACY_PROTOCOL, SessionEnvelopeContextV1, legacy_envelope_value,
+    legacy_kind_code,
+};
 pub use session::{
     SESSION_EXECUTION_QUEUE_CAPACITY, SESSION_EXECUTOR_START_TIMEOUT,
     SESSION_REPLACEMENT_SETTLE_TIMEOUT, SessionReplacementReason, SessionReplacementReceipt,
-    ZsxBuilder, ZsxExecutionMetrics, ZsxExecutionResult, ZsxSession, ZsxSessionCancellation,
-    ZsxSessionError, ZsxSessionFailureCode,
+    ZsxBuilder, ZsxExecutionMetrics, ZsxExecutionResult, ZsxExecutionResultV6, ZsxSession,
+    ZsxSessionCancellation, ZsxSessionError, ZsxSessionFailureCode,
 };
 pub use verdict::{
     VERDICT_LOOP_RECEIPT_SCHEMA, VerdictDecision, VerdictLoopEnvelope, VerdictLoopReceiptV1,

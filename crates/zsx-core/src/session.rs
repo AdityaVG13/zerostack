@@ -189,6 +189,51 @@ pub struct ZsxExecutionResult {
     pub metrics: ZsxExecutionMetrics,
 }
 
+/// One settled execution before legacy/V6 projection: the raw backend
+/// outcome plus the per-request cancellation fact, kept raw so the V6
+/// envelope projection (V6-R1) can prove its kinds from the typed
+/// [`HostError`] instead of a lossy code string.
+#[derive(Debug)]
+pub(crate) struct ZsxSettledExecution {
+    pub result: Option<ZsxExecutionResult>,
+    pub verdict: Option<VerdictLoopResult>,
+    pub backend_error: Option<HostError>,
+    pub request_cancelled: bool,
+}
+
+impl ZsxSettledExecution {
+    /// Legacy projection of the backend failure, exactly the pre-V6 code:
+    /// a cancelled request reports `Cancelled`, otherwise the typed backend
+    /// failure code. `None` on success.
+    fn legacy_error(&self, generation: u64, request_id: u64) -> Option<ZsxSessionError> {
+        self.backend_error.as_ref().map(|error| {
+            let code = if self.request_cancelled {
+                ZsxSessionFailureCode::Cancelled
+            } else {
+                backend_failure_code(error)
+            };
+            ZsxSessionError::new(code, generation, Some(request_id), error.to_string())
+        })
+    }
+}
+
+/// The V6 envelope emission of one execution (V6-R1, ZS-ADAPTER-003,
+/// ZS-EXEC-003): the legacy-visible value, metrics, and typed error
+/// (unchanged for existing consumers) plus the kind-tagged
+/// [`zero_abi::ZeroExecuteResultV6`] envelope. `envelope` is `None` only
+/// when no V6 kind is provable at the session boundary -- plain success
+/// without a safety verdict and content roots, or a transport/lifecycle
+/// failure -- per the honesty law in [`crate::result_v6`].
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ZsxExecutionResultV6 {
+    pub generation: u64,
+    pub request_id: u64,
+    pub value: Option<Value>,
+    pub metrics: Option<ZsxExecutionMetrics>,
+    pub error: Option<ZsxSessionError>,
+    pub envelope: Option<zero_abi::ZeroExecuteResultV6>,
+}
+
 #[derive(Clone, Debug, Eq, PartialEq, serde::Serialize)]
 pub struct ZsxExecutionMetrics {
     pub host: ExecutionMetrics,
@@ -903,6 +948,155 @@ impl ZsxSession {
         .map(|(result, _)| result)
     }
 
+    /// Execute one plan and emit the V6 result envelope (V6-R1,
+    /// ZS-ADAPTER-003, ZS-EXEC-003) alongside the legacy-visible result.
+    ///
+    /// The envelope is kind-tagged and honest: it is emitted only when the
+    /// session can prove the kind -- an uncovered decision point surfaces as
+    /// `DecisionRequired` with the typed question/choices/continuation
+    /// handle, a cancelled request as `Cancelled`, and an approval/permit
+    /// rejection as `FailedNoAuthority`. A plain successful execution has no
+    /// provable V6 kind at the session boundary (no safety verdict, no
+    /// content roots), so `envelope` is `None` and the legacy value/metrics
+    /// are returned unchanged; the legacy `error` field keeps the pre-V6
+    /// typed failure so existing consumers keep working.
+    pub fn execute_v6(
+        &self,
+        generation: u64,
+        request_id: u64,
+        source: impl Into<String>,
+        timeout: Duration,
+        ledger: crate::result_v6::SessionEnvelopeContextV1,
+    ) -> Result<ZsxExecutionResultV6, ZsxSessionError> {
+        self.execute_with_approvals_v6(generation, request_id, source, timeout, Vec::new(), ledger)
+    }
+
+    /// Execute with approval grants and emit the V6 result envelope. An
+    /// approval/permit admission rejection is a provable `FailedNoAuthority`
+    /// outcome, so it returns the envelope together with the legacy typed
+    /// error instead of a bare error.
+    pub fn execute_with_approvals_v6(
+        &self,
+        generation: u64,
+        request_id: u64,
+        source: impl Into<String>,
+        timeout: Duration,
+        approval_grants: Vec<SessionApprovalGrantV1>,
+        ledger: crate::result_v6::SessionEnvelopeContextV1,
+    ) -> Result<ZsxExecutionResultV6, ZsxSessionError> {
+        ledger.validate().map_err(|detail| {
+            ZsxSessionError::new(
+                ZsxSessionFailureCode::Internal,
+                generation,
+                Some(request_id),
+                format!("invalid V6 envelope context: {detail}"),
+            )
+        })?;
+        let project_root = self.lock_state(Some(request_id))?.root.clone();
+        match self.execute_settled(
+            generation,
+            request_id,
+            source,
+            timeout,
+            approval_grants,
+            None,
+        ) {
+            Ok(settled) => {
+                self.project_v6(generation, request_id, settled, project_root, &ledger)
+            }
+            Err(error)
+                if matches!(
+                    error.code,
+                    ZsxSessionFailureCode::InvalidApproval
+                        | ZsxSessionFailureCode::ApprovalReplay
+                ) =>
+            {
+                let envelope = crate::result_v6::failed_no_authority(Some(&project_root), &ledger)
+                    .map_err(|build| {
+                        ZsxSessionError::new(
+                            ZsxSessionFailureCode::Internal,
+                            generation,
+                            Some(request_id),
+                            format!("envelope projection failed: {build}"),
+                        )
+                    })?;
+                Ok(ZsxExecutionResultV6 {
+                    generation,
+                    request_id,
+                    value: None,
+                    metrics: None,
+                    error: Some(error),
+                    envelope: Some(envelope),
+                })
+            }
+            Err(error) => Err(error),
+        }
+    }
+
+    /// Project one settled execution onto the V6 envelope. Honest kinds
+    /// only: `DecisionRequired` from the typed payload, `Cancelled` from a
+    /// cancelled request, `FailedNoAuthority` from approval admission
+    /// rejections (handled by the caller); everything else keeps the legacy
+    /// shape with no envelope.
+    fn project_v6(
+        &self,
+        generation: u64,
+        request_id: u64,
+        settled: ZsxSettledExecution,
+        project_root: String,
+        ledger: &crate::result_v6::SessionEnvelopeContextV1,
+    ) -> Result<ZsxExecutionResultV6, ZsxSessionError> {
+        let legacy_error = settled.legacy_error(generation, request_id);
+        let envelope = match &settled.backend_error {
+            None => None,
+            Some(host_error) => {
+                let built = if settled.request_cancelled {
+                    crate::result_v6::cancelled(Some(&project_root), ledger)
+                } else {
+                    match host_error {
+                        HostError::DecisionRequired(payload) => crate::result_v6::decision_required(
+                            payload,
+                            generation,
+                            request_id,
+                            Some(&project_root),
+                            ledger,
+                        ),
+                        // Deadline, method/surface, verdict-rejection, and
+                        // connector failures have no provable V6 kind at the
+                        // session boundary: they remain legacy errors with no
+                        // envelope.
+                        _ => {
+                            return Ok(ZsxExecutionResultV6 {
+                                generation,
+                                request_id,
+                                value: None,
+                                metrics: None,
+                                error: legacy_error,
+                                envelope: None,
+                            });
+                        }
+                    }
+                };
+                Some(built.map_err(|build| {
+                    ZsxSessionError::new(
+                        ZsxSessionFailureCode::Internal,
+                        generation,
+                        Some(request_id),
+                        format!("envelope projection failed: {build}"),
+                    )
+                })?)
+            }
+        };
+        Ok(ZsxExecutionResultV6 {
+            generation,
+            request_id,
+            value: settled.result.as_ref().map(|result| result.value.clone()),
+            metrics: settled.result.as_ref().map(|result| result.metrics.clone()),
+            error: legacy_error,
+            envelope,
+        })
+    }
+
     /// Execute one bounded server-side verdict loop. The plan may compose and
     /// poll ordinary typed capabilities, but its only public value is the
     /// exact string `pass` or `fail`; accounting is returned separately.
@@ -932,7 +1126,12 @@ impl ZsxSession {
         })
     }
 
-    fn execute_internal(
+    /// Settle one execution through the session worker: admission, queue,
+    /// and per-request cancellation bookkeeping stay here; the raw backend
+    /// outcome is returned for legacy/V6 projection (V6-R1). Admission and
+    /// lifecycle failures surface as errors; backend failures surface raw in
+    /// [`ZsxSettledExecution`].
+    fn execute_settled(
         &self,
         generation: u64,
         request_id: u64,
@@ -940,7 +1139,7 @@ impl ZsxSession {
         timeout: Duration,
         approval_grants: Vec<SessionApprovalGrantV1>,
         verdict_envelope: Option<VerdictLoopEnvelope>,
-    ) -> Result<(ZsxExecutionResult, Option<VerdictLoopResult>), ZsxSessionError> {
+    ) -> Result<ZsxSettledExecution, ZsxSessionError> {
         let (reply_tx, reply_rx) = mpsc::sync_channel(1);
         let approval_ids = {
             let mut state = self.lock_state(Some(request_id))?;
@@ -1036,37 +1235,63 @@ impl ZsxSession {
             })?;
             slot.cancelled_requests.remove(&(generation, request_id))
         };
-        let (value, metrics, verdict) = match backend_result {
-            Ok(Ok(value)) => Ok(value),
-            Ok(Err(error)) => {
-                let code = if request_cancelled {
-                    ZsxSessionFailureCode::Cancelled
-                } else {
-                    backend_failure_code(&error)
-                };
-                Err(ZsxSessionError::new(
-                    code,
+        let (result, verdict, backend_error) = match backend_result {
+            Ok(Ok((value, metrics, verdict))) => (
+                Some(ZsxExecutionResult {
+                    generation,
+                    request_id,
+                    value,
+                    metrics,
+                }),
+                verdict,
+                None,
+            ),
+            Ok(Err(error)) => (None, None, Some(error)),
+            Err(error) => {
+                return Err(ZsxSessionError::new(
+                    ZsxSessionFailureCode::BackendUnavailable,
                     generation,
                     Some(request_id),
-                    error.to_string(),
-                ))
+                    format!("session executor dropped the result: {error}"),
+                ));
             }
-            Err(error) => Err(ZsxSessionError::new(
-                ZsxSessionFailureCode::BackendUnavailable,
-                generation,
-                Some(request_id),
-                format!("session executor dropped the result: {error}"),
-            )),
-        }?;
-        Ok((
-            ZsxExecutionResult {
-                generation,
-                request_id,
-                value,
-                metrics,
-            },
+        };
+        Ok(ZsxSettledExecution {
+            result,
             verdict,
-        ))
+            backend_error,
+            request_cancelled,
+        })
+    }
+
+    /// Legacy projection of one settled execution: backend failures become
+    /// typed [`ZsxSessionError`]s exactly as before V6 (a cancelled request
+    /// reports `Cancelled`, a typed backend failure keeps its code), so
+    /// existing consumers keep working unchanged.
+    fn execute_internal(
+        &self,
+        generation: u64,
+        request_id: u64,
+        source: impl Into<String>,
+        timeout: Duration,
+        approval_grants: Vec<SessionApprovalGrantV1>,
+        verdict_envelope: Option<VerdictLoopEnvelope>,
+    ) -> Result<(ZsxExecutionResult, Option<VerdictLoopResult>), ZsxSessionError> {
+        let settled = self.execute_settled(
+            generation,
+            request_id,
+            source,
+            timeout,
+            approval_grants,
+            verdict_envelope,
+        )?;
+        let legacy = settled.legacy_error(generation, request_id);
+        match (settled.result, settled.verdict, settled.backend_error) {
+            (Some(result), verdict, None) => Ok((result, verdict)),
+            (None, None, Some(_)) => Err(legacy
+                .expect("a backend failure always projects a legacy error")),
+            _ => unreachable!("a settled execution has exactly one of result or backend error"),
+        }
     }
 
     /// Reconcile the durable mutation attempt journals of one request.
