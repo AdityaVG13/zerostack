@@ -414,145 +414,30 @@ impl WorkerClient {
                 (child, pipes, None)
             }
         };
-        let stdin = match pipes.stdin {
-            Some(pipe) => pipe,
-            None => {
-                return Err(cleanup_partial(
-                    &child,
-                    &spec.session_id,
-                    config.shutdown_timeout,
-                    "worker stdin unavailable",
-                ));
-            }
-        };
-        let stdout = match pipes.stdout {
-            Some(pipe) => pipe,
-            None => {
-                return Err(cleanup_partial(
-                    &child,
-                    &spec.session_id,
-                    config.shutdown_timeout,
-                    "worker stdout unavailable",
-                ));
-            }
-        };
-        let stderr = match pipes.stderr {
-            Some(pipe) => pipe,
-            None => {
-                return Err(cleanup_partial(
-                    &child,
-                    &spec.session_id,
-                    config.shutdown_timeout,
-                    "worker stderr unavailable",
-                ));
-            }
-        };
+        let stdin = require_pipe(
+            pipes.stdin,
+            &child,
+            &spec.session_id,
+            config.shutdown_timeout,
+            "worker stdin unavailable",
+        )?;
+        let stdout = require_pipe(
+            pipes.stdout,
+            &child,
+            &spec.session_id,
+            config.shutdown_timeout,
+            "worker stdout unavailable",
+        )?;
+        let stderr = require_pipe(
+            pipes.stderr,
+            &child,
+            &spec.session_id,
+            config.shutdown_timeout,
+            "worker stderr unavailable",
+        )?;
 
-        let (writer, writer_requests) = mpsc::sync_channel(1);
-        thread::spawn(move || {
-            let mut stdin = stdin;
-            while let Ok(WriterRequest::Write {
-                bytes,
-                acknowledgement,
-            }) = writer_requests.recv()
-            {
-                let result = stdin.write_all(&bytes).and_then(|_| stdin.flush());
-                let failed = result.is_err();
-                let _ = acknowledgement.send(result);
-                if failed {
-                    break;
-                }
-            }
-        });
-
-        let (tx, output) = mpsc::sync_channel(1);
-        let max_frame = config.limits.max_frame_bytes as usize;
-        thread::spawn(move || {
-            let mut reader = BufReader::new(stdout);
-            loop {
-                let mut line = Vec::new();
-                match reader
-                    .by_ref()
-                    .take((max_frame.saturating_add(2)) as u64)
-                    .read_until(b'\n', &mut line)
-                {
-                    Ok(0) => {
-                        let _ = tx.send(OutputEvent::Eof);
-                        break;
-                    }
-                    Ok(_) => {
-                        let actual = line.strip_suffix(b"\n").unwrap_or(&line).len();
-                        if actual > max_frame {
-                            let _ = tx.send(OutputEvent::Bounds(actual));
-                            break;
-                        }
-                        if tx
-                            .send(OutputEvent::Frame {
-                                bytes: line,
-                                arrived_at: Instant::now(),
-                            })
-                            .is_err()
-                        {
-                            break;
-                        }
-                    }
-                    Err(error) => {
-                        let _ = tx.send(OutputEvent::Io(error));
-                        break;
-                    }
-                }
-            }
-        });
-
-        let stderr_state = Arc::new((Mutex::new(StderrState::default()), Condvar::new()));
-        let stderr_writer = stderr_state.clone();
-        let stderr_max = config.max_stderr_bytes;
-        let stderr_observer = config.observer.clone();
-        let stderr_engine = spec.engine;
-        thread::spawn(move || {
-            let mut reader = stderr;
-            let mut buf = [0_u8; 4096];
-            let mut reported = false;
-            loop {
-                let count = match reader.read(&mut buf) {
-                    Ok(0) => {
-                        if let Ok(mut state) = stderr_writer.0.lock() {
-                            state.complete = true;
-                            stderr_writer.1.notify_all();
-                        }
-                        break;
-                    }
-                    Err(_) => {
-                        stderr_writer.1.notify_all();
-                        break;
-                    }
-                    Ok(count) => count,
-                };
-                let mut state = match stderr_writer.0.lock() {
-                    Ok(state) => state,
-                    Err(_) => break,
-                };
-                state.total = state.total.saturating_add(count as u64);
-                let take = stderr_max.saturating_sub(state.bytes.len()).min(count);
-                state.bytes.extend_from_slice(&buf[..take]);
-                stderr_writer.1.notify_all();
-                if state.total > stderr_max as u64 && !reported {
-                    reported = true;
-                    if let Some(observer) = &stderr_observer {
-                        observer(&WorkerObservation {
-                            event: WorkerEvent::BoundsError,
-                            engine: stderr_engine,
-                            request_id: None,
-                            elapsed_ms: 0,
-                            input_bytes: 0,
-                            output_bytes: 0,
-                            stderr_bytes: state.total,
-                            settlement: None,
-                        });
-                    }
-                }
-            }
-        });
+        let (writer, output, stderr_state) =
+            spawn_stdio_threads(stdin, stdout, stderr, &config, spec.engine);
 
         let mut client = Self {
             engine: spec.engine,
@@ -572,71 +457,78 @@ impl WorkerClient {
             shutdown: false,
         };
         client.observe(WorkerEvent::Started, None, Duration::ZERO, 0, 0);
+        client.handshake_or_reap(&spec)?;
+        Ok(client)
+    }
+
+    /// Run the handshake send/recv/ack/validate protocol. Every failure site
+    /// kills and reaps the child before returning -- no leaked worker.
+    fn handshake_or_reap(&mut self, spec: &WorkerSpec) -> Result<(), WorkerAdapterError> {
         let request = match spec.handshake() {
             Ok(request) => request,
             Err(error) => {
-                client.kill_and_reap();
+                self.kill_and_reap();
                 return Err(error);
             }
         };
         let started = Instant::now();
-        let handshake_deadline = match checked_deadline(config.handshake_timeout, None) {
+        let handshake_deadline = match checked_deadline(self.config.handshake_timeout, None) {
             Ok(deadline) => deadline,
             Err(error) => {
-                client.kill_and_reap();
+                self.kill_and_reap();
                 return Err(error);
             }
         };
-        if let Err(error) = client.send(
+        if let Err(error) = self.send(
             &WorkerRequestFrame::Handshake {
                 request: request.clone(),
             },
             handshake_deadline,
         ) {
-            client.kill_and_reap();
+            self.kill_and_reap();
             return Err(error);
         }
-        let response = match client.receive_until(handshake_deadline, None) {
+        let response = match self.receive_until(handshake_deadline, None) {
             Ok(response) => response,
             Err(error) => {
-                client.kill_and_reap();
+                self.kill_and_reap();
                 return Err(error);
             }
         };
         let ack = match response {
             WorkerResponseFrame::HandshakeAck { ack } => ack,
             other => {
-                client.kill_and_reap();
+                self.kill_and_reap();
                 return Err(WorkerAdapterError::Handshake(format!(
                     "expected handshake_ack, got {other:?}"
                 )));
             }
         };
-        if let Err(error) = client.validate_handshake(&request, &ack) {
-            client.kill_and_reap();
+        if let Err(error) = self.validate_handshake(&request, &ack) {
+            self.kill_and_reap();
             return Err(error);
         }
-        client.negotiated_limits.max_frame_bytes = client
+        self.negotiated_limits.max_frame_bytes = self
             .negotiated_limits
             .max_frame_bytes
             .min(ack.limits.max_frame_bytes);
-        client.negotiated_limits.max_output_bytes = client
+        self.negotiated_limits.max_output_bytes = self
             .negotiated_limits
             .max_output_bytes
             .min(ack.limits.max_output_bytes);
-        client.negotiated_limits.max_in_flight = 1;
-        client.negotiated_limits.default_deadline_ms = client
+        self.negotiated_limits.max_in_flight = 1;
+        self.negotiated_limits.default_deadline_ms = self
             .negotiated_limits
             .default_deadline_ms
             .min(ack.limits.default_deadline_ms);
-        client.observe(
+        self.observe(
             WorkerEvent::Handshake,
             None,
             started.elapsed(),
             0,
-            client.last_output_bytes,
+            self.last_output_bytes,
         );
-        Ok(client)
+        Ok(())
     }
 
     fn validate_handshake(
@@ -796,32 +688,19 @@ impl WorkerClient {
                         worker_token_accounting,
                     };
                     let completion = Ok(result);
-                    let completion_bytes = self.last_output_bytes;
-                    if cancel_sent && !cancel_rejected {
-                        if pending_completion
-                            .replace((completion, completion_bytes, seed))
-                            .is_some()
-                        {
-                            return self.protocol_terminate(
-                                "duplicate completion before cancel acknowledgement".into(),
-                            );
-                        }
-                        continue;
-                    }
-                    self.accounting.requests = self.accounting.requests.saturating_add(1);
-                    let settlement = match finalize_settlement(seed, started) {
-                        Ok(receipt) => receipt,
-                        Err(message) => return self.protocol_terminate(message),
-                    };
-                    self.observe_with_settlement(
-                        WorkerEvent::Dispatch,
-                        Some(id),
-                        started.elapsed(),
+                    match self.settle_or_defer_until_cancel_ack(
+                        completion,
+                        seed,
+                        cancel_sent,
+                        cancel_rejected,
+                        &mut pending_completion,
+                        started,
+                        &id,
                         input,
-                        self.last_output_bytes,
-                        Some(settlement),
-                    );
-                    return completion;
+                    ) {
+                        Some(outcome) => return outcome,
+                        None => continue,
+                    }
                 }
                 WorkerResponseFrame::Error {
                     request_id: Some(request_id),
@@ -860,32 +739,19 @@ impl WorkerClient {
                         details: error.details.map(Box::new),
                         trace: trace.map(Box::new),
                     });
-                    let completion_bytes = self.last_output_bytes;
-                    if cancel_sent && !cancel_rejected {
-                        if pending_completion
-                            .replace((completion, completion_bytes, seed))
-                            .is_some()
-                        {
-                            return self.protocol_terminate(
-                                "duplicate completion before cancel acknowledgement".into(),
-                            );
-                        }
-                        continue;
-                    }
-                    self.accounting.requests = self.accounting.requests.saturating_add(1);
-                    let settlement = match finalize_settlement(seed, started) {
-                        Ok(receipt) => receipt,
-                        Err(message) => return self.protocol_terminate(message),
-                    };
-                    self.observe_with_settlement(
-                        WorkerEvent::Dispatch,
-                        Some(id),
-                        started.elapsed(),
+                    match self.settle_or_defer_until_cancel_ack(
+                        completion,
+                        seed,
+                        cancel_sent,
+                        cancel_rejected,
+                        &mut pending_completion,
+                        started,
+                        &id,
                         input,
-                        self.last_output_bytes,
-                        Some(settlement),
-                    );
-                    return completion;
+                    ) {
+                        Some(outcome) => return outcome,
+                        None => continue,
+                    }
                 }
                 WorkerResponseFrame::CancelAck {
                     request_id,
@@ -1207,6 +1073,55 @@ impl WorkerClient {
         }
     }
 
+    /// Settle one completion (Result or Error frame, opposite polarity) or,
+    /// while a cancel is outstanding and unrejected, defer it until the
+    /// cancel acknowledgement arrives. Returns `Some(outcome)` to return
+    /// from the dispatch loop or `None` to keep looping. The CancelAck-true
+    /// path stays in `dispatch_inner`.
+    #[allow(clippy::too_many_arguments)]
+    fn settle_or_defer_until_cancel_ack(
+        &mut self,
+        completion: Result<WorkerResult, WorkerAdapterError>,
+        seed: SettlementSeed,
+        cancel_sent: bool,
+        cancel_rejected: bool,
+        pending_completion: &mut Option<(
+            Result<WorkerResult, WorkerAdapterError>,
+            u64,
+            SettlementSeed,
+        )>,
+        started: Instant,
+        id: &str,
+        input: u64,
+    ) -> Option<Result<WorkerResult, WorkerAdapterError>> {
+        let completion_bytes = self.last_output_bytes;
+        if cancel_sent && !cancel_rejected {
+            if pending_completion
+                .replace((completion, completion_bytes, seed))
+                .is_some()
+            {
+                return Some(self.protocol_terminate(
+                    "duplicate completion before cancel acknowledgement".into(),
+                ));
+            }
+            return None;
+        }
+        self.accounting.requests = self.accounting.requests.saturating_add(1);
+        let settlement = match finalize_settlement(seed, started) {
+            Ok(receipt) => receipt,
+            Err(message) => return Some(self.protocol_terminate(message)),
+        };
+        self.observe_with_settlement(
+            WorkerEvent::Dispatch,
+            Some(id.to_string()),
+            started.elapsed(),
+            input,
+            self.last_output_bytes,
+            Some(settlement),
+        );
+        Some(completion)
+    }
+
     fn protocol_terminate<T>(&mut self, message: String) -> Result<T, WorkerAdapterError> {
         self.observe(
             WorkerEvent::ProtocolError,
@@ -1446,6 +1361,141 @@ fn cleanup_partial(
     let _ = child.signal_graceful_for(owner, 0, grace);
     let _ = child.revoke();
     WorkerAdapterError::Configuration(message.into())
+}
+
+/// Require one spawned stdio pipe; a missing pipe tears the partial child
+/// down with the pipe-specific reason.
+fn require_pipe<T>(
+    pipe: Option<T>,
+    child: &VerifiedChild,
+    owner: &str,
+    grace: Duration,
+    reason: &str,
+) -> Result<T, WorkerAdapterError> {
+    pipe.ok_or_else(|| cleanup_partial(child, owner, grace, reason))
+}
+
+/// Spawn the three stdio service threads (stdin writer, framed stdout
+/// reader, bounded stderr capture) as one linear phase. Intentionally one
+/// function: the phase is a unit, not three independent helpers.
+fn spawn_stdio_threads(
+    stdin: std::process::ChildStdin,
+    stdout: std::process::ChildStdout,
+    stderr: std::process::ChildStderr,
+    config: &WorkerClientConfig,
+    engine: EngineIdentity,
+) -> (
+    mpsc::SyncSender<WriterRequest>,
+    mpsc::Receiver<OutputEvent>,
+    Arc<(Mutex<StderrState>, Condvar)>,
+) {
+    let (writer, writer_requests) = mpsc::sync_channel(1);
+    thread::spawn(move || {
+        let mut stdin = stdin;
+        while let Ok(WriterRequest::Write {
+            bytes,
+            acknowledgement,
+        }) = writer_requests.recv()
+        {
+            let result = stdin.write_all(&bytes).and_then(|_| stdin.flush());
+            let failed = result.is_err();
+            let _ = acknowledgement.send(result);
+            if failed {
+                break;
+            }
+        }
+    });
+
+    let (tx, output) = mpsc::sync_channel(1);
+    let max_frame = config.limits.max_frame_bytes as usize;
+    thread::spawn(move || {
+        let mut reader = BufReader::new(stdout);
+        loop {
+            let mut line = Vec::new();
+            match reader
+                .by_ref()
+                .take((max_frame.saturating_add(2)) as u64)
+                .read_until(b'\n', &mut line)
+            {
+                Ok(0) => {
+                    let _ = tx.send(OutputEvent::Eof);
+                    break;
+                }
+                Ok(_) => {
+                    let actual = line.strip_suffix(b"\n").unwrap_or(&line).len();
+                    if actual > max_frame {
+                        let _ = tx.send(OutputEvent::Bounds(actual));
+                        break;
+                    }
+                    if tx
+                        .send(OutputEvent::Frame {
+                            bytes: line,
+                            arrived_at: Instant::now(),
+                        })
+                        .is_err()
+                    {
+                        break;
+                    }
+                }
+                Err(error) => {
+                    let _ = tx.send(OutputEvent::Io(error));
+                    break;
+                }
+            }
+        }
+    });
+
+    let stderr_state = Arc::new((Mutex::new(StderrState::default()), Condvar::new()));
+    let stderr_writer = stderr_state.clone();
+    let stderr_max = config.max_stderr_bytes;
+    let stderr_observer = config.observer.clone();
+    let stderr_engine = engine;
+    thread::spawn(move || {
+        let mut reader = stderr;
+        let mut buf = [0_u8; 4096];
+        let mut reported = false;
+        loop {
+            let count = match reader.read(&mut buf) {
+                Ok(0) => {
+                    if let Ok(mut state) = stderr_writer.0.lock() {
+                        state.complete = true;
+                        stderr_writer.1.notify_all();
+                    }
+                    break;
+                }
+                Err(_) => {
+                    stderr_writer.1.notify_all();
+                    break;
+                }
+                Ok(count) => count,
+            };
+            let mut state = match stderr_writer.0.lock() {
+                Ok(state) => state,
+                Err(_) => break,
+            };
+            state.total = state.total.saturating_add(count as u64);
+            let take = stderr_max.saturating_sub(state.bytes.len()).min(count);
+            state.bytes.extend_from_slice(&buf[..take]);
+            stderr_writer.1.notify_all();
+            if state.total > stderr_max as u64 && !reported {
+                reported = true;
+                if let Some(observer) = &stderr_observer {
+                    observer(&WorkerObservation {
+                        event: WorkerEvent::BoundsError,
+                        engine: stderr_engine,
+                        request_id: None,
+                        elapsed_ms: 0,
+                        input_bytes: 0,
+                        output_bytes: 0,
+                        stderr_bytes: state.total,
+                        settlement: None,
+                    });
+                }
+            }
+        }
+    });
+
+    (writer, output, stderr_state)
 }
 
 fn telemetry_response_mismatch(
