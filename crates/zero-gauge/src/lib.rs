@@ -14,6 +14,8 @@ use std::fmt;
 use std::num::NonZeroU64;
 use std::str::FromStr;
 
+pub mod solver;
+
 /// Closed set of engines that can own an ordinal reference.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum EngineScheme {

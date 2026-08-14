@@ -36,6 +36,12 @@
 //! - **Unforgeable exactness gates.** [`ExactnessGates`] has no public boolean
 //!   setter: each gate is raised only by presenting a verified evidence handle
 //!   ([`ArchiveAttestation`], [`PolicyEvidence`], [`TaskAcceptanceReceipt`]).
+//! - **V6 metric completion.** [`resource_classes`] adds typed non-token
+//!   ledger classes with honest exactness labels and provider-bill
+//!   reconciliation; [`charging_maps`] stores the disjoint six-phase
+//!   lower-bound maps with overlap checking and Gamma closure;
+//!   [`campaign`] allocates cold-build cost over reuse campaigns;
+//!   [`frontier`] computes the normalized Frontier Closure decomposition.
 //! - **No I/O, sync only.** charge() is a handful of integer adds and performs
 //!   no allocation.
 
@@ -44,8 +50,14 @@ use std::fmt;
 use serde::de::{self, Deserializer, Visitor};
 use serde::{Deserialize, Serialize, Serializer};
 
+pub mod campaign;
 pub mod causal_work;
+pub mod charging_maps;
 pub mod fresh_work;
+pub mod frontier;
+pub mod resource_classes;
+
+pub use campaign::{CampaignError, ReuseCampaign};
 
 pub use causal_work::{
     CAUSAL_WORK_MAX_CHARGES, CAUSAL_WORK_MAX_ID_BYTES, CAUSAL_WORK_RECEIPT_SCHEMA_V1,
@@ -55,6 +67,19 @@ pub use causal_work::{
     LegacyChargeClassV2, LegacyClassMappingV1, ParentCounterIdentityV1, ParentCounterObservationV1,
     ParentCounterWindowV1, ResiduePolicyV1, causal_work_contract_digest_v1,
     causal_work_contract_manifest_v1, map_legacy_class_v2,
+};
+
+pub use charging_maps::{
+    ChargingEntry, ChargingMap, ChargingMapError, ChargingMapSet, ChargingPhase, ClosureReport,
+    PhasePolicy,
+};
+
+pub use frontier::{FrontierClosure, FrontierError, FrontierTerm, LimitingBurden};
+
+pub use resource_classes::{
+    BillLineReconciliation, BillLineStatus, MeasurementSource, ProviderBillLine,
+    ProviderBillReconciliation, ReconciliationState, ResourceClass, ResourceClassParseError,
+    ResourceLedger, ResourceRow, ResourceTotal,
 };
 
 pub use fresh_work::{ActionFreshWork, FreshWorkComponent, FreshWorkVector, SessionFreshWork};
@@ -1301,6 +1326,30 @@ pub enum LedgerError {
     },
     /// An action record carried no action identity.
     EmptyActionId,
+    /// A provider bill line carried an empty provider identity.
+    EmptyBillProvider,
+    /// A billed coordinate has no ledger rows: work went uncharged.
+    HiddenUnchargedWork {
+        /// Billing provider.
+        provider: String,
+        /// Billed resource class.
+        class: &'static str,
+        /// Amount the provider billed.
+        billed: u64,
+    },
+    /// A ledger total deviated beyond a bill line's declared tolerance.
+    OutOfTolerance {
+        /// Billing provider.
+        provider: String,
+        /// Billed resource class.
+        class: &'static str,
+        /// Amount the provider billed.
+        billed: u64,
+        /// Ledger-derived total for the coordinate.
+        ledger: u128,
+        /// Declared tolerance in ppm.
+        tolerance_ppm: u32,
+    },
 }
 
 impl fmt::Display for LedgerError {
@@ -1357,6 +1406,27 @@ impl fmt::Display for LedgerError {
             Self::EmptyActionId => {
                 f.write_str("fresh-work action record requires a nonempty action id")
             }
+            Self::EmptyBillProvider => {
+                f.write_str("a provider bill line requires a nonempty provider identity")
+            }
+            Self::HiddenUnchargedWork {
+                provider,
+                class,
+                billed,
+            } => write!(
+                f,
+                "{provider} billed {billed} {class} but no ledger row charges that class: hidden uncharged work"
+            ),
+            Self::OutOfTolerance {
+                provider,
+                class,
+                billed,
+                ledger,
+                tolerance_ppm,
+            } => write!(
+                f,
+                "{provider} billed {billed} {class} but the ledger records {ledger}, beyond the declared {tolerance_ppm} ppm tolerance"
+            ),
         }
     }
 }
