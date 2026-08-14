@@ -25,6 +25,6 @@ question
 
 CodeMode can execute this sequence as one JavaScript plan. Standard MCP mode exposes equivalent engine capabilities as individual tool calls. A deployment selects one mode, never both. [ADR 0001](adr/0001-codemode-execution-boundary.md) proposes the normative one-runtime boundary, aggregate raw-worker topology, ownership, and gates.
 
-## Source and release model
+## Source
 
-The engines remain separate repositories and release independently. Consumers should build each backend from that engine repository's `origin/main` unless a versioned release says otherwise. This hub remains the canonical place for suite-level status and contracts.
+The engines are separate repositories. This hub holds the shared contracts, the composition host, and the docs that describe how the pieces fit.

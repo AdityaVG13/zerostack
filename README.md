@@ -1,92 +1,156 @@
 # ZeroStack
 
-**Recovery-aware context infrastructure for AI coding agents.**
+Context infrastructure for coding agents: three engines, one composition host, typed recoverable refs.
 
-ZeroStack combines three focused engines into one context-efficient system. TokenZero compresses tool output, FSZero understands the live filesystem, and GraphZero answers structural code questions. One by one they are useful. Together they turn bulky intermediate results into small, recoverable references that agents can compose without flooding their context window.
+TokenZero compacts tool output. FSZero reads and changes the live tree. GraphZero answers structural questions. ZeroStack is the hub that defines their shared contracts and runs them in one process so agents keep evidence without stuffing every intermediate byte into the model context.
 
-> **Project status:** TokenZero is public. FSZero and GraphZero are private and under active development. This repository is the canonical documentation, benchmark, and conformance hub. It does not contain the engine implementations.
+## How it fits together
 
-## The stack
-
-| Component | Purpose | Status |
-| --- | --- | --- |
-| [TokenZero](https://github.com/AdityaVG13/tokenzero) | Compresses, deduplicates, and selectively expands tool output | Public |
-| FSZero | Provides live filesystem reads, search, planning, and safe mutations | Private, in development |
-| GraphZero | Provides repository orientation, dependency analysis, impact, and recall | Private, in development |
-
-The engines remain independently useful and independently versioned. ZeroStack defines how their results compose.
-
-~~~text
-FSZero reads and changes files ─┐
-GraphZero maps code structure ──┼─> recoverable refs ─> agent context
-TokenZero compacts and expands ─┘
-~~~
-
-See [component overviews](docs/components.md) and [architecture](docs/architecture.md).
-
-## RACC: recover, do not repeat
-
-ZeroStack is built on **recovery-aware context compression (RACC)**. Large tool results are stored outside the model context and replaced with typed handles:
-
-- `tz://` for TokenZero results
-- `fz://` for FSZero results
-- `gz://` for GraphZero results
-
-A ref is not a lossy summary. It is a compact pointer to recoverable output. Agents can pass refs between steps, expand only the exact lines or symbols they need, and avoid paying repeatedly for the same bytes. This keeps the working context small while preserving access to evidence.
-
-Read [RACC and typed refs](racc/RACC.md).
-
-## Native runtime and MCP compatibility
-
-The canonical runtime is `zsx-core`. It embeds FSZero, GraphZero, and TokenZero domain adapters in one process. The `zsx` executable, Pi adapter, OMP adapter, and Node binding all use that same session authority, including configured Pi subagents. No worker process, session socket, or daemon exists.
-
-`zero-mcp` is a separate optional FastMCP compatibility carrier. A deployment chooses native CodeMode or MCP registration for a harness surface. It never exposes both catalogs at once.
-
-Read [CodeMode and MCP compatibility](docs/codemode.md).
-
-## Why the combination matters
-
-- FSZero finds the exact live bytes and performs controlled changes.
-- GraphZero narrows work to relevant definitions, callers, tests, and impact paths.
-- TokenZero keeps every intermediate result recoverable without keeping it visible.
-- CodeMode lets the three engines run as one batched workflow.
-
-The result is a context pipeline, not three unrelated tools.
-
-## Repository contents
-
-| Path | Contents |
+| Piece | Job |
 | --- | --- |
-| [crates/](crates/) | Shared foundation crates used by all three engines |
-| [docs/](docs/) | Public architecture, RACC, CodeMode, and component guides |
+| [TokenZero](https://github.com/AdityaVG13/tokenzero) | Compact, deduplicate, and selectively expand tool output (`tz://`) |
+| FSZero | Live filesystem read, search, and controlled mutation (`fz://`) |
+| GraphZero | Orientation, callers, impact, recall (`gz://`) |
+| This repo | Shared ABI, refs, store, process identity, CodeMode host, `zsx` |
 
-Engine source belongs in the three engine repositories, not here. Other harnesses and CLIs should build engine backends from each repository's `origin/main`; this hub is the canonical aggregation and documentation point.
+The engines stay independent. They do not import each other. This hub composes them.
 
-## Shared foundation crates
+```
+FSZero  (bytes)     ─┐
+GraphZero (structure)─┼─> typed refs ─> agent context
+TokenZero (tokens)  ─┘
+```
 
-The engines share contract-critical infrastructure through small foundation crates in [crates/](crates/):
+## RACC
 
-- **zero-abi** -- canonical JSON encoding, JSON Schema normalization and structural comparison, the operation contract digest, and raw-worker v2 as the shared canonical dispatch contract.
-- **zero-ref** -- the ZeroRef v1 portable blob ref: parser, canonical formatter, fragment selection, and the shared golden-vector fixture. One grammar, one selection algebra, byte-identical across engines.
-- **zero-store** -- the canonical content-addressed store layout (blobs/sha256/hh/hash) with the crash-safe, concurrency-safe publish protocol and digest-verified reads.
-- **zero-process** -- native process identity, owner-death notification, and exact child-tree lifecycle primitives. Engines keep only thin compatibility adapters over this hub authority.
-- **zero-machine-permit** -- the shared machine-permit issue/verify surface and scoped permit-base contract for isolating permit roots. It delegates generic process identity to `zero-process`. All publishable foundation packages use the `zero-*` prefix; the source directory retains its historical path until a separately approved filesystem cleanup.
+**Recovery-aware context compression.** A large tool result is stored and replaced with a short typed handle plus a bounded preview. The handle is not a summary. Later steps expand only the lines or symbols they need, or pass the ref onward.
 
-The production runtime links the three engine domain APIs through reviewed, pinned dependencies. Generic interpreter, lifecycle, store, ref, ABI, and MCP authority remains in this hub.
+| Ref | Producer |
+| --- | --- |
+| `tz://` | TokenZero |
+| `fz://` | FSZero |
+| `gz://` | GraphZero |
 
-## Development use only
+See [racc/RACC.md](racc/RACC.md).
 
-ZeroStack has no release or publication lifecycle. It is public only because
-FSZero, GraphZero, and TokenZero consume this shared base. Do not publish tags,
-bundles, registry packages, native prebuilds, or harness adapters from this
-repository. There is no public install path. Local development builds `zsx`
-from this checkout.
+## CodeMode
 
-`pi-zsx` is an internal adapter under active development in `pi-stack`. It must
-not be published without new, explicit owner approval.
+The canonical runtime is `zsx`. It embeds the three engines in-process and executes one JavaScript plan. There is no worker process and no session socket.
 
-## Current limitations
+```js
+const [files, graph] = await Promise.all([
+  zero.fs.compound("search", { query: "recoverable ref" }),
+  zero.graph.orient("context", "architecture"),
+]);
 
-ZeroStack is not a public installable product. Benchmark artifacts may describe
-evolving implementations, and private components can change without a release
-cadence. Status labels in this README are the source of truth.
+return { files: files.content, graph: graph.content };
+```
+
+Every public `zero.*` call returns `zero-result/v1`: `ack` plus `content` that is either inline or a typed ref.
+
+```js
+const run = await zero.token.shell("echo hi");
+if (run.content.kind === "inline") {
+  return run.content.value;
+}
+return await zero.token.expand(run.content.ref);
+```
+
+`zero-mcp` is an optional FastMCP carrier for harnesses that want ordinary tool calls. A deployment uses CodeMode or MCP, not both catalogs at once.
+
+More: [docs/codemode.md](docs/codemode.md), [docs/architecture.md](docs/architecture.md).
+
+## `zsx`
+
+```text
+zsx exec -C ROOT [--file PLAN] [--timeout-ms N]
+```
+
+Plan from `--file` or stdin. JSON on stdout. Default timeout 30000 ms.
+
+```bash
+cargo build -p zsx --release
+./target/release/zsx exec -C "$PWD" --file plan.js
+```
+
+```bash
+printf '%s\n' 'return (await zero.fs.compound("read", { path: "README.md" })).content;' \
+  | ./target/release/zsx exec -C "$PWD"
+```
+
+## Build
+
+Rust nightly as pinned in [`rust-toolchain.toml`](rust-toolchain.toml). License: MIT OR Apache-2.0.
+
+```bash
+git clone https://github.com/AdityaVG13/zerostack.git
+cd zerostack
+cargo build -p zero-abi -p zero-ref -p zero-store
+```
+
+`zsx` links the three engines through `zsx-core`. That crate expects sibling checkouts:
+
+```text
+AI/
+  ZeroStack/     # this repo
+  FSZero/
+  GraphZero/
+  TokenZero/
+```
+
+```bash
+cargo build -p zsx --release
+./target/release/zsx --help
+```
+
+Foundation crates (no engine source):
+
+| Crate | Role |
+| --- | --- |
+| `zero-abi` | JSON contract, schema normalize, operation digest, raw-worker v2 |
+| `zero-ref` | ZeroRef v1 parse, format, fragment select |
+| `zero-store` | Content-addressed blob layout and publish protocol |
+| `zero-process` | Process identity, owner-death, child-tree lifecycle |
+| `zero-codemode` | Restricted in-process CodeMode host |
+| `zero-gate` | Proof-carrying decision gate |
+| `zero-ledger` / `zero-gauge` / `zero-cert` | Accounting, ordinal refs, evidence certificates |
+| `zero-mcp` | Optional FastMCP stdio carrier |
+| `zsx` / `zsx-core` / `zsx-node` | Single-process executable, composition core, Node binding |
+
+## Layout
+
+| Path | What |
+| --- | --- |
+| [`crates/`](crates/) | Hub crates listed above |
+| [`docs/`](docs/) | Architecture, CodeMode, MCP policy |
+| [`racc/`](racc/) | RACC notes |
+| [`conformance/`](conformance/) | Contracts |
+| [`tests/`](tests/) | Shared test tree (`zero-testkit` plus crate `[[test]]` targets) |
+
+## Limitations
+
+- Building `zsx` needs the three engine checkouts on the paths `zsx-core` declares. The foundation crates build on their own.
+- CodeMode and MCP are alternative surfaces. Do not register both.
+- Intermediate results stay out of the model only if the agent keeps refs and expands on demand. Dumping payloads back into the prompt undoes RACC.
+
+## FAQ
+
+**Is this a replacement for the three engines?**
+No. The engines own their domains. This repo owns contracts, the store/ref/ABI, and the process that composes them.
+
+**Can I call one engine without the others?**
+Yes. Each engine is its own repository. TokenZero is at [AdityaVG13/tokenzero](https://github.com/AdityaVG13/tokenzero).
+
+**Why JavaScript plans instead of one tool call per step?**
+A plan can fan out, reuse refs, and return one small result. The bulky intermediates never have to re-enter the model.
+
+**Does `zsx` start a daemon?**
+No. `zsx exec` runs the session in that process and exits.
+
+## About Contributions
+
+> *About Contributions:* Please don't take this the wrong way, but I do not accept outside contributions for any of my projects. I simply don't have the mental bandwidth to review anything, and it's my name on the thing, so I'm responsible for any problems it causes; thus, the risk-reward is highly asymmetric from my perspective. I'd also have to worry about other "stakeholders," which seems unwise for tools I mostly make for myself for free. Feel free to submit issues, and even PRs if you want to illustrate a proposed fix, but know I won't merge them directly. Instead, I'll have Claude or Codex review submissions via `gh` and independently decide whether and how to address them. Bug reports in particular are welcome. Sorry if this offends, but I want to avoid wasted time and hurt feelings. I understand this isn't in sync with the prevailing open-source ethos that seeks community contributions, but it's the only way I can move at this velocity and keep my sanity.
+
+## License
+
+MIT OR Apache-2.0.
