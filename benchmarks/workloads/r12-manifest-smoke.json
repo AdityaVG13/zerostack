@@ -1,0 +1,36 @@
+{
+  "schema_version": 1,
+  "benchmark_id": "r12-manifest-smoke",
+  "requirement_id": "ZS-BENCH-001",
+  "title": "Manifest smoke workload for the R12 benchmark execution program",
+  "workload": {
+    "fixture_kind": "deterministic-fixture-v1",
+    "trials_required": 300,
+    "seed": 1,
+    "adapter_parameters": {}
+  },
+  "q99": {
+    "success_target_num": 99,
+    "success_target_den": 100,
+    "alpha_num": 1,
+    "alpha_den": 20,
+    "independent": true,
+    "design_effect_num": null,
+    "design_effect_den": null
+  },
+  "metrics": [
+    {
+      "name": "exact_reads",
+      "kind": "exact"
+    },
+    {
+      "name": "wall_clock_nanos",
+      "kind": "estimate"
+    }
+  ],
+  "parameters": {
+    "fixture_kind": "deterministic-fixture-v1",
+    "prefix_mode": "retained"
+  },
+  "workload_digest": "1d252c151603a72ce9a2e515ecef95ae4aae365b19635da23fe45cc09b00c5d4"
+}

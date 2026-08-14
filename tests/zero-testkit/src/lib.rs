@@ -26,6 +26,8 @@ pub mod aggregate_broker_gate;
 pub mod assembly_kat;
 #[cfg(feature = "full")]
 pub mod authority;
+#[cfg(feature = "full")]
+pub mod bench_exec;
 pub mod env;
 #[cfg(feature = "full")]
 pub mod invalidation_contract;

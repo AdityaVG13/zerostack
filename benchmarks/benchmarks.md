@@ -37,3 +37,14 @@ Sources: `tests/benches/<crate>/`.
 
 Do not ratchet a number from a single run. Keep-gate honesty is
 `zerostack-keep-gate-honesty-063e`.
+
+## Machine-readable workload catalog (V6-R12)
+
+`benchmarks/workloads/` holds machine-readable catalog entries (workload
+specs) for the benchmark execution program (`zero-testkit::bench_exec`,
+ZS-BENCH-001). Each entry is a JSON task manifest with a root seal
+(`workload_digest`) over all other fields; entries are loaded, validated,
+and executed by `bench_exec::load_catalog_entry_v1` / `execute_and_emit_v1`,
+which seal every run into a `SealedBenchmarkManifestV1` and refuse to
+overwrite a sealed manifest. Keep this folder data-only: no runners, no
+schema scripts -- the runner lives in the testkit.

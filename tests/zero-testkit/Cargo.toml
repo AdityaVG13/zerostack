@@ -13,6 +13,7 @@ full = [
     "dep:tempfile",
     "dep:zero-cert",
     "dep:zero-gate",
+    "dep:zero-gauge",
     "dep:zero-ledger",
     "dep:zero-store",
 ]
@@ -23,6 +24,7 @@ serde_json = { workspace = true, optional = true }
 zero-abi = { path = "../../crates/zero-abi" }
 zero-cert = { path = "../../crates/zero-cert", optional = true }
 zero-gate = { path = "../../crates/zero-gate", optional = true }
+zero-gauge = { path = "../../crates/zero-gauge", optional = true }
 zero-ledger = { path = "../../crates/zero-ledger", optional = true }
 zero-store = { path = "../../crates/zero-store", optional = true }
 tempfile = { version = "3", optional = true }
