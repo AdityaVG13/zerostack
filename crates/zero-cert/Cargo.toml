@@ -17,6 +17,7 @@ zero-ref = { path = "../zero-ref" }
 allocation-counter = "0.8"
 criterion = "0.8"
 proptest = "1"
+tempfile = "3"
 
 [[bench]]
 name = "verify"
@@ -30,6 +31,10 @@ path = "../../tests/rust/zero-cert/effect_witness.rs"
 [[test]]
 name = "golden_vectors"
 path = "../../tests/rust/zero-cert/golden_vectors.rs"
+
+[[test]]
+name = "kernel_runtime"
+path = "../../tests/rust/zero-cert/kernel_runtime.rs"
 
 [[test]]
 name = "property"

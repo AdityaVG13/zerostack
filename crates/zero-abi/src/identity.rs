@@ -48,6 +48,7 @@ pub enum IdentityErrorV1 {
     ReorderedEventLog { seq: u64, expected_parent: DigestV1, actual_parent: DigestV1 },
     UncoveredObligation(String),
     EquivalentClaimForbidden(String),
+    UnknownEventClass(String),
 }
 
 impl fmt::Display for IdentityErrorV1 {
@@ -79,6 +80,9 @@ impl fmt::Display for IdentityErrorV1 {
             }
             Self::EquivalentClaimForbidden(detail) => {
                 write!(formatter, "equivalent claim forbidden: {detail}")
+            }
+            Self::UnknownEventClass(class) => {
+                write!(formatter, "unknown event class {class:?} (not one of the nine authoritative classes)")
             }
         }
     }
@@ -671,11 +675,104 @@ impl PayloadFormationReceiptV1 {
     pub fn verify_payload(&self, contract_root: DigestV1, payload_root: &str) -> bool {
         self.contract_root == contract_root && self.payload_root == payload_root
     }
+
+    /// Fail-closed dependency re-check for cache reuse (ZS-KERNEL-003).
+    /// `verify_payload` alone does not revoke reuse when a dependency mutates
+    /// after formation; this re-checks that the CURRENT dependency roots are
+    /// exactly the set this receipt was formed against. Any added, removed,
+    /// or changed dependency root revokes reuse. Order-insensitive: the
+    /// dependency set is compared as a normalized set.
+    pub fn verify_against(&self, current_dependency_roots: &[String]) -> bool {
+        let mut recorded: Vec<&str> = self.dependency_roots.iter().map(String::as_str).collect();
+        let mut current: Vec<&str> = current_dependency_roots.iter().map(String::as_str).collect();
+        recorded.sort_unstable();
+        current.sort_unstable();
+        recorded.dedup();
+        current.dedup();
+        recorded == current
+    }
 }
 
 // ---------------------------------------------------------------------------
 // Parent-rooted authoritative event log (ZS-KERNEL-006).
 // ---------------------------------------------------------------------------
+
+/// Typed authoritative event classes (ZS-KERNEL-006). The wire record keeps a
+/// `String` `event_type`; this enum is the typed kernel boundary that
+/// enumerates every authoritative event class -- state transitions, evidence
+/// observations, cache decisions, executions, verification, authority
+/// issuance, commits, rollbacks, and resource charges. Unknown class names
+/// fail closed at the typed boundary (`UnknownEventClass`), so a runtime
+/// journal cannot append an unclassified event.
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum EventClassV1 {
+    /// Project state transition (root change, phase change, branch).
+    StateTransition,
+    /// Observation of raw evidence (span read, trace, diff).
+    EvidenceObservation,
+    /// Cache admission/refusal decision.
+    CacheDecision,
+    /// Task execution (started/finished/interrupted).
+    Execution,
+    /// Verification decision (certificate checked, verdict issued).
+    Verification,
+    /// Authority issuance (permit, asset, capability grant).
+    AuthorityIssuance,
+    /// Committed mutation (successor CAS advance).
+    Commit,
+    /// Rolled-back mutation.
+    Rollback,
+    /// Resource charge (fuel, elapsed, io, risk).
+    ResourceCharge,
+}
+
+impl EventClassV1 {
+    /// All nine authoritative event classes.
+    pub const ALL: [EventClassV1; 9] = [
+        EventClassV1::StateTransition,
+        EventClassV1::EvidenceObservation,
+        EventClassV1::CacheDecision,
+        EventClassV1::Execution,
+        EventClassV1::Verification,
+        EventClassV1::AuthorityIssuance,
+        EventClassV1::Commit,
+        EventClassV1::Rollback,
+        EventClassV1::ResourceCharge,
+    ];
+
+    /// The wire `event_type` string for this class.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            EventClassV1::StateTransition => "state_transition",
+            EventClassV1::EvidenceObservation => "evidence_observation",
+            EventClassV1::CacheDecision => "cache_decision",
+            EventClassV1::Execution => "execution",
+            EventClassV1::Verification => "verification",
+            EventClassV1::AuthorityIssuance => "authority_issuance",
+            EventClassV1::Commit => "commit",
+            EventClassV1::Rollback => "rollback",
+            EventClassV1::ResourceCharge => "resource_charge",
+        }
+    }
+
+    /// Parse a wire `event_type` string, fail-closed on anything outside the
+    /// nine authoritative classes.
+    pub fn from_str(class: &str) -> Result<Self, IdentityErrorV1> {
+        match class {
+            "state_transition" => Ok(EventClassV1::StateTransition),
+            "evidence_observation" => Ok(EventClassV1::EvidenceObservation),
+            "cache_decision" => Ok(EventClassV1::CacheDecision),
+            "execution" => Ok(EventClassV1::Execution),
+            "verification" => Ok(EventClassV1::Verification),
+            "authority_issuance" => Ok(EventClassV1::AuthorityIssuance),
+            "commit" => Ok(EventClassV1::Commit),
+            "rollback" => Ok(EventClassV1::Rollback),
+            "resource_charge" => Ok(EventClassV1::ResourceCharge),
+            other => Err(IdentityErrorV1::UnknownEventClass(other.to_owned())),
+        }
+    }
+}
 
 /// One chained event record. `parent_root` is the head of the log before
 /// this record; replay detects missing or reordered events by chaining.

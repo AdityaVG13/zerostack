@@ -11,6 +11,7 @@
 //! ~~~
 
 pub mod effect_witness;
+pub mod kernel_runtime;
 
 pub use effect_witness::{
     EFFECT_ACCEPTED_DOMAIN_V1, EFFECT_EVIDENCE_REF_DOMAIN_V1, EFFECT_WITNESS_CONTRACT_VERSION_V1,
@@ -21,6 +22,12 @@ pub use effect_witness::{
     accept_effect_verification_v1, effect_witness_contract_digest_v1,
     effect_witness_contract_manifest_v1, incomplete_effect_verification_v1,
     reject_effect_verification_v1,
+};
+pub use kernel_runtime::{
+    CACHE_ADMISSION_DOMAIN_V1, CacheAdmissionGateV1, CacheAdmissionRecordV1,
+    EVENT_JOURNAL_RECORDS_FILE_V1, EVENT_JOURNAL_SEALED_HEAD_FILE_V1, FileEventJournalStore,
+    InMemoryJournalStore, KERNEL_RUNTIME_VERSION_V1, KernelEventJournalV1, KernelRuntimeError,
+    JournalStore, ProjectRootGateV1, RootGateFaultV1, RootGateSessionV1,
 };
 
 use serde::{Deserialize, Serialize};

@@ -439,6 +439,85 @@
         assert!(record.validate().is_err());
     }
 
+    /// V6-R6 (ZS-KERNEL-006): the typed event-class boundary enumerates all
+    /// nine authoritative classes (including resource charges) and fails
+    /// closed on anything outside them.
+    #[test]
+    fn event_class_v1_round_trips_all_nine_classes() {
+        for class in EventClassV1::ALL {
+            let wire = class.as_str();
+            assert_eq!(EventClassV1::from_str(wire).unwrap(), class);
+        }
+        assert_eq!(EventClassV1::ALL.len(), 9);
+        assert_eq!(EventClassV1::ResourceCharge.as_str(), "resource_charge");
+
+        // Unknown class names fail closed at the typed boundary.
+        assert_eq!(
+            EventClassV1::from_str("anything_else"),
+            Err(IdentityErrorV1::UnknownEventClass("anything_else".into()))
+        );
+        assert_eq!(
+            EventClassV1::from_str(""),
+            Err(IdentityErrorV1::UnknownEventClass(String::new()))
+        );
+
+        // Wire spelling is stable and canonical.
+        assert_eq!(EventClassV1::Commit.as_str(), "commit");
+        assert_eq!(EventClassV1::Rollback.as_str(), "rollback");
+        assert_eq!(EventClassV1::CacheDecision.as_str(), "cache_decision");
+    }
+
+    /// V6-R6 (ZS-KERNEL-003): `verify_against` revokes cache reuse when the
+    /// current dependency roots no longer exactly match the receipt's
+    /// formation-time dependency set.
+    #[test]
+    fn formation_receipt_verify_against_revokes_dependency_mutation() {
+        let contract_root = DigestV1::from_bytes([1; 32]);
+        let receipt = PayloadFormationReceiptV1::new(
+            "constructor:seed-42",
+            contract_root,
+            vec!["fz://blob/dep-a".into(), "fz://blob/dep-b".into()],
+            "fz://blob/exec-1",
+            "fz://blob/payload-A",
+            7,
+        )
+        .unwrap();
+
+        // Exact dependency set admits reuse.
+        assert!(receipt.verify_against(&[
+            "fz://blob/dep-a".to_owned(),
+            "fz://blob/dep-b".to_owned()
+        ]));
+
+        // Order does not matter: the dependency set is normalized.
+        assert!(receipt.verify_against(&[
+            "fz://blob/dep-b".to_owned(),
+            "fz://blob/dep-a".to_owned()
+        ]));
+        // Duplicates normalize away.
+        assert!(receipt.verify_against(&[
+            "fz://blob/dep-a".to_owned(),
+            "fz://blob/dep-a".to_owned(),
+            "fz://blob/dep-b".to_owned()
+        ]));
+
+        // Any mutation revokes reuse: changed root...
+        assert!(!receipt.verify_against(&[
+            "fz://blob/dep-a".to_owned(),
+            "fz://blob/dep-c".to_owned()
+        ]));
+        // ...removed root...
+        assert!(!receipt.verify_against(&["fz://blob/dep-a".to_owned()]));
+        // ...added root...
+        assert!(!receipt.verify_against(&[
+            "fz://blob/dep-a".to_owned(),
+            "fz://blob/dep-b".to_owned(),
+            "fz://blob/dep-c".to_owned()
+        ]));
+        // ...and empty current set vs nonempty formation set.
+        assert!(!receipt.verify_against(&[]));
+    }
+
     #[test]
     fn scope_grade_serialization_spellings_are_stable() {
         use serde_json::json;
