@@ -16,6 +16,7 @@
 pub mod assembly;
 pub mod cache_entry;
 pub mod capability;
+pub mod continuation;
 pub mod cwir;
 pub mod decision;
 pub mod digest;
@@ -70,6 +71,10 @@ pub use decision::{
     ContingentPolicyRuleV1, ContingentPolicyV1, DecisionErrorV1, DecisionRequiredV1,
     ObservationClassV1, ObservedMatchV1, PolicyResolutionV1, SemanticDecisionPointV1,
     verdict_permits_selection,
+};
+pub use continuation::{
+    ContinuationCompactRecordV1, ContinuationErrorV1, ContinuationHandleV1, ContinuationRootsV1,
+    CONTINUATION_CONTRACT_VERSION_V1,
 };
 pub use digest::{contract_digest, contract_digest_hex, sha256, sha256_hex};
 pub use identity::{

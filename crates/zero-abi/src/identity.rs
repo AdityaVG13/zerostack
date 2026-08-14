@@ -103,6 +103,8 @@ pub enum ObjectClassV1 {
     EventRecord,
     SuccessorRecord,
     ExecuteResult,
+    ContinuationHandle,
+    ContinuationCompactRecord,
 }
 
 impl ObjectClassV1 {
@@ -114,6 +116,10 @@ impl ObjectClassV1 {
             ObjectClassV1::EventRecord => "zerostack.object.event_record.v1",
             ObjectClassV1::SuccessorRecord => "zerostack.object.successor_record.v1",
             ObjectClassV1::ExecuteResult => "zerostack.object.execute_result.v1",
+            ObjectClassV1::ContinuationHandle => "zerostack.object.continuation_handle.v1",
+            ObjectClassV1::ContinuationCompactRecord => {
+                "zerostack.object.continuation_compact_record.v1"
+            }
         }
     }
 }
