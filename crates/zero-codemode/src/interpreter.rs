@@ -1304,6 +1304,12 @@ impl<'tree> Interpreter<'tree> {
         args: Vec<Value<'tree>>,
     ) -> Result<Value<'tree>, Fault<'tree>> {
         match function {
+            Value::Tool(surface, method)
+                if surface == crate::decision_gate::DECISION_SURFACE
+                    && method == crate::decision_gate::DECISION_REQUIRE_METHOD =>
+            {
+                self.call_decision_require(args)
+            }
             Value::Tool(surface, method) => self.call_tool(&surface, &method, args),
             Value::Method(receiver, name) => self.call_method(*receiver, &name, args),
             Value::Function(function) => self.call_function(function, args),
@@ -1424,6 +1430,45 @@ impl<'tree> Interpreter<'tree> {
                     )))
                 }
             })
+    }
+
+    fn call_decision_require(&mut self, args: Vec<Value<'tree>>) -> Result<Value<'tree>, Fault<'tree>> {
+        let [point_value, observed_value] = args.as_slice() else {
+            return Err(Fault::Host(HostError::Data(
+                "decision.require expects (point, observed_value)".into(),
+            )));
+        };
+        let point_json = self.to_json(point_value).map_err(Fault::Host)?;
+        let point: zero_abi::SemanticDecisionPointV1 =
+            serde_json::from_value(point_json).map_err(|error| {
+                Fault::Host(HostError::Data(format!(
+                    "decision.require point is not a valid SemanticDecisionPointV1: {error}"
+                )))
+            })?;
+        let observed_json = self.to_json(observed_value).map_err(Fault::Host)?;
+        let observed = observed_json
+            .as_str()
+            .ok_or_else(|| {
+                Fault::Host(HostError::Data(
+                    "decision.require observed_value must be a string".into(),
+                ))
+            })?
+            .to_owned();
+        match self.host.decision_gate().resolve(&point, &observed) {
+            crate::decision_gate::GateResolutionV1::Selected(alternative) => {
+                Ok(Value::String(alternative))
+            }
+            crate::decision_gate::GateResolutionV1::DecisionRequired(payload) => {
+                // Never select a branch privately: abort with the typed
+                // decision payload (V6-C03/H03).
+                Err(Fault::Host(HostError::DecisionRequired(payload)))
+            }
+            crate::decision_gate::GateResolutionV1::PolicyError(error) => {
+                Err(Fault::Host(HostError::Data(format!(
+                    "decision policy error: {error}"
+                ))))
+            }
+        }
     }
 
     fn call_tool(

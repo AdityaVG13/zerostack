@@ -41,35 +41,35 @@ const SOURCE_INPUTS: [(&str, &[u8]); 10] = [
         "crates/zero-gate/Cargo.toml",
         include_bytes!(concat!(
             env!("CARGO_MANIFEST_DIR"),
-            "/../zero-gate/Cargo.toml"
+            "/../../crates/zero-gate/Cargo.toml"
         )),
     ),
     (
         "crates/zero-gate/src/durable_publication.rs",
         include_bytes!(concat!(
             env!("CARGO_MANIFEST_DIR"),
-            "/../zero-gate/src/durable_publication.rs"
+            "/../../crates/zero-gate/src/durable_publication.rs"
         )),
     ),
     (
         "crates/zero-gate/src/two_phase.rs",
         include_bytes!(concat!(
             env!("CARGO_MANIFEST_DIR"),
-            "/../zero-gate/src/two_phase.rs"
+            "/../../crates/zero-gate/src/two_phase.rs"
         )),
     ),
     (
         "crates/zero-store/src/durable_journal.rs",
         include_bytes!(concat!(
             env!("CARGO_MANIFEST_DIR"),
-            "/../zero-store/src/durable_journal.rs"
+            "/../../crates/zero-store/src/durable_journal.rs"
         )),
     ),
     (
         "crates/zero-store/src/lib.rs",
         include_bytes!(concat!(
             env!("CARGO_MANIFEST_DIR"),
-            "/../zero-store/src/lib.rs"
+            "/../../crates/zero-store/src/lib.rs"
         )),
     ),
     (

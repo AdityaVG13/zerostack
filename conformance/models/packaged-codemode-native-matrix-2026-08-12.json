@@ -1,0 +1,96 @@
+{
+  "schema_version": 1,
+  "schema": "zerostack.packaged_codemode.native_matrix.v1",
+  "bead_key": "zerostack-codemode-first-execution-jgm.4",
+  "claim_or_freeze_ids": [
+    "packaged-codemode-architecture-v1"
+  ],
+  "assembly_manifest_digest": "f08798a4510e8e17a3692f02a0e9ee262321317a12abea25815ed5226a081c74",
+  "model_or_spec_version": "raw-worker-v2 + zerostack.zsx.v1",
+  "verifier": {
+    "name": "dsr",
+    "version": "0.1.2",
+    "exact_command": "cargo test -p zerostack-shared-tests --test program_assembly -- --test-threads=1 && cargo test -p zerostack-shared-tests --test canonical_dispatch -- --test-threads=1 && cargo test -p zerostack-shared-tests --test raw_worker_v2 -- --test-threads=1 && cargo test -p zero-codemode --test host_contract -- --test-threads=1 && cargo test -p zsx-core --features fszero,graphzero,tokenzero --test canonical_mixed -- --test-threads=1 && cargo test -p zsx-core --features fszero,graphzero,tokenzero --test request_cancellation -- --test-threads=1 && cargo test -p zsx --test one_process -- --test-threads=1 && cargo test -p zsx-node -- --test-threads=1 && cargo build --release -p zsx"
+  },
+  "input_fixture_hashes": {
+    "conformance/models/program-assembly-2026-08-11.json": "c0a785d45c1764549b8fe61ca5ba1acf2681c783ce581b03a303a36da1056cb9",
+    "tests/fixtures/canonical_dispatch_vectors.json": "834c300273498c67a892aa235d9a29fad1012e3fa7d8e08a0f67998fcac505ba",
+    "tests/fixtures/raw_worker_v2_frames.json": "546071a831565155f847604e77eca59b63b4c4fbc4b056d3656149a917c501c5"
+  },
+  "mutants_run": [
+    "assembly manifest digest mismatch rejects before dispatch",
+    "canonical dispatch alias and owner mismatch vectors",
+    "raw-worker-v2 malformed and boundary frame vectors",
+    "host deadline and cancellation enforcement",
+    "mixed three-engine dispatch and ref-flow invariants",
+    "one-process worker-spawn rejection",
+    "root and session isolation",
+    "generated Node surface dispatch"
+  ],
+  "platform_receipts": [
+    {
+      "platform_profile": "native-macos-aarch64",
+      "dsr_run_id": "038e4eb1-f2c1-48d8-bd4a-985b48f83aa8",
+      "source_repository_heads": {
+        "ZeroStack": "817ec9cc4b04294ed30256c36b1ab790fa91d855",
+        "FSZero": "d6ce69c5dfc2a2bccb457a535757bc44de51e928",
+        "GraphZero": "098306257adc563d5f45976d4420c68ceed721bd",
+        "TokenZero": "333e32cb1430ea893140f657dab396bd10434022"
+      },
+      "toolchain_identity": "rustc 1.98.0-nightly (f8a08b688 2026-05-30), aarch64-apple-darwin; cargo 1.98.0-nightly (fbb61be30 2026-05-26)",
+      "output_artifact_hashes": {
+        "zsx": "3c160589c310d97c0fecf7231716c0faa008e3f9648ba30cb17e0a21ceb6b539",
+        "build_log": "58867b1e139b7632614a7f9197687c1c2dbbf78accb97295b8eb1e34325534b7"
+      },
+      "started_at": "2026-08-12T02:22:31Z",
+      "completed_at": "2026-08-12T02:27:51Z",
+      "result": "passed_native",
+      "failure_code": null
+    },
+    {
+      "platform_profile": "native-linux-aarch64",
+      "dsr_run_id": "be439fe0-a073-424f-8ef2-a8966da5af02",
+      "source_repository_heads": {
+        "ZeroStack": "817ec9cc4b04294ed30256c36b1ab790fa91d855",
+        "FSZero": "d6ce69c5dfc2a2bccb457a535757bc44de51e928",
+        "GraphZero": "098306257adc563d5f45976d4420c68ceed721bd",
+        "TokenZero": "333e32cb1430ea893140f657dab396bd10434022"
+      },
+      "toolchain_identity": "rustc 1.97.1 (8bab26f4f 2026-07-14), aarch64-unknown-linux-gnu; cargo 1.97.1 (c980f4866 2026-06-30)",
+      "output_artifact_hashes": {
+        "zsx": "52d77cd7c933d86e8a345fcba36cea961cd92250bb3dcb006a73eb5f1330e8ba",
+        "build_log": "e435eec54f2dd4e1d643eafb5ee10c7dba8a8e34a9cb976559ca6d4347076253"
+      },
+      "started_at": "2026-08-12T02:16:35Z",
+      "completed_at": "2026-08-12T02:21:56Z",
+      "result": "passed_native",
+      "failure_code": null
+    },
+    {
+      "platform_profile": "native-windows-x86_64-msvc",
+      "dsr_run_id": "c1a03e35-9dd9-43e9-8884-e4b57b72f312",
+      "source_repository_heads": {
+        "ZeroStack": "6fe67f8f64373ea1530ec7043f325342275756fb",
+        "FSZero": "45d8860c2a7425d3c811b417307913be26bc0fef",
+        "GraphZero": "a070c96e6721fa07dd1e6b1fca7dcfb03f15ba7c",
+        "TokenZero": "13d22c1376264b47726d7e45156081894efb4025"
+      },
+      "toolchain_identity": "rustc 1.97.0-nightly (f53b654a8 2026-04-30), x86_64-pc-windows-msvc; cargo 1.97.0-nightly (eb9b60f1f 2026-04-24)",
+      "output_artifact_hashes": {
+        "zsx.exe": "70d83cc9c20e633207ce9fd8d051dea1af3d3d29abb324572fd649d3f1dcfd3d",
+        "build_log": "b559874baf43f6d19968ec4a63f000bc7f594638d16594c8986e21f5972214dd"
+      },
+      "started_at": "2026-08-12T03:07:37Z",
+      "completed_at": "2026-08-12T03:17:13Z",
+      "result": "passed_native",
+      "failure_code": null
+    }
+  ],
+  "result": "passed_native_matrix",
+  "failure_code": null,
+  "residual_assumptions": [
+    "Platform receipts bind the exact source heads used on each native host; later platform-specific fixes intentionally create successor heads rather than rewriting prior receipts.",
+    "DSR build logs remain in the local append-only run store and are bound here by SHA-256 rather than committed in full.",
+    "Signing and publication are outside this architecture-conformance receipt."
+  ]
+}

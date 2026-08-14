@@ -17,6 +17,7 @@ pub mod assembly;
 pub mod cache_entry;
 pub mod capability;
 pub mod cwir;
+pub mod decision;
 pub mod digest;
 pub mod dispatch;
 pub mod effect;
@@ -29,7 +30,9 @@ pub mod robust_snap;
 pub mod schema;
 pub mod surface;
 pub mod telemetry;
+pub mod verdict;
 pub mod zbf;
+pub mod zero_execute;
 
 pub use assembly::{
     ASSEMBLY_ABI_CONTRACT_VERSION, ASSEMBLY_MANIFEST_DOMAIN_V1, ASSEMBLY_MANIFEST_SCHEMA_VERSION,
@@ -61,6 +64,11 @@ pub use cwir::{
     CwirObligationStatusV1, CwirObligationV1, CwirSoundnessV1, CwirStateAnchorV1,
     CwirTaskContractV1, CwirVerificationContractV1, CwirVerifierClassV1, cwir_contract_digest_v1,
     cwir_contract_manifest_v1,
+};
+pub use decision::{
+    ContingentPolicyRuleV1, ContingentPolicyV1, DecisionErrorV1, DecisionRequiredV1,
+    ObservationClassV1, ObservedMatchV1, PolicyResolutionV1, SemanticDecisionPointV1,
+    verdict_permits_selection,
 };
 pub use digest::{contract_digest, contract_digest_hex, sha256, sha256_hex};
 pub use dispatch::{
@@ -138,6 +146,13 @@ pub use surface::{
     SURFACE_CONTRACT_VERSION, SurfaceContractError, SurfaceKind, SurfaceRegistration,
 };
 pub use telemetry::{TelemetryCounter, TelemetryOverflow, TelemetrySchema, ZeroTelemetryV1};
+pub use verdict::{
+    PremiseV1, SafetyVerdictV1, VerdictBuildErrorV1, VERDICT_MAX_PREMISE_NAME_BYTES,
+};
+pub use zero_execute::{
+    AuditEventRangeV1, ContinuationStateV1, ZeroExecuteErrorV6, ZeroExecuteFieldsV6,
+    ZeroExecuteKindV6, ZeroExecuteResultV6, ZERO_EXECUTE_ABI_VERSION_V6,
+};
 pub use zbf::{
     DurableProfileIdV1, DurableProfileV1, ZBF_CONTAINER_FLAG_V1, ZBF_CONTRACT_VERSION_V1,
     ZBF_HEADER_LEN_V1, ZBF_MAGIC_V1, ZBF_MAX_CHILDREN_V1, ZBF_MAX_DEPTH_V1,

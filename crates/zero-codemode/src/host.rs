@@ -14,9 +14,12 @@ use std::time::{Duration, Instant};
 
 use serde::Serialize;
 use serde_json::Value as JsonValue;
-use zero_abi::{CapabilityDescriptor, GlobalRegistration, RegistrationError, ZeroResultV1};
+use zero_abi::{
+    CapabilityDescriptor, GlobalRegistration, RegistrationError, ZeroResultV1,
+};
 use zero_store::SharedCas;
 
+use crate::decision_gate::{DecisionGate, DECISION_REQUIRE_METHOD, DECISION_SURFACE};
 use crate::{HostLimits, LimitError, PlanError};
 
 static RUNTIME_CREATIONS: AtomicU64 = AtomicU64::new(0);
@@ -190,18 +193,46 @@ pub struct Host {
     pub(crate) registration: GlobalRegistration,
     pub(crate) spill_root: Option<PathBuf>,
     pub(crate) max_visible_result_bytes: usize,
+    decision_gate: DecisionGate,
 }
 
 impl Host {
     pub fn new(limits: HostLimits, registration: GlobalRegistration) -> Result<Self, HostError> {
         limits.validate().map_err(HostError::Limits)?;
+        // The decision surface is intrinsic to the interpreter: every host
+        // exposes `zero.decision.require` so plans can declare semantic
+        // decision points. The gate itself is policy-less by default, which
+        // fails closed to `DecisionRequired`.
+        let mut registration = registration;
+        if !registration.capabilities.iter().any(|capability| {
+            capability.surface == DECISION_SURFACE
+                && capability.method == DECISION_REQUIRE_METHOD
+        }) {
+            registration.capabilities.push(CapabilityDescriptor::new(
+                DECISION_SURFACE,
+                DECISION_REQUIRE_METHOD,
+            ));
+        }
         registration.validate().map_err(HostError::Registration)?;
         Ok(Self {
             max_visible_result_bytes: limits.max_json_bytes,
             limits,
             registration,
             spill_root: None,
+            decision_gate: DecisionGate::default(),
         })
+    }
+
+    /// Attach a contingent policy to this host. With no gate attached the
+    /// default policy-less gate fails every `decision.require` observation
+    /// closed with `DecisionRequired`.
+    pub fn with_decision_gate(mut self, gate: DecisionGate) -> Self {
+        self.decision_gate = gate;
+        self
+    }
+
+    pub(crate) fn decision_gate(&self) -> &DecisionGate {
+        &self.decision_gate
     }
 
     /// Publish results larger than `max_json_bytes` into the content-addressed
@@ -329,6 +360,7 @@ pub enum HostError {
     Data(String),
     Execution(String),
     VerdictRejected(String),
+    DecisionRequired(zero_abi::DecisionRequiredV1),
     Runtime(String),
     JavaScript(String),
     MethodNotFound(String),
@@ -355,6 +387,11 @@ impl fmt::Display for HostError {
             Self::Data(message) => write!(f, "data error: {message}"),
             Self::Execution(message) => write!(f, "execution error: {message}"),
             Self::VerdictRejected(message) => write!(f, "verdict rejected: {message}"),
+            Self::DecisionRequired(payload) => write!(
+                f,
+                "decision required: {} (class {}, observed {})",
+                payload.question, payload.observation_class.class_id, payload.observed_value
+            ),
             Self::Runtime(message) => write!(f, "runtime error: {message}"),
             Self::JavaScript(message)
             | Self::MethodNotFound(message)

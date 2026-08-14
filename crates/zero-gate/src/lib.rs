@@ -34,6 +34,7 @@ pub mod reinvestment;
 pub mod semantic_cut;
 pub mod transaction;
 pub mod two_phase;
+pub mod verdict;
 pub use aggregate::*;
 pub use deoptimization::*;
 pub use durable_publication::*;
@@ -48,6 +49,7 @@ pub use reinvestment::*;
 pub use semantic_cut::*;
 pub use transaction::*;
 pub use two_phase::*;
+pub use verdict::*;
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct NextBudget {

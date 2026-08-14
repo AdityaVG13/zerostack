@@ -90,6 +90,10 @@ pub enum ZsxSessionFailureCode {
     SurfaceNotFound,
     BackendExecution,
     VerdictRejected,
+    /// The plan reached an uncovered semantic decision point and aborted
+    /// with a typed `DecisionRequired` payload instead of privately
+    /// selecting a branch (V6-C03/H03).
+    DecisionRequired,
     /// The request was cancelled through its per-request token before it
     /// settled. The session itself remains accepting.
     Cancelled,
@@ -113,6 +117,7 @@ impl ZsxSessionFailureCode {
             Self::SurfaceNotFound => "surface_not_found",
             Self::BackendExecution => "backend_execution",
             Self::VerdictRejected => "verdict_rejected",
+            Self::DecisionRequired => "decision_required",
             Self::Cancelled => "cancelled",
             Self::Internal => "internal",
         }
@@ -122,6 +127,7 @@ impl ZsxSessionFailureCode {
 fn backend_failure_code(error: &HostError) -> ZsxSessionFailureCode {
     match error {
         HostError::VerdictRejected(_) => ZsxSessionFailureCode::VerdictRejected,
+        HostError::DecisionRequired(_) => ZsxSessionFailureCode::DecisionRequired,
         HostError::MethodNotFound(_) => ZsxSessionFailureCode::MethodNotFound,
         HostError::SurfaceNotFound(_) => ZsxSessionFailureCode::SurfaceNotFound,
         _ => ZsxSessionFailureCode::BackendExecution,

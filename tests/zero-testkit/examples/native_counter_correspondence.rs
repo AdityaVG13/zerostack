@@ -33,21 +33,21 @@ const SOURCE_INPUTS: [(&str, &[u8]); 8] = [
         "crates/zero-ledger/src/causal_work.rs",
         include_bytes!(concat!(
             env!("CARGO_MANIFEST_DIR"),
-            "/../zero-ledger/src/causal_work.rs"
+            "/../../crates/zero-ledger/src/causal_work.rs"
         )),
     ),
     (
         "crates/zero-ledger/src/lib.rs",
         include_bytes!(concat!(
             env!("CARGO_MANIFEST_DIR"),
-            "/../zero-ledger/src/lib.rs"
+            "/../../crates/zero-ledger/src/lib.rs"
         )),
     ),
     (
         "crates/zero-ledger/tests/fixtures/token-ledger-v2-archive.json",
         include_bytes!(concat!(
             env!("CARGO_MANIFEST_DIR"),
-            "/../zero-ledger/tests/fixtures/token-ledger-v2-archive.json"
+            "/../../tests/rust/zero-ledger/fixtures/token-ledger-v2-archive.json"
         )),
     ),
     (

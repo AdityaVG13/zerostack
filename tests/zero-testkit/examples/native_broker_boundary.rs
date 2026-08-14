@@ -23,42 +23,42 @@ const SOURCE_INPUTS: [(&str, &[u8]); 20] = [
         "crates/zero-gate/Cargo.toml",
         include_bytes!(concat!(
             env!("CARGO_MANIFEST_DIR"),
-            "/../zero-gate/Cargo.toml"
+            "/../../crates/zero-gate/Cargo.toml"
         )),
     ),
     (
         "crates/zero-gate/src/lib.rs",
         include_bytes!(concat!(
             env!("CARGO_MANIFEST_DIR"),
-            "/../zero-gate/src/lib.rs"
+            "/../../crates/zero-gate/src/lib.rs"
         )),
     ),
     (
         "crates/zero-gate/src/deoptimization.rs",
         include_bytes!(concat!(
             env!("CARGO_MANIFEST_DIR"),
-            "/../zero-gate/src/deoptimization.rs"
+            "/../../crates/zero-gate/src/deoptimization.rs"
         )),
     ),
     (
         "crates/zero-gate/src/two_phase.rs",
         include_bytes!(concat!(
             env!("CARGO_MANIFEST_DIR"),
-            "/../zero-gate/src/two_phase.rs"
+            "/../../crates/zero-gate/src/two_phase.rs"
         )),
     ),
     (
         "crates/zero-gate/src/quality.rs",
         include_bytes!(concat!(
             env!("CARGO_MANIFEST_DIR"),
-            "/../zero-gate/src/quality.rs"
+            "/../../crates/zero-gate/src/quality.rs"
         )),
     ),
     (
         "crates/zero-gate/src/semantic_cut.rs",
         include_bytes!(concat!(
             env!("CARGO_MANIFEST_DIR"),
-            "/../zero-gate/src/semantic_cut.rs"
+            "/../../crates/zero-gate/src/semantic_cut.rs"
         )),
     ),
     (

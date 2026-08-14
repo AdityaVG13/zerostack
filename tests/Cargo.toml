@@ -68,5 +68,9 @@ name = "two_phase_gate"
 path = "rust/shared/two_phase_gate.rs"
 
 [[test]]
+name = "zero_execute_result_v6"
+path = "rust/shared/zero_execute_result_v6.rs"
+
+[[test]]
 name = "zero_result_v1"
 path = "rust/shared/zero_result_v1.rs"

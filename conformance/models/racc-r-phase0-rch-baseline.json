@@ -1,0 +1,226 @@
+{
+  "bead_key": "zerostack-4vsu",
+  "claim_limits": [
+    "RCH output is compilation and test evidence only",
+    "zero-cert --lib contains no unit tests; integration tests were outside this per-crate lib baseline",
+    "zero-codemode is not green and is tracked by zerostack-4rp2",
+    "no native filesystem, crash, performance, or packaging claim is made"
+  ],
+  "crates": [
+    {
+      "command": "rch exec -- env CARGO_TARGET_DIR=/tmp/rch_target_zerostack_phase0 cargo test -p zero-abi --lib -- --test-threads=1",
+      "crate": "zero-abi",
+      "duration_seconds": 9.761,
+      "exit_code": 0,
+      "member": "crates/zero-abi",
+      "status": "passed_rch",
+      "stderr_sha256": "532073d73724d915fcd7e26e43e60bf012d25faed12b2f4c55bd6ae2f1a4b7d8",
+      "stdout_sha256": "0c43eaff5a07ca0373ad1a443d8dac0742f243de9370d3923a5f476423cd8d2a",
+      "test_results": [
+        {
+          "failed": 0,
+          "filtered_out": 0,
+          "ignored": 0,
+          "measured": 0,
+          "passed": 67,
+          "status": "ok"
+        }
+      ]
+    },
+    {
+      "command": "rch exec -- env CARGO_TARGET_DIR=/tmp/rch_target_zerostack_phase0 cargo test -p zero-cert --lib -- --test-threads=1",
+      "crate": "zero-cert",
+      "duration_seconds": 23.801,
+      "exit_code": 0,
+      "member": "crates/zero-cert",
+      "status": "passed_rch",
+      "stderr_sha256": "134386b60d274e0c0a4325b29cd90cc7b1abd1f8a667fe955f3c702ad6bb70dd",
+      "stdout_sha256": "df166913f47ff1f04202cae9b31df67ed272d692d99a0023a8117dc3029100dd",
+      "test_results": [
+        {
+          "failed": 0,
+          "filtered_out": 0,
+          "ignored": 0,
+          "measured": 0,
+          "passed": 0,
+          "status": "ok"
+        }
+      ]
+    },
+    {
+      "command": "rch exec -- env CARGO_TARGET_DIR=/tmp/rch_target_zerostack_phase0 cargo test -p zero-codemode --lib -- --test-threads=1",
+      "crate": "zero-codemode",
+      "duration_seconds": 5.907,
+      "exit_code": 101,
+      "failure": {
+        "code": "rustc_E0599",
+        "detail": "Host::execute_with_cancel_timeout is missing",
+        "preexisting_head_path_diff": false,
+        "source": "crates/zero-codemode/src/session.rs:799",
+        "tracking_bead": "zerostack-4rp2"
+      },
+      "member": "crates/zero-codemode",
+      "status": "failed_rch",
+      "stderr_sha256": "ddc3da500ef469e281e86096e695867b3f1ea29c32ff9461ee43aa448a0aa579",
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "test_results": []
+    },
+    {
+      "command": "rch exec -- env CARGO_TARGET_DIR=/tmp/rch_target_zerostack_phase0 cargo test -p zero-gate --lib -- --test-threads=1",
+      "crate": "zero-gate",
+      "duration_seconds": 2.613,
+      "exit_code": 0,
+      "member": "crates/zero-gate",
+      "status": "passed_rch",
+      "stderr_sha256": "70cd6842bef9dd1adf32d147e5aeaa9c8b649ec6b4da9d526fbfa9be96a672f7",
+      "stdout_sha256": "837d1ab1cfd67508066237056ad9ec72bfcdfaeb8a816248536e8dc41b7ad2d5",
+      "test_results": [
+        {
+          "failed": 0,
+          "filtered_out": 0,
+          "ignored": 0,
+          "measured": 0,
+          "passed": 20,
+          "status": "ok"
+        }
+      ]
+    },
+    {
+      "command": "rch exec -- env CARGO_TARGET_DIR=/tmp/rch_target_zerostack_phase0 cargo test -p zero-gauge --lib -- --test-threads=1",
+      "crate": "zero-gauge",
+      "duration_seconds": 0.541,
+      "exit_code": 0,
+      "member": "crates/zero-gauge",
+      "status": "passed_rch",
+      "stderr_sha256": "3534bd769edcf991e325e0998c543d9954254f5bb80f39970a1832371b2ee6da",
+      "stdout_sha256": "60df3c27648c7b2179099b1b5c3cf482b139c3f49bf14773d464c480e35101aa",
+      "test_results": [
+        {
+          "failed": 0,
+          "filtered_out": 0,
+          "ignored": 0,
+          "measured": 0,
+          "passed": 5,
+          "status": "ok"
+        }
+      ]
+    },
+    {
+      "command": "rch exec -- env CARGO_TARGET_DIR=/tmp/rch_target_zerostack_phase0 cargo test -p zero-ledger --lib -- --test-threads=1",
+      "crate": "zero-ledger",
+      "duration_seconds": 0.957,
+      "exit_code": 0,
+      "member": "crates/zero-ledger",
+      "status": "passed_rch",
+      "stderr_sha256": "fea98a0710611647d23502cb8e7700bf8115baacd9a7811808822c02098af7a2",
+      "stdout_sha256": "c524aef19124f637eebf68ea9853c4939851f8439cbc62d74051a6b8ec343e15",
+      "test_results": [
+        {
+          "failed": 0,
+          "filtered_out": 0,
+          "ignored": 0,
+          "measured": 0,
+          "passed": 6,
+          "status": "ok"
+        }
+      ]
+    },
+    {
+      "command": "rch exec -- env CARGO_TARGET_DIR=/tmp/rch_target_zerostack_phase0 cargo test -p zero-ref --lib -- --test-threads=1",
+      "crate": "zero-ref",
+      "duration_seconds": 0.474,
+      "exit_code": 0,
+      "member": "crates/zero-ref",
+      "status": "passed_rch",
+      "stderr_sha256": "38f0a085df1a8b0f498a1020553bfb2dea76f05446fcb76ddcfa61f504b3d34d",
+      "stdout_sha256": "7b506cd2cc490af13e0b96dbad7dda1cc44475489458ea73d641b348ee41d0f8",
+      "test_results": [
+        {
+          "failed": 0,
+          "filtered_out": 0,
+          "ignored": 0,
+          "measured": 0,
+          "passed": 1,
+          "status": "ok"
+        }
+      ]
+    },
+    {
+      "command": "rch exec -- env CARGO_TARGET_DIR=/tmp/rch_target_zerostack_phase0 cargo test -p zero-store --lib -- --test-threads=1",
+      "crate": "zero-store",
+      "duration_seconds": 6.002,
+      "exit_code": 0,
+      "member": "crates/zero-store",
+      "status": "passed_rch",
+      "stderr_sha256": "850c0167e85794093c038f1dbcf81c8420e09b8aa20bb44a7c4b212f824f1777",
+      "stdout_sha256": "ffc8956f31bce328c77553e5bf5654bf2ece9e95a26a658f6dbad912ee889650",
+      "test_results": [
+        {
+          "failed": 0,
+          "filtered_out": 0,
+          "ignored": 0,
+          "measured": 0,
+          "passed": 90,
+          "status": "ok"
+        }
+      ]
+    },
+    {
+      "command": "rch exec -- env CARGO_TARGET_DIR=/tmp/rch_target_zerostack_phase0 cargo test -p zero-testkit --lib -- --test-threads=1",
+      "crate": "zero-testkit",
+      "duration_seconds": 14.147,
+      "exit_code": 0,
+      "member": "crates/zero-testkit",
+      "status": "passed_rch",
+      "stderr_sha256": "603239762fe76e37eb6a14316b077e52fd0348d7a721ba0a3b8b8408e9b748d7",
+      "stdout_sha256": "90decbb2adf97b27747bf8c97341d39f56375b4453984a09e1f2d1fc92bba2a9",
+      "test_results": [
+        {
+          "failed": 0,
+          "filtered_out": 0,
+          "ignored": 0,
+          "measured": 0,
+          "passed": 38,
+          "status": "ok"
+        }
+      ]
+    },
+    {
+      "command": "rch exec -- env CARGO_TARGET_DIR=/tmp/rch_target_zerostack_phase0 cargo test -p zerostack-machine-permit --lib -- --test-threads=1",
+      "crate": "zerostack-machine-permit",
+      "duration_seconds": 3.391,
+      "exit_code": 0,
+      "member": "crates/zerostack-machine-permit",
+      "status": "passed_rch",
+      "stderr_sha256": "ceacc0fa0dd1fdc0f4ed4c2de93fca59aea1e0ccb60d8171b08f7dc3559154f3",
+      "stdout_sha256": "fd7b33b01acdfd13d6290c9acac407a4282646861612ce22f61e3f2bf043a1e2",
+      "test_results": [
+        {
+          "failed": 0,
+          "filtered_out": 0,
+          "ignored": 0,
+          "measured": 0,
+          "passed": 37,
+          "status": "ok"
+        }
+      ]
+    }
+  ],
+  "execution_boundary": "rch_per_crate_lib_tests",
+  "generated_at": "2026-08-06T08:35:02.972898Z",
+  "schema_version": 1,
+  "source_repository_head": "2db9d25ce49c7544df68164fbb68e3f222b7475b",
+  "summary": {
+    "crate_count": 10,
+    "failed_crates": 1,
+    "passed_crates": 9,
+    "status": "baseline_recorded_with_preexisting_failure"
+  },
+  "target_directory": "/tmp/rch_target_zerostack_phase0",
+  "working_tree_exclusions": [
+    "AGENTS.md and .beads state owned by the planning session",
+    "crates/zero-testkit/src/assembly_kat.rs pre-existing formatting-only work",
+    "untracked local research and prior evidence files"
+  ],
+  "workspace_manifest_sha256": "f61df8eaa2a20403cb5f8158d491406f95987f630def6133775bb4ea3de3e7cb"
+}

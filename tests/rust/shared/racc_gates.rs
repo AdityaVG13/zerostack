@@ -222,7 +222,7 @@ fn task_transaction_gate_rejects_missing_charge_receipt_and_irreversible_specula
 #[test]
 fn z4_native_counter_receipts_cover_every_supported_profile() {
     let model: serde_json::Value =
-        serde_json::from_str(include_str!("../../conformance/models/causal-work-v3.json")).unwrap();
+        serde_json::from_str(include_str!("../../../conformance/models/causal-work-v3.json")).unwrap();
     let supported = model["native_counter_profiles"]["supported"]
         .as_array()
         .unwrap()
@@ -232,15 +232,15 @@ fn z4_native_counter_receipts_cover_every_supported_profile() {
     let receipts = [
         (
             "macos",
-            include_str!("../../conformance/models/causal-work-v3-native-macos-receipt.json"),
+            include_str!("../../../conformance/models/causal-work-v3-native-macos-receipt.json"),
         ),
         (
             "linux",
-            include_str!("../../conformance/models/causal-work-v3-native-linux-receipt.json"),
+            include_str!("../../../conformance/models/causal-work-v3-native-linux-receipt.json"),
         ),
         (
             "windows",
-            include_str!("../../conformance/models/causal-work-v3-native-windows-receipt.json"),
+            include_str!("../../../conformance/models/causal-work-v3-native-windows-receipt.json"),
         ),
     ];
     assert_eq!(

@@ -1,6 +1,7 @@
 #![forbid(unsafe_code)]
 
 mod cancellation;
+mod decision_gate;
 mod interpreter;
 
 mod edit_protocol;
@@ -9,6 +10,8 @@ mod limits;
 pub mod worker;
 mod wrap;
 pub use cancellation::CancellationSignal;
+
+pub use decision_gate::{DECISION_REQUIRE_METHOD, DECISION_SURFACE, DecisionGate, GateResolutionV1};
 
 pub use edit_protocol::{
     EDIT_PROTOCOL_VERSION, EditError, EditErrorClass, EditOp, EditPlan, RefKind, Side, classify_ref,

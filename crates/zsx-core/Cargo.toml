@@ -46,6 +46,11 @@ name = "canonical_mixed"
 path = "../../tests/rust/zsx-core/canonical_mixed.rs"
 
 [[test]]
+name = "decision_required"
+path = "../../tests/rust/zsx-core/decision_required.rs"
+required-features = ["fixture-adapters"]
+
+[[test]]
 name = "request_cancellation"
 path = "../../tests/rust/zsx-core/request_cancellation.rs"
 

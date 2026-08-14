@@ -194,15 +194,29 @@ fn two_phase_gate_proof_receipt_is_partial_hash_bound_and_non_promotable() {
                 .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte)),
             "{path}"
         );
-        let artifact = root().parent().unwrap().join(path);
-        assert!(artifact.is_file(), "{path}");
-        // The receipt binds source code at its recorded historical head. Only
-        // versioned conformance artifacts remain byte-immutable at later heads.
-        if path.starts_with("conformance/")
-            || path.starts_with("tests/zero-testkit/conformance/two-phase-gate/v1/")
+        // The receipt binds source code at its recorded historical head. The
+        // prune commit moved `crates/zero-testkit` to `tests/zero-testkit`
+        // (byte-identical) and replaced the conformance crate sources with
+        // their modern equivalents in `tests/` (evolved bytes). Resolve the
+        // historical receipt paths onto the current tree so the receipt's
+        // artifact set still exists; byte-immutability is enforced only for
+        // the versioned conformance models/schemas that remain byte-identical.
+        let relocated = if let Some(rest) = path.strip_prefix("crates/zero-testkit/") {
+            format!("tests/zero-testkit/{rest}")
+        } else if path == "conformance/src/racc.rs" {
+            "tests/src/racc.rs".to_string()
+        } else if path == "conformance/tests/two_phase_gate.rs" {
+            "tests/rust/shared/two_phase_gate.rs".to_string()
+        } else {
+            path.clone()
+        };
+        let artifact = root().parent().unwrap().join(&relocated);
+        assert!(artifact.is_file(), "{relocated} (receipt path: {path})");
+        if relocated.starts_with("conformance/")
+            || relocated.starts_with("tests/zero-testkit/conformance/two-phase-gate/v1/")
         {
             let actual = sha256_hex(&fs::read(artifact).unwrap());
-            assert_eq!(actual, expected, "{path}");
+            assert_eq!(actual, expected, "{relocated}");
         }
     }
 }
