@@ -37,11 +37,13 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use zero_abi::raw_worker::{ApprovalGrant as WorkerApprovalGrant, EngineIdentity};
+use zero_abi::WorkerTokenAccountingV1;
 use zero_abi::{
     ApprovalState, CallRequest, CapabilityDescriptor, DigestV1, EffectClass, GlobalRegistration,
     TelemetryRequestV1, WorkerRequestFrame, WorkerResponseFrame, WorkerTrace, canonical_json,
     encode_frame, sha256, validate_response_frame,
 };
+use zero_ledger::{LedgerConfig, ResourceGauge, TokenCharge, TokenizerIdentity};
 use zero_codemode::CancellationSignal;
 use zero_codemode::{
     Connector, ConnectorCompletion, ConnectorError, DispatchContext, HostError,
@@ -410,6 +412,59 @@ fn fail_indeterminate(journal: Option<&MutationJournal>, error: ConnectorError) 
     error
 }
 
+/// Mint one session resource-ledger charge from a real dispatch's measured
+/// token accounting (W2 wiring: zero-gate/zero-ledger receipts on real
+/// work).
+///
+/// Fail-closed rules:
+/// - Only `WorkerTokenCountKind::Exact` accounting with a bound tokenizer
+///   version digest is charged; estimator/conservative upper bounds are
+///   never aliased into the ledger (V6: no metric minted from an estimate
+///   aliased as measured).
+/// - The gauge locks the first measured tokenizer identity; any later
+///   dispatch measured under a DIFFERENT tokenizer identity fails loudly
+///   instead of mixing gauges.
+/// - Charges are classified into the ledger's causal classes: billed tokens
+///   into `ChargeClass::Billed`, recovery tokens into
+///   `ChargeClass::Recovery`. The declared raw input equals the classified
+///   total, so `check_accounting_complete` passes on live counters.
+fn charge_resource_gauge(
+    state: &ZsxState,
+    accounting: &WorkerTokenAccountingV1,
+) -> Result<(), ConnectorError> {
+    use zero_abi::WorkerTokenCountKind;
+    if accounting.count_kind != WorkerTokenCountKind::Exact {
+        return Ok(());
+    }
+    let Some(digest_hex) = accounting.tokenizer_version_digest.as_deref() else {
+        return Ok(());
+    };
+    let tokenizer = TokenizerIdentity::new(
+        accounting.tokenizer_id.clone(),
+        zero_ledger::Digest::from_hex(digest_hex)
+            .ok_or_else(|| ConnectorError::new("invalid tokenizer version digest"))?,
+    );
+    let mut gauge = state
+        .resource_gauge
+        .lock()
+        .map_err(|_| ConnectorError::new("resource gauge lock poisoned"))?;
+    if gauge.is_none() {
+        *gauge = Some(ResourceGauge::new(LedgerConfig::new(tokenizer.clone())));
+    }
+    let charge = TokenCharge {
+        raw_input_tokens: accounting.raw_tokens,
+        input_tokens: accounting.raw_tokens,
+        billed_tokens: accounting.billed_tokens,
+        recovery_tokens: accounting.recovery_tokens,
+        ..TokenCharge::default()
+    };
+    gauge
+        .as_mut()
+        .expect("gauge initialized above")
+        .charge(&tokenizer, &charge)
+        .map_err(|error| ConnectorError::new(format!("resource ledger charge: {error}")))
+}
+
 /// Dispatch lapse predicate: deadline expiry first, then cancellation. Both
 /// `run_dispatch` call sites must stay -- they bracket a lock wait (TOCTOU).
 fn dispatch_lapsed(dispatch: &ZsxDispatch) -> bool {
@@ -578,6 +633,8 @@ pub(crate) struct ZsxState {
     engine_dispatches: [AtomicU64; 3],
     outstanding_dispatches: AtomicU64,
     verdict_meter: Mutex<Option<VerdictMeter>>,
+    /// Session resource gauge: charges minted on real dispatches (W2).
+    resource_gauge: Mutex<Option<ResourceGauge>>,
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -646,6 +703,7 @@ impl ZsxConnector {
             engine_dispatches: [const { AtomicU64::new(0) }; 3],
             outstanding_dispatches: AtomicU64::new(0),
             verdict_meter: Mutex::new(None),
+            resource_gauge: Mutex::new(None),
         });
         let (dispatch_sender, dispatch_receiver) = mpsc::sync_channel(MAX_INFLIGHT_CONNECTOR_CALLS);
         let dispatch_receiver = Arc::new(Mutex::new(dispatch_receiver));
@@ -719,6 +777,44 @@ impl ZsxConnector {
                 self.state.engine_dispatches[index].load(Ordering::Relaxed)
             }),
         }
+    }
+
+    /// Snapshot of the session resource ledger minted on real dispatches.
+    /// `None` when no measured dispatch has been charged yet.
+    pub(crate) fn resource_ledger(&self) -> Result<Option<zero_ledger::TokenLedger>, ConnectorError> {
+        let gauge = self
+            .state
+            .resource_gauge
+            .lock()
+            .map_err(|_| ConnectorError::new("resource gauge lock poisoned"))?;
+        Ok(gauge.as_ref().map(|gauge| gauge.ledger().clone()))
+    }
+
+    /// Seal the session resource ledger into a dominance receipt from LIVE
+    /// counters. Fails when no charge was ever minted (`IncompleteLedger`)
+    /// or when the live counters violate the conservation law
+    /// (`check_accounting_complete`).
+    pub(crate) fn finalize_resource_receipt(
+        &self,
+        target_retained_ppm: zero_ledger::RetainedFractionPpm,
+        roots: zero_ledger::ReceiptRoots,
+        exactness: zero_ledger::ExactnessGates,
+    ) -> Result<zero_ledger::DominanceReceipt, ConnectorError> {
+        let gauge = self
+            .state
+            .resource_gauge
+            .lock()
+            .map_err(|_| ConnectorError::new("resource gauge lock poisoned"))?;
+        let gauge = gauge
+            .as_ref()
+            .ok_or_else(|| ConnectorError::new("resource ledger has no charges"))?;
+        gauge
+            .ledger()
+            .check_accounting_complete()
+            .map_err(|error| ConnectorError::new(format!("resource ledger incomplete: {error}")))?;
+        gauge
+            .finalize_receipt(target_retained_ppm, roots, exactness)
+            .map_err(|error| ConnectorError::new(format!("resource receipt: {error}")))
     }
 
     pub(crate) fn wait_for_dispatch_idle(&self, timeout: Duration) -> Result<(), HostError> {
@@ -1003,8 +1099,12 @@ impl Connector for ZsxConnector {
             ),
             trace,
             approval_grant,
-            telemetry_request: metered.then_some(TelemetryRequestV1 {
-                engine_stage_timeline: false,
+            // Worker token accounting is requested on EVERY dispatch so the
+            // session resource ledger mints charges on real work, not just
+            // verdict-loop runs (W2). Engine stage timelines stay off; they
+            // are only paid for when a verdict envelope is installed.
+            telemetry_request: Some(TelemetryRequestV1 {
+                engine_stage_timeline: metered,
                 worker_token_accounting: true,
             }),
         };
@@ -1194,6 +1294,17 @@ fn run_dispatch(state: &ZsxState, dispatch: &ZsxDispatch) -> Result<String, Conn
         validate_adapter_result(state, dispatch.engine, &dispatch.request, &response)
     {
         return Err(fail_indeterminate(journal.as_ref(), error));
+    }
+    if let Some(accounting) = response.worker_token_accounting.as_ref() {
+        // Mint the session resource ledger charge on REAL dispatch work.
+        // Only measured (Exact) accounting with a bound tokenizer digest is
+        // charged; estimator/conservative upper bounds are never aliased
+        // into the ledger (V6: no metric minted from an estimate aliased as
+        // measured). A gauge identity conflict fails the dispatch loudly
+        // rather than mixing tokenizer gauges.
+        if let Err(error) = charge_resource_gauge(state, accounting) {
+            return Err(fail_indeterminate(journal.as_ref(), error));
+        }
     }
     {
         let mut active = state

@@ -650,6 +650,9 @@ fn worker_token_accounting(
         .transpose()?
         .unwrap_or(0);
     let worker = WorkerTokenAccountingV1 {
+        // Conservative upper-bound accounting has no bound tokenizer
+        // version; it is never charged into the resource ledger.
+        tokenizer_version_digest: None,
         tokenizer_id: "conservative:utf8-json-bytes-v1".to_string(),
         count_kind: WorkerTokenCountKind::ConservativeUpperBound,
         raw_tokens,

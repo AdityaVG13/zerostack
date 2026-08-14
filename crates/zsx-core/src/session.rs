@@ -233,6 +233,12 @@ enum ZsxCommand {
     Shutdown {
         reply: SyncSender<Result<(), String>>,
     },
+    ResourceReceipt {
+        target_retained_ppm: zero_ledger::RetainedFractionPpm,
+        roots: zero_ledger::ReceiptRoots,
+        exactness: zero_ledger::ExactnessGates,
+        reply: SyncSender<Result<zero_ledger::DominanceReceipt, String>>,
+    },
 }
 
 /// One-generation executor over the in-process connector.
@@ -1199,6 +1205,67 @@ impl ZsxSession {
         }
     }
 
+    /// Seal the session resource ledger into a dominance receipt from LIVE
+    /// counters (W2 wiring). Fails with `BackendUnavailable` when the
+    /// executor is gone, and with a typed ledger error when no measured
+    /// charge was ever minted or the conservation law does not hold.
+    pub fn finalize_resource_receipt(
+        &self,
+        target_retained_ppm: zero_ledger::RetainedFractionPpm,
+        roots: zero_ledger::ReceiptRoots,
+        exactness: zero_ledger::ExactnessGates,
+    ) -> Result<zero_ledger::DominanceReceipt, ZsxSessionError> {
+        let generation = {
+            let state = self.lock_state(None)?;
+            if state.worker_stopped {
+                return Err(ZsxSessionError::new(
+                    ZsxSessionFailureCode::BackendUnavailable,
+                    state.generation,
+                    None,
+                    "session executor is stopped",
+                ));
+            }
+            state.generation
+        };
+        let (reply_tx, reply_rx) = mpsc::sync_channel(1);
+        send_control_with_deadline(
+            &self.commands,
+            ZsxCommand::ResourceReceipt {
+                target_retained_ppm,
+                roots,
+                exactness,
+                reply: reply_tx,
+            },
+            SESSION_REPLACEMENT_SETTLE_TIMEOUT,
+        )
+        .map_err(|detail| {
+            ZsxSessionError::new(
+                ZsxSessionFailureCode::BackendUnavailable,
+                generation,
+                None,
+                detail,
+            )
+        })?;
+        reply_rx
+            .recv_timeout(SESSION_REPLACEMENT_SETTLE_TIMEOUT)
+            .map_err(|error| {
+                ZsxSessionError::new(
+                    ZsxSessionFailureCode::BackendUnavailable,
+                    generation,
+                    None,
+                    format!("resource receipt did not settle: {error}"),
+                )
+            })?
+            .map_err(|detail| {
+                ZsxSessionError::new(
+                    ZsxSessionFailureCode::BackendExecution,
+                    generation,
+                    None,
+                    detail,
+                )
+            })
+    }
+
     pub fn shutdown(&self) -> Result<u64, ZsxSessionError> {
         let (generation, should_send) = {
             let mut state = self.lock_state(None)?;
@@ -1453,6 +1520,23 @@ fn session_worker(
                 drop(executor.take());
                 let _ = reply.send(result);
                 break;
+            }
+            ZsxCommand::ResourceReceipt {
+                target_retained_ppm,
+                roots,
+                exactness,
+                reply,
+            } => {
+                let result = executor
+                    .as_ref()
+                    .ok_or_else(|| "session executor is unavailable".to_string())
+                    .and_then(|executor| {
+                        executor
+                            .connector
+                            .finalize_resource_receipt(target_retained_ppm, roots, exactness)
+                            .map_err(|error| error.to_string())
+                    });
+                let _ = reply.send(result);
             }
         }
     }

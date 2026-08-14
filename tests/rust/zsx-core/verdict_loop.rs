@@ -194,9 +194,14 @@ fn accounting_budget_and_overflow_stop_later_dispatches() {
             Duration::from_secs(5),
             unbounded_raw,
         )
-        .expect_err("second accounting addition must overflow");
+        .expect_err("inconsistent max accounting must fail closed");
+    // W2: the resource ledger gate now rejects the internally inconsistent
+    // accounting (raw=u64::MAX with billed=8) before the meter's second
+    // addition can overflow -- a stronger, earlier fail-closed gate. The
+    // graph dispatch must never run.
     assert!(
-        error.to_string().contains("raw_tokens overflowed"),
+        error.to_string().contains("resource ledger charge")
+            || error.to_string().contains("raw_tokens overflowed"),
         "{error}"
     );
     session.shutdown().expect("shutdown");

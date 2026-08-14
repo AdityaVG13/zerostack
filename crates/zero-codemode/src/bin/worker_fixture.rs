@@ -367,6 +367,9 @@ fn transport_telemetry(
         }
     });
     let accounting = emit_accounting.then(|| WorkerTokenAccountingV1 {
+        tokenizer_version_digest: Some(
+            "3278763c4d4dd11356d55cabfadb66db6de8260c8e300d681690efb8b1298f04".into(),
+        ),
         tokenizer_id: "fixture-tokenizer-v1".into(),
         count_kind: WorkerTokenCountKind::Exact,
         raw_tokens: 8,

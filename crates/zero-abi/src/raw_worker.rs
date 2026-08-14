@@ -209,6 +209,11 @@ pub enum WorkerTokenCountKind {
 #[serde(deny_unknown_fields)]
 pub struct WorkerTokenAccountingV1 {
     pub tokenizer_id: String,
+    /// Version digest of the tokenizer that produced this accounting
+    /// (64 lowercase hex). Present for measured accounting; `None` when the
+    /// adapter cannot bind a tokenizer version (e.g. estimator identities).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tokenizer_version_digest: Option<String>,
     pub count_kind: WorkerTokenCountKind,
     pub raw_tokens: u64,
     pub visible_tokens: u64,
@@ -620,6 +625,17 @@ pub fn validate_worker_token_accounting_v1(
             "worker token accounting tokenizer_id must be 1..=256 bytes".into(),
         ));
     }
+    if let Some(digest) = &accounting.tokenizer_version_digest {
+        if digest.len() != 64
+            || !digest
+                .bytes()
+                .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+        {
+            return Err(FrameCodecError::InvalidContract(
+                "worker token accounting tokenizer_version_digest must be 64 lowercase hex".into(),
+            ));
+        }
+    }
     if accounting.cached_tokens > accounting.billed_tokens {
         return Err(FrameCodecError::InvalidContract(
             "worker token accounting cached_tokens exceeds billed_tokens".into(),
@@ -950,6 +966,7 @@ pub fn raw_worker_protocol_manifest() -> Value {
     };
     let token_accounting = WorkerTokenAccountingV1 {
         tokenizer_id: String::new(),
+        tokenizer_version_digest: None,
         count_kind: WorkerTokenCountKind::Exact,
         raw_tokens: 0,
         visible_tokens: 0,

@@ -173,6 +173,7 @@
             engine_dispatches: [const { AtomicU64::new(0) }; 3],
             outstanding_dispatches: AtomicU64::new(0),
             verdict_meter: Mutex::new(None),
+            resource_gauge: Mutex::new(None),
         }
     }
 

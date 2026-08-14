@@ -29,6 +29,7 @@ tokenzero-core = { path = "../../../TokenZero/crates/tokenzero-core", optional =
 tokenzero-engine = { path = "../../../TokenZero/crates/tokenzero-engine", optional = true }
 tokenzero-recovery = { path = "../../../TokenZero/crates/tokenzero-recovery", optional = true }
 zero-abi = { path = "../zero-abi" }
+zero-ledger = { path = "../zero-ledger" }
 zero-codemode = { path = "../zero-codemode" }
 zero-ref = { path = "../zero-ref" }
 zero-store = { path = "../zero-store" }
@@ -44,6 +45,11 @@ path = "../../tests/rust/zsx-core/aggregate_world.rs"
 [[test]]
 name = "canonical_mixed"
 path = "../../tests/rust/zsx-core/canonical_mixed.rs"
+
+[[test]]
+name = "resource_ledger"
+path = "../../tests/rust/zsx-core/resource_ledger.rs"
+required-features = ["fixture-adapters"]
 
 [[test]]
 name = "decision_required"

@@ -352,6 +352,9 @@
     #[test]
     fn worker_token_accounting_is_typed_and_never_inferred_from_bytes() {
         let exact = WorkerTokenAccountingV1 {
+            tokenizer_version_digest: Some(
+                "3278763c4d4dd11356d55cabfadb66db6de8260c8e300d681690efb8b1298f04".into(),
+            ),
             tokenizer_id: "tokenizer-v1".into(),
             count_kind: WorkerTokenCountKind::Exact,
             raw_tokens: 100,

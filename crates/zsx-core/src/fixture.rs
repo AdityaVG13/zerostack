@@ -251,6 +251,14 @@ impl DomainAdapter for FixtureAdapter {
         let worker_token_accounting = (requested_accounting
             && request.args["__fixture_accounting"] != "missing")
             .then(|| WorkerTokenAccountingV1 {
+                tokenizer_version_digest: if request.args["__fixture_accounting"] == "estimate" {
+                    None
+                } else {
+                    Some(
+                        "3278763c4d4dd11356d55cabfadb66db6de8260c8e300d681690efb8b1298f04"
+                            .into(),
+                    )
+                },
                 tokenizer_id: if request.args["__fixture_accounting"] == "estimate" {
                     "estimator:fixture-v1".into()
                 } else {

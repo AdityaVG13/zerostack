@@ -1861,6 +1861,7 @@ mod tests {
         use zero_abi::raw_worker::WorkerTokenCountKind;
         fn accounting(kind: WorkerTokenCountKind) -> WorkerTokenAccountingV1 {
             WorkerTokenAccountingV1 {
+                tokenizer_version_digest: None,
                 tokenizer_id: "tz".into(),
                 count_kind: kind,
                 raw_tokens: 10,
@@ -1882,6 +1883,7 @@ mod tests {
 
         // empty tokenizer / all-zero accounting are still rejected.
         let bad = WorkerTokenAccountingV1 {
+            tokenizer_version_digest: None,
             tokenizer_id: String::new(),
             count_kind: WorkerTokenCountKind::Exact,
             raw_tokens: 0,
