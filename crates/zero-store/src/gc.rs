@@ -1056,6 +1056,49 @@ fn mark_uncertain(state: &mut MarkState, evidence: String) {
 
 const GC_MAX_PROJECT_NAMESPACES: usize = GC_MAX_REPORT_OBJECTS;
 
+/// Require a real (non-symlink) directory entry with a UTF-8 name. The noun
+/// keeps producer vs project error texts distinct.
+fn require_dir_utf8_name(entry: &fs::DirEntry, noun: &str) -> Result<String, GcError> {
+    if !entry.file_type()?.is_dir() {
+        return Err(corrupt(
+            &entry.path(),
+            format!("GC {noun} namespace is not a real directory"),
+        ));
+    }
+    let name = entry.file_name();
+    let name = name
+        .to_str()
+        .ok_or_else(|| corrupt(&entry.path(), format!("GC {noun} namespace is not UTF-8")))?;
+    Ok(name.to_string())
+}
+
+/// Walk the project namespaces under one producer directory, enforcing the
+/// shared project id and traversal-cap rules.
+fn walk_project_namespaces(
+    engine_dir: &Path,
+    project_count: &mut usize,
+    f: &mut impl FnMut(&Path) -> Result<(), GcError>,
+) -> Result<(), GcError> {
+    for project_entry in fs::read_dir(engine_dir)? {
+        let project_entry = project_entry?;
+        let project_id = require_dir_utf8_name(&project_entry, "project")?;
+        if !is_valid_hash(&project_id) {
+            return Err(corrupt(
+                &project_entry.path(),
+                "invalid project_id namespace".into(),
+            ));
+        }
+        *project_count = project_count.saturating_add(1);
+        if *project_count > GC_MAX_PROJECT_NAMESPACES {
+            return Err(GcError::Policy(format!(
+                "GC project traversal exceeds {GC_MAX_PROJECT_NAMESPACES}"
+            )));
+        }
+        f(&project_entry.path())?;
+    }
+    Ok(())
+}
+
 fn walk_gc_projects(
     store_root: &Path,
     subdir: &str,
@@ -1074,21 +1117,8 @@ fn walk_gc_projects(
     let mut project_count = 0usize;
     for engine_entry in fs::read_dir(&dir)? {
         let engine_entry = engine_entry?;
-        let engine_type = engine_entry.file_type()?;
-        if !engine_type.is_dir() {
-            return Err(corrupt(
-                &engine_entry.path(),
-                "GC producer namespace is not a real directory".into(),
-            ));
-        }
-        let producer_id = engine_entry.file_name();
-        let producer_id = producer_id.to_str().ok_or_else(|| {
-            corrupt(
-                &engine_entry.path(),
-                "GC producer namespace is not UTF-8".into(),
-            )
-        })?;
-        if !is_valid_producer_id(producer_id) {
+        let producer_id = require_dir_utf8_name(&engine_entry, "producer")?;
+        if !is_valid_producer_id(&producer_id) {
             return Err(corrupt(
                 &engine_entry.path(),
                 format!("invalid producer id {producer_id}"),
@@ -1100,36 +1130,7 @@ fn walk_gc_projects(
                 "GC producer traversal exceeds {GC_MAX_PRODUCER_NAMESPACES}"
             )));
         }
-        for project_entry in fs::read_dir(engine_entry.path())? {
-            let project_entry = project_entry?;
-            let project_type = project_entry.file_type()?;
-            if !project_type.is_dir() {
-                return Err(corrupt(
-                    &project_entry.path(),
-                    "GC project namespace is not a real directory".into(),
-                ));
-            }
-            let project_id = project_entry.file_name();
-            let project_id = project_id.to_str().ok_or_else(|| {
-                corrupt(
-                    &project_entry.path(),
-                    "GC project namespace is not UTF-8".into(),
-                )
-            })?;
-            if !is_valid_hash(project_id) {
-                return Err(corrupt(
-                    &project_entry.path(),
-                    "invalid project_id namespace".into(),
-                ));
-            }
-            project_count = project_count.saturating_add(1);
-            if project_count > GC_MAX_PROJECT_NAMESPACES {
-                return Err(GcError::Policy(format!(
-                    "GC project traversal exceeds {GC_MAX_PROJECT_NAMESPACES}"
-                )));
-            }
-            f(&project_entry.path())?;
-        }
+        walk_project_namespaces(&engine_entry.path(), &mut project_count, &mut f)?;
     }
     Ok(())
 }
@@ -1210,6 +1211,89 @@ fn load_all_pins(store_root: &Path, state: &mut MarkState, now: SystemTime) -> R
     )
 }
 
+/// Load reachability roots into the mark state. Missing roots metadata is
+/// uncertain, never a free pass to collect.
+fn load_reachability_roots(store_root: &Path, state: &mut MarkState) -> Result<(), GcError> {
+    if !store_root.join("gc").join("roots").is_dir() {
+        mark_uncertain(
+            state,
+            "missing gc/roots directory; reachability metadata absent".into(),
+        );
+        return Ok(());
+    }
+    let mut saw_any_project = false;
+    walk_gc_projects(store_root, "roots", |project_dir| {
+        saw_any_project = true;
+        let current = project_dir.join("current.json");
+        if !current.is_file() {
+            mark_uncertain(
+                state,
+                format!("missing reachability snapshot {}", current.display()),
+            );
+            return Ok(());
+        }
+        match read_reachability_snapshot(&current) {
+            Ok(snap) => {
+                let evidence = format!("root {} epoch {}", current.display(), snap.epoch);
+                for h in &snap.blob_hashes {
+                    mark_hash(state, h, "reachability-root", &evidence);
+                }
+            }
+            Err(err) => mark_uncertain(state, format!("{}: {err}", current.display())),
+        }
+        Ok(())
+    })?;
+    if !saw_any_project {
+        mark_uncertain(
+            state,
+            "gc/roots has no project namespaces; reachability metadata absent".into(),
+        );
+    }
+    Ok(())
+}
+
+/// Apply one lease to the mark state: active and in-grace leases retain their
+/// hashes; stale leases outside grace retain with unverified-liveness
+/// uncertainty.
+fn apply_lease_liveness(
+    path: &Path,
+    lease: &LeaseRecord,
+    state: &mut MarkState,
+    now: SystemTime,
+    grace_seconds: u64,
+) {
+    let expires = parse_rfc3339(&lease.expires_at).unwrap_or(now);
+    let grace_end = expires.checked_add(std::time::Duration::from_secs(
+        lease.grace_seconds.max(grace_seconds),
+    ));
+    let active = now <= expires;
+    let in_grace = !active && grace_end.is_none_or(|end| now < end);
+    let reason = if active {
+        "active-lease"
+    } else {
+        "stale-lease-grace"
+    };
+    let evidence = if active {
+        format!("lease {}", path.display())
+    } else if in_grace {
+        format!("lease {} inside grace", path.display())
+    } else {
+        format!("lease {} retained on uncertain liveness", path.display())
+    };
+    if !active && !in_grace {
+        mark_uncertain(
+            state,
+            format!(
+                "lease {} stale outside grace; owner liveness unverified",
+                path.display()
+            ),
+        );
+    }
+    for h in &lease.blob_hashes {
+        mark_hash(state, h, reason, &evidence);
+    }
+}
+
 fn load_mark_state(
     store_root: &Path,
     cas: &SharedCas,
@@ -1217,79 +1301,14 @@ fn load_mark_state(
     grace_seconds: u64,
 ) -> Result<MarkState, GcError> {
     let mut state = MarkState::default();
-    if !store_root.join("gc").join("roots").is_dir() {
-        mark_uncertain(
-            &mut state,
-            "missing gc/roots directory; reachability metadata absent".into(),
-        );
-    } else {
-        let mut saw_any_project = false;
-        walk_gc_projects(store_root, "roots", |project_dir| {
-            saw_any_project = true;
-            let current = project_dir.join("current.json");
-            if !current.is_file() {
-                mark_uncertain(
-                    &mut state,
-                    format!("missing reachability snapshot {}", current.display()),
-                );
-                return Ok(());
-            }
-            match read_reachability_snapshot(&current) {
-                Ok(snap) => {
-                    let evidence = format!("root {} epoch {}", current.display(), snap.epoch);
-                    for h in &snap.blob_hashes {
-                        mark_hash(&mut state, h, "reachability-root", &evidence);
-                    }
-                }
-                Err(err) => mark_uncertain(&mut state, format!("{}: {err}", current.display())),
-            }
-            Ok(())
-        })?;
-        if !saw_any_project {
-            mark_uncertain(
-                &mut state,
-                "gc/roots has no project namespaces; reachability metadata absent".into(),
-            );
-        }
-    }
+    load_reachability_roots(store_root, &mut state)?;
     load_all_pins(store_root, &mut state, now)?;
     walk_gc_records(
         store_root,
         "leases",
         &mut state,
         read_lease_record,
-        |path, lease, state| {
-            let expires = parse_rfc3339(&lease.expires_at).unwrap_or(now);
-            let grace_end = expires.checked_add(std::time::Duration::from_secs(
-                lease.grace_seconds.max(grace_seconds),
-            ));
-            let active = now <= expires;
-            let in_grace = !active && grace_end.is_none_or(|end| now < end);
-            let reason = if active {
-                "active-lease"
-            } else {
-                "stale-lease-grace"
-            };
-            let evidence = if active {
-                format!("lease {}", path.display())
-            } else if in_grace {
-                format!("lease {} inside grace", path.display())
-            } else {
-                format!("lease {} retained on uncertain liveness", path.display())
-            };
-            if !active && !in_grace {
-                mark_uncertain(
-                    state,
-                    format!(
-                        "lease {} stale outside grace; owner liveness unverified",
-                        path.display()
-                    ),
-                );
-            }
-            for h in &lease.blob_hashes {
-                mark_hash(state, h, reason, &evidence);
-            }
-        },
+        |path, lease, state| apply_lease_liveness(path, &lease, state, now, grace_seconds),
     )?;
     trace_refs(cas, &mut state)?;
     Ok(state)
@@ -1512,18 +1531,22 @@ fn prune_gc_reports(store_root: &Path, keep: usize, current: &Path) -> Result<()
             .file_name()
             .and_then(|name| name.to_str())
             .unwrap_or_default();
-        if entry.file_type()?.is_file()
-            && name.ends_with(".json")
-            && !name.ends_with(".progress.json")
-        {
-            let modified = entry.metadata()?.modified().unwrap_or(UNIX_EPOCH);
-            if reports.len() >= GC_MAX_REPORT_OBJECTS {
-                return Err(GcError::Policy(format!(
-                    "GC report namespace exceeds {GC_MAX_REPORT_OBJECTS} records"
-                )));
-            }
-            reports.push((modified, name.to_owned(), path));
+        if !entry.file_type()?.is_file() {
+            continue;
         }
+        if !name.ends_with(".json") {
+            continue;
+        }
+        if name.ends_with(".progress.json") {
+            continue;
+        }
+        let modified = entry.metadata()?.modified().unwrap_or(UNIX_EPOCH);
+        if reports.len() >= GC_MAX_REPORT_OBJECTS {
+            return Err(GcError::Policy(format!(
+                "GC report namespace exceeds {GC_MAX_REPORT_OBJECTS} records"
+            )));
+        }
+        reports.push((modified, name.to_owned(), path));
     }
     reports.sort_by(|a, b| a.0.cmp(&b.0).then_with(|| a.1.cmp(&b.1)));
     while reports.len() > keep {
@@ -1771,10 +1794,10 @@ fn validate_list(
             "{field} exceeds {GC_MAX_EVIDENCE_ITEMS} items"
         )));
     }
-    if field == "reason_codes" && items.is_empty() {
+    let reasons = field == "reason_codes";
+    if reasons && items.is_empty() {
         return Err(GcError::SchemaViolation("reason_codes empty".into()));
     }
-    let reasons = field == "reason_codes";
     let mut seen = BTreeSet::new();
     for item in items {
         let item = item.as_str().ok_or_else(|| {
@@ -1797,6 +1820,61 @@ fn validate_list(
             ));
         }
     }
+    Ok(())
+}
+
+/// Validate one bounded, deduplicated hash list field (`planned` / `deleted`)
+/// and return its set. Cross-set invariants stay with the caller.
+fn validate_hash_list(
+    value: &serde_json::Value,
+    field: &str,
+) -> Result<BTreeSet<String>, GcError> {
+    let items = value
+        .get(field)
+        .and_then(serde_json::Value::as_array)
+        .ok_or_else(|| GcError::SchemaViolation(field.into()))?;
+    if items.len() > GC_MAX_REPORT_OBJECTS {
+        return Err(GcError::SchemaViolation(format!(
+            "{field} exceeds {GC_MAX_REPORT_OBJECTS}"
+        )));
+    }
+    let mut seen = BTreeSet::new();
+    for hash in items {
+        let hash = hash
+            .as_str()
+            .ok_or_else(|| GcError::SchemaViolation(format!("{field} hash")))?;
+        if !is_valid_hash(hash) || !seen.insert(hash.to_string()) {
+            return Err(GcError::SchemaViolation(format!(
+                "invalid or duplicate {field} hash"
+            )));
+        }
+    }
+    Ok(seen)
+}
+
+/// Validate one candidate object entry: exact keys, unique valid hash,
+/// verdict vocabulary, and its bounded reason/evidence lists.
+fn validate_candidate_object(
+    object: &serde_json::Value,
+    seen_hashes: &mut BTreeSet<String>,
+    collect_hashes: &mut BTreeSet<String>,
+) -> Result<(), GcError> {
+    exact_keys(object, CANDIDATE_FIELDS, "extra object keys")?;
+    let blob_hash = require_str(object, "blob_hash")?;
+    if !is_valid_hash(blob_hash) || !seen_hashes.insert(blob_hash.to_string()) {
+        return Err(GcError::SchemaViolation(
+            "invalid or duplicate blob_hash".into(),
+        ));
+    }
+    let object_verdict = require_str(object, "verdict")?;
+    if !matches!(object_verdict, "retain" | "collect" | "retain-uncertain") {
+        return Err(GcError::SchemaViolation("verdict".into()));
+    }
+    if object_verdict == "collect" {
+        collect_hashes.insert(blob_hash.to_string());
+    }
+    validate_list(object, "reason_codes", Some(REASON_CODES))?;
+    validate_list(object, "evidence", None)?;
     Ok(())
 }
 
@@ -1832,7 +1910,7 @@ pub fn validate_dry_run_report(value: &serde_json::Value) -> Result<(), GcError>
     if !matches!(state, "evaluated" | "complete") {
         return Err(GcError::SchemaViolation("state".into()));
     }
-    if !apply && state != "evaluated" {
+    if !apply && state == "complete" {
         return Err(GcError::SchemaViolation(
             "dry run cannot have complete state".into(),
         ));
@@ -1849,43 +1927,9 @@ pub fn validate_dry_run_report(value: &serde_json::Value) -> Result<(), GcError>
     let mut seen_hashes = BTreeSet::new();
     let mut collect_hashes = BTreeSet::new();
     for object in objects {
-        exact_keys(object, CANDIDATE_FIELDS, "extra object keys")?;
-        let blob_hash = require_str(object, "blob_hash")?;
-        if !is_valid_hash(blob_hash) || !seen_hashes.insert(blob_hash.to_string()) {
-            return Err(GcError::SchemaViolation(
-                "invalid or duplicate blob_hash".into(),
-            ));
-        }
-        let object_verdict = require_str(object, "verdict")?;
-        if !matches!(object_verdict, "retain" | "collect" | "retain-uncertain") {
-            return Err(GcError::SchemaViolation("verdict".into()));
-        }
-        if object_verdict == "collect" {
-            collect_hashes.insert(blob_hash.to_string());
-        }
-        validate_list(object, "reason_codes", Some(REASON_CODES))?;
-        validate_list(object, "evidence", None)?;
+        validate_candidate_object(object, &mut seen_hashes, &mut collect_hashes)?;
     }
-    let planned = value
-        .get("planned")
-        .and_then(serde_json::Value::as_array)
-        .ok_or_else(|| GcError::SchemaViolation("planned".into()))?;
-    if planned.len() > GC_MAX_REPORT_OBJECTS {
-        return Err(GcError::SchemaViolation(format!(
-            "planned exceeds {GC_MAX_REPORT_OBJECTS}"
-        )));
-    }
-    let mut seen_planned = BTreeSet::new();
-    for hash in planned {
-        let hash = hash
-            .as_str()
-            .ok_or_else(|| GcError::SchemaViolation("planned hash".into()))?;
-        if !is_valid_hash(hash) || !seen_planned.insert(hash.to_string()) {
-            return Err(GcError::SchemaViolation(
-                "invalid or duplicate planned hash".into(),
-            ));
-        }
-    }
+    let seen_planned = validate_hash_list(value, "planned")?;
     if state == "evaluated" && seen_planned != collect_hashes {
         return Err(GcError::SchemaViolation(
             "evaluated planned set differs from collect candidates".into(),
@@ -1896,26 +1940,7 @@ pub fn validate_dry_run_report(value: &serde_json::Value) -> Result<(), GcError>
             "collect candidate is absent from planned set".into(),
         ));
     }
-    let deleted = value
-        .get("deleted")
-        .and_then(serde_json::Value::as_array)
-        .ok_or_else(|| GcError::SchemaViolation("deleted".into()))?;
-    if deleted.len() > GC_MAX_REPORT_OBJECTS {
-        return Err(GcError::SchemaViolation(format!(
-            "deleted exceeds {GC_MAX_REPORT_OBJECTS}"
-        )));
-    }
-    let mut seen_deleted = BTreeSet::new();
-    for hash in deleted {
-        let hash = hash
-            .as_str()
-            .ok_or_else(|| GcError::SchemaViolation("deleted hash".into()))?;
-        if !is_valid_hash(hash) || !seen_deleted.insert(hash.to_string()) {
-            return Err(GcError::SchemaViolation(
-                "invalid or duplicate deleted hash".into(),
-            ));
-        }
-    }
+    let seen_deleted = validate_hash_list(value, "deleted")?;
     if !seen_deleted.is_subset(&seen_planned) {
         return Err(GcError::SchemaViolation(
             "deleted hash is absent from planned set".into(),
@@ -1929,7 +1954,7 @@ pub fn validate_dry_run_report(value: &serde_json::Value) -> Result<(), GcError>
             "planned hash is absent from both objects and deleted".into(),
         ));
     }
-    if (!apply || state != "complete") && !deleted.is_empty() {
+    if (!apply || state != "complete") && !seen_deleted.is_empty() {
         return Err(GcError::SchemaViolation(
             "only a complete applied run may report deletions".into(),
         ));
@@ -2001,6 +2026,29 @@ pub fn gc_repair_receipt_digest_hex(receipt: &RepairReceipt) -> Result<String, G
 /// An empty `blob_hashes` slice is an explicit declaration that this producer
 /// and project retain no CAS objects. Epochs are strictly monotonic, including
 /// across legacy v1 records.
+/// Require that publishing at `path` would move the reachability epoch
+/// strictly forward. A missing snapshot admits any epoch >= 1.
+fn require_strictly_newer_epoch(path: &Path, epoch: u64) -> Result<(), GcError> {
+    match fs::symlink_metadata(path) {
+        Ok(metadata) if !metadata.file_type().is_file() => Err(corrupt(
+            path,
+            "reachability snapshot is not a regular file".into(),
+        )),
+        Ok(_) => {
+            let existing = read_reachability_snapshot(path)?;
+            if epoch <= existing.epoch {
+                return Err(GcError::SchemaViolation(format!(
+                    "epoch {epoch} must be strictly greater than current {}",
+                    existing.epoch
+                )));
+            }
+            Ok(())
+        }
+        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(GcError::Io(error)),
+    }
+}
+
 pub fn publish_reachability_snapshot(
     store_root: &Path,
     producer_id: &str,
@@ -2028,25 +2076,7 @@ pub fn publish_reachability_snapshot(
         store_root,
         &["roots", producer_id, project_id, "current.json"],
     );
-    match fs::symlink_metadata(&path) {
-        Ok(metadata) if !metadata.file_type().is_file() => {
-            return Err(corrupt(
-                &path,
-                "reachability snapshot is not a regular file".into(),
-            ));
-        }
-        Ok(_) => {
-            let existing = read_reachability_snapshot(&path)?;
-            if epoch <= existing.epoch {
-                return Err(GcError::SchemaViolation(format!(
-                    "epoch {epoch} must be strictly greater than current {}",
-                    existing.epoch
-                )));
-            }
-        }
-        Err(error) if error.kind() == io::ErrorKind::NotFound => {}
-        Err(error) => return Err(GcError::Io(error)),
-    }
+    require_strictly_newer_epoch(&path, epoch)?;
     let mut hashes = blob_hashes.to_vec();
     hashes.sort_unstable();
     hashes.dedup();

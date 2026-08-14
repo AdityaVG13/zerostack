@@ -180,21 +180,10 @@ fn try_lock(file: &File, mode: LockMode) -> Result<(), TryLockError> {
     }
 }
 
-/// Open (never truncate) the lock file, creating `gc/` on demand. Truncation
-/// would be harmless because the contents are unused, but it would also
-/// destroy any future holder metadata written there.
-fn open_lock_file(store_root: &Path) -> io::Result<(PathBuf, File)> {
-    fs::create_dir_all(store_root)?;
-    if !fs::symlink_metadata(store_root)?.file_type().is_dir() {
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidInput,
-            format!(
-                "store root is not a real directory: {}",
-                store_root.display()
-            ),
-        ));
-    }
-
+/// Ensure `<store_root>/gc/` exists as a real directory, tolerating a
+/// concurrent creator and re-checking after create (TOCTOU: a rival may
+/// replace the path between create and use).
+fn ensure_gc_namespace_dir(store_root: &Path) -> io::Result<PathBuf> {
     let directory = store_root.join(GC_DIR);
     match fs::symlink_metadata(&directory) {
         Ok(metadata) if metadata.file_type().is_dir() => {}
@@ -225,6 +214,25 @@ fn open_lock_file(store_root: &Path) -> io::Result<(PathBuf, File)> {
         }
         Err(error) => return Err(error),
     }
+    Ok(directory)
+}
+
+/// Open (never truncate) the lock file, creating `gc/` on demand. Truncation
+/// would be harmless because the contents are unused, but it would also
+/// destroy any future holder metadata written there.
+fn open_lock_file(store_root: &Path) -> io::Result<(PathBuf, File)> {
+    fs::create_dir_all(store_root)?;
+    if !fs::symlink_metadata(store_root)?.file_type().is_dir() {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            format!(
+                "store root is not a real directory: {}",
+                store_root.display()
+            ),
+        ));
+    }
+
+    let directory = ensure_gc_namespace_dir(store_root)?;
 
     let path = directory.join(COORDINATOR_LOCK);
     match fs::symlink_metadata(&path) {
