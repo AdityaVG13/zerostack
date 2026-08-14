@@ -22,10 +22,12 @@ mod durable_journal;
 mod fs_replace;
 mod gc;
 mod gc_lock;
+mod idle_gate;
 mod metadata;
 mod migrations;
 mod scrub;
 mod session_wal;
+mod snapshot;
 mod store_root;
 mod zbf;
 
@@ -69,6 +71,18 @@ pub use durable_journal::{
 pub use fs_replace::{
     SyncPolicy, atomic_write_file, atomic_write_file_with_sync, replace_file, sync_unsupported,
     tolerate_unsupported_sync,
+};
+pub use idle_gate::{
+    DEFAULT_IDLE_MAX_CPU_FRACTION_PPB_V1, DEFAULT_IDLE_MAX_RSS_BYTES_V1, IDLE_GATE_ABI_VERSION_V1,
+    IDLE_GATE_DOMAIN_V1, IDLE_GATE_SCHEMA_VERSION_V1, IdleBudgetsV1, IdleGateErrorV1,
+    IdleGateReceiptV1, IdleGateRefusalReasonV1, IdleGateRefusalV1, IdleSampleV1, IdleSamplerV1,
+    IdleWindowEvidenceV1, evaluate_idle_release_gate_v1, idle_gate_contract_v1,
+    measure_idle_window_v1,
+};
+pub use snapshot::{
+    SNAPSHOT_ABI_VERSION_V1, SNAPSHOT_SCHEMA_VERSION_V1, SNAPSHOT_STALENESS_DOMAIN_V1,
+    SnapshotReadResolutionV1, SnapshotStalenessReceiptV1, SnapshotViewV1,
+    resolve_snapshot_read_v1, snapshot_isolation_contract_v1, take_root_snapshot_v1,
 };
 pub use gc::{
     BeforeUnlinkHook, DEFAULT_GC_REPORT_LIMIT, DryRunReport, GC_MAX_BLOB_HASHES,

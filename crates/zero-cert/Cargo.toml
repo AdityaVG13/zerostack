@@ -25,6 +25,10 @@ harness = false
 path = "../../tests/benches/zero-cert/verify.rs"
 
 [[test]]
+name = "boundary_audit"
+path = "../../tests/rust/zero-cert/boundary_audit.rs"
+
+[[test]]
 name = "effect_witness"
 path = "../../tests/rust/zero-cert/effect_witness.rs"
 
@@ -39,3 +43,11 @@ path = "../../tests/rust/zero-cert/kernel_runtime.rs"
 [[test]]
 name = "property"
 path = "../../tests/rust/zero-cert/property.rs"
+
+[[test]]
+name = "trace_export"
+path = "../../tests/rust/zero-cert/trace_export.rs"
+
+[[test]]
+name = "worker_trust"
+path = "../../tests/rust/zero-cert/worker_trust.rs"

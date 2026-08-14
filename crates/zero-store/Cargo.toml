@@ -15,8 +15,13 @@ zero-abi = { path = "../zero-abi" }
 zero-ref = { path = "../zero-ref" }
 
 [dev-dependencies]
+libc = "0.2"
 tempfile = "3"
 
 [[test]]
 name = "gc_publication"
 path = "../../tests/rust/zero-store/gc_publication.rs"
+
+[[test]]
+name = "idle_gate_host"
+path = "../../tests/rust/zero-store/idle_gate_host.rs"

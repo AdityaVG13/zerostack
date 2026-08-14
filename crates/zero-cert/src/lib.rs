@@ -10,8 +10,18 @@
 //! }
 //! ~~~
 
+pub mod boundary_audit;
 pub mod effect_witness;
 pub mod kernel_runtime;
+pub mod trace_export;
+pub mod worker_trust;
+
+pub use boundary_audit::{
+    AuthorityBoundaryAuditReportV1, AuthoritySurfaceV1, BOUNDARY_AUDIT_ABI_VERSION_V1,
+    BOUNDARY_AUDIT_DOMAIN_V1, BOUNDARY_AUDIT_SCHEMA_VERSION_V1, BoundaryAuditErrorV1,
+    ConstructionSurfaceV1, authority_boundary_audit_v1, verify_commit_authority_v1,
+    verify_decision_authority_v1,
+};
 
 pub use effect_witness::{
     EFFECT_ACCEPTED_DOMAIN_V1, EFFECT_EVIDENCE_REF_DOMAIN_V1, EFFECT_WITNESS_CONTRACT_VERSION_V1,
@@ -28,6 +38,26 @@ pub use kernel_runtime::{
     EVENT_JOURNAL_RECORDS_FILE_V1, EVENT_JOURNAL_SEALED_HEAD_FILE_V1, FileEventJournalStore,
     InMemoryJournalStore, KERNEL_RUNTIME_VERSION_V1, KernelEventJournalV1, KernelRuntimeError,
     JournalStore, ProjectRootGateV1, RootGateFaultV1, RootGateSessionV1,
+};
+pub use trace_export::{
+    BenchmarkReproducibilityV1, DecisionBoundaryAnnotationV1, DecisionBoundaryKindV1,
+    DecisionBoundaryLineV1, DecisionBoundarySummaryV1, SealedBenchmarkManifestV1,
+    SealedManifestFileV1, TRACE_EXPORT_ABI_VERSION_V1, TRACE_EXPORT_DOMAIN_V1,
+    TRACE_EXPORT_MANIFEST_FILE_V1, TRACE_EXPORT_MAX_BATCH_RECORDS_V1,
+    TRACE_EXPORT_MAX_RECORD_BYTES_V1, TRACE_EXPORT_RECORDS_FILE_V1,
+    TRACE_EXPORT_SCHEMA_VERSION_V1, TRACE_EXPORT_SEALED_HEAD_FILE_V1, TraceEventKindV1,
+    TraceExportErrorV1, TraceExportReceiptV1, TraceExportSnapshotV1, TraceRecordV1,
+    TraceSealedHeadV1, append_trace_record_v1, export_benchmark_manifest_v1,
+    export_trace_pipeline_v1, open_trace_export_v1, read_exported_benchmark_manifest_v1,
+    read_trace_export_v1, seal_trace_export_v1, summarize_decision_boundaries_v1,
+    trace_export_contract_v1,
+};
+pub use worker_trust::{
+    TrustContextV1, WORKER_TRUST_ABI_VERSION_V1, WORKER_TRUST_ADMISSION_DOMAIN_V1,
+    WORKER_TRUST_ENVELOPE_DOMAIN_V1, WORKER_TRUST_REFUSAL_DOMAIN_V1,
+    WORKER_TRUST_SCHEMA_VERSION_V1, WorkerAdmissionReceiptV1, WorkerEnvelopeV1,
+    WorkerFrameV1, WorkerIdentityClaimV1, WorkerRefusalReasonV1, WorkerRefusalRecordV1,
+    WorkerTraceV1, WorkerTrustBoundaryV1, WorkerTrustErrorV1, worker_trust_contract_v1,
 };
 
 use serde::{Deserialize, Serialize};
