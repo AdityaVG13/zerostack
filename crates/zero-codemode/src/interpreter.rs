@@ -15,7 +15,7 @@ use std::time::{Duration, Instant};
 use serde_json::{Map, Number, Value as JsonValue};
 use tree_sitter::{Node, Parser};
 use tree_sitter_javascript::LANGUAGE;
-use zero_abi::{canonical_json, sha256_hex};
+use zero_abi::{CapabilityDescriptor, canonical_json, sha256_hex};
 
 use crate::host::{
     ConnectorCompletionMessage, directly_expands_one_spill_ref, is_terminal_exact_token_expansion,
@@ -1390,14 +1390,14 @@ impl<'tree> Interpreter<'tree> {
         }
     }
 
-    fn call_tool(
-        &mut self,
+    /// Resolve one `surface.method` capability, or fail with the typed
+    /// MethodNotFound / SurfaceNotFound error carrying closest-name hints.
+    fn resolve_capability(
+        &self,
         surface: &str,
         method: &str,
-        args: Vec<Value<'tree>>,
-    ) -> Result<Value<'tree>, Fault<'tree>> {
-        let descriptor = self
-            .host
+    ) -> Result<CapabilityDescriptor, Fault<'tree>> {
+        self.host
             .registration
             .capabilities
             .iter()
@@ -1423,7 +1423,16 @@ impl<'tree> Interpreter<'tree> {
                         closest_names(surface, self.host.registration.capabilities.iter().map(|capability| capability.surface.as_str()))
                     )))
                 }
-            })?;
+            })
+    }
+
+    fn call_tool(
+        &mut self,
+        surface: &str,
+        method: &str,
+        args: Vec<Value<'tree>>,
+    ) -> Result<Value<'tree>, Fault<'tree>> {
+        let descriptor = self.resolve_capability(surface, method)?;
         let value = if args.len() == 1 {
             args.into_iter().next().unwrap_or(Value::Undefined)
         } else {
@@ -2035,153 +2044,7 @@ impl<'tree> Interpreter<'tree> {
                 Ok(self.new_promise(PromiseState::Pending(kind)))
             }
             ("Array", "isArray") => Ok(Value::Bool(matches!(args.first(), Some(Value::Array(_))))),
-            ("Array", "from") => {
-                let source = args.first().cloned().unwrap_or(Value::Undefined);
-                let mapper = args.get(1).cloned();
-                if let Some(mapper) = &mapper
-                    && !matches!(mapper, Value::Function(_))
-                {
-                    return Err(Fault::Host(HostError::Data(
-                        "Array.from mapper must be a function".into(),
-                    )));
-                }
-                // Resolve the source to (length, element producer) without
-                // materializing the output, so every length check runs
-                // before any allocation.
-                let (length, producer): (usize, Box<dyn Fn(usize) -> Value<'tree>>) = match source {
-                    Value::Array(items) => {
-                        let length = items.borrow().len();
-                        (
-                            length,
-                            Box::new(move |index| {
-                                items
-                                    .borrow()
-                                    .get(index)
-                                    .cloned()
-                                    .unwrap_or(Value::Undefined)
-                            }),
-                        )
-                    }
-                    Value::String(value) => {
-                        let length = value.chars().count();
-                        let remaining = self
-                            .host
-                            .limits
-                            .instruction_budget
-                            .saturating_sub(self.instructions);
-                        if length as u64 > remaining {
-                            return Err(Fault::Host(HostError::FuelExhausted));
-                        }
-                        let staged_allocation = length
-                            .checked_mul(
-                                std::mem::size_of::<char>()
-                                    .saturating_add(std::mem::size_of::<Value<'tree>>()),
-                            )
-                            .ok_or_else(|| {
-                                Fault::Host(HostError::Data(
-                                    "Array.from string output length is too large".into(),
-                                ))
-                            })?;
-                        if staged_allocation > self.host.limits.memory_bytes {
-                            return Err(Fault::Host(HostError::MemoryLimit {
-                                requested: staged_allocation,
-                                maximum: self.host.limits.memory_bytes,
-                            }));
-                        }
-                        let mut characters = Vec::new();
-                        characters.try_reserve_exact(length).map_err(|error| {
-                            Fault::Host(HostError::Data(format!(
-                                "Array.from string staging could not be reserved: {error}"
-                            )))
-                        })?;
-                        characters.extend(value.chars());
-                        (
-                            length,
-                            Box::new(move |index| {
-                                Value::String(
-                                    characters.get(index).copied().unwrap_or('\0').to_string(),
-                                )
-                            }),
-                        )
-                    }
-                    Value::Object(object) => {
-                        let length = object
-                            .borrow()
-                            .fields
-                            .get("length")
-                            .and_then(number)
-                            .ok_or_else(|| {
-                                Fault::Host(HostError::Data(
-                                    "Array.from length must be a finite number".into(),
-                                ))
-                            })?;
-                        if !length.is_finite() || length < 0.0 {
-                            return Err(Fault::Host(HostError::Data(
-                                "Array.from length must be finite and non-negative".into(),
-                            )));
-                        }
-                        let length = length.floor() as usize;
-                        (
-                            length,
-                            Box::new(move |index| {
-                                object
-                                    .borrow()
-                                    .fields
-                                    .get(&index.to_string())
-                                    .cloned()
-                                    .unwrap_or(Value::Undefined)
-                            }),
-                        )
-                    }
-                    _ => {
-                        return Err(Fault::Host(HostError::Data(
-                            "Array.from expects an array, string, or array-like object".into(),
-                        )));
-                    }
-                };
-                // Pre-flight length checks: the output allocation must fit
-                // the memory limit and the emission loop must fit the
-                // remaining fuel, both before any memory is reserved.
-                let allocation = length
-                    .checked_mul(std::mem::size_of::<Value<'tree>>())
-                    .ok_or_else(|| {
-                        Fault::Host(HostError::Data(
-                            "Array.from output length is too large".into(),
-                        ))
-                    })?;
-                if allocation > self.host.limits.memory_bytes {
-                    return Err(Fault::Host(HostError::MemoryLimit {
-                        requested: allocation,
-                        maximum: self.host.limits.memory_bytes,
-                    }));
-                }
-                let remaining = self
-                    .host
-                    .limits
-                    .instruction_budget
-                    .saturating_sub(self.instructions);
-                if length as u64 > remaining {
-                    return Err(Fault::Host(HostError::FuelExhausted));
-                }
-                let mut values = Vec::new();
-                values.try_reserve_exact(length).map_err(|error| {
-                    Fault::Host(HostError::Data(format!(
-                        "Array.from output allocation could not be reserved: {error}"
-                    )))
-                })?;
-                for index in 0..length {
-                    self.tick()?;
-                    let item = match &mapper {
-                        Some(mapper) => self.call(
-                            mapper.clone(),
-                            vec![producer(index), Value::Number(index as f64)],
-                        )?,
-                        None => producer(index),
-                    };
-                    values.push(item);
-                }
-                Ok(new_array(values))
-            }
+            ("Array", "from") => self.array_from(args),
             ("Object", "keys") => Ok(new_array(object_keys(
                 args.first().cloned().unwrap_or(Value::Undefined),
             ))),
@@ -2204,60 +2067,7 @@ impl<'tree> Interpreter<'tree> {
             ("Reflect", "ownKeys") => Ok(new_array(object_keys(
                 args.first().cloned().unwrap_or(Value::Undefined),
             ))),
-            ("Object", "defineProperty") => {
-                let mut iter = args.into_iter();
-                let target = iter.next().unwrap_or(Value::Undefined);
-                let key = to_key(&iter.next().unwrap_or(Value::Undefined));
-                let descriptor = iter.next().unwrap_or(Value::Undefined);
-                let Value::Object(target) = target else {
-                    return Err(Fault::Host(HostError::Data(
-                        "Object.defineProperty target must be a mutable user object".into(),
-                    )));
-                };
-                let defined = match &descriptor {
-                    Value::Object(descriptor) => {
-                        // Clone get/value out before mutating `target`. The
-                        // same object can be both target and descriptor
-                        // (`Object.defineProperty(o, "x", o)`); holding
-                        // borrow_mut + borrow on one RefCell panics.
-                        let descriptor = descriptor.borrow();
-                        if let Some(getter) = descriptor.fields.get("get").cloned() {
-                            Some(Ok(getter))
-                        } else if let Some(value) = descriptor.fields.get("value").cloned() {
-                            Some(Err(value))
-                        } else {
-                            None
-                        }
-                    }
-                    _ => {
-                        return Err(Fault::Host(HostError::Data(
-                            "Object.defineProperty descriptor must be an object".into(),
-                        )));
-                    }
-                };
-                {
-                    let mut object = target.borrow_mut();
-                    if !matches!(object.access, ObjectAccess::Open) {
-                        return Err(Fault::Host(HostError::Data(format!(
-                            "cannot define property '{key}' on an immutable object"
-                        ))));
-                    }
-                    match defined {
-                        Some(Ok(getter)) => {
-                            object.getters.insert(key, getter);
-                        }
-                        Some(Err(value)) => {
-                            object.fields.insert(key, value);
-                        }
-                        None => {
-                            return Err(Fault::Host(HostError::Data(
-                                "Object.defineProperty descriptor must provide get or value".into(),
-                            )));
-                        }
-                    }
-                }
-                Ok(Value::Object(target))
-            }
+            ("Object", "defineProperty") => object_define_property(args),
             ("JSON", "parse") => {
                 let encoded = to_string(args.first().unwrap_or(&Value::Undefined));
                 if encoded.len() > self.host.limits.max_json_bytes {
@@ -2303,6 +2113,154 @@ impl<'tree> Interpreter<'tree> {
                 "global method {namespace}.{name} is not supported"
             )))),
         }
+    }
+
+    /// `Array.from`: resolve the source to (length, element producer) and run
+    /// every fuel/length preflight in source order before any allocation.
+    fn array_from(&mut self, args: Vec<Value<'tree>>) -> Result<Value<'tree>, Fault<'tree>> {
+        let source = args.first().cloned().unwrap_or(Value::Undefined);
+        let mapper = args.get(1).cloned();
+        if let Some(mapper) = &mapper
+            && !matches!(mapper, Value::Function(_))
+        {
+            return Err(Fault::Host(HostError::Data(
+                "Array.from mapper must be a function".into(),
+            )));
+        }
+        // Resolve the source to (length, element producer) without
+        // materializing the output, so every length check runs
+        // before any allocation.
+        let (length, producer): (usize, Box<dyn Fn(usize) -> Value<'tree>>) = match source {
+            Value::Array(items) => {
+                let length = items.borrow().len();
+                (
+                    length,
+                    Box::new(move |index| {
+                        items
+                            .borrow()
+                            .get(index)
+                            .cloned()
+                            .unwrap_or(Value::Undefined)
+                    }),
+                )
+            }
+            Value::String(value) => {
+                let length = value.chars().count();
+                let remaining = self
+                    .host
+                    .limits
+                    .instruction_budget
+                    .saturating_sub(self.instructions);
+                if length as u64 > remaining {
+                    return Err(Fault::Host(HostError::FuelExhausted));
+                }
+                let staged_allocation = length
+                    .checked_mul(
+                        std::mem::size_of::<char>()
+                            .saturating_add(std::mem::size_of::<Value<'tree>>()),
+                    )
+                    .ok_or_else(|| {
+                        Fault::Host(HostError::Data(
+                            "Array.from string output length is too large".into(),
+                        ))
+                    })?;
+                if staged_allocation > self.host.limits.memory_bytes {
+                    return Err(Fault::Host(HostError::MemoryLimit {
+                        requested: staged_allocation,
+                        maximum: self.host.limits.memory_bytes,
+                    }));
+                }
+                let mut characters = Vec::new();
+                characters.try_reserve_exact(length).map_err(|error| {
+                    Fault::Host(HostError::Data(format!(
+                        "Array.from string staging could not be reserved: {error}"
+                    )))
+                })?;
+                characters.extend(value.chars());
+                (
+                    length,
+                    Box::new(move |index| {
+                        Value::String(characters.get(index).copied().unwrap_or('\0').to_string())
+                    }),
+                )
+            }
+            Value::Object(object) => {
+                let length = object
+                    .borrow()
+                    .fields
+                    .get("length")
+                    .and_then(number)
+                    .ok_or_else(|| {
+                        Fault::Host(HostError::Data(
+                            "Array.from length must be a finite number".into(),
+                        ))
+                    })?;
+                if !length.is_finite() || length < 0.0 {
+                    return Err(Fault::Host(HostError::Data(
+                        "Array.from length must be finite and non-negative".into(),
+                    )));
+                }
+                let length = length.floor() as usize;
+                (
+                    length,
+                    Box::new(move |index| {
+                        object
+                            .borrow()
+                            .fields
+                            .get(&index.to_string())
+                            .cloned()
+                            .unwrap_or(Value::Undefined)
+                    }),
+                )
+            }
+            _ => {
+                return Err(Fault::Host(HostError::Data(
+                    "Array.from expects an array, string, or array-like object".into(),
+                )));
+            }
+        };
+        // Pre-flight length checks: the output allocation must fit
+        // the memory limit and the emission loop must fit the
+        // remaining fuel, both before any memory is reserved.
+        let allocation = length
+            .checked_mul(std::mem::size_of::<Value<'tree>>())
+            .ok_or_else(|| {
+                Fault::Host(HostError::Data(
+                    "Array.from output length is too large".into(),
+                ))
+            })?;
+        if allocation > self.host.limits.memory_bytes {
+            return Err(Fault::Host(HostError::MemoryLimit {
+                requested: allocation,
+                maximum: self.host.limits.memory_bytes,
+            }));
+        }
+        let remaining = self
+            .host
+            .limits
+            .instruction_budget
+            .saturating_sub(self.instructions);
+        if length as u64 > remaining {
+            return Err(Fault::Host(HostError::FuelExhausted));
+        }
+        let mut values = Vec::new();
+        values.try_reserve_exact(length).map_err(|error| {
+            Fault::Host(HostError::Data(format!(
+                "Array.from output allocation could not be reserved: {error}"
+            )))
+        })?;
+        for index in 0..length {
+            self.tick()?;
+            let item = match &mapper {
+                Some(mapper) => self.call(
+                    mapper.clone(),
+                    vec![producer(index), Value::Number(index as f64)],
+                )?,
+                None => producer(index),
+            };
+            values.push(item);
+        }
+        Ok(new_array(values))
     }
 
     fn array_method(
@@ -2357,44 +2315,7 @@ impl<'tree> Interpreter<'tree> {
                     .unwrap_or(-1.0),
             )),
             "map" | "filter" | "find" | "findIndex" | "some" | "every" | "forEach" => {
-                let callback = args.first().cloned().ok_or_else(|| {
-                    Fault::Host(HostError::Data("array callback is required".into()))
-                })?;
-                let mut output = Vec::new();
-                let mut found = None;
-                for (index, item) in snapshot.iter().cloned().enumerate() {
-                    let result = self.call(
-                        callback.clone(),
-                        vec![
-                            item,
-                            Value::Number(index as f64),
-                            new_array(snapshot.clone()),
-                        ],
-                    )?;
-                    match name {
-                        "map" => output.push(result),
-                        "filter" if truthy(&result) => output.push(snapshot[index].clone()),
-                        "find" if truthy(&result) => {
-                            found = Some(snapshot[index].clone());
-                            break;
-                        }
-                        "findIndex" if truthy(&result) => {
-                            found = Some(Value::Number(index as f64));
-                            break;
-                        }
-                        "some" if truthy(&result) => return Ok(Value::Bool(true)),
-                        "every" if !truthy(&result) => return Ok(Value::Bool(false)),
-                        _ => {}
-                    }
-                }
-                match name {
-                    "map" | "filter" => Ok(new_array(output)),
-                    "find" => Ok(found.unwrap_or(Value::Undefined)),
-                    "findIndex" => Ok(found.unwrap_or(Value::Number(-1.0))),
-                    "some" => Ok(Value::Bool(false)),
-                    "every" => Ok(Value::Bool(true)),
-                    _ => Ok(Value::Undefined),
-                }
+                self.array_callback_method(&snapshot, name, args)
             }
             "push" => {
                 let mut target = items.borrow_mut();
@@ -2405,6 +2326,55 @@ impl<'tree> Interpreter<'tree> {
         }
     }
 
+    /// Shared callback loop for the seven callback-taking array methods.
+    /// The `_ => Undefined` result tail is **forEach**, not dead code.
+    fn array_callback_method(
+        &mut self,
+        snapshot: &[Value<'tree>],
+        name: &str,
+        args: Vec<Value<'tree>>,
+    ) -> Result<Value<'tree>, Fault<'tree>> {
+        let callback = args
+            .first()
+            .cloned()
+            .ok_or_else(|| Fault::Host(HostError::Data("array callback is required".into())))?;
+        let mut output = Vec::new();
+        let mut found = None;
+        for (index, item) in snapshot.iter().cloned().enumerate() {
+            let result = self.call(
+                callback.clone(),
+                vec![
+                    item,
+                    Value::Number(index as f64),
+                    new_array(snapshot.to_vec()),
+                ],
+            )?;
+            match name {
+                "map" => output.push(result),
+                "filter" if truthy(&result) => output.push(snapshot[index].clone()),
+                "find" if truthy(&result) => {
+                    found = Some(snapshot[index].clone());
+                    break;
+                }
+                "findIndex" if truthy(&result) => {
+                    found = Some(Value::Number(index as f64));
+                    break;
+                }
+                "some" if truthy(&result) => return Ok(Value::Bool(true)),
+                "every" if !truthy(&result) => return Ok(Value::Bool(false)),
+                _ => {}
+            }
+        }
+        match name {
+            "map" | "filter" => Ok(new_array(output)),
+            "find" => Ok(found.unwrap_or(Value::Undefined)),
+            "findIndex" => Ok(found.unwrap_or(Value::Number(-1.0))),
+            "some" => Ok(Value::Bool(false)),
+            "every" => Ok(Value::Bool(true)),
+            _ => Ok(Value::Undefined),
+        }
+    }
+
     fn string_method(
         &mut self,
         value: &str,
@@ -2412,102 +2382,8 @@ impl<'tree> Interpreter<'tree> {
         args: Vec<Value<'tree>>,
     ) -> Result<Value<'tree>, Fault<'tree>> {
         match name {
-            "repeat" => {
-                let raw_count = args.first().and_then(number).unwrap_or(0.0);
-                if raw_count.is_nan() || raw_count == 0.0 {
-                    return Ok(Value::String(String::new()));
-                }
-                if raw_count < 0.0 || !raw_count.is_finite() {
-                    return Err(Fault::Host(HostError::Data(
-                        "String.repeat count must be a finite non-negative number".into(),
-                    )));
-                }
-                if value.is_empty() {
-                    return Ok(Value::String(String::new()));
-                }
-                let count = raw_count.floor();
-                let maximum = self.host.limits.memory_bytes / value.len();
-                if count >= usize::MAX as f64 || count > maximum as f64 {
-                    return Err(Fault::Host(HostError::MemoryLimit {
-                        requested: usize::MAX,
-                        maximum: self.host.limits.memory_bytes,
-                    }));
-                }
-                let count = count as usize;
-                let bytes = value.len().checked_mul(count).ok_or_else(|| {
-                    Fault::Host(HostError::Data(
-                        "String.repeat allocation is too large".into(),
-                    ))
-                })?;
-                if bytes > self.host.limits.memory_bytes {
-                    return Err(Fault::Host(HostError::MemoryLimit {
-                        requested: bytes,
-                        maximum: self.host.limits.memory_bytes,
-                    }));
-                }
-                Ok(Value::String(value.repeat(count)))
-            }
-            "padStart" => {
-                let raw_target = args.first().and_then(number).unwrap_or(0.0);
-                if raw_target.is_nan() || raw_target <= 0.0 {
-                    return Ok(Value::String(value.into()));
-                }
-                if !raw_target.is_finite() {
-                    return Err(Fault::Host(HostError::Data(
-                        "String.padStart target length must be finite".into(),
-                    )));
-                }
-                let target = raw_target.floor();
-                let current = value.chars().count();
-                if target <= current as f64 {
-                    return Ok(Value::String(value.into()));
-                }
-                if target >= usize::MAX as f64 {
-                    return Err(Fault::Host(HostError::Data(
-                        "String.padStart target length is too large".into(),
-                    )));
-                }
-                let target = target as usize;
-                let needed = target.saturating_sub(current);
-                let pad = match args.get(1) {
-                    None | Some(&Value::Undefined) => " ".to_owned(),
-                    Some(value) => to_string(value),
-                };
-                if pad.is_empty() {
-                    return Ok(Value::String(value.into()));
-                }
-                let pad_chars = pad.chars().count();
-                let full_repeats = needed / pad_chars;
-                let remainder = needed % pad_chars;
-                let remainder_bytes = pad
-                    .chars()
-                    .take(remainder)
-                    .map(|character| character.len_utf8())
-                    .sum::<usize>();
-                let padding_bytes = full_repeats
-                    .checked_mul(pad.len())
-                    .and_then(|bytes| bytes.checked_add(remainder_bytes))
-                    .ok_or_else(|| {
-                        Fault::Host(HostError::Data(
-                            "String.padStart allocation is too large".into(),
-                        ))
-                    })?;
-                let output_bytes = value.len().checked_add(padding_bytes).ok_or_else(|| {
-                    Fault::Host(HostError::Data(
-                        "String.padStart allocation is too large".into(),
-                    ))
-                })?;
-                if output_bytes > self.host.limits.memory_bytes {
-                    return Err(Fault::Host(HostError::MemoryLimit {
-                        requested: output_bytes,
-                        maximum: self.host.limits.memory_bytes,
-                    }));
-                }
-                let mut output = String::with_capacity(output_bytes);
-                output.extend(pad.chars().cycle().take(needed));
-                output.push_str(value);
-                Ok(Value::String(output))
-            }
+            "repeat" => self.string_repeat(value, &args),
+            "padStart" => self.string_pad_start(value, &args),
             "toLowerCase" => Ok(Value::String(value.to_lowercase())),
             "toUpperCase" => Ok(Value::String(value.to_uppercase())),
             "trim" => Ok(Value::String(value.trim().into())),
@@ -2551,6 +2427,118 @@ impl<'tree> Interpreter<'tree> {
             }
             _ => Err(Fault::Host(self.unsupported_name(name, "string method"))),
         }
+    }
+
+    /// `String.repeat`: NaN/zero counts and empty subjects are no-ops;
+    /// negative or non-finite counts are errors; allocation is preflighted
+    /// against the memory limit before repeating.
+    fn string_repeat(
+        &self,
+        value: &str,
+        args: &[Value<'tree>],
+    ) -> Result<Value<'tree>, Fault<'tree>> {
+        let raw_count = args.first().and_then(number).unwrap_or(0.0);
+        if raw_count.is_nan() || raw_count == 0.0 {
+            return Ok(Value::String(String::new()));
+        }
+        if raw_count < 0.0 || !raw_count.is_finite() {
+            return Err(Fault::Host(HostError::Data(
+                "String.repeat count must be a finite non-negative number".into(),
+            )));
+        }
+        if value.is_empty() {
+            return Ok(Value::String(String::new()));
+        }
+        let count = raw_count.floor();
+        let maximum = self.host.limits.memory_bytes / value.len();
+        if count >= usize::MAX as f64 || count > maximum as f64 {
+            return Err(Fault::Host(HostError::MemoryLimit {
+                requested: usize::MAX,
+                maximum: self.host.limits.memory_bytes,
+            }));
+        }
+        let count = count as usize;
+        let bytes = value.len().checked_mul(count).ok_or_else(|| {
+            Fault::Host(HostError::Data(
+                "String.repeat allocation is too large".into(),
+            ))
+        })?;
+        if bytes > self.host.limits.memory_bytes {
+            return Err(Fault::Host(HostError::MemoryLimit {
+                requested: bytes,
+                maximum: self.host.limits.memory_bytes,
+            }));
+        }
+        Ok(Value::String(value.repeat(count)))
+    }
+
+    /// `String.padStart`: NaN/short/empty-pad targets are no-ops returning the
+    /// original; the `!is_finite` check after `<= 0.0` catches **+Inf** and
+    /// must stay; UTF-8 remainder bytes are preflighted before allocating.
+    fn string_pad_start(
+        &self,
+        value: &str,
+        args: &[Value<'tree>],
+    ) -> Result<Value<'tree>, Fault<'tree>> {
+        let raw_target = args.first().and_then(number).unwrap_or(0.0);
+        if raw_target.is_nan() || raw_target <= 0.0 {
+            return Ok(Value::String(value.into()));
+        }
+        if !raw_target.is_finite() {
+            return Err(Fault::Host(HostError::Data(
+                "String.padStart target length must be finite".into(),
+            )));
+        }
+        let target = raw_target.floor();
+        let current = value.chars().count();
+        if target <= current as f64 {
+            return Ok(Value::String(value.into()));
+        }
+        if target >= usize::MAX as f64 {
+            return Err(Fault::Host(HostError::Data(
+                "String.padStart target length is too large".into(),
+            )));
+        }
+        let target = target as usize;
+        let needed = target.saturating_sub(current);
+        let pad = match args.get(1) {
+            None | Some(&Value::Undefined) => " ".to_owned(),
+            Some(value) => to_string(value),
+        };
+        if pad.is_empty() {
+            return Ok(Value::String(value.into()));
+        }
+        let pad_chars = pad.chars().count();
+        let full_repeats = needed / pad_chars;
+        let remainder = needed % pad_chars;
+        let remainder_bytes = pad
+            .chars()
+            .take(remainder)
+            .map(|character| character.len_utf8())
+            .sum::<usize>();
+        let padding_bytes = full_repeats
+            .checked_mul(pad.len())
+            .and_then(|bytes| bytes.checked_add(remainder_bytes))
+            .ok_or_else(|| {
+                Fault::Host(HostError::Data(
+                    "String.padStart allocation is too large".into(),
+                ))
+            })?;
+        let output_bytes = value.len().checked_add(padding_bytes).ok_or_else(|| {
+            Fault::Host(HostError::Data(
+                "String.padStart allocation is too large".into(),
+            ))
+        })?;
+        if output_bytes > self.host.limits.memory_bytes {
+            return Err(Fault::Host(HostError::MemoryLimit {
+                requested: output_bytes,
+                maximum: self.host.limits.memory_bytes,
+            }));
+        }
+        let mut output = String::with_capacity(output_bytes);
+        output.extend(pad.chars().cycle().take(needed));
+        output.push_str(value);
+        Ok(Value::String(output))
     }
 
     fn new_promise(&mut self, state: PromiseState<'tree>) -> Value<'tree> {
@@ -2873,45 +2861,7 @@ impl<'tree> Interpreter<'tree> {
                     json
                 }
             }
-            Value::Object(value) => {
-                let pointer = Rc::as_ptr(value) as usize;
-                if !seen.insert(pointer) {
-                    *degraded = true;
-                    self.serialize_public(&Value::Unreadable, depth + 1, seen, degraded)?
-                } else {
-                    let (fields, getters) = {
-                        let object = value.borrow();
-                        (object.fields.clone(), object.getters.clone())
-                    };
-                    let mut keys = fields.keys().cloned().collect::<BTreeSet<_>>();
-                    keys.extend(getters.keys().cloned());
-                    let mut map = Map::new();
-                    for key in keys {
-                        let entry = if let Some(getter) = getters.get(&key) {
-                            match self.call(getter.clone(), Vec::new()) {
-                                Ok(result) => {
-                                    self.serialize_public(&result, depth + 1, seen, degraded)?
-                                }
-                                Err(Fault::Throw(_)) => {
-                                    *degraded = true;
-                                    self.serialize_public(
-                                        &Value::Unreadable,
-                                        depth + 1,
-                                        seen,
-                                        degraded,
-                                    )?
-                                }
-                                Err(Fault::Host(error)) => return Err(error),
-                            }
-                        } else {
-                            self.serialize_public(&fields[&key], depth + 1, seen, degraded)?
-                        };
-                        map.insert(key, entry);
-                    }
-                    seen.remove(&pointer);
-                    JsonValue::Object(map)
-                }
-            }
+            Value::Object(value) => self.serialize_public_object(value, depth, seen, degraded)?,
             Value::Error(value) => JsonValue::Object(
                 [
                     (String::from("name"), JsonValue::String(value.name.clone())),
@@ -2935,6 +2885,47 @@ impl<'tree> Interpreter<'tree> {
                 ));
             }
         })
+    }
+
+    /// Serialize one user object arm: cycle detection degrades to
+    /// `[unreadable]`, getters run once (a throw degrades, a host error
+    /// aborts), and fields/getters merge into one sorted key set.
+    fn serialize_public_object(
+        &mut self,
+        value: &Rc<RefCell<ObjectValue<'tree>>>,
+        depth: usize,
+        seen: &mut BTreeSet<usize>,
+        degraded: &mut bool,
+    ) -> Result<JsonValue, HostError> {
+        let pointer = Rc::as_ptr(value) as usize;
+        if !seen.insert(pointer) {
+            *degraded = true;
+            return self.serialize_public(&Value::Unreadable, depth + 1, seen, degraded);
+        }
+        let (fields, getters) = {
+            let object = value.borrow();
+            (object.fields.clone(), object.getters.clone())
+        };
+        let mut keys = fields.keys().cloned().collect::<BTreeSet<_>>();
+        keys.extend(getters.keys().cloned());
+        let mut map = Map::new();
+        for key in keys {
+            let entry = if let Some(getter) = getters.get(&key) {
+                match self.call(getter.clone(), Vec::new()) {
+                    Ok(result) => self.serialize_public(&result, depth + 1, seen, degraded)?,
+                    Err(Fault::Throw(_)) => {
+                        *degraded = true;
+                        self.serialize_public(&Value::Unreadable, depth + 1, seen, degraded)?
+                    }
+                    Err(Fault::Host(error)) => return Err(error),
+                }
+            } else {
+                self.serialize_public(&fields[&key], depth + 1, seen, degraded)?
+            };
+            map.insert(key, entry);
+        }
+        seen.remove(&pointer);
+        Ok(JsonValue::Object(map))
     }
 
     fn fault(&self, fault: Fault<'tree>) -> HostError {
@@ -3148,6 +3139,63 @@ fn to_key(value: &Value<'_>) -> String {
         Value::Number(value) => (*value as usize).to_string(),
         _ => to_string(value),
     }
+}
+
+/// `Object.defineProperty`: clone get/value out of the descriptor **before**
+/// taking `borrow_mut` on the target. The same object can be both target and
+/// descriptor (`Object.defineProperty(o, "x", o)`); holding borrow_mut +
+/// borrow on one RefCell panics.
+fn object_define_property<'tree>(
+    args: Vec<Value<'tree>>,
+) -> Result<Value<'tree>, Fault<'tree>> {
+    let mut iter = args.into_iter();
+    let target = iter.next().unwrap_or(Value::Undefined);
+    let key = to_key(&iter.next().unwrap_or(Value::Undefined));
+    let descriptor = iter.next().unwrap_or(Value::Undefined);
+    let Value::Object(target) = target else {
+        return Err(Fault::Host(HostError::Data(
+            "Object.defineProperty target must be a mutable user object".into(),
+        )));
+    };
+    let defined = match &descriptor {
+        Value::Object(descriptor) => {
+            let descriptor = descriptor.borrow();
+            if let Some(getter) = descriptor.fields.get("get").cloned() {
+                Some(Ok(getter))
+            } else if let Some(value) = descriptor.fields.get("value").cloned() {
+                Some(Err(value))
+            } else {
+                None
+            }
+        }
+        _ => {
+            return Err(Fault::Host(HostError::Data(
+                "Object.defineProperty descriptor must be an object".into(),
+            )));
+        }
+    };
+    {
+        let mut object = target.borrow_mut();
+        if !matches!(object.access, ObjectAccess::Open) {
+            return Err(Fault::Host(HostError::Data(format!(
+                "cannot define property '{key}' on an immutable object"
+            ))));
+        }
+        match defined {
+            Some(Ok(getter)) => {
+                object.getters.insert(key, getter);
+            }
+            Some(Err(value)) => {
+                object.fields.insert(key, value);
+            }
+            None => {
+                return Err(Fault::Host(HostError::Data(
+                    "Object.defineProperty descriptor must provide get or value".into(),
+                )));
+            }
+        }
+    }
+    Ok(Value::Object(target))
 }
 
 fn same_value(left: &Value<'_>, right: &Value<'_>) -> bool {
