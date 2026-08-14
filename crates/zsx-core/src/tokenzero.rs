@@ -582,18 +582,20 @@ fn encoded_len(field: &str, value: &Value) -> Result<u64, String> {
         .and_then(|bytes| checked_u64_count(field, bytes.len()))
 }
 
-fn declared_recovery_bytes(value: &Value, allow_missing: bool) -> Result<u64, String> {
+/// Returns (recovery bytes, refs_omitted). A successful domain result that
+/// omits `refs` no longer fails the call: engine repos evolve independently
+/// of this adapter, and hard-failing every read/shell on a contract-shape
+/// drift is worse than accounting recovery as zero. The omission stays loud:
+/// the caller downgrades `count_kind` to `Estimate` because the byte total
+/// can undercount recovery and is no longer a proven upper bound.
+fn declared_recovery_bytes(value: &Value, allow_missing: bool) -> Result<(u64, bool), String> {
     let Some(refs) = value.get("refs") else {
-        return if allow_missing {
-            Ok(0)
-        } else {
-            Err("successful domain result omitted refs".to_string())
-        };
+        return Ok((0, !allow_missing));
     };
     let refs = refs
         .as_array()
         .ok_or_else(|| "successful domain result refs must be an array".to_string())?;
-    refs.iter().try_fold(0_u64, |total, record| {
+    let total = refs.iter().try_fold(0_u64, |total, record| {
         let bytes = record
             .get("bytes")
             .and_then(Value::as_u64)
@@ -601,7 +603,8 @@ fn declared_recovery_bytes(value: &Value, allow_missing: bool) -> Result<u64, St
         total
             .checked_add(bytes)
             .ok_or_else(|| "declared recovery bytes overflowed".to_string())
-    })
+    })?;
+    Ok((total, false))
 }
 
 /// Tokenizer-independent upper-bound accounting mirrored by TokenZero's raw
@@ -634,7 +637,7 @@ fn worker_token_accounting(
     }
     let input_bytes = encoded_len("request args", args)?;
     let output_bytes = encoded_len("domain result", value)?;
-    let recovery_bytes = declared_recovery_bytes(value, accounting_optional)?;
+    let (recovery_bytes, refs_omitted) = declared_recovery_bytes(value, accounting_optional)?;
     let raw_tokens = input_bytes
         .checked_add(output_bytes)
         .and_then(|value| value.checked_add(recovery_bytes))
@@ -654,7 +657,13 @@ fn worker_token_accounting(
         // version; it is never charged into the resource ledger.
         tokenizer_version_digest: None,
         tokenizer_id: "conservative:utf8-json-bytes-v1".to_string(),
-        count_kind: WorkerTokenCountKind::ConservativeUpperBound,
+        // A refs-omitting success can undercount recovery bytes, so its
+        // accounting is loudly an estimate, not a proven upper bound.
+        count_kind: if refs_omitted {
+            WorkerTokenCountKind::Estimate
+        } else {
+            WorkerTokenCountKind::ConservativeUpperBound
+        },
         raw_tokens,
         visible_tokens: output_bytes,
         recovery_tokens: recovery_bytes,

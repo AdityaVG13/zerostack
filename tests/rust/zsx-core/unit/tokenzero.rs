@@ -68,6 +68,45 @@
         assert_eq!(launch.recovery_tokens, 0);
     }
 
+    #[test]
+    fn refs_omitting_success_accounts_zero_recovery_as_loud_estimate() {
+        // Engine repos evolve independently: a successful read that omits
+        // `refs` must not fail the call. Recovery accounts as zero and the
+        // count kind downgrades loudly to Estimate (no proven upper bound).
+        let value = json!({
+            "visible":{"kind":"capsule","text":"ok"},
+            "accounting":{
+                "raw_tokens":1,
+                "visible_tokens":1,
+                "recovery_tokens":0,
+                "billed_tokens":1,
+                "cached_tokens":0
+            }
+        });
+        let accounting = worker_token_accounting("read", &json!({"input":"x"}), &value)
+            .expect("refs-omitting success must account, not fail");
+        assert_eq!(accounting.count_kind, WorkerTokenCountKind::Estimate);
+        assert_eq!(accounting.recovery_tokens, 0);
+        assert!(accounting.billed_tokens >= accounting.visible_tokens);
+
+        // Malformed refs (present but wrong shape) still fail loud.
+        let malformed_refs = json!({
+            "refs":"not-an-array",
+            "accounting":{
+                "raw_tokens":1,
+                "visible_tokens":1,
+                "recovery_tokens":0,
+                "billed_tokens":1,
+                "cached_tokens":0
+            }
+        });
+        assert!(
+            worker_token_accounting("read", &json!({}), &malformed_refs)
+                .unwrap_err()
+                .contains("refs must be an array")
+        );
+    }
+
     /// A `WorkerTrace` with the bare minimum for unit-testing pure helpers.
     fn test_trace() -> WorkerTrace {
         WorkerTrace {
