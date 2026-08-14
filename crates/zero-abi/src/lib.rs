@@ -23,6 +23,9 @@ pub mod decision_view;
 pub mod digest;
 pub mod dispatch;
 pub mod effect;
+pub mod exec_dag;
+pub mod exec_stream;
+pub mod exec_trace;
 pub mod freshness;
 pub mod identity;
 pub mod job;
@@ -109,6 +112,15 @@ pub use effect::{
     EffectExceptionV1, EffectIrErrorV1, EffectIrFailureCodeV1, EffectPredicateV1, EffectProgramV1,
     EffectRollbackV1, EffectTargetV1, EffectVerificationPlanV1, EffectVerificationStepV1,
     TypedEffectOperationV1, effect_ir_contract_digest_v1, effect_ir_contract_manifest_v1,
+};
+pub use exec_dag::{
+    MAX_EXEC_DAG_DEPENDENCIES_PER_NODE, MAX_EXEC_DAG_NODES, ExecDagErrorV1, ExecDagV1,
+    ExecNodeKindV1, ExecNodeV1,
+};
+pub use exec_stream::{ExecStreamEventV1, StepReceiptV1};
+pub use exec_trace::{
+    ExecTraceErrorV1, ExecTraceRecordV1, ExecTraceV1, ProtectedDecisionViewV1,
+    TraceDivergenceV1, TraceEquivalenceV1, TraceOutcomeV1,
 };
 pub use freshness::{
     CertifiedInfluenceClosure, DependencyEdgeKindV1, DependencyEdgeV1,
