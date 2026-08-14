@@ -88,3 +88,8 @@ required-features = ["fixture-adapters"]
 name = "execute_with_policy"
 path = "../../tests/rust/zsx-core/execute_with_policy.rs"
 required-features = ["fixture-adapters"]
+
+[[test]]
+name = "native_path_survives_adapter_disable"
+path = "../../tests/rust/zsx-core/native_path_survives_adapter_disable.rs"
+required-features = ["fixture-adapters"]

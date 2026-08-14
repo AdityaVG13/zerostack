@@ -697,13 +697,15 @@
 
     #[test]
     fn contract_and_external_schema_digests_are_stable() {
-        // d0c24fd011e6b2cc47eedbefb82901533277c5df1fb22a172c366a59a835b81c
+        // Linked reasoning contract completed with CONTRACT-002 invocation
+        // bindings (V6-R11); the reinvestment manifest digest moves with it.
+        // 34e45018dcc1674a45ee45c3d11d74e6f233c23c0528af56b4b64faa98dc50fc
         assert_eq!(
             reinvestment_contract_digest_v1(),
             DigestV1::from_bytes([
-                0xd0, 0xc2, 0x4f, 0xd0, 0x11, 0xe6, 0xb2, 0xcc, 0x47, 0xee, 0xdb, 0xef, 0xb8, 0x29,
-                0x01, 0x53, 0x32, 0x77, 0xc5, 0xdf, 0x1f, 0xb2, 0x2a, 0x17, 0x2c, 0x36, 0x6a, 0x59,
-                0xa8, 0x35, 0xb8, 0x1c,
+                0x34, 0xe4, 0x50, 0x18, 0xdc, 0xc1, 0x67, 0x4a, 0x45, 0xee, 0x45, 0xc3, 0xd1, 0x1d,
+                0x74, 0xe6, 0xf2, 0x33, 0xc2, 0x3c, 0x05, 0x28, 0xaf, 0x56, 0xb4, 0xb6, 0x4f, 0xaa,
+                0x98, 0xdc, 0x50, 0xfc,
             ])
         );
         assert_eq!(
@@ -719,5 +721,151 @@
             )))
             .to_hex(),
             REINVESTMENT_SELECTION_SCHEMA_SHA256_V1
+        );
+    }
+
+    /// ZS-BASE-003 acceptance: an injected late failure is either absorbed by
+    /// the fallback reserve (baseline completion stays possible), refused
+    /// before it begins when it exceeds baseline plus declared budget, or
+    /// caught as a loud record-level mutation -- never a silent overrun.
+    #[test]
+    fn injected_late_failure_is_absorbed_by_reserve_or_refused() {
+        let (_, boundary) = closed(d(24));
+        // (VerifiedReinvestmentActionV1 is a non-Clone authority object, so
+        // every portfolio is built from freshly verified actions. Each
+        // action gets a distinct claim action digest so the portfolio sort
+        // is strictly ascending.)
+        let reasoning = reasoning_admission();
+        let verified = |kind: ReinvestmentActionKindV1,
+                        reserved: NativeResourceVectorV1,
+                        action_digest_byte: u8| {
+            let claim = ReinvestmentActionClaimV1::new(
+                d(20),
+                d(21),
+                d(22),
+                d(23),
+                d(24),
+                d(action_digest_byte),
+                kind,
+                d(26),
+                boundary.action_digest(),
+                d(27),
+                &reasoning,
+                reserved,
+                verifier_identity(),
+            )
+            .unwrap();
+            let (certificate, resident) = evidence(&claim.canonical_bytes().unwrap());
+            let verified = verify(&certificate, &resident).unwrap();
+            verify_reinvestment_action_v1(claim, &reasoning, &verified).unwrap()
+        };
+        let primary = || {
+            verified(
+                ReinvestmentActionKindV1::SameModelSecondCandidate,
+                vector(40, 20),
+                25,
+            )
+        };
+        let late_small = || {
+            verified(ReinvestmentActionKindV1::AdditionalTests, vector(10, 5), 26)
+        };
+        let late_big = || {
+            verified(ReinvestmentActionKindV1::AdditionalTests, vector(40, 25), 27)
+        };
+        let portfolio = |primary: crate::VerifiedReinvestmentActionV1,
+                          late: crate::VerifiedReinvestmentActionV1| {
+            let mut actions = vec![primary, late];
+            actions.sort_by_key(|action| action.record.claim.action_digest);
+            actions
+        };
+
+        // 1. Late failure within reserve+slack: the plan still completes
+        //    within the raw baseline. Reserve (20,10), guarded (30,10),
+        //    baseline (100,50): committed = 30+20+40+10 = 100 <= 100 and
+        //    10+10+20+5 = 45 <= 50, slack stays (50,30).
+        let admitted = admit_reinvestment_plan_v1(
+            d(20),
+            d(21),
+            d(22),
+            d(28),
+            d(23),
+            d(24),
+            reasoning_admission().baseline_contract_digest(),
+            vector(100, 50),
+            vector(0, 0),
+            vector(30, 10),
+            vector(20, 10),
+            portfolio(primary(), late_small()),
+        )
+        .unwrap();
+        assert_eq!(
+            admitted.record().cost_position,
+            ReinvestmentCostPositionV1::WithinRawBaseline,
+            "the reserve absorbs the injected late failure without leaving the baseline"
+        );
+        // Baseline completion stays possible: the raw-baseline route is
+        // strictly cheaper than the guarded candidate plus reserve.
+        assert_eq!(admitted.record().causal_slack, vector(50, 30));
+
+        // 2. Late failure beyond reserve+slack with no declared budget:
+        //    speculation is refused before it begins.
+        let actions_big = portfolio(primary(), late_big());
+        assert_eq!(
+            admit_reinvestment_plan_v1(
+                d(20),
+                d(21),
+                d(22),
+                d(28),
+                d(23),
+                d(24),
+                reasoning_admission().baseline_contract_digest(),
+                vector(100, 50),
+                vector(0, 0),
+                vector(30, 10),
+                vector(20, 10),
+                portfolio(primary(), late_big()),
+            )
+            .err()
+            .unwrap()
+            .failure_code(),
+            ReinvestmentFailureCodeV1::BudgetExceeded
+        );
+
+        // 3. With a declared additional budget the same late failure is
+        //    labeled, never silently absorbed.
+        let declared = admit_reinvestment_plan_v1(
+            d(20),
+            d(21),
+            d(22),
+            d(28),
+            d(23),
+            d(24),
+            reasoning_admission().baseline_contract_digest(),
+            vector(100, 50),
+            vector(50, 30),
+            vector(30, 10),
+            vector(20, 10),
+            portfolio(primary(), late_big()),
+        )
+        .unwrap();
+        assert_eq!(
+            declared.record().cost_position,
+            ReinvestmentCostPositionV1::DeclaredAdditionalBudget
+        );
+
+        // 4. Injecting the late failure into the STORED record is caught as
+        //    a loud record-level mutation (accounting re-check fails before
+        //    the digest check; both are refusals, never a silent overrun).
+        let mut injected = admitted.record().clone();
+        injected.strict_candidate_guarded_bound = vector(55, 20);
+        assert!(injected.validate().is_err());
+        let mut injected_scope = admitted.record().clone();
+        injected_scope.scope_digest = d(99);
+        assert!(injected_scope.validate().is_err());
+        let mut injected_digest = admitted.record().clone();
+        injected_digest.plan_digest = d(98);
+        assert_eq!(
+            injected_digest.validate().err().unwrap().failure_code(),
+            ReinvestmentFailureCodeV1::DigestMismatch
         );
     }

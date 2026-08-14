@@ -20,6 +20,11 @@ pub const REASONING_CONTRACT_MAX_EXTENSION_BYTES_V1: usize = 8 * 1024;
 pub const REASONING_CONTRACT_MAX_EXTENSION_NODES_V1: usize = 256;
 pub const REASONING_CONTRACT_MAX_EXTENSION_DEPTH_V1: usize = 16;
 pub const REASONING_CONTRACT_MAX_ID_BYTES_V1: usize = 128;
+pub const REASONING_CONTRACT_MAX_TOOL_PERMISSIONS_V1: usize = 256;
+pub const REASONING_CONTRACT_MAX_STOP_SEQUENCES_V1: usize = 64;
+pub const REASONING_CONTRACT_MAX_STOP_SEQUENCE_BYTES_V1: usize = 256;
+pub const REASONING_CONTRACT_TEMPERATURE_PPM_MAX_V1: u32 = 2_000_000;
+pub const REASONING_CONTRACT_TOP_P_PPM_MAX_V1: u32 = 1_000_000;
 
 const CONTRACT_DOMAIN_V1: &[u8] = b"zerostack.reasoning_contract.contract.v1\0";
 const INSTANCE_DOMAIN_V1: &[u8] = b"zerostack.reasoning_contract.instance.v1\0";
@@ -34,6 +39,141 @@ pub enum NativeStatePolicyV1 {
     CleanRestart,
     ScopedCertificate,
     Unavailable,
+}
+
+/// Explicit sampling parameters (CONTRACT-002). Integer parts-per-million
+/// encoding keeps canonical bytes exact -- no float canonicalization hazards.
+/// Absence of a [`ReasoningContractV1`] field means provider defaults are
+/// committed by `decoder_identity`; presence binds the override into the
+/// contract identity.
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct SamplingParamsV1 {
+    /// Temperature in parts per million: `0` (greedy) ..= 2_000_000 (2.0).
+    pub temperature_ppm: u32,
+    /// Nucleus sampling cutoff in parts per million: `1_000_000` (1.0) means
+    /// no truncation.
+    pub top_p_ppm: u32,
+    /// Optional fixed seed; `None` leaves seeding to the provider.
+    pub seed: Option<u64>,
+}
+
+impl SamplingParamsV1 {
+    pub fn new(
+        temperature_ppm: u32,
+        top_p_ppm: u32,
+        seed: Option<u64>,
+    ) -> Result<Self, ReasoningContractErrorV1> {
+        let params = Self {
+            temperature_ppm,
+            top_p_ppm,
+            seed,
+        };
+        params.validate()?;
+        Ok(params)
+    }
+
+    pub fn validate(&self) -> Result<(), ReasoningContractErrorV1> {
+        if self.temperature_ppm > REASONING_CONTRACT_TEMPERATURE_PPM_MAX_V1 {
+            return Err(ReasoningContractErrorV1::new(
+                ReasoningContractFailureCodeV1::InvalidSamplingParams,
+                "temperature_ppm exceeds 2_000_000 (2.0)",
+            ));
+        }
+        if self.top_p_ppm == 0 || self.top_p_ppm > REASONING_CONTRACT_TOP_P_PPM_MAX_V1 {
+            return Err(ReasoningContractErrorV1::new(
+                ReasoningContractFailureCodeV1::InvalidSamplingParams,
+                "top_p_ppm must be in 1..=1_000_000",
+            ));
+        }
+        Ok(())
+    }
+}
+
+/// Explicit stopping policy (CONTRACT-002): bounded stop sequences plus an
+/// optional hard step ceiling.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct StoppingPolicyV1 {
+    pub stop_sequences: Vec<String>,
+    pub max_steps: Option<u32>,
+}
+
+impl StoppingPolicyV1 {
+    pub fn new(
+        stop_sequences: Vec<String>,
+        max_steps: Option<u32>,
+    ) -> Result<Self, ReasoningContractErrorV1> {
+        let policy = Self {
+            stop_sequences,
+            max_steps,
+        };
+        policy.validate()?;
+        Ok(policy)
+    }
+
+    pub fn validate(&self) -> Result<(), ReasoningContractErrorV1> {
+        if self.stop_sequences.len() > REASONING_CONTRACT_MAX_STOP_SEQUENCES_V1 {
+            return Err(ReasoningContractErrorV1::new(
+                ReasoningContractFailureCodeV1::InvalidStoppingPolicy,
+                "stop_sequences exceeds the 64-sequence bound",
+            ));
+        }
+        for sequence in &self.stop_sequences {
+            if sequence.is_empty()
+                || sequence.len() > REASONING_CONTRACT_MAX_STOP_SEQUENCE_BYTES_V1
+                || sequence.chars().any(char::is_control)
+            {
+                return Err(ReasoningContractErrorV1::new(
+                    ReasoningContractFailureCodeV1::InvalidStoppingPolicy,
+                    "stop sequences must be nonempty, bounded, and control-free",
+                ));
+            }
+        }
+        if self.max_steps.is_some_and(|steps| steps == 0) {
+            return Err(ReasoningContractErrorV1::new(
+                ReasoningContractFailureCodeV1::InvalidStoppingPolicy,
+                "max_steps must be nonzero when set",
+            ));
+        }
+        Ok(())
+    }
+}
+
+/// Per-tool invocation permission (CONTRACT-002): the granularity that
+/// `tool_schema_digest` set-identity cannot express.
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct ToolPermissionV1 {
+    pub read_only: bool,
+    pub approval_required: bool,
+    pub max_calls: Option<u32>,
+}
+
+impl ToolPermissionV1 {
+    pub fn new(
+        read_only: bool,
+        approval_required: bool,
+        max_calls: Option<u32>,
+    ) -> Result<Self, ReasoningContractErrorV1> {
+        let permission = Self {
+            read_only,
+            approval_required,
+            max_calls,
+        };
+        permission.validate()?;
+        Ok(permission)
+    }
+
+    pub fn validate(&self) -> Result<(), ReasoningContractErrorV1> {
+        if self.max_calls.is_some_and(|calls| calls == 0) {
+            return Err(ReasoningContractErrorV1::new(
+                ReasoningContractFailureCodeV1::InvalidToolPermissions,
+                "max_calls must be nonzero when set",
+            ));
+        }
+        Ok(())
+    }
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -55,6 +195,17 @@ pub struct ReasoningContractV1 {
     allow_effort_downshift: bool,
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     provider_extension: BTreeMap<String, Value>,
+    // CONTRACT-002: explicit invocation bindings. Absence (None/empty) is a
+    // legitimate declared state meaning provider defaults; presence binds the
+    // override into the contract identity and strict comparison.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    sampling_params: Option<SamplingParamsV1>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    stopping_policy: Option<StoppingPolicyV1>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    system_prompt_root: Option<DigestV1>,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    tool_permissions: BTreeMap<String, ToolPermissionV1>,
 }
 
 impl ReasoningContractV1 {
@@ -91,9 +242,41 @@ impl ReasoningContractV1 {
             native_state_policy,
             allow_effort_downshift,
             provider_extension,
+            sampling_params: None,
+            stopping_policy: None,
+            system_prompt_root: None,
+            tool_permissions: BTreeMap::new(),
         };
         contract.validate()?;
         Ok(contract)
+    }
+
+    /// Bind the CONTRACT-002 invocation fields (sampling params, stopping
+    /// policy, system prompt root, per-tool permissions) into the contract.
+    /// Any binding participates in the canonical bytes, the identity digest,
+    /// and strict paired comparison.
+    pub fn with_invocation_bindings(
+        mut self,
+        sampling_params: SamplingParamsV1,
+        stopping_policy: StoppingPolicyV1,
+        system_prompt_root: Option<DigestV1>,
+        tool_permissions: BTreeMap<String, ToolPermissionV1>,
+    ) -> Result<Self, ReasoningContractErrorV1> {
+        sampling_params.validate()?;
+        stopping_policy.validate()?;
+        if system_prompt_root.is_some_and(|root| root == DigestV1::ZERO) {
+            return Err(ReasoningContractErrorV1::new(
+                ReasoningContractFailureCodeV1::InvalidSystemPromptRoot,
+                "system_prompt_root must be nonzero when set",
+            ));
+        }
+        validate_tool_permissions(&tool_permissions)?;
+        self.sampling_params = Some(sampling_params);
+        self.stopping_policy = Some(stopping_policy);
+        self.system_prompt_root = system_prompt_root;
+        self.tool_permissions = tool_permissions;
+        self.validate()?;
+        Ok(self)
     }
 
     pub fn validate(&self) -> Result<(), ReasoningContractErrorV1> {
@@ -128,6 +311,22 @@ impl ReasoningContractV1 {
             ));
         }
         validate_provider_extension(&self.provider_extension)?;
+        validate_tool_permissions(&self.tool_permissions)?;
+        if let Some(params) = &self.sampling_params {
+            params.validate()?;
+        }
+        if let Some(policy) = &self.stopping_policy {
+            policy.validate()?;
+        }
+        if self
+            .system_prompt_root
+            .is_some_and(|root| root == DigestV1::ZERO)
+        {
+            return Err(ReasoningContractErrorV1::new(
+                ReasoningContractFailureCodeV1::InvalidSystemPromptRoot,
+                "system_prompt_root must be nonzero when set",
+            ));
+        }
         if self.canonical_bytes_unchecked()?.len() > REASONING_CONTRACT_MAX_CANONICAL_BYTES_V1 {
             return Err(ReasoningContractErrorV1::new(
                 ReasoningContractFailureCodeV1::CanonicalPayloadTooLarge,
@@ -245,6 +444,18 @@ impl ReasoningContractV1 {
     }
     pub fn provider_extension(&self) -> &BTreeMap<String, Value> {
         &self.provider_extension
+    }
+    pub const fn sampling_params(&self) -> Option<&SamplingParamsV1> {
+        self.sampling_params.as_ref()
+    }
+    pub const fn stopping_policy(&self) -> Option<&StoppingPolicyV1> {
+        self.stopping_policy.as_ref()
+    }
+    pub const fn system_prompt_root(&self) -> Option<DigestV1> {
+        self.system_prompt_root
+    }
+    pub fn tool_permissions(&self) -> &BTreeMap<String, ToolPermissionV1> {
+        &self.tool_permissions
     }
 }
 
@@ -469,6 +680,32 @@ pub fn verify_strict_no_downshift_v1(
             "provider extension changed without a cross-class theorem",
         ));
     }
+    // CONTRACT-002 invocation bindings: any mismatch reclassifies the pair,
+    // exactly like the other comparison-identity fields.
+    if baseline.sampling_params != candidate.sampling_params {
+        return Err(ReasoningContractErrorV1::new(
+            ReasoningContractFailureCodeV1::InvocationBindingMismatch,
+            "sampling parameters changed without a cross-class theorem",
+        ));
+    }
+    if baseline.stopping_policy != candidate.stopping_policy {
+        return Err(ReasoningContractErrorV1::new(
+            ReasoningContractFailureCodeV1::InvocationBindingMismatch,
+            "stopping policy changed without a cross-class theorem",
+        ));
+    }
+    if baseline.system_prompt_root != candidate.system_prompt_root {
+        return Err(ReasoningContractErrorV1::new(
+            ReasoningContractFailureCodeV1::InvocationBindingMismatch,
+            "system prompt root changed without a cross-class theorem",
+        ));
+    }
+    if baseline.tool_permissions != candidate.tool_permissions {
+        return Err(ReasoningContractErrorV1::new(
+            ReasoningContractFailureCodeV1::InvocationBindingMismatch,
+            "per-tool permission set changed without a cross-class theorem",
+        ));
+    }
     if candidate.max_output_tokens < baseline.max_output_tokens {
         return Err(downshift(
             ReasoningContractFailureCodeV1::OutputCeilingDownshift,
@@ -500,6 +737,39 @@ pub fn reasoning_contract_schema_v1() -> Value {
     json!({
         "$defs": {
             "digest": {"pattern": "^[0-9a-f]{64}$", "type": "string"},
+            "sampling_params": {
+                "additionalProperties": false,
+                "properties": {
+                    "seed": {"anyOf": [{"minimum": 0, "type": "integer"}, {"type": "null"}]},
+                    "temperature_ppm": {"maximum": 2000000, "minimum": 0, "type": "integer"},
+                    "top_p_ppm": {"maximum": 1000000, "minimum": 1, "type": "integer"}
+                },
+                "required": ["temperature_ppm", "top_p_ppm"],
+                "type": "object"
+            },
+            "stopping_policy": {
+                "additionalProperties": false,
+                "properties": {
+                    "max_steps": {"anyOf": [{"minimum": 1, "type": "integer"}, {"type": "null"}]},
+                    "stop_sequences": {
+                        "items": {"maxLength": 256, "minLength": 1, "type": "string"},
+                        "maxItems": 64,
+                        "type": "array"
+                    }
+                },
+                "required": ["stop_sequences"],
+                "type": "object"
+            },
+            "tool_permission": {
+                "additionalProperties": false,
+                "properties": {
+                    "approval_required": {"type": "boolean"},
+                    "max_calls": {"anyOf": [{"minimum": 1, "type": "integer"}, {"type": "null"}]},
+                    "read_only": {"type": "boolean"}
+                },
+                "required": ["read_only", "approval_required"],
+                "type": "object"
+            }
         },
         "$id": "https://zerostack.dev/schemas/racc-r/reasoning-contract-v1.json",
         "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -517,8 +787,12 @@ pub fn reasoning_contract_schema_v1() -> Value {
             "reserved_reasoning_tokens": {"minimum": 0, "type": "integer"},
             "reserved_recovery_tokens": {"minimum": 0, "type": "integer"},
             "reserved_visible_output_tokens": {"minimum": 0, "type": "integer"},
+            "sampling_params": {"$ref": "#/$defs/sampling_params"},
             "schema_version": {"const": REASONING_CONTRACT_SCHEMA_VERSION_V1},
+            "stopping_policy": {"$ref": "#/$defs/stopping_policy"},
+            "system_prompt_root": {"$ref": "#/$defs/digest"},
             "tokenizer_identity": {"$ref": "#/$defs/digest"},
+            "tool_permissions": {"additionalProperties": {"$ref": "#/$defs/tool_permission"}, "maxProperties": 256, "type": "object"},
             "tool_schema_digest": {"$ref": "#/$defs/digest"},
         },
         "required": [
@@ -538,7 +812,8 @@ pub fn reasoning_contract_manifest_v1() -> Value {
         "comparison_identity_fields": [
             "model_identity", "backend_identity", "tokenizer_identity", "decoder_identity",
             "tool_schema_digest", "reasoning_mode", "reasoning_effort", "native_state_policy",
-            "provider_extension",
+            "provider_extension", "sampling_params", "stopping_policy", "system_prompt_root",
+            "tool_permissions",
         ],
         "contract_version": REASONING_CONTRACT_VERSION_V1,
         "headroom_order": ["reasoning", "visible_output", "tool", "recovery", "input"],
@@ -553,7 +828,8 @@ pub fn reasoning_contract_manifest_v1() -> Value {
         "strict_exact_fields": [
             "model_identity", "backend_identity", "tokenizer_identity", "decoder_identity",
             "tool_schema_digest", "reasoning_mode", "reasoning_effort", "native_state_policy",
-            "provider_extension", "allow_effort_downshift_false",
+            "provider_extension", "sampling_params", "stopping_policy", "system_prompt_root",
+            "tool_permissions", "allow_effort_downshift_false",
         ],
         "strict_nondecreasing_fields": [
             "max_output_tokens", "reserved_reasoning_tokens", "reserved_visible_output_tokens",
@@ -672,6 +948,22 @@ fn validate_id(label: &str, value: &str) -> Result<(), ReasoningContractErrorV1>
     Ok(())
 }
 
+fn validate_tool_permissions(
+    permissions: &BTreeMap<String, ToolPermissionV1>,
+) -> Result<(), ReasoningContractErrorV1> {
+    if permissions.len() > REASONING_CONTRACT_MAX_TOOL_PERMISSIONS_V1 {
+        return Err(ReasoningContractErrorV1::new(
+            ReasoningContractFailureCodeV1::InvalidToolPermissions,
+            "tool_permissions exceeds the 256-tool bound",
+        ));
+    }
+    for (tool, permission) in permissions {
+        validate_id("tool permission key", tool)?;
+        permission.validate()?;
+    }
+    Ok(())
+}
+
 fn validate_provider_extension(
     extension: &BTreeMap<String, Value>,
 ) -> Result<(), ReasoningContractErrorV1> {
@@ -764,6 +1056,11 @@ pub enum ReasoningContractFailureCodeV1 {
     ReasoningEffortMismatch,
     NativeStatePolicyMismatch,
     ProviderExtensionMismatch,
+    InvocationBindingMismatch,
+    InvalidSamplingParams,
+    InvalidStoppingPolicy,
+    InvalidSystemPromptRoot,
+    InvalidToolPermissions,
     OutputCeilingDownshift,
     ReasoningReserveDownshift,
     VisibleOutputReserveDownshift,

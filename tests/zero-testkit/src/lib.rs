@@ -40,6 +40,8 @@ pub mod raw_v2_slice;
 #[cfg(feature = "full")]
 pub mod robust_snap_model;
 #[cfg(feature = "full")]
+pub mod v6_conformance;
+#[cfg(feature = "full")]
 pub mod zero_bench_r;
 
 use serde::{Deserialize, Serialize};

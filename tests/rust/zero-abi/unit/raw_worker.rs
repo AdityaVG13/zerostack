@@ -484,7 +484,7 @@
         assert_eq!(digest.len(), 64);
         assert_eq!(
             digest,
-            "e2daca4d95cbd2780f2e10b30b823e9398747bfe15e38ca0810f634a387aeace"
+            "8e8290e087e596c9b9c203ad5022ee6bb3d8e8a1b3550baff8fe390020bc7fcd"
         );
         assert_eq!(digest, raw_worker_protocol_digest_hex());
     }

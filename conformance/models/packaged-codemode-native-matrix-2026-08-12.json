@@ -5,7 +5,7 @@
   "claim_or_freeze_ids": [
     "packaged-codemode-architecture-v1"
   ],
-  "assembly_manifest_digest": "f08798a4510e8e17a3692f02a0e9ee262321317a12abea25815ed5226a081c74",
+  "assembly_manifest_digest": "9756754a7833fccdf6daf0a688783d2be298e4825ff909909c01925ec53ed661",
   "model_or_spec_version": "raw-worker-v2 + zerostack.zsx.v1",
   "verifier": {
     "name": "dsr",
@@ -13,7 +13,7 @@
     "exact_command": "cargo test -p zerostack-shared-tests --test program_assembly -- --test-threads=1 && cargo test -p zerostack-shared-tests --test canonical_dispatch -- --test-threads=1 && cargo test -p zerostack-shared-tests --test raw_worker_v2 -- --test-threads=1 && cargo test -p zero-codemode --test host_contract -- --test-threads=1 && cargo test -p zsx-core --features fszero,graphzero,tokenzero --test canonical_mixed -- --test-threads=1 && cargo test -p zsx-core --features fszero,graphzero,tokenzero --test request_cancellation -- --test-threads=1 && cargo test -p zsx --test one_process -- --test-threads=1 && cargo test -p zsx-node -- --test-threads=1 && cargo build --release -p zsx"
   },
   "input_fixture_hashes": {
-    "conformance/models/program-assembly-2026-08-11.json": "c0a785d45c1764549b8fe61ca5ba1acf2681c783ce581b03a303a36da1056cb9",
+    "conformance/models/program-assembly-2026-08-11.json": "da79b8b88d5e42eb6c9db4834b0658a7c09dea87f04e15fbe9f3a81573ab07eb",
     "tests/fixtures/canonical_dispatch_vectors.json": "834c300273498c67a892aa235d9a29fad1012e3fa7d8e08a0f67998fcac505ba",
     "tests/fixtures/raw_worker_v2_frames.json": "546071a831565155f847604e77eca59b63b4c4fbc4b056d3656149a917c501c5"
   },

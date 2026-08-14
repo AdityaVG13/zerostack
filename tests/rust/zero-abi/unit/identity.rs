@@ -594,3 +594,241 @@
         )
         .is_err());
     }
+
+    // ---------------------------------------------------------------------
+    // ZS-KERNEL-001: registry extension to views/deltas/authority objects
+    // and canonical-byte property breadth (process order, escapes, locale,
+    // path aliases).
+    // ---------------------------------------------------------------------
+
+    #[test]
+    fn object_class_registry_covers_views_deltas_and_authority_objects() {
+        for (class, domain) in [
+            (ObjectClassV1::DecisionView, "zerostack.object.decision_view.v1"),
+            (ObjectClassV1::Delta, "zerostack.object.delta.v1"),
+            (ObjectClassV1::AuthorityObject, "zerostack.object.authority_object.v1"),
+            (ObjectClassV1::MigrationReceipt, "zerostack.object.migration_receipt.v1"),
+        ] {
+            assert_eq!(class.domain(), domain);
+            let payload = serde_json::json!({"class": class.domain()});
+            let bytes = canonical_object_bytes(class, abi(), &payload).unwrap();
+            let root = object_root(class, abi(), &bytes).unwrap();
+            assert!(verify_object_root(class, abi(), &bytes, root));
+            // Class binding: the same payload under every other class roots
+            // differently (no cross-class reuse).
+            for (other, _) in [
+                (ObjectClassV1::TaskContract, ""),
+                (ObjectClassV1::ExecuteResult, ""),
+                (ObjectClassV1::DecisionView, ""),
+                (ObjectClassV1::Delta, ""),
+                (ObjectClassV1::AuthorityObject, ""),
+            ] {
+                if other != class {
+                    let other_bytes =
+                        canonical_object_bytes(other, abi(), &payload).unwrap();
+                    let other_root = object_root(other, abi(), &other_bytes).unwrap();
+                    assert_ne!(other_root, root);
+                    assert!(!verify_object_root(other, abi(), &bytes, root));
+                }
+            }
+        }
+    }
+
+    /// KERNEL-001 property breadth: canonical bytes are invariant under key
+    /// insertion order, JSON whitespace, and equivalent escape spellings
+    /// (process-order and locale-adjacent perturbations), and are byte-exact
+    /// where content differs (Unicode normalization forms and path aliases
+    /// are never silently normalized).
+    #[test]
+    fn canonical_bytes_are_stable_across_perturbations_and_exact_otherwise() {
+        // Process order: identical semantic objects with different key
+        // insertion orders and whitespace produce identical canonical bytes.
+        let spellings = [
+            r#"{"b":1,"a":[2,3],"c":{"y":true,"x":false}}"#,
+            r#"{ "c" : { "x" : false, "y" : true }, "a" : [ 2, 3 ], "b" : 1 }"#,
+            r#"{
+                "a": [2, 3],
+                "b": 1,
+                "c": {"x": false, "y": true}
+            }"#,
+        ];
+        let roots = spellings
+            .iter()
+            .map(|spelling| {
+                let value: Value = serde_json::from_str(spelling).unwrap();
+                let bytes =
+                    canonical_object_bytes(ObjectClassV1::ExecuteResult, abi(), &value).unwrap();
+                object_root(ObjectClassV1::ExecuteResult, abi(), &bytes).unwrap()
+            })
+            .collect::<Vec<_>>();
+        assert!(roots.iter().all(|root| *root == roots[0]));
+
+        // Escape spellings: "\u0041" and "A" decode to the same string and
+        // canonicalize identically.
+        let escaped = r#"{"label":"\u0041B"}"#;
+        let plain = r#"{"label":"AB"}"#;
+        let bytes_escaped =
+            canonical_object_bytes(ObjectClassV1::Delta, abi(), &serde_json::from_str(escaped).unwrap())
+                .unwrap();
+        let bytes_plain =
+            canonical_object_bytes(ObjectClassV1::Delta, abi(), &serde_json::from_str(plain).unwrap())
+                .unwrap();
+        assert_eq!(bytes_escaped, bytes_plain);
+
+        // Locale: NFC vs NFD spellings are different byte content and must
+        // NOT collide -- the canonical layer is byte-exact, never locale
+        // normalized.
+        let nfc = r#"{"label":"\u00e9"}"#; // é (U+00E9)
+        let nfd = r#"{"label":"e\u0301"}"#; // e + combining acute
+        let bytes_nfc =
+            canonical_object_bytes(ObjectClassV1::DecisionView, abi(), &serde_json::from_str(nfc).unwrap())
+                .unwrap();
+        let bytes_nfd =
+            canonical_object_bytes(ObjectClassV1::DecisionView, abi(), &serde_json::from_str(nfd).unwrap())
+                .unwrap();
+        assert_ne!(bytes_nfc, bytes_nfd, "NFC/NFD must never collide");
+
+        // Path aliases: ref strings that alias under naive path semantics
+        // stay distinct objects (no silent alias normalization at the object
+        // layer; aliasing is engine-scope policy).
+        let canonical_path = r#"{"path":"fz://root/a/b"}"#;
+        let aliased = r#"{"path":"fz://root/a/../b"}"#;
+        let doubled_slash = r#"{"path":"fz://root/a//b"}"#;
+        let bytes_canonical = canonical_object_bytes(
+            ObjectClassV1::AuthorityObject,
+            abi(),
+            &serde_json::from_str(canonical_path).unwrap(),
+        )
+        .unwrap();
+        for spelling in [aliased, doubled_slash] {
+            let bytes = canonical_object_bytes(
+                ObjectClassV1::AuthorityObject,
+                abi(),
+                &serde_json::from_str(spelling).unwrap(),
+            )
+            .unwrap();
+            assert_ne!(bytes, bytes_canonical, "path alias {spelling} must not collide");
+        }
+    }
+
+    /// ZS-KERNEL-007: incompatible-version migration is explicit and
+    /// receipted -- the receipt re-derives the legacy root, roots the v6
+    /// target through the canonical path, and fails closed on any tamper.
+    #[test]
+    fn migration_receipt_mints_verifies_and_fails_closed() {
+        let legacy_payload = serde_json::json!({"legacy": "v5-task"});
+        let legacy_bytes = crate::canonical_json(&legacy_payload).into_bytes();
+        let legacy_root = DigestV1::from_bytes(sha256(&root_preimage(
+            ObjectClassV1::TaskContract,
+            "zerostack.racc.v5",
+            &legacy_bytes,
+        )));
+        let target_payload = serde_json::json!({"task_kind": "port"});
+        let receipt = RootedAbiMigrationReceiptV1::new(
+            ObjectClassV1::TaskContract,
+            "zerostack.racc.v5",
+            &legacy_bytes,
+            legacy_root,
+            ObjectClassV1::TaskContract,
+            &target_payload,
+            "v6 structured task contract fields",
+        )
+        .unwrap();
+        receipt.validate().unwrap();
+        let canonical = receipt.canonical_bytes().unwrap();
+        let root = object_root(ObjectClassV1::MigrationReceipt, abi(), &canonical).unwrap();
+        assert_eq!(receipt.receipt_root().unwrap(), root);
+        assert_eq!(
+            RootedAbiMigrationReceiptV1::from_canonical_bytes(&canonical).unwrap(),
+            receipt
+        );
+
+        // Forged legacy root refused.
+        assert!(matches!(
+            RootedAbiMigrationReceiptV1::new(
+                ObjectClassV1::TaskContract,
+                "zerostack.racc.v5",
+                &legacy_bytes,
+                DigestV1::from_bytes([0x7f; 32]),
+                ObjectClassV1::TaskContract,
+                &target_payload,
+                "forged",
+            ),
+            Err(IdentityErrorV1::SourceRootMismatch)
+        ));
+
+        // No ABI change is not a migration.
+        assert!(matches!(
+            RootedAbiMigrationReceiptV1::new(
+                ObjectClassV1::TaskContract,
+                abi(),
+                &legacy_bytes,
+                legacy_root,
+                ObjectClassV1::TaskContract,
+                &target_payload,
+                "no-op",
+            ),
+            Err(IdentityErrorV1::MigrationWithoutAbiChange)
+        ));
+
+        // Empty reason refused.
+        assert!(matches!(
+            RootedAbiMigrationReceiptV1::new(
+                ObjectClassV1::TaskContract,
+                "zerostack.racc.v5",
+                &legacy_bytes,
+                legacy_root,
+                ObjectClassV1::TaskContract,
+                &target_payload,
+                "  ",
+            ),
+            Err(IdentityErrorV1::InvalidMigrationReceipt(_))
+        ));
+
+        // Stored-receipt tamper: any field change flips the receipt root
+        // (the canonical-bytes binding), so a relabeled reason can never
+        // verify against the original sealed root.
+        let mut relabeled = receipt.clone();
+        relabeled.migration_reason = "relabeled".into();
+        assert_ne!(relabeled.receipt_root().unwrap(), receipt.receipt_root().unwrap());
+        assert!(!verify_object_root(
+            ObjectClassV1::MigrationReceipt,
+            abi(),
+            &relabeled.canonical_bytes().unwrap(),
+            receipt.receipt_root().unwrap(),
+        ));
+
+        // Stored-receipt tamper: swapped source bytes break the legacy root.
+        let mut swapped_source = receipt.clone();
+        swapped_source.source_canonical_bytes_hex =
+            canonical_object_bytes(ObjectClassV1::ExecuteResult, abi(), &target_payload)
+                .unwrap()
+                .iter()
+                .map(|byte| format!("{byte:02x}"))
+                .collect();
+        assert!(matches!(
+            swapped_source.validate(),
+            Err(IdentityErrorV1::SourceRootMismatch)
+        ));
+
+        // Stored-receipt tamper: swapped target bytes break the target root.
+        let mut swapped_target = receipt.clone();
+        swapped_target.target_canonical_bytes_hex =
+            canonical_object_bytes(ObjectClassV1::ExecuteResult, abi(), &legacy_payload)
+                .unwrap()
+                .iter()
+                .map(|byte| format!("{byte:02x}"))
+                .collect();
+        assert!(matches!(
+            swapped_target.validate(),
+            Err(IdentityErrorV1::TargetRootMismatch)
+        ));
+
+        // Legacy target ABI is refused (migration always lands on v6).
+        let mut legacy_target = receipt.clone();
+        legacy_target.target_abi_version = "zerostack.racc.v5".into();
+        assert!(matches!(
+            legacy_target.validate(),
+            Err(IdentityErrorV1::LegacyTargetAbi(_))
+        ));
+    }

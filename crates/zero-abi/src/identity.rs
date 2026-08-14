@@ -49,6 +49,11 @@ pub enum IdentityErrorV1 {
     UncoveredObligation(String),
     EquivalentClaimForbidden(String),
     UnknownEventClass(String),
+    InvalidMigrationReceipt(String),
+    SourceRootMismatch,
+    TargetRootMismatch,
+    MigrationWithoutAbiChange,
+    LegacyTargetAbi(String),
 }
 
 impl fmt::Display for IdentityErrorV1 {
@@ -84,6 +89,25 @@ impl fmt::Display for IdentityErrorV1 {
             Self::UnknownEventClass(class) => {
                 write!(formatter, "unknown event class {class:?} (not one of the nine authoritative classes)")
             }
+            Self::InvalidMigrationReceipt(detail) => {
+                write!(formatter, "invalid rooted migration receipt: {detail}")
+            }
+            Self::SourceRootMismatch => write!(
+                formatter,
+                "migration receipt source root does not match its recorded legacy object"
+            ),
+            Self::TargetRootMismatch => write!(
+                formatter,
+                "migration receipt target root does not match the rooted v6 object"
+            ),
+            Self::MigrationWithoutAbiChange => write!(
+                formatter,
+                "migration receipt requires a real ABI version change between source and target"
+            ),
+            Self::LegacyTargetAbi(actual) => write!(
+                formatter,
+                "migration target must use {ROOTED_ABI_VERSION_V6}, got {actual}"
+            ),
         }
     }
 }
@@ -109,6 +133,18 @@ pub enum ObjectClassV1 {
     ExecuteResult,
     ContinuationHandle,
     ContinuationCompactRecord,
+    /// TokenZero/GraphZero decision-view objects (ZS-ADAPTER-008) rooted
+    /// under the same canonical byte path as every other class.
+    DecisionView,
+    /// FSZero/GraphZero delta objects (exact-delta roots) rooted under the
+    /// same canonical byte path.
+    Delta,
+    /// zero-gate authority objects (permits, assets, admission records)
+    /// rooted under the same canonical byte path.
+    AuthorityObject,
+    /// Rooted receipt for migrating a legacy rooted object into the current
+    /// ABI (ZS-KERNEL-007): pins source and target roots under one receipt.
+    MigrationReceipt,
 }
 
 impl ObjectClassV1 {
@@ -124,6 +160,10 @@ impl ObjectClassV1 {
             ObjectClassV1::ContinuationCompactRecord => {
                 "zerostack.object.continuation_compact_record.v1"
             }
+            ObjectClassV1::DecisionView => "zerostack.object.decision_view.v1",
+            ObjectClassV1::Delta => "zerostack.object.delta.v1",
+            ObjectClassV1::AuthorityObject => "zerostack.object.authority_object.v1",
+            ObjectClassV1::MigrationReceipt => "zerostack.object.migration_receipt.v1",
         }
     }
 }
@@ -1198,6 +1238,231 @@ impl HarnessContractV1 {
         let bytes = self.canonical_bytes()?;
         object_root(ObjectClassV1::TaskContract, ROOTED_ABI_VERSION_V6, &bytes)
     }
+}
+
+// ---------------------------------------------------------------------------
+// Rooted ABI migration receipt (ZS-KERNEL-007).
+// ---------------------------------------------------------------------------
+
+/// Max canonical bytes for one migration receipt payload.
+pub const MIGRATION_RECEIPT_MAX_CANONICAL_BYTES_V1: usize = 64 * 1024;
+pub const MIGRATION_RECEIPT_MAX_REASON_BYTES_V1: usize = 512;
+
+/// A rooted receipt for migrating one legacy rooted object into the current
+/// ABI (ZS-KERNEL-007). The receipt pins four facts under one root:
+///
+/// - the legacy object's class, declared ABI version, canonical bytes, and
+///   recorded root (verified against the versioned `root_preimage` with the
+///   legacy ABI tag -- legacy payloads are not re-canonicalized);
+/// - the v6 replacement object's class and rooted v6 bytes (verified through
+///   [`canonical_object_bytes`] + [`object_root`], the only v6 path);
+/// - a real ABI version change (source != target);
+/// - a nonempty migration reason.
+///
+/// Incompatible-version mismatches still fail closed -- this receipt is the
+/// machinery for *recording* a deliberate, audited migration, not a backdoor
+/// around version checks. The receipt itself is rootable under
+/// [`ObjectClassV1::MigrationReceipt`] like every other object class.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct RootedAbiMigrationReceiptV1 {
+    pub receipt_version: u16,
+    pub source_class: ObjectClassV1,
+    pub source_abi_version: String,
+    pub source_canonical_bytes_hex: String,
+    pub source_root: DigestV1,
+    pub target_class: ObjectClassV1,
+    pub target_abi_version: String,
+    pub target_canonical_bytes_hex: String,
+    pub target_root: DigestV1,
+    pub migration_reason: String,
+    pub abi_version: String,
+}
+
+impl RootedAbiMigrationReceiptV1 {
+    /// Migrate a legacy rooted object into the current ABI.
+    ///
+    /// `source_canonical_bytes` are the legacy object's own canonical bytes
+    /// (already canonical under its legacy ABI); the source root must match
+    /// `sha256(root_preimage(source_class, source_abi_version, source_bytes))`.
+    /// `target_value` is re-canonicalized and rooted through the v6 path.
+    pub fn new(
+        source_class: ObjectClassV1,
+        source_abi_version: impl Into<String>,
+        source_canonical_bytes: &[u8],
+        source_root: DigestV1,
+        target_class: ObjectClassV1,
+        target_value: &Value,
+        migration_reason: impl Into<String>,
+    ) -> Result<Self, IdentityErrorV1> {
+        let source_abi_version = source_abi_version.into();
+        let migration_reason = migration_reason.into();
+        if source_abi_version == ROOTED_ABI_VERSION_V6 {
+            return Err(IdentityErrorV1::MigrationWithoutAbiChange);
+        }
+        if migration_reason.trim().is_empty()
+            || migration_reason.len() > MIGRATION_RECEIPT_MAX_REASON_BYTES_V1
+        {
+            return Err(IdentityErrorV1::InvalidMigrationReceipt(
+                "migration_reason must be nonempty and bounded".into(),
+            ));
+        }
+        if source_canonical_bytes.is_empty()
+            || source_canonical_bytes.len() > MIGRATION_RECEIPT_MAX_CANONICAL_BYTES_V1
+        {
+            return Err(IdentityErrorV1::InvalidMigrationReceipt(
+                "source canonical bytes must be nonempty and bounded".into(),
+            ));
+        }
+        let actual_source = DigestV1::from_bytes(sha256(&root_preimage(
+            source_class,
+            &source_abi_version,
+            source_canonical_bytes,
+        )));
+        if actual_source != source_root {
+            return Err(IdentityErrorV1::SourceRootMismatch);
+        }
+        let target_canonical =
+            canonical_object_bytes(target_class, ROOTED_ABI_VERSION_V6, target_value)?;
+        let target_root =
+            object_root(target_class, ROOTED_ABI_VERSION_V6, &target_canonical)?;
+        let receipt = Self {
+            receipt_version: CONTRACT_VERSION_V1,
+            source_class,
+            source_abi_version,
+            source_canonical_bytes_hex: hex_encode(source_canonical_bytes),
+            source_root,
+            target_class,
+            target_abi_version: ROOTED_ABI_VERSION_V6.to_owned(),
+            target_canonical_bytes_hex: hex_encode(&target_canonical),
+            target_root,
+            migration_reason,
+            abi_version: ROOTED_ABI_VERSION_V6.to_owned(),
+        };
+        receipt.validate()?;
+        Ok(receipt)
+    }
+
+    pub fn validate(&self) -> Result<(), IdentityErrorV1> {
+        if self.receipt_version != CONTRACT_VERSION_V1 {
+            return Err(IdentityErrorV1::InvalidMigrationReceipt(format!(
+                "unsupported receipt version {}",
+                self.receipt_version
+            )));
+        }
+        if self.abi_version != ROOTED_ABI_VERSION_V6 {
+            return Err(IdentityErrorV1::WrongAbiVersion {
+                actual: self.abi_version.clone(),
+            });
+        }
+        if self.target_abi_version != ROOTED_ABI_VERSION_V6 {
+            return Err(IdentityErrorV1::LegacyTargetAbi(
+                self.target_abi_version.clone(),
+            ));
+        }
+        if self.source_abi_version == self.target_abi_version {
+            return Err(IdentityErrorV1::MigrationWithoutAbiChange);
+        }
+        if self.migration_reason.trim().is_empty()
+            || self.migration_reason.len() > MIGRATION_RECEIPT_MAX_REASON_BYTES_V1
+        {
+            return Err(IdentityErrorV1::InvalidMigrationReceipt(
+                "migration_reason must be nonempty and bounded".into(),
+            ));
+        }
+        let source_bytes = hex_decode(&self.source_canonical_bytes_hex).ok_or_else(|| {
+            IdentityErrorV1::InvalidMigrationReceipt(
+                "source_canonical_bytes_hex is not valid hex".into(),
+            )
+        })?;
+        if source_bytes.is_empty()
+            || source_bytes.len() > MIGRATION_RECEIPT_MAX_CANONICAL_BYTES_V1
+        {
+            return Err(IdentityErrorV1::InvalidMigrationReceipt(
+                "source canonical bytes must be nonempty and bounded".into(),
+            ));
+        }
+        if self.source_root == DigestV1::ZERO || self.target_root == DigestV1::ZERO {
+            return Err(IdentityErrorV1::InvalidMigrationReceipt(
+                "source and target roots must be nonzero".into(),
+            ));
+        }
+        // Re-verify the legacy root against the recorded legacy preimage.
+        let actual_source = DigestV1::from_bytes(sha256(&root_preimage(
+            self.source_class,
+            &self.source_abi_version,
+            &source_bytes,
+        )));
+        if actual_source != self.source_root {
+            return Err(IdentityErrorV1::SourceRootMismatch);
+        }
+        let target_bytes = hex_decode(&self.target_canonical_bytes_hex).ok_or_else(|| {
+            IdentityErrorV1::InvalidMigrationReceipt(
+                "target_canonical_bytes_hex is not valid hex".into(),
+            )
+        })?;
+        if target_bytes.is_empty() || target_bytes.len() > MIGRATION_RECEIPT_MAX_CANONICAL_BYTES_V1 {
+            return Err(IdentityErrorV1::InvalidMigrationReceipt(
+                "target canonical bytes must be nonempty and bounded".into(),
+            ));
+        }
+        if object_root(self.target_class, ROOTED_ABI_VERSION_V6, &target_bytes)?
+            != self.target_root
+        {
+            return Err(IdentityErrorV1::TargetRootMismatch);
+        }
+        Ok(())
+    }
+
+    pub fn canonical_bytes(&self) -> Result<Vec<u8>, IdentityErrorV1> {
+        let value = serde_json::to_value(self)
+            .map_err(|error| IdentityErrorV1::NonCanonicalBytes(error.to_string()))?;
+        canonical_object_bytes(ObjectClassV1::MigrationReceipt, ROOTED_ABI_VERSION_V6, &value)
+    }
+
+    pub fn receipt_root(&self) -> Result<DigestV1, IdentityErrorV1> {
+        let bytes = self.canonical_bytes()?;
+        object_root(ObjectClassV1::MigrationReceipt, ROOTED_ABI_VERSION_V6, &bytes)
+    }
+
+    pub fn from_canonical_bytes(bytes: &[u8]) -> Result<Self, IdentityErrorV1> {
+        if bytes.is_empty() || bytes.len() > MIGRATION_RECEIPT_MAX_CANONICAL_BYTES_V1 {
+            return Err(IdentityErrorV1::InvalidMigrationReceipt(
+                "receipt bytes must be nonempty and bounded".into(),
+            ));
+        }
+        let value: Value = serde_json::from_slice(bytes)
+            .map_err(|error| IdentityErrorV1::InvalidMigrationReceipt(error.to_string()))?;
+        let receipt: Self = serde_json::from_value(value).map_err(|error| {
+            IdentityErrorV1::InvalidMigrationReceipt(error.to_string())
+        })?;
+        receipt.validate()?;
+        let canonical = receipt.canonical_bytes()?;
+        if canonical != bytes {
+            return Err(IdentityErrorV1::InvalidMigrationReceipt(
+                "receipt bytes are not canonical sorted-key JSON".into(),
+            ));
+        }
+        Ok(receipt)
+    }
+}
+
+fn hex_encode(bytes: &[u8]) -> String {
+    let mut out = String::with_capacity(bytes.len() * 2);
+    for byte in bytes {
+        out.push_str(&format!("{byte:02x}"));
+    }
+    out
+}
+
+fn hex_decode(hex: &str) -> Option<Vec<u8>> {
+    if hex.len() % 2 != 0 {
+        return None;
+    }
+    (0..hex.len())
+        .step_by(2)
+        .map(|index| u8::from_str_radix(&hex[index..index + 2], 16).ok())
+        .collect()
 }
 
 #[cfg(test)]

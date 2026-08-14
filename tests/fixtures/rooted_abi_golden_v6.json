@@ -1,0 +1,132 @@
+{
+  "schema_version": "zerostack.rooted_abi_golden_v6.v1",
+  "abi_version": "zerostack.racc.v6",
+  "hash_algorithm": "sha256",
+  "objects": [
+    {
+      "class": "task_contract",
+      "domain": "zerostack.object.task_contract.v1",
+      "abi_version": "zerostack.racc.v6",
+      "payload": {
+        "task_kind": "port"
+      },
+      "canonical_bytes_hex": "7b227461736b5f6b696e64223a22706f7274227d",
+      "root_hex": "f6898672788e0919ca484b6311142e31a7f23e6c8c8c89569b76d9f2ded734b8"
+    },
+    {
+      "class": "protected_scope",
+      "domain": "zerostack.object.protected_scope.v1",
+      "abi_version": "zerostack.racc.v6",
+      "payload": {
+        "obligations": []
+      },
+      "canonical_bytes_hex": "7b226f626c69676174696f6e73223a5b5d7d",
+      "root_hex": "f69b7d9a770927c020a80ffa6c42e48f49c157f5bc9ffea29997ffbbfbadb5b4"
+    },
+    {
+      "class": "formation_receipt",
+      "domain": "zerostack.object.formation_receipt.v1",
+      "abi_version": "zerostack.racc.v6",
+      "payload": {
+        "payload_root": "fz://blob/p"
+      },
+      "canonical_bytes_hex": "7b227061796c6f61645f726f6f74223a22667a3a2f2f626c6f622f70227d",
+      "root_hex": "bdfea28054c51751110109b1e4ef9519a48c0d690bd781cb82d64936dc08f1f6"
+    },
+    {
+      "class": "event_record",
+      "domain": "zerostack.object.event_record.v1",
+      "abi_version": "zerostack.racc.v6",
+      "payload": {
+        "event_type": "execution",
+        "seq": 0
+      },
+      "canonical_bytes_hex": "7b226576656e745f74797065223a22657865637574696f6e222c22736571223a307d",
+      "root_hex": "db716455cb367d567b2390b0b724f6e1765c6a592a581663f1e927fffbb294f4"
+    },
+    {
+      "class": "successor_record",
+      "domain": "zerostack.object.successor_record.v1",
+      "abi_version": "zerostack.racc.v6",
+      "payload": {
+        "advanced": false,
+        "authority": "gate"
+      },
+      "canonical_bytes_hex": "7b22616476616e636564223a66616c73652c22617574686f72697479223a2267617465227d",
+      "root_hex": "93714061e012c5d5a506807521805f693f07273c385f5e0f83a390d85796c74c"
+    },
+    {
+      "class": "execute_result",
+      "domain": "zerostack.object.execute_result.v1",
+      "abi_version": "zerostack.racc.v6",
+      "payload": {
+        "kind": "Cancelled"
+      },
+      "canonical_bytes_hex": "7b226b696e64223a2243616e63656c6c6564227d",
+      "root_hex": "dcf42497703299c56e3d571d8f967e41ce631139a3501246121860cda65654fd"
+    },
+    {
+      "class": "continuation_handle",
+      "domain": "zerostack.object.continuation_handle.v1",
+      "abi_version": "zerostack.racc.v6",
+      "payload": {
+        "state": "Bound"
+      },
+      "canonical_bytes_hex": "7b227374617465223a22426f756e64227d",
+      "root_hex": "d954d207247e7f5195b1b92e48002d05feb7f8cf16dd45926019a378e66c7971"
+    },
+    {
+      "class": "continuation_compact_record",
+      "domain": "zerostack.object.continuation_compact_record.v1",
+      "abi_version": "zerostack.racc.v6",
+      "payload": {
+        "sealed": true
+      },
+      "canonical_bytes_hex": "7b227365616c6564223a747275657d",
+      "root_hex": "768b72603656c9692fdbbcfd05e4736718a333083536c8701cea65d7fede3142"
+    },
+    {
+      "class": "decision_view",
+      "domain": "zerostack.object.decision_view.v1",
+      "abi_version": "zerostack.racc.v6",
+      "payload": {
+        "question": "which direction?"
+      },
+      "canonical_bytes_hex": "7b227175657374696f6e223a22776869636820646972656374696f6e3f227d",
+      "root_hex": "48072ec48c558460a208dd8058be646ec9a98c0c5cb70d6698e974e6c4e8aea5"
+    },
+    {
+      "class": "delta",
+      "domain": "zerostack.object.delta.v1",
+      "abi_version": "zerostack.racc.v6",
+      "payload": {
+        "op": "add",
+        "path": "a/b"
+      },
+      "canonical_bytes_hex": "7b226f70223a22616464222c2270617468223a22612f62227d",
+      "root_hex": "bedbce07c4a53d14ab9b07cfd6adcd1d8427ebe307b292c76785b035d4193352"
+    },
+    {
+      "class": "authority_object",
+      "domain": "zerostack.object.authority_object.v1",
+      "abi_version": "zerostack.racc.v6",
+      "payload": {
+        "kind": "execution_permit",
+        "scope": "fz://root/p"
+      },
+      "canonical_bytes_hex": "7b226b696e64223a22657865637574696f6e5f7065726d6974222c2273636f7065223a22667a3a2f2f726f6f742f70227d",
+      "root_hex": "e4047f62dd2c43ec1527e5111c08b85e3a965b0fcb75570e10f7000164ea3ae8"
+    },
+    {
+      "class": "migration_receipt",
+      "domain": "zerostack.object.migration_receipt.v1",
+      "abi_version": "zerostack.racc.v6",
+      "payload": {
+        "source_abi_version": "zerostack.racc.v5",
+        "reason": "v6 contract completion"
+      },
+      "canonical_bytes_hex": "7b22726561736f6e223a22763620636f6e747261637420636f6d706c6574696f6e222c22736f757263655f6162695f76657273696f6e223a227a65726f737461636b2e726163632e7635227d",
+      "root_hex": "98930ed64d03e04df76050a562cb3e7015da305501273c91d6ef23dfae311186"
+    }
+  ]
+}

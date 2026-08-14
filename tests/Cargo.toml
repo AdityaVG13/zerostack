@@ -56,6 +56,10 @@ name = "raw_worker_v2"
 path = "rust/shared/raw_worker_v2.rs"
 
 [[test]]
+name = "rooted_abi_golden"
+path = "rust/shared/rooted_abi_golden.rs"
+
+[[test]]
 name = "report_status"
 path = "rust/shared/report_status.rs"
 
@@ -68,8 +72,20 @@ name = "surface_registration"
 path = "rust/shared/surface_registration.rs"
 
 [[test]]
+name = "task_contract_roundtrip"
+path = "rust/shared/task_contract_roundtrip.rs"
+
+[[test]]
 name = "two_phase_gate"
 path = "rust/shared/two_phase_gate.rs"
+
+[[test]]
+name = "v6_cross_transport"
+path = "rust/shared/v6_cross_transport.rs"
+
+[[test]]
+name = "v6_schema_identity"
+path = "rust/shared/v6_schema_identity.rs"
 
 [[test]]
 name = "zero_execute_result_v6"

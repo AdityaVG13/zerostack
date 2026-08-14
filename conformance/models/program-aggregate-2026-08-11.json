@@ -1,10 +1,10 @@
 {
   "assembly": {
-    "abiContractDigest": "f9320787ce17676c1eff1b2e38f1897ca40f9a72a02d5d72ffba37d70aa70d70",
+    "abiContractDigest": "400b8267d8b0a52bb5e9e2aab1a4f9b9b66cfdd193039d3364b69997f7497ee3",
     "dispatchBoundary": "before_dispatch",
     "generatedBy": "tests/scripts/generate_program_assembly.py",
     "manifest": "conformance/models/program-assembly-2026-08-11.json",
-    "manifestDigest": "f08798a4510e8e17a3692f02a0e9ee262321317a12abea25815ed5226a081c74",
+    "manifestDigest": "9756754a7833fccdf6daf0a688783d2be298e4825ff909909c01925ec53ed661",
     "mismatchFailureCode": "manifest_digest_mismatch",
     "validation": "zero_abi::validate_assembly_pre_dispatch_v1"
   },

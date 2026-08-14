@@ -92,7 +92,7 @@
         assert_eq!(decoded, manifest);
         assert_eq!(
             manifest.digest().unwrap().to_hex(),
-            "7a5d8c5a6bfd4e8990510d9f4129f734bd07f4cc3a2603068ce5bb3d80246b92"
+            "9abb236d5ec0f74db941e11d2e059fff82fa9f2eeabaaab4e62f550f5c7b1a05"
         );
     }
 
@@ -105,7 +105,7 @@
         );
         assert_eq!(
             assembly_abi_contract_digest_v1().to_hex(),
-            "f9320787ce17676c1eff1b2e38f1897ca40f9a72a02d5d72ffba37d70aa70d70"
+            "400b8267d8b0a52bb5e9e2aab1a4f9b9b66cfdd193039d3364b69997f7497ee3"
         );
     }
 
