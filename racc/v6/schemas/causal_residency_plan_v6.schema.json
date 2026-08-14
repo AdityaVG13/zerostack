@@ -1,0 +1,31 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://zerostack.dev/schemas/causal_residency_plan_v6.schema.json",
+  "title": "CausalResidencyPlanV6",
+  "type": "object",
+  "required": ["tier", "capacity_bytes", "threshold", "demand_window_root", "objects"],
+  "properties": {
+    "tier": {"type": "string"},
+    "capacity_bytes": {"type": "integer", "minimum": 0},
+    "threshold": {"type": "number", "minimum": 0, "maximum": 1},
+    "demand_window_root": {"type": "string"},
+    "objects": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["object_root", "size_bytes", "demand_weight", "valid", "resident"],
+        "properties": {
+          "object_root": {"type": "string"},
+          "size_bytes": {"type": "integer", "minimum": 0},
+          "demand_weight": {"type": "number", "minimum": 0},
+          "valid": {"type": "boolean"},
+          "resident": {"type": "boolean"}
+        },
+        "additionalProperties": false
+      }
+    },
+    "optimizer": {"type": ["string", "null"]},
+    "proposal_root": {"type": ["string", "null"]}
+  },
+  "additionalProperties": false
+}

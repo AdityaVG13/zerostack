@@ -1,0 +1,21 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://zerostack.dev/schemas/decision_view_v6.schema.json",
+  "title": "DecisionViewV6",
+  "type": "object",
+  "required": ["task_contract_root", "project_root", "causal_lens_root", "supported_decisions", "completeness_grade", "baseline_escape"],
+  "properties": {
+    "task_contract_root": {"type": "string"},
+    "project_root": {"type": "string"},
+    "causal_lens_root": {"type": "string"},
+    "supported_decisions": {"type": "array", "items": {"type": "string"}},
+    "evidence_refs": {"type": "array", "items": {"type": "string"}},
+    "omitted_classes": {"type": "array", "items": {"type": "string"}},
+    "expansion_handles": {"type": "array", "items": {"type": "string"}},
+    "completeness_grade": {"enum": ["Proved", "BoundedComplete", "Observed", "Unknown"]},
+    "unresolved_question": {"type": ["string", "null"]},
+    "baseline_escape": {"type": "boolean"},
+    "canonical_render_root": {"type": ["string", "null"]}
+  },
+  "additionalProperties": false
+}

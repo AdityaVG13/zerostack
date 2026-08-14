@@ -1,0 +1,17 @@
+{
+  "abi_version": "zerostack.racc.v6",
+  "task_contract_root": "sha256:task-contract-example",
+  "project_root": "sha256:project-root-example",
+  "continuation_handle": null,
+  "operation": "refactor",
+  "objective": "Separate persistence from request handling without changing the public API.",
+  "acceptance_criteria": ["existing tests pass", "public API remains compatible"],
+  "side_effect_policy": "verified_commit",
+  "private_composition_budget": {"max_operations": 100, "max_wall_ms": 300000, "max_complete_work_units": 1000000},
+  "model_contract_root": "sha256:model-contract-example",
+  "harness_contract_root": "sha256:harness-contract-example",
+  "tool_contract_root": "sha256:tool-contract-example",
+  "reasoning_contract_root": "sha256:reasoning-contract-example",
+  "verification_contract_root": "sha256:verification-contract-example",
+  "result_detail": "decision"
+}
