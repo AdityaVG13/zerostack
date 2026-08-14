@@ -21,6 +21,7 @@ use zero_abi::raw_worker::EffectClass;
 use zero_cert::{CommandId, VerifiedEvidence};
 
 pub mod aggregate;
+pub mod asset;
 pub mod deoptimization;
 pub mod durable_publication;
 pub mod evidence;
@@ -38,6 +39,7 @@ pub mod transaction;
 pub mod two_phase;
 pub mod verdict;
 pub use aggregate::*;
+pub use asset::*;
 pub use deoptimization::*;
 pub use durable_publication::*;
 pub use evidence::*;
