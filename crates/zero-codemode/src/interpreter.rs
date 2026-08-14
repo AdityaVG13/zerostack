@@ -2468,6 +2468,16 @@ impl<'tree> Interpreter<'tree> {
             "includes" => Ok(Value::Bool(
                 value.contains(&to_string(args.first().unwrap_or(&Value::Undefined))),
             )),
+            // Advertised in the fallback error below since its introduction,
+            // but never implemented — align the arm with the message.
+            // Char-indexed to match this interpreter's slice/substring.
+            "indexOf" => {
+                let needle = to_string(args.first().unwrap_or(&Value::Undefined));
+                Ok(Value::Number(match value.find(&needle) {
+                    Some(byte_index) => value[..byte_index].chars().count() as f64,
+                    None => -1.0,
+                }))
+            }
             "startsWith" => Ok(Value::Bool(
                 value.starts_with(&to_string(args.first().unwrap_or(&Value::Undefined))),
             )),

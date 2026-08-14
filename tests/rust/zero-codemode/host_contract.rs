@@ -706,6 +706,21 @@ fn unsupported_string_method_error_lists_supported_methods() {
     assert!(text.contains("supported: includes"), "{text}");
 }
 
+// The fallback error has advertised indexOf since its introduction; the arm
+// must exist and use char indices consistent with slice/substring.
+#[test]
+fn string_index_of_matches_the_advertised_support_list() {
+    let connector = Rc::new(C::ok());
+    let host = Host::new(lim(), reg()).unwrap_or_else(|error| panic!("host: {error}"));
+    let value = host
+        .execute(
+            "const s='héllo world';return [s.indexOf('world'), s.indexOf('absent'), s.slice(s.indexOf('world'))];",
+            connector,
+        )
+        .unwrap_or_else(|error| panic!("indexOf: {error}"));
+    assert_eq!(value, json!([6, -1, "world"]));
+}
+
 // ctx.payload on a payload_utf8 receipt returns the exact text; a caller that
 // knows the payload is JSON parses it explicitly.
 #[test]
