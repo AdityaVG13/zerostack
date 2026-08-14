@@ -297,13 +297,12 @@ fn tampered_record_refused() {
 #[test]
 fn forged_handle_id_refused() {
     let dir = tempfile::tempdir().expect("tempdir");
-    let wal_path = {
+    {
         let mut registry = open(dir.path());
         registry
             .persist(&persist_request(now() + 3600_000))
             .expect("persist");
-        registry.wal_path()
-    };
+    }
     // Read the journaled record back through the public API, flip the
     // handle id inside the record, and recompute the record digest -- the
     // maximum a writer with full journal access could do. The handle's own
