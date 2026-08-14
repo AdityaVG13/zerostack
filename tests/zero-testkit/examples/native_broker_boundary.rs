@@ -140,17 +140,17 @@ const SOURCE_INPUTS: [(&str, &[u8]); 20] = [
         )),
     ),
     (
-        "conformance/src/racc.rs",
+        "tests/src/racc.rs",
         include_bytes!(concat!(
             env!("CARGO_MANIFEST_DIR"),
-            "/../../conformance/src/racc.rs"
+            "/../../tests/src/racc.rs"
         )),
     ),
     (
-        "conformance/tests/two_phase_gate.rs",
+        "tests/rust/shared/two_phase_gate.rs",
         include_bytes!(concat!(
             env!("CARGO_MANIFEST_DIR"),
-            "/../../conformance/tests/two_phase_gate.rs"
+            "/../../tests/rust/shared/two_phase_gate.rs"
         )),
     ),
 ];
