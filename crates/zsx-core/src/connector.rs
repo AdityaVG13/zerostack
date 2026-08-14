@@ -400,6 +400,22 @@ fn indeterminate_mutation_journal(journal: &MutationJournal) -> Result<(), Conne
     Ok(())
 }
 
+/// Post-cross failure law: once `cross_mutation_journal` has run, the effect
+/// may have executed, so **every** failure tail resolves the journal
+/// Indeterminate -- never SafeToRetry. A missed site here is a protocol bug.
+fn fail_indeterminate(journal: Option<&MutationJournal>, error: ConnectorError) -> ConnectorError {
+    if let Some(journal) = journal {
+        let _ = indeterminate_mutation_journal(journal);
+    }
+    error
+}
+
+/// Dispatch lapse predicate: deadline expiry first, then cancellation. Both
+/// `run_dispatch` call sites must stay -- they bracket a lock wait (TOCTOU).
+fn dispatch_lapsed(dispatch: &ZsxDispatch) -> bool {
+    dispatch.context.is_expired() || dispatch.cancellation.is_cancelled()
+}
+
 /// Reconcile every mutation attempt journal of one request against the
 /// zero-store recovery law: terminals are returned unchanged, a Prepared
 /// journal is classified SafeToRetry (it never dispatched and can never
@@ -845,6 +861,38 @@ impl ZsxConnector {
         publish_reachability(&self.state)
     }
 
+    /// Metered admission stage: encode the call frame and reserve dispatch
+    /// budget under the meter lock, before the request joins the queue.
+    /// Outer errors are hard meter faults (no approval restore); the inner
+    /// result is the reserve verdict the caller settles (restoring any taken
+    /// approval on rejection).
+    fn reserve_metered_dispatch(
+        &self,
+        request: &CallRequest,
+    ) -> Result<Result<(), String>, ConnectorError> {
+        let input_bytes = encode_frame(
+            &WorkerRequestFrame::Call {
+                request: request.clone(),
+            },
+            zero_abi::DEFAULT_MAX_FRAME_BYTES,
+        )
+        .map_err(|error| ConnectorError::new(format!("meter request frame: {error}")))?
+        .len()
+        .try_into()
+        .map_err(|_| ConnectorError::new("meter request frame size overflowed"))?;
+        let mut meter = self
+            .state
+            .verdict_meter
+            .lock()
+            .map_err(|_| ConnectorError::new("verdict meter lock poisoned"))?;
+        let Some(meter) = meter.as_mut() else {
+            return Err(ConnectorError::new(
+                "verdict meter missing after presence check",
+            ));
+        };
+        Ok(meter.reserve_dispatch(input_bytes))
+    }
+
     /// Install the token of the request that is about to execute. Every
     /// dispatch admitted while this is installed clones the same token.
     pub(crate) fn set_request_cancellation(&self, signal: CancellationSignal) {
@@ -961,29 +1009,7 @@ impl Connector for ZsxConnector {
             }),
         };
         if metered {
-            let input_bytes = encode_frame(
-                &WorkerRequestFrame::Call {
-                    request: request.clone(),
-                },
-                zero_abi::DEFAULT_MAX_FRAME_BYTES,
-            )
-            .map_err(|error| ConnectorError::new(format!("meter request frame: {error}")))?
-            .len()
-            .try_into()
-            .map_err(|_| ConnectorError::new("meter request frame size overflowed"))?;
-            let reserve = {
-                let mut meter = self
-                    .state
-                    .verdict_meter
-                    .lock()
-                    .map_err(|_| ConnectorError::new("verdict meter lock poisoned"))?;
-                let Some(meter) = meter.as_mut() else {
-                    return Err(ConnectorError::new(
-                        "verdict meter missing after presence check",
-                    ));
-                };
-                meter.reserve_dispatch(input_bytes)
-            };
+            let reserve = self.reserve_metered_dispatch(&request)?;
             if let Err(error) = reserve {
                 if let Some((_, grant)) = taken_approval {
                     self.restore_approval(grant)?;
@@ -1092,7 +1118,7 @@ fn validate_adapter_result(
 }
 
 fn run_dispatch(state: &ZsxState, dispatch: &ZsxDispatch) -> Result<String, ConnectorError> {
-    if dispatch.context.is_expired() || dispatch.cancellation.is_cancelled() {
+    if dispatch_lapsed(dispatch) {
         return Err(ConnectorError::new(
             "aggregate dispatch deadline or cancellation",
         ));
@@ -1109,7 +1135,7 @@ fn run_dispatch(state: &ZsxState, dispatch: &ZsxDispatch) -> Result<String, Conn
     let engine_started = Instant::now();
     let result = {
         let _engine_guard = engine_busy;
-        if dispatch.context.is_expired() || dispatch.cancellation.is_cancelled() {
+        if dispatch_lapsed(dispatch) {
             return Err(ConnectorError::new(
                 "aggregate dispatch deadline or cancellation",
             ));
@@ -1160,22 +1186,14 @@ fn run_dispatch(state: &ZsxState, dispatch: &ZsxDispatch) -> Result<String, Conn
     state.engine_dispatches[engine_index].fetch_add(1, Ordering::Relaxed);
     let response = match result {
         Ok(response) => response,
-        Err(error) => {
-            // The adapter call started (dispatch crossed); its failure is
-            // ambiguous, so the journal is terminal Indeterminate.
-            if let Some(journal) = journal.as_ref() {
-                let _ = indeterminate_mutation_journal(journal);
-            }
-            return Err(error);
-        }
+        // The adapter call started (dispatch crossed); its failure is
+        // ambiguous, so the journal is terminal Indeterminate.
+        Err(error) => return Err(fail_indeterminate(journal.as_ref(), error)),
     };
     if let Err(error) =
         validate_adapter_result(state, dispatch.engine, &dispatch.request, &response)
     {
-        if let Some(journal) = journal.as_ref() {
-            let _ = indeterminate_mutation_journal(journal);
-        }
-        return Err(error);
+        return Err(fail_indeterminate(journal.as_ref(), error));
     }
     {
         let mut active = state
@@ -1207,20 +1225,14 @@ fn run_dispatch(state: &ZsxState, dispatch: &ZsxDispatch) -> Result<String, Conn
         response.result.value,
     ) {
         Ok(value) => value,
-        Err(error) => {
-            if let Some(journal) = journal.as_ref() {
-                let _ = indeterminate_mutation_journal(journal);
-            }
-            return Err(error);
-        }
+        Err(error) => return Err(fail_indeterminate(journal.as_ref(), error)),
     };
     if let Some(journal) = journal.as_ref() {
         let receipt_digest = attempt_digest(&result_value);
         if let Err(error) = succeed_mutation_journal(journal, receipt_digest) {
             // The effect completed but its receipt could not be persisted;
             // the journal cannot prove completion, so resolve Indeterminate.
-            let _ = indeterminate_mutation_journal(journal);
-            return Err(error);
+            return Err(fail_indeterminate(Some(journal), error));
         }
     }
     serde_json::to_string(&serde_json::json!({
