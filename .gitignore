@@ -154,3 +154,6 @@ conformance/schemas/*
 .bv/
 # br doctor per-run artifacts
 .doctor/
+.rotational-code-analysis/
+.rotational-code-analysis
+*.rotational-code-analysis/
