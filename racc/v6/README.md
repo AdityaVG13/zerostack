@@ -28,6 +28,42 @@ Historical PDFs and Drafts 1-5 are lineage, not authority. Consult the archive
 only through `lineage/CLAIM_LINEAGE_D1_D6.csv` when a proof or counterexample is
 needed.
 
+## Packs and distillations (second landing)
+
+- `packs/01_CURRENT_PAPERS_TEXT.md` -- Draft 6 papers 00-04 as text (proof detail,
+  side conditions, 4 process theorems not in the theorem-to-runtime map).
+- `packs/02_DRAFT5_DETAIL_PACK.md` -- Draft 5 detail: the 110 requirements with
+  their **acceptance tests**, 65-claim ledger, theorem-to-program map,
+  research-resolution matrix, full D5 Q99 paper, 15-state Zero Execute machine
+  with 5 forbidden transitions, 31 record types, 22 checkers, mandatory test
+  suites, minimum vertical slice, first-release acceptance criteria.
+- `packs/03_HISTORY_CORRECTIONS_AND_AUXILIARY_PACK.md` -- D1-D4 lineage,
+  retained auxiliary results (cache-break taxonomy, No Project-Amnesia,
+  branch-local reuse...), superseded framings, failed avenues.
+- `distilled/scout_*.md` -- five scout audit reports mapping every pack and the
+  whole corpus catalog against the Phase A docs (what is additive, what is
+  superseded, 67/67 unique current-authority records accounted for).
+- `01_IMPLEMENTATION_AGENT_PROMPT.md` -- required first-response contract for an
+  implementing agent (5-value status taxonomy incl. `conflicting`).
+- `CUMULATIVE_COMPLETENESS_AUDIT_V6.md` -- corpus completeness + non-claims.
+
+Key scout findings an implementer must not miss:
+
+1. **Four process theorems are unmapped** (Explanation Evidence Preservation,
+   Decision-Delimited Refactor d+1, Port Nonregression, Greenfield Strategy
+   Preservation) -- they exist only in paper 01 text and have no
+   theorem-to-runtime rows or checkers yet.
+2. **Acceptance tests for the 110 D5-inherited requirements live in the V6
+   backlog CSV and pack 02 only**; V6 canonical docs restate zero of them.
+3. **D5's 5 forbidden state transitions** (e.g. Unknown -> Authorized,
+   Executing -> Committed directly) are the authoritative safety constraints;
+   V6's 14-state chain does not restate them.
+4. Exactly two lineage rows are hard-superseded (D4 rewrite-break pair) -- use
+   the exact LCP residual `s + b - r` everywhere.
+5. Result envelope: V6 ABI schema has 6 result kinds; D5 requirement
+   ZS-ADAPTER-003 lists 8 (adds Cancelled, FailedNoAuthority). Resolve at
+   implementation time; the JSON schema is canonical for the wire shape.
+
 ## Ground rules the corpus itself imposes
 
 - **Audit before implementing** (Phase 0 gate): no semantic implementation until
