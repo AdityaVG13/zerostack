@@ -15,9 +15,9 @@ use zero_abi::raw_worker::EngineIdentity;
 use zero_abi::{
     decode_response_frame, encode_frame, raw_worker_protocol_digest_hex,
     validate_handshake_request, CallRequest, CancelRequest, EngineStageTimelineV1, FrameCodecError,
-    HandshakeAck, HandshakeRequest, ProtocolLimits, ShutdownRequest, TelemetryRequestV1,
-    WorkerRequestFrame, WorkerResponseFrame, WorkerResult, WorkerTokenAccountingV1,
-    RAW_WORKER_PROTOCOL_VERSION, TIMELINE_CLOSURE_TOLERANCE_NS_V1,
+    HandshakeAck, HandshakeRequest, ProtocolLimits, RedactorV1, SecretsErrorV1, ShutdownRequest,
+    TelemetryRequestV1, WorkerRequestFrame, WorkerResponseFrame, WorkerResult,
+    WorkerTokenAccountingV1, RAW_WORKER_PROTOCOL_VERSION, TIMELINE_CLOSURE_TOLERANCE_NS_V1,
 };
 
 pub const STORE_ROOT_ENV: &str = "ZEROSTACK_STORE_ROOT";
@@ -312,6 +312,18 @@ impl fmt::Display for WorkerAdapterError {
 
 impl std::error::Error for WorkerAdapterError {}
 
+impl WorkerAdapterError {
+    /// Host-facing redacted rendering (ZS-SEC-004). Every error string that
+    /// leaves the adapter -- including captured worker stderr, which may echo
+    /// environment values -- MUST be emitted through this helper instead of
+    /// `Display` whenever the text crosses a model-visible or exported
+    /// surface. Fails closed: if any configured secret survives redaction the
+    /// caller gets `RedactionLeak` and must not emit the output.
+    pub fn redacted_message(&self, redactor: &RedactorV1) -> Result<String, SecretsErrorV1> {
+        redactor.redact_text_checked(&self.to_string())
+    }
+}
+
 enum OutputEvent {
     Frame { bytes: Vec<u8>, arrived_at: Instant },
     Bounds(usize),
@@ -377,6 +389,19 @@ pub struct WorkerClient {
     shutdown: bool,
 }
 
+/// The host boundary for environment forwarding (ZS-SEC-004): session
+/// capability env vars are stripped BEFORE the child environment is
+/// assembled. Session tokens never cross the host boundary and can never be
+/// echoed by a worker or land in a crash/remote error string.
+fn strip_session_env(env: &BTreeMap<String, String>) -> Vec<(String, String)> {
+    env.iter()
+        .filter(|(key, _)| {
+            key.as_str() != SESSION_TOKEN_ENV && key.as_str() != SESSION_SHUTDOWN_TOKEN_ENV
+        })
+        .map(|(key, value)| (key.clone(), value.clone()))
+        .collect()
+}
+
 impl WorkerClient {
     pub fn spawn(spec: WorkerSpec, config: WorkerClientConfig) -> Result<Self, WorkerAdapterError> {
         validate_spec(&spec)?;
@@ -384,12 +409,10 @@ impl WorkerClient {
         let mut command = Command::new(&spec.program);
         command
             .args(&spec.args)
-            .envs(&spec.env)
+            .envs(strip_session_env(&spec.env))
             .env(STORE_ROOT_ENV, &spec.store_root)
             .env(SESSION_ID_ENV, &spec.session_id)
             .env(ENGINE_ENV, spec.engine.as_str())
-            .env_remove(SESSION_TOKEN_ENV)
-            .env_remove(SESSION_SHUTDOWN_TOKEN_ENV)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
@@ -1585,3 +1608,7 @@ fn unix_ms() -> u64 {
         .as_millis()
         .min(u128::from(u64::MAX)) as u64
 }
+
+#[cfg(test)]
+#[path = "../../../tests/rust/zero-codemode/unit/worker_redaction.rs"]
+mod tests;

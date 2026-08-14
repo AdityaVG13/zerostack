@@ -251,7 +251,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     )
     .map_err(|error| format!("kernel fixture failed: {error}"))?;
     let permit = prepare(fixture.request)?;
-    let mut execution = permit.start();
+    let mut execution = permit.start().map_err(|error| format!("{error}"))?;
     let executable = env::current_exe()?;
     let timer = Instant::now();
     let mut child = Command::new(&executable)

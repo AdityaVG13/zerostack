@@ -42,7 +42,7 @@ pub use attempt_journal::{
 };
 pub use cas::{
     CAS_LAYOUT, CAS_LAYOUT_VERSION, CAS_MAX_OBJECT_BYTES, CAS_QUARANTINE_DIR, CAS_TEMP_REAP_AGE,
-    CasError, PutOutcome, SharedCas,
+    CasError, CasReadGate, PutOutcome, SharedCas,
 };
 pub use durable_journal::{
     AbortReasonV1, ContinuationCartridgeV1, DURABLE_BINDING_SCHEMA_VERSION_V1,

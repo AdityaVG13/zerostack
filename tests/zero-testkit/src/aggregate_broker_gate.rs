@@ -71,7 +71,7 @@ mod tests {
     fn execute(surface: ExecutionSurface) -> zero_gate::CommitReceipt {
         let fixture = fixture(surface);
         let permit = prepare(fixture.request).unwrap();
-        let mut execution = permit.start();
+        let mut execution = permit.start().unwrap();
         execution
             .dispatch(
                 zero_gate::PeerOwner::ZeroStack,

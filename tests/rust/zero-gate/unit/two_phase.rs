@@ -450,6 +450,9 @@
                 },
                 performance: quality_admission(candidate_identity),
             },
+            expiry_deadline_ms: 4_102_444_800_000, // year 2100: live for all fixtures
+            epoch: 1,
+            caller_session_id: "fixture-session".into(),
         }
     }
 
@@ -550,7 +553,7 @@
     ) -> Result<ReadyToFinalize, KernelError> {
         let permit = prepare(request).map_err(|failure| failure.into_parts().0)?;
         validate_permit_record(&permit.record())?;
-        let mut execution = permit.start();
+        let mut execution = permit.start().unwrap();
         execution.dispatch(
             PeerOwner::FsZero,
             ResourceUsage {
@@ -609,13 +612,15 @@
                 0xfb, 0xce, 0x18, 0xc7,
             ]
         );
-        // 0b1a537463ac9556d4340a5c2387e14fef50cac5d49a4c4eda1e6d78ffb2607e
+        // v6 schema: permit lease (expiry/epoch/caller_session_id) entered the
+        // admission and permit digests; contract digest re-pinned.
+        // 11abf18e9a440007b80b34e068bdeaccea85ddcfa4f9241a883f8600206c4139
         assert_eq!(
             two_phase_contract_digest_v5(),
             [
-                0x0b, 0x1a, 0x53, 0x74, 0x63, 0xac, 0x95, 0x56, 0xd4, 0x34, 0x0a, 0x5c, 0x23, 0x87,
-                0xe1, 0x4f, 0xef, 0x50, 0xca, 0xc5, 0xd4, 0x9a, 0x4c, 0x4e, 0xda, 0x1e, 0x6d, 0x78,
-                0xff, 0xb2, 0x60, 0x7e,
+                0x11, 0xab, 0xf1, 0x8e, 0x9a, 0x44, 0x00, 0x07, 0xb8, 0x0b, 0x34, 0xe0, 0x68, 0xbd,
+                0xea, 0xcc, 0xea, 0x85, 0xdd, 0xcf, 0xa4, 0xf9, 0x24, 0x1a, 0x88, 0x3f, 0x86, 0x00,
+                0x20, 0x6c, 0x41, 0x39,
             ]
         );
     }
@@ -877,7 +882,7 @@
         let bound = request(ExecutionSurface::Mcp, EffectClass::ReadOnly);
         let closure = fallback_closure(&bound);
         let other = request(ExecutionSurface::Pi, EffectClass::ReadOnly);
-        let execution = prepare(other).unwrap().start();
+        let execution = prepare(other).unwrap().start().unwrap();
         assert_eq!(
             execution
                 .abort(FailureCode::PerformanceUnknown, closure)
@@ -892,7 +897,7 @@
         let bound_request = request(ExecutionSurface::ClaudeCode, EffectClass::ReadOnly);
         let mut bad = fallback_closure(&bound_request);
         let permit = prepare(bound_request).unwrap();
-        let mut execution = permit.start();
+        let mut execution = permit.start().unwrap();
         execution
             .dispatch(
                 PeerOwner::FsZero,
@@ -915,7 +920,7 @@
         let request = request(ExecutionSurface::ClaudeCode, EffectClass::ReadOnly);
         let fallback = fallback_closure(&request);
         let permit = prepare(request).unwrap();
-        let execution = permit.start();
+        let execution = permit.start().unwrap();
         let ready = execution
             .abort(FailureCode::BufferOverflow, fallback)
             .unwrap();
@@ -940,7 +945,7 @@
     #[test]
     fn state_machine_effects_require_matching_acceptance_and_pre_action_evidence() {
         let permit = prepare(request(ExecutionSurface::Mcp, EffectClass::Irreversible)).unwrap();
-        let mut execution = permit.start();
+        let mut execution = permit.start().unwrap();
         execution
             .dispatch(
                 PeerOwner::FsZero,
@@ -964,7 +969,7 @@
             EffectClass::ApprovalRequiredMutation,
         ))
         .unwrap();
-        let mut execution = permit.start();
+        let mut execution = permit.start().unwrap();
         execution
             .dispatch(
                 PeerOwner::FsZero,
@@ -1043,5 +1048,102 @@
         assert_eq!(
             validate_receipt_record(&quality_tamper).unwrap_err().code,
             FailureCode::ForgedReceipt
+        );
+    }
+
+    #[test]
+    fn permit_lease_expired_permit_is_refused_and_receipted_at_start() {
+        let mut leased = request(ExecutionSurface::Mcp, EffectClass::ReadOnly);
+        leased.expiry_deadline_ms = 1_000;
+        leased.epoch = 7;
+        leased.caller_session_id = "session:alpha".into();
+        let permit = prepare(leased).unwrap();
+        let record = permit.record();
+        // The lease rides the record and is bound into the permit identity.
+        assert_eq!(record.expiry_deadline_ms, 1_000);
+        assert_eq!(record.epoch, 7);
+        assert_eq!(record.caller_session_id, "session:alpha");
+        validate_permit_record(&record).unwrap();
+
+        // Use-time refusal: starting after the deadline fails loudly with a
+        // typed receipt (ExpiredPermit) and produces no execution.
+        let error = permit.start_at(1_001).unwrap_err();
+        assert_eq!(error.code, FailureCode::ExpiredPermit);
+        assert!(error.detail.contains("session:alpha"));
+        assert!(error.detail.contains("deadline_ms=1000"));
+    }
+
+    #[test]
+    fn permit_lease_live_permit_passes_start_bound_lease() {
+        let mut leased = request(ExecutionSurface::Mcp, EffectClass::ReadOnly);
+        leased.expiry_deadline_ms = 5_000;
+        leased.epoch = 3;
+        leased.caller_session_id = "session:beta".into();
+        let permit = prepare(leased).unwrap();
+        let mut execution = permit.start_at(4_000).unwrap();
+        assert_eq!(execution.epoch(), 3);
+        assert_eq!(execution.caller_session_id(), "session:beta");
+        assert_eq!(execution.expiry_deadline_ms(), 5_000);
+        execution
+            .dispatch(
+                PeerOwner::FsZero,
+                ResourceUsage {
+                    worker_steps: 1,
+                    ..ResourceUsage::default()
+                },
+            )
+            .unwrap();
+    }
+
+    #[test]
+    fn permit_lease_replay_after_expiry_fails_and_lease_tamper_is_forged() {
+        // The same prepared permit replays: valid before the deadline, refused
+        // after it -- replay-after-expiry can never start an execution.
+        let mut leased = request(ExecutionSurface::Mcp, EffectClass::ReadOnly);
+        leased.expiry_deadline_ms = 2_000;
+        leased.epoch = 5;
+        leased.caller_session_id = "session:gamma".into();
+        let first = prepare(leased.clone()).unwrap();
+        first.start_at(1_500).unwrap();
+        let replay = prepare(leased).unwrap();
+        // Lease tampering breaks the digest-bound permit identity.
+        let mut tampered = replay.record();
+        tampered.expiry_deadline_ms += 1;
+        assert_eq!(
+            validate_permit_record(&tampered).unwrap_err().code,
+            FailureCode::ForgedPermit
+        );
+        let mut tampered = replay.record();
+        tampered.epoch += 1;
+        assert_eq!(
+            validate_permit_record(&tampered).unwrap_err().code,
+            FailureCode::ForgedPermit
+        );
+        let mut tampered = replay.record();
+        let _ = tampered.caller_session_id.push('x');
+        assert_eq!(
+            validate_permit_record(&tampered).unwrap_err().code,
+            FailureCode::ForgedPermit
+        );
+        // Replay after expiry can never start an execution.
+        assert_eq!(
+            replay.start_at(2_001).unwrap_err().code,
+            FailureCode::ExpiredPermit
+        );
+    }
+
+    #[test]
+    fn permit_lease_without_caller_session_or_epoch_is_refused_at_prepare() {
+        let mut no_session = request(ExecutionSurface::Mcp, EffectClass::ReadOnly);
+        no_session.caller_session_id.clear();
+        assert_eq!(
+            prepare(no_session).unwrap_err().error().code,
+            FailureCode::MissingBinding
+        );
+        let mut no_epoch = request(ExecutionSurface::Mcp, EffectClass::ReadOnly);
+        no_epoch.epoch = 0;
+        assert_eq!(
+            prepare(no_epoch).unwrap_err().error().code,
+            FailureCode::MissingBinding
         );
     }

@@ -581,11 +581,38 @@ impl SharedCas {
         Ok(path)
     }
 
+}
+
+/// Authorization gate for verified CAS reads (ZS-SEC-005). A capability
+/// gate names the exact content a reader is authorized to fetch; a refusal
+/// is fail-closed: no object lookup happens and no bytes are returned.
+pub trait CasReadGate {
+    /// Refuse the read with `PolicyDenied` unless the reader is authorized
+    /// to fetch exactly `sha256`. Called before any object lookup, so a
+    /// refused read cannot leak object existence either.
+    fn authorize_read(&self, sha256: &str) -> Result<(), CasError>;
+}
+
+impl SharedCas {
+
     /// Open by full digest, enforce the regular-file/size policy, hash the
     /// complete bytes, and only then return data. Digest mismatch is loud and
     /// returns no bytes.
     pub fn get_verified(&self, sha256: &str) -> Result<Vec<u8>, CasError> {
         self.get_verified_limited(sha256, CAS_MAX_OBJECT_BYTES)
+    }
+
+    /// Verified read behind an authorization gate. The gate is consulted
+    /// BEFORE any object lookup, so a refused read returns no bytes and cannot
+    /// distinguish object existence; content still hashes to the requested
+    /// identity before bytes are returned.
+    pub fn get_verified_gated(
+        &self,
+        sha256: &str,
+        gate: &dyn CasReadGate,
+    ) -> Result<Vec<u8>, CasError> {
+        gate.authorize_read(sha256)?;
+        self.get_verified(sha256)
     }
 
     /// Verified read under a caller-supplied bound no weaker than the CAS policy.

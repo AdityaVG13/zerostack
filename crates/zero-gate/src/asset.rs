@@ -961,6 +961,98 @@ impl AssetValueLedgerV1 {
     }
 }
 
+/// Hub-side CAS read gate (ZS-SEC-005): a verified capability asset names the
+/// exact content it authorizes, and reads through the gate are refused
+/// fail-closed BEFORE any object lookup. Cross-project reads (guessed roots),
+/// content the asset does not authorize, non-`Promoted` assets, and stale
+/// capabilities are all refused with `PolicyDenied` and return no bytes.
+/// This is the runtime wiring that promotes the W7 shadow-mode capability
+/// contract into the zero-store read path.
+#[derive(Clone, Debug)]
+pub struct CasCapabilityGateV1 {
+    asset: CapabilityAssetV1,
+    caller_project_id: String,
+    current_epoch: u64,
+}
+
+impl CasCapabilityGateV1 {
+    pub fn new(
+        asset: CapabilityAssetV1,
+        caller_project_id: impl Into<String>,
+        current_epoch: u64,
+    ) -> Result<Self, AssetErrorV1> {
+        let caller_project_id = caller_project_id.into();
+        if caller_project_id.is_empty() {
+            return Err(AssetErrorV1::InvalidAsset(
+                "caller project id must be nonempty (cross-project isolation key)".into(),
+            ));
+        }
+        Ok(Self {
+            asset,
+            caller_project_id,
+            current_epoch,
+        })
+    }
+
+    pub fn asset(&self) -> &CapabilityAssetV1 {
+        &self.asset
+    }
+
+    pub fn caller_project_id(&self) -> &str {
+        &self.caller_project_id
+    }
+
+    pub const fn current_epoch(&self) -> u64 {
+        self.current_epoch
+    }
+}
+
+impl zero_store::CasReadGate for CasCapabilityGateV1 {
+    fn authorize_read(&self, sha256: &str) -> Result<(), zero_store::CasError> {
+        // Project equality first (CAP-002 leakage kill): a caller may guess
+        // another project's root hash, but the gate refuses before lookup.
+        if self.caller_project_id != self.asset.project_id {
+            return Err(zero_store::CasError::PolicyDenied(format!(
+                "capability gate: cross-project read refused (caller '{}', asset '{}')",
+                self.caller_project_id, self.asset.project_id
+            )));
+        }
+        // CAP-001: only a Promoted asset is authoritative for reads.
+        if self.asset.state != AssetStateV1::Promoted {
+            return Err(zero_store::CasError::PolicyDenied(format!(
+                "capability gate: asset state {:?} is not promoted",
+                self.asset.state
+            )));
+        }
+        // Exact content binding: the asset authorizes exactly the content
+        // hash in its scope; mismatched content is refused fail-loud.
+        if sha256 != self.asset.scope.input_shape_digest_hex {
+            return Err(zero_store::CasError::PolicyDenied(format!(
+                "capability gate: content {} not authorized (asset scope {})",
+                &sha256[..sha256.len().min(16)],
+                &self.asset.scope.input_shape_digest_hex[..16]
+            )));
+        }
+        // Freshness: a stale capability is refused even when the state
+        // machine still says Promoted.
+        if self
+            .asset
+            .freshness
+            .captured_epoch
+            .saturating_add(self.asset.freshness.valid_epochs)
+            <= self.current_epoch
+        {
+            return Err(zero_store::CasError::PolicyDenied(format!(
+                "capability gate: stale capability (captured {}, valid {} epochs, epoch {})",
+                self.asset.freshness.captured_epoch,
+                self.asset.freshness.valid_epochs,
+                self.current_epoch
+            )));
+        }
+        Ok(())
+    }
+}
+
 #[cfg(test)]
 #[path = "../../../tests/rust/zero-gate/unit/asset.rs"]
 mod tests;

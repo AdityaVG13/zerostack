@@ -13,6 +13,7 @@ name = "zsx_node"
 napi = { version = "3.12.1", features = ["serde-json", "napi6"] }
 napi-derive = "3.6.3"
 serde_json.workspace = true
+zero-abi = { path = "../zero-abi" }
 zsx-core = { path = "../zsx-core", features = ["fszero", "graphzero", "tokenzero"] }
 
 [build-dependencies]

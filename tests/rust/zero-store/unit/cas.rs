@@ -477,3 +477,47 @@
         assert!(cas.contains(&first.hash));
         assert_eq!(cas.list_objects().unwrap(), vec![first.hash]);
     }
+
+    // -- ZS-SEC-005: gated verified reads --------------------------------
+
+    struct RefuseAllGate;
+    impl CasReadGate for RefuseAllGate {
+        fn authorize_read(&self, sha256: &str) -> Result<(), CasError> {
+            Err(CasError::PolicyDenied(format!(
+                "gate refuses {sha256}"
+            )))
+        }
+    }
+
+    struct AllowAllGate;
+    impl CasReadGate for AllowAllGate {
+        fn authorize_read(&self, _sha256: &str) -> Result<(), CasError> {
+            Ok(())
+        }
+    }
+
+    /// A gate refusal short-circuits BEFORE any object lookup: even an
+    /// existing object returns no bytes and no existence signal escapes.
+    #[test]
+    fn gated_read_refuses_before_lookup_and_returns_no_bytes() {
+        let root = tempdir().unwrap();
+        let cas = SharedCas::open(root.path());
+        let hash = cas.put(b"present payload").unwrap();
+
+        let err = cas.get_verified_gated(&hash, &RefuseAllGate).unwrap_err();
+        assert!(matches!(err, CasError::PolicyDenied(_)));
+        assert_eq!(err.class(), "policy_denied");
+    }
+
+    /// An authorizing gate lets the verified read proceed; content still
+    /// hashes to the requested identity before bytes are returned.
+    #[test]
+    fn gated_read_passes_through_an_authorizing_gate() {
+        let root = tempdir().unwrap();
+        let cas = SharedCas::open(root.path());
+        let bytes = b"authorized payload";
+        let hash = cas.put(bytes).unwrap();
+
+        let read = cas.get_verified_gated(&hash, &AllowAllGate).unwrap();
+        assert_eq!(read, bytes);
+    }

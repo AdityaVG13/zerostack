@@ -147,6 +147,7 @@ pub use result::{
     ZeroResultV1,
 };
 pub use redaction::{EffectTraceV1, RedactionPolicyV1, RedactorV1, SecretsErrorV1};
+pub use redaction::DEFAULT_REDACTION_TOKEN;
 pub use robust_snap::{
     EvidenceDecisionTree, EvidenceLeafV1, EvidenceObservationV1, ProtectedEffectClassV1,
     ProtectedEffectSet, ProtectedEffectV1, ROBUST_SNAP_CONTRACT_VERSION,

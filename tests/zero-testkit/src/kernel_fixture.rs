@@ -427,6 +427,9 @@ pub fn kernel_mutation_fixture_v2(
             irreversible_pre_action_evidence_digest: None,
             performance: quality_admission,
         },
+        expiry_deadline_ms: 4_102_444_800_000, // year 2100: live for all fixtures
+        epoch: 1,
+        caller_session_id: "fixture-session".into(),
     };
     Ok(KernelMutationFixtureV2 {
         request,

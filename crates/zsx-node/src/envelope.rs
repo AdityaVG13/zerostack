@@ -136,4 +136,75 @@ impl Envelope {
         }
         serde_json::Value::Object(v)
     }
+
+    /// The sanctioned emission choke point for UI exports (ZS-SEC-004):
+    /// canonical JSON with every configured secret redacted from result
+    /// values, metrics, and error detail before the value leaves the process.
+    /// Fails closed -- a configured secret surviving redaction is
+    /// `RedactionLeak` and the caller MUST NOT emit the returned value.
+    pub fn to_value_redacted(
+        &self,
+        redactor: &zero_abi::RedactorV1,
+    ) -> Result<serde_json::Value, zero_abi::SecretsErrorV1> {
+        let redacted = redactor.redact(&self.to_value());
+        redactor.check_no_leak(&redacted)?;
+        Ok(redacted)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use zero_abi::{DEFAULT_REDACTION_TOKEN, RedactionPolicyV1, RedactorV1};
+
+    fn redactor(secrets: &[&str]) -> RedactorV1 {
+        RedactorV1::new(
+            RedactionPolicyV1::new(
+                secrets.iter().map(|s| s.to_string()).collect(),
+                DEFAULT_REDACTION_TOKEN,
+            )
+            .unwrap(),
+        )
+        .unwrap()
+    }
+
+    /// ZS-SEC-004: a secret-bearing result and error detail never survive the
+    /// export emission point. The unredacted path is shown to still carry the
+    /// secret, proving the surface is live.
+    #[test]
+    fn envelope_export_redacts_secrets_from_result_and_error_detail() {
+        let redactor = redactor(&["sk-live-abc123", "password"]);
+        let metrics = ZsxExecutionMetrics {
+            host: Default::default(),
+            engine_wall_ns: [0; 3],
+            engine_dispatches: [0; 3],
+            engine_wall_ns_sum: 0,
+            runtime_overhead_lower_bound_ns: 0,
+        };
+        let mut envelope = Envelope::ok(
+            1,
+            7,
+            ZsxExecutionResult {
+                generation: 1,
+                request_id: 7,
+                value: serde_json::json!({"plan": "use sk-live-abc123"}),
+                metrics,
+            },
+        );
+        envelope.error = Some(EnvelopeError {
+            code: "execution_failed".into(),
+            detail: "password rejected".into(),
+            retry_after_ms: None,
+        });
+
+        let raw = envelope.to_value();
+        assert!(raw.to_string().contains("sk-live-abc123"));
+        assert!(raw.to_string().contains("password"));
+
+        let redacted = envelope.to_value_redacted(&redactor).unwrap();
+        let serialized = redacted.to_string();
+        assert!(!serialized.contains("sk-live-abc123"));
+        assert!(!serialized.contains("password"));
+        assert!(serialized.contains(DEFAULT_REDACTION_TOKEN));
+    }
 }

@@ -51,16 +51,35 @@
 
     #[test]
     fn redaction_policy_validation_fails_closed() {
-        // Empty token rejected; empty and duplicate secrets rejected.
+        // Empty token rejected; empty and duplicate secrets rejected; a
+        // secret equal to the token would make redaction non-total or
+        // loop, so it is rejected fail-closed.
         assert!(RedactionPolicyV1::new(vec!["a".into()], "").is_err());
         assert!(RedactionPolicyV1::new(vec![String::new()], "[R]").is_err());
         assert!(RedactionPolicyV1::new(vec!["a".into(), "a".into()], "[R]").is_err());
+        assert!(RedactionPolicyV1::new(vec!["[R]".into()], "[R]").is_err());
         let empty = policy(&[]);
         assert!(empty.is_empty());
         // Redacting with no secrets changes nothing.
         let redactor = RedactorV1::new(empty).unwrap();
         let value = json!("anything");
         assert_eq!(redactor.redact(&value), value);
+    }
+
+    /// The plain-text emission helper scrubs every occurrence and fails
+    /// closed; it is the primitive behind host error-string redaction.
+    #[test]
+    fn redact_text_checked_scrubs_and_fails_closed() {
+        let redactor = RedactorV1::new(policy(&["sk-live-abc123"])).unwrap();
+        let text = "worker crashed with ZEROSTACK_SESSION_TOKEN=sk-live-abc123";
+        let redacted = redactor.redact_text_checked(text).unwrap();
+        assert!(!redacted.contains("sk-live-abc123"));
+        assert!(redacted.contains(DEFAULT_REDACTION_TOKEN));
+        // Idempotent on the scrubbed form.
+        assert_eq!(
+            redactor.redact_text_checked(&redacted).unwrap(),
+            redacted
+        );
     }
 
     /// ZS-STORE-004 acceptance: an undeclared effect during candidate

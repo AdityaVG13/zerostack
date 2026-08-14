@@ -427,3 +427,83 @@
         assert!(asset.promote().is_err());
         assert!(asset.enter_shadow().is_err());
     }
+
+    // -- ZS-SEC-005: capability gate wired into the CAS read path ---------
+
+    use tempfile::tempdir;
+    use zero_store::CasReadGate as _;
+    use zero_store::SharedCas;
+
+    /// Cross-project guessed-root: the caller guesses another project's root
+    /// content hash; the gate refuses before any object lookup.
+    #[test]
+    fn cas_gate_refuses_cross_project_guessed_root() {
+        let asset = asset_in_state(Promoted);
+        let gate = CasCapabilityGateV1::new(asset, "project:beta", 7).unwrap();
+        let err = gate
+            .authorize_read(&digest(1))
+            .expect_err("cross-project read must be refused");
+        assert!(format!("{err:?}").contains("cross-project"));
+        assert_eq!(err.class(), "policy_denied");
+    }
+
+    /// A permit names the exact content hash it authorizes; mismatched
+    /// content is refused fail-loud.
+    #[test]
+    fn cas_gate_refuses_content_the_asset_does_not_authorize() {
+        let asset = asset_in_state(Promoted);
+        let gate = CasCapabilityGateV1::new(asset, "project:alpha", 7).unwrap();
+        let err = gate
+            .authorize_read(&digest(99))
+            .expect_err("content outside the authorized scope must be refused");
+        assert!(format!("{err:?}").contains("not authorized"));
+    }
+
+    /// A stale capability (freshness lapsed even while state still says
+    /// Promoted) is refused.
+    #[test]
+    fn cas_gate_refuses_stale_capability() {
+        // asset_captured: captured_epoch 7, valid_epochs 100 -> expires at 107.
+        let asset = asset_in_state(Promoted);
+        let gate = CasCapabilityGateV1::new(asset, "project:alpha", 108).unwrap();
+        let err = gate
+            .authorize_read(&digest(1))
+            .expect_err("stale capability must be refused");
+        assert!(format!("{err:?}").contains("stale"));
+    }
+
+    /// A non-promoted asset never authorizes reads (CAP-001).
+    #[test]
+    fn cas_gate_refuses_non_promoted_asset() {
+        for state in [Captured, Shadow, Demoted, Revoked, Expired] {
+            let asset = asset_in_state(state);
+            let gate = CasCapabilityGateV1::new(asset, "project:alpha", 7).unwrap();
+            assert!(gate.authorize_read(&digest(1)).is_err(), "{state:?} must not authorize reads");
+        }
+    }
+
+    /// Live permit end-to-end through a real CAS: Promoted + matching
+    /// project + exact authorized content hash + fresh epoch reads the
+    /// bytes; every other combination refuses with no bytes.
+    #[test]
+    fn cas_gate_live_permit_passes_through_the_store() {
+        let dir = tempdir().unwrap();
+        let cas = SharedCas::open(dir.path());
+        let bytes = b"authorized project content";
+        let hash = cas.put(bytes).unwrap();
+
+        let mut asset = asset_captured();
+        asset.scope = ScopeV1::new("extract_facts", hash.clone()).unwrap();
+        asset.enter_shadow().unwrap();
+        asset.promote().unwrap();
+
+        let gate = CasCapabilityGateV1::new(asset, "project:alpha", 7).unwrap();
+        assert_eq!(cas.get_verified_gated(&hash, &gate).unwrap(), bytes);
+
+        // The same gate refuses a foreign object in the same store.
+        let other_hash = cas.put(b"other project content").unwrap();
+        assert!(matches!(
+            cas.get_verified_gated(&other_hash, &gate),
+            Err(zero_store::CasError::PolicyDenied(_))
+        ));
+    }

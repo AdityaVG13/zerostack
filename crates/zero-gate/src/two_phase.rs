@@ -21,6 +21,7 @@ use serde_json::{json, Value};
 use sha2::{Digest as _, Sha256};
 use std::collections::BTreeSet;
 use std::fmt;
+use std::time::{SystemTime, UNIX_EPOCH};
 use zero_abi::{
     canonical_json, raw_worker::EffectClass, reasoning_contract_digest_v1,
     verify_strict_no_downshift_v1, zbf_contract_digest_v1, ArtifactOwnerV1,
@@ -30,7 +31,10 @@ use zero_abi::{
 };
 use zero_cert::{effect_witness_contract_digest_v1, EffectAcceptedV1, VerifiedEvidence};
 
-pub const TWO_PHASE_SCHEMA_VERSION: u16 = 5;
+/// Schema version. Bumped to 6 when the permit lease binding (expiry
+/// deadline, epoch, caller session id) entered the admission/permit digests
+/// (ZS-VERIFY-005).
+pub const TWO_PHASE_SCHEMA_VERSION: u16 = 6;
 pub const GUARD_COUNT: usize = 10;
 pub const MAX_SOURCE_REPOSITORIES: usize = 64;
 pub const MAX_CONTROLLER_INSTRUCTIONS: usize = 4_096;
@@ -455,6 +459,7 @@ pub enum FailureCode {
     IrreversiblePreEvidenceEffect,
     PerformanceUnknown,
     ExecuteWithoutPermit,
+    ExpiredPermit,
     ForgedPermit,
     PlanStepMismatch,
     BufferOverflow,
@@ -488,6 +493,7 @@ impl FailureCode {
             Self::IrreversiblePreEvidenceEffect => "irreversible_pre_evidence_effect",
             Self::PerformanceUnknown => "performance_unknown",
             Self::ExecuteWithoutPermit => "execute_without_permit",
+            Self::ExpiredPermit => "expired_permit",
             Self::ForgedPermit => "forged_permit",
             Self::PlanStepMismatch => "plan_step_mismatch",
             Self::BufferOverflow => "buffer_overflow",
@@ -1133,13 +1139,21 @@ pub struct PrepareRequest {
     pub plan: ControllerPlan,
     pub envelope: WorkerEnvelope,
     pub evidence: GuardEvidence,
+    /// Permit lease: the absolute wall-clock deadline (ms since epoch) after
+    /// which the permit MUST NOT start (ZS-VERIFY-005).
+    pub expiry_deadline_ms: u64,
+    /// Permit lease: the epoch the permit is bound to. Zero is refused.
+    pub epoch: u64,
+    /// Permit lease: the caller session that may start the permit. Empty is
+    /// refused.
+    pub caller_session_id: String,
 }
 
 impl PrepareRequest {
     /// Canonical commitment to every G0-G7 admission input.
     pub fn admission_digest(&self) -> DigestV1 {
         let mut bytes = Vec::new();
-        bytes.extend_from_slice(b"zerostack.kernel.admission.v5\0");
+        bytes.extend_from_slice(b"zerostack.kernel.admission.v6\0");
         bytes.extend_from_slice(&self.binding.digest());
         bytes.push(self.surface as u8);
         bytes.push(effect_class_tag(self.effect_class));
@@ -1154,6 +1168,11 @@ impl PrepareRequest {
         bytes.extend_from_slice(&envelope.processes.to_be_bytes());
         bytes.extend_from_slice(&envelope.risk_units.to_be_bytes());
         bytes.extend_from_slice(&envelope.worker_steps.to_be_bytes());
+
+        bytes.extend_from_slice(&self.expiry_deadline_ms.to_be_bytes());
+        bytes.extend_from_slice(&self.epoch.to_be_bytes());
+        bytes.extend_from_slice(&(self.caller_session_id.len() as u64).to_be_bytes());
+        bytes.extend_from_slice(self.caller_session_id.as_bytes());
 
         let evidence = &self.evidence;
         bytes.extend_from_slice(&evidence.artifacts.artifact_set_digest);
@@ -1208,6 +1227,12 @@ pub struct PermitRecord {
     pub admission_digest: DigestV1,
     pub surface: ExecutionSurface,
     pub trace: ExecutionTrace,
+    /// Permit lease carried on the record; bound into `permit_id`.
+    pub expiry_deadline_ms: u64,
+    /// Permit lease carried on the record; bound into `permit_id`.
+    pub epoch: u64,
+    /// Permit lease carried on the record; bound into `permit_id`.
+    pub caller_session_id: String,
 }
 
 /// Opaque, linear execution authority. It cannot be deserialized or cloned.
@@ -1216,6 +1241,9 @@ pub struct ExecutionPermit {
     permit_id: DigestV1,
     request: PrepareRequest,
     trace: ExecutionTrace,
+    expiry_deadline_ms: u64,
+    epoch: u64,
+    caller_session_id: String,
 }
 
 impl ExecutionPermit {
@@ -1227,26 +1255,88 @@ impl ExecutionPermit {
             admission_digest: self.request.admission_digest(),
             surface: self.request.surface,
             trace: self.trace.clone(),
+            expiry_deadline_ms: self.expiry_deadline_ms,
+            epoch: self.epoch,
+            caller_session_id: self.caller_session_id.clone(),
         }
     }
     pub fn binding(&self) -> &ExecutionBinding {
         &self.request.binding
     }
-    pub fn start(self) -> BrokeredExecution {
-        BrokeredExecution {
+    /// The absolute wall-clock deadline (ms since epoch) of this permit.
+    pub const fn expiry_deadline_ms(&self) -> u64 {
+        self.expiry_deadline_ms
+    }
+    /// The epoch this permit is bound to.
+    pub const fn epoch(&self) -> u64 {
+        self.epoch
+    }
+    /// The caller session this permit is bound to.
+    pub fn caller_session_id(&self) -> &str {
+        &self.caller_session_id
+    }
+    /// Start the brokered execution now. An expired permit is refused
+    /// fail-loud with `ExpiredPermit` and returns no execution (ZS-VERIFY-005).
+    pub fn start(self) -> Result<BrokeredExecution, KernelError> {
+        let now_ms = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|duration| duration.as_millis() as u64)
+            .unwrap_or(0);
+        self.start_at(now_ms)
+    }
+
+    /// Start at an explicit wall-clock instant (deterministic for tests and
+    /// replays). The deadline check is the single expiry enforcement point:
+    /// an expired permit can never produce an execution or a receipt.
+    pub fn start_at(self, now_ms: u64) -> Result<BrokeredExecution, KernelError> {
+        if now_ms > self.expiry_deadline_ms {
+            return Err(KernelError::execution(
+                FailureCode::ExpiredPermit,
+                format!(
+                    "permit for session '{}' expired at deadline_ms={} (start now_ms={})",
+                    self.caller_session_id, self.expiry_deadline_ms, now_ms
+                ),
+            ));
+        }
+        Ok(BrokeredExecution {
             permit_id: self.permit_id,
             request: self.request,
             trace: self.trace,
+            expiry_deadline_ms: self.expiry_deadline_ms,
+            epoch: self.epoch,
+            caller_session_id: self.caller_session_id,
             next_instruction: 0,
             usage: ResourceUsage::default(),
             verification_digest: None,
             buffered_visible: Vec::new(),
             staged_effects: Vec::new(),
-        }
+        })
     }
 }
 
 pub fn prepare(request: PrepareRequest) -> Result<ExecutionPermit, PrepareFailure> {
+    // Permit lease is mandatory and fail-closed: a permit without a caller
+    // session or epoch is not a permit (ZS-VERIFY-005).
+    if request.caller_session_id.is_empty() {
+        return Err(PrepareFailure {
+            error: KernelError::at(
+                FailureCode::MissingBinding,
+                Guard::G0Canonical,
+                "permit lease: caller_session_id must be nonempty",
+            ),
+            trace: ExecutionTrace::new(),
+        });
+    }
+    if request.epoch == 0 {
+        return Err(PrepareFailure {
+            error: KernelError::at(
+                FailureCode::MissingBinding,
+                Guard::G0Canonical,
+                "permit lease: epoch must be nonzero",
+            ),
+            trace: ExecutionTrace::new(),
+        });
+    }
     let mut trace = ExecutionTrace::new();
     macro_rules! guard {
         ($guard:expr, $check:expr) => {{
@@ -1265,10 +1355,16 @@ pub fn prepare(request: PrepareRequest) -> Result<ExecutionPermit, PrepareFailur
     guard!(Guard::G6SafetyShield, validate_g6(&request));
     guard!(Guard::G7Performance, validate_g7(&request));
     let permit_id = permit_digest(&request, &trace);
+    let expiry_deadline_ms = request.expiry_deadline_ms;
+    let epoch = request.epoch;
+    let caller_session_id = request.caller_session_id.clone();
     Ok(ExecutionPermit {
         permit_id,
         request,
         trace,
+        expiry_deadline_ms,
+        epoch,
+        caller_session_id,
     })
 }
 
@@ -1292,14 +1388,30 @@ pub fn validate_permit_record(record: &PermitRecord) -> Result<(), KernelError> 
             "permit binding or admission digest is zero",
         ));
     }
+    if record.caller_session_id.is_empty() {
+        return Err(KernelError::execution(
+            FailureCode::ForgedPermit,
+            "permit caller_session_id is empty",
+        ));
+    }
+    if record.epoch == 0 {
+        return Err(KernelError::execution(
+            FailureCode::ForgedPermit,
+            "permit epoch is zero",
+        ));
+    }
     let mut bytes = Vec::new();
-    bytes.extend_from_slice(b"zerostack.kernel.permit.v5\0");
+    bytes.extend_from_slice(b"zerostack.kernel.permit.v6\0");
     bytes.extend_from_slice(&record.admission_digest);
     bytes.extend_from_slice(&record.trace.digest());
+    bytes.extend_from_slice(&record.expiry_deadline_ms.to_be_bytes());
+    bytes.extend_from_slice(&record.epoch.to_be_bytes());
+    bytes.extend_from_slice(&(record.caller_session_id.len() as u64).to_be_bytes());
+    bytes.extend_from_slice(record.caller_session_id.as_bytes());
     if record.permit_id != hash_bytes(&bytes) {
         return Err(KernelError::execution(
             FailureCode::ForgedPermit,
-            "permit identity does not bind its record",
+            "permit identity does not bind its record (incl. lease)",
         ));
     }
     Ok(())
@@ -1780,9 +1892,13 @@ fn validate_source_heads(heads: &[SourceHead]) -> Result<(), KernelError> {
 
 fn permit_digest(request: &PrepareRequest, trace: &ExecutionTrace) -> DigestV1 {
     let mut bytes = Vec::new();
-    bytes.extend_from_slice(b"zerostack.kernel.permit.v5\0");
+    bytes.extend_from_slice(b"zerostack.kernel.permit.v6\0");
     bytes.extend_from_slice(&request.admission_digest());
     bytes.extend_from_slice(&trace.digest());
+    bytes.extend_from_slice(&request.expiry_deadline_ms.to_be_bytes());
+    bytes.extend_from_slice(&request.epoch.to_be_bytes());
+    bytes.extend_from_slice(&(request.caller_session_id.len() as u64).to_be_bytes());
+    bytes.extend_from_slice(request.caller_session_id.as_bytes());
     hash_bytes(&bytes)
 }
 
@@ -1802,6 +1918,9 @@ pub struct BrokeredExecution {
     permit_id: DigestV1,
     request: PrepareRequest,
     trace: ExecutionTrace,
+    expiry_deadline_ms: u64,
+    epoch: u64,
+    caller_session_id: String,
     next_instruction: usize,
     usage: ResourceUsage,
     verification_digest: Option<DigestV1>,
@@ -1810,6 +1929,19 @@ pub struct BrokeredExecution {
 }
 
 impl BrokeredExecution {
+    /// The absolute wall-clock deadline (ms since epoch) of the starting permit.
+    pub const fn expiry_deadline_ms(&self) -> u64 {
+        self.expiry_deadline_ms
+    }
+    /// The epoch the starting permit is bound to.
+    pub const fn epoch(&self) -> u64 {
+        self.epoch
+    }
+    /// The caller session the starting permit is bound to.
+    pub fn caller_session_id(&self) -> &str {
+        &self.caller_session_id
+    }
+
     pub fn dispatch(&mut self, owner: PeerOwner, usage: ResourceUsage) -> Result<(), KernelError> {
         self.expect(ControllerInstruction::Dispatch { owner })?; // ubs:ignore — BrokeredExecution::expect instruction matcher, not Result::expect
         let next = self.usage.checked_add(usage).ok_or_else(|| {

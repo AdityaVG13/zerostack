@@ -84,6 +84,11 @@ impl RedactionPolicyV1 {
                     "secrets must be nonempty strings".into(),
                 ));
             }
+            if secret == &self.redaction_token {
+                return Err(SecretsErrorV1::InvalidPolicy(format!(
+                    "secret {secret:?} equals the redaction token; redaction could not be total or would loop"
+                )));
+            }
             if !seen.insert(secret.clone()) {
                 return Err(SecretsErrorV1::InvalidPolicy(format!(
                     "duplicate secret pattern {secret:?}"
@@ -143,6 +148,21 @@ impl RedactorV1 {
             }
         }
         output
+    }
+
+    /// Redact one plain string (error messages, single-line emissions) and
+    /// fail closed: if any configured secret survives, the caller gets
+    /// `RedactionLeak` and MUST NOT emit the output (ZS-SEC-004).
+    pub fn redact_text_checked(&self, text: &str) -> Result<String, SecretsErrorV1> {
+        let redacted = self.redact_text(text);
+        for secret in &self.policy.secrets {
+            if redacted.contains(secret.as_str()) {
+                return Err(SecretsErrorV1::RedactionLeak(format!(
+                    "redacted text still contains secret {secret:?}"
+                )));
+            }
+        }
+        Ok(redacted)
     }
 
     /// Fail-closed completeness check: the redacted output must contain NO
