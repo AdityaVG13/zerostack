@@ -9,7 +9,7 @@ use zero_abi::{
 };
 use zerostack_shared_tests::racc::{RACC_INVALIDATION_FRESHNESS_SCHEMA, validate_racc_schema};
 
-const VECTORS: &str = include_str!("../fixtures/invalidation-freshness-v1.json");
+const VECTORS: &str = include_str!("../../fixtures/invalidation-freshness-v1.json");
 
 #[derive(Deserialize)]
 struct Vectors {

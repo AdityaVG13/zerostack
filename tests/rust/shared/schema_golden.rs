@@ -113,7 +113,7 @@ fn racc_receipt_schema_is_golden_pinned() {
 fn racc_invalidation_freshness_schema_is_golden_pinned() {
     use zerostack_shared_tests::racc::{RACC_INVALIDATION_FRESHNESS_SCHEMA, validate_racc_schema};
     let vectors: serde_json::Value =
-        serde_json::from_str(include_str!("../fixtures/invalidation-freshness-v1.json")).unwrap();
+        serde_json::from_str(include_str!("../../fixtures/invalidation-freshness-v1.json")).unwrap();
     let certificate = vectors["canonical_fresh_certificate"].clone();
     let digest = certificate["certificate_digest"].clone();
     let document = json!({
@@ -173,7 +173,7 @@ fn task_acceptance_receipt_schema_is_golden_pinned() {
 
 fn harness_report_validator() -> jsonschema::Validator {
     let schema: serde_json::Value =
-        serde_json::from_str(include_str!("../contracts/harness_report.schema.json")).unwrap();
+        serde_json::from_str(include_str!("../../contracts/harness_report.schema.json")).unwrap();
     jsonschema::Validator::new(&schema).unwrap()
 }
 
@@ -234,9 +234,9 @@ fn full_raw_harness_report() -> serde_json::Value {
 #[test]
 fn harness_report_schema_pair_is_deterministic_and_accepts_full_shape() {
     let source: serde_json::Value =
-        serde_json::from_str(include_str!("../contracts/harness-report.schema.json")).unwrap();
+        serde_json::from_str(include_str!("../../contracts/harness-report.schema.json")).unwrap();
     let snapshot: serde_json::Value =
-        serde_json::from_str(include_str!("../contracts/harness_report.schema.json")).unwrap();
+        serde_json::from_str(include_str!("../../contracts/harness_report.schema.json")).unwrap();
     assert_eq!(
         snapshot, source,
         "underscore snapshot must equal the resolved SSOT schema"

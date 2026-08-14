@@ -11,7 +11,7 @@ use zerostack_shared_tests::schema::{
 };
 
 fn fixture() -> Value {
-    serde_json::from_str(include_str!("../fixtures/canonical_dispatch_vectors.json"))
+    serde_json::from_str(include_str!("../../fixtures/canonical_dispatch_vectors.json"))
         .expect("canonical dispatch fixture parses")
 }
 

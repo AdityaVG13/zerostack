@@ -15,7 +15,10 @@
 //! Unsupported platforms must return Support::Unsupported with a reason. Such cases
 //! make a report partial, never complete.
 
-#![forbid(unsafe_code)]
+// deny (not forbid): the `env` module needs `unsafe` for edition-2024
+// `std::env::{set_var,remove_var}` under its process-wide lock and opts in
+// with a module-level `#![allow(unsafe_code)]`. Everything else stays safe.
+#![deny(unsafe_code)]
 
 #[cfg(feature = "full")]
 pub mod aggregate_broker_gate;
@@ -23,6 +26,7 @@ pub mod aggregate_broker_gate;
 pub mod assembly_kat;
 #[cfg(feature = "full")]
 pub mod authority;
+pub mod env;
 #[cfg(feature = "full")]
 pub mod invalidation_contract;
 #[cfg(feature = "full")]

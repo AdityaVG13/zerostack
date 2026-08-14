@@ -7,7 +7,7 @@ use zero_abi::{
 use zerostack_shared_tests::schema::{SchemaName, validate_against_schema};
 
 fn fixture_frames() -> Vec<Value> {
-    serde_json::from_str(include_str!("../fixtures/raw_worker_v2_frames.json"))
+    serde_json::from_str(include_str!("../../fixtures/raw_worker_v2_frames.json"))
         .expect("raw-worker v2 fixtures parse")
 }
 
