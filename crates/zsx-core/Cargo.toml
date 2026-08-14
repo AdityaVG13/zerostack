@@ -23,7 +23,7 @@ tokenzero = ["dep:tokenzero-core", "dep:tokenzero-engine", "dep:tokenzero-recove
 serde.workspace = true
 serde_json.workspace = true
 fs-zero = { path = "../../../FSZero", default-features = false, features = ["sqlite-bundled"], optional = true }
-graphzero-query = { path = "../../../GraphZero/crates/graphzero-query", optional = true }
+graphzero-query = { package = "graphzero-engine", path = "../../../GraphZero/crates/graphzero-engine", optional = true }
 graphzero-store = { path = "../../../GraphZero/crates/graphzero-store", optional = true }
 tokenzero-core = { path = "../../../TokenZero/crates/tokenzero-core", optional = true }
 tokenzero-engine = { path = "../../../TokenZero/crates/tokenzero-engine", optional = true }
