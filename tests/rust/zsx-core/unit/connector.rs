@@ -174,6 +174,9 @@
             outstanding_dispatches: AtomicU64::new(0),
             verdict_meter: Mutex::new(None),
             resource_gauge: Mutex::new(None),
+            residency_gate: Mutex::new(None),
+            layer_validity: Mutex::new(LayerValidityLedgerV1::new()),
+            residency_report: Mutex::new(None),
         }
     }
 

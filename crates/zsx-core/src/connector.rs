@@ -44,6 +44,7 @@ use zero_abi::{
     encode_frame, sha256, validate_response_frame,
 };
 use zero_ledger::{LedgerConfig, ResourceGauge, TokenCharge, TokenizerIdentity};
+use zero_gate::residency::LayerValidityLedgerV1;
 use zero_codemode::CancellationSignal;
 use zero_codemode::{
     Connector, ConnectorCompletion, ConnectorError, DispatchContext, HostError,
@@ -63,6 +64,7 @@ use zero_machine_permit::{
 
 use crate::adapter::{AdapterCall, DomainAdapter};
 use crate::lower::{METHODS, lower};
+use crate::residency::{SessionQ99ReportV1, SessionResidencyGate, tier_of_engine};
 use crate::verdict::{VerdictLoopEnvelope, VerdictLoopResult, VerdictMeter};
 
 /// One approval grant consumed by the native session.
@@ -635,6 +637,16 @@ pub(crate) struct ZsxState {
     verdict_meter: Mutex<Option<VerdictMeter>>,
     /// Session resource gauge: charges minted on real dispatches (W2).
     resource_gauge: Mutex<Option<ResourceGauge>>,
+    /// Per-execution Q99/residency gate over the executing request's demand
+    /// window (V6-R4). Installed before execution, finalized after it
+    /// settles; `None` between executions.
+    residency_gate: Mutex<Option<SessionResidencyGate>>,
+    /// Session-lifetime layer-validity ledger consulted on every verified
+    /// CAS read, so an L3/CAS loss in a later request preserves the L2
+    /// validity an earlier request published (ZS-CACHE-001/013).
+    layer_validity: Mutex<LayerValidityLedgerV1>,
+    /// Last finalized Q99 report for the session, or its rejection detail.
+    residency_report: Mutex<Option<Result<SessionQ99ReportV1, String>>>,
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -704,6 +716,9 @@ impl ZsxConnector {
             outstanding_dispatches: AtomicU64::new(0),
             verdict_meter: Mutex::new(None),
             resource_gauge: Mutex::new(None),
+            residency_gate: Mutex::new(None),
+            layer_validity: Mutex::new(LayerValidityLedgerV1::new()),
+            residency_report: Mutex::new(None),
         });
         let (dispatch_sender, dispatch_receiver) = mpsc::sync_channel(MAX_INFLIGHT_CONNECTOR_CALLS);
         let dispatch_receiver = Arc::new(Mutex::new(dispatch_receiver));
@@ -867,6 +882,83 @@ impl ZsxConnector {
     pub(crate) fn clear_verdict_meter(&self) {
         if let Ok(mut active) = self.state.verdict_meter.lock() {
             active.take();
+        }
+    }
+
+    /// Install the per-execution residency gate for one demand window.
+    /// Fails when a previous gate was not finalized (balanced with
+    /// [`Self::finish_residency_report`]).
+    pub(crate) fn install_residency_gate(
+        &self,
+        window_id: String,
+    ) -> Result<(), HostError> {
+        let mut active = self
+            .state
+            .residency_gate
+            .lock()
+            .map_err(|_| HostError::Connector("residency gate lock poisoned".into()))?;
+        if active.is_some() {
+            return Err(HostError::Connector(
+                "residency gate was not finalized after the prior execution".into(),
+            ));
+        }
+        *active = Some(SessionResidencyGate::new(window_id));
+        Ok(())
+    }
+
+    /// Finalize the residency gate into the session's Q99 report. The report
+    /// (or its rejection detail) is stored on the connector state and
+    /// surfaced through [`Self::residency_report`]. Report rejection never
+    /// fails the already-settled execution; it is telemetry and stays
+    /// visible as a typed rejection.
+    pub(crate) fn finish_residency_report(&self) -> Result<(), HostError> {
+        let gate = self
+            .state
+            .residency_gate
+            .lock()
+            .map_err(|_| HostError::Connector("residency gate lock poisoned".into()))?
+            .take();
+        let layer_valid_entries = self
+            .state
+            .layer_validity
+            .lock()
+            .map_err(|_| HostError::Connector("layer validity lock poisoned".into()))?
+            .entries()
+            .filter(|entry| entry.l2_valid)
+            .count();
+        let stored = match gate {
+            Some(gate) => gate
+                .report(layer_valid_entries)
+                .map_err(|error| error.to_string()),
+            None => Err("no residency gate installed for the last execution".to_string()),
+        };
+        *self
+            .state
+            .residency_report
+            .lock()
+            .map_err(|_| HostError::Connector("residency report lock poisoned".into()))? =
+            Some(stored);
+        Ok(())
+    }
+
+    /// The last finalized Q99 report, or its rejection detail. Fails when no
+    /// execution has finalized a report yet (impossible after the session
+    /// prewarm, which installs and finalizes one window).
+    pub(crate) fn residency_report(
+        &self,
+    ) -> Result<SessionQ99ReportV1, ConnectorError> {
+        let report = self
+            .state
+            .residency_report
+            .lock()
+            .map_err(|_| ConnectorError::new("residency report lock poisoned"))?
+            .clone();
+        match report {
+            Some(Ok(report)) => Ok(report),
+            Some(Err(detail)) => Err(ConnectorError::new(detail)),
+            None => Err(ConnectorError::new(
+                "no residency report has been finalized".to_string(),
+            )),
         }
     }
 
@@ -1305,6 +1397,21 @@ fn run_dispatch(state: &ZsxState, dispatch: &ZsxDispatch) -> Result<String, Conn
         if let Err(error) = charge_resource_gauge(state, accounting) {
             return Err(fail_indeterminate(journal.as_ref(), error));
         }
+        // Observe the dispatch in the executing window's Q99 gate: only
+        // Exact accounting is evidence (measured not claimed); the mass
+        // split is exact (cached = hit, raw - cached = recomputed).
+        {
+            let mut gate = state
+                .residency_gate
+                .lock()
+                .map_err(|_| ConnectorError::new("residency gate lock poisoned"))?;
+            if let Some(gate) = gate.as_mut() {
+                gate.observe_dispatch(tier_of_engine(dispatch.engine), accounting)
+                    .map_err(|error| {
+                        ConnectorError::new(format!("residency gate observation: {error}"))
+                    })?;
+            }
+        }
     }
     {
         let mut active = state
@@ -1433,11 +1540,70 @@ fn retain_reachability(
                 engine.as_str()
             )));
         }
-        cas.get_verified(&parsed.hash).map_err(|error| {
+        let bytes = match cas.get_verified(&parsed.hash) {
+            Ok(bytes) => bytes,
+            Err(error) => {
+                // Consult the session layer-validity ledger on the miss: an
+                // entry previously published L2-valid keeps its validity and
+                // is marked needs-refetch (never rediscovered); an entry
+                // never L2-valid fails closed as undiscovered loss.
+                let object_root = DigestV1::from_hex(&parsed.hash).map_err(|parse_error| {
+                    ConnectorError::new(format!(
+                        "adapter ref {reference:?} has an invalid object digest: {parse_error}"
+                    ))
+                })?;
+                let preserved = state
+                    .layer_validity
+                    .lock()
+                    .map_err(|_| ConnectorError::new("layer validity lock poisoned"))?
+                    .mark_l3_loss(object_root);
+                return Err(match preserved {
+                    Ok(()) => ConnectorError::new(format!(
+                        "adapter ref {reference:?} is unavailable from authorized CAS: {error}"
+                    )),
+                    Err(loss) => ConnectorError::new(format!(
+                        "undiscovered L3 loss for adapter ref {reference:?}: {loss}"
+                    )),
+                });
+            }
+        };
+        // Publish the L2 validity of the verified copy: identity proven by
+        // content verification, never rediscovery (ZS-CACHE-001/013).
+        let object_root = DigestV1::from_hex(&parsed.hash).map_err(|error| {
             ConnectorError::new(format!(
-                "adapter ref {reference:?} is unavailable from authorized CAS: {error}"
+                "adapter ref {reference:?} has an invalid object digest: {error}"
             ))
         })?;
+        {
+            let mut ledger = state
+                .layer_validity
+                .lock()
+                .map_err(|_| ConnectorError::new("layer validity lock poisoned"))?;
+            ledger.publish_l2(object_root).map_err(|error| {
+                ConnectorError::new(format!(
+                    "layer validity publish for adapter ref {reference:?}: {error}"
+                ))
+            })?;
+        }
+        // Record the demanded object in the executing window's closure
+        // (ZS-CACHE-003/010): measured byte mass as demand weight. Zero-byte
+        // objects are recorded as demanded-but-unweighted, which rejects the
+        // report at finalization (missing weights fail closed).
+        {
+            let mut gate = state
+                .residency_gate
+                .lock()
+                .map_err(|_| ConnectorError::new("residency gate lock poisoned"))?;
+            if let Some(gate) = gate.as_mut() {
+                let weight = u64::try_from(bytes.len()).map_err(|_| {
+                    ConnectorError::new("demanded object byte mass overflowed".to_string())
+                })?;
+                gate.record_demand(object_root, weight, tier_of_engine(engine))
+                    .map_err(|error| {
+                        ConnectorError::new(format!("residency demand ledger: {error}"))
+                    })?;
+            }
+        }
         batch.insert(parsed.hash);
     }
     let mut retained = state

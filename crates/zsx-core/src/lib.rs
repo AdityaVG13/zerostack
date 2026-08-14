@@ -32,6 +32,7 @@ mod adapter;
 mod connector;
 mod help;
 mod lower;
+mod residency;
 mod session;
 mod verdict;
 
@@ -72,6 +73,12 @@ pub use session::{
 pub use verdict::{
     VERDICT_LOOP_RECEIPT_SCHEMA, VerdictDecision, VerdictLoopEnvelope, VerdictLoopReceiptV1,
     VerdictLoopResult,
+};
+/// Q99/residency gate (V6-R4): session telemetry receipts measured by the
+/// zero-gate W4 contracts. The gate itself is internal to the connector;
+/// the report is the session's typed quality claim surface.
+pub use residency::{
+    SESSION_Q99_REPORT_SCHEMA, SessionQ99ReportV1, TierQ99ReportV1, tier_of_engine,
 };
 /// Bound untrusted error text for typed zsx envelopes.
 pub use zero_codemode::finalize_visible_error;

@@ -29,6 +29,7 @@ tokenzero-core = { path = "../../../TokenZero/crates/tokenzero-core", optional =
 tokenzero-engine = { path = "../../../TokenZero/crates/tokenzero-engine", optional = true }
 tokenzero-recovery = { path = "../../../TokenZero/crates/tokenzero-recovery", optional = true }
 zero-abi = { path = "../zero-abi" }
+zero-gate = { path = "../zero-gate" }
 zero-ledger = { path = "../zero-ledger" }
 zero-codemode = { path = "../zero-codemode" }
 zero-ref = { path = "../zero-ref" }
@@ -63,6 +64,11 @@ path = "../../tests/rust/zsx-core/request_cancellation.rs"
 [[test]]
 name = "verdict_loop"
 path = "../../tests/rust/zsx-core/verdict_loop.rs"
+
+[[test]]
+name = "residency_wiring"
+path = "../../tests/rust/zsx-core/residency_wiring.rs"
+required-features = ["fixture-adapters"]
 
 [[test]]
 name = "verdict_loop_canonical"

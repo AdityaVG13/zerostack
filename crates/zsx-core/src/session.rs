@@ -239,6 +239,9 @@ enum ZsxCommand {
         exactness: zero_ledger::ExactnessGates,
         reply: SyncSender<Result<zero_ledger::DominanceReceipt, String>>,
     },
+    Q99Report {
+        reply: SyncSender<Result<crate::residency::SessionQ99ReportV1, String>>,
+    },
 }
 
 /// One-generation executor over the in-process connector.
@@ -387,6 +390,20 @@ impl ZsxExecutor {
             clear_active();
             return Err(error);
         }
+        // One Q99/residency demand window per execution (V6-R4): the gate
+        // collects per-tier observations and the demanded-object closure
+        // while the request dispatches, and is finalized after it settles.
+        if let Err(error) = self
+            .connector
+            .install_residency_gate(format!("g{generation}-r{request_id}"))
+        {
+            self.connector.clear_verdict_meter();
+            self.connector.clear_request_cancellation();
+            self.connector.clear_execution_context();
+            self.connector.clear_approvals();
+            clear_active();
+            return Err(error);
+        }
         self.connector.reset_dispatch_metrics();
         let outcome = self.host.execute_measured_with_cancel_timeout_context(
             source,
@@ -426,6 +443,15 @@ impl ZsxExecutor {
         self.connector.clear_execution_context();
         self.connector.clear_approvals();
         clear_active();
+        // Finalize the residency gate into the session Q99 report. Runs on
+        // success and failure alike: an execution with failed dispatches
+        // still yields a measured window (impossibility is reported, never
+        // dropped). Report rejection stays telemetry and never fails the
+        // already-settled execution; it surfaces through
+        // [`ZsxSession::q99_report`].
+        if let Err(error) = self.connector.finish_residency_report() {
+            return Err(error);
+        }
         let verdict = match result.as_ref() {
             Ok(value) => match self.connector.finish_verdict_meter(value) {
                 Ok(verdict) => verdict,
@@ -1266,6 +1292,59 @@ impl ZsxSession {
             })
     }
 
+    /// The session's last finalized Q99/residency report: per-tier windows,
+    /// the measured demanded-object closure, and layer-validity accounting
+    /// (V6-R4). Measured only: no observation is ever claimed from an
+    /// estimate, and a rejected closure surfaces as this error instead of a
+    /// silent omission. The prewarm execution finalizes one window, so a
+    /// report is available immediately after build.
+    pub fn q99_report(&self) -> Result<crate::residency::SessionQ99ReportV1, ZsxSessionError> {
+        let generation = {
+            let state = self.lock_state(None)?;
+            if state.worker_stopped {
+                return Err(ZsxSessionError::new(
+                    ZsxSessionFailureCode::BackendUnavailable,
+                    state.generation,
+                    None,
+                    "session executor is stopped",
+                ));
+            }
+            state.generation
+        };
+        let (reply_tx, reply_rx) = mpsc::sync_channel(1);
+        send_control_with_deadline(
+            &self.commands,
+            ZsxCommand::Q99Report { reply: reply_tx },
+            SESSION_REPLACEMENT_SETTLE_TIMEOUT,
+        )
+        .map_err(|detail| {
+            ZsxSessionError::new(
+                ZsxSessionFailureCode::BackendUnavailable,
+                generation,
+                None,
+                detail,
+            )
+        })?;
+        reply_rx
+            .recv_timeout(SESSION_REPLACEMENT_SETTLE_TIMEOUT)
+            .map_err(|error| {
+                ZsxSessionError::new(
+                    ZsxSessionFailureCode::BackendUnavailable,
+                    generation,
+                    None,
+                    format!("q99 report did not settle: {error}"),
+                )
+            })?
+            .map_err(|detail| {
+                ZsxSessionError::new(
+                    ZsxSessionFailureCode::BackendExecution,
+                    generation,
+                    None,
+                    detail,
+                )
+            })
+    }
+
     pub fn shutdown(&self) -> Result<u64, ZsxSessionError> {
         let (generation, should_send) = {
             let mut state = self.lock_state(None)?;
@@ -1534,6 +1613,18 @@ fn session_worker(
                         executor
                             .connector
                             .finalize_resource_receipt(target_retained_ppm, roots, exactness)
+                            .map_err(|error| error.to_string())
+                    });
+                let _ = reply.send(result);
+            }
+            ZsxCommand::Q99Report { reply } => {
+                let result = executor
+                    .as_ref()
+                    .ok_or_else(|| "session executor is unavailable".to_string())
+                    .and_then(|executor| {
+                        executor
+                            .connector
+                            .residency_report()
                             .map_err(|error| error.to_string())
                     });
                 let _ = reply.send(result);
