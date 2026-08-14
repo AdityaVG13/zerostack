@@ -78,6 +78,7 @@ CLAUDE.md.*
 .ub-exorcism/
 .cut-branches/
 .cyclomatic-reduction/
+.omega-math/
 .prosecution/
 /beads_compliance_audit/
 beads_compliance_audit/
