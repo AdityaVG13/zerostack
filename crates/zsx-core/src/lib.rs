@@ -30,6 +30,7 @@
 
 mod adapter;
 mod connector;
+mod continuation;
 mod help;
 mod lower;
 mod residency;
@@ -64,6 +65,12 @@ pub use adapter::{
 };
 pub use connector::SessionApprovalGrantV1;
 pub use connector::ZsxAttemptJournalStatus;
+pub use continuation::{
+    CONTINUATION_REGISTRY_SCHEMA_VERSION_V1, CONTINUATION_REGISTRY_WAL_SNAPSHOT,
+    ContinuationFrameV1, ContinuationKeyV1, ContinuationPersistRequestV1, ContinuationReceiptV1,
+    ContinuationRecordV1, ContinuationRegistryErrorV1, ContinuationRegistryV1,
+    ContinuationResumeBindingV1,
+};
 pub use lower::{METHODS, engine_for, lower};
 pub use result_v6::{
     SESSION_V6_ENVELOPE_LEGACY_PROTOCOL, SessionEnvelopeContextV1, DecisionViewContextV1,

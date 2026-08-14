@@ -78,3 +78,8 @@ required-features = ["fixture-adapters"]
 [[test]]
 name = "verdict_loop_canonical"
 path = "../../tests/rust/zsx-core/verdict_loop_canonical.rs"
+
+[[test]]
+name = "continuation_resume"
+path = "../../tests/rust/zsx-core/continuation_resume.rs"
+required-features = ["fixture-adapters"]

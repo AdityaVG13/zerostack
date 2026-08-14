@@ -97,6 +97,10 @@ pub enum ZsxSessionFailureCode {
     /// The request was cancelled through its per-request token before it
     /// settled. The session itself remains accepting.
     Cancelled,
+    /// A continuation persist/resume was refused loudly: unknown, tampered,
+    /// expired, cross-project, revoked-epoch, already-consumed, or
+    /// unoffered-choice (V6-R2, ZS-ADAPTER-004).
+    ContinuationRefused,
     Internal,
 }
 
@@ -119,6 +123,7 @@ impl ZsxSessionFailureCode {
             Self::VerdictRejected => "verdict_rejected",
             Self::DecisionRequired => "decision_required",
             Self::Cancelled => "cancelled",
+            Self::ContinuationRefused => "continuation_refused",
             Self::Internal => "internal",
         }
     }
@@ -268,6 +273,9 @@ enum ZsxCommand {
         timeout: Duration,
         approval_grants: Vec<SessionApprovalGrantV1>,
         verdict_envelope: Option<VerdictLoopEnvelope>,
+        /// One-shot contingent policy that supplies a resumed decision; a
+        /// resume re-executes the recorded plan with this gate (V6-R2).
+        resume_gate: Option<zero_abi::ContingentPolicyV1>,
         reply:
             SyncSender<Result<(Value, ZsxExecutionMetrics, Option<VerdictLoopResult>), HostError>>,
     },
@@ -510,6 +518,37 @@ impl ZsxExecutor {
         result.map(|value| (value, metrics, verdict))
     }
 
+    /// Execute one plan with the host's decision gate temporarily replaced
+    /// by a one-shot contingent policy (V6-R2 continuation resume). The gate
+    /// is installed immediately before the plan runs and restored to the
+    /// policy-less fail-closed state when the execution settles, whatever
+    /// the outcome. The executor is single-threaded, so the host gate is
+    /// only ever consulted by this execution.
+    fn execute_with_resume_policy(
+        &mut self,
+        generation: u64,
+        request_id: u64,
+        source: &str,
+        timeout: Duration,
+        approval_grants: Vec<SessionApprovalGrantV1>,
+        verdict_envelope: Option<VerdictLoopEnvelope>,
+        policy: &zero_abi::ContingentPolicyV1,
+    ) -> Result<(Value, ZsxExecutionMetrics, Option<VerdictLoopResult>), HostError> {
+        self.host
+            .set_decision_gate(zero_codemode::DecisionGate::new(Some(policy.clone())));
+        let outcome = self.execute_with_context(
+            generation,
+            request_id,
+            source,
+            timeout,
+            approval_grants,
+            verdict_envelope,
+        );
+        self.host
+            .set_decision_gate(zero_codemode::DecisionGate::default());
+        outcome
+    }
+
     fn publish_reachability(&self) -> Result<(), HostError> {
         self.connector.publish_reachability()
     }
@@ -716,6 +755,10 @@ pub struct ZsxSession {
     commands: SyncSender<ZsxCommand>,
     cancellation: Arc<Mutex<ActiveCancellationSlot>>,
     worker: Mutex<Option<JoinHandle<()>>>,
+    /// Durable continuation registry (V6-R2) journaled under the session
+    /// state root; shared with no worker state, since persist and resume
+    /// are facade operations.
+    continuations: Arc<Mutex<crate::continuation::ContinuationRegistryV1>>,
 }
 
 #[derive(Clone)]
@@ -828,6 +871,16 @@ impl ZsxSession {
         })?;
         let root_text = root.to_string_lossy().into_owned();
         let state_root_text = state_root.to_string_lossy().into_owned();
+        let continuations = Arc::new(Mutex::new(
+            crate::continuation::ContinuationRegistryV1::open(&state_root).map_err(|error| {
+                ZsxSessionError::new(
+                    ZsxSessionFailureCode::Internal,
+                    initial_generation,
+                    None,
+                    format!("cannot open continuation registry: {error}"),
+                )
+            })?,
+        ));
         let (commands, receiver) = mpsc::sync_channel(SESSION_EXECUTION_QUEUE_CAPACITY);
         let (ready_tx, ready_rx) = mpsc::sync_channel(1);
         let cancellation = Arc::new(Mutex::new(ActiveCancellationSlot::default()));
@@ -894,6 +947,7 @@ impl ZsxSession {
             commands,
             cancellation,
             worker: Mutex::new(Some(worker)),
+            continuations,
         })
     }
 
@@ -999,6 +1053,7 @@ impl ZsxSession {
             source,
             timeout,
             approval_grants,
+            None,
             None,
         ) {
             Ok(settled) => {
@@ -1139,6 +1194,7 @@ impl ZsxSession {
         timeout: Duration,
         approval_grants: Vec<SessionApprovalGrantV1>,
         verdict_envelope: Option<VerdictLoopEnvelope>,
+        resume_gate: Option<zero_abi::ContingentPolicyV1>,
     ) -> Result<ZsxSettledExecution, ZsxSessionError> {
         let (reply_tx, reply_rx) = mpsc::sync_channel(1);
         let approval_ids = {
@@ -1186,6 +1242,7 @@ impl ZsxSession {
             timeout,
             approval_grants,
             verdict_envelope,
+            resume_gate,
             reply: reply_tx,
         }) {
             Ok(()) => {}
@@ -1284,6 +1341,7 @@ impl ZsxSession {
             timeout,
             approval_grants,
             verdict_envelope,
+            None,
         )?;
         let legacy = settled.legacy_error(generation, request_id);
         match (settled.result, settled.verdict, settled.backend_error) {
@@ -1347,6 +1405,137 @@ impl ZsxSession {
         reconcile_all_attempts(&attempts_root).map_err(|detail| {
             ZsxSessionError::new(ZsxSessionFailureCode::Internal, generation, None, detail)
         })
+    }
+
+    /// Persist one uncovered decision as a typed continuation record
+    /// (V6-R2, ZS-ADAPTER-004): the self-verifying handle, the decision
+    /// payload, the bound generation/request identity, the plan source, and
+    /// the expiry are journaled durably under the session state root, so a
+    /// restarted process can resume the handle without retransmitting
+    /// evidence. `decision` must be the typed payload of the
+    /// `DecisionRequired` outcome the harness captured at the abort point
+    /// (the V6 envelope carries only its projection); `generation` must be
+    /// the active session generation. Returns the scoped handle the model
+    /// holds, identical to the envelope's `continuation_handle`.
+    pub fn persist_continuation(
+        &self,
+        generation: u64,
+        request_id: u64,
+        decision: &zero_abi::DecisionRequiredV1,
+        source: impl Into<String>,
+        ttl: Duration,
+    ) -> Result<crate::continuation::ContinuationReceiptV1, ZsxSessionError> {
+        let (project_root, active_generation) = {
+            let state = self.lock_state(Some(request_id))?;
+            (state.root.clone(), state.generation)
+        };
+        if generation != active_generation {
+            return Err(ZsxSessionError::new(
+                ZsxSessionFailureCode::StaleGeneration,
+                active_generation,
+                Some(request_id),
+                format!(
+                    "continuation persist generation {generation} does not match active generation {active_generation}"
+                ),
+            ));
+        }
+        let expires_at_unix_ms = now_ms().saturating_add(u64::try_from(ttl.as_millis()).unwrap_or(u64::MAX));
+        let request = crate::continuation::ContinuationPersistRequestV1 {
+            generation,
+            request_id,
+            decision: decision.clone(),
+            source: source.into(),
+            project_root,
+            expires_at_unix_ms,
+        };
+        let mut registry = self.continuations.lock().map_err(|_| {
+            ZsxSessionError::new(
+                ZsxSessionFailureCode::Internal,
+                generation,
+                Some(request_id),
+                "continuation registry is poisoned",
+            )
+        })?;
+        registry.persist(&request).map_err(|error| {
+            ZsxSessionError::new(
+                ZsxSessionFailureCode::ContinuationRefused,
+                generation,
+                Some(request_id),
+                error.to_string(),
+            )
+        })
+    }
+
+    /// Resume a persisted continuation with the model's decision (V6-R2,
+    /// ZS-SESSION-001/005). The handle is validated against the session
+    /// (unknown, tampered, expired, cross-project, revoked-epoch,
+    /// already-consumed, or unoffered choices refuse loudly and consume
+    /// nothing), durably consumed (single-use), and the recorded plan is
+    /// re-executed with the decision supplied as a one-shot contingent
+    /// policy. The V6 envelope projection runs on the settled outcome, so a
+    /// resumed plan that hits another uncovered decision point surfaces a
+    /// fresh `DecisionRequired` envelope.
+    pub fn resume_continuation_v6(
+        &self,
+        generation: u64,
+        request_id: u64,
+        handle: &str,
+        decision: &str,
+        timeout: Duration,
+        approval_grants: Vec<SessionApprovalGrantV1>,
+        ledger: crate::result_v6::SessionEnvelopeContextV1,
+    ) -> Result<ZsxExecutionResultV6, ZsxSessionError> {
+        ledger.validate().map_err(|detail| {
+            ZsxSessionError::new(
+                ZsxSessionFailureCode::Internal,
+                generation,
+                Some(request_id),
+                format!("invalid V6 envelope context: {detail}"),
+            )
+        })?;
+        let project_root = {
+            let state = self.lock_state(Some(request_id))?;
+            if generation != state.generation {
+                return Err(ZsxSessionError::new(
+                    ZsxSessionFailureCode::StaleGeneration,
+                    state.generation,
+                    Some(request_id),
+                    format!(
+                        "continuation resume generation {generation} does not match active generation {}",
+                        state.generation
+                    ),
+                ));
+            }
+            state.root.clone()
+        };
+        let binding = {
+            let mut registry = self.continuations.lock().map_err(|_| {
+                ZsxSessionError::new(
+                    ZsxSessionFailureCode::Internal,
+                    generation,
+                    Some(request_id),
+                    "continuation registry is poisoned",
+                )
+            })?;
+            registry.consume(handle, decision, &project_root, generation, now_ms()).map_err(|error| {
+                ZsxSessionError::new(
+                    ZsxSessionFailureCode::ContinuationRefused,
+                    generation,
+                    Some(request_id),
+                    error.to_string(),
+                )
+            })?
+        };
+        let settled = self.execute_settled(
+            generation,
+            request_id,
+            binding.record.source.clone(),
+            timeout,
+            approval_grants,
+            None,
+            Some(binding.policy),
+        )?;
+        self.project_v6(generation, request_id, settled, project_root, &ledger)
     }
 
     pub fn replace(
@@ -1764,21 +1953,31 @@ fn session_worker(
                 timeout,
                 approval_grants,
                 verdict_envelope,
+                resume_gate,
                 reply,
             } => {
-                let result = executor
-                    .as_ref()
-                    .ok_or_else(|| HostError::Runtime("session executor is unavailable".into()))
-                    .and_then(|executor| {
-                        executor.execute_with_context(
+                let result = match executor.as_mut() {
+                    None => Err(HostError::Runtime("session executor is unavailable".into())),
+                    Some(executor) => match resume_gate {
+                        Some(policy) => executor.execute_with_resume_policy(
                             generation,
                             request_id,
                             &source,
                             timeout,
                             approval_grants,
                             verdict_envelope,
-                        )
-                    });
+                            &policy,
+                        ),
+                        None => executor.execute_with_context(
+                            generation,
+                            request_id,
+                            &source,
+                            timeout,
+                            approval_grants,
+                            verdict_envelope,
+                        ),
+                    },
+                };
                 let _ = reply.send(result);
             }
             ZsxCommand::Replace { generation, reply } => {

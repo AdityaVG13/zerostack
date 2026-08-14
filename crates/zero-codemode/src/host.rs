@@ -231,6 +231,16 @@ impl Host {
         self
     }
 
+    /// Replace the decision gate for the next execution. Used by the session
+    /// continuation runtime (V6-R2) to resume an aborted plan with the
+    /// model's decision supplied as a one-shot contingent policy; the caller
+    /// restores the policy-less gate after the execution settles. The
+    /// interpreter consults the gate only while a plan runs, so replacing it
+    /// between executions is safe on the single-threaded session executor.
+    pub fn set_decision_gate(&mut self, gate: DecisionGate) {
+        self.decision_gate = gate;
+    }
+
     pub(crate) fn decision_gate(&self) -> &DecisionGate {
         &self.decision_gate
     }
