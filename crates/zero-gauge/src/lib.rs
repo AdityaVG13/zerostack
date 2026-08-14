@@ -14,7 +14,9 @@ use std::fmt;
 use std::num::NonZeroU64;
 use std::str::FromStr;
 
+pub mod bounds;
 pub mod solver;
+pub mod theorems;
 
 /// Closed set of engines that can own an ordinal reference.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]

@@ -655,8 +655,10 @@ fn u256_unsigned_mul(a: u128, b: u128) -> U256 {
 /// Schoolbook u128 x u128 -> u256 multiplication, `(hi, lo)`.
 ///
 /// No widening primitive is assumed on the toolchain; this is exact and
-/// carries correctly at every boundary.
-fn widen_mul(a: u128, b: u128) -> (u128, u128) {
+/// carries correctly at every boundary. `pub(crate)` so the theorem-checker
+/// and statistical-bound modules reuse the same widening instead of
+/// reimplementing it.
+pub(crate) fn widen_mul(a: u128, b: u128) -> (u128, u128) {
     const MASK: u128 = u128::MAX >> 64;
     let a_lo = a & MASK;
     let a_hi = a >> 64;

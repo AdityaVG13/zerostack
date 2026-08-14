@@ -8,3 +8,4 @@ description = "Canonical ZeroStack ordinal references and provider-locked token 
 [dependencies]
 serde.workspace = true
 serde_json.workspace = true
+zero-abi = { path = "../zero-abi" }
