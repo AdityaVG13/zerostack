@@ -28,6 +28,7 @@ pub mod job;
 pub mod raw_worker;
 pub mod reasoning;
 pub mod result;
+pub mod redaction;
 pub mod robust_snap;
 pub mod schema;
 pub mod surface;
@@ -145,6 +146,7 @@ pub use result::{
     MAX_ACK_CHARS, MAX_PREVIEW_CHARS, ZERO_RESULT_V1, ZeroResultAccessError, ZeroResultBuildError,
     ZeroResultV1,
 };
+pub use redaction::{EffectTraceV1, RedactionPolicyV1, RedactorV1, SecretsErrorV1};
 pub use robust_snap::{
     EvidenceDecisionTree, EvidenceLeafV1, EvidenceObservationV1, ProtectedEffectClassV1,
     ProtectedEffectSet, ProtectedEffectV1, ROBUST_SNAP_CONTRACT_VERSION,
