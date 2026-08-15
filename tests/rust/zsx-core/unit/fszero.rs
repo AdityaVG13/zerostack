@@ -182,7 +182,7 @@
             &test_request(Some(crate::connector::now_ms().saturating_sub(1))),
         )
         .expect_err("expired wait must stop");
-        assert_eq!(error.error.kind, "deadline");
+        assert_eq!(error.error.kind, "deadline_exceeded");
     }
 
     fn delay_request(delay_ms: u64) -> CallRequest {
