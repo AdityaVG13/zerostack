@@ -373,11 +373,25 @@ fn remote_error(error: &WorkerAdapterError) -> String {
 /// validation, sandbox, forbidden, and unsupported variants. Rejects policy
 /// (mutation realm), deadline, and output-bounds kinds, which belong to the
 /// mutation, limits, and leak gates respectively.
+fn is_unknown_op_kind(kind: &str) -> bool {
+    matches!(kind, "validation" | "unknown" | "unsupported")
+}
+
 fn is_forbidden_denial(kind: &str) -> bool {
     matches!(
-        kind.to_ascii_lowercase().as_str(),
+        kind,
         "validation" | "sandbox" | "forbidden" | "unsupported"
     )
+}
+
+#[test]
+fn rw5_unknown_kind_potato_is_not_typed() {
+    assert!(!zero_abi::is_typed_worker_error_kind("potato"));
+    assert!(!zero_abi::is_typed_worker_error_kind("ok_validation_lol"));
+    assert!(zero_abi::is_typed_worker_error_kind("validation"));
+    assert!(is_unknown_op_kind("validation"));
+    assert!(!is_unknown_op_kind("ok_validation_lol"));
+    assert!(!is_unknown_op_kind("potato"));
 }
 
 /// Whether a remote error `kind` signals output/frame bounds enforcement
@@ -944,10 +958,7 @@ fn check_errors_gate(
     match worker.dispatch(unknown) {
         Ok(_) => details.push("unknown op did not return a typed error".into()),
         Err(error) => match remote_kind(&error) {
-            Some(kind)
-                if kind.contains("validation")
-                    || kind.contains("unknown")
-                    || kind.contains("unsupported") => {}
+            Some(kind) if is_unknown_op_kind(kind) => {}
             Some(kind) => details.push(format!("unknown op returned unexpected kind {:?}", kind)),
             None => details.push(format!("unknown op failed client-side: {}", error)),
         },

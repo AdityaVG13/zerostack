@@ -518,3 +518,34 @@
             );
         }
     }
+
+    #[test]
+    fn worker_error_kind_is_a_closed_set() {
+        assert!(is_typed_worker_error_kind("validation"));
+        assert!(is_typed_worker_error_kind("unknown"));
+        assert!(is_typed_worker_error_kind("unsupported"));
+        assert!(WORKER_ERROR_KINDS.contains(&"policy"));
+        assert!(!is_typed_worker_error_kind("potato"));
+        assert!(
+            !is_typed_worker_error_kind("ok_validation_lol"),
+            "substring contains() is not a typed kind"
+        );
+        let ok = WorkerError {
+            kind: "validation".into(),
+            message: "unknown op".into(),
+            retryable: false,
+            details: None,
+        };
+        let encoded = serde_json::to_value(&ok).unwrap();
+        let decoded: WorkerError = serde_json::from_value(encoded).unwrap();
+        assert_eq!(decoded.kind, "validation");
+        let potato = json!({
+            "kind": "potato",
+            "message": "not a typed WorkerError",
+            "retryable": false
+        });
+        assert!(
+            serde_json::from_value::<WorkerError>(potato).is_err(),
+            "unknown kind potato must fail deserialize"
+        );
+    }

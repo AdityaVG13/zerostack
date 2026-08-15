@@ -1,6 +1,10 @@
 use jsonschema::Validator;
 use serde_json::{Value, json};
-use zero_abi::{ZeroResultAccessError, ZeroResultV1};
+use zero_abi::{ZeroResultAccessError, ZeroResultBuildError, ZeroResultV1};
+
+fn blob_ref(scheme: &str) -> String {
+    format!("{scheme}://blob/{}", "ab".repeat(32))
+}
 
 fn schema() -> Validator {
     let value: Value =
@@ -25,8 +29,24 @@ fn assert_rejected(value: Value) {
 #[test]
 fn valid_inline_and_ref_match_schema_and_serde() {
     assert_valid(&json!({"ack":"R2","content":{"kind":"inline","value":"file bytes"}}));
-    assert_valid(
-        &json!({"ack":"0","content":{"kind":"ref","ref":"tz://blob/abc","preview":"bounded"}}),
+    assert_valid(&json!({
+        "ack":"0",
+        "content":{"kind":"ref","ref":blob_ref("tz"),"preview":"bounded"}
+    }));
+}
+#[test]
+fn short_blob_refs_fail_result_validation() {
+    assert!(matches!(
+        ZeroResultV1::reference("0", "tz://blob/abc", None),
+        Err(ZeroResultBuildError::InvalidRef)
+    ));
+    assert!(
+        serde_json::from_value::<ZeroResultV1>(json!({
+            "ack":"0",
+            "content":{"kind":"ref","ref":"tz://blob/abc","preview":"bounded"}
+        }))
+        .is_err(),
+        "tz://blob/abc must fail ZeroResult serde"
     );
 }
 #[test]
@@ -47,9 +67,11 @@ fn wrong_accessor_returns_a_typed_error() {
         inline.reference_value(),
         Err(ZeroResultAccessError::ExpectedRef { actual: "inline" })
     );
-    let referenced: ZeroResultV1 =
-        serde_json::from_value(json!({"ack":"C","content":{"kind":"ref","ref":"gz://blob/abc"}}))
-            .unwrap();
+    let referenced: ZeroResultV1 = serde_json::from_value(json!({
+        "ack":"C",
+        "content":{"kind":"ref","ref":blob_ref("gz")}
+    }))
+    .unwrap();
     assert_eq!(
         referenced.inline_value(),
         Err(ZeroResultAccessError::ExpectedInline { actual: "ref" })
@@ -62,10 +84,11 @@ fn serialization_uses_only_the_canonical_tagged_shape() {
         serde_json::to_value(inline).unwrap(),
         json!({"ack":"R2","content":{"kind":"inline","value":{"text":"evidence"}}})
     );
-    let referenced = ZeroResultV1::reference("0", "tz://blob/abc", Some("preview".into())).unwrap();
+    let referenced =
+        ZeroResultV1::reference("0", blob_ref("tz"), Some("preview".into())).unwrap();
     assert_eq!(
         serde_json::to_value(referenced).unwrap(),
-        json!({"ack":"0","content":{"kind":"ref","ref":"tz://blob/abc","preview":"preview"}})
+        json!({"ack":"0","content":{"kind":"ref","ref":blob_ref("tz"),"preview":"preview"}})
     );
 }
 #[test]
@@ -85,15 +108,15 @@ fn cross_surface_fixture_table_uses_one_envelope() {
         ),
         (
             "zero.fs.plan",
-            json!({"ack":"C","content":{"kind":"ref","ref":"fz://codemode/execution/e/result"}}),
+            json!({"ack":"C","content":{"kind":"ref","ref":blob_ref("fz")}}),
         ),
         (
             "zero.fs.structural",
-            json!({"ack":"C","content":{"kind":"ref","ref":"fz://blob/abc"}}),
+            json!({"ack":"C","content":{"kind":"ref","ref":blob_ref("fz")}}),
         ),
         (
             "zero.graph.blast",
-            json!({"ack":"C","content":{"kind":"ref","ref":"gz://blob/abc"}}),
+            json!({"ack":"C","content":{"kind":"ref","ref":blob_ref("gz")}}),
         ),
         (
             "zero.graph.query",
@@ -101,7 +124,7 @@ fn cross_surface_fixture_table_uses_one_envelope() {
         ),
         (
             "zero.graph.orient",
-            json!({"ack":"C","content":{"kind":"ref","ref":"gz://blob/def","preview":"outline"}}),
+            json!({"ack":"C","content":{"kind":"ref","ref":blob_ref("gz"),"preview":"outline"}}),
         ),
         (
             "zero.graph.recall",
@@ -113,7 +136,7 @@ fn cross_surface_fixture_table_uses_one_envelope() {
         ),
         (
             "zero.graph.snap",
-            json!({"ack":"C","content":{"kind":"ref","ref":"gz://blob/ghi"}}),
+            json!({"ack":"C","content":{"kind":"ref","ref":blob_ref("gz")}}),
         ),
         (
             "zero.graph.reserve",
@@ -129,11 +152,11 @@ fn cross_surface_fixture_table_uses_one_envelope() {
         ),
         (
             "zero.token.shell",
-            json!({"ack":"0","content":{"kind":"ref","ref":"tz://blob/abc","preview":"stdout"}}),
+            json!({"ack":"0","content":{"kind":"ref","ref":blob_ref("tz"),"preview":"stdout"}}),
         ),
         (
             "zero.token.compact",
-            json!({"ack":"0","content":{"kind":"ref","ref":"tz://blob/def","preview":"summary"}}),
+            json!({"ack":"0","content":{"kind":"ref","ref":blob_ref("tz"),"preview":"summary"}}),
         ),
         (
             "zero.token.expand",

@@ -7,7 +7,7 @@
 
 use std::fmt;
 
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::{Value, json};
 
 use crate::{
@@ -391,9 +391,47 @@ pub struct WorkerResult {
     pub metadata: WorkerResultMetadata,
 }
 
+/// Closed `WorkerError.kind` set. RW5 and deserialize reject anything else
+/// (`potato`, `ok_validation_lol`). Keep this list exhaustive: a new kind is
+/// a protocol change, not a free string.
+pub const WORKER_ERROR_KINDS: &[&str] = &[
+    "validation",
+    "unknown",
+    "unsupported",
+    "forbidden",
+    "sandbox",
+    "policy",
+    "fixture",
+    "deadline_exceeded",
+    "timeout",
+    "cancelled",
+    "output_too_large",
+    "frame_too_large",
+    "substrate",
+    "internal",
+    "provider_error",
+    "commit_race",
+];
+
+pub fn is_typed_worker_error_kind(kind: &str) -> bool {
+    WORKER_ERROR_KINDS.contains(&kind)
+}
+
+fn deserialize_typed_kind<'de, D: Deserializer<'de>>(deserializer: D) -> Result<String, D::Error> {
+    let kind = String::deserialize(deserializer)?;
+    if is_typed_worker_error_kind(&kind) {
+        Ok(kind)
+    } else {
+        Err(serde::de::Error::custom(format!(
+            "unknown WorkerError.kind {kind:?}; not in the closed RW5 set"
+        )))
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct WorkerError {
+    #[serde(deserialize_with = "deserialize_typed_kind")]
     pub kind: String,
     pub message: String,
     pub retryable: bool,
