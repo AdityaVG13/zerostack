@@ -248,6 +248,79 @@
         );
     }
 
+    /// Identity proof: a digest-mismatched body must not occupy
+    /// `gc/quarantine/<hash>` as if it were recoverable under that digest.
+    #[test]
+    fn quarantine_corrupt_body_does_not_occupy_hash_slot() {
+        let root = tempdir().unwrap();
+        let cas = SharedCas::open(root.path());
+        let hash = cas.put(b"original bytes").unwrap();
+        fs::write(cas.object_path(&hash), b"tampered").unwrap();
+        let guard = cas.lock_for_sweep().unwrap();
+        cas.quarantine_object(&hash, &guard).unwrap();
+        assert!(!cas.contains(&hash));
+        let dir = root
+            .path()
+            .join(crate::gc_lock::GC_DIR)
+            .join(CAS_QUARANTINE_DIR);
+        let verified_slot = dir.join(&hash);
+        assert!(
+            fs::symlink_metadata(&verified_slot).is_err(),
+            "corrupt body must not occupy quarantine/{hash}"
+        );
+        let corrupt = dir.join(format!("{hash}.corrupt-0"));
+        assert_eq!(fs::read(&corrupt).unwrap(), b"tampered");
+    }
+
+    /// Second verified quarantine versions the prior dest to `{hash}.1`.
+    #[test]
+    fn second_verified_quarantine_versions_prior_dest() {
+        let root = tempdir().unwrap();
+        let cas = SharedCas::open(root.path());
+        let hash = cas.put(b"same bytes").unwrap();
+        let guard = cas.lock_for_sweep().unwrap();
+        cas.quarantine_object(&hash, &guard).unwrap();
+        drop(guard);
+        let again = cas.put(b"same bytes").unwrap();
+        assert_eq!(again, hash);
+        let guard = cas.lock_for_sweep().unwrap();
+        cas.quarantine_object(&hash, &guard).unwrap();
+        let dir = root
+            .path()
+            .join(crate::gc_lock::GC_DIR)
+            .join(CAS_QUARANTINE_DIR);
+        assert_eq!(fs::read(dir.join(&hash)).unwrap(), b"same bytes");
+        assert_eq!(fs::read(dir.join(format!("{hash}.1"))).unwrap(), b"same bytes");
+    }
+
+    /// A symlink dest must not be treated as a regular quarantined object.
+    #[cfg(unix)]
+    #[test]
+    fn quarantine_refuses_symlink_dest() {
+        let root = tempdir().unwrap();
+        let cas = SharedCas::open(root.path());
+        let hash = cas.put(b"payload").unwrap();
+        let dir = root
+            .path()
+            .join(crate::gc_lock::GC_DIR)
+            .join(CAS_QUARANTINE_DIR);
+        fs::create_dir_all(&dir).unwrap();
+        let dest = dir.join(&hash);
+        std::os::unix::fs::symlink(root.path().join("elsewhere"), &dest).unwrap();
+        let guard = cas.lock_for_sweep().unwrap();
+        let err = cas.quarantine_object(&hash, &guard).unwrap_err();
+        assert_eq!(err.class(), "malformed");
+        assert!(
+            err.to_string().contains("symlink"),
+            "symlink dest must fail closed: {err}"
+        );
+        assert!(cas.contains(&hash), "source must stay in the object tree");
+        assert!(
+            dest.symlink_metadata().unwrap().file_type().is_symlink(),
+            "symlink dest must not be overwritten"
+        );
+    }
+
     /// The publish/GC race, made deterministic with channel rendezvous rather
     /// than timing.
     ///

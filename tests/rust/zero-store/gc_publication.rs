@@ -308,7 +308,12 @@ fn repair_quarantines_corruption_and_persists_receipt() {
     assert!(validate_repair_receipt(&tampered).is_err());
     assert_eq!(cas.get_verified(&blob).unwrap(), bytes);
     assert_eq!(
-        fs::read(dir.path().join("gc/quarantine").join(&blob)).unwrap(),
+        fs::read(
+            dir.path()
+                .join("gc/quarantine")
+                .join(format!("{blob}.corrupt-0"))
+        )
+        .unwrap(),
         b"corrupt bytes"
     );
     assert!(

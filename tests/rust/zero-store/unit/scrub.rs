@@ -80,13 +80,17 @@ fn scrub_catches_intentionally_corrupted_blob_and_quarantines_fail_loud() {
     assert_eq!(receipt.findings[0].kind, ScrubFindingKindV1::CorruptQuarantined);
 
     // The corrupt body is quarantined, never silently repaired, never deleted.
-    // The exact body found at the identity (the tampered bytes) is preserved
-    // so a wrong verdict stays recoverable.
-    let quarantine_path = directory
+    // Identity proof (licj): it occupies `<hash>.corrupt-0`, not `<hash>`.
+    let quarantine_dir = directory
         .path()
         .join(crate::gc_lock::GC_DIR)
-        .join(crate::cas::CAS_QUARANTINE_DIR)
-        .join(&bad);
+        .join(crate::cas::CAS_QUARANTINE_DIR);
+    let verified_slot = quarantine_dir.join(&bad);
+    assert!(
+        fs::symlink_metadata(&verified_slot).is_err(),
+        "corrupt body must not occupy quarantine/{bad}"
+    );
+    let quarantine_path = quarantine_dir.join(format!("{bad}.corrupt-0"));
     assert!(quarantine_path.is_file());
     assert_eq!(
         fs::read(&quarantine_path).unwrap(),

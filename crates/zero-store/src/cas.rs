@@ -161,6 +161,35 @@ fn is_regular_file(path: &Path) -> bool {
         .unwrap_or(false)
 }
 
+/// Next unused `dir/{stem}{n}` that does not exist even as a symlink.
+/// `Path::exists` follows links, so a dangling symlink would look free.
+fn next_unused_path(dir: &Path, stem: &str, start: u32) -> Result<PathBuf, CasError> {
+    let mut n = start;
+    loop {
+        let candidate = dir.join(format!("{stem}{n}"));
+        match fs::symlink_metadata(&candidate) {
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(candidate),
+            Err(e) => return Err(io_err("stat quarantine version", e)),
+            Ok(_) => {
+                n = n.checked_add(1).ok_or_else(|| {
+                    CasError::PolicyDenied("quarantine version namespace exhausted".into())
+                })?;
+            }
+        }
+    }
+}
+
+fn refuse_symlink_dest(path: &Path) -> Result<(), CasError> {
+    match fs::symlink_metadata(path) {
+        Ok(meta) if meta.file_type().is_symlink() => Err(CasError::Malformed(
+            "quarantine dest is a symlink (substitution refused)".to_string(),
+        )),
+        Ok(_) => Ok(()),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(e) => Err(io_err("stat quarantine dest", e)),
+    }
+}
+
 fn io_err(context: &str, e: impl std::fmt::Display) -> CasError {
     CasError::Io(format!("{context}: {e}"))
 }
@@ -535,8 +564,20 @@ impl SharedCas {
         fs::remove_file(&path).map_err(|e| io_err("remove object", e))
     }
 
-    /// Move one object into `<store_root>/gc/quarantine/<hash>` instead of
-    /// unlinking it, so a wrong collection verdict remains recoverable.
+    /// Move one object out of the live tree so a wrong collection verdict
+    /// (or a scrub of a digest-mismatched body) remains recoverable.
+    ///
+    /// Owner choice (licj): quarantine is an **identity proof**, not a
+    /// scrub-into-named-slot. `gc/quarantine/<hash>` is occupied only by a
+    /// body that `read_verified_at` confirms hashes to `hash`. A
+    /// digest-mismatched source is moved to
+    /// `gc/quarantine/<hash>.corrupt-<n>` so the `<hash>` slot never
+    /// presents unverified bytes as recoverable under that digest. Prior
+    /// dest at `<hash>` is versioned to `<hash>.N` only after it verifies;
+    /// an unverified dest is renamed `<hash>.unverified` (then
+    /// `<hash>.unverified-N`) first. A symlink dest is refused --
+    /// `exists()` follows links and would treat one as a regular
+    /// quarantined object.
     pub fn quarantine_object(&self, sha256: &str, guard: &StoreLock) -> Result<(), CasError> {
         let path = self.sweep_target(sha256, guard)?;
         let dir = self
@@ -544,25 +585,66 @@ impl SharedCas {
             .join(crate::gc_lock::GC_DIR)
             .join(CAS_QUARANTINE_DIR);
         fs::create_dir_all(&dir).map_err(|e| io_err("create quarantine directory", e))?;
-        let dest = dir.join(sha256);
-        if dest.exists() {
-            let mut n = 1u32;
-            loop {
-                let backup = dir.join(format!("{sha256}.{n}"));
-                if !backup.exists() {
-                    replace_file(&dest, &backup)
-                        .map_err(|e| io_err("version prior quarantine body", e))?;
-                    break;
-                }
-                n = n.checked_add(1).ok_or_else(|| {
-                    CasError::PolicyDenied("quarantine version namespace exhausted".into())
-                })?;
-            }
-        }
+        let source_verified = match self.read_verified_at(&path, sha256, CAS_MAX_OBJECT_BYTES) {
+            Ok(_) => true,
+            Err(CasError::DigestMismatch { .. }) => false,
+            Err(error) => return Err(error),
+        };
+        let dest = if source_verified {
+            let dest = dir.join(sha256);
+            self.vacate_verified_quarantine_slot(&dest, sha256)?;
+            dest
+        } else {
+            next_unused_path(&dir, &format!("{sha256}.corrupt-"), 0)?
+        };
+        refuse_symlink_dest(&dest)?;
         replace_file(&path, &dest).map_err(|e| io_err("quarantine object", e))?;
         // Post-rename: the object is already out of the object tree, so a
         // directory fsync failure is a durability warning, not a failed move.
         let _ = sync_dir(&dir);
+        Ok(())
+    }
+
+    /// Move a regular file occupying the verified `<hash>` slot aside.
+    /// Verified prior bodies become `<hash>.N`; unverified ones become
+    /// `<hash>.unverified` so the slot is not reused as if it were identity.
+    fn vacate_verified_quarantine_slot(
+        &self,
+        dest: &Path,
+        sha256: &str,
+    ) -> Result<(), CasError> {
+        let meta = match fs::symlink_metadata(dest) {
+            Ok(meta) => meta,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+            Err(e) => return Err(io_err("stat quarantine dest", e)),
+        };
+        if meta.file_type().is_symlink() {
+            return Err(CasError::Malformed(
+                "quarantine dest is a symlink (substitution refused)".to_string(),
+            ));
+        }
+        if !meta.file_type().is_file() {
+            return Err(CasError::Malformed(
+                "quarantine dest is not a regular file".to_string(),
+            ));
+        }
+        let dir = dest.parent().ok_or_else(|| {
+            CasError::Malformed("quarantine dest is missing its parent directory".into())
+        })?;
+        let backup = match self.read_verified_at(dest, sha256, CAS_MAX_OBJECT_BYTES) {
+            Ok(_) => next_unused_path(dir, &format!("{sha256}."), 1)?,
+            Err(CasError::DigestMismatch { .. }) => {
+                let plain = dir.join(format!("{sha256}.unverified"));
+                match fs::symlink_metadata(&plain) {
+                    Err(e) if e.kind() == std::io::ErrorKind::NotFound => plain,
+                    Err(e) => return Err(io_err("stat unverified quarantine dest", e)),
+                    Ok(_) => next_unused_path(dir, &format!("{sha256}.unverified-"), 1)?,
+                }
+            }
+            Err(error) => return Err(error),
+        };
+        refuse_symlink_dest(&backup)?;
+        replace_file(dest, &backup).map_err(|e| io_err("version prior quarantine body", e))?;
         Ok(())
     }
 
