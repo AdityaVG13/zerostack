@@ -1373,69 +1373,19 @@ impl ZsxSession {
         contingent_policy: Option<zero_abi::ContingentPolicyV1>,
     ) -> Result<ZsxSettledExecution, ZsxSessionError> {
         let (reply_tx, reply_rx) = mpsc::sync_channel(1);
-        let approval_ids = {
-            let mut state = self.lock_state(Some(request_id))?;
-            if generation != state.generation {
-                return Err(ZsxSessionError::new(
-                    ZsxSessionFailureCode::StaleGeneration,
-                    state.generation,
-                    Some(request_id),
-                    format!(
-                        "request generation {generation} does not match active generation {}",
-                        state.generation
-                    ),
-                ));
-            }
-            if state.terminating || !state.accepting {
-                return Err(ZsxSessionError::new(
-                    ZsxSessionFailureCode::Terminating,
-                    state.generation,
-                    Some(request_id),
-                    "session is not accepting execution",
-                ));
-            }
-            if state.seen_request_ids.contains(&request_id) {
-                return Err(ZsxSessionError::new(
-                    ZsxSessionFailureCode::DuplicateRequestId,
-                    state.generation,
-                    Some(request_id),
-                    "request id was already admitted in this generation",
-                ));
-            }
-            let approval_ids =
-                validate_session_approvals(&state, generation, request_id, &approval_grants)?;
-            state.seen_request_ids.insert(request_id);
-            state.active_request_ids.insert(request_id);
-            state
-                .consumed_approval_ids
-                .extend(approval_ids.iter().cloned());
-            approval_ids
-        };
-        match self.commands.try_send(ZsxCommand::Execute {
+        let approval_ids =
+            self.admit_execution(generation, request_id, &approval_grants)?;
+        self.send_or_release_execute(
             generation,
             request_id,
-            source: source.into(),
+            source.into(),
             timeout,
             approval_grants,
             verdict_envelope,
             contingent_policy,
-            reply: reply_tx,
-        }) {
-            Ok(()) => {}
-            Err(TrySendError::Full(_)) => {
-                self.release_unadmitted(generation, request_id, &approval_ids);
-                return Err(ZsxSessionError::backpressure(generation, request_id));
-            }
-            Err(TrySendError::Disconnected(_)) => {
-                self.release_unadmitted(generation, request_id, &approval_ids);
-                return Err(ZsxSessionError::new(
-                    ZsxSessionFailureCode::BackendUnavailable,
-                    generation,
-                    Some(request_id),
-                    "session executor is unavailable",
-                ));
-            }
-        }
+            reply_tx,
+            &approval_ids,
+        )?;
         let backend_result = reply_rx.recv().map_err(|error| {
             ZsxSessionError::new(
                 ZsxSessionFailureCode::BackendUnavailable,
@@ -1721,49 +1671,7 @@ impl ZsxSession {
         expected_generation: u64,
         reason: SessionReplacementReason,
     ) -> Result<SessionReplacementReceipt, ZsxSessionError> {
-        let next_generation = {
-            let mut state = self.lock_state(None)?;
-            if expected_generation != state.generation {
-                return Err(ZsxSessionError::new(
-                    ZsxSessionFailureCode::StaleGeneration,
-                    state.generation,
-                    None,
-                    format!(
-                        "replacement generation {expected_generation} does not match active generation {}",
-                        state.generation
-                    ),
-                ));
-            }
-            if state.terminating {
-                return Err(ZsxSessionError::new(
-                    ZsxSessionFailureCode::Terminating,
-                    state.generation,
-                    None,
-                    "session is terminating",
-                ));
-            }
-            if state.replacing {
-                return Err(ZsxSessionError::new(
-                    ZsxSessionFailureCode::ReplacementInProgress,
-                    state.generation,
-                    None,
-                    "another replacement is already in progress",
-                ));
-            }
-            let next = state.generation.checked_add(1).ok_or_else(|| {
-                ZsxSessionError::new(
-                    ZsxSessionFailureCode::GenerationExhausted,
-                    state.generation,
-                    None,
-                    "session generation cannot advance",
-                )
-            })?;
-            state.accepting = false;
-            state.replacing = true;
-            state.generation = next;
-            state.seen_request_ids.clear();
-            next
-        };
+        let next_generation = self.begin_replacement(expected_generation)?;
         cancel_backend(&self.cancellation);
         let control_started = Instant::now();
         let (reply_tx, reply_rx) = mpsc::sync_channel(1);
@@ -2018,6 +1926,146 @@ impl ZsxSession {
                 "session lifecycle state is poisoned",
             )
         })
+    }
+
+    fn admit_execution(
+        &self,
+        generation: u64,
+        request_id: u64,
+        approval_grants: &[SessionApprovalGrantV1],
+    ) -> Result<Vec<String>, ZsxSessionError> {
+        let mut state = self.lock_state(Some(request_id))?;
+        if generation != state.generation {
+            return Err(ZsxSessionError::new(
+                ZsxSessionFailureCode::StaleGeneration,
+                state.generation,
+                Some(request_id),
+                format!(
+                    "request generation {generation} does not match active generation {}",
+                    state.generation
+                ),
+            ));
+        }
+        if state.terminating || !state.accepting {
+            return Err(ZsxSessionError::new(
+                ZsxSessionFailureCode::Terminating,
+                state.generation,
+                Some(request_id),
+                "session is not accepting execution",
+            ));
+        }
+        if state.seen_request_ids.contains(&request_id) {
+            return Err(ZsxSessionError::new(
+                ZsxSessionFailureCode::DuplicateRequestId,
+                state.generation,
+                Some(request_id),
+                "request id was already admitted in this generation",
+            ));
+        }
+        let approval_ids =
+            validate_session_approvals(&state, generation, request_id, approval_grants)?;
+        state.seen_request_ids.insert(request_id);
+        state.active_request_ids.insert(request_id);
+        state
+            .consumed_approval_ids
+            .extend(approval_ids.iter().cloned());
+        Ok(approval_ids)
+    }
+
+    fn send_or_release_execute(
+        &self,
+        generation: u64,
+        request_id: u64,
+        source: String,
+        timeout: Duration,
+        approval_grants: Vec<SessionApprovalGrantV1>,
+        verdict_envelope: Option<VerdictLoopEnvelope>,
+        contingent_policy: Option<zero_abi::ContingentPolicyV1>,
+        reply_tx: SyncSender<
+            Result<
+                (
+                    Value,
+                    ZsxExecutionMetrics,
+                    Option<VerdictLoopResult>,
+                    Option<zero_codemode::GateUsageReportV1>,
+                ),
+                (HostError, Option<zero_codemode::GateUsageReportV1>),
+            >,
+        >,
+        approval_ids: &[String],
+    ) -> Result<(), ZsxSessionError> {
+        match self.commands.try_send(ZsxCommand::Execute {
+            generation,
+            request_id,
+            source,
+            timeout,
+            approval_grants,
+            verdict_envelope,
+            contingent_policy,
+            reply: reply_tx,
+        }) {
+            Ok(()) => Ok(()),
+            Err(TrySendError::Full(_)) => {
+                self.release_unadmitted(generation, request_id, approval_ids);
+                Err(ZsxSessionError::backpressure(generation, request_id))
+            }
+            Err(TrySendError::Disconnected(_)) => {
+                self.release_unadmitted(generation, request_id, approval_ids);
+                Err(ZsxSessionError::new(
+                    ZsxSessionFailureCode::BackendUnavailable,
+                    generation,
+                    Some(request_id),
+                    "session executor is unavailable",
+                ))
+            }
+        }
+    }
+
+    fn begin_replacement(
+        &self,
+        expected_generation: u64,
+    ) -> Result<u64, ZsxSessionError> {
+        let mut state = self.lock_state(None)?;
+        if expected_generation != state.generation {
+            return Err(ZsxSessionError::new(
+                ZsxSessionFailureCode::StaleGeneration,
+                state.generation,
+                None,
+                format!(
+                    "replacement generation {expected_generation} does not match active generation {}",
+                    state.generation
+                ),
+            ));
+        }
+        if state.terminating {
+            return Err(ZsxSessionError::new(
+                ZsxSessionFailureCode::Terminating,
+                state.generation,
+                None,
+                "session is terminating",
+            ));
+        }
+        if state.replacing {
+            return Err(ZsxSessionError::new(
+                ZsxSessionFailureCode::ReplacementInProgress,
+                state.generation,
+                None,
+                "another replacement is already in progress",
+            ));
+        }
+        let next = state.generation.checked_add(1).ok_or_else(|| {
+            ZsxSessionError::new(
+                ZsxSessionFailureCode::GenerationExhausted,
+                state.generation,
+                None,
+                "session generation cannot advance",
+            )
+        })?;
+        state.accepting = false;
+        state.replacing = true;
+        state.generation = next;
+        state.seen_request_ids.clear();
+        Ok(next)
     }
 
     fn release_unadmitted(&self, generation: u64, request_id: u64, approval_ids: &[String]) {

@@ -242,6 +242,108 @@ fn retain_valid_refs(session: &FSZeroSession, refs: &mut Vec<String>) -> Option<
     rejected
 }
 
+fn collect_and_conform_refs(
+    session: &FSZeroSession,
+    request: &CallRequest,
+    result: &DomainResult,
+) -> Result<Vec<String>, AdapterError> {
+    let mut refs = result.refs.clone();
+    if let Some(value) = &result.value {
+        collect_portable_refs(value, &mut refs);
+    }
+    if let Some(reference) = request.args.get("ref").and_then(Value::as_str)
+        && ["fz://", "gz://", "tz://"]
+            .iter()
+            .any(|prefix| reference.starts_with(prefix))
+        && !refs.iter().any(|value| value == reference)
+    {
+        refs.push(reference.to_owned());
+    }
+    if let Some(rejected) = retain_valid_refs(session, &mut refs) {
+        return Err(adapter_error(
+            "ref_conformance",
+            format!(
+                "refusing to emit non-conformant ref {rejected:?}: fz://blob refs must be 64 lowercase hex characters and expandable"
+            ),
+            request,
+        ));
+    }
+    Ok(refs)
+}
+
+fn enrich_recovery_payload(
+    session: &FSZeroSession,
+    outcome: &DispatchOutcome,
+    result: &mut DomainResult,
+    refs: &[String],
+) {
+    if let Some(key) = outcome
+        .recovery_key
+        .as_deref()
+        .or_else(|| result.refs.first().map(String::as_str))
+        && let Some(bytes) = session.expand(key)
+    {
+        let portable_ref = refs
+            .iter()
+            .find(|value| value.starts_with("fz://"))
+            .cloned()
+            .unwrap_or_else(|| key.to_string());
+        let payload = match String::from_utf8(bytes) {
+            Ok(text) => serde_json::json!({
+                "ref": portable_ref,
+                "payload_utf8": text,
+            }),
+            Err(error) => {
+                let bytes = error.into_bytes();
+                let hex: String = bytes.iter().map(|byte| format!("{byte:02x}")).collect();
+                serde_json::json!({
+                    "ref": portable_ref,
+                    "payload_hex": hex,
+                    "bytes_len": bytes.len(),
+                })
+            }
+        };
+        result.value = Some(match result.value.take() {
+            Some(Value::Object(mut map)) => {
+                if let Value::Object(payload) = payload {
+                    map.extend(payload);
+                }
+                Value::Object(map)
+            }
+            Some(prior) => serde_json::json!({ "prior": prior, "recovered": payload }),
+            None => payload,
+        });
+    }
+}
+
+fn publish_refs_to_cas(
+    session: &FSZeroSession,
+    root: &std::path::Path,
+    request: &CallRequest,
+    refs: &[String],
+) -> Result<(), AdapterError> {
+    let cas = SharedCas::open(root);
+    for reference in refs {
+        if !reference.starts_with("fz://blob/") {
+            continue;
+        }
+        if reference.contains('#') {
+            continue;
+        }
+        let Some(bytes) = session.expand(reference) else {
+            continue;
+        };
+        cas.put(&bytes).map_err(|error| {
+            adapter_error(
+                "cas",
+                format!("cannot publish fszero ref {reference} to shared CAS: {error}"),
+                request,
+            )
+        })?;
+    }
+    Ok(())
+}
+
 /// One in-process dispatch command, executed on the session thread.
 enum SessionCommand {
     Call {
@@ -318,69 +420,8 @@ fn run_call(
         return Err(domain_error_to_adapter(&error, request));
     }
 
-    // Ref collection mirrors the raw worker: registry refs first, then
-    // portable refs embedded in the value, then the requested ref.
-    let mut refs = result.refs.clone();
-    if let Some(value) = &result.value {
-        collect_portable_refs(value, &mut refs);
-    }
-    if let Some(reference) = request.args.get("ref").and_then(Value::as_str)
-        && ["fz://", "gz://", "tz://"]
-            .iter()
-            .any(|prefix| reference.starts_with(prefix))
-        && !refs.iter().any(|value| value == reference)
-    {
-        refs.push(reference.to_owned());
-    }
-    if let Some(rejected) = retain_valid_refs(session, &mut refs) {
-        return Err(adapter_error(
-            "ref_conformance",
-            format!(
-                "refusing to emit non-conformant ref {rejected:?}: fz://blob refs must be 64 lowercase hex characters and expandable"
-            ),
-            request,
-        ));
-    }
-
-    // Recovery payload enrichment mirrors the raw worker: when the outcome
-    // minted a recovery key, surface ref + payload inline.
-    if let Some(key) = outcome
-        .recovery_key
-        .as_deref()
-        .or_else(|| result.refs.first().map(String::as_str))
-        && let Some(bytes) = session.expand(key)
-    {
-        let portable_ref = refs
-            .iter()
-            .find(|value| value.starts_with("fz://"))
-            .cloned()
-            .unwrap_or_else(|| key.to_string());
-        let payload = match String::from_utf8(bytes) {
-            Ok(text) => serde_json::json!({
-                "ref": portable_ref,
-                "payload_utf8": text,
-            }),
-            Err(error) => {
-                let bytes = error.into_bytes();
-                let hex: String = bytes.iter().map(|byte| format!("{byte:02x}")).collect();
-                serde_json::json!({
-                    "ref": portable_ref,
-                    "payload_hex": hex,
-                    "bytes_len": bytes.len(),
-                })
-            }
-        };
-        result.value = Some(match result.value.take() {
-            Some(Value::Object(mut map)) => {
-                if let Value::Object(payload) = payload {
-                    map.extend(payload);
-                }
-                Value::Object(map)
-            }
-            Some(prior) => serde_json::json!({ "prior": prior, "recovered": payload }),
-            None => payload,
-        });
-    }
+    let mut refs = collect_and_conform_refs(session, request, &result)?;
+    enrich_recovery_payload(session, &outcome, &mut result, &refs);
     result.refs = refs.clone();
 
     // Serialized DomainResult envelope plus inline evidence (worker parity:
@@ -390,31 +431,7 @@ fn run_call(
         map.insert("evidence".into(), serde_json::json!(evidence));
     }
 
-    // Bridge every emitted blob ref into the shared CAS the connector
-    // verifies against (`<session root>/blobs`). FSZero's own store may or
-    // may not dual-write a CAS; this publish is the deterministic in-process
-    // contract.
-    let cas = SharedCas::open(root);
-    for reference in &refs {
-        if !reference.starts_with("fz://blob/") {
-            continue;
-        }
-        // Fragment refs (`#B`/`#L`) expand to a slice; putting those bytes
-        // would mint a whole-hash object that is not the parent identity.
-        if reference.contains('#') {
-            continue;
-        }
-        let Some(bytes) = session.expand(reference) else {
-            continue;
-        };
-        cas.put(&bytes).map_err(|error| {
-            adapter_error(
-                "cas",
-                format!("cannot publish fszero ref {reference} to shared CAS: {error}"),
-                request,
-            )
-        })?;
-    }
+    publish_refs_to_cas(session, root, request, &refs)?;
 
     let mutated = result.mutated;
     let (effect, approval) = if let (true, Some(grant)) = (mutated, request.approval_grant.as_ref())
