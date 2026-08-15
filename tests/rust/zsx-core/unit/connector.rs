@@ -393,12 +393,23 @@
         .expect("prepare second request");
         cross_mutation_journal(&mut crossed).expect("cross second request");
 
-        let statuses = reconcile_all_attempts(&state.attempts_root).expect("reconcile all");
-        assert_eq!(statuses.len(), 2);
-        assert_eq!((statuses[0].generation, statuses[0].request_id), (7, 22));
-        assert_eq!(statuses[0].state, AttemptStateV1::SafeToRetry);
-        assert_eq!((statuses[1].generation, statuses[1].request_id), (8, 1));
-        assert_eq!(statuses[1].state, AttemptStateV1::Indeterminate);
+        let live = reconcile_all_attempts(&state.attempts_root, 8).expect("reconcile live gen");
+        assert_eq!(live.len(), 1);
+        assert_eq!((live[0].generation, live[0].request_id), (8, 1));
+        assert_eq!(live[0].state, AttemptStateV1::Indeterminate);
+        assert!(
+            live.iter()
+                .all(|status| status.generation == 8 && status.state != AttemptStateV1::SafeToRetry),
+            "replaced generation must not resume as SafeToRetry"
+        );
+
+        let retired = reconcile_all_attempts(&state.attempts_root, 7).expect("audit retired gen");
+        assert_eq!(retired.len(), 1);
+        assert_eq!((retired[0].generation, retired[0].request_id), (7, 22));
+        assert!(
+            state.attempts_root.join("g7").is_dir(),
+            "retired journals stay on disk"
+        );
 
         assert!(
             mark_dispatch_crossed_v1(&prepared.paths, prepared.prepared_entry_digest, 1).is_err()

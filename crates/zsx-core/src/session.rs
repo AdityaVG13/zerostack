@@ -1543,7 +1543,7 @@ impl ZsxSession {
             (state.state_root.clone(), state.generation)
         };
         let attempts_root = attempts_root_for(Path::new(&root));
-        reconcile_all_attempts(&attempts_root).map_err(|detail| {
+        reconcile_all_attempts(&attempts_root, generation).map_err(|detail| {
             ZsxSessionError::new(ZsxSessionFailureCode::Internal, generation, None, detail)
         })
     }

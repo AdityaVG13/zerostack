@@ -510,6 +510,75 @@ fn successful_mutation_is_journaled_succeeded_and_reconcile_never_calls_an_adapt
 }
 
 #[test]
+fn reconcile_all_omits_replaced_generation_journals() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let root = dir
+        .path()
+        .canonicalize()
+        .unwrap_or_else(|_| dir.path().to_path_buf());
+    let (session, fs, _, _) = build_session(&root);
+
+    session
+        .execute(
+            1,
+            1,
+            r#"await zero.fs.compound('mutate', {path: 'a.txt', text: 'x'});"#,
+            Duration::from_secs(30),
+        )
+        .expect("g1 mutation journals");
+    let before = session
+        .reconcile_all_attempts()
+        .expect("reconcile before replace");
+    assert!(
+        before.iter().any(|status| {
+            status.generation == 1 && status.state == AttemptStateV1::Succeeded
+        }),
+        "live generation must still reconcile"
+    );
+
+    session
+        .replace(1, SessionReplacementReason::Manual)
+        .expect("replace advances generation");
+    let after = session
+        .reconcile_all_attempts()
+        .expect("reconcile after replace");
+    assert!(
+        after.iter().all(|status| status.generation != 1),
+        "replaced generation must not appear in the live resume set: {after:?}"
+    );
+    assert!(
+        after
+            .iter()
+            .all(|status| status.state != AttemptStateV1::SafeToRetry),
+        "SafeToRetry must not appear for a replaced generation"
+    );
+
+    session
+        .execute(
+            2,
+            1,
+            r#"await zero.fs.compound('mutate', {path: 'b.txt', text: 'y'});"#,
+            Duration::from_secs(30),
+        )
+        .expect("g2 mutation journals");
+    let live = session
+        .reconcile_all_attempts()
+        .expect("reconcile live gen");
+    assert!(
+        live.iter().any(|status| {
+            status.generation == 2 && status.state == AttemptStateV1::Succeeded
+        }),
+        "live generation must still reconcile after replace"
+    );
+    assert!(
+        live.iter().all(|status| status.generation == 2),
+        "only the live generation is a resume row"
+    );
+    assert_eq!(fs.calls(), 2);
+    session.shutdown().expect("shutdown");
+}
+
+#[test]
 fn ambiguous_mutation_failure_is_indeterminate_and_never_redispatched() {
     let dir = tempfile::tempdir().expect("tempdir");
     let root = dir

@@ -534,11 +534,15 @@ pub(crate) fn reconcile_request_attempts(
     Ok(statuses)
 }
 
-/// Reconcile every durable mutation attempt found under one session store.
-/// Unknown entries are ignored, symlinks are never followed, and recovery
-/// never calls an adapter or redispatches an effect.
+/// Reconcile every durable mutation attempt found under one session store
+/// for `live_generation`. Journals under `g<other>/` stay on disk for audit
+/// and are omitted from the live resume set so a replaced generation cannot
+/// surface as `SafeToRetry` / `Indeterminate`. Unknown entries are ignored,
+/// symlinks are never followed, and recovery never calls an adapter or
+/// redispatches an effect.
 pub(crate) fn reconcile_all_attempts(
     attempts_root: &Path,
+    live_generation: u64,
 ) -> Result<Vec<ZsxAttemptJournalStatus>, String> {
     let generations = match std::fs::read_dir(attempts_root) {
         Ok(entries) => entries,
@@ -564,6 +568,9 @@ pub(crate) fn reconcile_all_attempts(
         else {
             continue;
         };
+        if generation != live_generation {
+            continue;
+        }
         let requests = std::fs::read_dir(generation_entry.path())
             .map_err(|error| format!("cannot read attempt requests: {error}"))?;
         for request_entry in requests {
