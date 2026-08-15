@@ -178,6 +178,23 @@ Output on failure:
 
 When MCP wraps results, the canonical object shown above MUST be top-level `structuredContent`. `content[0].text` MAY remain a compact human/model ack but MUST NOT replace or omit any structured field. Private `zerostack.raw_worker.v2` frames are governed separately and are not subject to this envelope.
 
+#### Late settlement after cancel or timeout
+
+When a handler has already classified a request as cancelled or timed out
+and the worker later produces a result (MCP `zero-mcp` and session
+`zsx-core` share this law):
+
+- A late Ok MUST NOT be reported as Success or `ok`. `kind` MUST be
+  `commit_race` and `retryable` MUST be false. The committed payload
+  MUST remain attached (AR-004 / 3r3z).
+- A late domain Err MUST stay that Err. It MUST NOT be rewritten to
+  `cancelled` or `commit_race`.
+- An empty late channel MAY stay `cancelled` or `timeout` and MUST
+  attach `still_running` rather than detach silently.
+
+`commit_race` is a worker/MCP settlement kind. It is not one of the
+CodeMode sandbox `Error.kind` values in §9.
+
 ### `{ns}_codemode_search`
 
 Input schema:

@@ -182,7 +182,12 @@ family = "conformance"
 name = "CodeMode conformance harness CLI + checks"
 status = "present"
 weight = 0.038759689922
-evidence = ["conformance/"]
+evidence = [
+  "conformance/",
+  "conformance/CONTRACT.md",
+  "tests/rust/zero-mcp/unit/mcp_transport.rs",
+]
+notes = "late Ok after cancel is commit_race (retryable false, never ok/cancelled); CONTRACT §4 late settlement; MCP crate test late_ok_after_cancel_is_commit_race_with_payload"
 
 [[feature]]
 id = "F-CONF-GOLDEN-SCHEMA"
