@@ -77,6 +77,21 @@ impl Envelope {
         }
     }
 
+    /// Late execute settlement: Ok after abort is `commit_race`; a domain
+    /// Err always stays that Err (never rewritten to `cancelled`).
+    pub fn settle_after_execute(
+        generation: u64,
+        request_id: u64,
+        cancelled: bool,
+        outcome: Result<ZsxExecutionResult, ZsxSessionError>,
+    ) -> Self {
+        match (outcome, cancelled) {
+            (Ok(result), false) => Self::ok(generation, request_id, result),
+            (Ok(result), true) => Self::commit_race(generation, request_id, result),
+            (Err(err), _) => Self::from_zsx_error(generation, request_id, &err),
+        }
+    }
+
     /// Map a typed zsx-core error into the envelope, preserving its failure
     /// code and retry hint.
     pub fn from_zsx_error(generation: u64, request_id: u64, err: &ZsxSessionError) -> Self {
@@ -156,6 +171,25 @@ impl Envelope {
 mod tests {
     use super::*;
     use zero_abi::{DEFAULT_REDACTION_TOKEN, RedactionPolicyV1, RedactorV1};
+    use zsx_core::ZsxSessionFailureCode;
+
+    /// CONTRACT: a late domain Err must stay that Err after AbortSignal.
+    #[test]
+    fn late_domain_err_is_not_rewritten_to_cancelled() {
+        let err = ZsxSessionError {
+            code: ZsxSessionFailureCode::BackendExecution,
+            generation: 3,
+            request_id: Some(9),
+            detail: "adapter failed after abort".into(),
+            retry_after_ms: None,
+        };
+        let envelope = Envelope::settle_after_execute(3, 9, true, Err(err));
+        assert!(!envelope.ok);
+        let error = envelope.error.expect("typed error");
+        assert_eq!(error.code, "backend_execution");
+        assert_ne!(error.code, CODE_CANCELLED);
+        assert_ne!(error.code, CODE_COMMIT_RACE);
+    }
 
     fn redactor(secrets: &[&str]) -> RedactorV1 {
         RedactorV1::new(

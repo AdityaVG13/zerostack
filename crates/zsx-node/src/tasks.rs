@@ -115,19 +115,12 @@ impl Task for ExecuteTask {
             )
         }));
         match outcome {
-            Ok(Ok(result)) if !self.cancelled.load(Ordering::Acquire) => {
-                Ok(Envelope::ok(self.generation, self.request_id, result))
-            }
-            // Aborted while in flight: surface CommitRace, keep the result.
-            Ok(Ok(result)) => Ok(Envelope::commit_race(
+            Ok(inner) => Ok(Envelope::settle_after_execute(
                 self.generation,
                 self.request_id,
-                result,
+                self.cancelled.load(Ordering::Acquire),
+                inner,
             )),
-            Ok(Err(err)) if !self.cancelled.load(Ordering::Acquire) => Ok(
-                Envelope::from_zsx_error(self.generation, self.request_id, &err),
-            ),
-            Ok(Err(_)) => Ok(self.cancelled()),
             Err(_panic) => Ok(Envelope::panic(self.generation, self.request_id)),
         }
     }
