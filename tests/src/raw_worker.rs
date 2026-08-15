@@ -965,13 +965,7 @@ fn check_errors_gate(
     }
 
     // sandbox: planner/JS/MCP ops are forbidden on a raw worker.
-    for forbidden in [
-        "planner",
-        "planner.run",
-        "js.execute",
-        "mcp.tools_call",
-        "codemode.execute",
-    ] {
+    for forbidden in zero_abi::RW10_FORBIDDEN_OPS {
         let request = make_request(forbidden, json!({}), deadline, false, revision, digest);
         match worker.dispatch(request) {
             Ok(_) => details.push(format!("forbidden op {:?} was not denied", forbidden)),
@@ -1305,15 +1299,7 @@ fn check_sandbox_gate(
         Err(error) => return CheckResult::fail("RW10", "planner_refusal", error.to_string()),
     };
     let mut details = Vec::new();
-    for forbidden in [
-        "planner",
-        "planner.run",
-        "js.execute",
-        "mcp.tools_call",
-        "mcp.tools_list",
-        "codemode.execute",
-        "execute_code",
-    ] {
+    for forbidden in zero_abi::RW10_FORBIDDEN_OPS {
         let request = make_request(
             forbidden,
             json!({}),

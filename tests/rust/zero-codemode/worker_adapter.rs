@@ -70,9 +70,13 @@ fn context(engine: EngineIdentity) -> WorkerContext {
 }
 
 fn request(id: &str, args: serde_json::Value, deadline: Option<u64>) -> CallRequest {
+    request_op(id, "fixture.echo", args, deadline)
+}
+
+fn request_op(id: &str, op: &str, args: serde_json::Value, deadline: Option<u64>) -> CallRequest {
     CallRequest {
         request_id: id.into(),
-        op: "fixture.echo".into(),
+        op: op.into(),
         args,
         deadline_unix_ms: deadline,
         trace: WorkerTrace {
@@ -1113,6 +1117,38 @@ fn descendant_exists(pid: i32) -> bool {
         .status()
         .expect("execute kill -0 descendant probe")
         .success()
+}
+
+#[test]
+fn rw10_harness_names_are_refused_and_fixture_is_not_live_identity() {
+    let fixture_src = include_str!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/src/bin/worker_fixture.rs"
+    ));
+    assert!(
+        fixture_src.contains("semantic_contract_version: \"fixture.v1\""),
+        "fixture handshake must stay fixture.v1, not a live worker identity"
+    );
+
+    let mut client = registry("normal")
+        .launch(
+            context(EngineIdentity::FsZero),
+            WorkerClientConfig::default(),
+        )
+        .unwrap();
+    for op in zero_abi::RW10_FORBIDDEN_OPS {
+        match client.dispatch(request_op("rw10", op, json!({}), None)) {
+            Err(WorkerAdapterError::Remote { kind, message, .. }) => {
+                assert_eq!(kind, "forbidden", "{op} kind={kind}");
+                assert!(
+                    message.contains("worker-fixture"),
+                    "refuse must name the fixture, not a live worker: {message}"
+                );
+            }
+            other => panic!("{op} must be RW10-forbidden, got {other:?}"),
+        }
+    }
+    client.shutdown().unwrap();
 }
 
 fn assert_terminal_and_rejects(client: &mut WorkerClient) {

@@ -417,6 +417,61 @@ pub fn is_typed_worker_error_kind(kind: &str) -> bool {
     WORKER_ERROR_KINDS.contains(&kind)
 }
 
+/// Exact names the RW10 harness probes. Fixture, in-process adapters, and
+/// the conformance loop must refuse this set.
+pub const RW10_FORBIDDEN_OPS: &[&str] = &[
+    "planner",
+    "planner.run",
+    "js.execute",
+    "mcp.tools_call",
+    "mcp.tools_list",
+    "codemode.execute",
+    "execute_code",
+];
+
+/// Planner / JS / MCP / nested-CodeMode ops a raw worker cannot own.
+///
+/// Includes [`RW10_FORBIDDEN_OPS`] plus documented aliases so fixture names
+/// (`javascript`, `mcp_catalog`) and in-process names (`fz_execute_code`,
+/// `tools/call`) stay one arrangement instead of three copied arrays.
+///
+/// Alias row (not a second law):
+/// - `plan` / `planner.*` ≡ `planner`
+/// - `js` / `javascript` / `javascript_runtime` / `javascript.*` / `js.*` ≡ `js.execute`
+/// - `mcp` / `mcp_catalog` / `mcp.*` / `tools/call` / `tools/list` ≡ `mcp.tools_*`
+/// - `codemode` / `codemode.*` / `nested_codemode` / `*_codemode_search` /
+///   `*_codemode_describe` ≡ `codemode.execute`
+/// - `*_execute_code` / `fszero.exec` ≡ `execute_code`
+pub fn is_rw10_forbidden_op(op: &str) -> bool {
+    let lower = op.to_ascii_lowercase();
+    if RW10_FORBIDDEN_OPS.iter().any(|name| *name == lower) {
+        return true;
+    }
+    matches!(
+        lower.as_str(),
+        "plan"
+            | "js"
+            | "javascript"
+            | "javascript_runtime"
+            | "mcp"
+            | "mcp_catalog"
+            | "codemode"
+            | "nested_codemode"
+            | "tools/call"
+            | "tools/list"
+            | "fszero.exec"
+            | "codemode_search"
+            | "codemode_describe"
+    ) || lower.starts_with("planner.")
+        || lower.starts_with("javascript.")
+        || lower.starts_with("mcp.")
+        || lower.starts_with("js.")
+        || lower.starts_with("codemode.")
+        || lower.ends_with("_execute_code")
+        || lower.ends_with("_codemode_search")
+        || lower.ends_with("_codemode_describe")
+}
+
 fn deserialize_typed_kind<'de, D: Deserializer<'de>>(deserializer: D) -> Result<String, D::Error> {
     let kind = String::deserialize(deserializer)?;
     if is_typed_worker_error_kind(&kind) {

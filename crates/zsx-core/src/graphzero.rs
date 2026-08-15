@@ -271,6 +271,17 @@ impl DomainAdapter for GraphZeroAdapter {
                 Some(trace),
             ));
         }
+        if zero_abi::is_rw10_forbidden_op(&request.op) {
+            return Err(AdapterError::new(
+                "forbidden",
+                format!(
+                    "graphzero adapter refuses planner/JavaScript/MCP operation '{}'",
+                    request.op
+                ),
+                false,
+                Some(trace),
+            ));
+        }
         let context = self.engine_context(request);
         match private_worker_dispatch(&context, &request.op, &request.args) {
             Ok(result) => {

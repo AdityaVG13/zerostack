@@ -148,7 +148,7 @@ pub use raw_worker::{
     WorkerCapabilities, WorkerError, WorkerRequestFrame, WorkerResponseFrame, WorkerResult,
     WorkerResultMetadata,
     WorkerTokenAccountingV1, WorkerTokenCountKind, WorkerTrace, decode_request_frame,
-    is_typed_worker_error_kind,
+    is_rw10_forbidden_op, is_typed_worker_error_kind, RW10_FORBIDDEN_OPS,
     decode_response_frame, encode_frame, raw_worker_protocol_digest_hex,
     raw_worker_protocol_manifest, validate_engine_stage_timeline_v1, validate_handshake_request,
     validate_request_frame, validate_response_frame, validate_worker_token_accounting_v1,

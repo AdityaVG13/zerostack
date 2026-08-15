@@ -108,13 +108,13 @@ fn main() {
                 }
             }
             WorkerRequestFrame::Call { request } => {
-                if rw10_forbidden_op(&request.op) {
+                if zero_abi::is_rw10_forbidden_op(&request.op) {
                     send(
                         &mut stdout,
                         &WorkerResponseFrame::Error {
                             request_id: Some(request.request_id.clone()),
                             error: WorkerError {
-                                kind: "policy".into(),
+                                kind: "forbidden".into(),
                                 message: format!(
                                     "RW10-forbidden op '{}'; worker-fixture is not a planner/MCP/nested-CodeMode host",
                                     request.op
@@ -470,18 +470,7 @@ fn result(request: CallRequest) -> WorkerResult {
     }
 }
 
-fn rw10_forbidden_op(op: &str) -> bool {
-    matches!(
-        op,
-        "planner"
-            | "javascript_runtime"
-            | "mcp_catalog"
-            | "nested_codemode"
-            | "javascript"
-            | "codemode"
-            | "mcp"
-    )
-}
+
 
 fn opaque_chain_result(
     engine: EngineIdentity,

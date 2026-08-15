@@ -213,21 +213,9 @@ fn receive_call_response(
     }
 }
 
-/// Mirror of `RawWorkerV2::forbidden`: operations that never reach the typed
-/// dispatcher (planner / JavaScript / MCP surface-dispatch names).
+/// RW10 mask: shared [`zero_abi::is_rw10_forbidden_op`] (harness + fixture).
 fn is_forbidden_operation(op: &str) -> bool {
-    matches!(
-        op,
-        "execute_code"
-            | "fz_execute_code"
-            | "codemode_search"
-            | "fz_codemode_search"
-            | "codemode_describe"
-            | "fz_codemode_describe"
-            | "tools/call"
-            | "tools/list"
-            | "fszero.exec"
-    )
+    zero_abi::is_rw10_forbidden_op(op)
 }
 
 /// Mirror of `domain_error_kind`: map FSZero error classes onto the
@@ -461,7 +449,7 @@ fn run_call(
     }
     if is_forbidden_operation(&request.op) {
         return Err(adapter_error(
-            "forbidden_op",
+            "forbidden",
             format!(
                 "fszero adapter refuses planner/JavaScript/MCP operation '{}'",
                 request.op

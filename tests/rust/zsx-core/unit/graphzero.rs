@@ -22,6 +22,18 @@
     }
 
     #[test]
+    fn rw10_mask_refuses_harness_names() {
+        for op in zero_abi::RW10_FORBIDDEN_OPS {
+            assert!(
+                zero_abi::is_rw10_forbidden_op(op),
+                "{op} must be RW10-forbidden"
+            );
+        }
+        assert!(!zero_abi::is_rw10_forbidden_op("verify"));
+        assert!(!zero_abi::is_rw10_forbidden_op("query"));
+    }
+
+    #[test]
     fn bridges_legacy_graph_blob_into_aggregate_shared_cas() {
         let repo = tempfile::tempdir().expect("repo");
         let state = tempfile::tempdir().expect("state");

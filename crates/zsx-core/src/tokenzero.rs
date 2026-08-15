@@ -457,7 +457,7 @@ impl DomainAdapter for TokenZeroAdapter {
         }
         if forbidden_operation(&request.op) {
             return Err(AdapterError::new(
-                "unsupported_operation",
+                "forbidden",
                 "planner, JavaScript, and MCP operations are forbidden",
                 false,
                 Some(request.trace.clone()),
@@ -554,27 +554,9 @@ fn collect_refs(value: &Value, output: &mut Vec<String>) {
     }
 }
 
-/// Forbidden-operation mask, byte-identical to the v2 worker's `forbidden`.
+/// RW10 mask: shared [`zero_abi::is_rw10_forbidden_op`] (harness + fixture).
 fn forbidden_operation(op: &str) -> bool {
-    let op = op.to_ascii_lowercase();
-    matches!(
-        op.as_str(),
-        "plan"
-            | "planner"
-            | "js"
-            | "javascript"
-            | "mcp"
-            | "execute_code"
-            | "tz_execute_code"
-            | "codemode_search"
-            | "tz_codemode_search"
-            | "codemode_describe"
-            | "tz_codemode_describe"
-            | "tools/call"
-            | "tools/list"
-    ) || op.starts_with("planner.")
-        || op.starts_with("javascript.")
-        || op.starts_with("mcp.")
+    zero_abi::is_rw10_forbidden_op(op)
 }
 
 fn encoded_len(field: &str, value: &Value) -> Result<u64, String> {

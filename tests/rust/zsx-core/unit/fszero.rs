@@ -46,12 +46,17 @@
 
     #[test]
     fn forbidden_operations_never_reach_the_dispatcher() {
+        for op in zero_abi::RW10_FORBIDDEN_OPS {
+            assert!(is_forbidden_operation(op), "{op} must be forbidden");
+        }
         for op in [
             "execute_code",
             "fz_execute_code",
             "codemode_search",
             "fszero.exec",
             "tools/call",
+            "planner.run",
+            "js.execute",
         ] {
             assert!(is_forbidden_operation(op), "{op} must be forbidden");
         }

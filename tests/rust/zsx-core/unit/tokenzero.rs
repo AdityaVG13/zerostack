@@ -212,6 +212,9 @@
 
     #[test]
     fn forbidden_mask_matches_the_v2_worker() {
+        for op in zero_abi::RW10_FORBIDDEN_OPS {
+            assert!(forbidden_operation(op), "{op}");
+        }
         for op in [
             "plan",
             "planner",

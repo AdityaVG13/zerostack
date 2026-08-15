@@ -549,3 +549,25 @@
             "unknown kind potato must fail deserialize"
         );
     }
+
+    #[test]
+    fn rw10_harness_names_are_forbidden_and_engine_ops_are_not() {
+        assert!(RW10_FORBIDDEN_OPS.len() >= 7);
+        for op in RW10_FORBIDDEN_OPS {
+            assert!(is_rw10_forbidden_op(op), "{op}");
+        }
+        for op in [
+            "planner.run",
+            "js.execute",
+            "mcp.tools_call",
+            "execute_code",
+            "fz_execute_code",
+            "javascript",
+            "tools/call",
+        ] {
+            assert!(is_rw10_forbidden_op(op), "{op}");
+        }
+        for op in ["fs.read", "fs.search", "verify", "query", "find", "shell"] {
+            assert!(!is_rw10_forbidden_op(op), "{op} must remain legal");
+        }
+    }
