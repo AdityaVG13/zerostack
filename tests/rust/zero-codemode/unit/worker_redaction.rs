@@ -84,3 +84,13 @@ fn session_capability_env_vars_are_stripped_before_child_env_assembly() {
     }));
     assert_eq!(stripped, vec![("GRAPHZERO_REPO".into(), "/work/repo".into())]);
 }
+
+#[test]
+fn independent_zero_residual_does_not_zero_settlement_close() {
+    // total=1000, known=600: leftover residual would have been 400.
+    // Adding leftover back into the partition made err identically 0.
+    // The shipped close is |total-known|, so independent residual=0 unmasks 400.
+    assert_eq!(settlement_closure_error_ns(1000, 600), 400);
+    assert_ne!(settlement_closure_error_ns(1000, 600), 0);
+    assert_eq!(settlement_closure_error_ns(500, 600), 100);
+}

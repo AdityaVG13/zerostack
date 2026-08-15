@@ -493,14 +493,15 @@ fn enabled_transport_telemetry_closes_and_preserves_worker_token_units() {
         .and_then(|event| event.settlement.as_ref())
         .expect("dispatch settlement receipt");
     let timeline = receipt.engine_timeline.as_ref().expect("engine timeline");
-    let partitioned_ns = u128::from(timeline.total_ns)
-        + u128::from(receipt.raw_worker_result_settlement_ns)
-        + u128::from(receipt.residual_transport_ns);
+    let known_ns = u128::from(timeline.total_ns)
+        + u128::from(receipt.raw_worker_result_settlement_ns);
+    let leftover = u128::from(receipt.total_ns).saturating_sub(known_ns);
+    assert_eq!(u128::from(receipt.residual_transport_ns), leftover);
     assert_eq!(
-        u128::from(receipt.total_ns).abs_diff(partitioned_ns),
-        u128::from(receipt.closure_error_ns)
+        u128::from(receipt.total_ns).abs_diff(known_ns),
+        u128::from(receipt.closure_error_ns),
+        "closure_error is |total-known|; residual is leftover, not a close-zeroing term"
     );
-    assert!(receipt.closure_error_ns <= TIMELINE_CLOSURE_TOLERANCE_NS_V1);
     assert_eq!(timeline.total_ns, 300);
     assert_eq!(timeline.spans[0].stage, "fixture_decode");
     assert_eq!(timeline.spans[1].start_ns, 100);
@@ -558,7 +559,12 @@ fn remote_failure_preserves_details_trace_and_transport_receipt() {
         .expect("failure settlement receipt");
     assert!(receipt.engine_timeline.is_some());
     assert!(receipt.worker_token_accounting.is_some());
-    assert!(receipt.closure_error_ns <= TIMELINE_CLOSURE_TOLERANCE_NS_V1);
+    let known_ns = u128::from(receipt.engine_timeline.as_ref().unwrap().total_ns)
+        + u128::from(receipt.raw_worker_result_settlement_ns);
+    assert_eq!(
+        u128::from(receipt.total_ns).abs_diff(known_ns),
+        u128::from(receipt.closure_error_ns)
+    );
     drop(events);
     client.shutdown().unwrap();
 }

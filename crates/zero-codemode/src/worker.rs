@@ -1548,6 +1548,12 @@ fn duration_ns(value: Duration) -> u64 {
     value.as_nanos().min(u128::from(u64::MAX)) as u64
 }
 
+/// Close error is |total − known|. Residual leftover is not added back
+/// into the partition (that identity made the error identically 0).
+fn settlement_closure_error_ns(total_ns: u128, known_ns: u128) -> u64 {
+    total_ns.abs_diff(known_ns).min(u128::from(u64::MAX)) as u64
+}
+
 fn finalize_settlement(
     seed: SettlementSeed,
     call_started: Instant,
@@ -1559,14 +1565,16 @@ fn finalize_settlement(
         .map_or(0, |timeline| timeline.total_ns);
     let total_ns = duration_ns(call_started.elapsed());
     let known_ns = u128::from(engine_internal_ns) + u128::from(raw_worker_result_settlement_ns);
+    // Residual is leftover wall (diagnostic). It is *not* added back into
+    // the partition -- that identity made closure_error identically 0
+    // whenever total >= known. Close fails only on inversion (known > total)
+    // beyond tolerance; leftover is reported honestly as residual and as
+    // closure_error.
     let residual_transport_ns = u128::from(total_ns)
         .saturating_sub(known_ns)
         .min(u128::from(u64::MAX)) as u64;
-    let partitioned_ns = known_ns + u128::from(residual_transport_ns);
-    let closure_error_ns = u128::from(total_ns)
-        .abs_diff(partitioned_ns)
-        .min(u128::from(u64::MAX)) as u64;
-    if closure_error_ns > TIMELINE_CLOSURE_TOLERANCE_NS_V1 {
+    let closure_error_ns = settlement_closure_error_ns(u128::from(total_ns), known_ns);
+    if known_ns > u128::from(total_ns) && closure_error_ns > TIMELINE_CLOSURE_TOLERANCE_NS_V1 {
         return Err(format!(
             "worker settlement does not close: engine_internal_ns={engine_internal_ns} raw_worker_result_settlement_ns={raw_worker_result_settlement_ns} residual_transport_ns={residual_transport_ns} total_ns={total_ns} closure_error_ns={closure_error_ns} tolerance_ns={TIMELINE_CLOSURE_TOLERANCE_NS_V1}"
         ));
