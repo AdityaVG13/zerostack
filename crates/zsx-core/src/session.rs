@@ -108,6 +108,9 @@ pub enum ZsxSessionFailureCode {
     /// The request was cancelled through its per-request token before it
     /// settled. The session itself remains accepting.
     Cancelled,
+    /// The request already committed under a retired generation. The
+    /// caller must not treat this as Success or as a silent no-op.
+    CommitRace,
     /// A continuation persist/resume was refused loudly: unknown, tampered,
     /// expired, cross-project, revoked-epoch, already-consumed, or
     /// unoffered-choice (V6-R2, ZS-ADAPTER-004).
@@ -138,6 +141,7 @@ impl ZsxSessionFailureCode {
             Self::VerdictRejected => "verdict_rejected",
             Self::DecisionRequired => "decision_required",
             Self::Cancelled => "cancelled",
+            Self::CommitRace => "commit_race",
             Self::ContinuationRefused => "continuation_refused",
             Self::InvalidPolicy => "invalid_policy",
             Self::Internal => "internal",
@@ -1397,25 +1401,31 @@ impl ZsxSession {
             reply_tx,
             &approval_ids,
         )?;
-        let backend_result = reply_rx.recv().map_err(|error| {
-            ZsxSessionError::new(
-                ZsxSessionFailureCode::BackendUnavailable,
-                generation,
-                Some(request_id),
-                format!("session executor dropped the result: {error}"),
-            )
-        });
+        let backend_result = match reply_rx.recv() {
+            Ok(outcome) => outcome,
+            Err(error) => {
+                if let Ok(mut state) = self.lock_state(Some(request_id)) {
+                    state.active_request_ids.remove(&request_id);
+                }
+                return Err(ZsxSessionError::new(
+                    ZsxSessionFailureCode::BackendUnavailable,
+                    generation,
+                    Some(request_id),
+                    format!("session executor dropped the result: {error}"),
+                ));
+            }
+        };
         let (current, terminating) = {
             let mut state = self.lock_state(Some(request_id))?;
             state.active_request_ids.remove(&request_id);
             (state.generation, state.terminating)
         };
         if current != generation || terminating {
-            return Err(ZsxSessionError::new(
-                ZsxSessionFailureCode::StaleGeneration,
+            return Err(replaced_generation_error(
+                generation,
                 current,
-                Some(request_id),
-                "execution settled after its generation was replaced",
+                request_id,
+                &backend_result,
             ));
         }
         let request_cancelled = {
@@ -1430,7 +1440,7 @@ impl ZsxSession {
             slot.cancelled_requests.remove(&(generation, request_id))
         };
         let (result, verdict, backend_error, policy_report) = match backend_result {
-            Ok(Ok((value, metrics, verdict, policy_report))) => (
+            Ok((value, metrics, verdict, policy_report)) => (
                 Some(ZsxExecutionResult {
                     generation,
                     request_id,
@@ -1441,15 +1451,7 @@ impl ZsxSession {
                 None,
                 policy_report,
             ),
-            Ok(Err((error, policy_report))) => (None, None, Some(error), policy_report),
-            Err(error) => {
-                return Err(ZsxSessionError::new(
-                    ZsxSessionFailureCode::BackendUnavailable,
-                    generation,
-                    Some(request_id),
-                    format!("session executor dropped the result: {error}"),
-                ));
-            }
+            Err((error, policy_report)) => (None, None, Some(error), policy_report),
         };
         Ok(ZsxSettledExecution {
             result,
@@ -2152,6 +2154,59 @@ fn cancel_backend(cancellation: &Arc<Mutex<ActiveCancellationSlot>>) {
     }
 }
 
+fn stale_generation_runtime(generation: u64, live: u64) -> HostError {
+    HostError::Runtime(format!(
+        "request generation {generation} is stale; live generation is {live}"
+    ))
+}
+
+fn is_stale_generation_runtime(error: &HostError) -> bool {
+    matches!(
+        error,
+        HostError::Runtime(message) if message.contains("is stale; live generation is")
+    )
+}
+
+fn replaced_generation_error(
+    generation: u64,
+    current: u64,
+    request_id: u64,
+    backend_result: &Result<
+        (
+            Value,
+            ZsxExecutionMetrics,
+            Option<VerdictLoopResult>,
+            Option<zero_codemode::GateUsageReportV1>,
+        ),
+        (HostError, Option<zero_codemode::GateUsageReportV1>),
+    >,
+) -> ZsxSessionError {
+    match backend_result {
+        Ok(_) => ZsxSessionError::new(
+            ZsxSessionFailureCode::CommitRace,
+            generation,
+            Some(request_id),
+            format!(
+                "execution committed under generation {generation}; live generation is {current}"
+            ),
+        ),
+        Err((error, _)) if is_stale_generation_runtime(error) => ZsxSessionError::new(
+            ZsxSessionFailureCode::StaleGeneration,
+            current,
+            Some(request_id),
+            "execution settled after its generation was replaced",
+        ),
+        Err(_) => ZsxSessionError::new(
+            ZsxSessionFailureCode::CommitRace,
+            generation,
+            Some(request_id),
+            format!(
+                "in-flight execution settled after generation {generation} was replaced; live generation is {current}"
+            ),
+        ),
+    }
+}
+
 fn session_worker(
     initial_generation: u64,
     root: PathBuf,
@@ -2197,12 +2252,7 @@ fn session_worker(
             } => {
                 let live = live_generation.load(Ordering::Acquire);
                 let result = if generation != live {
-                    Err((
-                        HostError::Runtime(format!(
-                            "request generation {generation} is stale; live generation is {live}"
-                        )),
-                        None,
-                    ))
+                    Err((stale_generation_runtime(generation, live), None))
                 } else {
                     match executor.as_mut() {
                         None => Err((

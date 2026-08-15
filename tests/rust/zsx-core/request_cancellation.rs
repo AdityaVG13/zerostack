@@ -90,8 +90,9 @@ impl DomainAdapter for TestAdapter {
         if let Some(delay_ms) = request.args["__delay_ms"].as_u64() {
             let started = Instant::now();
             let budget = Duration::from_millis(delay_ms);
+            let committed = request.args["__committed"].as_bool() == Some(true);
             loop {
-                if call.cancellation.is_cancelled() {
+                if !committed && call.cancellation.is_cancelled() {
                     return Err(AdapterError::new(
                         "cancelled",
                         "test adapter cancelled during delay",
@@ -275,6 +276,56 @@ fn replace_rejects_queued_execute_under_old_generation() {
             .expect_err("old-generation reconcile is stale")
             .code,
         ZsxSessionFailureCode::StaleGeneration
+    );
+    let admit = session
+        .execute(
+            1,
+            3,
+            r#"await zero.fs.compound('search', {query: 'after'});"#,
+            Duration::from_secs(30),
+        )
+        .expect_err("new work on the retired generation is stale at admit");
+    assert_eq!(admit.code, ZsxSessionFailureCode::StaleGeneration);
+    session.shutdown().expect("shutdown");
+}
+
+#[test]
+fn replace_reports_commit_race_when_inflight_execute_commits() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let root = dir
+        .path()
+        .canonicalize()
+        .unwrap_or_else(|_| dir.path().to_path_buf());
+    let (session, fs, _, _) = build_session(&root);
+
+    let occupier = Arc::clone(&session);
+    let occupy = std::thread::spawn(move || {
+        occupier.execute(
+            1,
+            1,
+            r#"await zero.fs.compound('search', {query: 'x', __delay_ms: 400, __committed: true});"#,
+            Duration::from_secs(30),
+        )
+    });
+    std::thread::sleep(Duration::from_millis(80));
+    session
+        .replace(1, SessionReplacementReason::Manual)
+        .expect("replace advances generation");
+    let occupy_error = occupy
+        .join()
+        .expect("occupier thread")
+        .expect_err("committed work after replace must not be Success");
+    assert_eq!(occupy_error.code, ZsxSessionFailureCode::CommitRace);
+    assert_eq!(occupy_error.generation, 1);
+    assert!(
+        occupy_error.detail.contains("generation 1"),
+        "commit_race must name the committed generation: {}",
+        occupy_error.detail
+    );
+    assert!(
+        fs.calls() >= 1,
+        "in-flight occupier must have dispatched: calls={}",
+        fs.calls()
     );
     session.shutdown().expect("shutdown");
 }
