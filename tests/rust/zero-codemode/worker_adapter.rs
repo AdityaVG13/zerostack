@@ -12,7 +12,9 @@ use zero_abi::{
     CallRequest, DEFAULT_MAX_FRAME_BYTES, FrameCodecError, TIMELINE_CLOSURE_TOLERANCE_NS_V1,
     TelemetryRequestV1, WorkerTokenCountKind, WorkerTrace, encode_frame,
 };
+use proptest::prelude::*;
 use zero_codemode::worker::{
+    settlement_close_refused, settlement_closure_error_ns, settlement_residual_transport_ns,
     CancellationSignal, StaticWorkerFactory, WorkerAdapterError, WorkerClient, WorkerClientConfig,
     WorkerContext, WorkerEvent, WorkerFactory, WorkerRegistry, WorkerSpec,
 };
@@ -1165,4 +1167,83 @@ fn unix_ms() -> u64 {
         .duration_since(UNIX_EPOCH)
         .unwrap_or(Duration::ZERO)
         .as_millis() as u64
+}
+
+/// Leftover-zeroing mutant: residual added back into the partition.
+/// MR1 must reject this whenever leftover is nonzero.
+fn leftover_zeroing_mutant(total_ns: u128, known_ns: u128) -> u64 {
+    let residual = total_ns.saturating_sub(known_ns);
+    total_ns
+        .abs_diff(known_ns)
+        .saturating_sub(residual)
+        .min(u128::from(u64::MAX)) as u64
+}
+
+proptest! {
+    /// MR1 (invertive): close error is |total-known|, not leftover-zeroed.
+    #[test]
+    fn settlement_closure_error_is_abs_diff_not_leftover_zero(
+        total in 0u64..,
+        known in 0u64..,
+    ) {
+        let total = u128::from(total);
+        let known = u128::from(known);
+        let err = settlement_closure_error_ns(total, known);
+        prop_assert_eq!(err, settlement_closure_error_ns(known, total));
+        if total > known {
+            prop_assert_ne!(
+                err,
+                leftover_zeroing_mutant(total, known),
+                "leftover added back would zero the close error"
+            );
+        }
+        if known > total {
+            prop_assert_eq!(err, leftover_zeroing_mutant(total, known));
+        }
+    }
+
+    /// MR2: residual is leftover wall when total >= known.
+    #[test]
+    fn settlement_residual_is_leftover_when_total_covers_known(
+        known in 0u64..,
+        leftover in 0u64..,
+    ) {
+        let known_ns = u128::from(known);
+        let total_ns = known_ns.saturating_add(u128::from(leftover));
+        let residual = settlement_residual_transport_ns(total_ns, known_ns);
+        if total_ns >= known_ns {
+            prop_assert_eq!(residual, leftover.min(u64::MAX));
+        }
+        if leftover > 0 && total_ns > known_ns {
+            prop_assert_ne!(settlement_closure_error_ns(total_ns, known_ns), 0);
+        }
+    }
+
+    /// MR3: leftover never refuses close; inversion refuses only beyond tolerance.
+    #[test]
+    fn settlement_leftover_does_not_refuse_close_inversion_does(
+        known in 0u64..,
+        leftover in 0u64..,
+        extra in 1u64..,
+        tolerance in 0u64..,
+    ) {
+        let known_ns = u128::from(known);
+        let leftover_total = known_ns.saturating_add(u128::from(leftover));
+        prop_assert!(!settlement_close_refused(
+            leftover_total,
+            known_ns,
+            tolerance
+        ));
+        let inverted_known = u128::from(known).saturating_add(u128::from(extra));
+        let total = u128::from(known);
+        let err = settlement_closure_error_ns(total, inverted_known);
+        prop_assert_eq!(
+            settlement_close_refused(total, inverted_known, tolerance),
+            err > tolerance
+        );
+        prop_assert_eq!(
+            settlement_close_refused(total, inverted_known, TIMELINE_CLOSURE_TOLERANCE_NS_V1),
+            err > TIMELINE_CLOSURE_TOLERANCE_NS_V1
+        );
+    }
 }

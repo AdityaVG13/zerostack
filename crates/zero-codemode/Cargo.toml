@@ -29,6 +29,7 @@ zero-process = { path = "../zero-process" }
 [dev-dependencies]
 tempfile = "3"
 serde_json.workspace = true
+proptest = "1"
 
 [[test]]
 name = "aggregate_scale"
