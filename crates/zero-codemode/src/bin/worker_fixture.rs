@@ -122,6 +122,7 @@ fn main() {
                                 retryable: false,
                                 details: None,
                             },
+                            trace: None,
                             engine_timeline: None,
                             worker_token_accounting: None,
                         },
