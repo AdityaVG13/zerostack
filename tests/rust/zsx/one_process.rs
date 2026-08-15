@@ -354,7 +354,7 @@ fn zsx_exec_source_has_no_process_spawn_or_session_socket_path() {
         "ZEROSTACK_SESSION_SOCKET",
         "ZEROSTACK_SESSION_TOKEN",
     ];
-    for name in ["src/main.rs", "src/exec.rs"] {
+    for name in ["src/main.rs", "src/lib.rs", "src/exec.rs", "src/mcp.rs"] {
         let path = manifest.join(name);
         let source = std::fs::read_to_string(&path)
             .unwrap_or_else(|error| panic!("read {}: {error}", path.display()));

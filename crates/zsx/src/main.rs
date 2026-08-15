@@ -1,13 +1,13 @@
 #![forbid(unsafe_code)]
 
-mod exec;
-
 use std::io::Read;
 use std::path::PathBuf;
 use std::process::ExitCode;
 use std::time::Duration;
 
 use serde_json::{Value, json};
+use zsx_cli::exec;
+use zsx_cli::mcp;
 
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
@@ -50,8 +50,33 @@ fn run(args: &[String]) -> Result<Value, Box<dyn std::error::Error>> {
             std::process::exit(0);
         }
         [command, rest @ ..] if command == "exec" => exec_command(rest),
-        _ => Err("usage: zsx exec -C ROOT [--file PLAN] [--timeout-ms N]".into()),
+        [command, rest @ ..] if command == "mcp" => {
+            mcp_command(rest)?;
+            // Serve already wrote framed MCP replies. A leftover JSON line
+            // after EOF would be a protocol violation.
+            std::process::exit(0);
+        }
+        _ => Err("usage: zsx exec -C ROOT | zsx mcp [-C ROOT]".into()),
     }
+}
+
+fn mcp_command(args: &[String]) -> Result<Value, Box<dyn std::error::Error>> {
+    let mut root = std::env::current_dir()?;
+    let mut a = args.iter();
+    while let Some(k) = a.next() {
+        match k.as_str() {
+            "-C" => {
+                root = PathBuf::from(a.next().ok_or("mcp -C requires a root")?);
+            }
+            _ => return Err(format!("unknown argument {k}").into()),
+        }
+    }
+    mcp::serve(root)?;
+    Ok(json!({
+        "protocol": exec::ZSX_PROTOCOL,
+        "ok": true,
+        "result": "eof",
+    }))
 }
 
 fn exec_command(args: &[String]) -> Result<Value, Box<dyn std::error::Error>> {
@@ -88,12 +113,15 @@ fn exec_command(args: &[String]) -> Result<Value, Box<dyn std::error::Error>> {
 fn print_help() {
     println!("ZeroStack single-process CodeMode executable");
     println!();
-    println!("Usage: zsx exec -C ROOT [--file PLAN] [--timeout-ms N]");
+    println!("Usage:");
+    println!("  zsx exec -C ROOT [--file PLAN] [--timeout-ms N]");
+    println!("  zsx mcp  [-C ROOT]");
     println!();
-    println!("exec    execute one CodeMode plan against the embedded zsx-core");
-    println!("        session; the plan is read from --file or stdin. Runs");
-    println!("        entirely in this process: no worker processes, no");
-    println!("        session socket.");
+    println!("exec    one-shot CodeMode plan (stdin or --file). Process exits.");
+    println!("mcp     harness-owned stdio MCP: zero_execute / zero_wait.");
+    println!("        Idle is a blocking stdin read (no background work).");
+    println!("        The host starts this process and kills it with the session.");
+    println!("        Not a sidecar. Stores stay warm across calls.");
     println!("-C ROOT          authorized engine root (canonicalized)");
     println!("--file PLAN      read the plan from a file instead of stdin");
     println!("--timeout-ms N   execution timeout in milliseconds (default 30000)");

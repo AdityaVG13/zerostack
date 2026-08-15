@@ -6,6 +6,10 @@ edition.workspace = true
 license.workspace = true
 description = "Single-process canonical ZSX executable: zsx exec runs the embedded zsx-core directly"
 
+[lib]
+name = "zsx_cli"
+path = "src/lib.rs"
+
 [[bin]]
 name = "zsx"
 path = "src/main.rs"
@@ -22,3 +26,7 @@ zero-abi = { path = "../zero-abi" }
 [[test]]
 name = "one_process"
 path = "../../tests/rust/zsx/one_process.rs"
+
+[[test]]
+name = "mcp_protocol"
+path = "../../tests/rust/zsx/mcp_protocol.rs"
