@@ -291,13 +291,10 @@
             "fs.transact",
             json!({"steps":[{"path":"a.rs","old":"x","new":"y","op":"edit"}]}),
         );
-        assert_lower(
-            "fs",
-            "multi_edit",
-            json!([{"path":"b.txt"}]),
-            EngineIdentity::FsZero,
-            "fs.transact",
-            json!({"steps":[{"path":"b.txt","op":"write"}]}),
+        let path_only = lower("fs", "multi_edit", json!([{"path":"b.txt"}])).unwrap_err();
+        assert!(
+            path_only.to_string().contains("path-only is not an implicit write"),
+            "path-only must not become write: {path_only}"
         );
         let missing_find = lower(
             "fs",

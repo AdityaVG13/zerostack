@@ -466,9 +466,14 @@ fn default_batch_step_op(step: &mut Value) -> Result<(), ConnectorError> {
             "fs.multi_edit edit step needs both find/old and replace/new",
         ));
     }
-    if map.get("content").is_some() || map.get("path").is_some() {
+    if map.get("content").is_some() {
         map.insert("op".into(), Value::String("write".into()));
         return Ok(());
+    }
+    if map.get("path").is_some() {
+        return Err(ConnectorError::new(
+            "fs.multi_edit write step needs content (path-only is not an implicit write)",
+        ));
     }
     Err(ConnectorError::new(
         "fs.multi_edit step needs op, find/replace, or content",
