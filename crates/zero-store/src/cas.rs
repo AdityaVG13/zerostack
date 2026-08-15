@@ -545,6 +545,20 @@ impl SharedCas {
             .join(CAS_QUARANTINE_DIR);
         fs::create_dir_all(&dir).map_err(|e| io_err("create quarantine directory", e))?;
         let dest = dir.join(sha256);
+        if dest.exists() {
+            let mut n = 1u32;
+            loop {
+                let backup = dir.join(format!("{sha256}.{n}"));
+                if !backup.exists() {
+                    replace_file(&dest, &backup)
+                        .map_err(|e| io_err("version prior quarantine body", e))?;
+                    break;
+                }
+                n = n.checked_add(1).ok_or_else(|| {
+                    CasError::PolicyDenied("quarantine version namespace exhausted".into())
+                })?;
+            }
+        }
         replace_file(&path, &dest).map_err(|e| io_err("quarantine object", e))?;
         // Post-rename: the object is already out of the object tree, so a
         // directory fsync failure is a durability warning, not a failed move.

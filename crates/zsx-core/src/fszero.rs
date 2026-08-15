@@ -399,6 +399,11 @@ fn run_call(
         if !reference.starts_with("fz://blob/") {
             continue;
         }
+        // Fragment refs (`#B`/`#L`) expand to a slice; putting those bytes
+        // would mint a whole-hash object that is not the parent identity.
+        if reference.contains('#') {
+            continue;
+        }
         let Some(bytes) = session.expand(reference) else {
             continue;
         };

@@ -351,7 +351,8 @@ impl TokenZeroAdapter {
             if parsed.scheme != ZeroScheme::Tz {
                 continue;
             }
-            if cas.contains(&parsed.hash) {
+            // Presence is not identity: a tampered dest still `contains()`.
+            if cas.get_verified(&parsed.hash).is_ok() {
                 continue;
             }
             let payload = self.resolve_payload(&parsed.hash)?;
