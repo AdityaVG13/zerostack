@@ -120,4 +120,192 @@ fn mcp_source_never_daemonizes() {
         source.contains("install_parent_death_exit"),
         "parent-death exit must stay wired"
     );
+    assert!(
+        source.contains("exit_if_detached_launch"),
+        "detached-launch refusal must stay wired"
+    );
+    assert!(
+        source.contains("lifetime") && source.contains("harness-stdio"),
+        "zero_wait must advertise harness-stdio lifetime"
+    );
+}
+
+#[test]
+fn plugin_launch_path_is_zsx_mcp_not_python_or_engine() {
+    let home = std::env::var("HOME").unwrap_or_default();
+    let plugin = std::path::PathBuf::from(home).join(".grok/plugins/zerostack");
+    if !plugin.is_dir() {
+        return;
+    }
+
+    let mcp_json = std::fs::read_to_string(plugin.join(".mcp.json")).expect(".mcp.json");
+    let parsed: serde_json::Value = serde_json::from_str(&mcp_json).expect("json");
+    let server = &parsed["mcpServers"]["zerostack"];
+    let command = server["command"].as_str().unwrap_or("");
+    let args = server["args"].as_array().cloned().unwrap_or_default();
+    assert!(
+        command.ends_with("/zsx") || command.ends_with("/bin/zsx"),
+        "plugin must exec the Mach-O, not Python: {command}"
+    );
+    assert_eq!(
+        args,
+        vec![serde_json::json!("mcp")],
+        "plugin args must be [\"mcp\"], got {args:?}"
+    );
+    assert!(
+        !command.contains("python") && !command.contains("zsx_mcp.py"),
+        "plugin must not launch the Python wrap: {command}"
+    );
+    for forbidden in ["fszero", "graphzero", "tokenzero"] {
+        assert!(
+            parsed["mcpServers"].get(forbidden).is_none(),
+            "engine MCP {forbidden} must not be registered"
+        );
+    }
+
+    let hook = std::fs::read_to_string(plugin.join("hooks/ensure-live.sh")).expect("hook");
+    for token in ["nohup", "setsid", "disown"] {
+        assert!(!hook.contains(token), "ensure-live.sh must not {token}");
+    }
+    for line in hook.lines() {
+        let trimmed = line.trim();
+        let backgrounds = trimmed.ends_with(" &") || trimmed.ends_with("\t&");
+        assert!(
+            !(backgrounds && trimmed.contains("rebuild")),
+            "ensure-live.sh must not background a rebuild: {trimmed}"
+        );
+    }
+
+    let wrap = plugin.join("servers/zsx_mcp.py");
+    if wrap.is_file() {
+        let source = std::fs::read_to_string(&wrap).expect("wrap");
+        assert!(!source.contains("subprocess"), "zsx_mcp.py must not spawn");
+        assert!(
+            source.contains("refuses") || source.contains("is not a server"),
+            "zsx_mcp.py must fail closed"
+        );
+    }
+
+    let skill =
+        std::fs::read_to_string(plugin.join("skills/zerostack-codemode/SKILL.md")).expect("skill");
+    assert!(
+        skill.contains("Harnesses must not"),
+        "skill must list what harnesses must not do"
+    );
+    for needle in ["Python", "LaunchAgent", "engine MCP", "pid 1"] {
+        assert!(
+            skill.contains(needle),
+            "skill MUST NOT list missing {needle}"
+        );
+    }
+
+    let rebuild = std::fs::read_to_string(plugin.join("scripts/rebuild.sh")).expect("rebuild");
+    for token in ["nohup", "setsid", "disown"] {
+        assert!(!rebuild.contains(token), "rebuild.sh must not {token}");
+    }
+    for line in rebuild.lines() {
+        let trimmed = line.trim();
+        assert!(
+            !(trimmed.ends_with(" &") && trimmed.contains("cargo")),
+            "rebuild.sh must stay in the foreground: {trimmed}"
+        );
+    }
+    assert!(
+        rebuild.contains("mapped") || rebuild.contains("lsof"),
+        "rebuild.sh must refuse to overwrite a mapped bin/zsx"
+    );
+
+    let hooks_json = std::fs::read_to_string(plugin.join("hooks/hooks.json")).expect("hooks");
+    let hooks: serde_json::Value = serde_json::from_str(&hooks_json).expect("hooks json");
+    assert!(
+        hooks["hooks"].get("SessionStart").is_some(),
+        "only SessionStart fingerprint is allowed"
+    );
+    assert!(
+        hooks["hooks"].get("SessionEnd").is_none(),
+        "no SessionEnd daemon teardown hook"
+    );
+
+    let plist_count = std::fs::read_dir(&plugin)
+        .into_iter()
+        .flatten()
+        .flatten()
+        .filter(|entry| entry.path().extension().and_then(|ext| ext.to_str()) == Some("plist"))
+        .count();
+    assert_eq!(plist_count, 0, "plugin must not ship a LaunchAgent plist");
+}
+
+fn mcp_output_with_env(pairs: &[(&str, &str)]) -> std::process::Output {
+    let directory = TempDir::new().unwrap();
+    let mut command = Command::new(zsx_bin());
+    command
+        .args(["mcp", "-C", directory.path().to_str().unwrap()])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    for (key, value) in pairs {
+        command.env(key, value);
+    }
+    command.output().expect("zsx mcp")
+}
+
+#[test]
+fn mcp_cli_help_states_must_not() {
+    let output = Command::new(zsx_bin())
+        .arg("--help")
+        .output()
+        .expect("zsx --help");
+    assert!(output.status.success());
+    let text = String::from_utf8_lossy(&output.stdout);
+    for needle in [
+        "Not a sidecar",
+        "Not a LaunchAgent",
+        "Not a Python wrapper",
+        "fszero/graphzero/tokenzero",
+        "pid 1",
+        "wrap zsx in Python",
+        "rebuild a mapped bin/zsx",
+    ] {
+        assert!(text.contains(needle), "help missing {needle:?}:\n{text}");
+    }
+}
+
+#[test]
+fn mcp_refuses_our_launchd_xpc_name() {
+    let output = mcp_output_with_env(&[("XPC_SERVICE_NAME", "ai.zerostack.zsx")]);
+    assert_eq!(output.status.code(), Some(2), "{output:?}");
+    let err = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        err.contains("LaunchAgent") || err.contains("XPC"),
+        "stderr: {err}"
+    );
+}
+
+#[test]
+fn mcp_refuses_systemd_listen_pid() {
+    let output = mcp_output_with_env(&[("LISTEN_PID", "1")]);
+    assert_eq!(output.status.code(), Some(2), "{output:?}");
+    let err = String::from_utf8_lossy(&output.stderr);
+    assert!(err.contains("systemd"), "stderr: {err}");
+}
+
+#[test]
+fn mcp_allows_unrelated_inherited_xpc_name() {
+    // Grok / other GUI hosts inherit application.com.* XPC names. That is
+    // not us becoming a LaunchAgent.
+    let directory = TempDir::new().unwrap();
+    let mut child = Command::new(zsx_bin())
+        .args(["mcp", "-C", directory.path().to_str().unwrap()])
+        .env("XPC_SERVICE_NAME", "application.com.xai.grok")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("zsx mcp");
+    drop(child.stdin.take());
+    let status = child.wait().expect("wait");
+    assert!(
+        status.success(),
+        "inherited host XPC name must not refuse: {status:?}"
+    );
 }

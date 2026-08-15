@@ -15,6 +15,7 @@ fn initialize_and_list_do_not_touch_a_store() {
     )
     .unwrap();
     assert_eq!(init["result"]["serverInfo"]["name"], "zerostack-zsx");
+    assert_eq!(init["result"]["serverInfo"]["lifetime"], "harness-stdio");
 
     let listed = handle(
         &mut host,

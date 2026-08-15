@@ -5,7 +5,7 @@ use std::path::PathBuf;
 use std::process::ExitCode;
 use std::time::Duration;
 
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 use zsx_cli::exec;
 use zsx_cli::mcp;
 
@@ -121,7 +121,15 @@ fn print_help() {
     println!("mcp     harness-owned stdio MCP: zero_execute / zero_wait.");
     println!("        Idle is a blocking stdin read (no background work).");
     println!("        The host starts this process and kills it with the session.");
-    println!("        Not a sidecar. Stores stay warm across calls.");
+    println!("        Not a sidecar. Not a LaunchAgent. Not a Python wrapper.");
+    println!("        Do not register fszero/graphzero/tokenzero as MCP servers.");
+    println!("        Must not:");
+    println!("          wrap zsx in Python");
+    println!("          register fszero/graphzero/tokenzero as MCP servers");
+    println!("          LaunchAgent, nohup, setsid, disown, or background zsx");
+    println!("          rebuild a mapped bin/zsx");
+    println!("          leave a process whose parent is pid 1");
+    println!("        Stores stay warm across calls in this process only.");
     println!("-C ROOT          authorized engine root (canonicalized)");
     println!("--file PLAN      read the plan from a file instead of stdin");
     println!("--timeout-ms N   execution timeout in milliseconds (default 30000)");

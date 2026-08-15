@@ -164,7 +164,7 @@ fn tools() -> Value {
         },
         {
             "name": "zero_wait",
-            "description": "Reports that the live zsx MCP process is ready. No child process is spawned.",
+            "description": "Reports that this zsx mcp process is ready (pid, ppid, lifetime:harness-stdio). No child is spawned. The process exits on stdin EOF or parent death. Harnesses must not wrap, detach, or register engine MCP.",
             "inputSchema": {"type": "object", "properties": {}}
         }
     ])
@@ -237,6 +237,7 @@ pub fn handle(host: &mut McpHost, message: &Value) -> Option<Value> {
                 "serverInfo": {
                     "name": SERVER_NAME,
                     "version": env!("CARGO_PKG_VERSION"),
+                    "lifetime": "harness-stdio",
                 },
             }
         }));
@@ -430,11 +431,82 @@ fn write_frame(stdout: &mut impl Write, kind: &FrameKind, value: &Value) -> io::
     stdout.flush()
 }
 
+const DETACHED_ENV_REFUSALS: &[(&str, &str)] = &[
+    ("LISTEN_PID", "systemd socket activation"),
+    ("LISTEN_FDS", "systemd socket activation"),
+    ("NOTIFY_SOCKET", "systemd notify"),
+    ("INVOCATION_ID", "systemd service"),
+];
+
+const OURS_IN_LAUNCHD_NAME: &[&str] = &["zsx", "zerostack", "fszero", "graphzero", "tokenzero"];
+
+fn launchd_service_is_ours(name: &str) -> bool {
+    let lower = name.to_ascii_lowercase();
+    OURS_IN_LAUNCHD_NAME
+        .iter()
+        .any(|needle| lower.contains(needle))
+}
+
+fn stdin_is_harness_stdio() -> bool {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::FileTypeExt;
+        match std::fs::metadata("/dev/fd/0") {
+            Ok(meta) => {
+                let kind = meta.file_type();
+                kind.is_fifo() || kind.is_socket()
+            }
+            Err(_) => true,
+        }
+    }
+    #[cfg(not(unix))]
+    {
+        true
+    }
+}
+
+/// Why this process must not serve. `None` means a harness owns stdio.
+fn detached_launch_reason() -> Option<String> {
+    if let Ok(name) = std::env::var("XPC_SERVICE_NAME") {
+        if launchd_service_is_ours(&name) {
+            return Some(format!(
+                "refuses LaunchAgent/XPC ({name}). Harness must exec bin/zsx mcp on stdio."
+            ));
+        }
+    }
+    for (key, why) in DETACHED_ENV_REFUSALS {
+        if std::env::var_os(key).is_some() {
+            return Some(format!(
+                "refuses {why} ({key}). Harness must exec bin/zsx mcp on stdio."
+            ));
+        }
+    }
+    if current_ppid() <= 1 {
+        return Some(
+            "refuses to start as an orphan (ppid<=1). Harness must own this process.".into(),
+        );
+    }
+    if !stdin_is_harness_stdio() {
+        return Some(
+            "refuses a detached stdin (not a pipe/socket). Do not LaunchAgent or redirect from /dev/null.".into(),
+        );
+    }
+    None
+}
+
+fn exit_if_detached_launch() {
+    if let Some(reason) = detached_launch_reason() {
+        eprintln!("zsx mcp: {reason}");
+        std::process::exit(2);
+    }
+}
+
 /// Serve MCP on stdin/stdout until EOF. Returns after the host hangs up.
 ///
 /// Do not hold `stdout.lock()` across `handle`: execute can `println!` /
 /// engine-log, and a held stdout lock deadlocks the only thread.
 pub fn serve(default_root: PathBuf) -> io::Result<()> {
+    exit_if_detached_launch();
     install_parent_death_exit();
     let mut host = McpHost::new(default_root);
     let mut stdin = io::BufReader::new(io::stdin());
@@ -505,6 +577,41 @@ mod tests {
         write_frame(&mut buf, &FrameKind::Ndjson, &value).unwrap();
         assert_eq!(buf.last().copied(), Some(b'\n'));
         assert_eq!(buf.iter().filter(|b| **b == b'\n').count(), 1);
+    }
+
+    #[test]
+    fn launchd_name_matches_only_our_services() {
+        assert!(launchd_service_is_ours("ai.zerostack.zsx"));
+        assert!(launchd_service_is_ours("ai.fszero.watch"));
+        assert!(launchd_service_is_ours("com.example.tokenzero"));
+        assert!(!launchd_service_is_ours("application.com.xai.grok"));
+        assert!(!launchd_service_is_ours("com.apple.xpc.launchd"));
+        assert!(!launchd_service_is_ours(""));
+    }
+
+    #[test]
+    fn zero_wait_payload_names_harness_lifetime() {
+        let payload = zero_wait_payload();
+        assert_eq!(payload["mcp"], true);
+        assert_eq!(payload["lifetime"], "harness-stdio");
+        assert_eq!(payload["idle"], "blocking-stdin");
+        assert!(payload["pid"].as_u64().unwrap() > 1);
+        assert!(payload["ppid"].as_u64().is_some());
+    }
+
+    #[test]
+    fn initialize_advertises_harness_lifetime() {
+        let mut host = McpHost::new(std::env::temp_dir());
+        let response = handle(
+            &mut host,
+            &json!({"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}),
+        )
+        .expect("reply");
+        assert_eq!(
+            response["result"]["serverInfo"]["lifetime"],
+            "harness-stdio"
+        );
+        assert!(host.sessions.is_empty());
     }
 
     #[test]

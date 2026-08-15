@@ -43,6 +43,30 @@
         let result = help_search(&json!({"query": "multi edit files in parallel"}));
         let first = result["results"][0]["path"].as_str().unwrap();
         assert_eq!(first, "fs.multi_edit", "got {result}");
+
+        let result = help_search(&json!({"query": "exactly_one preimage replacement fused"}));
+        let paths: Vec<&str> = result["results"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|row| row["path"].as_str().unwrap())
+            .collect();
+        assert!(
+            paths.contains(&"fs.edit"),
+            "snap-to-effect must surface fs.edit: {paths:?}"
+        );
+
+        let result = help_search(&json!({"query": "HIT path#Lstart-Lend inlined window"}));
+        let paths: Vec<&str> = result["results"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|row| row["path"].as_str().unwrap())
+            .collect();
+        assert!(
+            paths.contains(&"fs.compound"),
+            "snap-to-file must surface fs.compound: {paths:?}"
+        );
     }
 
     #[test]

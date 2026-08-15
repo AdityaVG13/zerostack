@@ -5,7 +5,7 @@
 //! carries the exact call signature so no second lookup is needed. The
 //! connector completes help calls synchronously; no engine is dispatched.
 
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 
 use crate::lower::METHODS;
 
@@ -43,9 +43,9 @@ const HELP_ENTRIES: &[HelpEntry] = &[
     HelpEntry {
         surface: "fs",
         method: "compound",
-        signature: "zero.fs.compound(name: \"read\"|\"search\"|\"list\"|\"resolve\"|\"edit\"|\"write\", args: object) — write content must be a UTF-8 string (ctx.payload / payload_utf8 or expand a ref); search takes {query, path?}; read/list take {path}; resolve takes {intent, engine, limit}",
-        description: "One named filesystem operation with an args object. Write rejects tool-result objects as content.",
-        keywords: &["read", "search", "list", "grep", "resolve", "query"],
+        signature: "zero.fs.compound(name: \"read\"|\"search\"|\"list\"|\"resolve\"|\"edit\"|\"mutate\"|\"write\", args: object) — search {query, path?} returns HIT path#Lstart-Lend (snap-to-file); mutate/edit {query, scope, uniqueness:\"exactly_one\", preimage, replacement} is snap-to-effect (one dispatch); write content must be a UTF-8 string",
+        description: "One named filesystem operation. Search snaps to a file+line window; mutate is fused search+edit when uniqueness is exactly_one.",
+        keywords: &["read", "search", "list", "grep", "resolve", "query", "snap", "snap-to-file", "snap-to-effect", "mutate"],
     },
     HelpEntry {
         surface: "fs",
@@ -57,9 +57,9 @@ const HELP_ENTRIES: &[HelpEntry] = &[
     HelpEntry {
         surface: "fs",
         method: "edit",
-        signature: "zero.fs.edit({ path, find, replace, start_line?, end_line?, base? }) — base is fz://blob/<sha256> of the expected current content (CAS)",
-        description: "Guarded single-file find/replace edit with optional CAS base gate",
-        keywords: &["edit", "patch", "replace", "mutate", "cas", "base"],
+        signature: "zero.fs.edit({ path, find, replace, start_line?, end_line?, base? } | { query, scope, uniqueness: \"exactly_one\", preimage, replacement }) — second form is snap-to-effect: one dispatch, journaled, uniqueness-gated",
+        description: "Guarded find/replace, or fused snap-to-effect (search+edit in one kernel call)",
+        keywords: &["edit", "patch", "replace", "mutate", "cas", "base", "snap", "snap-to-effect", "uniqueness", "preimage"],
     },
     HelpEntry {
         surface: "fs",
@@ -80,7 +80,7 @@ const HELP_ENTRIES: &[HelpEntry] = &[
         method: "multi_edit",
         signature: "zero.fs.multi_edit([{ path, find, replace, base? } | { op: \"write\", path, content, base? }, ...]) — one call, many files; implicit edit when find/replace are set",
         description: "Atomic multi-file create/edit for parallel tool calling. Same kernel as fs.transact; returns a per-step receipt (path + ack), not a mashed string",
-        keywords: &["multi_edit", "parallel", "batch", "multi", "files", "refactor"],
+        keywords: &["multi_edit", "parallel", "batch", "multi", "files", "refactor", "multi-edit"],
     },
     HelpEntry {
         surface: "fs",
@@ -265,8 +265,7 @@ fn tokenize(query: &str) -> Vec<String> {
 }
 
 fn term_matches(term: &str, haystack: &str) -> bool {
-    haystack.contains(term)
-        || singular(term).is_some_and(|stem| haystack.contains(&stem))
+    haystack.contains(term) || singular(term).is_some_and(|stem| haystack.contains(&stem))
 }
 
 fn score_entry(entry: &HelpEntry, terms: &[String]) -> u64 {
