@@ -83,6 +83,12 @@ Required fields:
 - `plan_forms`: MUST contain `"recipe"`, `"json"`, and `"js"`.
 - `limits`: object containing only enforced limits. Echoed means enforced. A substrate MAY omit a limit it cannot enforce, but MUST NOT echo a dead limit.
 
+These `limits` values are the **capability-manifest echo** only (arrangement
+`capability-manifest-echo` in `zero_codemode::OUTPUT_WALL_ARRANGEMENTS`).
+They are not `HostLimits::default` (64 MiB / 2 s / 1 MiB json), not the
+zsx session visible budget (12 KiB), and not the zsx-core connector host
+(128 MiB / 30 s / 16 MiB json). There is no product-wide output/wall ceiling.
+
 Normative default limits:
 
 | Limit | Default | Rule |

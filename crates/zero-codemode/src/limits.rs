@@ -86,6 +86,51 @@ impl Default for HostLimits {
     }
 }
 
+/// One named output/wall arrangement. These are **not** one product-wide
+/// ceiling: CONTRACT echo, `HostLimits::default`, the zsx session visible
+/// budget, and the zsx-core connector host are four different laws.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct OutputWallArrangement {
+    pub name: &'static str,
+    pub memory_bytes: usize,
+    pub wall_ms: u64,
+    pub output_bytes: usize,
+    pub owner: &'static str,
+}
+
+/// Authority decision B (honest Stop): four arrangement-local budgets.
+/// Adding a fifth constructor requires a fifth row here.
+pub const OUTPUT_WALL_ARRANGEMENTS: &[OutputWallArrangement] = &[
+    OutputWallArrangement {
+        name: "capability-manifest-echo",
+        memory_bytes: 32 * 1024 * 1024,
+        wall_ms: 250,
+        output_bytes: 64 * 1024,
+        owner: "conformance/CONTRACT.md §3 limits echo",
+    },
+    OutputWallArrangement {
+        name: "host-limits-default",
+        memory_bytes: 64 * 1024 * 1024,
+        wall_ms: 2_000,
+        output_bytes: 1024 * 1024,
+        owner: "HostLimits::default max_json_bytes / wall / memory",
+    },
+    OutputWallArrangement {
+        name: "zsx-session-visible",
+        memory_bytes: 0,
+        wall_ms: 0,
+        output_bytes: 12 * 1024,
+        owner: "zsx-core SESSION_VISIBLE_RESULT_BYTES",
+    },
+    OutputWallArrangement {
+        name: "zsx-connector-host",
+        memory_bytes: 128 * 1024 * 1024,
+        wall_ms: 30_000,
+        output_bytes: 16 * 1024 * 1024,
+        owner: "zsx-core connector::host_limits",
+    },
+];
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum LimitError {
     Zero(&'static str),

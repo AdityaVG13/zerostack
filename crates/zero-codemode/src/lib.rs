@@ -26,7 +26,7 @@ pub use host::{
     PUBLIC_RESULT_FIELDS, RESULT_SPILL_PREVIEW_BYTES, RESULT_SPILL_SCHEMA, finalize_visible_error,
     runtime_creation_count,
 };
-pub use limits::{HostLimits, LimitError};
+pub use limits::{HostLimits, LimitError, OUTPUT_WALL_ARRANGEMENTS, OutputWallArrangement};
 pub use wrap::{PlanError, validate_plan, wrap_plan};
 pub use zero_abi::{
     CapabilityDescriptor, DomainAdapterRegistration, GlobalRegistration, RegistrationError,

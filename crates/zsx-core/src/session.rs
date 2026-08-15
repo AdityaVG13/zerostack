@@ -80,7 +80,7 @@ pub const SESSION_EXECUTION_QUEUE_CAPACITY: usize = 8;
 // 12 KiB: small command outputs (git status, test tails, directory listings)
 // stay inline instead of degrading to an opaque spill receipt; anything
 // larger still spills with a real head-of-content preview.
-const SESSION_VISIBLE_RESULT_BYTES: usize = 12 * 1024;
+pub(crate) const SESSION_VISIBLE_RESULT_BYTES: usize = 12 * 1024;
 pub const SESSION_REPLACEMENT_SETTLE_TIMEOUT: Duration = Duration::from_secs(5);
 pub const SESSION_EXECUTOR_START_TIMEOUT: Duration = Duration::from_secs(5);
 

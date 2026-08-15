@@ -19,7 +19,7 @@ use zero_codemode::{
 
 use zero_codemode::{
     CapabilityDescriptor, GlobalRegistration, Host, HostError, HostLimits, PlanError,
-    RegistrationError, wrap_plan,
+    RegistrationError, wrap_plan, OUTPUT_WALL_ARRANGEMENTS,
 };
 use zero_codemode::{
     DEFAULT_MAX_VISIBLE_RESULT_BYTES, MAX_INFLIGHT_CONNECTOR_CALLS,
@@ -178,6 +178,56 @@ fn lim() -> HostLimits {
         16 * 1024,
     )
     .unwrap_or_else(|error| panic!("limits: {error}"))
+}
+
+#[test]
+fn output_wall_arrangements_are_local_not_one_ceiling() {
+    assert_eq!(
+        OUTPUT_WALL_ARRANGEMENTS.len(),
+        4,
+        "a fifth silent constructor needs a fifth named row"
+    );
+    let names: Vec<&str> = OUTPUT_WALL_ARRANGEMENTS.iter().map(|row| row.name).collect();
+    assert_eq!(
+        names,
+        [
+            "capability-manifest-echo",
+            "host-limits-default",
+            "zsx-session-visible",
+            "zsx-connector-host",
+        ]
+    );
+
+    let default = HostLimits::default();
+    let host_default = OUTPUT_WALL_ARRANGEMENTS
+        .iter()
+        .find(|row| row.name == "host-limits-default")
+        .expect("host-limits-default row");
+    assert_eq!(default.memory_bytes, host_default.memory_bytes);
+    assert_eq!(default.wall_timeout, Duration::from_millis(host_default.wall_ms));
+    assert_eq!(default.max_json_bytes, host_default.output_bytes);
+
+    let point = lim();
+    assert_ne!(
+        point, default,
+        "host_contract lim() is a Point arrangement, not HostLimits::default"
+    );
+    assert_eq!(point.wall_timeout, Duration::from_millis(250));
+    assert_eq!(point.memory_bytes, 16 * 1024 * 1024);
+
+    let echo = OUTPUT_WALL_ARRANGEMENTS
+        .iter()
+        .find(|row| row.name == "capability-manifest-echo")
+        .expect("echo row");
+    assert_eq!(echo.wall_ms, 250);
+    assert_ne!(
+        echo.memory_bytes, point.memory_bytes,
+        "CONTRACT 32 MiB echo is not host_contract lim() 16 MiB"
+    );
+    assert_ne!(
+        echo.output_bytes, DEFAULT_MAX_VISIBLE_RESULT_BYTES,
+        "CONTRACT 64 KiB echo is not DEFAULT_MAX_VISIBLE_RESULT_BYTES"
+    );
 }
 
 #[test]

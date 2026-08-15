@@ -42,6 +42,32 @@
     }
 
     #[test]
+    fn connector_and_session_budgets_match_named_arrangements() {
+        use std::time::Duration;
+        use zero_codemode::OUTPUT_WALL_ARRANGEMENTS;
+
+        let connector = OUTPUT_WALL_ARRANGEMENTS
+            .iter()
+            .find(|row| row.name == "zsx-connector-host")
+            .expect("connector row");
+        let limits = host_limits().expect("connector host_limits");
+        assert_eq!(limits.memory_bytes, connector.memory_bytes);
+        assert_eq!(limits.wall_timeout, Duration::from_millis(connector.wall_ms));
+        assert_eq!(limits.max_json_bytes, connector.output_bytes);
+
+        let session = OUTPUT_WALL_ARRANGEMENTS
+            .iter()
+            .find(|row| row.name == "zsx-session-visible")
+            .expect("session row");
+        assert_eq!(crate::session::SESSION_VISIBLE_RESULT_BYTES, session.output_bytes);
+        assert_ne!(
+            limits.max_json_bytes,
+            crate::session::SESSION_VISIBLE_RESULT_BYTES,
+            "connector 16 MiB json wall is not the 12 KiB session visible budget"
+        );
+    }
+
+    #[test]
     fn char_connector_grants_and_now_ms_owner() {
         eprintln!(
             "CHAR grant schema={s} max_grants={n} max_lifetime_ms={ms}",
