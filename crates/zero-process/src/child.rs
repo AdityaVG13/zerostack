@@ -912,35 +912,77 @@ fn linux_bind_pdeathsig() -> io::Result<()> {
     Ok(())
 }
 
+/// Darwin kqueue handshake: the tree root may Ok() only after the watcher
+/// writes this ready byte (EVFILT_PROC registered). Any other read is
+/// fail-closed (zerostack-sq32). Compiled on Linux tests so the rule is
+/// not Darwin-only dead code.
+#[cfg(any(test, target_os = "macos"))]
+fn darwin_kqueue_registration_ready(n: isize, byte: u8) -> bool {
+    n == 1 && byte == 1
+}
+
 /// Darwin owner-death: fork a kqueue watcher that SIGKILLs this process
 /// group when the spawning owner exits. The watcher leaves the tree group
 /// so it is not a member of the kill target. libc-only after fork.
 #[cfg(target_os = "macos")]
 fn darwin_bind_tree_to_owner() -> io::Result<()> {
     // SAFETY: pre_exec is async-signal-safe. getppid/getpid/fork/setpgid
-    // are AS-safe. The watcher process never returns into Rust.
+    // pipe/read/write/close are AS-safe. The watcher process never returns
+    // into Rust. The tree root does not Ok() until the watcher has
+    // registered EVFILT_PROC (zerostack-sq32).
     unsafe {
         let owner = libc::getppid();
         let tree_root = libc::getpid();
         if owner <= 1 {
             libc::_exit(1);
         }
+        let mut fds = [0i32; 2];
+        if libc::pipe(fds.as_mut_ptr()) != 0 {
+            return Err(io::Error::last_os_error());
+        }
+        let (read_fd, write_fd) = (fds[0], fds[1]);
         match libc::fork() {
-            -1 => Err(io::Error::last_os_error()),
-            0 => {
-                let _ = libc::setpgid(0, 0);
-                darwin_watch_owner_then_kill(owner, tree_root);
+            -1 => {
+                libc::close(read_fd);
+                libc::close(write_fd);
+                Err(io::Error::last_os_error())
             }
-            _ => Ok(()),
+            0 => {
+                libc::close(read_fd);
+                let _ = libc::setpgid(0, 0);
+                darwin_watch_owner_then_kill(owner, tree_root, write_fd);
+            }
+            _ => {
+                libc::close(write_fd);
+                let mut byte: libc::c_uchar = 0;
+                let n = libc::read(
+                    read_fd,
+                    &mut byte as *mut libc::c_uchar as *mut libc::c_void,
+                    1,
+                );
+                libc::close(read_fd);
+                if darwin_kqueue_registration_ready(n, byte) {
+                    Ok(())
+                } else {
+                    Err(io::Error::other(
+                        "Darwin kqueue watcher failed to register EVFILT_PROC; refusing exec",
+                    ))
+                }
+            }
         }
     }
 }
 
 #[cfg(target_os = "macos")]
-fn darwin_watch_owner_then_kill(owner: libc::pid_t, tree_root: libc::pid_t) -> ! {
+fn darwin_watch_owner_then_kill(
+    owner: libc::pid_t,
+    tree_root: libc::pid_t,
+    ready_fd: libc::c_int,
+) -> ! {
     unsafe {
         let kq = libc::kqueue();
         if kq < 0 {
+            libc::close(ready_fd);
             libc::_exit(1);
         }
         let changes = [
@@ -970,8 +1012,12 @@ fn darwin_watch_owner_then_kill(owner: libc::pid_t, tree_root: libc::pid_t) -> !
             std::ptr::null(),
         ) < 0
         {
+            libc::close(ready_fd);
             libc::_exit(1);
         }
+        let ready: libc::c_uchar = 1;
+        let _ = libc::write(ready_fd, &ready as *const libc::c_uchar as *const libc::c_void, 1);
+        libc::close(ready_fd);
         let mut event = libc::kevent {
             ident: 0,
             filter: 0,
@@ -1623,5 +1669,18 @@ mod linux_pdeathsig_tests {
         let rc = unsafe { libc::prctl(libc::PR_GET_PDEATHSIG, &mut got as *mut libc::c_int) };
         assert_eq!(rc, 0, "PR_GET_PDEATHSIG");
         assert_eq!(got, libc::SIGKILL);
+    }
+}
+
+#[cfg(test)]
+mod darwin_kqueue_sq32_tests {
+    use super::darwin_kqueue_registration_ready;
+
+    #[test]
+    fn kqueue_registration_ready_is_fail_closed() {
+        assert!(!darwin_kqueue_registration_ready(-1, 1));
+        assert!(!darwin_kqueue_registration_ready(0, 1));
+        assert!(!darwin_kqueue_registration_ready(1, 0));
+        assert!(darwin_kqueue_registration_ready(1, 1));
     }
 }
