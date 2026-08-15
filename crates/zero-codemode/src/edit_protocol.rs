@@ -73,30 +73,34 @@ impl std::error::Error for EditError {}
 /// This is a syntactic classifier only: resolution, digest verification and
 /// clamp policy stay in the owning engine (`zero_ref` for blob refs, FSZero for
 /// file spans, GraphZero for symbols).
+const BLOB_SCHEMES: &[&str] = &["fz://", "tz://"];
+
 pub fn classify_ref(input: &str) -> Result<RefKind, EditError> {
     if input.is_empty() {
         return Err(EditError::new(EditErrorClass::MalformedRef, "empty ref"));
     }
-    if let Some(rest) = input.strip_prefix("gz://") {
-        if let Some(sym) = rest.strip_prefix("node/") {
-            return if sym.is_empty() {
-                Err(EditError::new(
-                    EditErrorClass::MalformedRef,
-                    "gz://node/ requires a symbol",
-                ))
-            } else {
-                Ok(RefKind::Symbol)
-            };
-        }
-        if rest.starts_with("blob/") {
-            return Ok(RefKind::BlobSpan);
-        }
-        return Err(EditError::new(
-            EditErrorClass::MalformedRef,
-            "unknown gz:// kind",
-        ));
+    if let Some(rest) = input.strip_prefix("gz://node/") {
+        return if rest.is_empty() {
+            Err(EditError::new(
+                EditErrorClass::MalformedRef,
+                "gz://node/ requires a symbol",
+            ))
+        } else {
+            Ok(RefKind::Symbol)
+        };
     }
-    if input.starts_with("fz://") || input.starts_with("tz://") {
+    if let Some(rest) = input.strip_prefix("gz://") {
+        return if rest.starts_with("blob/") {
+            Ok(RefKind::BlobSpan)
+        } else {
+            Err(EditError::new(
+                EditErrorClass::MalformedRef,
+                "unknown gz:// kind",
+            ))
+        };
+    }
+    // Both `fz://` and `tz://` are 5 bytes; keep the original slice length.
+    if BLOB_SCHEMES.iter().any(|scheme| input.starts_with(scheme)) {
         return if input["fz://".len()..].starts_with("blob/") {
             Ok(RefKind::BlobSpan)
         } else {

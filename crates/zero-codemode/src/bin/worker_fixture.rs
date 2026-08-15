@@ -108,6 +108,26 @@ fn main() {
                 }
             }
             WorkerRequestFrame::Call { request } => {
+                if rw10_forbidden_op(&request.op) {
+                    send(
+                        &mut stdout,
+                        &WorkerResponseFrame::Error {
+                            request_id: Some(request.request_id.clone()),
+                            error: WorkerError {
+                                kind: "policy".into(),
+                                message: format!(
+                                    "RW10-forbidden op '{}'; worker-fixture is not a planner/MCP/nested-CodeMode host",
+                                    request.op
+                                ),
+                                retryable: false,
+                                details: None,
+                            },
+                            engine_timeline: None,
+                            worker_token_accounting: None,
+                        },
+                    );
+                    continue;
+                }
                 if mode.starts_with("tree-") {
                     spawn_descendant();
                 }
@@ -447,6 +467,19 @@ fn result(request: CallRequest) -> WorkerResult {
             trace: request.trace,
         },
     }
+}
+
+fn rw10_forbidden_op(op: &str) -> bool {
+    matches!(
+        op,
+        "planner"
+            | "javascript_runtime"
+            | "mcp_catalog"
+            | "nested_codemode"
+            | "javascript"
+            | "codemode"
+            | "mcp"
+    )
 }
 
 fn opaque_chain_result(
