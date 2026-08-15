@@ -319,6 +319,52 @@
     }
 
     #[test]
+    fn write_missing_content_legal_and_empty_multi_edit_step() {
+        // IMPL-11: missing write content stays legal (empty create).
+        assert_lower(
+            "fs",
+            "write",
+            json!({"path":"c.txt"}),
+            EngineIdentity::FsZero,
+            "fs.write",
+            json!({"path":"c.txt"}),
+        );
+        let write = lower("fs", "write", json!({"path":"c.txt"})).expect("missing content legal");
+        assert!(
+            write.2.get("content").is_none(),
+            "empty create must omit content: {}",
+            write.2
+        );
+        assert_lower(
+            "fs",
+            "multi_edit",
+            json!([{"op":"write","path":"c.txt"}]),
+            EngineIdentity::FsZero,
+            "fs.transact",
+            json!({"steps":[{"op":"write","path":"c.txt"}]}),
+        );
+        let non_string = lower(
+            "fs",
+            "write",
+            json!({"path":"c.txt","content":{"kind":"inline","value":"x"}}),
+        )
+        .unwrap_err();
+        assert!(
+            non_string.to_string().contains("non_byte_provenance"),
+            "present non-string content still rejects: {non_string}"
+        );
+
+        // IMPL-7: empty step object has no implicit op.
+        let empty_step = lower("fs", "multi_edit", json!([{}])).unwrap_err();
+        assert!(
+            empty_step
+                .to_string()
+                .contains("op, find/replace, or content"),
+            "empty multi_edit step: {empty_step}"
+        );
+    }
+
+    #[test]
     fn token_read_and_shell_options_are_strict_and_forwarded_once() {
         assert!(METHODS.contains(&("token", "read")));
         assert_lower(
