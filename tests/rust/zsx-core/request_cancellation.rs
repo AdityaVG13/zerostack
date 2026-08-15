@@ -24,7 +24,7 @@ use zero_abi::{
 use zero_store::{AttemptRecoveryOutcomeV1, AttemptStateV1};
 use zsx_core::{
     AdapterBinding, AdapterCall, AdapterError, AdapterResponse, DomainAdapter,
-    SessionReplacementReason, ZsxSession, ZsxSessionFailureCode,
+    SessionApprovalGrantV1, SessionReplacementReason, ZsxSession, ZsxSessionFailureCode,
 };
 
 /// Minimal in-process adapter honoring the per-request cancellation token,
@@ -629,6 +629,237 @@ fn whole_session_cancel_still_terminates_acceptance() {
         .execute(generation, 1, "return null", Duration::from_secs(30))
         .expect_err("terminated session must reject execution");
     assert_eq!(error.code, ZsxSessionFailureCode::Terminating);
+
+    session.shutdown().expect("shutdown");
+}
+
+fn e2e_log(phase: &str, event: &str, data: serde_json::Value) {
+    eprintln!(
+        "{}",
+        json!({
+            "ts": now_ms(),
+            "suite": "sm9i",
+            "phase": phase,
+            "event": event,
+            "data": data,
+        })
+    );
+}
+
+fn refuse_if_zerostack_checkout(workspace: &Path) {
+    let canon = workspace
+        .canonicalize()
+        .unwrap_or_else(|_| workspace.to_path_buf());
+    let mut roots = vec![
+        Path::new("/Users/aditya/AI/ZeroStack").to_path_buf(),
+        Path::new("/home/aditya/AI/ZeroStack").to_path_buf(),
+    ];
+    if let Ok(manifest) = std::env::var("CARGO_MANIFEST_DIR") {
+        let manifest = Path::new(&manifest);
+        roots.push(manifest.to_path_buf());
+        if let Some(parent) = manifest.parent() {
+            roots.push(parent.to_path_buf());
+        }
+    }
+    for root in roots {
+        let Ok(root) = root.canonicalize() else {
+            continue;
+        };
+        if canon == root {
+            panic!(
+                "sm9i workspace must not be the ZeroStack checkout root: {}",
+                canon.display()
+            );
+        }
+    }
+}
+
+fn write_grant(root: &Path, request_id: u64) -> SessionApprovalGrantV1 {
+    let now = now_ms();
+    SessionApprovalGrantV1 {
+        schema: "zerostack.session.approval_grant.v1".into(),
+        grant_id: format!("grant-sm9i-{request_id}"),
+        engine: EngineIdentity::FsZero,
+        root: root.to_string_lossy().into_owned(),
+        generation: 1,
+        request_id,
+        operation: "write".into(),
+        effect: EffectClass::ApprovalRequiredMutation,
+        authority_digest: "a".repeat(64),
+        policy_digest: "b".repeat(64),
+        issued_at_unix_ms: now.saturating_sub(1),
+        expires_at_unix_ms: now.saturating_add(60_000),
+    }
+}
+
+#[cfg(feature = "fszero")]
+#[test]
+fn real_fszero_write_queued_across_replace_is_honest() {
+    let workspace = tempfile::tempdir().expect("workspace");
+    let state = tempfile::tempdir().expect("state");
+    let root = workspace
+        .path()
+        .canonicalize()
+        .unwrap_or_else(|_| workspace.path().to_path_buf());
+    refuse_if_zerostack_checkout(&root);
+    refuse_if_zerostack_checkout(state.path());
+
+    let unique = format!("queued-sm9i-{}-{}.txt", std::process::id(), now_ms());
+    let written = root.join(&unique);
+    e2e_log(
+        "setup",
+        "phase_start",
+        json!({
+            "workspace": root.display().to_string(),
+            "state": state.path().display().to_string(),
+            "path": unique,
+        }),
+    );
+
+    let session_id = "sm9i-real-write";
+    let fszero = Arc::new(zsx_core::fszero::FsZeroAdapter::new_with_state_root(
+        &root,
+        state.path(),
+        session_id,
+    ));
+    assert!(
+        !fszero.degraded(),
+        "real durable FSZero must open; inert adapter is not this e2e"
+    );
+    let graph = Arc::new(TestAdapter::new(EngineIdentity::GraphZero, session_id));
+    let token = Arc::new(TestAdapter::new(EngineIdentity::TokenZero, session_id));
+    let session = Arc::new(
+        ZsxSession::builder(&root)
+            .with_state_root(state.path())
+            .with_session_id(session_id)
+            .fszero(fszero)
+            .graphzero(graph)
+            .tokenzero(token)
+            .build()
+            .expect("session with real FSZero builds"),
+    );
+    let generation_before = session.generation().expect("generation");
+    e2e_log(
+        "setup",
+        "session_ready",
+        json!({"generation": generation_before}),
+    );
+
+    let occupy_session = Arc::clone(&session);
+    let occupy = std::thread::spawn(move || {
+        occupy_session.execute(
+            1,
+            1,
+            r#"await zero.fs.compound('search', {query: 'x', __delay_ms: 800});"#,
+            Duration::from_secs(30),
+        )
+    });
+    std::thread::sleep(Duration::from_millis(80));
+
+    let queued_session = Arc::clone(&session);
+    let queued_path = unique.clone();
+    let grant = write_grant(&root, 2);
+    let queued = std::thread::spawn(move || {
+        let source = format!(
+            r#"await zero.fs.compound("write", {{path:{path:?}, content:"sm9i-payload"}});"#,
+            path = queued_path
+        );
+        queued_session.execute_with_approvals(1, 2, source, Duration::from_secs(30), vec![grant])
+    });
+    std::thread::sleep(Duration::from_millis(40));
+
+    e2e_log(
+        "act",
+        "replace",
+        json!({"generation_before": generation_before}),
+    );
+    session
+        .replace(1, SessionReplacementReason::Manual)
+        .expect("replace advances generation");
+    let generation_after = session.generation().expect("generation after replace");
+    e2e_log(
+        "act",
+        "replaced",
+        json!({"generation_after": generation_after}),
+    );
+    assert!(
+        generation_after > generation_before,
+        "replace must bump generation"
+    );
+
+    let _ = occupy.join();
+    let queued_result = queued.join().expect("queued write thread");
+    let file_exists = written.exists();
+    e2e_log(
+        "assert",
+        "queued_outcome",
+        json!({
+            "ok": queued_result.is_ok(),
+            "file_exists": file_exists,
+            "generation_before": generation_before,
+            "generation_after": generation_after,
+            "error": queued_result.as_ref().err().map(|error| json!({
+                "code": format!("{:?}", error.code),
+                "generation": error.generation,
+                "detail": error.detail,
+            })),
+        }),
+    );
+
+    match queued_result {
+        Ok(success) => {
+            e2e_log(
+                "assert",
+                "test_end",
+                json!({"result": "fail", "reason": "success"}),
+            );
+            panic!(
+                "queued real fs.write after replace must not succeed: generation={} file_exists={file_exists}",
+                success.generation
+            );
+        }
+        Err(error) => {
+            if file_exists && error.code == ZsxSessionFailureCode::StaleGeneration {
+                e2e_log(
+                    "assert",
+                    "test_end",
+                    json!({"result": "fail", "reason": "file_plus_stale"}),
+                );
+                panic!(
+                    "silent file+StaleGeneration: wrote {} but reported {:?}: {}",
+                    written.display(),
+                    error.code,
+                    error.detail
+                );
+            }
+            assert!(
+                matches!(
+                    error.code,
+                    ZsxSessionFailureCode::StaleGeneration
+                        | ZsxSessionFailureCode::CommitRace
+                        | ZsxSessionFailureCode::Cancelled
+                ),
+                "queued write must be an honest failure, got {:?}: {}",
+                error.code,
+                error.detail
+            );
+            if error.code == ZsxSessionFailureCode::StaleGeneration {
+                assert!(
+                    !file_exists,
+                    "StaleGeneration must not leave a written file"
+                );
+            }
+            e2e_log(
+                "assert",
+                "test_end",
+                json!({
+                    "result": "pass",
+                    "code": format!("{:?}", error.code),
+                    "file_exists": file_exists,
+                }),
+            );
+        }
+    }
 
     session.shutdown().expect("shutdown");
 }
