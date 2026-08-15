@@ -273,13 +273,11 @@ fn collect_and_conform_refs(
 
 fn enrich_recovery_payload(
     session: &FSZeroSession,
-    outcome: &DispatchOutcome,
+    recovery_key: Option<&str>,
     result: &mut DomainResult,
     refs: &[String],
 ) {
-    if let Some(key) = outcome
-        .recovery_key
-        .as_deref()
+    if let Some(key) = recovery_key
         .or_else(|| result.refs.first().map(String::as_str))
         && let Some(bytes) = session.expand(key)
     {
@@ -409,6 +407,8 @@ fn run_call(
         ));
     }
     let wall_ns = outcome.wall_ns.max(1);
+    let inline_evidence = outcome.inline_evidence.clone();
+    let recovery_key = outcome.recovery_key.clone();
     let mut result: DomainResult = outcome.result;
     if !result.ok {
         let error = result.error.unwrap_or_else(|| {
@@ -420,14 +420,14 @@ fn run_call(
         return Err(domain_error_to_adapter(&error, request));
     }
 
-    let mut refs = collect_and_conform_refs(session, request, &result)?;
-    enrich_recovery_payload(session, &outcome, &mut result, &refs);
+    let refs = collect_and_conform_refs(session, request, &result)?;
+    enrich_recovery_payload(session, recovery_key.as_deref(), &mut result, &refs);
     result.refs = refs.clone();
 
     // Serialized DomainResult envelope plus inline evidence (worker parity:
     // raw_worker_v2 merges evidence into the value object).
     let mut value = serde_json::to_value(&result).unwrap_or(Value::Null);
-    if let (Some(evidence), Value::Object(map)) = (outcome.inline_evidence, &mut value) {
+    if let (Some(evidence), Value::Object(map)) = (inline_evidence, &mut value) {
         map.insert("evidence".into(), serde_json::json!(evidence));
     }
 
