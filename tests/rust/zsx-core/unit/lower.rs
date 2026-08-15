@@ -252,7 +252,7 @@
         ]);
         assert_lower(
             "fs",
-            "edit_many",
+            "multi_edit",
             implicit.clone(),
             EngineIdentity::FsZero,
             "fs.transact",
@@ -260,7 +260,7 @@
         );
         assert_lower(
             "fs",
-            "multi_edit",
+            "edit_many",
             json!([implicit]),
             EngineIdentity::FsZero,
             "fs.transact",
@@ -268,13 +268,13 @@
         );
         let err = lower(
             "fs",
-            "edit_many",
+            "multi_edit",
             json!([{"op":"write","path":"tracked.txt","content": tool_result}]),
         )
         .unwrap_err();
         assert!(
             err.to_string().contains("non_byte_provenance"),
-            "edit_many write: {err}"
+            "multi_edit write: {err}"
         );
     }
 

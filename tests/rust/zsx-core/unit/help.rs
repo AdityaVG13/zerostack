@@ -40,9 +40,9 @@
         assert_eq!(result["total"], 1);
         assert_eq!(result["results"][0]["path"], "fs.transact");
 
-        let result = help_search(&json!({"query": "edit many files in parallel"}));
+        let result = help_search(&json!({"query": "multi edit files in parallel"}));
         let first = result["results"][0]["path"].as_str().unwrap();
-        assert_eq!(first, "fs.edit_many", "got {result}");
+        assert_eq!(first, "fs.multi_edit", "got {result}");
     }
 
     #[test]

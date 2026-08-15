@@ -330,7 +330,7 @@ fn collect_and_conform_refs(
 }
 
 /// Lift the transact recovery JSON (per-step path + ack) onto the envelope
-/// so edit_many callers see structured steps, not a mashed `transact:1` string.
+/// so multi_edit callers see structured steps, not a mashed `transact:1` string.
 fn attach_transact_step_receipt(op: &str, value: &mut Value) {
     if op != "fs.transact" {
         return;

@@ -17,8 +17,8 @@ pub const METHODS: &[(&str, &str)] = &[
     ("fs", "edit"),
     ("fs", "write"),
     ("fs", "transact"),
-    ("fs", "edit_many"),
     ("fs", "multi_edit"),
+    ("fs", "edit_many"),
     ("fs", "read_many"),
     ("fs", "list_many"),
     ("fs", "search_many"),
@@ -450,7 +450,7 @@ fn reject_non_byte_write_content(args: &Value) -> Result<(), ConnectorError> {
 fn default_batch_step_op(step: &mut Value) -> Result<(), ConnectorError> {
     let Some(map) = step.as_object_mut() else {
         return Err(ConnectorError::new(
-            "fs.edit_many / fs.transact steps must be objects",
+            "fs.multi_edit / fs.transact steps must be objects",
         ));
     };
     if map.get("op").and_then(Value::as_str).is_some() {
@@ -467,7 +467,7 @@ fn default_batch_step_op(step: &mut Value) -> Result<(), ConnectorError> {
         return Ok(());
     }
     Err(ConnectorError::new(
-        "fs.edit_many step needs op, find/replace, or content",
+        "fs.multi_edit step needs op, find/replace, or content",
     ))
 }
 
@@ -480,13 +480,13 @@ fn collect_batch_steps(input: Value) -> Result<Value, ConnectorError> {
         Some(items) if !items.is_empty() && items.iter().all(Value::is_object) => items.clone(),
         _ => {
             return Err(ConnectorError::new(
-                "fs.transact / fs.edit_many take one non-empty array of step objects",
+                "fs.transact / fs.multi_edit take one non-empty array of step objects",
             ));
         }
     };
     if steps.is_empty() {
         return Err(ConnectorError::new(
-            "fs.transact / fs.edit_many take one non-empty array of step objects",
+            "fs.transact / fs.multi_edit take one non-empty array of step objects",
         ));
     }
     for step in &mut steps {
@@ -604,9 +604,9 @@ pub fn lower(
         reject_non_byte_write_content(&args)?;
         return Ok((engine, format!("fs.{method}"), args));
     }
-    // All-or-nothing multi-file mutation. edit_many / multi_edit are the
-    // dogfood names (implicit op:edit|write); transact is the kernel name.
-    if surface == "fs" && matches!(method, "transact" | "edit_many" | "multi_edit") {
+    // All-or-nothing multi-file mutation. multi_edit is the dogfood name
+    // (implicit op:edit|write); edit_many is an alias; transact is the kernel.
+    if surface == "fs" && matches!(method, "transact" | "multi_edit" | "edit_many") {
         let steps = collect_batch_steps(input)?;
         reject_non_byte_transact_writes(&steps)?;
         return Ok((engine, "fs.transact".into(), serde_json::json!({"steps": steps})));
