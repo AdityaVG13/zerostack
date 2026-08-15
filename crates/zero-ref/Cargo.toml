@@ -15,6 +15,7 @@ sha2 = { workspace = true }
 criterion = "0.8"
 proptest = "1"
 serde_json = { workspace = true }
+zero-abi = { path = "../zero-abi" }
 
 [[bench]]
 name = "parse"
@@ -28,6 +29,10 @@ path = "../../tests/rust/zero-ref/golden_vectors.rs"
 [[test]]
 name = "property_identity"
 path = "../../tests/rust/zero-ref/property_identity.rs"
+
+[[test]]
+name = "zeroref_envelope_differential"
+path = "../../tests/rust/zero-ref/fuzz_targets/zeroref_envelope_differential.rs"
 
 [[test]]
 name = "span_ref"
