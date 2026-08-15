@@ -530,6 +530,11 @@ pub fn lower(
                     "unsupported planner-free fs.compound operation; discover call shapes with zero.help.search({query})",
                 )
             })?;
+        if matches!(op, "fs.write" | "fs.edit") && !compound_args.is_object() {
+            return Err(ConnectorError::new(
+                "fs.edit and fs.write take exactly one options object",
+            ));
+        }
         return Ok((engine, op.into(), compound_args));
     }
     if surface == "fs" && method == "world" {

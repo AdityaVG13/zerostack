@@ -1209,19 +1209,28 @@ impl Connector for ZsxConnector {
                 return Err(ConnectorError::new(error));
             }
         }
-        let journal = mutation_effect_class(engine, &request.op)
-            .map(|effect_class| {
+        let journal = match mutation_effect_class(engine, &request.op) {
+            Some(effect_class) => {
                 let journal_dir = journal_dir_for(&self.state.attempts_root, execution, sequence);
-                prepare_mutation_journal(
+                match prepare_mutation_journal(
                     &self.state,
                     execution,
                     &journal_dir,
                     &request,
                     engine,
                     effect_class,
-                )
-            })
-            .transpose()?;
+                ) {
+                    Ok(journal) => Some(journal),
+                    Err(error) => {
+                        if let Some((_, grant)) = taken_approval {
+                            self.restore_approval(grant)?;
+                        }
+                        return Err(error);
+                    }
+                }
+            }
+            None => None,
+        };
         let dispatch = ZsxDispatch {
             engine,
             request,
@@ -1333,7 +1342,15 @@ fn run_dispatch(state: &ZsxState, dispatch: &ZsxDispatch) -> Result<String, Conn
             ));
         }
         // Consume and validate the approval grant exactly when the process
-        // worker would have: immediately before the action.
+        // worker would have: immediately before the action. Approval-required
+        // mutations (fs.write) refuse a missing grant -- same class as ABI
+        // `ApprovalGrantRejection::Missing`.
+        if mutation_effect_class(dispatch.engine, &dispatch.request.op)
+            == Some(EffectClass::ApprovalRequiredMutation)
+            && dispatch.request.approval_grant.is_none()
+        {
+            return Err(ConnectorError::new("approval grant rejected: Missing"));
+        }
         if dispatch.request.approval_grant.is_some() {
             let mut consumed = state
                 .consumed_approval_grants

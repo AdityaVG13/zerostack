@@ -241,12 +241,18 @@ fn approvals_reachability_and_bounded_dispatch_survive_in_process() {
         .expect_err("approval replay must fail closed");
     assert_eq!(error.code, ZsxSessionFailureCode::ApprovalReplay, "{error}");
 
-    // A grantless approval-required operation fails closed.
+    // A grantless approval-required operation fails closed on the public
+    // execute path -- fs.write is ABI Missing, not graph.blast + fixture.
     let error = session
-        .execute(1, 10, approval_plan, Duration::from_secs(30))
+        .execute(
+            1,
+            10,
+            r#"await zero.fs.compound("write", {path:"grantless.txt", content:"x"});"#,
+            Duration::from_secs(30),
+        )
         .expect_err("missing approval must fail closed");
     assert!(
-        error.to_string().contains("approval") || error.to_string().contains("Required"),
+        error.to_string().contains("Missing") || error.to_string().contains("approval"),
         "{error}"
     );
 

@@ -158,6 +158,18 @@
             assert!(lower("fs", "edit", input.clone()).is_err());
             assert!(lower("fs", "write", input).is_err());
         }
+        // compound must not smuggle a scalar past the write/edit object rule.
+        for (name, scalar) in [
+            ("write", json!("c.txt")),
+            ("verifiedEdit", json!("c.txt")),
+            ("edit", json!("c.txt")),
+        ] {
+            let err = lower("fs", "compound", json!([name, scalar])).unwrap_err();
+            assert!(
+                err.to_string().contains("exactly one options object"),
+                "{name}: {err}"
+            );
+        }
 
         assert!(METHODS.contains(&("fs", "transact")));
         let steps = json!([
