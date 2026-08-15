@@ -118,6 +118,21 @@ fn fixture_runner() {
                 std::thread::sleep(Duration::from_secs(3600));
             }
         }
+        "owner-spawn-tree" => {
+            // This fixture *is* the owner: it spawn_tree's a leaf so the leaf
+            // gets Linux PR_SET_PDEATHSIG bound to this process. The parent
+            // test SIGKILLs us; the leaf must not stay live.
+            let mut command = fixture_command("leaf");
+            if let Ok(pid_file) = std::env::var(LEAF_PID_ENV) {
+                command.env(LEAF_PID_ENV, pid_file);
+            }
+            let (_owned, _stdin, _stdout) =
+                VerifiedChild::spawn_tree(command, "owner-session", 1)
+                    .expect("owner fixture spawn_tree");
+            loop {
+                std::thread::sleep(Duration::from_secs(3600));
+            }
+        }
         other => panic!("unknown fixture role: {other:?}"),
     }
 }
@@ -708,6 +723,58 @@ fn assert_leaf_dead(leaf_pid: u32, identity: &LeafIdentity) {
         std::thread::sleep(Duration::from_millis(50));
     }
     panic!("descendant leaf {leaf_pid} survived");
+}
+
+/// Linux: SIGKILL of the spawn_tree owner must reap the leaf via PR_SET_PDEATHSIG.
+/// Fail if only a comment was added (`zerostack-rca-unix-parent-death-7afx`).
+#[cfg(target_os = "linux")]
+#[test]
+fn spawn_tree_owner_sigkill_reaps_leaf() {
+    let pid_file = unique_temp_path("owner-kill-leaf");
+    let mut owner_cmd = fixture_command("owner-spawn-tree");
+    owner_cmd
+        .env(LEAF_PID_ENV, &pid_file)
+        .stdout(Stdio::null())
+        .stderr(Stdio::null());
+    let mut owner = owner_cmd.spawn().expect("spawn owner fixture");
+    let leaf_pid = wait_for_leaf_pid_file(&pid_file);
+    let _ = std::fs::remove_file(&pid_file);
+    let leaf_identity = ProcessIdentity::capture(leaf_pid).expect("capture leaf identity");
+    assert!(
+        leaf_identity.is_live().unwrap_or(false),
+        "leaf {leaf_pid} must be live before owner SIGKILL"
+    );
+
+    // SAFETY: SIGKILL the owner fixture we just spawned. The leaf is bound
+    // to that owner by PR_SET_PDEATHSIG.
+    let rc = unsafe { libc::kill(owner.id() as libc::pid_t, libc::SIGKILL) };
+    assert_eq!(rc, 0, "SIGKILL owner");
+    let _ = owner.wait();
+
+    let deadline = Instant::now() + Duration::from_secs(10);
+    let mut leaf_gone = false;
+    while Instant::now() < deadline {
+        if leaf_is_gone(leaf_pid, &leaf_identity) {
+            leaf_gone = true;
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    assert!(
+        leaf_gone,
+        "leaf {leaf_pid} stayed live after owner SIGKILL (PDEATHSIG did not fire)"
+    );
+}
+
+/// macOS has no PR_SET_PDEATHSIG. Owner-death reaping stays kill_and_reap /
+/// process-group teardown (`child.rs` spawn_tree comment). This is not a
+/// silent skip of the Linux invariant -- Linux is the rch host.
+#[cfg(target_os = "macos")]
+#[test]
+fn spawn_tree_owner_sigkill_documents_no_pdeathsig() {
+    eprintln!(
+        "macOS has no PR_SET_PDEATHSIG; owner path is kill_and_reap / process-group teardown"
+    );
 }
 
 #[test]
