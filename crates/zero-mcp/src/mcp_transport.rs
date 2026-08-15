@@ -28,6 +28,10 @@ pub const DEFAULT_MCP_MAX_INFLIGHT: usize = 16;
 /// Hard upper bound for concurrent compatibility callbacks.
 pub const MAX_MCP_MAX_INFLIGHT: usize = 256;
 const CANCELLATION_POLL: Duration = Duration::from_millis(10);
+/// How long a cancelled/timeout handler waits for a late worker result
+/// before attaching a still-running receipt and detaching. Must stay far
+/// below any product tool timeout so the handler thread is never unbounded.
+const LATE_RESULT_BOUND: Duration = Duration::from_millis(100);
 
 /// Configuration shared by every dynamically registered tool.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -513,6 +517,48 @@ where
     )
 }
 
+trait LateOkPayload {
+    fn late_ok_data(self) -> Value;
+}
+
+impl LateOkPayload for Value {
+    fn late_ok_data(self) -> Value {
+        serde_json::json!({ "result": self })
+    }
+}
+
+impl LateOkPayload for McpDispatchOutput {
+    fn late_ok_data(self) -> Value {
+        match self {
+            Self::Json(value) => serde_json::json!({ "result": value }),
+            Self::Text(parts) => {
+                let texts: Vec<String> = parts.into_iter().map(|part| part.text).collect();
+                serde_json::json!({ "result": { "text": texts } })
+            }
+        }
+    }
+}
+
+impl LateOkPayload for McpResourceOutput {
+    fn late_ok_data(self) -> Value {
+        match self {
+            Self::Json(value) => serde_json::json!({ "result": value }),
+            Self::Text(text) => serde_json::json!({ "result": { "text": text } }),
+            Self::Blob(blob) => serde_json::json!({ "result": { "blob": blob } }),
+        }
+    }
+}
+
+fn commit_race_error(operation: &str, data: Value) -> McpDispatchError {
+    McpDispatchError::new(
+        "commit_race",
+        "MCP tool completed after cancel/timeout; result is not a clean success",
+        false,
+    )
+    .with_op(operation)
+    .with_data(data)
+}
+
 fn execute_bounded<T, D, F>(
     operation: &str,
     config: McpTransportConfig,
@@ -521,7 +567,7 @@ fn execute_bounded<T, D, F>(
     externally_cancelled: F,
 ) -> Result<T, McpDispatchError>
 where
-    T: Send + 'static,
+    T: LateOkPayload + Send + 'static,
     D: FnOnce(&McpCallContext) -> Result<T, McpDispatchError> + Send + 'static,
     F: Fn() -> bool,
 {
@@ -580,31 +626,42 @@ where
             }
         }
     };
-    match &outcome {
-        Ok(_) => {
+    match outcome {
+        Ok(value) => {
             let _ = worker.join();
+            Ok(value)
         }
         Err(error) if error.kind == "cancelled" || error.kind == "timeout" => {
-            if let Ok(late) = receiver.try_recv() {
-                let _ = worker.join();
-                return match late {
-                    Ok(_) => Err(McpDispatchError::new(
-                        "commit_race",
-                        "MCP tool completed after cancel/timeout; result is not a clean success",
-                        false,
-                    )
-                    .with_op(operation)),
-                    Err(error) => Err(error),
-                };
+            let late = match receiver.recv_timeout(LATE_RESULT_BOUND) {
+                Ok(late) => Some(late),
+                Err(mpsc::RecvTimeoutError::Timeout | mpsc::RecvTimeoutError::Disconnected) => {
+                    None
+                }
+            };
+            match late {
+                Some(Ok(value)) => {
+                    let _ = worker.join();
+                    Err(commit_race_error(operation, value.late_ok_data()))
+                }
+                Some(Err(late_error)) => {
+                    let _ = worker.join();
+                    if matches!(late_error.kind.as_str(), "cancelled" | "timeout") {
+                        Err(error)
+                    } else {
+                        Err(late_error)
+                    }
+                }
+                None => {
+                    drop(worker);
+                    Err(error.with_data(serde_json::json!({ "still_running": true })))
+                }
             }
-            // Dispatch ignored cancel; do not block the handler thread.
-            drop(worker);
         }
-        Err(_) => {
+        Err(error) => {
             let _ = worker.join();
+            Err(error)
         }
     }
-    outcome
 }
 
 #[cfg(feature = "fastmcp")]

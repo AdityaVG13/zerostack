@@ -87,6 +87,93 @@
         assert!(started.elapsed() < Duration::from_millis(250));
     }
 
+    #[test]
+    fn late_ok_after_cancel_is_commit_race_with_payload() {
+        let started = Instant::now();
+        let payload = json!({"committed": true, "n": 7});
+        let callback_payload = payload.clone();
+        let result = execute_call_with_cancel(
+            Arc::new(move |_: &str, _: Value, context: &McpCallContext| {
+                while !context.is_cancelled() {
+                    thread::sleep(Duration::from_millis(2));
+                }
+                thread::sleep(Duration::from_millis(15));
+                Ok(callback_payload.clone())
+            }),
+            "fs.write",
+            json!({}),
+            McpTransportConfig::default(),
+            move || started.elapsed() >= Duration::from_millis(20),
+        );
+        let error = result.expect_err("late Ok after cancel must not be Success");
+        assert_eq!(error.kind, "commit_race");
+        assert!(!error.retryable);
+        assert_eq!(
+            error.data.as_ref().and_then(|data| data.get("result")),
+            Some(&payload),
+            "commit_race must keep the committed payload: {:?}",
+            error.data
+        );
+    }
+
+    #[test]
+    fn late_err_after_cancel_stays_that_err() {
+        let started = Instant::now();
+        let result = execute_call_with_cancel(
+            Arc::new(|_: &str, _: Value, context: &McpCallContext| {
+                while !context.is_cancelled() {
+                    thread::sleep(Duration::from_millis(2));
+                }
+                thread::sleep(Duration::from_millis(15));
+                Err(McpDispatchError::new("denied", "approval required", false)
+                    .with_op("fs.write")
+                    .with_data(json!({"approval_id": "a1"})))
+            }),
+            "fs.write",
+            json!({}),
+            McpTransportConfig::default(),
+            move || started.elapsed() >= Duration::from_millis(20),
+        );
+        let error = result.expect_err("late domain Err must stay Err");
+        assert_eq!(error.kind, "denied");
+        assert_eq!(
+            error.data,
+            Some(json!({"approval_id": "a1"})),
+            "{error:?}"
+        );
+    }
+
+    #[test]
+    fn cancel_without_late_result_attaches_still_running_receipt() {
+        let started = Instant::now();
+        let result = execute_call_with_cancel(
+            Arc::new(|_: &str, _: Value, context: &McpCallContext| {
+                while !context.is_cancelled() {
+                    thread::sleep(Duration::from_millis(2));
+                }
+                thread::sleep(Duration::from_millis(400));
+                Ok(json!({"too_late": true}))
+            }),
+            "fs.write",
+            json!({}),
+            McpTransportConfig::default(),
+            move || started.elapsed() >= Duration::from_millis(20),
+        );
+        let error = result.expect_err("unfinished worker is not Success");
+        assert_eq!(error.kind, "cancelled");
+        assert_eq!(
+            error.data.as_ref().and_then(|data| data.get("still_running")),
+            Some(&json!(true)),
+            "empty late channel must not silent-detach: {:?}",
+            error.data
+        );
+        assert!(
+            started.elapsed() < Duration::from_millis(250),
+            "handler must not wait out the unfinished worker: {:?}",
+            started.elapsed()
+        );
+    }
+
     #[cfg(feature = "fastmcp")]
     #[test]
     fn fastmcp_catalog_and_tools_call_preserve_structured_results() {
