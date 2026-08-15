@@ -587,7 +587,15 @@ where
         Err(error) if error.kind == "cancelled" || error.kind == "timeout" => {
             if let Ok(late) = receiver.try_recv() {
                 let _ = worker.join();
-                return late;
+                return match late {
+                    Ok(_) => Err(McpDispatchError::new(
+                        "commit_race",
+                        "MCP tool completed after cancel/timeout; result is not a clean success",
+                        false,
+                    )
+                    .with_op(operation)),
+                    Err(error) => Err(error),
+                };
             }
             // Dispatch ignored cancel; do not block the handler thread.
             drop(worker);
