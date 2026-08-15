@@ -62,6 +62,17 @@ pub struct SessionReplacementReceipt {
     pub reason: SessionReplacementReason,
 }
 
+/// Bounded class-agnostic execution FIFO (`sync_channel` + `try_send`).
+///
+/// This is a backpressure valve, not a class scheduler. Analysis/Index/Heavy
+/// permit classes live on the connector dispatch table (`dispatch_permit_class`)
+/// and are independent (M-13b). An execute request is not classified at this
+/// queue: a Heavy-class plan (`token.shell` / `fs.edit` / `fs.write`) is the
+/// same FIFO citizen as Analysis. Under an Analysis flood that keeps the
+/// channel full, Heavy `try_send` returns [`ZsxSessionFailureCode::Backpressure`]
+/// immediately -- there is no reserved slot and no pending-Heavy wait queue.
+/// Clients may retry; bounded wait under adversarial refill is not a session
+/// law. Permit Heavy=1 is not this starvation site.
 pub const SESSION_EXECUTION_QUEUE_CAPACITY: usize = 8;
 /// Canonical model-visible JSON byte budget. This avoids a durable spill for
 /// a tiny read plus its execution receipt while retaining a hard inline cap;
@@ -175,7 +186,7 @@ impl ZsxSessionError {
             generation,
             request_id: Some(request_id),
             detail: format!(
-                "session execution queue is full (capacity {})",
+                "session execution queue is full (capacity {}); class-agnostic FIFO, Heavy is not reserved",
                 SESSION_EXECUTION_QUEUE_CAPACITY
             ),
             retry_after_ms: Some(1),
