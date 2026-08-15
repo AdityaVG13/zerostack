@@ -274,24 +274,27 @@ fn collect_portable_refs(value: &Value, refs: &mut Vec<String>) {
     }
 }
 
-/// Mirror of `retain_valid_refs`: drop refs that are not byte-conformant and
-/// not expandable, reporting the first rejected ref so the boundary can fail
-/// closed exactly like the raw worker.
+/// True when a ref may be emitted: legal ZeroRef v1, and expandable if `fz://blob`.
+fn retainable_ref(session: &FSZeroSession, reference: &str) -> bool {
+    if !is_conformant_blob_ref(reference) {
+        return false;
+    }
+    let Ok(parsed) = ZeroRefV1::parse(reference) else {
+        return false;
+    };
+    if reference.starts_with("fz://blob/") {
+        let bare = format!("fz://blob/{}", parsed.hash);
+        session.expand(&bare).is_some() || session.expand(reference).is_some()
+    } else {
+        true
+    }
+}
+
+/// Fail-closed filter for engine-emitted / explicit request refs.
 fn retain_valid_refs(session: &FSZeroSession, refs: &mut Vec<String>) -> Option<String> {
     let mut rejected = None;
     refs.retain(|reference| {
-        let valid = if !is_conformant_blob_ref(reference) {
-            false
-        } else if let Ok(parsed) = ZeroRefV1::parse(reference) {
-            if reference.starts_with("fz://blob/") {
-                let bare = format!("fz://blob/{}", parsed.hash);
-                session.expand(&bare).is_some() || session.expand(reference).is_some()
-            } else {
-                true
-            }
-        } else {
-            false
-        };
+        let valid = retainable_ref(session, reference);
         if !valid && rejected.is_none() {
             rejected = Some(reference.clone());
         }
@@ -306,9 +309,6 @@ fn collect_and_conform_refs(
     result: &DomainResult,
 ) -> Result<Vec<String>, AdapterError> {
     let mut refs = result.refs.clone();
-    if let Some(value) = &result.value {
-        collect_portable_refs(value, &mut refs);
-    }
     if let Some(reference) = request.args.get("ref").and_then(Value::as_str)
         && ["fz://", "gz://", "tz://"]
             .iter()
@@ -317,6 +317,7 @@ fn collect_and_conform_refs(
     {
         refs.push(reference.to_owned());
     }
+    // Engine-emitted result.refs and the caller's explicit `ref` still fail closed.
     if let Some(rejected) = retain_valid_refs(session, &mut refs) {
         return Err(adapter_error(
             "ref_conformance",
@@ -325,6 +326,20 @@ fn collect_and_conform_refs(
             ),
             request,
         ));
+    }
+    // Harvested tokens from value text: drop non-blob / non-retainable mentions.
+    // A successful result that quotes `gz://node/symbol` must stay Ok.
+    let mut harvested = Vec::new();
+    if let Some(value) = &result.value {
+        collect_portable_refs(value, &mut harvested);
+    }
+    for reference in harvested {
+        if refs.iter().any(|value| value == &reference) {
+            continue;
+        }
+        if retainable_ref(session, &reference) {
+            refs.push(reference);
+        }
     }
     Ok(refs)
 }

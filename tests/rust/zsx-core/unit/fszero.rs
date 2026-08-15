@@ -115,6 +115,47 @@
     }
 
     #[test]
+    fn harvested_non_blob_scheme_tokens_do_not_fail_the_call() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let session = FSZeroSession::with_root(dir.path());
+        let request = test_request(None);
+        let result = DomainResult::success(
+            "fs.search",
+            None,
+            Some(serde_json::json!({
+                "text": "see gz://node/symbol and tz://node/foo and fz://codemode/execution/7"
+            })),
+            vec![],
+            false,
+        );
+        let refs = collect_and_conform_refs(&session, &request, &result)
+            .expect("incidental non-blob harvest must stay Ok");
+        assert!(refs.is_empty(), "dropped harvests: {refs:?}");
+    }
+
+    #[test]
+    fn engine_emitted_non_blob_refs_still_fail_closed() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let session = FSZeroSession::with_root(dir.path());
+        let request = test_request(None);
+        let result = DomainResult::success(
+            "fs.search",
+            None,
+            None,
+            vec!["gz://node/symbol".into()],
+            false,
+        );
+        let error = collect_and_conform_refs(&session, &request, &result)
+            .expect_err("engine-emitted non-blob must fail closed");
+        assert_eq!(error.error.kind, "internal");
+        assert!(
+            error.error.message.contains("gz://node/symbol"),
+            "{}",
+            error.error.message
+        );
+    }
+
+    #[test]
     fn cancelled_reply_wait_releases_the_shared_dispatcher_promptly() {
         let (_reply_tx, reply_rx) = mpsc::sync_channel(1);
         let cancellation = CancellationSignal::new();
