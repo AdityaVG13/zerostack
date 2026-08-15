@@ -22,7 +22,7 @@ fn one_cell_dispatches_all_three_real_engines_without_processes() {
         .execute(
             1,
             1,
-            r#"const fs=await zero.fs.read_many(["seed.txt"]);
+            r#"const fs=await zero.fs.multi_read(["seed.txt"]);
                await zero.graph.index();
                const graph=await zero.graph.query("symbol","mixed-engine-seed");
                const token=await zero.token.find("mixed-engine-seed");

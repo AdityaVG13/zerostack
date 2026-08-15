@@ -5070,7 +5070,7 @@
     },
     {
       "repo": "fszero",
-      "path": "src/core/ast_search_many.rs",
+      "path": "src/core/multi_ast_search.rs",
       "blob_digest": "9fcfd88ff5c741b4969a3976284abf469f9c27bd",
       "source_head": "5ceb193f191b0988dbe41c34a021f599cd10de8e",
       "role": "implementation",
@@ -5520,7 +5520,7 @@
     },
     {
       "repo": "fszero",
-      "path": "src/core/list_many.rs",
+      "path": "src/core/multi_list.rs",
       "blob_digest": "d0af4f286ad6017bdd105c86a303dc40bb9f2238",
       "source_head": "5ceb193f191b0988dbe41c34a021f599cd10de8e",
       "role": "implementation",
@@ -7514,7 +7514,7 @@
     },
     {
       "repo": "fszero",
-      "path": "tests/list_many.rs",
+      "path": "tests/multi_list.rs",
       "blob_digest": "e8d2a3865ff3e962624a5c9eac41310526733fac",
       "source_head": "5ceb193f191b0988dbe41c34a021f599cd10de8e",
       "role": "implementation",

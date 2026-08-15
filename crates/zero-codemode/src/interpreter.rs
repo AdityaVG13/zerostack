@@ -781,7 +781,7 @@ impl<'tree> Interpreter<'tree> {
                     }
                 } else {
                     return Err(Fault::Host(HostError::Data(format!(
-                        "cannot destructure {} with an array pattern; connector results are objects — bind to one name first (e.g. `const files = await zero.fs.read_many([...]); files.content`)",
+                        "cannot destructure {} with an array pattern; connector results are objects — bind to one name first (e.g. `const files = await zero.fs.multi_read([...]); files.content`)",
                         value_kind(&value),
                     ))));
                 }

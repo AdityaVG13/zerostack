@@ -134,7 +134,7 @@ fn dispatch_permit_class(engine: EngineIdentity, operation: &str) -> Option<Disp
         (EngineIdentity::FsZero, "fs.expand")
             | (
                 EngineIdentity::FsZero,
-                "fs.read" | "fs.readMany" | "fs.ls" | "fs.listMany" | "fs.stat" | "fs.history"
+                "fs.read" | "fs.multiRead" | "fs.ls" | "fs.multiList" | "fs.stat" | "fs.history"
             )
             | (EngineIdentity::GraphZero, "expand")
             | (EngineIdentity::TokenZero, "expand")

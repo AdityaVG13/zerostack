@@ -75,10 +75,10 @@ fn fixture_session(budget: usize) -> (tempfile::TempDir, ZsxSession, Arc<Disabli
 }
 
 const PLAN: &str = r#"
-const first = await zero.fs.read_many({paths:["a.txt"]});
+const first = await zero.fs.multi_read({paths:["a.txt"]});
 let phase = "adapter-alive";
 try {
-  await zero.fs.read_many({paths:["b.txt"]});
+  await zero.fs.multi_read({paths:["b.txt"]});
   phase = "adapter-still-alive";
 } catch (e) {
   phase = "native-continued:" + e.name;
@@ -159,7 +159,7 @@ fn complete_refusal_without_native_fallback_fails_loudly() {
         .execute(
             1,
             1,
-            "return await zero.fs.read_many({paths:['x']});".to_string(),
+            "return await zero.fs.multi_read({paths:['x']});".to_string(),
             Duration::from_secs(10),
         )
         .expect_err("an unhandled disabled-adapter call must fail");

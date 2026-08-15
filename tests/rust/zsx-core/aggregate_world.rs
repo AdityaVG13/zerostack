@@ -109,7 +109,7 @@ fn one_call_atomically_commits_and_verifies_one_hundred_files() {
             const committed=await zero.fs.world("commit",{{world}});
             const commitDomain=committed.content.value.value;
             if(!commitDomain.ok)throw new Error("world commit failed");
-            const verified=await zero.fs.read_many({paths_json});
+            const verified=await zero.fs.multi_read({paths_json});
             if(!verified.content.value.value.ok)throw new Error("read-many verify failed");
             return {{world,commit:commitDomain.value.detail,refs:commitDomain.refs,verified:true}};"#
     );

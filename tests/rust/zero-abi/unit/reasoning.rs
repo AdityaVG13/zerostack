@@ -273,7 +273,7 @@
                 Some(digest(9)),
                 BTreeMap::from([
                     (
-                        "fs.read_many".to_owned(),
+                        "fs.multi_read".to_owned(),
                         ToolPermissionV1::new(true, false, Some(128)).unwrap(),
                     ),
                     (

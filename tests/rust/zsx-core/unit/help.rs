@@ -16,7 +16,7 @@
     fn scoring_finds_bulk_reads_and_cas_writes() {
         let result = help_search(&json!([{ "query": "read many files" }]));
         let first = result["results"][0]["path"].as_str().unwrap();
-        assert_eq!(first, "fs.read_many", "got {result}");
+        assert_eq!(first, "fs.multi_read", "got {result}");
         assert!(
             result["results"][0]["signature"]
                 .as_str()

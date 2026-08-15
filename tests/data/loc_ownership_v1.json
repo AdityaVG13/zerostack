@@ -2901,7 +2901,7 @@
     },
     {
       "repo": "fszero",
-      "path": "src/core/ast_search_many.rs",
+      "path": "src/core/multi_ast_search.rs",
       "language": "Rust",
       "classification": "domain-local",
       "rule": "engine-domain-default",
@@ -3168,7 +3168,7 @@
     },
     {
       "repo": "fszero",
-      "path": "src/core/list_many.rs",
+      "path": "src/core/multi_list.rs",
       "language": "Rust",
       "classification": "domain-local",
       "rule": "engine-domain-default",
@@ -4340,7 +4340,7 @@
     },
     {
       "repo": "fszero",
-      "path": "tests/list_many.rs",
+      "path": "tests/multi_list.rs",
       "language": "Rust",
       "classification": "domain-local",
       "rule": "engine-domain-default",

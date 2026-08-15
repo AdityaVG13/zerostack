@@ -357,7 +357,7 @@ fn limit_probe_plan(name: &str, limit: u64) -> Option<String> {
             "for (let i=0;i<{above};i++) {{ ctx.ref(i); }} return 1;"
         )),
         "max_parallel_width" => Some(format!(
-            "return zero.queryMany ? zero.queryMany(Array.from({{length: {above}}}, (_, i) => String(i))) : 1;"
+            "return zero.multiQuery ? zero.multiQuery(Array.from({{length: {above}}}, (_, i) => String(i))) : 1;"
         )),
         "max_wall_ms"
         | "hard_max_wall_ms"
@@ -470,7 +470,7 @@ fn check_mutation(
 }
 
 fn check_coalescing(client: &mut McpClient, execute_tool: &str) -> CheckResult {
-    let plan = "return zero.queryMany ? zero.queryMany(Array.from({length: 100}, (_, i) => String(i))) : ctx.step('batch', () => Array.from({length: 100}, (_, i) => ctx.ref(i)));";
+    let plan = "return zero.multiQuery ? zero.multiQuery(Array.from({length: 100}, (_, i) => String(i))) : ctx.step('batch', () => Array.from({length: 100}, (_, i) => ctx.ref(i)));";
     match client.call_tool(execute_tool, json!({ "plan": plan, "form": "js" })) {
         Ok(response) => {
             let payload = extract_json_payload(&response).unwrap_or(response);

@@ -19,7 +19,7 @@
     fn fs_methods_use_canonical_domain_operations() {
         let plan = lower("fs", "plan", json!("map widget entrypoint")).unwrap();
         assert_eq!(plan.0, EngineIdentity::FsZero);
-        assert_eq!(plan.1, "fs.searchMany");
+        assert_eq!(plan.1, "fs.multiSearch");
         assert_eq!(plan.2["queries"], json!(["widget"]));
         assert_lower(
             "fs",
@@ -55,18 +55,18 @@
         );
         assert_lower(
             "fs",
-            "read_many",
+            "multi_read",
             json!([["a.rs"], {"max_bytes":32}]),
             EngineIdentity::FsZero,
-            "fs.readMany",
+            "fs.multiRead",
             json!({"paths":["a.rs"],"max_bytes":32}),
         );
         assert_lower(
             "fs",
-            "search_many",
+            "multi_search",
             json!(["one", "two"]),
             EngineIdentity::FsZero,
-            "fs.searchMany",
+            "fs.multiSearch",
             json!({"queries":["one","two"]}),
         );
     }
@@ -80,6 +80,14 @@
             EngineIdentity::GraphZero,
             "blast",
             json!({"intent":"Widget","depth":2}),
+        );
+        assert_lower(
+            "graph",
+            "multi_query",
+            json!(["symbol", ["Widget", "Thing"]]),
+            EngineIdentity::GraphZero,
+            "multi_query",
+            json!({"surface":"symbol","targets":["Widget","Thing"]}),
         );
         assert_lower(
             "graph",

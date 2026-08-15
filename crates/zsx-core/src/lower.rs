@@ -18,12 +18,13 @@ pub const METHODS: &[(&str, &str)] = &[
     ("fs", "write"),
     ("fs", "transact"),
     ("fs", "multi_edit"),
-    ("fs", "read_many"),
-    ("fs", "list_many"),
-    ("fs", "search_many"),
-    ("fs", "ast_search_many"),
+    ("fs", "multi_read"),
+    ("fs", "multi_list"),
+    ("fs", "multi_search"),
+    ("fs", "multi_ast_search"),
     ("graph", "blast"),
     ("graph", "query"),
+    ("graph", "multi_query"),
     ("graph", "orient"),
     ("graph", "recall"),
     ("graph", "verify"),
@@ -148,10 +149,10 @@ const COMPOUND_OPS: &[(&str, &str)] = &[
 ];
 
 const FS_VECTOR_METHODS: &[(&str, &str, &str)] = &[
-    ("read_many", "fs.readMany", "paths"),
-    ("list_many", "fs.listMany", "items"),
-    ("search_many", "fs.searchMany", "queries"),
-    ("ast_search_many", "fs.astSearchMany", "items"),
+    ("multi_read", "fs.multiRead", "paths"),
+    ("multi_list", "fs.multiList", "items"),
+    ("multi_search", "fs.multiSearch", "queries"),
+    ("multi_ast_search", "fs.multiAstSearch", "items"),
 ];
 
 const PLAN_STOPWORDS: &[&str] = &[
@@ -368,7 +369,7 @@ fn lower_fs_plan(engine: EngineIdentity, input: &Value) -> (EngineIdentity, Stri
     }
     (
         engine,
-        "fs.searchMany".into(),
+        "fs.multiSearch".into(),
         serde_json::json!({"queries":queries}),
     )
 }
@@ -655,6 +656,17 @@ pub fn lower(
     if surface == "graph" {
         let args = match method {
             "blast" => positional_args(&input, "intent", None),
+            "multi_query" => {
+                let mut args = positional_args(&input, "surface", Some("targets"));
+                if let Some(object) = args.as_object_mut() {
+                    if !object.contains_key("targets") {
+                        if let Some(query) = object.remove("query") {
+                            object.insert("targets".into(), query);
+                        }
+                    }
+                }
+                args
+            }
             "query" | "orient" => positional_args(&input, "surface", Some("query")),
             "recall" => positional_args(&input, "query", None),
             "verify" => positional_args(&input, "target", Some("claim")),

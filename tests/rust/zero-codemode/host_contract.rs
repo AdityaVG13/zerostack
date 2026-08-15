@@ -957,7 +957,7 @@ fn ctx_payload_text_round_trips_through_json_parse() {
         result: Some(
             json!({
                 "metadata":{"ownership":{"refs":["fz://blob/abc"]}},
-                "value":{"operation":"fs.read_many","value":{"payload_utf8":"[\"alpha\",\"beta\"]"},"refs":["fz://blob/abc"]}
+                "value":{"operation":"fs.multi_read","value":{"payload_utf8":"[\"alpha\",\"beta\"]"},"refs":["fz://blob/abc"]}
             })
             .to_string(),
         ),
