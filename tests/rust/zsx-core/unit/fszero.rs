@@ -288,8 +288,8 @@
         let started = Instant::now();
         drop(adapter);
         assert!(
-            started.elapsed() < SESSION_THREAD_STOP_TIMEOUT + Duration::from_millis(500),
-            "Drop must not block past the session-thread stop bound: {:?}",
+            started.elapsed() < SESSION_SHUTDOWN_SETTLE_TIMEOUT + Duration::from_millis(250),
+            "Drop must stay inside the shutdown settle budget, not the 5s dispatch enqueue bound: {:?}",
             started.elapsed()
         );
     }

@@ -6,7 +6,24 @@
     fn shutdown_settle_is_strictly_inside_a_two_second_host_deadline() {
         assert_eq!(DEFAULT_SHUTDOWN_WAIT_MS, 500);
         assert!(DEFAULT_SHUTDOWN_WAIT_MS < 2000);
+        assert_eq!(SESSION_SHUTDOWN_SETTLE_TIMEOUT.as_millis(), 500);
         assert_eq!(SESSION_REPLACEMENT_SETTLE_TIMEOUT.as_millis(), 5000);
+    }
+
+    #[test]
+    fn join_thread_within_fails_closed_when_the_budget_is_gone() {
+        let handle = std::thread::spawn(|| std::thread::sleep(Duration::from_secs(5)));
+        let started = Instant::now();
+        let error = join_thread_within(handle, Duration::from_millis(20)).expect_err("must not hang");
+        assert!(
+            started.elapsed() < Duration::from_millis(250),
+            "bounded join leaked past the budget: {:?}",
+            started.elapsed()
+        );
+        assert!(
+            error.contains("did not join"),
+            "unexpected join error: {error}"
+        );
     }
 
     #[test]

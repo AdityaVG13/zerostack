@@ -85,9 +85,11 @@ pub const SESSION_REPLACEMENT_SETTLE_TIMEOUT: Duration = Duration::from_secs(5);
 pub const SESSION_EXECUTOR_START_TIMEOUT: Duration = Duration::from_secs(5);
 /// Shutdown-only settle budget. Must stay strictly under a typical 2000ms
 /// host listener deadline (ZEROSTACK_ENGINE_OBSERVATIONS.md). Replacement
-/// and executor start keep the 5s timeouts above.
+/// and executor start keep the 5s timeouts above. Adapter Drop and the
+/// session-executor join share this same remaining budget.
 pub const DEFAULT_SHUTDOWN_WAIT_MS: u64 = 500;
-const SESSION_SHUTDOWN_SETTLE_TIMEOUT: Duration = Duration::from_millis(DEFAULT_SHUTDOWN_WAIT_MS);
+pub(crate) const SESSION_SHUTDOWN_SETTLE_TIMEOUT: Duration =
+    Duration::from_millis(DEFAULT_SHUTDOWN_WAIT_MS);
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, serde::Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -1891,8 +1893,8 @@ impl ZsxSession {
             (state.generation, true)
         };
         cancel_backend(&self.cancellation);
+        let shutdown_started = Instant::now();
         if should_send {
-            let control_started = Instant::now();
             let (reply_tx, reply_rx) = mpsc::sync_channel(1);
             send_control_with_deadline(
                 &self.commands,
@@ -1908,7 +1910,7 @@ impl ZsxSession {
                 )
             })?;
             let settle_remaining =
-                SESSION_SHUTDOWN_SETTLE_TIMEOUT.saturating_sub(control_started.elapsed());
+                SESSION_SHUTDOWN_SETTLE_TIMEOUT.saturating_sub(shutdown_started.elapsed());
             let closure = reply_rx.recv_timeout(settle_remaining).map_err(|error| {
                 ZsxSessionError::new(
                     ZsxSessionFailureCode::BackendUnavailable,
@@ -1932,12 +1934,14 @@ impl ZsxSession {
         if let Ok(mut worker) = self.worker.lock()
             && let Some(handle) = worker.take()
         {
-            handle.join().map_err(|_| {
+            let join_remaining =
+                SESSION_SHUTDOWN_SETTLE_TIMEOUT.saturating_sub(shutdown_started.elapsed());
+            join_thread_within(handle, join_remaining).map_err(|detail| {
                 ZsxSessionError::new(
                     ZsxSessionFailureCode::BackendUnavailable,
                     generation,
                     None,
-                    "session executor panicked during shutdown",
+                    detail,
                 )
             })?;
         }
@@ -2160,6 +2164,28 @@ impl Drop for ZsxSession {
         }
         let (reply, _) = mpsc::sync_channel(1);
         let _ = self.commands.try_send(ZsxCommand::Shutdown { reply });
+    }
+}
+
+pub(crate) fn join_thread_within(
+    handle: JoinHandle<()>,
+    timeout: Duration,
+) -> Result<(), String> {
+    if timeout.is_zero() {
+        return Err("session executor join had no remaining shutdown budget".into());
+    }
+    let (done_tx, done_rx) = mpsc::sync_channel(1);
+    thread::spawn(move || {
+        let panicked = handle.join().is_err();
+        let _ = done_tx.send(panicked);
+    });
+    match done_rx.recv_timeout(timeout) {
+        Ok(true) => Err("session executor panicked during shutdown".into()),
+        Ok(false) => Ok(()),
+        Err(_) => Err(format!(
+            "session executor did not join within {}ms",
+            timeout.as_millis()
+        )),
     }
 }
 

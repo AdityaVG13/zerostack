@@ -76,6 +76,7 @@ use zero_ref::ZeroRefV1;
 use zero_store::SharedCas;
 
 use crate::adapter::{AdapterBinding, AdapterCall, AdapterError, AdapterResponse, DomainAdapter};
+use crate::session::{SESSION_SHUTDOWN_SETTLE_TIMEOUT, join_thread_within};
 
 /// Canonical FSZero ref scheme.
 pub const FSZERO_REF_SCHEME: &str = "fz://";
@@ -85,7 +86,8 @@ pub const FSZERO_REF_SCHEME: &str = "fz://";
 /// raw worker's `CARGO_PKG_VERSION` fallback.
 pub const FSZERO_PINNED_VERSION: &str = "0.1.0";
 
-/// How long [`FsZeroAdapter`]'s `Drop` waits for the session thread to stop.
+/// How long live dispatch waits for the session command channel to accept.
+/// Shutdown and [`FsZeroAdapter`] `Drop` use [`SESSION_SHUTDOWN_SETTLE_TIMEOUT`].
 const SESSION_THREAD_STOP_TIMEOUT: Duration = Duration::from_secs(5);
 
 /// How long [`FsZeroAdapter::new`] waits for the session thread to open the
@@ -167,16 +169,8 @@ fn send_session_command(
 }
 
 fn join_session_thread(handle: JoinHandle<()>, timeout: Duration) {
-    let (done_tx, done_rx) = mpsc::sync_channel(1);
-    thread::spawn(move || {
-        let _ = handle.join();
-        let _ = done_tx.send(());
-    });
-    if done_rx.recv_timeout(timeout).is_err() {
-        eprintln!(
-            "zsx-core: FSZero session thread did not stop within {}ms; detaching",
-            timeout.as_millis()
-        );
+    if let Err(detail) = join_thread_within(handle, timeout) {
+        eprintln!("zsx-core: FSZero session thread {detail}; detaching");
     }
 }
 
@@ -867,15 +861,17 @@ impl FsZeroAdapter {
 
 impl Drop for FsZeroAdapter {
     fn drop(&mut self) {
+        let budget = SESSION_SHUTDOWN_SETTLE_TIMEOUT;
+        let started = Instant::now();
+        let remaining = || budget.saturating_sub(started.elapsed());
         let (reply_tx, reply_rx) = mpsc::sync_channel(1);
         let mut command = SessionCommand::Shutdown { reply: reply_tx };
-        let started = Instant::now();
         let sent = loop {
             match self.sender.try_send(command) {
                 Ok(()) => break true,
                 Err(TrySendError::Disconnected(_)) => break false,
                 Err(TrySendError::Full(returned)) => {
-                    if started.elapsed() >= SESSION_THREAD_STOP_TIMEOUT {
+                    if remaining().is_zero() {
                         break false;
                     }
                     command = returned;
@@ -884,10 +880,10 @@ impl Drop for FsZeroAdapter {
             }
         };
         if sent {
-            let _ = reply_rx.recv_timeout(SESSION_THREAD_STOP_TIMEOUT);
+            let _ = reply_rx.recv_timeout(remaining());
         }
         if let Some(handle) = self.session_thread.take() {
-            join_session_thread(handle, SESSION_THREAD_STOP_TIMEOUT);
+            join_session_thread(handle, remaining());
         }
     }
 }
