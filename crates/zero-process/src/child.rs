@@ -415,22 +415,13 @@ impl VerifiedChild {
             // group id equals the child's pid and is pinned by the unreaped
             // owned Child until reap.
             command.process_group(0);
-            // Linux: PR_SET_PDEATHSIG. Darwin: a forked kqueue watcher on the
-            // owner pid (NOTE_EXIT) SIGKILLs this process group -- macOS has
-            // no PDEATHSIG. xk4c owns prctl-errno fail-closed; do not fold it
-            // in here.
+            // Linux: PR_SET_PDEATHSIG, fail-closed if prctl returns nonzero
+            // (xk4c). Darwin: kqueue watcher (hgni). macOS has no PDEATHSIG;
+            // the owner path remains that watcher plus kill_and_reap.
             #[cfg(target_os = "linux")]
             {
                 unsafe {
-                    command.pre_exec(|| {
-                        // SAFETY: pre_exec is async-signal-safe; prctl here only
-                        // sets the parent-death signal on this child.
-                        let _ = libc::prctl(libc::PR_SET_PDEATHSIG, libc::SIGKILL);
-                        if libc::getppid() == 1 {
-                            libc::_exit(1);
-                        }
-                        Ok(())
-                    });
+                    command.pre_exec(linux_bind_pdeathsig);
                 }
             }
             #[cfg(target_os = "macos")]
@@ -886,6 +877,39 @@ impl VerifiedChild {
         self.revoke()?;
         self.terminal_status().ok_or(IdentityError::Missing)
     }
+}
+
+/// Set `PR_SET_PDEATHSIG` to `signal`. Nonzero prctl fails the spawn hook
+/// so Command does not exec without the parent-death bit.
+#[cfg(target_os = "linux")]
+fn linux_set_pdeathsig(signal: libc::c_int) -> io::Result<()> {
+    // SAFETY: prctl here only sets or queries the parent-death signal.
+    let rc = unsafe { libc::prctl(libc::PR_SET_PDEATHSIG, signal) };
+    if rc != 0 {
+        Err(io::Error::last_os_error())
+    } else {
+        Ok(())
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn linux_bind_pdeathsig() -> io::Result<()> {
+    linux_set_pdeathsig(libc::SIGKILL)?;
+    let mut got: libc::c_int = 0;
+    // SAFETY: PR_GET_PDEATHSIG writes one int; fail closed if the bit did not
+    // stick so Command cannot exec an unbound child.
+    let rc = unsafe { libc::prctl(libc::PR_GET_PDEATHSIG, &mut got as *mut libc::c_int) };
+    if rc != 0 || got != libc::SIGKILL {
+        return Err(io::Error::other(
+            "PR_SET_PDEATHSIG did not stick; refusing exec",
+        ));
+    }
+    // SAFETY: getppid is async-signal-safe; orphan means the owner already
+    // died between fork and this hook.
+    if unsafe { libc::getppid() } == 1 {
+        unsafe { libc::_exit(1) };
+    }
+    Ok(())
 }
 
 /// Darwin owner-death: fork a kqueue watcher that SIGKILLs this process
@@ -1579,5 +1603,25 @@ fn resume_primary_thread(pid: u32) -> io::Result<()> {
                 "spawned child primary thread not found",
             ));
         }
+    }
+}
+
+#[cfg(all(test, target_os = "linux"))]
+mod linux_pdeathsig_tests {
+    use super::linux_set_pdeathsig;
+
+    #[test]
+    fn invalid_pdeathsig_fails_closed() {
+        let error = linux_set_pdeathsig(999_999).expect_err("invalid signal must fail prctl");
+        assert_eq!(error.raw_os_error(), Some(libc::EINVAL));
+    }
+
+    #[test]
+    fn valid_pdeathsig_sets_sigkill() {
+        linux_set_pdeathsig(libc::SIGKILL).expect("SIGKILL is a valid PDEATHSIG");
+        let mut got: libc::c_int = 0;
+        let rc = unsafe { libc::prctl(libc::PR_GET_PDEATHSIG, &mut got as *mut libc::c_int) };
+        assert_eq!(rc, 0, "PR_GET_PDEATHSIG");
+        assert_eq!(got, libc::SIGKILL);
     }
 }

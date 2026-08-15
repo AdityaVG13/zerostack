@@ -766,6 +766,24 @@ fn spawn_tree_owner_sigkill_reaps_leaf() {
     );
 }
 
+/// xk4c: the fail-closed condition is prctl != 0. An invalid signal must
+/// fail so `pre_exec` cannot return Ok and exec without the bit. Live
+/// SET+GET is in `linux_pdeathsig_tests`; owner SIGKILL is
+/// `spawn_tree_owner_sigkill_reaps_leaf`.
+#[cfg(target_os = "linux")]
+#[test]
+fn prctl_invalid_signal_fails_so_pre_exec_cannot_ok() {
+    let rc = unsafe { libc::prctl(libc::PR_SET_PDEATHSIG, 999_999) };
+    assert_ne!(
+        rc, 0,
+        "invalid PDEATHSIG must fail prctl so linux_set_pdeathsig returns Err"
+    );
+    assert_eq!(
+        std::io::Error::last_os_error().raw_os_error(),
+        Some(libc::EINVAL)
+    );
+}
+
 #[test]
 fn tree_poll_exited_keeps_pin_and_allows_descendant_sweep() {
     // Observing the root's exit via poll_exited must NOT reap it: the numeric
