@@ -83,6 +83,11 @@ pub const SESSION_EXECUTION_QUEUE_CAPACITY: usize = 8;
 pub(crate) const SESSION_VISIBLE_RESULT_BYTES: usize = 12 * 1024;
 pub const SESSION_REPLACEMENT_SETTLE_TIMEOUT: Duration = Duration::from_secs(5);
 pub const SESSION_EXECUTOR_START_TIMEOUT: Duration = Duration::from_secs(5);
+/// Shutdown-only settle budget. Must stay strictly under a typical 2000ms
+/// host listener deadline (ZEROSTACK_ENGINE_OBSERVATIONS.md). Replacement
+/// and executor start keep the 5s timeouts above.
+pub const DEFAULT_SHUTDOWN_WAIT_MS: u64 = 500;
+const SESSION_SHUTDOWN_SETTLE_TIMEOUT: Duration = Duration::from_millis(DEFAULT_SHUTDOWN_WAIT_MS);
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, serde::Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -1892,7 +1897,7 @@ impl ZsxSession {
             send_control_with_deadline(
                 &self.commands,
                 ZsxCommand::Shutdown { reply: reply_tx },
-                SESSION_REPLACEMENT_SETTLE_TIMEOUT,
+                SESSION_SHUTDOWN_SETTLE_TIMEOUT,
             )
             .map_err(|detail| {
                 ZsxSessionError::new(
@@ -1903,7 +1908,7 @@ impl ZsxSession {
                 )
             })?;
             let settle_remaining =
-                SESSION_REPLACEMENT_SETTLE_TIMEOUT.saturating_sub(control_started.elapsed());
+                SESSION_SHUTDOWN_SETTLE_TIMEOUT.saturating_sub(control_started.elapsed());
             let closure = reply_rx.recv_timeout(settle_remaining).map_err(|error| {
                 ZsxSessionError::new(
                     ZsxSessionFailureCode::BackendUnavailable,
@@ -1911,7 +1916,7 @@ impl ZsxSession {
                     None,
                     format!(
                         "session shutdown did not settle within {}ms: {error}",
-                        SESSION_REPLACEMENT_SETTLE_TIMEOUT.as_millis()
+                        DEFAULT_SHUTDOWN_WAIT_MS
                     ),
                 )
             })?;

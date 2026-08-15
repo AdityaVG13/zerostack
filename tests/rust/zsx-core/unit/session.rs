@@ -3,6 +3,13 @@
     use zero_abi::raw_worker::EngineIdentity;
 
     #[test]
+    fn shutdown_settle_is_strictly_inside_a_two_second_host_deadline() {
+        assert_eq!(DEFAULT_SHUTDOWN_WAIT_MS, 500);
+        assert!(DEFAULT_SHUTDOWN_WAIT_MS < 2000);
+        assert_eq!(SESSION_REPLACEMENT_SETTLE_TIMEOUT.as_millis(), 5000);
+    }
+
+    #[test]
     fn default_session_id_is_unique_per_builder() {
         let first = ZsxBuilder::new(PathBuf::from("/tmp/one"));
         let second = ZsxBuilder::new(PathBuf::from("/tmp/two"));

@@ -82,7 +82,7 @@ pub use result_v6::{
     legacy_envelope_value, legacy_kind_code,
 };
 pub use session::{
-    SESSION_EXECUTION_QUEUE_CAPACITY, SESSION_EXECUTOR_START_TIMEOUT,
+    DEFAULT_SHUTDOWN_WAIT_MS, SESSION_EXECUTION_QUEUE_CAPACITY, SESSION_EXECUTOR_START_TIMEOUT,
     SESSION_REPLACEMENT_SETTLE_TIMEOUT, SessionReplacementReason, SessionReplacementReceipt,
     ZsxBuilder, ZsxExecutionMetrics, ZsxExecutionResult, ZsxExecutionResultV6, ZsxSession,
     ZsxSessionCancellation, ZsxSessionError, ZsxSessionFailureCode,
