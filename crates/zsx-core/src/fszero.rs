@@ -186,6 +186,19 @@ fn receive_call_response(
     request: &CallRequest,
 ) -> Result<AdapterResponse, AdapterError> {
     loop {
+        // Prefer a committed reply over cancel/deadline so a sitting Ok is
+        // not rewritten after the session thread already finished.
+        match reply.recv_timeout(CALL_REPLY_POLL_INTERVAL) {
+            Ok(response) => return response,
+            Err(RecvTimeoutError::Timeout) => {}
+            Err(RecvTimeoutError::Disconnected) => {
+                return Err(adapter_error(
+                    "internal",
+                    "fszero session thread is gone",
+                    request,
+                ));
+            }
+        }
         if cancellation.is_cancelled() {
             return Err(adapter_error(
                 "cancelled",
@@ -199,17 +212,6 @@ fn receive_call_response(
                 "fszero adapter deadline exceeded while awaiting dispatch",
                 request,
             ));
-        }
-        match reply.recv_timeout(CALL_REPLY_POLL_INTERVAL) {
-            Ok(response) => return response,
-            Err(RecvTimeoutError::Timeout) => {}
-            Err(RecvTimeoutError::Disconnected) => {
-                return Err(adapter_error(
-                    "internal",
-                    "fszero session thread is gone",
-                    request,
-                ));
-            }
         }
     }
 }
@@ -544,20 +546,7 @@ fn run_call(
             Ok(outcome) => outcome,
             Err(error) => return Err(domain_error_to_adapter(&error, request)),
         };
-    if cancellation.is_cancelled() {
-        return Err(adapter_error(
-            "cancelled",
-            "fszero adapter cancelled",
-            request,
-        ));
-    }
-    if deadline_expired(request) {
-        return Err(adapter_error(
-            "deadline_exceeded",
-            "fszero adapter deadline exceeded",
-            request,
-        ));
-    }
+    // Kernel already ran. Do not rewrite a finished Ok as cancel/deadline.
     let wall_ns = outcome.wall_ns.max(1);
     let inline_evidence = outcome.inline_evidence.clone();
     let recovery_key = outcome.recovery_key.clone();
@@ -946,20 +935,6 @@ impl DomainAdapter for FsZeroAdapter {
         };
         send_session_command(&self.sender, command, call.cancellation, request)?;
         let response = receive_call_response(&reply_rx, &call.cancellation, request)?;
-        if call.cancellation.is_cancelled() {
-            return Err(adapter_error(
-                "cancelled",
-                "fszero adapter cancelled",
-                request,
-            ));
-        }
-        if deadline_expired(request) {
-            return Err(adapter_error(
-                "deadline_exceeded",
-                "fszero adapter deadline exceeded",
-                request,
-            ));
-        }
         Ok(response)
     }
 }

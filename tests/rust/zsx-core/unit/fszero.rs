@@ -225,6 +225,25 @@
         assert_eq!(error.error.kind, "deadline_exceeded");
     }
 
+    #[test]
+    fn sitting_reply_wins_over_cancel() {
+        let (reply_tx, reply_rx) = mpsc::sync_channel(1);
+        let request = test_request(None);
+        reply_tx
+            .send(Err(adapter_error(
+                "validation",
+                "committed kernel result",
+                &request,
+            )))
+            .expect("reply");
+        let cancellation = CancellationSignal::new();
+        cancellation.cancel();
+        let error = receive_call_response(&reply_rx, &cancellation, &request)
+            .expect_err("committed reply is an error frame");
+        assert_eq!(error.error.kind, "validation");
+        assert!(error.error.message.contains("committed kernel result"));
+    }
+
     fn delay_request(delay_ms: u64) -> CallRequest {
         let mut request = test_request(None);
         request.op = "fs.search".into();
