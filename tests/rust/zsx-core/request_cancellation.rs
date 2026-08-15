@@ -261,12 +261,20 @@ fn replace_rejects_queued_execute_under_old_generation() {
         .expect("replace advances generation");
     let _ = occupy.join();
     let queued_result = queued_join.join().expect("queued thread");
-    assert!(queued_result.is_err(), "queued g1 work must not succeed");
+    let queued_error = queued_result.expect_err("queued g1 work must not succeed");
+    assert_eq!(queued_error.code, ZsxSessionFailureCode::StaleGeneration);
     // Occupier may have started; queued work must not add a second dispatch.
     assert!(
         fs.calls() <= 1,
         "queued execute after replace must not dispatch: calls={}",
         fs.calls()
+    );
+    assert_eq!(
+        session
+            .reconcile_request(1, 2)
+            .expect_err("old-generation reconcile is stale")
+            .code,
+        ZsxSessionFailureCode::StaleGeneration
     );
     session.shutdown().expect("shutdown");
 }

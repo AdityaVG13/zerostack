@@ -823,12 +823,17 @@ pub struct ZsxSession {
     /// state root; shared with no worker state, since persist and resume
     /// are facade operations.
     continuations: Arc<Mutex<crate::continuation::ContinuationRegistryV1>>,
+    /// Worker-visible generation. `begin_replacement` and whole-session
+    /// `cancel` store the next value before any Replace is enqueued so a
+    /// FIFO-ahead Execute cannot dispatch under the retired generation.
+    live_generation: Arc<AtomicU64>,
 }
 
 #[derive(Clone)]
 pub struct ZsxSessionCancellation {
     state: Arc<Mutex<ZsxSessionState>>,
     cancellation: Arc<Mutex<ActiveCancellationSlot>>,
+    live_generation: Arc<AtomicU64>,
 }
 
 impl ZsxSessionCancellation {
@@ -841,6 +846,7 @@ impl ZsxSessionCancellation {
             if let Some(next) = state.generation.checked_add(1) {
                 state.generation = next;
                 state.seen_request_ids.clear();
+                self.live_generation.store(next, Ordering::Release);
             }
         }
         if let Ok(mut slot) = self.cancellation.lock() {
@@ -949,6 +955,8 @@ impl ZsxSession {
         let (ready_tx, ready_rx) = mpsc::sync_channel(1);
         let cancellation = Arc::new(Mutex::new(ActiveCancellationSlot::default()));
         let worker_cancellation = Arc::clone(&cancellation);
+        let live_generation = Arc::new(AtomicU64::new(initial_generation));
+        let worker_live_generation = Arc::clone(&live_generation);
         let worker = thread::Builder::new()
             .name("zsx-session-executor".into())
             .spawn(move || {
@@ -960,6 +968,7 @@ impl ZsxSession {
                     adapters,
                     receiver,
                     worker_cancellation,
+                    worker_live_generation,
                     ready_tx,
                 )
             })
@@ -1012,6 +1021,7 @@ impl ZsxSession {
             cancellation,
             worker: Mutex::new(Some(worker)),
             continuations,
+            live_generation,
         })
     }
 
@@ -1033,6 +1043,7 @@ impl ZsxSession {
         ZsxSessionCancellation {
             state: Arc::clone(&self.state),
             cancellation: Arc::clone(&self.cancellation),
+            live_generation: Arc::clone(&self.live_generation),
         }
     }
 
@@ -2065,6 +2076,7 @@ impl ZsxSession {
         state.replacing = true;
         state.generation = next;
         state.seen_request_ids.clear();
+        self.live_generation.store(next, Ordering::Release);
         Ok(next)
     }
 
@@ -2151,9 +2163,9 @@ fn session_worker(
     >,
     commands: Receiver<ZsxCommand>,
     cancellation: Arc<Mutex<ActiveCancellationSlot>>,
+    live_generation: Arc<AtomicU64>,
     ready: SyncSender<Result<(), String>>,
 ) {
-    let mut live_generation = initial_generation;
     let mut executor = match start_session_executor(
         initial_generation,
         &root,
@@ -2183,10 +2195,11 @@ fn session_worker(
                 contingent_policy,
                 reply,
             } => {
-                let result = if generation != live_generation {
+                let live = live_generation.load(Ordering::Acquire);
+                let result = if generation != live {
                     Err((
                         HostError::Runtime(format!(
-                            "request generation {generation} is stale; live generation is {live_generation}"
+                            "request generation {generation} is stale; live generation is {live}"
                         )),
                         None,
                     ))
@@ -2223,7 +2236,7 @@ fn session_worker(
                 let _ = reply.send(result);
             }
             ZsxCommand::Replace { generation, reply } => {
-                live_generation = generation;
+                live_generation.store(generation, Ordering::Release);
                 if let Ok(mut slot) = cancellation.lock() {
                     *slot = ActiveCancellationSlot::default();
                 }
