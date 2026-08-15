@@ -417,7 +417,7 @@ The deterministic hub suite publishes six machine-readable gate IDs. It owns imm
 | `RACC-CERT` | Every supported typed query returns the exact payload, locked parser/index/operator provenance, query-bound completeness witness, and no omissions or extras. | T2 |
 | `RACC-RECEIPT` | Replay identity and exact per-phase arithmetic include successful and failed trials, retries, verification/recovery calls, expansions, and fallback charges. | T8, 12.2 |
 | `RACC-GATE-IRREV` | An irreversible effect without verified evidence routes to `RawFallback` rather than committing a compressed decision. | T2, T8 |
-| `RACC-BUDGET` | Expansion budgets are nested monotone doublings and independently satisfy the cumulative factor-4 bound. | T10 |
+| `RACC-BUDGET` | Expansion budgets are nested monotone doublings; the coded last×4 check (`Σ measured ≤ 4 × last requested`) is an enclosure identity, **not** RACC paper Thm 6.1 (`Σ bids < 4K`). | T10 |
 | `RACC-INLINE` | A certified payload and its certificate arrive in one substrate round trip. | 12.2 |
 | `RACC-RESIDENCY` | Resident objects recover byte-identically with metadata; guarded removal produces a typed miss. | T8 |
 

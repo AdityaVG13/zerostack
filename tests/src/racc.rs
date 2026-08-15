@@ -754,11 +754,11 @@ pub fn check_budget(substrate: &mut impl RaccSubstrate) -> RaccCheckResult {
         .last()
         .and_then(|last| last.checked_mul(4));
     if cumulative.is_none() || factor_four.is_none() || cumulative.unwrap() > factor_four.unwrap() {
-        return fail(RaccGateId::Budget, "independent factor-4 bound failed");
+        return fail(RaccGateId::Budget, "enclosure last×4 bound failed");
     }
     pass(
         RaccGateId::Budget,
-        "nested doubling and factor-4 arithmetic verified",
+        "nested doubling and last×4 enclosure (not paper Thm 6.1 / 4K bids) verified",
     )
 }
 

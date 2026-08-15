@@ -1,4 +1,10 @@
 //! Deterministic contract digest helpers.
+//!
+//! These hashes are Wire identity (canonical JSON + SHA-256). They are **not**
+//! a C-25 semantic-mutation checker: changing ProtocolLimits defaults,
+//! ApprovalGrant shape, or EngineIdentity aliases can leave the digest
+//! unchanged if the hashed field names / version string stay put. Do not
+//! Promote C-25 from the existing version/key-order pins.
 
 use serde_json::Value;
 use sha2::{Digest, Sha256};
