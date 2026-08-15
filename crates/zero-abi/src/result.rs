@@ -145,14 +145,20 @@ fn validate_ack(ack: &str) -> Result<(), ZeroResultBuildError> {
     }
 }
 fn validate_ref(reference: &str) -> Result<(), ZeroResultBuildError> {
-    let valid_scheme = ["fz://", "gz://", "tz://"]
-        .iter()
-        .any(|prefix| reference.starts_with(prefix));
-    let suffix = reference
-        .split_once("://")
-        .map(|(_, suffix)| suffix)
-        .unwrap_or_default();
-    if valid_scheme && !suffix.is_empty() && !reference.chars().any(char::is_whitespace) {
+    // Same identity as ZeroRef v1: `{fz|gz|tz}://blob/<64-hex>` plus optional
+    // `#B`/`#L` fragment. `tz://blob/abc` is not a ref.
+    let Some((scheme, rest)) = reference.split_once("://blob/") else {
+        return Err(ZeroResultBuildError::InvalidRef);
+    };
+    if !matches!(scheme, "fz" | "gz" | "tz") {
+        return Err(ZeroResultBuildError::InvalidRef);
+    }
+    let hash = rest.split_once('#').map(|(hash, _)| hash).unwrap_or(rest);
+    if hash.len() == 64
+        && hash
+            .bytes()
+            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+    {
         Ok(())
     } else {
         Err(ZeroResultBuildError::InvalidRef)

@@ -415,6 +415,23 @@ impl VerifiedChild {
             // group id equals the child's pid and is pinned by the unreaped
             // owned Child until reap.
             command.process_group(0);
+            // Linux: die with the spawning owner even if the owner is SIGKILL'd
+            // before it can reap the group. macOS has no PDEATHSIG -- explicit
+            // kill_and_reap / process-group teardown remains the owner path.
+            #[cfg(target_os = "linux")]
+            {
+                unsafe {
+                    command.pre_exec(|| {
+                        // SAFETY: pre_exec is async-signal-safe; prctl here only
+                        // sets the parent-death signal on this child.
+                        let _ = libc::prctl(libc::PR_SET_PDEATHSIG, libc::SIGKILL);
+                        if libc::getppid() == 1 {
+                            libc::_exit(1);
+                        }
+                        Ok(())
+                    });
+                }
+            }
         }
         #[cfg(windows)]
         {

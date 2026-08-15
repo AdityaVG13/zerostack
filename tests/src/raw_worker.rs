@@ -374,11 +374,10 @@ fn remote_error(error: &WorkerAdapterError) -> String {
 /// (mutation realm), deadline, and output-bounds kinds, which belong to the
 /// mutation, limits, and leak gates respectively.
 fn is_forbidden_denial(kind: &str) -> bool {
-    let kind = kind.to_ascii_lowercase();
-    kind.contains("validation")
-        || kind.contains("sandbox")
-        || kind.contains("forbidden")
-        || kind.contains("unsupported")
+    matches!(
+        kind.to_ascii_lowercase().as_str(),
+        "validation" | "sandbox" | "forbidden" | "unsupported"
+    )
 }
 
 /// Whether a remote error `kind` signals output/frame bounds enforcement
