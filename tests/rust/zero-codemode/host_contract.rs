@@ -259,6 +259,135 @@ fn output_wall_arrangements_golden_matches_const() {
     );
 }
 
+/// PROVENANCE: one-shot `execute_measured("return 1;")` per named
+/// `OUTPUT_WALL_ARRANGEMENTS` row. Catalog only -- not an SLO, keep-window,
+/// or product-wide ceiling.
+#[test]
+fn output_wall_occupancy_is_four_named_rows_not_an_slo() {
+    let mut rows = Vec::new();
+    for arrangement in OUTPUT_WALL_ARRANGEMENTS {
+        rows.push(sample_arrangement_occupancy(arrangement));
+    }
+    assert_eq!(rows.len(), 4, "occupancy is four named rows, not one blend");
+    let names: Vec<&str> = rows
+        .iter()
+        .map(|row| row["name"].as_str().expect("name"))
+        .collect();
+    assert_eq!(
+        names,
+        OUTPUT_WALL_ARRANGEMENTS
+            .iter()
+            .map(|row| row.name)
+            .collect::<Vec<_>>()
+    );
+
+    let receipt = json!({
+        "kind": "measure-only",
+        "schema": "output-wall-occupancy-v1",
+        "provenance": "one-shot execute_measured(return 1) per OUTPUT_WALL_ARRANGEMENTS row; not an SLO",
+        "rows": rows,
+    });
+    assert_measure_only_receipt(&receipt);
+
+    let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../../tests/artifacts/output_wall_occupancy");
+    fs::create_dir_all(&dir).expect("create occupancy evidence dir");
+    fs::write(
+        dir.join("PROVENANCE.md"),
+        "PROVENANCE: generated from OUTPUT_WALL_ARRANGEMENTS constructors + one-shot execute_measured; measure-only catalog, not an SLO.\n",
+    )
+    .expect("write PROVENANCE");
+    fs::write(
+        dir.join("receipt.json"),
+        serde_json::to_string_pretty(&receipt).expect("encode receipt"),
+    )
+    .expect("write occupancy receipt");
+}
+
+fn sample_arrangement_occupancy(
+    arrangement: &zero_codemode::OutputWallArrangement,
+) -> Value {
+    let limits = match arrangement.name {
+        "host-limits-default" => HostLimits::default(),
+        "capability-manifest-echo" => {
+            let base = HostLimits::default();
+            HostLimits::new(
+                arrangement.memory_bytes,
+                base.stack_bytes,
+                Duration::from_millis(arrangement.wall_ms),
+                base.instruction_budget,
+                base.microtask_ceiling,
+                MAX_INFLIGHT_CONNECTOR_CALLS,
+                base.max_plan_bytes,
+                arrangement.output_bytes,
+            )
+            .expect("echo HostLimits")
+        }
+        "zsx-connector-host" => HostLimits::new(
+            arrangement.memory_bytes,
+            1024 * 1024,
+            Duration::from_millis(arrangement.wall_ms),
+            10_000_000,
+            16_384,
+            MAX_INFLIGHT_CONNECTOR_CALLS,
+            256 * 1024,
+            arrangement.output_bytes,
+        )
+        .expect("connector HostLimits"),
+        "zsx-session-visible" => HostLimits::default(),
+        other => panic!("unmeasured arrangement {other}"),
+    };
+    let mut host = Host::new(limits, reg()).expect("host for occupancy sample");
+    if arrangement.name == "zsx-session-visible" {
+        host = host
+            .with_visible_result_budget(arrangement.output_bytes)
+            .expect("session visible overlay");
+    }
+    let outcome = host.execute_measured("return 1;", Rc::new(C::ok()));
+    let value = outcome
+        .result
+        .unwrap_or_else(|error| panic!("{} execute: {error}", arrangement.name));
+    let encoded_bytes = serde_json::to_vec(&value).expect("encode sample").len();
+    json!({
+        "name": arrangement.name,
+        "constructor": arrangement.owner,
+        "budget_memory_bytes": arrangement.memory_bytes,
+        "budget_wall_ms": arrangement.wall_ms,
+        "budget_output_bytes": arrangement.output_bytes,
+        "sample_wall_time_ns": outcome.metrics.wall_time_ns,
+        "sample_encoded_bytes": encoded_bytes,
+        "sample_peak_inflight": outcome.metrics.peak_inflight_connector_calls,
+        "sample_status": "one-shot-execute",
+    })
+}
+
+fn assert_measure_only_receipt(receipt: &Value) {
+    let mut stack = vec![receipt];
+    while let Some(node) = stack.pop() {
+        match node {
+            Value::Object(map) => {
+                for (key, child) in map {
+                    let lower = key.to_ascii_lowercase();
+                    assert!(
+                        !(lower.contains("slo")
+                            || lower.contains("keep")
+                            || lower.contains("p50")
+                            || lower.contains("p95")
+                            || lower.contains("ratchet")
+                            || lower.contains("ceiling")),
+                        "measure-only receipt must not write {key}"
+                    );
+                    stack.push(child);
+                }
+            }
+            Value::Array(items) => stack.extend(items),
+            _ => {}
+        }
+    }
+    assert_eq!(receipt["kind"], "measure-only");
+    assert!(receipt.get("occupancy").is_none(), "no blended occupancy number");
+}
+
 fn render_output_wall_arrangements_table() -> String {
     let mut out = String::from("name\tmemory_bytes\twall_ms\toutput_bytes\towner\n");
     for row in OUTPUT_WALL_ARRANGEMENTS {
