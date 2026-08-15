@@ -248,3 +248,25 @@
             let _ = join.join();
         }
     }
+
+    #[cfg(all(feature = "fszero", feature = "graphzero", feature = "tokenzero"))]
+    #[test]
+    fn build_canonical_refuses_unusable_durable_fszero_root() {
+        let workspace = tempfile::tempdir().expect("workspace");
+        let state_file = workspace.path().join("not-a-dir");
+        std::fs::write(&state_file, b"x").expect("blocker file");
+        let error = match ZsxSession::builder(workspace.path())
+            .with_state_root(&state_file)
+            .with_session_id("canonical-mkdir-fail")
+            .build_canonical()
+        {
+            Ok(_) => panic!("canonical must refuse inert FSZero"),
+            Err(error) => error,
+        };
+        assert_eq!(error.code, ZsxSessionFailureCode::BackendUnavailable);
+        assert!(
+            error.detail.contains("durable store unavailable"),
+            "canonical refuse must name the durable failure: {}",
+            error.detail
+        );
+    }

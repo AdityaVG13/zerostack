@@ -757,9 +757,10 @@ impl ZsxBuilder {
     /// Build the canonical session over exactly the three real adapters
     /// (FSZero, GraphZero, TokenZero) constructed from this builder's root
     /// and session id, with no custom or fixture adapters. `FsZeroAdapter`
-    /// and `GraphZeroAdapter` constructors are infallible; a `TokenZeroAdapter`
-    /// binding failure surfaces as
-    /// [`ZsxSessionFailureCode::BackendUnavailable`].
+    /// and `GraphZeroAdapter` constructors stay infallible; a durable-open
+    /// failure is an inert degraded adapter and is refused here as
+    /// [`ZsxSessionFailureCode::BackendUnavailable`]. A `TokenZeroAdapter`
+    /// binding failure surfaces as the same code.
     #[cfg(all(feature = "fszero", feature = "graphzero", feature = "tokenzero"))]
     pub fn build_canonical(self) -> Result<ZsxSession, ZsxSessionError> {
         let root = self.root.clone();

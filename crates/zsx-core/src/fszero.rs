@@ -62,7 +62,8 @@ use std::time::{Duration, Instant};
 
 use fs_zero::core::{DispatchOutcome, dispatch_codemode_method};
 use fs_zero::{
-    DomainError, DomainResult, FSZeroSession, OPERATION_ABI_VERSION, operation_abi_digest,
+    DomainError, DomainResult, FSZeroSession, OPERATION_ABI_VERSION, RecoveryStore,
+    operation_abi_digest,
 };
 use serde_json::Value;
 use zero_abi::{
@@ -625,6 +626,16 @@ fn session_loop(
     }
 }
 
+/// How a constructor asked to open the FSZero session.
+enum SessionOpen {
+    /// Durable repo store under `root` (`.zerostack` / `.fszero`).
+    RepoStore,
+    /// Explicit sqlite path under the caller-authorized state root.
+    Database(PathBuf),
+    /// Test/fixture in-memory recovery. Never used as a durable-open fallback.
+    InMemory,
+}
+
 /// Real FSZero in-process adapter over one [`FSZeroSession`] owned by a
 /// dedicated session thread.
 pub struct FsZeroAdapter {
@@ -633,26 +644,36 @@ pub struct FsZeroAdapter {
     root: PathBuf,
     state_root: PathBuf,
     binding: AdapterBinding,
-    /// True when the durable repo store could not be opened and the session
-    /// fell back to in-memory recovery (durable refs do not survive restart).
+    /// True when the caller asked for a durable store and it could not be
+    /// opened. The adapter is then inert: no session thread, no `with_root`
+    /// fallback, and `call` fails closed.
     degraded: bool,
 }
 
 impl FsZeroAdapter {
+    // Owner choice (pz1y): keep `new` / `new_with_state_root` infallible.
+    // Durable failure is an inert adapter (`degraded()==true`, no session
+    // thread, no `FSZeroSession::with_root`). Tests that need a live
+    // in-memory engine call [`Self::new_in_memory`]. Do not change `new()`
+    // to `Result` and `.expect` at every call site.
+
     /// Build the adapter over the immutable FSZero revision API rooted at
     /// `root`, bound to `session_id`.
     ///
-    /// Opens the durable repo store (`.zerostack`/`.fszero`) when possible;
-    /// falls back to in-memory recovery — never panics on store errors — and
-    /// reports the degradation through [`Self::degraded`].
+    /// Opens the durable repo store (`.zerostack`/`.fszero`) when possible.
+    /// If that open fails the adapter is inert (`degraded()==true`) and does
+    /// not start [`FSZeroSession::with_root`].
     pub fn new(root: impl Into<PathBuf>, session_id: &str) -> Self {
         let root = root.into();
         let root = root.canonicalize().unwrap_or(root);
-        Self::build(root.clone(), root, session_id, None, false)
+        Self::build(root.clone(), root, session_id, SessionOpen::RepoStore)
     }
 
     /// Build over `workspace_root` while keeping all durable engine and CAS
     /// state below the caller-authorized `state_root`.
+    ///
+    /// mkdir or durable-open failure returns an inert adapter. It does not
+    /// spawn `FSZeroSession::with_root`.
     pub fn new_with_state_root(
         workspace_root: impl Into<PathBuf>,
         state_root: impl Into<PathBuf>,
@@ -663,23 +684,32 @@ impl FsZeroAdapter {
         let state_root = state_root.into();
         let fszero_dir = state_root.join("fszero");
         if std::fs::create_dir_all(&fszero_dir).is_err() {
-            return Self::build(workspace_root, state_root, session_id, None, true);
+            eprintln!(
+                "zsx-core: FSZero durable state root unusable; refusing with_root fallback"
+            );
+            return Self::inert(workspace_root, state_root);
         }
         let database = fszero_dir.join("store.sqlite3");
-        Self::build(workspace_root, state_root, session_id, Some(database), false)
+        Self::build(
+            workspace_root,
+            state_root,
+            session_id,
+            SessionOpen::Database(database),
+        )
     }
 
-    fn build(
-        root: PathBuf,
-        state_root: PathBuf,
-        session_id: &str,
-        database: Option<PathBuf>,
-        force_degraded: bool,
-    ) -> Self {
+    /// Explicit in-memory session for fixtures. Not a durable-open fallback.
+    pub fn new_in_memory(root: impl Into<PathBuf>, session_id: &str) -> Self {
+        let root = root.into();
+        let root = root.canonicalize().unwrap_or(root);
+        Self::build(root.clone(), root, session_id, SessionOpen::InMemory)
+    }
+
+    fn fszero_binding() -> AdapterBinding {
         // FSZero equates the semantic contract digest with the operation ABI
         // digest (surface_handshake::local_capability).
         let digest = operation_abi_digest();
-        let binding = AdapterBinding::new(
+        AdapterBinding::new(
             EngineIdentity::FsZero,
             worker_revision(),
             OPERATION_ABI_VERSION,
@@ -687,7 +717,23 @@ impl FsZeroAdapter {
             digest,
             FSZERO_REF_SCHEME,
         )
-        .expect("fszero binding is valid"); // ubs:ignore — AdapterBinding constants are schema-valid
+        .expect("fszero binding is valid") // ubs:ignore — AdapterBinding constants are schema-valid
+    }
+
+    fn inert(root: PathBuf, state_root: PathBuf) -> Self {
+        let (sender, _receiver) = mpsc::sync_channel(1);
+        Self {
+            sender,
+            session_thread: None,
+            root,
+            state_root,
+            binding: Self::fszero_binding(),
+            degraded: true,
+        }
+    }
+
+    fn build(root: PathBuf, state_root: PathBuf, session_id: &str, open: SessionOpen) -> Self {
+        let binding = Self::fszero_binding();
         let (sender, receiver) = mpsc::sync_channel(1);
         let (init_tx, init_rx) = mpsc::sync_channel(1);
         let thread_session_id = session_id.to_owned();
@@ -699,35 +745,33 @@ impl FsZeroAdapter {
         let session_thread = thread::Builder::new()
             .name("zsx-fszero-session".into())
             .spawn(move || {
-                let (session, degraded) = if force_degraded {
-                    eprintln!(
-                        "zsx-core: FSZero durable state root unusable; refusing silent success"
-                    );
-                    (FSZeroSession::with_root(&thread_root), true)
-                } else {
-                    match database {
-                        Some(database) => (
-                            FSZeroSession::with_durable_root(&thread_root, database),
-                            false,
-                        ),
-                        None => match FSZeroSession::try_with_repo_store(&thread_root) {
-                            Ok(session) => (session, false),
-                            Err(error) => {
-                                eprintln!(
-                                    "zsx-core: FSZero durable store unavailable ({error}); using in-memory recovery"
-                                );
-                                (FSZeroSession::with_root(&thread_root), true)
-                            }
-                        },
-                    }
+                let opened = match open {
+                    SessionOpen::InMemory => Ok(FSZeroSession::with_root(&thread_root)),
+                    SessionOpen::RepoStore => FSZeroSession::try_with_repo_store(&thread_root),
+                    SessionOpen::Database(database) => match RecoveryStore::try_with_durable(&database)
+                    {
+                        Ok(store) => {
+                            drop(store);
+                            Ok(FSZeroSession::with_durable_root(&thread_root, database))
+                        }
+                        Err(error) => Err(error),
+                    },
                 };
-                let _ = init_tx.send(degraded);
-                session_loop(session, receiver, thread_state_root, thread_session_id);
+                match opened {
+                    Ok(session) => {
+                        let _ = init_tx.send(false);
+                        session_loop(session, receiver, thread_state_root, thread_session_id);
+                    }
+                    Err(error) => {
+                        eprintln!(
+                            "zsx-core: FSZero durable store unavailable ({error}); refusing with_root fallback"
+                        );
+                        let _ = init_tx.send(true);
+                    }
+                }
             })
             .expect("cannot start fszero session thread"); // ubs:ignore — constructor is documented infallible; thread spawn failure is process-fatal
-        let degraded = init_rx
-            .recv_timeout(SESSION_INIT_TIMEOUT)
-            .unwrap_or(true);
+        let degraded = init_rx.recv_timeout(SESSION_INIT_TIMEOUT).unwrap_or(true);
         Self {
             sender,
             session_thread: Some(session_thread),
@@ -738,10 +782,16 @@ impl FsZeroAdapter {
         }
     }
 
-    /// True when the durable repo store was unavailable and the session runs
-    /// on in-memory recovery.
+    /// True when the caller asked for a durable store and it could not be
+    /// opened. The adapter is then inert and must not be treated as a live
+    /// in-memory engine.
     pub fn degraded(&self) -> bool {
         self.degraded
+    }
+
+    #[cfg(test)]
+    fn session_is_live(&self) -> bool {
+        self.session_thread.is_some() && !self.degraded
     }
 
     /// The session root this adapter serves.
@@ -793,6 +843,13 @@ impl DomainAdapter for FsZeroAdapter {
 
     fn call(&self, call: AdapterCall<'_>) -> Result<AdapterResponse, AdapterError> {
         let request = call.request;
+        if self.degraded || self.session_thread.is_none() {
+            return Err(adapter_error(
+                "backend_unavailable",
+                "FSZero durable store unavailable; refusing in-memory fallback",
+                request,
+            ));
+        }
         // Cancellation and deadline are checked before enqueueing and again
         // after the reply arrives; the session thread re-checks both right
         // before and right after the dispatch itself.

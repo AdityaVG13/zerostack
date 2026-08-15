@@ -222,3 +222,68 @@
         let _ = queued.join();
         drop(adapter);
     }
+
+    #[test]
+    fn durable_mkdir_fail_is_inert_and_degraded() {
+        let workspace = tempfile::tempdir().expect("workspace");
+        let state_file = workspace.path().join("not-a-dir");
+        std::fs::write(&state_file, b"x").expect("blocker file");
+        let started = Instant::now();
+        let adapter =
+            FsZeroAdapter::new_with_state_root(workspace.path(), &state_file, "session-mkdir-fail");
+        assert!(
+            started.elapsed() < Duration::from_secs(2),
+            "mkdir fail must not wait SESSION_INIT_TIMEOUT: {:?}",
+            started.elapsed()
+        );
+        assert!(adapter.degraded(), "durable mkdir fail must set degraded");
+        assert!(
+            !adapter.session_is_live(),
+            "mkdir fail must not start with_root"
+        );
+        let error = adapter
+            .call(AdapterCall {
+                request: &test_request(None),
+                cancellation: &CancellationSignal::new(),
+            })
+            .expect_err("inert adapter must fail closed");
+        assert_eq!(error.error.kind, "backend_unavailable");
+        assert!(adapter.degraded(), "call must not clear degraded");
+    }
+
+    #[test]
+    fn durable_open_fail_does_not_start_with_root() {
+        let workspace = tempfile::tempdir().expect("workspace");
+        let state = tempfile::tempdir().expect("state");
+        let store = state.path().join("fszero").join("store.sqlite3");
+        std::fs::create_dir_all(&store).expect("blocker dir as sqlite path");
+        let started = Instant::now();
+        let adapter =
+            FsZeroAdapter::new_with_state_root(workspace.path(), state.path(), "session-open-fail");
+        assert!(
+            started.elapsed() < Duration::from_secs(5),
+            "durable-open fail must not wait SESSION_INIT_TIMEOUT: {:?}",
+            started.elapsed()
+        );
+        assert!(adapter.degraded());
+        assert!(
+            !adapter.session_is_live(),
+            "durable-open fail must not start with_root"
+        );
+        assert!(
+            adapter.degraded(),
+            "degraded must stay true after durable-open fail"
+        );
+    }
+
+    #[test]
+    fn explicit_in_memory_is_not_a_durable_fallback() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let adapter = FsZeroAdapter::new_in_memory(dir.path(), "session-in-memory");
+        assert!(
+            !adapter.degraded(),
+            "explicit in-memory is not a durable-open failure"
+        );
+        assert!(adapter.session_is_live());
+        assert_eq!(adapter.engine(), EngineIdentity::FsZero);
+    }
