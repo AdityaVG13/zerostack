@@ -15,7 +15,7 @@ use std::path::{Path, PathBuf};
 use std::sync::{
     Arc, Mutex,
     atomic::{AtomicBool, AtomicU64, Ordering},
-    mpsc::{self, Receiver, SyncSender, TrySendError},
+    mpsc::{self, Receiver, RecvTimeoutError, SyncSender, TrySendError},
 };
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
@@ -1696,28 +1696,42 @@ impl ZsxSession {
             },
             SESSION_REPLACEMENT_SETTLE_TIMEOUT,
         ) {
-            self.finish_failed_replacement(next_generation);
+            self.abort_unsent_replacement(expected_generation, next_generation);
             return Err(ZsxSessionError::new(
                 ZsxSessionFailureCode::BackendUnavailable,
-                next_generation,
+                expected_generation,
                 None,
                 detail,
             ));
         }
         let settle_remaining =
             SESSION_REPLACEMENT_SETTLE_TIMEOUT.saturating_sub(control_started.elapsed());
-        let replacement = reply_rx.recv_timeout(settle_remaining).map_err(|error| {
-            self.finish_failed_replacement(next_generation);
-            ZsxSessionError::new(
-                ZsxSessionFailureCode::BackendUnavailable,
-                next_generation,
-                None,
-                format!(
-                    "session replacement did not settle within {}ms: {error}",
-                    SESSION_REPLACEMENT_SETTLE_TIMEOUT.as_millis()
-                ),
-            )
-        })?;
+        let replacement = match reply_rx.recv_timeout(settle_remaining) {
+            Ok(outcome) => outcome,
+            Err(RecvTimeoutError::Timeout) => {
+                // Replace is already in the FIFO. Keep the next generation
+                // and re-admit so late worker Replace is usable.
+                self.finish_unsettled_replacement(next_generation);
+                return Err(ZsxSessionError::new(
+                    ZsxSessionFailureCode::BackendUnavailable,
+                    next_generation,
+                    None,
+                    format!(
+                        "session replacement did not settle within {}ms",
+                        SESSION_REPLACEMENT_SETTLE_TIMEOUT.as_millis()
+                    ),
+                ));
+            }
+            Err(RecvTimeoutError::Disconnected) => {
+                self.terminate_after_failed_replacement(next_generation);
+                return Err(ZsxSessionError::new(
+                    ZsxSessionFailureCode::BackendUnavailable,
+                    next_generation,
+                    None,
+                    "session executor dropped the replacement reply",
+                ));
+            }
+        };
         let mut state = self.lock_state(None)?;
         state.replacing = false;
         match replacement {
@@ -2097,12 +2111,35 @@ impl ZsxSession {
         }
     }
 
-    fn finish_failed_replacement(&self, generation: u64) {
+    fn abort_unsent_replacement(&self, previous: u64, next: u64) {
+        if let Ok(mut state) = self.state.lock()
+            && state.generation == next
+            && state.replacing
+        {
+            state.generation = previous;
+            state.replacing = false;
+            state.accepting = !state.terminating;
+            self.live_generation.store(previous, Ordering::Release);
+        }
+    }
+
+    fn finish_unsettled_replacement(&self, generation: u64) {
+        if let Ok(mut state) = self.state.lock()
+            && state.generation == generation
+            && !state.terminating
+        {
+            state.replacing = false;
+            state.accepting = true;
+        }
+    }
+
+    fn terminate_after_failed_replacement(&self, generation: u64) {
         if let Ok(mut state) = self.state.lock()
             && state.generation == generation
         {
             state.replacing = false;
             state.accepting = false;
+            state.terminating = true;
         }
     }
 }

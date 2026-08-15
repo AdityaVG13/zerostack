@@ -331,6 +331,49 @@ fn replace_reports_commit_race_when_inflight_execute_commits() {
 }
 
 #[test]
+fn replace_timeout_readmits_on_new_generation() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let root = dir
+        .path()
+        .canonicalize()
+        .unwrap_or_else(|_| dir.path().to_path_buf());
+    let (session, _, _, _) = build_session(&root);
+
+    let occupier = Arc::clone(&session);
+    let occupy = std::thread::spawn(move || {
+        occupier.execute(
+            1,
+            1,
+            r#"await zero.fs.compound('search', {query: 'x', __delay_ms: 6000, __committed: true});"#,
+            Duration::from_secs(30),
+        )
+    });
+    std::thread::sleep(Duration::from_millis(80));
+    let replace_error = session
+        .replace(1, SessionReplacementReason::Manual)
+        .expect_err("in-flight occupier longer than settle timeout");
+    assert_eq!(replace_error.code, ZsxSessionFailureCode::BackendUnavailable);
+    assert!(
+        replace_error.detail.contains("did not settle"),
+        "{}",
+        replace_error.detail
+    );
+    assert_eq!(session.generation().expect("generation"), 2);
+    let ok = session
+        .execute(
+            2,
+            2,
+            r#"await zero.fs.compound('list', {path: '.'});"#,
+            Duration::from_secs(30),
+        )
+        .expect("new generation must accept after replace timeout");
+    assert_eq!(ok.generation, 2);
+    assert_eq!(ok.request_id, 2);
+    let _ = occupy.join();
+    session.shutdown().expect("shutdown");
+}
+
+#[test]
 fn cancelled_before_start_never_dispatches_and_later_request_succeeds() {
     let dir = tempfile::tempdir().expect("tempdir");
     let root = dir
