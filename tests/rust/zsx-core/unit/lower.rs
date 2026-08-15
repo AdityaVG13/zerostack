@@ -170,6 +170,49 @@
                 "{name}: {err}"
             );
         }
+        // Tool-result / provenance objects must not stringify into file bytes.
+        let tool_result = json!({"ack":"C","content":{"kind":"inline","value":"secret"}});
+        for input in [
+            json!({"path":"tracked.txt","content": tool_result.clone()}),
+            json!([{"path":"tracked.txt","content": {"kind":"ref","ref":"fz://blob/abc"}}]),
+        ] {
+            let err = lower("fs", "write", input).unwrap_err();
+            assert!(
+                err.to_string().contains("non_byte_provenance"),
+                "direct write: {err}"
+            );
+        }
+        let err = lower(
+            "fs",
+            "compound",
+            json!(["write", {"path":"tracked.txt","content": tool_result.clone()}]),
+        )
+        .unwrap_err();
+        assert!(
+            err.to_string().contains("non_byte_provenance")
+                && err.to_string().contains("ctx.payload"),
+            "compound write: {err}"
+        );
+        let err = lower(
+            "fs",
+            "write",
+            json!({"path":"tracked.txt","content":"[object Object]"}),
+        )
+        .unwrap_err();
+        assert!(
+            err.to_string().contains("non_byte_provenance"),
+            "js object coercion: {err}"
+        );
+        let err = lower(
+            "fs",
+            "transact",
+            json!([{"op":"write","path":"tracked.txt","content": tool_result}]),
+        )
+        .unwrap_err();
+        assert!(
+            err.to_string().contains("non_byte_provenance"),
+            "transact write: {err}"
+        );
 
         assert!(METHODS.contains(&("fs", "transact")));
         let steps = json!([
@@ -196,6 +239,43 @@
         for input in [json!([]), json!("steps"), json!(["a", "b"])] {
             assert!(lower("fs", "transact", input).is_err());
         }
+
+        assert!(METHODS.contains(&("fs", "edit_many")));
+        assert!(METHODS.contains(&("fs", "multi_edit")));
+        let implicit = json!([
+            {"path":"a.rs","find":"x","replace":"y"},
+            {"path":"b.txt","content":"z","base":null}
+        ]);
+        let expected_steps = json!([
+            {"path":"a.rs","find":"x","replace":"y","op":"edit"},
+            {"path":"b.txt","content":"z","base":null,"op":"write"}
+        ]);
+        assert_lower(
+            "fs",
+            "edit_many",
+            implicit.clone(),
+            EngineIdentity::FsZero,
+            "fs.transact",
+            json!({"steps": expected_steps.clone()}),
+        );
+        assert_lower(
+            "fs",
+            "multi_edit",
+            json!([implicit]),
+            EngineIdentity::FsZero,
+            "fs.transact",
+            json!({"steps": expected_steps}),
+        );
+        let err = lower(
+            "fs",
+            "edit_many",
+            json!([{"op":"write","path":"tracked.txt","content": tool_result}]),
+        )
+        .unwrap_err();
+        assert!(
+            err.to_string().contains("non_byte_provenance"),
+            "edit_many write: {err}"
+        );
     }
 
     #[test]

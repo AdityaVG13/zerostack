@@ -67,7 +67,7 @@ pub struct SessionReplacementReceipt {
 /// This is a backpressure valve, not a class scheduler. Analysis/Index/Heavy
 /// permit classes live on the connector dispatch table (`dispatch_permit_class`)
 /// and are independent (M-13b). An execute request is not classified at this
-/// queue: a Heavy-class plan (`token.shell` / `fs.edit` / `fs.write`) is the
+/// queue: a Heavy-class plan (`token.shell` / `fs.edit` / `fs.write` / `fs.transact`) is the
 /// same FIFO citizen as Analysis. Under an Analysis flood that keeps the
 /// channel full, Heavy `try_send` returns [`ZsxSessionFailureCode::Backpressure`]
 /// immediately -- there is no reserved slot and no pending-Heavy wait queue.

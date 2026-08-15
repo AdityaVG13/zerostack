@@ -43,8 +43,8 @@ const HELP_ENTRIES: &[HelpEntry] = &[
     HelpEntry {
         surface: "fs",
         method: "compound",
-        signature: "zero.fs.compound(name: \"read\"|\"search\"|\"list\"|\"resolve\"|\"edit\"|\"write\", args: object) — search takes {query, path?}; read/list take {path}; resolve takes {intent, engine, limit}",
-        description: "One named filesystem operation with an args object",
+        signature: "zero.fs.compound(name: \"read\"|\"search\"|\"list\"|\"resolve\"|\"edit\"|\"write\", args: object) — write content must be a UTF-8 string (ctx.payload / payload_utf8 or expand a ref); search takes {query, path?}; read/list take {path}; resolve takes {intent, engine, limit}",
+        description: "One named filesystem operation with an args object. Write rejects tool-result objects as content.",
         keywords: &["read", "search", "list", "grep", "resolve", "query"],
     },
     HelpEntry {
@@ -64,8 +64,8 @@ const HELP_ENTRIES: &[HelpEntry] = &[
     HelpEntry {
         surface: "fs",
         method: "write",
-        signature: "zero.fs.write({ path, content, base? }) — base: null requires create (must not exist); base: fz://blob/<sha256> is a compare-and-swap overwrite",
-        description: "Atomic create or overwrite with optional CAS base gate and bounded diff result",
+        signature: "zero.fs.write({ path, content, base? }) — content is a UTF-8 string (extract with ctx.payload / payload_utf8 or expand a ref; never pass a tool-result object). base: null requires create (must not exist); base: fz://blob/<sha256> is a compare-and-swap overwrite",
+        description: "Atomic create or overwrite with optional CAS base gate and bounded diff result. Non-string content is rejected (non_byte_provenance).",
         keywords: &["write", "create", "overwrite", "put", "cas", "base"],
     },
     HelpEntry {
@@ -74,6 +74,20 @@ const HELP_ENTRIES: &[HelpEntry] = &[
         signature: "zero.fs.transact([{ op: \"edit\"|\"write\", path, find?, replace?, content?, base? }, ...])",
         description: "All-or-nothing multi-step mutation: every CAS gate checked before any apply; journaled rollback on failure",
         keywords: &["transaction", "atomic", "multi", "rollback", "batch", "refactor"],
+    },
+    HelpEntry {
+        surface: "fs",
+        method: "edit_many",
+        signature: "zero.fs.edit_many([{ path, find, replace, base? } | { op: \"write\", path, content, base? }, ...]) — one call, many files; implicit edit when find/replace are set",
+        description: "Atomic multi-file create/edit for parallel tool calling. Same kernel as fs.transact; returns a per-step receipt (path + ack), not a mashed string",
+        keywords: &["edit_many", "multi_edit", "parallel", "batch", "multi", "files", "refactor"],
+    },
+    HelpEntry {
+        surface: "fs",
+        method: "multi_edit",
+        signature: "zero.fs.multi_edit([{ path, find, replace, base? }, ...]) — alias of fs.edit_many",
+        description: "Alias of fs.edit_many: atomic multi-file find/replace and write",
+        keywords: &["multi_edit", "edit_many", "alias", "batch", "parallel"],
     },
     HelpEntry {
         surface: "fs",

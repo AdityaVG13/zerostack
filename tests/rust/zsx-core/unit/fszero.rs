@@ -81,6 +81,23 @@
     }
 
     #[test]
+    fn transact_receipt_is_lifted_into_structured_steps() {
+        let receipt = serde_json::json!([
+            {"step": 0, "path": "a.rs", "ack": "edit:1"},
+            {"step": 1, "path": "b.txt", "ack": "write:1"}
+        ]);
+        let mut value = serde_json::json!({
+            "value": {"payload_utf8": receipt.to_string()}
+        });
+        attach_transact_step_receipt("fs.transact", &mut value);
+        assert_eq!(value["steps"], receipt);
+        assert_eq!(value["value"]["steps"], receipt);
+        let mut other = serde_json::json!({"value": {"payload_utf8": "[]"}});
+        attach_transact_step_receipt("fs.read", &mut other);
+        assert!(other.get("steps").is_none());
+    }
+
+    #[test]
     fn portable_refs_are_collected_from_any_value_shape() {
         let value = serde_json::json!({
             "text": "see fz://blob/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa and (fz://blob/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb)",

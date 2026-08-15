@@ -146,7 +146,7 @@ fn dispatch_permit_class(engine: EngineIdentity, operation: &str) -> Option<Disp
     }
     if matches!(
         (engine, operation),
-        (EngineIdentity::FsZero, "fs.edit" | "fs.write")
+        (EngineIdentity::FsZero, "fs.edit" | "fs.write" | "fs.transact")
             | (EngineIdentity::TokenZero, "ingest" | "shell")
     ) {
         return Some(DispatchPermitClass::Heavy);

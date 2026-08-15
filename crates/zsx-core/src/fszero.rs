@@ -329,6 +329,36 @@ fn collect_and_conform_refs(
     Ok(refs)
 }
 
+/// Lift the transact recovery JSON (per-step path + ack) onto the envelope
+/// so edit_many callers see structured steps, not a mashed `transact:1` string.
+fn attach_transact_step_receipt(op: &str, value: &mut Value) {
+    if op != "fs.transact" {
+        return;
+    }
+    let Some(root) = value.as_object_mut() else {
+        return;
+    };
+    let text = root
+        .get("value")
+        .and_then(|inner| inner.get("payload_utf8"))
+        .and_then(Value::as_str)
+        .or_else(|| root.get("payload_utf8").and_then(Value::as_str))
+        .map(str::to_owned);
+    let Some(text) = text else {
+        return;
+    };
+    let Ok(steps) = serde_json::from_str::<Value>(&text) else {
+        return;
+    };
+    if !steps.is_array() {
+        return;
+    }
+    if let Some(inner) = root.get_mut("value").and_then(Value::as_object_mut) {
+        inner.insert("steps".into(), steps.clone());
+    }
+    root.insert("steps".into(), steps);
+}
+
 fn enrich_recovery_payload(
     session: &FSZeroSession,
     recovery_key: Option<&str>,
@@ -512,6 +542,7 @@ fn run_call(
     if let (Some(evidence), Value::Object(map)) = (inline_evidence, &mut value) {
         map.insert("evidence".into(), serde_json::json!(evidence));
     }
+    attach_transact_step_receipt(&request.op, &mut value);
 
     publish_refs_to_cas(session, root, request, &refs)?;
 

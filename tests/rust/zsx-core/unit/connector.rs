@@ -22,6 +22,10 @@
             Some(DispatchPermitClass::Analysis)
         );
         assert_eq!(
+            dispatch_permit_class(EngineIdentity::FsZero, "fs.transact"),
+            Some(DispatchPermitClass::Heavy)
+        );
+        assert_eq!(
             dispatch_permit_class(EngineIdentity::GraphZero, "index"),
             Some(DispatchPermitClass::Index)
         );

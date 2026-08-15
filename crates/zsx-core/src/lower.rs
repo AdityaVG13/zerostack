@@ -17,6 +17,8 @@ pub const METHODS: &[(&str, &str)] = &[
     ("fs", "edit"),
     ("fs", "write"),
     ("fs", "transact"),
+    ("fs", "edit_many"),
+    ("fs", "multi_edit"),
     ("fs", "read_many"),
     ("fs", "list_many"),
     ("fs", "search_many"),
@@ -411,6 +413,103 @@ fn lower_fs_world(input: Value) -> Result<Value, ConnectorError> {
     ))
 }
 
+/// Stable token in the connector error so plans can branch without
+/// string-matching prose. The corrective path is `ctx.payload` /
+/// `payload_utf8` or expand-then-write, never `JSON.stringify(result)`.
+const NON_BYTE_WRITE_CONTENT: &str = "non_byte_provenance";
+
+fn write_content_error() -> ConnectorError {
+    ConnectorError::new(format!(
+        "{NON_BYTE_WRITE_CONTENT}: fs.write content must be a UTF-8 string, not a tool-result object. \
+         Extract bytes with ctx.payload(result) (payload_utf8) or expand a content ref in the same plan; \
+         do not pass the connector result as content"
+    ))
+}
+
+fn is_utf8_string_content(value: &Value) -> bool {
+    match value {
+        Value::String(text) => text != "[object Object]",
+        _ => false,
+    }
+}
+
+/// Reject tool-result / provenance objects smuggled as `content`.
+/// Missing `content` stays legal (empty create); present content must be a string.
+fn reject_non_byte_write_content(args: &Value) -> Result<(), ConnectorError> {
+    let Some(map) = args.as_object() else {
+        return Ok(());
+    };
+    match map.get("content") {
+        None => Ok(()),
+        Some(value) if is_utf8_string_content(value) => Ok(()),
+        Some(_) => Err(write_content_error()),
+    }
+}
+
+/// Fill `op` when a batch step omits it: find/replace → edit, else write.
+fn default_batch_step_op(step: &mut Value) -> Result<(), ConnectorError> {
+    let Some(map) = step.as_object_mut() else {
+        return Err(ConnectorError::new(
+            "fs.edit_many / fs.transact steps must be objects",
+        ));
+    };
+    if map.get("op").and_then(Value::as_str).is_some() {
+        return Ok(());
+    }
+    let has_edit = map.get("find").or_else(|| map.get("old")).is_some()
+        && map.get("replace").or_else(|| map.get("new")).is_some();
+    if has_edit {
+        map.insert("op".into(), Value::String("edit".into()));
+        return Ok(());
+    }
+    if map.get("content").is_some() || map.get("path").is_some() {
+        map.insert("op".into(), Value::String("write".into()));
+        return Ok(());
+    }
+    Err(ConnectorError::new(
+        "fs.edit_many step needs op, find/replace, or content",
+    ))
+}
+
+fn collect_batch_steps(input: Value) -> Result<Value, ConnectorError> {
+    let mut steps = match input.as_array() {
+        Some(items) if items.len() == 1 && items[0].is_array() => items[0]
+            .as_array()
+            .cloned()
+            .unwrap_or_default(),
+        Some(items) if !items.is_empty() && items.iter().all(Value::is_object) => items.clone(),
+        _ => {
+            return Err(ConnectorError::new(
+                "fs.transact / fs.edit_many take one non-empty array of step objects",
+            ));
+        }
+    };
+    if steps.is_empty() {
+        return Err(ConnectorError::new(
+            "fs.transact / fs.edit_many take one non-empty array of step objects",
+        ));
+    }
+    for step in &mut steps {
+        default_batch_step_op(step)?;
+    }
+    Ok(Value::Array(steps))
+}
+
+fn reject_non_byte_transact_writes(steps: &Value) -> Result<(), ConnectorError> {
+    let Some(items) = steps.as_array() else {
+        return Ok(());
+    };
+    for step in items {
+        let Some(op) = step.get("op").and_then(Value::as_str) else {
+            continue;
+        };
+        if op == "write" {
+            reject_non_byte_write_content(step)?;
+        }
+    }
+    Ok(())
+}
+
 fn exactly_one_options_object(input: Value) -> Result<Value, ConnectorError> {
     if let Some(items) = input.as_array() {
         if items.len() != 1 || !items[0].is_object() {
@@ -498,25 +597,18 @@ pub fn lower(
     // One options object (positionally or bare) passed through unchanged so
     // the FSZero dispatcher owns arg semantics, including the CAS `base`
     // gate (null = must-not-exist create, fz://blob/<sha256> = compare-
-    // and-swap against current content).
+    // and-swap against current content). Write `content` is hub-gated:
+    // a tool-result object must not stringify into a tracked file.
     if surface == "fs" && (method == "edit" || method == "write") {
         let args = exactly_one_options_object(input)?;
+        reject_non_byte_write_content(&args)?;
         return Ok((engine, format!("fs.{method}"), args));
     }
-    // All-or-nothing multi-step mutation: zero.fs.transact([step, ...]) or
-    // zero.fs.transact(step, ...). Steps are objects; FSZero owns semantics.
-    if surface == "fs" && method == "transact" {
-        let steps = match input.as_array() {
-            Some(items) if items.len() == 1 && items[0].is_array() => items[0].clone(),
-            Some(items) if !items.is_empty() && items.iter().all(Value::is_object) => {
-                Value::Array(items.clone())
-            }
-            _ => {
-                return Err(ConnectorError::new(
-                    "fs.transact takes one non-empty array of step objects",
-                ));
-            }
-        };
+    // All-or-nothing multi-file mutation. edit_many / multi_edit are the
+    // dogfood names (implicit op:edit|write); transact is the kernel name.
+    if surface == "fs" && matches!(method, "transact" | "edit_many" | "multi_edit") {
+        let steps = collect_batch_steps(input)?;
+        reject_non_byte_transact_writes(&steps)?;
         return Ok((engine, "fs.transact".into(), serde_json::json!({"steps": steps})));
     }
     if surface == "fs" && method == "compound" {
@@ -534,6 +626,9 @@ pub fn lower(
             return Err(ConnectorError::new(
                 "fs.edit and fs.write take exactly one options object",
             ));
+        }
+        if matches!(op, "fs.write" | "fs.edit") {
+            reject_non_byte_write_content(&compound_args)?;
         }
         return Ok((engine, op.into(), compound_args));
     }
