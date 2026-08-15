@@ -211,8 +211,16 @@ fn plugin_launch_path_is_zsx_mcp_not_python_or_engine() {
         );
     }
     assert!(
-        rebuild.contains("mapped") || rebuild.contains("lsof"),
-        "rebuild.sh must refuse to overwrite a mapped bin/zsx"
+        rebuild.contains("mv -f") && rebuild.contains(".zsx."),
+        "rebuild.sh must install via same-dir rename, not truncate a mapped inode"
+    );
+    assert!(
+        !rebuild.contains("cp -f") || rebuild.contains("mv -f"),
+        "rebuild.sh must not cp -f onto the live bin path"
+    );
+    assert!(
+        !rebuild.contains("exit 3"),
+        "rebuild.sh must not refuse when a Grok session has bin/zsx mapped"
     );
 
     let hooks_json = std::fs::read_to_string(plugin.join("hooks/hooks.json")).expect("hooks");
@@ -264,7 +272,7 @@ fn mcp_cli_help_states_must_not() {
         "fszero/graphzero/tokenzero",
         "pid 1",
         "wrap zsx in Python",
-        "rebuild a mapped bin/zsx",
+        "truncate a mapped bin/zsx",
     ] {
         assert!(text.contains(needle), "help missing {needle:?}:\n{text}");
     }

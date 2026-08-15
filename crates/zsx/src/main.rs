@@ -127,7 +127,7 @@ fn print_help() {
     println!("          wrap zsx in Python");
     println!("          register fszero/graphzero/tokenzero as MCP servers");
     println!("          LaunchAgent, nohup, setsid, disown, or background zsx");
-    println!("          rebuild a mapped bin/zsx");
+    println!("          truncate a mapped bin/zsx (install via rename)");
     println!("          leave a process whose parent is pid 1");
     println!("        Stores stay warm across calls in this process only.");
     println!("-C ROOT          authorized engine root (canonicalized)");
