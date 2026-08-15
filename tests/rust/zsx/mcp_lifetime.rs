@@ -1,7 +1,7 @@
 //! `zsx mcp` is harness-owned: it must die when stdin closes or the parent
 //! exits, and it must leave no child processes behind.
 
-use std::io::{BufRead, BufReader};
+use std::io::{BufRead, BufReader, Write};
 use std::process::{Command, Stdio};
 use std::thread;
 use std::time::{Duration, Instant};
@@ -127,6 +127,28 @@ fn mcp_source_never_daemonizes() {
     assert!(
         source.contains("lifetime") && source.contains("harness-stdio"),
         "zero_wait must advertise harness-stdio lifetime"
+    );
+    assert!(
+        source.contains("reexec_if_plugin_bin_changed"),
+        "serve must reexec after a rename-install"
+    );
+}
+
+#[test]
+fn reexec_source_execs_and_never_spawns() {
+    let manifest = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+    let source = std::fs::read_to_string(manifest.join("src/reexec.rs")).unwrap();
+    assert!(
+        source.contains("cmd.exec()"),
+        "reexec must execve the new inode"
+    );
+    assert!(
+        !source.contains("Command::spawn") && !source.contains(".spawn()"),
+        "reexec must not spawn a sibling"
+    );
+    assert!(
+        !source.contains("setsid") && !source.contains("nohup"),
+        "reexec must not detach"
     );
 }
 
@@ -316,4 +338,128 @@ fn mcp_allows_unrelated_inherited_xpc_name() {
         status.success(),
         "inherited host XPC name must not refuse: {status:?}"
     );
+}
+
+#[cfg(unix)]
+fn rename_copy(src: &std::path::Path, dest: &std::path::Path) {
+    let tmp = dest.with_file_name(".zsx.test");
+    std::fs::copy(src, &tmp).expect("copy tmp");
+    std::fs::rename(&tmp, dest).expect("rename install");
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mut perms = std::fs::metadata(dest).unwrap().permissions();
+        perms.set_mode(0o755);
+        std::fs::set_permissions(dest, perms).unwrap();
+    }
+}
+
+#[cfg(unix)]
+fn rpc_line(
+    stdin: &mut impl Write,
+    stdout: &mut BufReader<impl std::io::Read>,
+    msg: &serde_json::Value,
+) -> serde_json::Value {
+    writeln!(stdin, "{msg}").unwrap();
+    stdin.flush().unwrap();
+    let mut line = String::new();
+    stdout.read_line(&mut line).unwrap();
+    serde_json::from_str(line.trim()).unwrap_or_else(|err| {
+        panic!("rpc parse {err}: {line}");
+    })
+}
+
+#[cfg(unix)]
+fn wait_payload(reply: &serde_json::Value) -> serde_json::Value {
+    let text = reply["result"]["content"][0]["text"]
+        .as_str()
+        .expect("tool text");
+    serde_json::from_str(text).expect("zero_wait json")
+}
+
+#[cfg(unix)]
+#[test]
+fn mcp_reexecs_same_pid_when_plugin_bin_inode_changes() {
+    let plugin = TempDir::new().unwrap();
+    let root = TempDir::new().unwrap();
+    let bin_dir = plugin.path().join("bin");
+    std::fs::create_dir_all(&bin_dir).unwrap();
+    let live = bin_dir.join("zsx");
+    rename_copy(std::path::Path::new(zsx_bin()), &live);
+
+    let mut child = Command::new(&live)
+        .args(["mcp", "-C", root.path().to_str().unwrap()])
+        .env("GROK_PLUGIN_ROOT", plugin.path())
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("plugin zsx mcp");
+    let pid = child.id();
+    let mut stdin = child.stdin.take().unwrap();
+    let mut stdout = BufReader::new(child.stdout.take().unwrap());
+
+    let _init = rpc_line(
+        &mut stdin,
+        &mut stdout,
+        &serde_json::json!({"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}),
+    );
+    let first = wait_payload(&rpc_line(
+        &mut stdin,
+        &mut stdout,
+        &serde_json::json!({
+            "jsonrpc":"2.0",
+            "id":2,
+            "method":"tools/call",
+            "params":{"name":"zero_wait","arguments":{}}
+        }),
+    ));
+    assert_eq!(first["pid"], pid);
+    assert_eq!(first["image"]["stale"], false, "{first}");
+    let original_inode = first["image"]["running_inode"].as_u64().unwrap();
+
+    rename_copy(std::path::Path::new(zsx_bin()), &live);
+
+    let after_rename = wait_payload(&rpc_line(
+        &mut stdin,
+        &mut stdout,
+        &serde_json::json!({
+            "jsonrpc":"2.0",
+            "id":3,
+            "method":"tools/call",
+            "params":{"name":"zero_wait","arguments":{}}
+        }),
+    ));
+    assert_eq!(after_rename["pid"], pid);
+    assert_eq!(after_rename["image"]["stale"], true, "{after_rename}");
+    assert_eq!(
+        after_rename["image"]["running_inode"].as_u64().unwrap(),
+        original_inode
+    );
+
+    let swapped = wait_payload(&rpc_line(
+        &mut stdin,
+        &mut stdout,
+        &serde_json::json!({
+            "jsonrpc":"2.0",
+            "id":4,
+            "method":"tools/call",
+            "params":{"name":"zero_wait","arguments":{}}
+        }),
+    ));
+    assert_eq!(swapped["pid"], pid, "execve must keep the harness pid");
+    assert_eq!(swapped["image"]["stale"], false, "{swapped}");
+    assert_ne!(
+        swapped["image"]["running_inode"].as_u64().unwrap(),
+        original_inode,
+        "running image must be the new inode: {swapped}"
+    );
+    assert_eq!(
+        swapped["image"]["running_inode"],
+        swapped["image"]["bin_inode"]
+    );
+
+    drop(stdin);
+    let status = child.wait().expect("wait");
+    assert!(status.success(), "{status:?}");
 }

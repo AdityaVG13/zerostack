@@ -19,6 +19,7 @@ use serde_json::{json, Value};
 use zsx_core::ZsxSession;
 
 use crate::exec::{DEFAULT_TIMEOUT_MS, ZSX_PROTOCOL};
+use crate::reexec;
 
 const PROTOCOL: &str = "2024-11-05";
 const SERVER_NAME: &str = "zerostack-zsx";
@@ -189,6 +190,7 @@ fn zero_wait_payload() -> Value {
         "ppid": current_ppid(),
         "idle": "blocking-stdin",
         "lifetime": "harness-stdio",
+        "image": reexec::image_payload(),
     })
 }
 
@@ -507,6 +509,7 @@ fn exit_if_detached_launch() {
 /// engine-log, and a held stdout lock deadlocks the only thread.
 pub fn serve(default_root: PathBuf) -> io::Result<()> {
     exit_if_detached_launch();
+    reexec::capture_running_image();
     install_parent_death_exit();
     let mut host = McpHost::new(default_root);
     let mut stdin = io::BufReader::new(io::stdin());
@@ -518,6 +521,7 @@ pub fn serve(default_root: PathBuf) -> io::Result<()> {
                     let mut stdout = io::stdout();
                     write_frame(&mut stdout, &kind, &response)?;
                 }
+                reexec::reexec_if_plugin_bin_changed();
             }
             Err(error) => {
                 let response = json!({
@@ -527,6 +531,7 @@ pub fn serve(default_root: PathBuf) -> io::Result<()> {
                 });
                 let mut stdout = io::stdout();
                 write_frame(&mut stdout, &FrameKind::Ndjson, &response)?;
+                reexec::reexec_if_plugin_bin_changed();
             }
         }
     }
@@ -597,6 +602,7 @@ mod tests {
         assert_eq!(payload["idle"], "blocking-stdin");
         assert!(payload["pid"].as_u64().unwrap() > 1);
         assert!(payload["ppid"].as_u64().is_some());
+        assert!(payload["image"].is_object());
     }
 
     #[test]
