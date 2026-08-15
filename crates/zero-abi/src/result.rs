@@ -145,29 +145,54 @@ fn validate_ack(ack: &str) -> Result<(), ZeroResultBuildError> {
     }
 }
 fn validate_ref(reference: &str) -> Result<(), ZeroResultBuildError> {
-    // Same identity as ZeroRef v1: `{fz|gz|tz}://blob/<64-hex>` plus optional
-    // `#B`/`#L` fragment. `tz://blob/abc` is not a ref.
-    let Some((scheme, rest)) = reference.split_once("://blob/") else {
-        return Err(ZeroResultBuildError::InvalidRef);
-    };
-    if !matches!(scheme, "fz" | "gz" | "tz") {
-        return Err(ZeroResultBuildError::InvalidRef);
-    }
-    let hash = rest.split_once('#').map(|(hash, _)| hash).unwrap_or(rest);
-    if hash.len() == 64
-        && hash
-            .bytes()
-            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
-    {
-        Ok(())
-    } else {
-        Err(ZeroResultBuildError::InvalidRef)
-    }
+    zero_ref::ZeroRefV1::parse(reference)
+        .map(|_| ())
+        .map_err(|_| ZeroResultBuildError::InvalidRef)
 }
 fn validate_preview(preview: Option<&str>) -> Result<(), ZeroResultBuildError> {
     if preview.is_some_and(|value| value.chars().count() > MAX_PREVIEW_CHARS) {
         Err(ZeroResultBuildError::PreviewTooLong)
     } else {
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod zero_result_fragment_tests {
+    use super::*;
+
+    fn blob(fragment: &str) -> String {
+        format!("fz://blob/{}{fragment}", "ab".repeat(32))
+    }
+
+    #[test]
+    fn zero_result_validate_ref_matches_zeroref_parse() {
+        let cases = [
+            (blob(""), true),
+            (blob("#B0-4"), true),
+            (blob("#L1-2"), true),
+            (blob("#B0+4"), true),
+            (blob("#garbage"), false),
+            (blob("#"), false),
+            (blob("#B999-1"), false),
+            (blob("#L0-1"), false),
+            ("tz://blob/abc".into(), false),
+        ];
+        for (reference, accepted) in cases {
+            let parse_ok = zero_ref::ZeroRefV1::parse(&reference).is_ok();
+            let result_ok = ZeroResultV1::reference("0", reference.clone(), None).is_ok();
+            assert_eq!(
+                parse_ok, accepted,
+                "ZeroRef::parse disagreed on {reference}: {parse_ok}"
+            );
+            assert_eq!(
+                result_ok, accepted,
+                "ZeroResult::reference disagreed on {reference}: {result_ok}"
+            );
+            assert_eq!(
+                parse_ok, result_ok,
+                "validate_ref and ZeroRef::parse split on {reference}"
+            );
+        }
     }
 }

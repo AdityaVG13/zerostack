@@ -50,6 +50,22 @@ fn short_blob_refs_fail_result_validation() {
     );
 }
 #[test]
+fn illegal_fragments_fail_result_validation() {
+    let hash = "ab".repeat(32);
+    for fragment in ["#garbage", "#", "#B999-1"] {
+        let reference = format!("fz://blob/{hash}{fragment}");
+        assert!(
+            matches!(
+                ZeroResultV1::reference("0", &reference, None),
+                Err(ZeroResultBuildError::InvalidRef)
+            ),
+            "{reference} must fail ZeroResult"
+        );
+    }
+    let legal = format!("fz://blob/{hash}#B0-4");
+    ZeroResultV1::reference("0", &legal, None).expect("legal #B0-4 must construct");
+}
+#[test]
 fn unknown_missing_and_mixed_payloads_fail_closed() {
     assert_rejected(json!({"ack":"C","content":{"kind":"inline"}}));
     assert_rejected(json!({"content":{"kind":"inline","value":1}}));
