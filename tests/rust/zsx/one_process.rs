@@ -7,12 +7,12 @@ use std::io::Write;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 use tempfile::TempDir;
 use zero_abi::{EffectClass, EngineIdentity};
 use zsx_core::{
-    DomainAdapter, SessionApprovalGrantV1, ZsxSession, ZsxSessionFailureCode, fixture,
-    process_spawn_count,
+    fixture, process_spawn_count, DomainAdapter, SessionApprovalGrantV1, ZsxSession,
+    ZsxSessionFailureCode,
 };
 
 /// Coerce a concrete fixture adapter to the registered trait object.
@@ -353,6 +353,9 @@ fn zsx_exec_source_has_no_process_spawn_or_session_socket_path() {
         "zerostack-session",
         "ZEROSTACK_SESSION_SOCKET",
         "ZEROSTACK_SESSION_TOKEN",
+        "setsid",
+        "nohup",
+        "daemonize",
     ];
     for name in ["src/main.rs", "src/lib.rs", "src/exec.rs", "src/mcp.rs"] {
         let path = manifest.join(name);

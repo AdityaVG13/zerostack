@@ -1,11 +1,13 @@
 //! Harness-owned stdio MCP carrier.
 //!
 //! This is the product surface for Grok, Cursor, Claude, and any other
-//! MCP host: the host starts `zsx mcp` and kills it when the session
-//! ends. It is not a sidecar. Idle state is a blocking stdin read
-//! (zero CPU). Work is one CodeMode plan at a time, bounded by the
-//! request timeout. Stores stay warm across `zero_execute` calls in
-//! this process.
+//! MCP host: the host starts `zsx mcp` as a child and owns stdin. It is
+//! not a sidecar, not a launchd service, and it never detaches. Idle state
+//! is a blocking stdin read (zero CPU). The process exits when stdin
+//! hits EOF (host closed the session) or when the parent pid changes
+//! (host crashed and we were reparented). Work is one CodeMode plan at
+//! a time, bounded by the request timeout. Stores stay warm across
+//! `zero_execute` calls in this process only.
 
 use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
@@ -13,7 +15,7 @@ use std::io::{self, BufRead, Write};
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 use zsx_core::ZsxSession;
 
 use crate::exec::{DEFAULT_TIMEOUT_MS, ZSX_PROTOCOL};
@@ -75,11 +77,7 @@ impl McpHost {
         }
         let mut hasher = std::collections::hash_map::DefaultHasher::new();
         root.hash(&mut hasher);
-        let session_id = format!(
-            "zsx-mcp-{:x}-{:x}",
-            std::process::id(),
-            hasher.finish()
-        );
+        let session_id = format!("zsx-mcp-{:x}-{:x}", std::process::id(), hasher.finish());
         let state_root = root.join(".zerostack");
         let session = ZsxSession::builder(root.clone())
             .with_state_root(state_root)
@@ -188,8 +186,42 @@ fn zero_wait_payload() -> Value {
         "present": true,
         "mcp": true,
         "pid": std::process::id(),
+        "ppid": current_ppid(),
         "idle": "blocking-stdin",
+        "lifetime": "harness-stdio",
     })
+}
+
+fn current_ppid() -> u32 {
+    #[cfg(unix)]
+    {
+        std::os::unix::process::parent_id()
+    }
+    #[cfg(not(unix))]
+    {
+        0
+    }
+}
+
+/// Exit the process if the harness parent dies and we are reparented.
+/// Polls in-process; this is not a sidecar and has no extra pid.
+fn install_parent_death_exit() {
+    #[cfg(unix)]
+    {
+        let parent = current_ppid();
+        if parent <= 1 {
+            return;
+        }
+        let _ = std::thread::Builder::new()
+            .name("zsx-mcp-parent-death".into())
+            .spawn(move || loop {
+                std::thread::sleep(Duration::from_millis(50));
+                let now = current_ppid();
+                if now == 1 || now != parent {
+                    std::process::exit(0);
+                }
+            });
+    }
 }
 
 pub fn handle(host: &mut McpHost, message: &Value) -> Option<Value> {
@@ -225,10 +257,7 @@ pub fn handle(host: &mut McpHost, message: &Value) -> Option<Value> {
         let arguments = params.get("arguments").cloned().unwrap_or(json!({}));
         let result = match name {
             "zero_execute" => {
-                let plan = arguments
-                    .get("plan")
-                    .and_then(Value::as_str)
-                    .unwrap_or("");
+                let plan = arguments.get("plan").and_then(Value::as_str).unwrap_or("");
                 let root = arguments
                     .get("root")
                     .and_then(Value::as_str)
@@ -287,11 +316,7 @@ fn header_key(bytes: &[u8]) -> Option<&str> {
     let text = std::str::from_utf8(bytes).ok()?;
     let (key, _) = text.split_once(':')?;
     let key = key.trim();
-    if key.is_empty()
-        || !key
-            .bytes()
-            .all(|b| b.is_ascii_alphanumeric() || b == b'-')
-    {
+    if key.is_empty() || !key.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-') {
         return None;
     }
     Some(key)
@@ -321,10 +346,7 @@ fn detect_and_read(stdin: &mut impl BufRead) -> io::Result<Option<(FrameKind, Va
     if !is_lsp_opener(trimmed) {
         return Err(io::Error::new(
             io::ErrorKind::InvalidData,
-            format!(
-                "invalid mcp frame: {}",
-                String::from_utf8_lossy(trimmed)
-            ),
+            format!("invalid mcp frame: {}", String::from_utf8_lossy(trimmed)),
         ));
     }
     let mut headers = first;
@@ -353,9 +375,8 @@ fn detect_and_read(stdin: &mut impl BufRead) -> io::Result<Option<(FrameKind, Va
             ));
         }
     }
-    let length = content_length(&headers).ok_or_else(|| {
-        io::Error::new(io::ErrorKind::InvalidData, "missing Content-Length")
-    })?;
+    let length = content_length(&headers)
+        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "missing Content-Length"))?;
     if length > 8 * 1024 * 1024 {
         return Err(io::Error::new(
             io::ErrorKind::InvalidData,
@@ -414,6 +435,7 @@ fn write_frame(stdout: &mut impl Write, kind: &FrameKind, value: &Value) -> io::
 /// Do not hold `stdout.lock()` across `handle`: execute can `println!` /
 /// engine-log, and a held stdout lock deadlocks the only thread.
 pub fn serve(default_root: PathBuf) -> io::Result<()> {
+    install_parent_death_exit();
     let mut host = McpHost::new(default_root);
     let mut stdin = io::BufReader::new(io::stdin());
     loop {
@@ -472,10 +494,7 @@ mod tests {
 
     #[test]
     fn content_length_parses_case_insensitive() {
-        assert_eq!(
-            content_length(b"Content-Length: 12\r\n\r\n"),
-            Some(12)
-        );
+        assert_eq!(content_length(b"Content-Length: 12\r\n\r\n"), Some(12));
         assert_eq!(content_length(b"content-length: 7\n\n"), Some(7));
     }
 

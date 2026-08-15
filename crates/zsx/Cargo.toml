@@ -30,3 +30,7 @@ path = "../../tests/rust/zsx/one_process.rs"
 [[test]]
 name = "mcp_protocol"
 path = "../../tests/rust/zsx/mcp_protocol.rs"
+
+[[test]]
+name = "mcp_lifetime"
+path = "../../tests/rust/zsx/mcp_lifetime.rs"
