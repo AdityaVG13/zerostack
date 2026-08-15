@@ -282,6 +282,38 @@
     }
 
     #[test]
+    fn multi_edit_default_op_alias_and_path_only_matrix() {
+        assert_lower(
+            "fs",
+            "multi_edit",
+            json!([{"path":"a.rs","old":"x","new":"y"}]),
+            EngineIdentity::FsZero,
+            "fs.transact",
+            json!({"steps":[{"path":"a.rs","old":"x","new":"y","op":"edit"}]}),
+        );
+        assert_lower(
+            "fs",
+            "multi_edit",
+            json!([{"path":"b.txt"}]),
+            EngineIdentity::FsZero,
+            "fs.transact",
+            json!({"steps":[{"path":"b.txt","op":"write"}]}),
+        );
+        let missing_find = lower(
+            "fs",
+            "multi_edit",
+            json!([{"path":"a.rs","replace":"y"}]),
+        )
+        .unwrap_err();
+        assert!(
+            missing_find
+                .to_string()
+                .contains("both find/old and replace/new"),
+            "replace-without-find must not become write: {missing_find}"
+        );
+    }
+
+    #[test]
     fn token_read_and_shell_options_are_strict_and_forwarded_once() {
         assert!(METHODS.contains(&("token", "read")));
         assert_lower(

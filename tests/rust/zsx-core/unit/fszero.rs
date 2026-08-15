@@ -151,6 +151,29 @@
     }
 
     #[test]
+    fn recovery_label_that_expands_to_a_real_blob_is_kept() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let mut session = FSZeroSession::with_root(dir.path());
+        let minted = session.recovery.put_content_ref(b"read payload");
+        session.recovery.put_key("read/ref", minted.as_bytes());
+        let request = test_request(None);
+        let result = DomainResult::success(
+            "fs.read",
+            None,
+            Some(serde_json::json!({"detail": "ok"})),
+            vec!["read".into()],
+            false,
+        );
+        let refs = collect_and_conform_refs(&session, &request, &result)
+            .expect("label that expands to an expandable fz://blob must stay Ok");
+        assert_eq!(refs, vec![minted.clone()], "kept normalized refs: {refs:?}");
+        assert!(
+            minted.starts_with("fz://blob/"),
+            "minted recovery ref: {minted}"
+        );
+    }
+
+    #[test]
     fn engine_emitted_non_blob_refs_still_fail_closed() {
         let dir = tempfile::tempdir().expect("tempdir");
         let session = FSZeroSession::with_root(dir.path());
