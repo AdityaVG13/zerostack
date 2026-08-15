@@ -240,7 +240,6 @@
             assert!(lower("fs", "transact", input).is_err());
         }
 
-        assert!(METHODS.contains(&("fs", "edit_many")));
         assert!(METHODS.contains(&("fs", "multi_edit")));
         let implicit = json!([
             {"path":"a.rs","find":"x","replace":"y"},
@@ -254,14 +253,6 @@
             "fs",
             "multi_edit",
             implicit.clone(),
-            EngineIdentity::FsZero,
-            "fs.transact",
-            json!({"steps": expected_steps.clone()}),
-        );
-        assert_lower(
-            "fs",
-            "edit_many",
-            json!([implicit]),
             EngineIdentity::FsZero,
             "fs.transact",
             json!({"steps": expected_steps}),

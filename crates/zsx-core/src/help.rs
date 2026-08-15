@@ -80,14 +80,7 @@ const HELP_ENTRIES: &[HelpEntry] = &[
         method: "multi_edit",
         signature: "zero.fs.multi_edit([{ path, find, replace, base? } | { op: \"write\", path, content, base? }, ...]) — one call, many files; implicit edit when find/replace are set",
         description: "Atomic multi-file create/edit for parallel tool calling. Same kernel as fs.transact; returns a per-step receipt (path + ack), not a mashed string",
-        keywords: &["multi_edit", "edit_many", "parallel", "batch", "multi", "files", "refactor"],
-    },
-    HelpEntry {
-        surface: "fs",
-        method: "edit_many",
-        signature: "zero.fs.edit_many([{ path, find, replace, base? }, ...]) — alias of fs.multi_edit",
-        description: "Alias of fs.multi_edit: atomic multi-file find/replace and write",
-        keywords: &["edit_many", "alias"],
+        keywords: &["multi_edit", "parallel", "batch", "multi", "files", "refactor"],
     },
     HelpEntry {
         surface: "fs",

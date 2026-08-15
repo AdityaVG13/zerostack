@@ -18,7 +18,6 @@ pub const METHODS: &[(&str, &str)] = &[
     ("fs", "write"),
     ("fs", "transact"),
     ("fs", "multi_edit"),
-    ("fs", "edit_many"),
     ("fs", "read_many"),
     ("fs", "list_many"),
     ("fs", "search_many"),
@@ -605,8 +604,8 @@ pub fn lower(
         return Ok((engine, format!("fs.{method}"), args));
     }
     // All-or-nothing multi-file mutation. multi_edit is the dogfood name
-    // (implicit op:edit|write); edit_many is an alias; transact is the kernel.
-    if surface == "fs" && matches!(method, "transact" | "multi_edit" | "edit_many") {
+    // (implicit op:edit|write); transact is the kernel.
+    if surface == "fs" && matches!(method, "transact" | "multi_edit") {
         let steps = collect_batch_steps(input)?;
         reject_non_byte_transact_writes(&steps)?;
         return Ok((engine, "fs.transact".into(), serde_json::json!({"steps": steps})));
