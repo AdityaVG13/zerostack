@@ -1,0 +1,5 @@
+name	memory_bytes	wall_ms	output_bytes	owner
+capability-manifest-echo	33554432	250	65536	conformance/CONTRACT.md §3 limits echo
+host-limits-default	67108864	2000	1048576	HostLimits::default max_json_bytes / wall / memory
+zsx-session-visible	0	0	12288	zsx-core SESSION_VISIBLE_RESULT_BYTES
+zsx-connector-host	134217728	30000	16777216	zsx-core connector::host_limits

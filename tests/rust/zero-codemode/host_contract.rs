@@ -1,3 +1,5 @@
+use std::fs;
+use std::path::PathBuf;
 use std::time::Duration;
 use std::time::Instant;
 
@@ -228,6 +230,50 @@ fn output_wall_arrangements_are_local_not_one_ceiling() {
         echo.output_bytes, DEFAULT_MAX_VISIBLE_RESULT_BYTES,
         "CONTRACT 64 KiB echo is not DEFAULT_MAX_VISIBLE_RESULT_BYTES"
     );
+}
+
+/// PROVENANCE: generated from `zero_codemode::OUTPUT_WALL_ARRANGEMENTS`;
+/// refresh with `UPDATE_GOLDENS=1 cargo test -p zero-codemode --test host_contract output_wall_arrangements`.
+/// This freezes the four arrangement-local rows, not a product-wide ceiling.
+#[test]
+fn output_wall_arrangements_golden_matches_const() {
+    let actual = render_output_wall_arrangements_table();
+    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../../tests/rust/zero-codemode/goldens/output_wall_arrangements.golden");
+    if std::env::var_os("UPDATE_GOLDENS").is_some() {
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent).expect("create golden dir");
+        }
+        fs::write(&path, &actual).expect("write golden");
+        return;
+    }
+    let expected = fs::read_to_string(&path).unwrap_or_else(|error| {
+        panic!(
+            "missing golden {}: {error}; UPDATE_GOLDENS=1 to create",
+            path.display()
+        )
+    });
+    assert_eq!(
+        actual, expected,
+        "OUTPUT_WALL_ARRANGEMENTS row changed; review then UPDATE_GOLDENS=1"
+    );
+}
+
+fn render_output_wall_arrangements_table() -> String {
+    let mut out = String::from("name\tmemory_bytes\twall_ms\toutput_bytes\towner\n");
+    for row in OUTPUT_WALL_ARRANGEMENTS {
+        assert!(
+            !row.name.contains('\t')
+                && !row.owner.contains('\t')
+                && !row.owner.contains('\n'),
+            "arrangement fields must be TSV-safe"
+        );
+        out.push_str(&format!(
+            "{}\t{}\t{}\t{}\t{}\n",
+            row.name, row.memory_bytes, row.wall_ms, row.output_bytes, row.owner
+        ));
+    }
+    out
 }
 
 #[test]
