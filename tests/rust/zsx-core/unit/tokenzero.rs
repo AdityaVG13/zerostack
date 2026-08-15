@@ -258,7 +258,7 @@
                 cancellation: &cancellation,
             })
             .expect_err("expired deadline must fail before dispatch");
-        assert_eq!(error.error.kind, "deadline");
+        assert_eq!(error.error.kind, "deadline_exceeded");
 
         let request = CallRequest {
             deadline_unix_ms: None,

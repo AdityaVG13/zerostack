@@ -48,7 +48,7 @@ impl DomainAdapter for DisablingAdapter {
     fn call(&self, call: AdapterCall<'_>) -> Result<AdapterResponse, AdapterError> {
         if self.remaining.load(Ordering::Relaxed) == 0 {
             return Err(AdapterError::new(
-                "engine_unavailable",
+                "substrate",
                 "ZeroStack disabled mid-run: fixture fs adapter is gone",
                 false,
                 Some(call.request.trace.clone()),

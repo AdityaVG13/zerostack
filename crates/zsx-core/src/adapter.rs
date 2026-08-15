@@ -227,13 +227,14 @@ impl AdapterError {
         retryable: bool,
         trace: Option<WorkerTrace>,
     ) -> Self {
+        let message = message.into();
+        let error = match WorkerError::new(kind, message.clone(), retryable) {
+            Ok(error) => error,
+            Err(rejected) => WorkerError::new("internal", format!("{rejected}: {message}"), false)
+                .expect("internal is a closed RW5 kind"),
+        };
         Self {
-            error: Box::new(WorkerError {
-                kind: kind.into(),
-                message: message.into(),
-                retryable,
-                details: None,
-            }),
+            error: Box::new(error),
             trace: trace.map(Box::new),
             engine_timeline: None,
             worker_token_accounting: None,
@@ -248,6 +249,25 @@ impl fmt::Display for AdapterError {
 }
 
 impl std::error::Error for AdapterError {}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn adapter_error_new_cannot_emit_open_kinds() {
+        let potato = AdapterError::new("potato", "nope", true, None);
+        assert_eq!(potato.error.kind, "internal");
+        assert!(potato.error.message.contains("potato"));
+        let busy = AdapterError::new("busy", "backpressure", true, None);
+        assert_eq!(busy.error.kind, "timeout");
+        assert!(busy.error.retryable);
+        let deadline = AdapterError::new("deadline", "late", false, None);
+        assert_eq!(deadline.error.kind, "deadline_exceeded");
+        let closed = AdapterError::new("validation", "bad arg", false, None);
+        assert_eq!(closed.error.kind, "validation");
+    }
+}
 
 /// Safe in-process domain dispatch contract.
 ///

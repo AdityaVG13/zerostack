@@ -259,7 +259,7 @@ impl TokenZeroAdapter {
                 Ok(accounting) => Some(accounting),
                 Err(message) => {
                     return Err(AdapterError::new(
-                        "invalid_token_accounting",
+                        "validation",
                         message,
                         false,
                         Some(request.trace.clone()),
@@ -342,7 +342,7 @@ impl TokenZeroAdapter {
             }
             let parsed = ZeroRefV1::parse(reference).map_err(|error| {
                 AdapterError::new(
-                    "invalid_ref",
+                    "validation",
                     format!("token adapter ref {reference:?} is not portable v1: {error}"),
                     false,
                     None,
@@ -358,7 +358,7 @@ impl TokenZeroAdapter {
             let payload = self.resolve_payload(&parsed.hash)?;
             let published = cas.put(&payload).map_err(|error| {
                 AdapterError::new(
-                    "internal_contract",
+                    "internal",
                     format!(
                         "cannot publish token blob {} to hub CAS: {error}",
                         parsed.hash
@@ -369,7 +369,7 @@ impl TokenZeroAdapter {
             })?;
             if published != parsed.hash {
                 return Err(AdapterError::new(
-                    "internal_contract",
+                    "internal",
                     format!(
                         "token blob digest mismatch: ref {parsed_hash} published {published}",
                         parsed_hash = parsed.hash
@@ -420,7 +420,7 @@ impl TokenZeroAdapter {
             }
         }
         Err(AdapterError::new(
-            "invalid_ref",
+            "validation",
             format!("token blob {reference} is not resolvable from the engine recovery store"),
             false,
             None,
@@ -449,7 +449,7 @@ impl DomainAdapter for TokenZeroAdapter {
         }
         if request.deadline_expired(now_ms()) {
             return Err(AdapterError::new(
-                "deadline",
+                "deadline_exceeded",
                 "token adapter deadline expired before dispatch",
                 false,
                 Some(request.trace.clone()),

@@ -548,6 +548,18 @@
             serde_json::from_value::<WorkerError>(potato).is_err(),
             "unknown kind potato must fail deserialize"
         );
+        assert!(
+            WorkerError::new("potato", "not a typed WorkerError", false).is_err(),
+            "ctor must reject potato the same way deserialize does"
+        );
+        assert!(WorkerError::new("ok_validation_lol", "nope", false).is_err());
+        let deadline = WorkerError::new("deadline", "late", false).expect("deadline aliases");
+        assert_eq!(deadline.kind, "deadline_exceeded");
+        let busy = WorkerError::new("busy", "backpressure", true).expect("busy aliases");
+        assert_eq!(busy.kind, "timeout");
+        assert!(busy.retryable);
+        let closed = WorkerError::new("validation", "unknown op", false).expect("closed kind");
+        assert_eq!(closed.kind, "validation");
     }
 
     #[test]

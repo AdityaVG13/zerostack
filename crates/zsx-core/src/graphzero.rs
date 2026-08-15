@@ -44,7 +44,7 @@ use graphzero_query::{
 use graphzero_store::{ExpandResolver, GzRef};
 use zero_abi::{
     ApprovalMetadata, ApprovalState, CallRequest, EffectClass, EngineIdentity, RefOwnership,
-    RevertMetadata, WorkerError, WorkerResult, WorkerResultMetadata,
+    RevertMetadata, WorkerResult, WorkerResultMetadata,
 };
 use zero_store::SharedCas;
 
@@ -198,7 +198,7 @@ impl GraphZeroAdapter {
         let resolver = ExpandResolver::new(self.embedded.store_root(), self.embedded.repo_root())
             .map_err(|error| {
                 AdapterError::new(
-                    "cas",
+                    "substrate",
                     format!("cannot open GraphZero ref resolver: {error}"),
                     false,
                     Some(request.trace.clone()),
@@ -211,7 +211,7 @@ impl GraphZeroAdapter {
             };
             let resolution = resolver.resolve_blob(&hash, reference).map_err(|error| {
                 AdapterError::new(
-                    "cas",
+                    "substrate",
                     format!("cannot resolve GraphZero ref {reference}: {error}"),
                     false,
                     Some(request.trace.clone()),
@@ -219,7 +219,7 @@ impl GraphZeroAdapter {
             })?;
             let published = target.put(&resolution.bytes).map_err(|error| {
                 AdapterError::new(
-                    "cas",
+                    "substrate",
                     format!("cannot publish GraphZero ref {reference}: {error}"),
                     false,
                     Some(request.trace.clone()),
@@ -227,7 +227,7 @@ impl GraphZeroAdapter {
             })?;
             if published != hash {
                 return Err(AdapterError::new(
-                    "cas",
+                    "substrate",
                     format!(
                         "GraphZero ref {reference} resolved to digest {published}, expected {hash}"
                     ),
@@ -316,17 +316,12 @@ impl DomainAdapter for GraphZeroAdapter {
                 worker_token_accounting: None,
                 })
             }
-            Err(error) => Err(AdapterError {
-                error: Box::new(WorkerError {
-                    kind: error.kind.as_str().into(),
-                    message: error.message,
-                    retryable: error.retryable,
-                    details: None,
-                }),
-                trace: Some(Box::new(trace)),
-                engine_timeline: None,
-                worker_token_accounting: None,
-            }),
+            Err(error) => Err(AdapterError::new(
+                error.kind.as_str(),
+                error.message,
+                error.retryable,
+                Some(trace),
+            )),
         }
     }
 }

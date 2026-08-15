@@ -69,9 +69,10 @@ use serde_json::Value;
 use zero_abi::{
     ApprovalMetadata, ApprovalState, CallRequest, EffectClass, EngineIdentity, EngineStageSpanV1,
     EngineStageTimelineV1, RefOwnership as WorkerRefOwnership, RevertMetadata, WorkerResult,
-    WorkerResultMetadata,
+    WorkerResultMetadata, canonical_worker_error_kind,
 };
 use zero_codemode::CancellationSignal;
+use zero_ref::ZeroRefV1;
 use zero_store::SharedCas;
 
 use crate::adapter::{AdapterBinding, AdapterCall, AdapterError, AdapterResponse, DomainAdapter};
@@ -136,7 +137,7 @@ fn send_session_command(
         }
         if deadline_expired(request) {
             return Err(adapter_error(
-                "deadline",
+                "deadline_exceeded",
                 "fszero adapter deadline exceeded while enqueueing dispatch",
                 request,
             ));
@@ -194,7 +195,7 @@ fn receive_call_response(
         }
         if deadline_expired(request) {
             return Err(adapter_error(
-                "deadline",
+                "deadline_exceeded",
                 "fszero adapter deadline exceeded while awaiting dispatch",
                 request,
             ));
@@ -221,26 +222,24 @@ fn is_forbidden_operation(op: &str) -> bool {
 /// Mirror of `domain_error_kind`: map FSZero error classes onto the
 /// raw-worker-v2 `WorkerError.kind` vocabulary.
 fn domain_error_kind(class: &str) -> String {
-    match class {
-        "invalid_argument" => "validation".into(),
-        "permission_denied" | "incompatible_contract" => "policy".into(),
-        "cancelled" => "cancelled".into(),
-        "deadline_exceeded" => "deadline_exceeded".into(),
-        "busy" => "busy".into(),
-        other => other.into(),
-    }
+    let mapped = match class {
+        "invalid_argument" => "validation",
+        "permission_denied" | "incompatible_contract" => "policy",
+        "cancelled" => "cancelled",
+        "deadline_exceeded" | "deadline" => "deadline_exceeded",
+        // Occupancy/backpressure is not a RW5 kind; timeout is the retryable stand-in.
+        "busy" => "timeout",
+        other => other,
+    };
+    canonical_worker_error_kind(mapped)
+        .unwrap_or("internal")
+        .to_string()
 }
 
-/// Mirror of `is_conformant_blob_ref`: an `fz://blob/` ref must carry exactly
-/// 64 lowercase hex characters; non-blob refs pass.
+/// Same acceptance as `ZeroResult::validate_ref`: legal ZeroRef v1 blobs
+/// (including `#B0-4` / `#L…` fragments) pass; non-ZeroRef tokens fail.
 fn is_conformant_blob_ref(reference: &str) -> bool {
-    let Some(hash) = reference.strip_prefix("fz://blob/") else {
-        return true;
-    };
-    hash.len() == 64
-        && hash
-            .bytes()
-            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+    ZeroRefV1::parse(reference).is_ok()
 }
 
 /// Mirror of `collect_portable_refs`: gather `fz://`/`gz://`/`tz://` tokens
@@ -281,8 +280,18 @@ fn collect_portable_refs(value: &Value, refs: &mut Vec<String>) {
 fn retain_valid_refs(session: &FSZeroSession, refs: &mut Vec<String>) -> Option<String> {
     let mut rejected = None;
     refs.retain(|reference| {
-        let valid = is_conformant_blob_ref(reference)
-            && (!reference.starts_with("fz://blob/") || session.expand(reference).is_some());
+        let valid = if !is_conformant_blob_ref(reference) {
+            false
+        } else if let Ok(parsed) = ZeroRefV1::parse(reference) {
+            if reference.starts_with("fz://blob/") {
+                let bare = format!("fz://blob/{}", parsed.hash);
+                session.expand(&bare).is_some() || session.expand(reference).is_some()
+            } else {
+                true
+            }
+        } else {
+            false
+        };
         if !valid && rejected.is_none() {
             rejected = Some(reference.clone());
         }
@@ -382,7 +391,7 @@ fn publish_refs_to_cas(
         };
         cas.put(&bytes).map_err(|error| {
             adapter_error(
-                "cas",
+                "substrate",
                 format!("cannot publish fszero ref {reference} to shared CAS: {error}"),
                 request,
             )
@@ -421,11 +430,14 @@ fn run_call(
     }
     if deadline_expired(request) {
         return Err(adapter_error(
-            "deadline",
+            "deadline_exceeded",
             "fszero adapter deadline exceeded",
             request,
         ));
     }
+    // Occupancy tests inject a stall via feature `stall-inject` or crate
+    // unit tests. Production builds ignore `__delay_ms` (zerostack-54p0).
+    #[cfg(any(test, feature = "stall-inject"))]
     if let Some(delay_ms) = request.args.get("__delay_ms").and_then(Value::as_u64) {
         let budget = Duration::from_millis(delay_ms);
         let started = Instant::now();
@@ -439,7 +451,7 @@ fn run_call(
             }
             if deadline_expired(request) {
                 return Err(adapter_error(
-                    "deadline",
+                    "deadline_exceeded",
                     "fszero adapter deadline exceeded during delay",
                     request,
                 ));
@@ -471,7 +483,7 @@ fn run_call(
     }
     if deadline_expired(request) {
         return Err(adapter_error(
-            "deadline",
+            "deadline_exceeded",
             "fszero adapter deadline exceeded",
             request,
         ));
@@ -833,7 +845,7 @@ impl DomainAdapter for FsZeroAdapter {
         let request = call.request;
         if self.degraded || self.session_thread.is_none() {
             return Err(adapter_error(
-                "backend_unavailable",
+                "substrate",
                 "FSZero durable store unavailable; refusing in-memory fallback",
                 request,
             ));
@@ -850,7 +862,7 @@ impl DomainAdapter for FsZeroAdapter {
         }
         if deadline_expired(request) {
             return Err(adapter_error(
-                "deadline",
+                "deadline_exceeded",
                 "fszero adapter deadline exceeded",
                 request,
             ));
@@ -872,7 +884,7 @@ impl DomainAdapter for FsZeroAdapter {
         }
         if deadline_expired(request) {
             return Err(adapter_error(
-                "deadline",
+                "deadline_exceeded",
                 "fszero adapter deadline exceeded",
                 request,
             ));

@@ -181,7 +181,7 @@ impl DomainAdapter for FixtureAdapter {
         let request = call.request;
         if request.args["__fixture_fail"] == true {
             return Err(AdapterError::new(
-                "fixture_failure",
+                "fixture",
                 "fixture adapter failed by request",
                 false,
                 Some(request.trace.clone()),
@@ -213,7 +213,7 @@ impl DomainAdapter for FixtureAdapter {
                     && crate::connector::now_ms() >= deadline
                 {
                     return Err(AdapterError::new(
-                        "deadline",
+                        "deadline_exceeded",
                         "fixture adapter deadline exceeded",
                         false,
                         Some(request.trace.clone()),

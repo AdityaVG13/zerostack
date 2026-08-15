@@ -104,7 +104,7 @@ impl DomainAdapter for TestAdapter {
                     && now_ms() >= deadline
                 {
                     return Err(AdapterError::new(
-                        "deadline",
+                        "deadline_exceeded",
                         "test adapter deadline exceeded",
                         false,
                         Some(request.trace.clone()),
@@ -118,7 +118,7 @@ impl DomainAdapter for TestAdapter {
         }
         if request.args["__fail"] == true {
             return Err(AdapterError::new(
-                "boom",
+                "internal",
                 "test adapter failed after dispatch crossing",
                 false,
                 Some(request.trace.clone()),

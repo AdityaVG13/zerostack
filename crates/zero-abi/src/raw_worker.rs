@@ -417,6 +417,26 @@ pub fn is_typed_worker_error_kind(kind: &str) -> bool {
     WORKER_ERROR_KINDS.contains(&kind)
 }
 
+/// Canonicalize a worker error kind.
+///
+/// Accepted aliases: `deadline` → `deadline_exceeded`, `busy` → `timeout`.
+/// Anything else outside [`WORKER_ERROR_KINDS`] is rejected so constructors
+/// cannot emit `potato` / `busy` / `deadline`.
+pub fn canonical_worker_error_kind(kind: &str) -> Result<&str, String> {
+    if kind == "deadline" {
+        return Ok("deadline_exceeded");
+    }
+    if kind == "busy" {
+        return Ok("timeout");
+    }
+    if is_typed_worker_error_kind(kind) {
+        return Ok(kind);
+    }
+    Err(format!(
+        "unknown WorkerError.kind {kind:?}; not in the closed RW5 set"
+    ))
+}
+
 /// Exact names the RW10 harness probes. Fixture, in-process adapters, and
 /// the conformance loop must refuse this set.
 pub const RW10_FORBIDDEN_OPS: &[&str] = &[
@@ -492,6 +512,24 @@ pub struct WorkerError {
     pub retryable: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub details: Option<Value>,
+}
+
+impl WorkerError {
+    /// Construct a typed worker error. Rejects kinds outside
+    /// [`WORKER_ERROR_KINDS`] after the `deadline` / `busy` aliases.
+    pub fn new(
+        kind: impl Into<String>,
+        message: impl Into<String>,
+        retryable: bool,
+    ) -> Result<Self, String> {
+        let kind = canonical_worker_error_kind(&kind.into())?.to_owned();
+        Ok(Self {
+            kind,
+            message: message.into(),
+            retryable,
+            details: None,
+        })
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

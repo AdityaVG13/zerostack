@@ -69,11 +69,15 @@
     fn blob_ref_conformance_mirrors_the_raw_worker() {
         let valid = "fz://blob/".to_owned() + &"a".repeat(64);
         assert!(is_conformant_blob_ref(&valid));
+        assert!(is_conformant_blob_ref(&(valid.clone() + "#B0-4")));
+        assert!(is_conformant_blob_ref(&(valid.clone() + "#L1-2")));
         let short = "fz://blob/".to_owned() + &"b".repeat(63);
         assert!(!is_conformant_blob_ref(&short));
         let upper = "fz://blob/".to_owned() + &"C".repeat(64);
         assert!(!is_conformant_blob_ref(&upper));
-        assert!(is_conformant_blob_ref("fz://codemode/execution/7"));
+        assert!(!is_conformant_blob_ref(&(valid + "#garbage")));
+        assert!(!is_conformant_blob_ref("fz://codemode/execution/7"));
+        assert!(!is_conformant_blob_ref("not-a-ref"));
     }
 
     #[test]
@@ -252,7 +256,7 @@
                 cancellation: &CancellationSignal::new(),
             })
             .expect_err("inert adapter must fail closed");
-        assert_eq!(error.error.kind, "backend_unavailable");
+        assert_eq!(error.error.kind, "substrate");
         assert!(adapter.degraded(), "call must not clear degraded");
     }
 
