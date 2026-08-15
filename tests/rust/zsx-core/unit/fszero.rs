@@ -413,3 +413,71 @@
         assert!(adapter.session_is_live());
         assert_eq!(adapter.engine(), EngineIdentity::FsZero);
     }
+
+    fn transact_request(steps: serde_json::Value) -> CallRequest {
+        let mut request = test_request(None);
+        request.op = "fs.transact".into();
+        request.args = serde_json::json!({ "steps": steps });
+        request
+    }
+
+    #[test]
+    fn mr_multi_edit_find_replace_invertive() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let rel = "invertive.txt";
+        let path = dir.path().join(rel);
+        let needle_a = "UNIQUE_NEEDLE_A_eyzt";
+        let needle_b = "UNIQUE_REPLACEMENT_B_eyzt";
+        let original = format!("prefix {needle_a} suffix\nsecond line stays put\n");
+        std::fs::write(&path, original.as_bytes()).expect("seed");
+        let seeded = std::fs::read_to_string(&path).expect("seed read");
+        if seeded.matches(needle_a).count() != 1 || seeded.contains(needle_b) {
+            // Bead precondition: A unique and B absent, or skip.
+            return;
+        }
+
+        let adapter = FsZeroAdapter::new(dir.path(), "session-mr-invertive");
+        assert!(
+            adapter.session_is_live(),
+            "live adapter required for invertive apply"
+        );
+
+        let forward = transact_request(serde_json::json!([{
+            "op": "edit",
+            "path": rel,
+            "find": needle_a,
+            "replace": needle_b
+        }]));
+        adapter
+            .call(AdapterCall {
+                request: &forward,
+                cancellation: &CancellationSignal::new(),
+            })
+            .expect("A->B multi_edit/transact");
+
+        let mid = std::fs::read_to_string(&path).expect("mid");
+        assert!(
+            mid.contains(needle_b) && !mid.contains(needle_a),
+            "forward replace must land B and drop A: {mid:?}"
+        );
+
+        let back = transact_request(serde_json::json!([{
+            "op": "edit",
+            "path": rel,
+            "find": needle_b,
+            "replace": needle_a
+        }]));
+        adapter
+            .call(AdapterCall {
+                request: &back,
+                cancellation: &CancellationSignal::new(),
+            })
+            .expect("B->A multi_edit/transact");
+
+        let restored = std::fs::read(&path).expect("restored");
+        assert_eq!(
+            restored,
+            original.as_bytes(),
+            "invertive A->B then B->A must restore original bytes"
+        );
+    }
