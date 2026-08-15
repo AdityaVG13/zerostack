@@ -297,4 +297,15 @@
             );
         }
         assert!(lower("token", "expand", json!("https://invalid")).is_err());
+        // `gz://` must win over the `g:` prefix (first-match table order).
+        assert_lower(
+            "token",
+            "expand",
+            json!("g:42"),
+            EngineIdentity::GraphZero,
+            "expand",
+            json!({"reference":"g:42"}),
+        );
+        assert!(engine_for("help").is_err(), "help is not an engine surface");
+        assert!(engine_for("fs").is_ok());
     }

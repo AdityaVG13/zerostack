@@ -120,12 +120,69 @@ const TOKEN_SHELL_OPTIONS: &[(&str, TokenOptionType)] = &[
     ("background", TokenOptionType::Bool),
 ];
 
-fn token_method_args(
+/// First-match expand schemes. `gz://` must precede `g:` (`gz://` starts with `g:`).
+/// Prefix lengths stay on the original string bytes (`"fz://"` and `"tz://"`
+/// are both 5); the table does not slice.
+const EXPAND_SCHEMES: &[(&str, EngineIdentity, &str, &str)] = &[
+    ("fz://", EngineIdentity::FsZero, "fs.expand", "ref"),
+    ("gz://", EngineIdentity::GraphZero, "expand", "reference"),
+    ("g:", EngineIdentity::GraphZero, "expand", "reference"),
+    ("q:", EngineIdentity::GraphZero, "expand", "reference"),
+    ("tz://", EngineIdentity::TokenZero, "expand", "ref"),
+];
+
+const COMPOUND_OPS: &[(&str, &str)] = &[
+    ("read", "fs.read"),
+    ("search", "fs.search"),
+    ("find", "fs.search"),
+    ("grep", "fs.search"),
+    ("list", "fs.ls"),
+    ("tree", "fs.ls"),
+    ("inventory", "fs.ls"),
+    ("mutate", "fs.edit"),
+    ("edit", "fs.edit"),
+    ("verifiedEdit", "fs.edit"),
+    ("write", "fs.write"),
+    ("resolve", "fs.resolve"),
+];
+
+const FS_VECTOR_METHODS: &[(&str, &str, &str)] = &[
+    ("read_many", "fs.readMany", "paths"),
+    ("list_many", "fs.listMany", "items"),
+    ("search_many", "fs.searchMany", "queries"),
+    ("ast_search_many", "fs.astSearchMany", "items"),
+];
+
+const PLAN_STOPWORDS: &[&str] = &[
+    "about",
+    "context",
+    "discover",
+    "entrypoint",
+    "files",
+    "find",
+    "from",
+    "into",
+    "load",
+    "locate",
+    "map",
+    "repo",
+    "repository",
+    "the",
+    "this",
+    "with",
+];
+
+fn unsupported_method(surface: &str) -> ConnectorError {
+    ConnectorError::new(format!(
+        "unsupported {surface} method; discover call shapes with zero.help.search({{query}})"
+    ))
+}
+
+fn normalize_token_args(
     input: &Value,
     method: &str,
     first_key: &str,
-    contract: &[(&str, TokenOptionType)],
-) -> Result<Value, ConnectorError> {
+) -> Result<serde_json::Map<String, Value>, ConnectorError> {
     let mut args = serde_json::Map::new();
     if let Some(arguments) = input.as_array() {
         if !arguments.is_empty() && arguments.iter().all(Value::is_string) {
@@ -156,6 +213,42 @@ fn token_method_args(
     } else {
         args.insert(first_key.into(), input.clone());
     }
+    Ok(args)
+}
+
+fn validate_token_option(expected: TokenOptionType, value: &Value) -> bool {
+    const TOKEN_MODES: &[&str] = &[
+        "auto",
+        "hybrid",
+        "passthrough",
+        "diagnostic",
+        "critical",
+        "structured",
+        "fidelity",
+        "dedupe",
+        "diff-aware",
+        "diff_aware",
+        "diffaware",
+        "exact",
+        "lossy",
+    ];
+    match expected {
+        TokenOptionType::Bool => value.is_boolean(),
+        TokenOptionType::PositiveInteger => value.as_u64().is_some_and(|number| number > 0),
+        TokenOptionType::String => value.is_string(),
+        TokenOptionType::Mode => value
+            .as_str()
+            .is_some_and(|mode| TOKEN_MODES.contains(&mode)),
+    }
+}
+
+fn token_method_args(
+    input: &Value,
+    method: &str,
+    first_key: &str,
+    contract: &[(&str, TokenOptionType)],
+) -> Result<Value, ConnectorError> {
+    let args = normalize_token_args(input, method, first_key)?;
 
     let first = args
         .get(first_key)
@@ -192,30 +285,7 @@ fn token_method_args(
                 "token.{method} unknown option '{key}'; supported options: {supported}{advice}"
             )));
         };
-        let valid = match expected {
-            TokenOptionType::Bool => value.is_boolean(),
-            TokenOptionType::PositiveInteger => value.as_u64().is_some_and(|number| number > 0),
-            TokenOptionType::String => value.is_string(),
-            TokenOptionType::Mode => value.as_str().is_some_and(|mode| {
-                matches!(
-                    mode,
-                    "auto"
-                        | "hybrid"
-                        | "passthrough"
-                        | "diagnostic"
-                        | "critical"
-                        | "structured"
-                        | "fidelity"
-                        | "dedupe"
-                        | "diff-aware"
-                        | "diff_aware"
-                        | "diffaware"
-                        | "exact"
-                        | "lossy"
-                )
-            }),
-        };
-        if !valid {
+        if !validate_token_option(*expected, value) {
             return Err(ConnectorError::new(format!(
                 "token.{method} option '{key}' has an invalid value: {value}"
             )));
@@ -259,10 +329,138 @@ fn token_job_args(input: &Value) -> Result<Value, ConnectorError> {
     serde_json::to_value(request).map_err(|error| ConnectorError::new(error.to_string()))
 }
 
+fn lower_token_expand(input: &Value) -> Result<(EngineIdentity, String, Value), ConnectorError> {
+    let reference = input
+        .as_array()
+        .and_then(|values| values.first())
+        .and_then(Value::as_str)
+        .or_else(|| input.get("ref").and_then(Value::as_str))
+        .or_else(|| input.as_str())
+        .ok_or_else(|| ConnectorError::new("token.expand requires ref"))?;
+    let (engine, op, key) = EXPAND_SCHEMES
+        .iter()
+        .find(|(prefix, _, _, _)| reference.starts_with(prefix))
+        .map(|(_, engine, op, key)| (*engine, *op, *key))
+        .ok_or_else(|| ConnectorError::new("unsupported ref scheme"))?;
+    let mut args = serde_json::Map::new();
+    args.insert(key.into(), Value::String(reference.into()));
+    Ok((engine, op.into(), Value::Object(args)))
+}
+
+fn lower_fs_plan(engine: EngineIdentity, input: &Value) -> (EngineIdentity, String, Value) {
+    let goal = input
+        .as_array()
+        .and_then(|values| values.first())
+        .or_else(|| input.get("goal"))
+        .and_then(Value::as_str)
+        .or_else(|| input.as_str())
+        .unwrap_or_default();
+    let queries: Vec<Value> = goal
+        .split(|character: char| !character.is_ascii_alphanumeric() && character != '_')
+        .map(str::to_ascii_lowercase)
+        .filter(|term| term.len() >= 3 && !PLAN_STOPWORDS.contains(&term.as_str()))
+        .take(8)
+        .map(Value::String)
+        .collect();
+    if queries.is_empty() {
+        return (engine, "fs.ls".into(), serde_json::json!({"arg":"."}));
+    }
+    (
+        engine,
+        "fs.searchMany".into(),
+        serde_json::json!({"queries":queries}),
+    )
+}
+
+fn lower_fs_world(input: Value) -> Result<Value, ConnectorError> {
+    if let Some(items) = input.as_array() {
+        if items.is_empty() || items.len() > 2 {
+            return Err(ConnectorError::new(
+                "fs.world requires an action and optional options object",
+            ));
+        }
+        let action = items[0]
+            .as_str()
+            .ok_or_else(|| ConnectorError::new("fs.world action must be a string"))?;
+        if let Some(options) = items.get(1) {
+            let mut object = options
+                .as_object()
+                .cloned()
+                .ok_or_else(|| ConnectorError::new("fs.world options must be an object"))?;
+            if object.contains_key("action") || object.contains_key("arg") {
+                return Err(ConnectorError::new(
+                    "fs.world options must not repeat action or arg",
+                ));
+            }
+            object.insert("action".into(), Value::String(action.into()));
+            return Ok(Value::Object(object));
+        }
+        if matches!(action, "fork") || action.contains(':') {
+            return Ok(serde_json::json!({"arg": action}));
+        }
+        return Ok(serde_json::json!({"action": action}));
+    }
+    if input.is_object() {
+        return Ok(input);
+    }
+    if let Some(action) = input.as_str() {
+        return Ok(serde_json::json!({"arg": action}));
+    }
+    Err(ConnectorError::new(
+        "fs.world requires an action string or object",
+    ))
+}
+
+fn exactly_one_options_object(input: Value) -> Result<Value, ConnectorError> {
+    if let Some(items) = input.as_array() {
+        if items.len() != 1 || !items[0].is_object() {
+            return Err(ConnectorError::new(
+                "fs.edit and fs.write take exactly one options object",
+            ));
+        }
+        return Ok(items[0].clone());
+    }
+    if input.is_object() {
+        return Ok(input);
+    }
+    Err(ConnectorError::new(
+        "fs.edit and fs.write take exactly one options object",
+    ))
+}
+
+fn compound_name_and_args(input: &Value) -> Result<(&str, Value), ConnectorError> {
+    if let Some(items) = input.as_array() {
+        let name = items
+            .first()
+            .and_then(Value::as_str)
+            .ok_or_else(|| ConnectorError::new("fs.compound requires name"))?;
+        let args = items
+            .get(1)
+            .cloned()
+            .unwrap_or(Value::Object(Default::default()));
+        return Ok((name, args));
+    }
+    let name = input
+        .get("name")
+        .and_then(Value::as_str)
+        .ok_or_else(|| ConnectorError::new("fs.compound requires name"))?;
+    let args = input
+        .get("args")
+        .cloned()
+        .unwrap_or(Value::Object(Default::default()));
+    Ok((name, args))
+}
+
 /// Lower one public `surface.method` call to its canonical domain operation.
 ///
 /// Returns `(engine, operation, args)` exactly as the process compatibility
 /// path does; expansion routing follows the ref scheme owner.
+///
+/// Bill (Wave F): F1–F5 + L1–L4 + C1/C2/C5 are justified-displacement
+/// (named unique blocks). Remaining `lower` CC is the public surface/method
+/// router. ΣCC is flat except the three shared tails (edit/write options,
+/// compound name, unsupported method). F6 `normalize_token_job_candidate`
+/// and L5 `engine_for` table are not done -- `help` must stay rejected.
 pub fn lower(
     surface: &str,
     method: &str,
@@ -270,70 +468,10 @@ pub fn lower(
 ) -> Result<(EngineIdentity, String, Value), ConnectorError> {
     let engine = engine_for(surface)?;
     if surface == "token" && method == "expand" {
-        let reference = input
-            .as_array()
-            .and_then(|values| values.first())
-            .and_then(Value::as_str)
-            .or_else(|| input.get("ref").and_then(Value::as_str))
-            .or_else(|| input.as_str())
-            .ok_or_else(|| ConnectorError::new("token.expand requires ref"))?;
-        let (engine, op, key) = if reference.starts_with("fz://") {
-            (EngineIdentity::FsZero, "fs.expand", "ref")
-        } else if reference.starts_with("gz://")
-            || reference.starts_with("g:")
-            || reference.starts_with("q:")
-        {
-            (EngineIdentity::GraphZero, "expand", "reference")
-        } else if reference.starts_with("tz://") {
-            (EngineIdentity::TokenZero, "expand", "ref")
-        } else {
-            return Err(ConnectorError::new("unsupported ref scheme"));
-        };
-        let mut args = serde_json::Map::new();
-        args.insert(key.into(), Value::String(reference.into()));
-        return Ok((engine, op.into(), Value::Object(args)));
+        return lower_token_expand(&input);
     }
     if surface == "fs" && method == "plan" {
-        let goal = input
-            .as_array()
-            .and_then(|values| values.first())
-            .or_else(|| input.get("goal"))
-            .and_then(Value::as_str)
-            .or_else(|| input.as_str())
-            .unwrap_or_default();
-        let stop = [
-            "about",
-            "context",
-            "discover",
-            "entrypoint",
-            "files",
-            "find",
-            "from",
-            "into",
-            "load",
-            "locate",
-            "map",
-            "repo",
-            "repository",
-            "the",
-            "this",
-            "with",
-        ];
-        let queries: Vec<Value> = goal
-            .split(|character: char| !character.is_ascii_alphanumeric() && character != '_')
-            .map(str::to_ascii_lowercase)
-            .filter(|term| term.len() >= 3 && !stop.contains(&term.as_str()))
-            .take(8)
-            .map(Value::String)
-            .collect();
-        if queries.is_empty() {
-            return Ok((engine, "fs.ls".into(), serde_json::json!({"arg":"."})));
-        }
-        return Ok((
-            engine,
-            "fs.searchMany".into(),
-            serde_json::json!({"queries":queries}),
-        ));
+        return Ok(lower_fs_plan(engine, &input));
     }
     if surface == "fs" && method == "structural" {
         let values = input.as_array();
@@ -362,20 +500,7 @@ pub fn lower(
     // gate (null = must-not-exist create, fz://blob/<sha256> = compare-
     // and-swap against current content).
     if surface == "fs" && (method == "edit" || method == "write") {
-        let args = if let Some(items) = input.as_array() {
-            if items.len() != 1 || !items[0].is_object() {
-                return Err(ConnectorError::new(
-                    "fs.edit and fs.write take exactly one options object",
-                ));
-            }
-            items[0].clone()
-        } else if input.is_object() {
-            input
-        } else {
-            return Err(ConnectorError::new(
-                "fs.edit and fs.write take exactly one options object",
-            ));
-        };
+        let args = exactly_one_options_object(input)?;
         return Ok((engine, format!("fs.{method}"), args));
     }
     // All-or-nothing multi-step mutation: zero.fs.transact([step, ...]) or
@@ -395,90 +520,27 @@ pub fn lower(
         return Ok((engine, "fs.transact".into(), serde_json::json!({"steps": steps})));
     }
     if surface == "fs" && method == "compound" {
-        let (name, compound_args) = if let Some(items) = input.as_array() {
-            (
-                items
-                    .first()
-                    .and_then(Value::as_str)
-                    .ok_or_else(|| ConnectorError::new("fs.compound requires name"))?,
-                items
-                    .get(1)
-                    .cloned()
-                    .unwrap_or(Value::Object(Default::default())),
-            )
-        } else {
-            (
-                input
-                    .get("name")
-                    .and_then(Value::as_str)
-                    .ok_or_else(|| ConnectorError::new("fs.compound requires name"))?,
-                input
-                    .get("args")
-                    .cloned()
-                    .unwrap_or(Value::Object(Default::default())),
-            )
-        };
-        let op = match name {
-            "read" => "fs.read",
-            "search" | "find" | "grep" => "fs.search",
-            "list" | "tree" | "inventory" => "fs.ls",
-            "mutate" | "edit" | "verifiedEdit" => "fs.edit",
-            "write" => "fs.write",
-            "resolve" => "fs.resolve",
-            _ => {
-                return Err(ConnectorError::new(
+        let (name, compound_args) = compound_name_and_args(&input)?;
+        let op = COMPOUND_OPS
+            .iter()
+            .find(|(alias, _)| *alias == name)
+            .map(|(_, op)| *op)
+            .ok_or_else(|| {
+                ConnectorError::new(
                     "unsupported planner-free fs.compound operation; discover call shapes with zero.help.search({query})",
-                ));
-            }
-        };
+                )
+            })?;
         return Ok((engine, op.into(), compound_args));
     }
     if surface == "fs" && method == "world" {
-        let args = if let Some(items) = input.as_array() {
-            if items.is_empty() || items.len() > 2 {
-                return Err(ConnectorError::new(
-                    "fs.world requires an action and optional options object",
-                ));
-            }
-            let action = items[0]
-                .as_str()
-                .ok_or_else(|| ConnectorError::new("fs.world action must be a string"))?;
-            if let Some(options) = items.get(1) {
-                let mut object = options
-                    .as_object()
-                    .cloned()
-                    .ok_or_else(|| ConnectorError::new("fs.world options must be an object"))?;
-                if object.contains_key("action") || object.contains_key("arg") {
-                    return Err(ConnectorError::new(
-                        "fs.world options must not repeat action or arg",
-                    ));
-                }
-                object.insert("action".into(), Value::String(action.into()));
-                Value::Object(object)
-            } else if matches!(action, "fork") || action.contains(':') {
-                serde_json::json!({"arg": action})
-            } else {
-                serde_json::json!({"action": action})
-            }
-        } else if input.is_object() {
-            input
-        } else if let Some(action) = input.as_str() {
-            serde_json::json!({"arg": action})
-        } else {
-            return Err(ConnectorError::new(
-                "fs.world requires an action string or object",
-            ));
-        };
-        return Ok((engine, "fs.world".into(), args));
+        return Ok((engine, "fs.world".into(), lower_fs_world(input)?));
     }
     if surface == "fs" {
-        let (op, key) = match method {
-            "read_many" => ("fs.readMany", "paths"),
-            "list_many" => ("fs.listMany", "items"),
-            "search_many" => ("fs.searchMany", "queries"),
-            "ast_search_many" => ("fs.astSearchMany", "items"),
-            _ => return Err(ConnectorError::new("unsupported fs method; discover call shapes with zero.help.search({query})")),
-        };
+        let (op, key) = FS_VECTOR_METHODS
+            .iter()
+            .find(|(name, _, _)| *name == method)
+            .map(|(_, op, key)| (*op, *key))
+            .ok_or_else(|| unsupported_method("fs"))?;
         return Ok((engine, op.into(), vector_args(&input, key)));
     }
     if surface == "graph" {
@@ -502,7 +564,7 @@ pub fn lower(
                 }
             }
             "index" => Value::Object(Default::default()),
-            _ => return Err(ConnectorError::new("unsupported graph method; discover call shapes with zero.help.search({query})")),
+            _ => return Err(unsupported_method("graph")),
         };
         return Ok((engine, method.into(), args));
     }
@@ -529,7 +591,7 @@ pub fn lower(
             "shell",
             token_method_args(&input, "shell", "command", TOKEN_SHELL_OPTIONS)?,
         ),
-        _ => return Err(ConnectorError::new("unsupported token method; discover call shapes with zero.help.search({query})")),
+        _ => return Err(unsupported_method("token")),
     };
     Ok((engine, op.into(), args))
 }
