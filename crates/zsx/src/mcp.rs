@@ -8,6 +8,7 @@
 //! this process.
 
 use std::collections::HashMap;
+use std::hash::{Hash, Hasher};
 use std::io::{self, BufRead, Write};
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
@@ -50,6 +51,9 @@ impl McpHost {
         let root = root
             .canonicalize()
             .map_err(|error| format!("cannot canonicalize {}: {error}", root.display()))?;
+        if !root.is_dir() {
+            return Err(format!("root is not a directory: {}", root.display()));
+        }
         if self.sessions.contains_key(&root) {
             let live = self.sessions.get_mut(&root).expect("just checked");
             live.last_used = Instant::now();
@@ -69,7 +73,13 @@ impl McpHost {
                 break;
             }
         }
-        let session_id = format!("zsx-mcp-{:x}", std::process::id());
+        let mut hasher = std::collections::hash_map::DefaultHasher::new();
+        root.hash(&mut hasher);
+        let session_id = format!(
+            "zsx-mcp-{:x}-{:x}",
+            std::process::id(),
+            hasher.finish()
+        );
         let state_root = root.join(".zerostack");
         let session = ZsxSession::builder(root.clone())
             .with_state_root(state_root)
@@ -223,10 +233,26 @@ pub fn handle(host: &mut McpHost, message: &Value) -> Option<Value> {
                     .get("root")
                     .and_then(Value::as_str)
                     .map(PathBuf::from);
-                let timeout_ms = arguments
-                    .get("timeout_ms")
-                    .and_then(Value::as_u64)
-                    .unwrap_or(DEFAULT_TIMEOUT_MS);
+                let timeout_ms = match arguments.get("timeout_ms") {
+                    None => DEFAULT_TIMEOUT_MS,
+                    Some(Value::Number(n)) => match n.as_u64() {
+                        Some(v) => v,
+                        None => {
+                            return Some(json!({
+                                "jsonrpc": "2.0",
+                                "id": id,
+                                "result": tool_result("timeout_ms must be a positive integer".into(), true),
+                            }));
+                        }
+                    },
+                    Some(_) => {
+                        return Some(json!({
+                            "jsonrpc": "2.0",
+                            "id": id,
+                            "result": tool_result("timeout_ms must be a positive integer".into(), true),
+                        }));
+                    }
+                };
                 match host.zero_execute(plan, root, timeout_ms) {
                     Ok(value) => tool_result(value.to_string(), false),
                     Err(error) => tool_result(error, true),
@@ -257,6 +283,28 @@ pub fn handle(host: &mut McpHost, message: &Value) -> Option<Value> {
     }))
 }
 
+fn header_key(bytes: &[u8]) -> Option<&str> {
+    let text = std::str::from_utf8(bytes).ok()?;
+    let (key, _) = text.split_once(':')?;
+    let key = key.trim();
+    if key.is_empty()
+        || !key
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b == b'-')
+    {
+        return None;
+    }
+    Some(key)
+}
+
+fn is_lsp_opener(bytes: &[u8]) -> bool {
+    header_key(bytes).is_some_and(|key| key.eq_ignore_ascii_case("content-length"))
+}
+
+fn is_lsp_header_line(bytes: &[u8]) -> bool {
+    header_key(bytes).is_some()
+}
+
 fn detect_and_read(stdin: &mut impl BufRead) -> io::Result<Option<(FrameKind, Value)>> {
     let mut first = Vec::new();
     let n = stdin.read_until(b'\n', &mut first)?;
@@ -268,21 +316,52 @@ fn detect_and_read(stdin: &mut impl BufRead) -> io::Result<Option<(FrameKind, Va
         let value = serde_json::from_slice(trimmed).map_err(io::Error::other)?;
         return Ok(Some((FrameKind::Ndjson, value)));
     }
+    // Only Content-Length/Content-Type start an LSP frame. A stray log
+    // line must not trap the server waiting for a blank header terminator.
+    if !is_lsp_opener(trimmed) {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!(
+                "invalid mcp frame: {}",
+                String::from_utf8_lossy(trimmed)
+            ),
+        ));
+    }
     let mut headers = first;
+    let mut header_lines = 1usize;
     loop {
+        if header_lines > 16 || headers.len() > 4096 {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "mcp header block too large",
+            ));
+        }
         let mut line = Vec::new();
         let n = stdin.read_until(b'\n', &mut line)?;
         if n == 0 {
             return Ok(None);
         }
         headers.extend_from_slice(&line);
+        header_lines += 1;
         if line == b"\r\n" || line == b"\n" {
             break;
+        }
+        if !is_lsp_header_line(strip_crlf(&line)) && line != b"\r\n" && line != b"\n" {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "invalid mcp header line",
+            ));
         }
     }
     let length = content_length(&headers).ok_or_else(|| {
         io::Error::new(io::ErrorKind::InvalidData, "missing Content-Length")
     })?;
+    if length > 8 * 1024 * 1024 {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "mcp body exceeds 8MiB",
+        ));
+    }
     let mut body = vec![0_u8; length];
     stdin.read_exact(&mut body)?;
     let value = serde_json::from_slice(&body).map_err(io::Error::other)?;
@@ -331,18 +410,30 @@ fn write_frame(stdout: &mut impl Write, kind: &FrameKind, value: &Value) -> io::
 }
 
 /// Serve MCP on stdin/stdout until EOF. Returns after the host hangs up.
+///
+/// Do not hold `stdout.lock()` across `handle`: execute can `println!` /
+/// engine-log, and a held stdout lock deadlocks the only thread.
 pub fn serve(default_root: PathBuf) -> io::Result<()> {
     let mut host = McpHost::new(default_root);
-    let mut stdin = io::BufReader::new(io::stdin().lock());
-    let mut stdout = io::stdout().lock();
-    let mut kind;
+    let mut stdin = io::BufReader::new(io::stdin());
     loop {
-        let Some((detected, message)) = detect_and_read(&mut stdin)? else {
-            break;
-        };
-        kind = detected;
-        if let Some(response) = handle(&mut host, &message) {
-            write_frame(&mut stdout, &kind, &response)?;
+        match detect_and_read(&mut stdin) {
+            Ok(None) => break,
+            Ok(Some((kind, message))) => {
+                if let Some(response) = handle(&mut host, &message) {
+                    let mut stdout = io::stdout();
+                    write_frame(&mut stdout, &kind, &response)?;
+                }
+            }
+            Err(error) => {
+                let response = json!({
+                    "jsonrpc": "2.0",
+                    "id": Value::Null,
+                    "error": {"code": -32700, "message": error.to_string()},
+                });
+                let mut stdout = io::stdout();
+                write_frame(&mut stdout, &FrameKind::Ndjson, &response)?;
+            }
         }
     }
     host.shutdown();
@@ -372,6 +463,14 @@ mod tests {
     }
 
     #[test]
+    fn garbage_line_is_not_an_lsp_opener() {
+        assert!(!is_lsp_opener(b"not-json-at-all"));
+        assert!(!is_lsp_opener(b"INFO starting"));
+        assert!(is_lsp_opener(b"Content-Length: 12"));
+        assert!(is_lsp_opener(b"content-length: 7"));
+    }
+
+    #[test]
     fn content_length_parses_case_insensitive() {
         assert_eq!(
             content_length(b"Content-Length: 12\r\n\r\n"),
@@ -387,5 +486,22 @@ mod tests {
         write_frame(&mut buf, &FrameKind::Ndjson, &value).unwrap();
         assert_eq!(buf.last().copied(), Some(b'\n'));
         assert_eq!(buf.iter().filter(|b| **b == b'\n').count(), 1);
+    }
+
+    #[test]
+    fn negative_timeout_is_a_tool_error() {
+        let mut host = McpHost::new(std::env::temp_dir());
+        let response = handle(
+            &mut host,
+            &json!({
+                "jsonrpc":"2.0",
+                "id":1,
+                "method":"tools/call",
+                "params":{"name":"zero_execute","arguments":{"plan":"return 1;","timeout_ms":-3}}
+            }),
+        )
+        .unwrap();
+        assert_eq!(response["result"]["isError"], true);
+        assert!(host.sessions.is_empty());
     }
 }
