@@ -550,7 +550,7 @@ impl FsZeroAdapter {
     pub fn new(root: impl Into<PathBuf>, session_id: &str) -> Self {
         let root = root.into();
         let root = root.canonicalize().unwrap_or(root);
-        Self::build(root.clone(), root, session_id, None)
+        Self::build(root.clone(), root, session_id, None, false)
     }
 
     /// Build over `workspace_root` while keeping all durable engine and CAS
@@ -563,9 +563,12 @@ impl FsZeroAdapter {
         let workspace_root = workspace_root.into();
         let workspace_root = workspace_root.canonicalize().unwrap_or(workspace_root);
         let state_root = state_root.into();
-        let _ = std::fs::create_dir_all(state_root.join("fszero"));
-        let database = state_root.join("fszero").join("store.sqlite3");
-        Self::build(workspace_root, state_root, session_id, Some(database))
+        let fszero_dir = state_root.join("fszero");
+        if std::fs::create_dir_all(&fszero_dir).is_err() {
+            return Self::build(workspace_root, state_root, session_id, None, true);
+        }
+        let database = fszero_dir.join("store.sqlite3");
+        Self::build(workspace_root, state_root, session_id, Some(database), false)
     }
 
     fn build(
@@ -573,6 +576,7 @@ impl FsZeroAdapter {
         state_root: PathBuf,
         session_id: &str,
         database: Option<PathBuf>,
+        force_degraded: bool,
     ) -> Self {
         // FSZero equates the semantic contract digest with the operation ABI
         // digest (surface_handshake::local_capability).
@@ -597,20 +601,27 @@ impl FsZeroAdapter {
         let session_thread = thread::Builder::new()
             .name("zsx-fszero-session".into())
             .spawn(move || {
-                let (session, degraded) = match database {
-                    Some(database) => (
-                        FSZeroSession::with_durable_root(&thread_root, database),
-                        false,
-                    ),
-                    None => match FSZeroSession::try_with_repo_store(&thread_root) {
-                        Ok(session) => (session, false),
-                        Err(error) => {
-                            eprintln!(
-                                "zsx-core: FSZero durable store unavailable ({error}); using in-memory recovery"
-                            );
-                            (FSZeroSession::with_root(&thread_root), true)
-                        }
-                    },
+                let (session, degraded) = if force_degraded {
+                    eprintln!(
+                        "zsx-core: FSZero durable state root unusable; refusing silent success"
+                    );
+                    (FSZeroSession::with_root(&thread_root), true)
+                } else {
+                    match database {
+                        Some(database) => (
+                            FSZeroSession::with_durable_root(&thread_root, database),
+                            false,
+                        ),
+                        None => match FSZeroSession::try_with_repo_store(&thread_root) {
+                            Ok(session) => (session, false),
+                            Err(error) => {
+                                eprintln!(
+                                    "zsx-core: FSZero durable store unavailable ({error}); using in-memory recovery"
+                                );
+                                (FSZeroSession::with_root(&thread_root), true)
+                            }
+                        },
+                    }
                 };
                 let _ = init_tx.send(degraded);
                 session_loop(session, receiver, thread_state_root, thread_session_id);
@@ -618,7 +629,7 @@ impl FsZeroAdapter {
             .expect("cannot start fszero session thread"); // ubs:ignore — constructor is documented infallible; thread spawn failure is process-fatal
         let degraded = init_rx
             .recv_timeout(SESSION_INIT_TIMEOUT)
-            .expect("fszero session thread did not initialize"); // ubs:ignore — constructor is documented infallible; init timeout is process-fatal
+            .unwrap_or(true);
         Self {
             sender,
             session_thread: Some(session_thread),
