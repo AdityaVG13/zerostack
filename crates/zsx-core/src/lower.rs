@@ -455,11 +455,16 @@ fn default_batch_step_op(step: &mut Value) -> Result<(), ConnectorError> {
     if map.get("op").and_then(Value::as_str).is_some() {
         return Ok(());
     }
-    let has_edit = map.get("find").or_else(|| map.get("old")).is_some()
-        && map.get("replace").or_else(|| map.get("new")).is_some();
-    if has_edit {
+    let has_find = map.get("find").or_else(|| map.get("old")).is_some();
+    let has_replace = map.get("replace").or_else(|| map.get("new")).is_some();
+    if has_find && has_replace {
         map.insert("op".into(), Value::String("edit".into()));
         return Ok(());
+    }
+    if has_find || has_replace {
+        return Err(ConnectorError::new(
+            "fs.multi_edit edit step needs both find/old and replace/new",
+        ));
     }
     if map.get("content").is_some() || map.get("path").is_some() {
         map.insert("op".into(), Value::String("write".into()));

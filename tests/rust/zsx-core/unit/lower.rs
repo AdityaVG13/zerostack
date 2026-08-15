@@ -257,6 +257,18 @@
             "fs.transact",
             json!({"steps": expected_steps}),
         );
+        let missing_replace = lower(
+            "fs",
+            "multi_edit",
+            json!([{"path":"a.rs","find":"x"}]),
+        )
+        .unwrap_err();
+        assert!(
+            missing_replace
+                .to_string()
+                .contains("both find/old and replace/new"),
+            "find-without-replace must not become write: {missing_replace}"
+        );
         let err = lower(
             "fs",
             "multi_edit",
