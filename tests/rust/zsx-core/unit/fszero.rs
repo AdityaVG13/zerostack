@@ -134,6 +134,23 @@
     }
 
     #[test]
+    fn engine_recovery_labels_are_dropped_not_fail_closed() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let session = FSZeroSession::with_root(dir.path());
+        let request = test_request(None);
+        let result = DomainResult::success(
+            "fs.search",
+            None,
+            Some(serde_json::json!({"detail": "ok"})),
+            vec!["search".into(), "world".into()],
+            false,
+        );
+        let refs = collect_and_conform_refs(&session, &request, &result)
+            .expect("bare recovery labels must not fail the call");
+        assert!(refs.is_empty(), "unknown labels drop: {refs:?}");
+    }
+
+    #[test]
     fn engine_emitted_non_blob_refs_still_fail_closed() {
         let dir = tempfile::tempdir().expect("tempdir");
         let session = FSZeroSession::with_root(dir.path());

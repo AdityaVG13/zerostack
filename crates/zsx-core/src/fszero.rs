@@ -290,6 +290,30 @@ fn retainable_ref(session: &FSZeroSession, reference: &str) -> bool {
     }
 }
 
+/// Replace internal recovery labels (`search`, `read`, `world`, …) with the
+/// canonical public ref stored at `<label>/ref`. Unknown labels drop.
+/// Scheme-bearing refs (`fz://`, `gz://`, …) are left for retain/fail-closed.
+fn normalize_recovery_refs(session: &FSZeroSession, refs: &mut Vec<String>) {
+    let mut normalized = Vec::with_capacity(refs.len());
+    for reference in refs.drain(..) {
+        let candidate = if reference.contains("://") {
+            Some(reference)
+        } else {
+            session
+                .expand(&format!("{reference}/ref"))
+                .and_then(|bytes| String::from_utf8(bytes).ok())
+                .map(|value| value.trim().to_string())
+                .filter(|value| value.starts_with("fz://"))
+        };
+        if let Some(candidate) = candidate
+            && !normalized.contains(&candidate)
+        {
+            normalized.push(candidate);
+        }
+    }
+    *refs = normalized;
+}
+
 /// Fail-closed filter for engine-emitted / explicit request refs.
 fn retain_valid_refs(session: &FSZeroSession, refs: &mut Vec<String>) -> Option<String> {
     let mut rejected = None;
@@ -309,6 +333,7 @@ fn collect_and_conform_refs(
     result: &DomainResult,
 ) -> Result<Vec<String>, AdapterError> {
     let mut refs = result.refs.clone();
+    normalize_recovery_refs(session, &mut refs);
     if let Some(reference) = request.args.get("ref").and_then(Value::as_str)
         && ["fz://", "gz://", "tz://"]
             .iter()
