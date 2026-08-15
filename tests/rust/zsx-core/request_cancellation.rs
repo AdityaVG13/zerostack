@@ -23,8 +23,8 @@ use zero_abi::{
 };
 use zero_store::{AttemptRecoveryOutcomeV1, AttemptStateV1};
 use zsx_core::{
-    AdapterBinding, AdapterCall, AdapterError, AdapterResponse, DomainAdapter, ZsxSession,
-    ZsxSessionFailureCode,
+    AdapterBinding, AdapterCall, AdapterError, AdapterResponse, DomainAdapter,
+    SessionReplacementReason, ZsxSession, ZsxSessionFailureCode,
 };
 
 /// Minimal in-process adapter honoring the per-request cancellation token,
@@ -224,6 +224,50 @@ fn cancelled_in_flight_request_stops_dispatching_and_later_request_succeeds() {
     assert_eq!(ok.request_id, 2);
     assert_eq!(fs.calls(), 2);
 
+    session.shutdown().expect("shutdown");
+}
+
+#[test]
+fn replace_rejects_queued_execute_under_old_generation() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let root = dir
+        .path()
+        .canonicalize()
+        .unwrap_or_else(|_| dir.path().to_path_buf());
+    let (session, fs, _, _) = build_session(&root);
+
+    let blocker = Arc::clone(&session);
+    let occupy = std::thread::spawn(move || {
+        blocker.execute(
+            1,
+            1,
+            r#"await zero.fs.compound('search', {query: 'x', __delay_ms: 800});"#,
+            Duration::from_secs(30),
+        )
+    });
+    std::thread::sleep(Duration::from_millis(80));
+    let queued = Arc::clone(&session);
+    let queued_join = std::thread::spawn(move || {
+        queued.execute(
+            1,
+            2,
+            r#"await zero.fs.compound('search', {query: 'queued'});"#,
+            Duration::from_secs(30),
+        )
+    });
+    std::thread::sleep(Duration::from_millis(40));
+    session
+        .replace(1, SessionReplacementReason::Manual)
+        .expect("replace advances generation");
+    let _ = occupy.join();
+    let queued_result = queued_join.join().expect("queued thread");
+    assert!(queued_result.is_err(), "queued g1 work must not succeed");
+    // Occupier may have started; queued work must not add a second dispatch.
+    assert!(
+        fs.calls() <= 1,
+        "queued execute after replace must not dispatch: calls={}",
+        fs.calls()
+    );
     session.shutdown().expect("shutdown");
 }
 

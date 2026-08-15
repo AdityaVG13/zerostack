@@ -2105,6 +2105,7 @@ fn session_worker(
     cancellation: Arc<Mutex<ActiveCancellationSlot>>,
     ready: SyncSender<Result<(), String>>,
 ) {
+    let mut live_generation = initial_generation;
     let mut executor = match start_session_executor(
         initial_generation,
         &root,
@@ -2134,37 +2135,47 @@ fn session_worker(
                 contingent_policy,
                 reply,
             } => {
-                let result = match executor.as_mut() {
-                    None => Err((
-                        HostError::Runtime("session executor is unavailable".into()),
+                let result = if generation != live_generation {
+                    Err((
+                        HostError::Runtime(format!(
+                            "request generation {generation} is stale; live generation is {live_generation}"
+                        )),
                         None,
-                    )),
-                    Some(executor) => match contingent_policy {
-                        Some(policy) => executor.execute_with_contingent_policy(
-                            generation,
-                            request_id,
-                            &source,
-                            timeout,
-                            approval_grants,
-                            verdict_envelope,
-                            &policy,
-                        ),
-                        None => executor
-                            .execute_with_context(
+                    ))
+                } else {
+                    match executor.as_mut() {
+                        None => Err((
+                            HostError::Runtime("session executor is unavailable".into()),
+                            None,
+                        )),
+                        Some(executor) => match contingent_policy {
+                            Some(policy) => executor.execute_with_contingent_policy(
                                 generation,
                                 request_id,
                                 &source,
                                 timeout,
                                 approval_grants,
                                 verdict_envelope,
-                            )
-                            .map(|(value, metrics, verdict)| (value, metrics, verdict, None))
-                            .map_err(|error| (error, None)),
-                    },
+                                &policy,
+                            ),
+                            None => executor
+                                .execute_with_context(
+                                    generation,
+                                    request_id,
+                                    &source,
+                                    timeout,
+                                    approval_grants,
+                                    verdict_envelope,
+                                )
+                                .map(|(value, metrics, verdict)| (value, metrics, verdict, None))
+                                .map_err(|error| (error, None)),
+                        },
+                    }
                 };
                 let _ = reply.send(result);
             }
             ZsxCommand::Replace { generation, reply } => {
+                live_generation = generation;
                 if let Ok(mut slot) = cancellation.lock() {
                     *slot = ActiveCancellationSlot::default();
                 }
