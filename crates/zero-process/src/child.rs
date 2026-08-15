@@ -415,9 +415,10 @@ impl VerifiedChild {
             // group id equals the child's pid and is pinned by the unreaped
             // owned Child until reap.
             command.process_group(0);
-            // Linux: die with the spawning owner even if the owner is SIGKILL'd
-            // before it can reap the group. macOS has no PDEATHSIG -- explicit
-            // kill_and_reap / process-group teardown remains the owner path.
+            // Linux: PR_SET_PDEATHSIG. Darwin: a forked kqueue watcher on the
+            // owner pid (NOTE_EXIT) SIGKILLs this process group -- macOS has
+            // no PDEATHSIG. xk4c owns prctl-errno fail-closed; do not fold it
+            // in here.
             #[cfg(target_os = "linux")]
             {
                 unsafe {
@@ -430,6 +431,12 @@ impl VerifiedChild {
                         }
                         Ok(())
                     });
+                }
+            }
+            #[cfg(target_os = "macos")]
+            {
+                unsafe {
+                    command.pre_exec(darwin_bind_tree_to_owner);
                 }
             }
         }
@@ -878,6 +885,93 @@ impl VerifiedChild {
         }
         self.revoke()?;
         self.terminal_status().ok_or(IdentityError::Missing)
+    }
+}
+
+/// Darwin owner-death: fork a kqueue watcher that SIGKILLs this process
+/// group when the spawning owner exits. The watcher leaves the tree group
+/// so it is not a member of the kill target. libc-only after fork.
+#[cfg(target_os = "macos")]
+fn darwin_bind_tree_to_owner() -> io::Result<()> {
+    // SAFETY: pre_exec is async-signal-safe. getppid/getpid/fork/setpgid
+    // are AS-safe. The watcher process never returns into Rust.
+    unsafe {
+        let owner = libc::getppid();
+        let tree_root = libc::getpid();
+        if owner <= 1 {
+            libc::_exit(1);
+        }
+        match libc::fork() {
+            -1 => Err(io::Error::last_os_error()),
+            0 => {
+                let _ = libc::setpgid(0, 0);
+                darwin_watch_owner_then_kill(owner, tree_root);
+            }
+            _ => Ok(()),
+        }
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn darwin_watch_owner_then_kill(owner: libc::pid_t, tree_root: libc::pid_t) -> ! {
+    unsafe {
+        let kq = libc::kqueue();
+        if kq < 0 {
+            libc::_exit(1);
+        }
+        let changes = [
+            libc::kevent {
+                ident: owner as usize,
+                filter: libc::EVFILT_PROC,
+                flags: libc::EV_ADD | libc::EV_ONESHOT,
+                fflags: libc::NOTE_EXIT,
+                data: 0,
+                udata: std::ptr::null_mut(),
+            },
+            libc::kevent {
+                ident: tree_root as usize,
+                filter: libc::EVFILT_PROC,
+                flags: libc::EV_ADD | libc::EV_ONESHOT,
+                fflags: libc::NOTE_EXIT,
+                data: 0,
+                udata: std::ptr::null_mut(),
+            },
+        ];
+        if libc::kevent(
+            kq,
+            changes.as_ptr(),
+            2,
+            std::ptr::null_mut(),
+            0,
+            std::ptr::null(),
+        ) < 0
+        {
+            libc::_exit(1);
+        }
+        let mut event = libc::kevent {
+            ident: 0,
+            filter: 0,
+            flags: 0,
+            fflags: 0,
+            data: 0,
+            udata: std::ptr::null_mut(),
+        };
+        loop {
+            let rc = libc::kevent(kq, std::ptr::null(), 0, &mut event, 1, std::ptr::null());
+            if rc < 0 {
+                if io::Error::last_os_error().raw_os_error() == Some(libc::EINTR) {
+                    continue;
+                }
+                libc::_exit(1);
+            }
+            if rc == 0 {
+                continue;
+            }
+            if event.ident == owner as usize {
+                let _ = libc::kill(-tree_root, libc::SIGKILL);
+            }
+            libc::_exit(0);
+        }
     }
 }
 

@@ -120,8 +120,8 @@ fn fixture_runner() {
         }
         "owner-spawn-tree" => {
             // This fixture *is* the owner: it spawn_tree's a leaf so the leaf
-            // gets Linux PR_SET_PDEATHSIG bound to this process. The parent
-            // test SIGKILLs us; the leaf must not stay live.
+            // is bound to this process (Linux PDEATHSIG / Darwin kqueue
+            // watcher). The parent test SIGKILLs us; the leaf must not stay live.
             let mut command = fixture_command("leaf");
             if let Ok(pid_file) = std::env::var(LEAF_PID_ENV) {
                 command.env(LEAF_PID_ENV, pid_file);
@@ -725,9 +725,9 @@ fn assert_leaf_dead(leaf_pid: u32, identity: &LeafIdentity) {
     panic!("descendant leaf {leaf_pid} survived");
 }
 
-/// Linux: SIGKILL of the spawn_tree owner must reap the leaf via PR_SET_PDEATHSIG.
-/// Fail if only a comment was added (`zerostack-rca-unix-parent-death-7afx`).
-#[cfg(target_os = "linux")]
+/// SIGKILL of the spawn_tree owner must reap the leaf: Linux PR_SET_PDEATHSIG
+/// or Darwin kqueue NOTE_EXIT watcher. Fail if only a comment was added.
+#[cfg(any(target_os = "linux", target_os = "macos"))]
 #[test]
 fn spawn_tree_owner_sigkill_reaps_leaf() {
     let pid_file = unique_temp_path("owner-kill-leaf");
@@ -746,7 +746,7 @@ fn spawn_tree_owner_sigkill_reaps_leaf() {
     );
 
     // SAFETY: SIGKILL the owner fixture we just spawned. The leaf is bound
-    // to that owner by PR_SET_PDEATHSIG.
+    // to that owner by PDEATHSIG (Linux) or the Darwin kqueue watcher.
     let rc = unsafe { libc::kill(owner.id() as libc::pid_t, libc::SIGKILL) };
     assert_eq!(rc, 0, "SIGKILL owner");
     let _ = owner.wait();
@@ -762,18 +762,7 @@ fn spawn_tree_owner_sigkill_reaps_leaf() {
     }
     assert!(
         leaf_gone,
-        "leaf {leaf_pid} stayed live after owner SIGKILL (PDEATHSIG did not fire)"
-    );
-}
-
-/// macOS has no PR_SET_PDEATHSIG. Owner-death reaping stays kill_and_reap /
-/// process-group teardown (`child.rs` spawn_tree comment). This is not a
-/// silent skip of the Linux invariant -- Linux is the rch host.
-#[cfg(target_os = "macos")]
-#[test]
-fn spawn_tree_owner_sigkill_documents_no_pdeathsig() {
-    eprintln!(
-        "macOS has no PR_SET_PDEATHSIG; owner path is kill_and_reap / process-group teardown"
+        "leaf {leaf_pid} stayed live after owner SIGKILL (owner-death binding did not fire)"
     );
 }
 
