@@ -117,3 +117,108 @@
         .expect_err("expired wait must stop");
         assert_eq!(error.error.kind, "deadline");
     }
+
+    fn delay_request(delay_ms: u64) -> CallRequest {
+        let mut request = test_request(None);
+        request.op = "fs.search".into();
+        request.args = serde_json::json!({"query": "x", "__delay_ms": delay_ms});
+        request
+    }
+
+    #[test]
+    fn drop_after_cancelled_full_channel_is_bounded() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let adapter = std::sync::Arc::new(FsZeroAdapter::new(dir.path(), "session-drop-bound"));
+        let occupier_cancel = CancellationSignal::new();
+        let queued_cancel = CancellationSignal::new();
+        let occupier_request = delay_request(30_000);
+        let queued_request = delay_request(30_000);
+
+        let occupier_adapter = std::sync::Arc::clone(&adapter);
+        let occupier_token = occupier_cancel.clone();
+        let occupier = std::thread::spawn(move || {
+            occupier_adapter.call(AdapterCall {
+                request: &occupier_request,
+                cancellation: &occupier_token,
+            })
+        });
+        std::thread::sleep(Duration::from_millis(40));
+
+        let queued_adapter = std::sync::Arc::clone(&adapter);
+        let queued_token = queued_cancel.clone();
+        let queued = std::thread::spawn(move || {
+            queued_adapter.call(AdapterCall {
+                request: &queued_request,
+                cancellation: &queued_token,
+            })
+        });
+        std::thread::sleep(Duration::from_millis(20));
+
+        occupier_cancel.cancel();
+        queued_cancel.cancel();
+        let _ = occupier.join();
+        let _ = queued.join();
+
+        let started = Instant::now();
+        drop(adapter);
+        assert!(
+            started.elapsed() < SESSION_THREAD_STOP_TIMEOUT + Duration::from_millis(500),
+            "Drop must not block past the session-thread stop bound: {:?}",
+            started.elapsed()
+        );
+    }
+
+    #[test]
+    fn cancelled_enqueue_does_not_hold_the_command_channel() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let adapter = std::sync::Arc::new(FsZeroAdapter::new(dir.path(), "session-enqueue-cancel"));
+        let occupier_cancel = CancellationSignal::new();
+        let waiter_cancel = CancellationSignal::new();
+        let occupier_request = delay_request(30_000);
+        let queued_request = delay_request(30_000);
+        let waiter_request = delay_request(30_000);
+
+        let occupier_adapter = std::sync::Arc::clone(&adapter);
+        let occupier_token = occupier_cancel.clone();
+        let occupier = std::thread::spawn(move || {
+            occupier_adapter.call(AdapterCall {
+                request: &occupier_request,
+                cancellation: &occupier_token,
+            })
+        });
+        std::thread::sleep(Duration::from_millis(40));
+
+        let queued_adapter = std::sync::Arc::clone(&adapter);
+        let queued = std::thread::spawn(move || {
+            queued_adapter.call(AdapterCall {
+                request: &queued_request,
+                cancellation: &CancellationSignal::new(),
+            })
+        });
+        std::thread::sleep(Duration::from_millis(20));
+
+        let waiter_adapter = std::sync::Arc::clone(&adapter);
+        let waiter_token = waiter_cancel.clone();
+        let waiter = std::thread::spawn(move || {
+            waiter_adapter.call(AdapterCall {
+                request: &waiter_request,
+                cancellation: &waiter_token,
+            })
+        });
+        std::thread::sleep(Duration::from_millis(20));
+        waiter_cancel.cancel();
+
+        let started = Instant::now();
+        let waiter_error = waiter.join().expect("waiter").expect_err("cancelled enqueue");
+        assert_eq!(waiter_error.error.kind, "cancelled");
+        assert!(
+            started.elapsed() < Duration::from_millis(200),
+            "cancelled enqueue must release promptly: {:?}",
+            started.elapsed()
+        );
+
+        occupier_cancel.cancel();
+        let _ = occupier.join();
+        let _ = queued.join();
+        drop(adapter);
+    }

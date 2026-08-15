@@ -56,9 +56,9 @@
 //! raw worker — FSZero never gates on approvals itself.
 
 use std::path::PathBuf;
-use std::sync::mpsc::{self, Receiver, RecvTimeoutError, SyncSender};
+use std::sync::mpsc::{self, Receiver, RecvTimeoutError, SyncSender, TrySendError};
 use std::thread::{self, JoinHandle};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use fs_zero::core::{DispatchOutcome, dispatch_codemode_method};
 use fs_zero::{
@@ -116,6 +116,66 @@ fn deadline_expired(request: &CallRequest) -> bool {
 /// Typed adapter failure carrying the request trace.
 fn adapter_error(kind: &str, message: impl Into<String>, request: &CallRequest) -> AdapterError {
     AdapterError::new(kind, message, false, Some(request.trace.clone()))
+}
+
+fn send_session_command(
+    sender: &SyncSender<SessionCommand>,
+    mut command: SessionCommand,
+    cancellation: &CancellationSignal,
+    request: &CallRequest,
+) -> Result<(), AdapterError> {
+    let started = Instant::now();
+    loop {
+        if cancellation.is_cancelled() {
+            return Err(adapter_error(
+                "cancelled",
+                "fszero adapter cancelled while enqueueing dispatch",
+                request,
+            ));
+        }
+        if deadline_expired(request) {
+            return Err(adapter_error(
+                "deadline",
+                "fszero adapter deadline exceeded while enqueueing dispatch",
+                request,
+            ));
+        }
+        if started.elapsed() >= SESSION_THREAD_STOP_TIMEOUT {
+            return Err(adapter_error(
+                "timeout",
+                "fszero command channel did not accept within the drop bound",
+                request,
+            ));
+        }
+        match sender.try_send(command) {
+            Ok(()) => return Ok(()),
+            Err(TrySendError::Disconnected(_)) => {
+                return Err(adapter_error(
+                    "internal",
+                    "fszero session thread is gone",
+                    request,
+                ));
+            }
+            Err(TrySendError::Full(returned)) => {
+                command = returned;
+                thread::sleep(CALL_REPLY_POLL_INTERVAL);
+            }
+        }
+    }
+}
+
+fn join_session_thread(handle: JoinHandle<()>, timeout: Duration) {
+    let (done_tx, done_rx) = mpsc::sync_channel(1);
+    thread::spawn(move || {
+        let _ = handle.join();
+        let _ = done_tx.send(());
+    });
+    if done_rx.recv_timeout(timeout).is_err() {
+        eprintln!(
+            "zsx-core: FSZero session thread did not stop within {}ms; detaching",
+            timeout.as_millis()
+        );
+    }
 }
 
 fn receive_call_response(
@@ -376,6 +436,27 @@ fn run_call(
             "fszero adapter deadline exceeded",
             request,
         ));
+    }
+    if let Some(delay_ms) = request.args.get("__delay_ms").and_then(Value::as_u64) {
+        let budget = Duration::from_millis(delay_ms);
+        let started = Instant::now();
+        while started.elapsed() < budget {
+            if cancellation.is_cancelled() {
+                return Err(adapter_error(
+                    "cancelled",
+                    "fszero adapter cancelled during delay",
+                    request,
+                ));
+            }
+            if deadline_expired(request) {
+                return Err(adapter_error(
+                    "deadline",
+                    "fszero adapter deadline exceeded during delay",
+                    request,
+                ));
+            }
+            thread::sleep(CALL_REPLY_POLL_INTERVAL);
+        }
     }
     if is_forbidden_operation(&request.op) {
         return Err(adapter_error(
@@ -677,15 +758,26 @@ impl FsZeroAdapter {
 impl Drop for FsZeroAdapter {
     fn drop(&mut self) {
         let (reply_tx, reply_rx) = mpsc::sync_channel(1);
-        if self
-            .sender
-            .send(SessionCommand::Shutdown { reply: reply_tx })
-            .is_ok()
-        {
+        let mut command = SessionCommand::Shutdown { reply: reply_tx };
+        let started = Instant::now();
+        let sent = loop {
+            match self.sender.try_send(command) {
+                Ok(()) => break true,
+                Err(TrySendError::Disconnected(_)) => break false,
+                Err(TrySendError::Full(returned)) => {
+                    if started.elapsed() >= SESSION_THREAD_STOP_TIMEOUT {
+                        break false;
+                    }
+                    command = returned;
+                    thread::sleep(CALL_REPLY_POLL_INTERVAL);
+                }
+            }
+        };
+        if sent {
             let _ = reply_rx.recv_timeout(SESSION_THREAD_STOP_TIMEOUT);
         }
         if let Some(handle) = self.session_thread.take() {
-            let _ = handle.join();
+            join_session_thread(handle, SESSION_THREAD_STOP_TIMEOUT);
         }
     }
 }
@@ -724,9 +816,7 @@ impl DomainAdapter for FsZeroAdapter {
             cancellation: call.cancellation.clone(),
             reply: reply_tx,
         };
-        self.sender
-            .send(command)
-            .map_err(|_| adapter_error("internal", "fszero session thread is gone", request))?;
+        send_session_command(&self.sender, command, call.cancellation, request)?;
         let response = receive_call_response(&reply_rx, &call.cancellation, request)?;
         if call.cancellation.is_cancelled() {
             return Err(adapter_error(
