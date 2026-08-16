@@ -1683,14 +1683,17 @@ impl<'tree> Interpreter<'tree> {
             PromiseState::Rejected(value) => Err(Fault::Throw(value)),
             PromiseState::Failed(error) => Err(Fault::Host(error)),
             PromiseState::Pending(PromiseKind::All(ids)) => {
-                let mut values = Vec::new();
-                for child in ids {
-                    values.push(self.resolve(child)?);
+                // Persist reject/fail so progress_race_child cannot
+                // resolve() the same All forever (a6wz leftover).
+                match self.all(&ids) {
+                    Ok(values) => {
+                        let value = new_array(values);
+                        self.promises
+                            .insert(id, PromiseState::Fulfilled(value.clone()));
+                        Ok(value)
+                    }
+                    Err(fault) => Err(self.persist_combinator_fault(id, fault)),
                 }
-                let value = new_array(values);
-                self.promises
-                    .insert(id, PromiseState::Fulfilled(value.clone()));
-                Ok(value)
             }
             PromiseState::Pending(PromiseKind::AllSettled(ids)) => {
                 let mut values = Vec::new();
@@ -1708,10 +1711,14 @@ impl<'tree> Interpreter<'tree> {
             }
             PromiseState::Pending(PromiseKind::Race(ids)) => {
                 let winner = self.race(&ids).map_err(Fault::Host)?;
-                let value = self.resolve(winner)?;
-                self.promises
-                    .insert(id, PromiseState::Fulfilled(value.clone()));
-                Ok(value)
+                match self.resolve(winner) {
+                    Ok(value) => {
+                        self.promises
+                            .insert(id, PromiseState::Fulfilled(value.clone()));
+                        Ok(value)
+                    }
+                    Err(fault) => Err(self.persist_combinator_fault(id, fault)),
+                }
             }
             PromiseState::Pending(PromiseKind::Then { .. }) => Err(Fault::Host(
                 HostError::Connector("promise chain did not settle".into()),
@@ -1859,6 +1866,48 @@ impl<'tree> Interpreter<'tree> {
         ids.iter().copied().find(|id| self.promise_is_settled(*id))
     }
 
+    fn first_rejected_all_sibling(&self, ids: &[u64]) -> Option<u64> {
+        ids.iter().copied().find(|id| {
+            matches!(
+                self.promises.get(id),
+                Some(PromiseState::Rejected(_) | PromiseState::Failed(_))
+            )
+        })
+    }
+
+    fn collect_fulfilled_all_siblings(&self, ids: &[u64]) -> Option<Vec<Value<'tree>>> {
+        let mut values = Vec::with_capacity(ids.len());
+        for id in ids {
+            match self.promises.get(id) {
+                Some(PromiseState::Fulfilled(value)) => values.push(value.clone()),
+                _ => return None,
+            }
+        }
+        Some(values)
+    }
+
+    fn settled_fault(&self, id: u64) -> Option<Fault<'tree>> {
+        match self.promises.get(&id) {
+            Some(PromiseState::Rejected(value)) => Some(Fault::Throw(value.clone())),
+            Some(PromiseState::Failed(error)) => Some(Fault::Host(error.clone())),
+            _ => None,
+        }
+    }
+
+    fn persist_combinator_fault(&mut self, id: u64, fault: Fault<'tree>) -> Fault<'tree> {
+        match &fault {
+            Fault::Throw(value) => {
+                self.promises
+                    .insert(id, PromiseState::Rejected(value.clone()));
+            }
+            Fault::Host(error) => {
+                self.promises
+                    .insert(id, PromiseState::Failed(error.clone()));
+            }
+        }
+        fault
+    }
+
     fn combinator_can_settle(&self, kind: &PromiseKind) -> bool {
         match kind {
             PromiseKind::All(child_ids) => {
@@ -1963,6 +2012,55 @@ impl<'tree> Interpreter<'tree> {
                     return Err(HostError::Connector(
                         "connector completion channel closed".into(),
                     ));
+                }
+            }
+        }
+    }
+
+    /// Fail-fast All: a settled reject/fail wins before host-waiting an
+    /// earlier Pending(Connector). Sequential resolve() waited the first
+    /// child, so all([slowPing, reject('x')]) timed out instead of
+    /// throwing x (zerostack-hzms; a6wz leftover).
+    fn all(&mut self, ids: &[u64]) -> Result<Vec<Value<'tree>>, Fault<'tree>> {
+        if ids.is_empty() {
+            return Ok(Vec::new());
+        }
+        loop {
+            self.drain().map_err(Fault::Host)?;
+            if let Some(id) = self.first_rejected_all_sibling(ids) {
+                return Err(self.settled_fault(id).ok_or_else(|| {
+                    Fault::Host(HostError::Data(
+                        "rejected All sibling was not terminal".into(),
+                    ))
+                })?);
+            }
+            if let Some(values) = self.collect_fulfilled_all_siblings(ids) {
+                return Ok(values);
+            }
+            let mut progressed = false;
+            for id in ids {
+                if self.progress_race_child(*id).map_err(Fault::Host)? {
+                    progressed = true;
+                    if self.first_rejected_all_sibling(ids).is_some() {
+                        break;
+                    }
+                }
+            }
+            if progressed {
+                continue;
+            }
+            self.tick().map_err(Fault::Host)?;
+            match self.receiver.recv_timeout(
+                self.deadline
+                    .saturating_duration_since(Instant::now())
+                    .min(Duration::from_millis(25)),
+            ) {
+                Ok(completion) => self.settle(completion).map_err(Fault::Host)?,
+                Err(RecvTimeoutError::Timeout) => {}
+                Err(RecvTimeoutError::Disconnected) => {
+                    return Err(Fault::Host(HostError::Connector(
+                        "connector completion channel closed".into(),
+                    )));
                 }
             }
         }
@@ -3581,7 +3679,7 @@ mod promise_race_then_tests {
     use std::rc::Rc;
     use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
     use std::thread;
-    use std::time::Duration;
+    use std::time::{Duration, Instant};
     use zero_abi::{CapabilityDescriptor, GlobalRegistration};
 
     struct NoDispatch;
@@ -3765,5 +3863,74 @@ mod promise_race_then_tests {
         )
         .expect("fast sibling must beat then-of-slow");
         assert_eq!(value, serde_json::json!("sibling-fast"));
+    }
+
+    #[test]
+    fn all_empty_settles() {
+        let value = run("return await Promise.all([]);", Rc::new(NoDispatch)).expect("empty all");
+        assert_eq!(value, serde_json::json!([]));
+    }
+
+    #[test]
+    fn all_resolved_siblings_settle() {
+        let value = run(
+            "return await Promise.all([Promise.resolve(1), Promise.resolve(2)]);",
+            Rc::new(NoDispatch),
+        )
+        .expect("resolved all");
+        assert_eq!(value, serde_json::json!([1, 2]));
+    }
+
+    #[test]
+    fn all_rejected_sibling_beats_pending_connector() {
+        let connector = Rc::new(DelayedPing {
+            delay: Duration::from_millis(80),
+            payload: "conn-win".into(),
+            started: AtomicBool::new(false),
+        });
+        let started = Instant::now();
+        let value = run(
+            "return await Promise.all([zero.test.ping(), Promise.reject('fast')]).catch(e => e);",
+            connector,
+        )
+        .expect("rejected sibling must win");
+        assert_eq!(value, serde_json::json!("fast"));
+        assert!(
+            started.elapsed() < Duration::from_millis(50),
+            "all must not host-wait the pending connector: {:?}",
+            started.elapsed()
+        );
+    }
+
+    #[test]
+    fn race_of_rejected_all_does_not_hang() {
+        let started = Instant::now();
+        let value = run(
+            "return await Promise.race([Promise.all([Promise.reject('x')])]).catch(e => e);",
+            Rc::new(NoDispatch),
+        )
+        .expect("rejected all must settle the race");
+        assert_eq!(value, serde_json::json!("x"));
+        assert!(
+            started.elapsed() < Duration::from_millis(50),
+            "race-of-rejected-all must not loop: {:?}",
+            started.elapsed()
+        );
+    }
+
+    #[test]
+    fn all_of_rejected_race_does_not_hang() {
+        let started = Instant::now();
+        let value = run(
+            "return await Promise.all([Promise.race([Promise.reject('x')])]).catch(e => e);",
+            Rc::new(NoDispatch),
+        )
+        .expect("rejected race must settle the all");
+        assert_eq!(value, serde_json::json!("x"));
+        assert!(
+            started.elapsed() < Duration::from_millis(50),
+            "all-of-rejected-race must not loop: {:?}",
+            started.elapsed()
+        );
     }
 }
