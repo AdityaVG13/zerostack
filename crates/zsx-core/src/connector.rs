@@ -569,7 +569,8 @@ fn dispatch_lapsed(dispatch: &ZsxDispatch) -> bool {
 /// dispatch through this journal), and a DispatchCrossed journal without
 /// authoritative evidence is classified Indeterminate. This never calls an
 /// adapter and never writes a DispatchCrossed entry, so no recovered attempt
-/// can be replayed.
+/// can be replayed. Journal entries that are not real directories (files or
+/// planted symlinks) are ignored -- `Path::is_dir` is not used.
 pub(crate) fn reconcile_request_attempts(
     attempts_root: &Path,
     generation: u64,
@@ -586,10 +587,16 @@ pub(crate) fn reconcile_request_attempts(
     let mut statuses = Vec::new();
     for entry in entries {
         let entry = entry.map_err(|error| format!("cannot read attempt journal entry: {error}"))?;
-        let journal_dir = entry.path();
-        if !journal_dir.is_dir() {
+        // DirEntry::file_type does not follow. Path::is_dir would treat a
+        // planted symlink-to-dir as a journal and recover_attempt_v1 would
+        // write SafeToRetry into the target (zerostack-recon-journal-symlink-4js1).
+        let file_type = entry
+            .file_type()
+            .map_err(|error| format!("cannot inspect attempt journal entry: {error}"))?;
+        if !file_type.is_dir() {
             continue;
         }
+        let journal_dir = entry.path();
         let manifest = read_attempt_manifest(&journal_dir);
         let dispatch_id = manifest
             .as_ref()
@@ -1823,6 +1830,88 @@ mod rmja_already_terminal_tests {
         assert!(!prepare_error_is_already_terminal(&ConnectorError::new(
             "aggregate dispatch deadline or cancellation"
         )));
+    }
+}
+
+#[cfg(test)]
+mod reconcile_journal_symlink_tests {
+    use super::{
+        AttemptBindingV1, AttemptJournalPathsV1, AttemptStateV1, DurableProfileIdV1,
+        prepare_attempt_v1, read_current_attempt_v1, reconcile_request_attempts,
+    };
+    use std::path::Path;
+    use zero_abi::{DigestV1, EffectClass, sha256};
+
+    fn prepared_journal(dir: &Path) {
+        std::fs::create_dir_all(dir).expect("journal dir");
+        let paths = AttemptJournalPathsV1::new(dir).expect("paths");
+        let binding = AttemptBindingV1::new(
+            DigestV1::from_bytes(sha256(b"4js1-attempt")),
+            DigestV1::from_bytes(sha256(b"4js1-effect")),
+            EffectClass::ReversibleMutation,
+            DigestV1::from_bytes(sha256(b"4js1-anchor")),
+            DurableProfileIdV1::PortableStrict,
+            DigestV1::from_bytes(sha256(b"4js1-owner")),
+        );
+        prepare_attempt_v1(&paths, binding).expect("prepare");
+    }
+
+    fn journal_entry_names(dir: &Path) -> Vec<String> {
+        let mut names = std::fs::read_dir(dir)
+            .expect("read journal")
+            .filter_map(|entry| entry.ok())
+            .map(|entry| entry.file_name().to_string_lossy().into_owned())
+            .collect::<Vec<_>>();
+        names.sort();
+        names
+    }
+
+    #[test]
+    fn prepared_real_journal_is_safe_to_retry() {
+        let root = std::env::temp_dir().join(format!("zerostack-4js1-real-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let journal = root.join("g1").join("r1").join("d1");
+        prepared_journal(&journal);
+        let statuses = reconcile_request_attempts(&root, 1, 1).expect("reconcile");
+        assert_eq!(statuses.len(), 1, "{statuses:?}");
+        assert_eq!(statuses[0].state, AttemptStateV1::SafeToRetry);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn planted_journal_dir_symlink_is_not_followed() {
+        let root =
+            std::env::temp_dir().join(format!("zerostack-4js1-symlink-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let request = root.join("g1").join("r1");
+        std::fs::create_dir_all(&request).expect("request dir");
+        let victim = root.join("victim");
+        prepared_journal(&victim);
+        let before = journal_entry_names(&victim);
+        std::os::unix::fs::symlink(&victim, request.join("planted")).expect("symlink");
+
+        let statuses =
+            reconcile_request_attempts(&root, 1, 1).expect("symlink journal dir must be ignored");
+        assert!(
+            statuses.is_empty(),
+            "planted journal symlink must not become a resume status: {statuses:?}"
+        );
+        assert_eq!(
+            journal_entry_names(&victim),
+            before,
+            "recovery must not write SafeToRetry through a journal-dir symlink"
+        );
+        let paths = AttemptJournalPathsV1::new(&victim).expect("victim paths");
+        let current = read_current_attempt_v1(&paths)
+            .expect("read victim")
+            .expect("victim still has a journal");
+        assert_eq!(
+            current.state,
+            AttemptStateV1::Prepared,
+            "victim must stay Prepared; write-through would classify SafeToRetry"
+        );
+        let _ = std::fs::remove_dir_all(&root);
     }
 }
 
