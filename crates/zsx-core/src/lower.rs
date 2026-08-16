@@ -537,6 +537,39 @@ fn exactly_one_options_object(input: Value) -> Result<Value, ConnectorError> {
     ))
 }
 
+/// Map help-advertised search aliases onto `fs.search`'s query/arg wire.
+///
+/// Callers pass `regex` / `pattern` (and optional `path`) because help
+/// says `{query, path?}`. The kernel only reads `query`/`arg`; extra keys
+/// were previously a silent miss, and regex-only calls failed "missing query".
+fn normalize_compound_search_args(args: Value) -> Value {
+    let Value::Object(mut map) = args else {
+        return args;
+    };
+    let has_query = map
+        .get("query")
+        .and_then(Value::as_str)
+        .is_some_and(|s| !s.is_empty())
+        || map
+            .get("arg")
+            .and_then(Value::as_str)
+            .is_some_and(|s| !s.is_empty());
+    if !has_query {
+        for key in ["regex", "pattern", "q"] {
+            if let Some(value) = map.get(key).cloned() {
+                if value.as_str().is_some_and(|s| !s.is_empty()) {
+                    map.insert("query".into(), value);
+                    break;
+                }
+            }
+        }
+    }
+    // Keep `path` on the object so a later kernel that honors it sees it.
+    // fs.search still matches the query workspace-wide (kernel grammar
+    // change is out of scope for this bead).
+    Value::Object(map)
+}
+
 fn compound_name_and_args(input: &Value) -> Result<(&str, Value), ConnectorError> {
     if let Some(items) = input.as_array() {
         let name = items
@@ -623,6 +656,11 @@ pub fn lower(
     }
     if surface == "fs" && method == "compound" {
         let (name, compound_args) = compound_name_and_args(&input)?;
+        let compound_args = if matches!(name, "search" | "find" | "grep") {
+            normalize_compound_search_args(compound_args)
+        } else {
+            compound_args
+        };
         if compound_args.get("paths").is_some() {
             let op = match name {
                 "read" => "fs.multiRead",
@@ -727,5 +765,36 @@ pub fn lower(
         _ => return Err(unsupported_method("token")),
     };
     Ok((engine, op.into(), args))
+}
+
+#[cfg(test)]
+mod compound_search_alias_tests {
+    use super::lower;
+    use serde_json::json;
+
+    #[test]
+    fn regex_alias_becomes_fs_search_query() {
+        let (_engine, op, args) = lower(
+            "fs",
+            "compound",
+            json!(["search", {"regex": "HIT_MARKER", "path": "src"}]),
+        )
+        .expect("lower");
+        assert_eq!(op, "fs.search");
+        assert_eq!(args["query"], "HIT_MARKER");
+        assert_eq!(args["path"], "src");
+    }
+
+    #[test]
+    fn query_wins_over_regex() {
+        let (_engine, op, args) = lower(
+            "fs",
+            "compound",
+            json!(["grep", {"query": "keep", "regex": "drop"}]),
+        )
+        .expect("lower");
+        assert_eq!(op, "fs.search");
+        assert_eq!(args["query"], "keep");
+    }
 }
 
