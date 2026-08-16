@@ -270,7 +270,9 @@ fn collect_portable_refs(value: &Value, refs: &mut Vec<String>) {
     }
 }
 
-/// True when a ref may be emitted: legal ZeroRef v1, and expandable if `fz://blob`.
+/// True when a ref may be emitted: expandable `fz://blob` only.
+/// Harvested foreign-scheme blobs (`gz://blob`, `tz://blob`) are dropped
+/// so they never land on `ownership.refs`.
 fn retainable_ref(session: &FSZeroSession, reference: &str) -> bool {
     if !is_conformant_blob_ref(reference) {
         return false;
@@ -278,12 +280,11 @@ fn retainable_ref(session: &FSZeroSession, reference: &str) -> bool {
     let Ok(parsed) = ZeroRefV1::parse(reference) else {
         return false;
     };
-    if reference.starts_with("fz://blob/") {
-        let bare = format!("fz://blob/{}", parsed.hash);
-        session.expand(&bare).is_some() || session.expand(reference).is_some()
-    } else {
-        true
+    if !reference.starts_with("fz://blob/") {
+        return false;
     }
+    let bare = format!("fz://blob/{}", parsed.hash);
+    session.expand(&bare).is_some() || session.expand(reference).is_some()
 }
 
 /// Replace internal recovery labels (`search`, `read`, `world`, …) with the
@@ -954,3 +955,69 @@ impl DomainAdapter for FsZeroAdapter {
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+    use zero_abi::WorkerTrace;
+
+    fn empty_request() -> CallRequest {
+        CallRequest {
+            request_id: "t".into(),
+            op: "fs.search".into(),
+            args: json!({}),
+            deadline_unix_ms: None,
+            trace: WorkerTrace {
+                runtime_id: String::new(),
+                cell_id: String::new(),
+                request_id: String::new(),
+                trace_id: String::new(),
+                parent_span_id: None,
+                worker_revision: String::new(),
+                contract_digest: String::new(),
+            },
+            approval_grant: None,
+            telemetry_request: None,
+        }
+    }
+
+    #[test]
+    fn harvested_foreign_blob_is_not_retained() {
+        let mut session = FSZeroSession::new();
+        let gz_blob = format!("gz://blob/{}", "a".repeat(64));
+        let tz_blob = format!("tz://blob/{}", "b".repeat(64));
+        let fz_blob = session.recovery.put_content_ref(b"owned");
+        let result = DomainResult::success(
+            "fs.search",
+            Some("R1".into()),
+            Some(json!({
+                "detail": format!(
+                    "see {gz_blob} and gz://node/symbol and {tz_blob} and {fz_blob}"
+                )
+            })),
+            Vec::new(),
+            false,
+        );
+        let refs = collect_and_conform_refs(&session, &empty_request(), &result)
+            .expect("foreign-scheme harvest must stay Ok");
+        assert!(
+            refs.iter()
+                .all(|reference| !reference.starts_with("gz://blob/")),
+            "harvested gz://blob must not land on ownership.refs: {refs:?}"
+        );
+        assert!(
+            refs.iter()
+                .all(|reference| !reference.starts_with("tz://blob/")),
+            "harvested tz://blob must not land on ownership.refs: {refs:?}"
+        );
+        assert!(
+            refs.iter()
+                .all(|reference| !reference.contains("gz://node")),
+            "gz://node harvest stays dropped: {refs:?}"
+        );
+        assert!(
+            refs.iter().any(|reference| reference == &fz_blob),
+            "expandable fz://blob must still be kept: {refs:?}"
+        );
+    }
+}
