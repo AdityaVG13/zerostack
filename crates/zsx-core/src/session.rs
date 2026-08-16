@@ -1888,11 +1888,27 @@ impl ZsxSession {
             })
     }
 
+    /// True while a shutdown was sent but the executor has not joined.
+    /// Cache hits must not treat this as a live session (zerostack-gswf).
+    pub fn shutdown_in_progress(&self) -> bool {
+        self.state.lock().ok().is_some_and(|state| {
+            state.shutdown_sent && !state.worker_stopped
+        })
+    }
+
     pub fn shutdown(&self) -> Result<u64, ZsxSessionError> {
         let (generation, should_send) = {
             let mut state = self.lock_state(None)?;
-            if state.worker_stopped || state.shutdown_sent {
+            if state.worker_stopped {
                 return Ok(state.generation);
+            }
+            if state.shutdown_sent {
+                return Err(ZsxSessionError::new(
+                    ZsxSessionFailureCode::Terminating,
+                    state.generation,
+                    None,
+                    "session shutdown is still joining; worker has not stopped",
+                ));
             }
             state.accepting = false;
             state.terminating = true;
@@ -2186,12 +2202,10 @@ pub(crate) fn join_thread_within(
     handle: JoinHandle<()>,
     timeout: Duration,
 ) -> Result<(), String> {
-    // Zero budget: join on this thread. Never drop JoinHandle (that detaches).
-    if timeout.is_zero() {
-        return handle
-            .join()
-            .map_err(|_| "session executor panicked during inline join".into());
-    }
+    // Always park the JoinHandle on a watcher. A zero remaining budget must
+    // not inline-join (that hangs the host after control send+settle eats the
+    // 500ms shutdown window -- zerostack-vrnt / yi0b). recv_timeout(0) returns
+    // immediately; the watcher keeps the handle so it is never dropped.
     let parked = std::sync::Arc::new(Mutex::new(Some(handle)));
     let (done_tx, done_rx) = mpsc::sync_channel(1);
     let watcher = {
@@ -2692,6 +2706,37 @@ mod shutdown_deadline_tests {
         let again = session.shutdown().expect("idempotent shutdown");
         assert_eq!(again, generation);
         let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn join_thread_within_zero_budget_does_not_block() {
+        let (release_tx, release_rx) = mpsc::sync_channel::<()>(1);
+        let handle = thread::spawn(move || {
+            let _ = release_rx.recv();
+        });
+        let started = Instant::now();
+        let result = join_thread_within(handle, Duration::ZERO);
+        let elapsed = started.elapsed();
+        drop(release_tx);
+        assert!(result.is_err(), "zero budget must park, not join: {result:?}");
+        assert!(
+            elapsed < Duration::from_millis(80),
+            "zero-budget join blocked the host: {elapsed:?}"
+        );
+    }
+
+    #[test]
+    fn second_shutdown_while_joining_is_error_not_ok() {
+        let (release_tx, release_rx) = mpsc::sync_channel::<()>(1);
+        let handle = thread::spawn(move || {
+            let _ = release_rx.recv();
+        });
+        let err = join_thread_within(handle, Duration::ZERO).expect_err("parked");
+        assert!(
+            err.contains("did not join"),
+            "expected park timeout, got {err}"
+        );
+        drop(release_tx);
     }
 }
 

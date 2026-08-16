@@ -99,6 +99,12 @@ impl McpHost {
         }
         if self.sessions.contains_key(&root) {
             let live = self.sessions.get_mut(&root).expect("just checked");
+            if live.session.shutdown_in_progress() {
+                return Err(format!(
+                    "root {} is shutting down; worker has not stopped",
+                    root.display()
+                ));
+            }
             live.last_used = Instant::now();
             return Ok(live);
         }
