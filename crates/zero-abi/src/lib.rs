@@ -170,7 +170,7 @@ pub use reasoning::{
 };
 pub use result::{
     MAX_ACK_CHARS, MAX_PREVIEW_CHARS, ZERO_RESULT_V1, ZeroResultAccessError, ZeroResultBuildError,
-    ZeroResultV1,
+    ZeroResultV1, zero_result_from_engine_step, zero_result_to_wire,
 };
 pub use redaction::{EffectTraceV1, RedactionPolicyV1, RedactorV1, SecretsErrorV1};
 pub use redaction::DEFAULT_REDACTION_TOKEN;

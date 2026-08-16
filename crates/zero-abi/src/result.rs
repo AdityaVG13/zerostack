@@ -156,3 +156,107 @@ fn validate_preview(preview: Option<&str>) -> Result<(), ZeroResultBuildError> {
         Ok(())
     }
 }
+
+/// Build a `zero-result/v1` envelope from one engine step.
+///
+/// Extracted from the engine-local CodeMode hosts. Canonical `fz://` /
+/// `gz://` / `tz://` recovery keys become `content.kind=ref`. Non-canonical
+/// aliases stay inline. Failures are always inline `{ok:false, detail, method}`.
+pub fn zero_result_from_engine_step(
+    ack: &str,
+    ok: bool,
+    method: &str,
+    recovery_key: &str,
+    payload_wire: &Value,
+    detail: Option<&str>,
+) -> ZeroResultV1 {
+    let ack = normalize_ack(ack, ok);
+    if !ok {
+        return inline_or_x0(
+            &ack,
+            serde_json::json!({
+                "ok": false,
+                "method": method,
+                "detail": detail.unwrap_or("failed"),
+            }),
+        );
+    }
+
+    if let Some(reference) = canonical_zeroref(recovery_key).or_else(|| {
+        payload_wire
+            .get("ref")
+            .and_then(Value::as_str)
+            .and_then(canonical_zeroref)
+    }) {
+        let preview = payload_wire
+            .get("preview")
+            .and_then(Value::as_str)
+            .map(|s| truncate_chars(s, MAX_PREVIEW_CHARS))
+            .or_else(|| detail.map(|d| truncate_chars(d, MAX_PREVIEW_CHARS)));
+        if let Ok(result) = ZeroResultV1::reference(ack.clone(), reference, preview) {
+            return result;
+        }
+    }
+
+    let value = if let Some(text) = payload_wire.as_str() {
+        serde_json::json!(text)
+    } else if payload_wire.is_null() {
+        serde_json::json!({
+            "ok": true,
+            "method": method,
+            "detail": detail,
+        })
+    } else {
+        payload_wire.clone()
+    };
+    inline_or_x0(&ack, value)
+}
+
+/// Serialize a result for the CodeMode wire (canonical tagged shape only).
+pub fn zero_result_to_wire(result: &ZeroResultV1) -> Value {
+    serde_json::to_value(result).expect("ZeroResultV1 always serializes")
+}
+
+fn normalize_ack(ack: &str, ok: bool) -> String {
+    let trimmed = ack.trim();
+    if (1..=MAX_ACK_CHARS).contains(&trimmed.chars().count()) {
+        trimmed.to_string()
+    } else if ok {
+        "ok".into()
+    } else {
+        "X0".into()
+    }
+}
+
+fn inline_or_x0(ack: &str, value: Value) -> ZeroResultV1 {
+    ZeroResultV1::inline(ack, value).unwrap_or_else(|_| {
+        ZeroResultV1::inline(
+            "X0",
+            serde_json::json!({"ok": false, "detail": "invalid zero-result ack"}),
+        )
+        .expect("X0 inline always valid")
+    })
+}
+
+fn canonical_zeroref(reference: &str) -> Option<&str> {
+    let valid_scheme = ["fz://", "gz://", "tz://"]
+        .iter()
+        .any(|prefix| reference.starts_with(prefix));
+    let suffix = reference
+        .split_once("://")
+        .map(|(_, suffix)| suffix)
+        .unwrap_or_default();
+    if valid_scheme && !suffix.is_empty() && !reference.chars().any(char::is_whitespace) {
+        Some(reference)
+    } else {
+        None
+    }
+}
+
+fn truncate_chars(text: &str, limit: usize) -> String {
+    text.chars().take(limit).collect()
+}
+
+#[cfg(test)]
+#[path = "../../../tests/unit/zero-abi/result_from_engine_step_tests.rs"]
+mod result_from_engine_step_tests;
