@@ -407,14 +407,38 @@ fn enrich_recovery_payload(
 ) {
     if let Some(key) = recovery_key
         .or_else(|| result.refs.first().map(String::as_str))
-        && let Some(bytes) = session.expand(key)
+        && let Some(batch_bytes) = session.expand(key)
     {
         let portable_ref = refs
             .iter()
             .find(|value| value.starts_with("fz://"))
             .cloned()
             .unwrap_or_else(|| key.to_string());
-        let payload = match String::from_utf8(bytes) {
+        // One-item fused batch is the snap-to-file fast path. The durable
+        // batch envelope stores only a source_ref, so recover that payload
+        // here instead of making every host issue a second expand.
+        let batch_text = String::from_utf8(batch_bytes.clone()).ok();
+        let source_ref = batch_text
+            .as_deref()
+            .and_then(|text| serde_json::from_str::<Vec<Value>>(text).ok())
+            .and_then(|rows| {
+                (rows.len() == 1)
+                    .then(|| {
+                        rows[0]
+                            .get("source_ref")
+                            .and_then(Value::as_str)
+                            .map(str::to_owned)
+                    })
+                    .flatten()
+            });
+        let nested = source_ref
+            .as_deref()
+            .and_then(|reference| session.expand(reference));
+        let (bytes, batch_payload_utf8, source_ref) = match nested {
+            Some(bytes) => (bytes, batch_text, source_ref),
+            None => (batch_bytes, None, None),
+        };
+        let mut payload = match String::from_utf8(bytes) {
             Ok(text) => serde_json::json!({
                 "ref": portable_ref,
                 "payload_utf8": text,
@@ -429,6 +453,14 @@ fn enrich_recovery_payload(
                 })
             }
         };
+        if let Value::Object(map) = &mut payload {
+            if let Some(batch) = batch_payload_utf8 {
+                map.insert("batch_payload_utf8".into(), Value::String(batch));
+            }
+            if let Some(source) = source_ref {
+                map.insert("source_ref".into(), Value::String(source));
+            }
+        }
         result.value = Some(match result.value.take() {
             Some(Value::Object(mut map)) => {
                 if let Value::Object(payload) = payload {

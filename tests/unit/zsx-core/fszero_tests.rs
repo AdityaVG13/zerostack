@@ -131,6 +131,39 @@
     }
 
     #[test]
+    fn enrich_single_batch_recovers_the_snap_payload() {
+        let mut session = FSZeroSession::new();
+        let source_ref = session.recovery.put_content_ref(
+            b"HIT src/lib.rs#L7-L9 kind=literal\n| 8: unique_needle();",
+        );
+        let batch = serde_json::to_vec(&json!([{
+            "operation": "fs.search",
+            "source_ref": source_ref,
+            "payload_len": 58
+        }]))
+        .unwrap();
+        let batch_ref = session.recovery.put_content_ref(&batch);
+        let mut result = success_result(Some(json!({"count": 1})), vec![batch_ref.clone()]);
+        enrich_recovery_payload(&session, Some(&batch_ref), &mut result, &[batch_ref.clone()]);
+        let value = result.value.expect("single batch enrichment");
+        assert!(
+            value["payload_utf8"]
+                .as_str()
+                .unwrap()
+                .starts_with("HIT src/lib.rs#L7-L9"),
+            "{value}"
+        );
+        assert_eq!(value["source_ref"], source_ref);
+        assert!(
+            value["batch_payload_utf8"]
+                .as_str()
+                .unwrap()
+                .contains("source_ref")
+        );
+        assert_eq!(value["ref"], batch_ref);
+    }
+
+    #[test]
     fn enrich_falls_back_to_first_result_ref_when_key_missing() {
         let mut session = FSZeroSession::new();
         let key = session.recovery.put_content_ref(b"from-ref");
