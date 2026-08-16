@@ -1481,7 +1481,10 @@ impl<'tree> Interpreter<'tree> {
             })
     }
 
-    fn call_decision_require(&mut self, args: Vec<Value<'tree>>) -> Result<Value<'tree>, Fault<'tree>> {
+    fn call_decision_require(
+        &mut self,
+        args: Vec<Value<'tree>>,
+    ) -> Result<Value<'tree>, Fault<'tree>> {
         let [point_value, observed_value] = args.as_slice() else {
             return Err(Fault::Host(HostError::Data(
                 "decision.require expects (point, observed_value)".into(),
@@ -1512,11 +1515,9 @@ impl<'tree> Interpreter<'tree> {
                 // decision payload (V6-C03/H03).
                 Err(Fault::Host(HostError::DecisionRequired(payload)))
             }
-            crate::decision_gate::GateResolutionV1::PolicyError(error) => {
-                Err(Fault::Host(HostError::Data(format!(
-                    "decision policy error: {error}"
-                ))))
-            }
+            crate::decision_gate::GateResolutionV1::PolicyError(error) => Err(Fault::Host(
+                HostError::Data(format!("decision policy error: {error}")),
+            )),
         }
     }
 
@@ -1847,10 +1848,77 @@ impl<'tree> Interpreter<'tree> {
         Ok(())
     }
 
+    fn promise_is_settled(&self, id: u64) -> bool {
+        matches!(
+            self.promises.get(&id),
+            Some(PromiseState::Fulfilled(_) | PromiseState::Rejected(_) | PromiseState::Failed(_))
+        )
+    }
+
     fn first_settled_race_sibling(&self, ids: &[u64]) -> Option<u64> {
-        ids.iter()
-            .copied()
-            .find(|id| !matches!(self.promises.get(id), Some(PromiseState::Pending(_))))
+        ids.iter().copied().find(|id| self.promise_is_settled(*id))
+    }
+
+    fn combinator_can_settle(&self, kind: &PromiseKind) -> bool {
+        match kind {
+            PromiseKind::All(child_ids) => {
+                child_ids.iter().any(|child| {
+                    matches!(
+                        self.promises.get(child),
+                        Some(PromiseState::Rejected(_) | PromiseState::Failed(_))
+                    )
+                }) || child_ids.iter().all(|child| {
+                    matches!(self.promises.get(child), Some(PromiseState::Fulfilled(_)))
+                })
+            }
+            PromiseKind::AllSettled(child_ids) => child_ids
+                .iter()
+                .all(|child| self.promise_is_settled(*child)),
+            PromiseKind::Race(child_ids) => child_ids
+                .iter()
+                .any(|child| self.promise_is_settled(*child)),
+            PromiseKind::Then { parent, .. } => self.promise_is_settled(*parent),
+            PromiseKind::Connector | PromiseKind::Manual => false,
+        }
+    }
+
+    /// Advance one race child without waiting on a pending host Connector.
+    /// Then/All/Race used to `resolve()`/`pump()` here and host-wait, so a
+    /// later sibling that settled first still lost (gtoj leftover).
+    fn progress_race_child(&mut self, id: u64) -> Result<bool, HostError> {
+        match self.promises.get(&id).cloned() {
+            Some(PromiseState::Pending(PromiseKind::Then { parent, .. })) => {
+                if !self.promise_is_settled(parent) {
+                    return Ok(false);
+                }
+                self.pump(id)?;
+                Ok(true)
+            }
+            Some(PromiseState::Pending(
+                kind @ (PromiseKind::All(_) | PromiseKind::AllSettled(_) | PromiseKind::Race(_)),
+            )) => {
+                let child_ids = match &kind {
+                    PromiseKind::All(ids)
+                    | PromiseKind::AllSettled(ids)
+                    | PromiseKind::Race(ids) => ids.clone(),
+                    _ => unreachable!(),
+                };
+                let mut progressed = false;
+                for child in &child_ids {
+                    if self.progress_race_child(*child)? {
+                        progressed = true;
+                    }
+                }
+                if self.combinator_can_settle(&kind) {
+                    return match self.resolve(id) {
+                        Ok(_) | Err(Fault::Throw(_)) => Ok(true),
+                        Err(Fault::Host(error)) => Err(error),
+                    };
+                }
+                Ok(progressed)
+            }
+            _ => Ok(false),
+        }
     }
 
     fn race(&mut self, ids: &[u64]) -> Result<u64, HostError> {
@@ -1867,28 +1935,21 @@ impl<'tree> Interpreter<'tree> {
             if let Some(id) = self.first_settled_race_sibling(ids) {
                 return Ok(id);
             }
-            // Pump Then / nested combinators as microtasks before the next
-            // host tick. Promise.all already resolve()s each child; race used
-            // to wait for a non-Pending state and so a Fulfilled parent with
-            // a Pending(Then) child never settled (zerostack-pitl).
+            // Cheap microtasks only: Then with a settled parent, or a
+            // combinator whose children are already terminal. Full
+            // resolve()/pump() host-waits on Pending(Connector) and lets
+            // the earlier sibling steal the win (zerostack-a6wz).
+            let mut progressed = false;
             for id in ids {
-                match self.promises.get(id) {
-                    Some(PromiseState::Pending(PromiseKind::Then { .. })) => {
-                        self.pump(*id)?;
+                if self.progress_race_child(*id)? {
+                    progressed = true;
+                    if let Some(winner) = self.first_settled_race_sibling(ids) {
+                        return Ok(winner);
                     }
-                    Some(
-                        PromiseState::Pending(PromiseKind::All(_))
-                        | PromiseState::Pending(PromiseKind::AllSettled(_))
-                        | PromiseState::Pending(PromiseKind::Race(_)),
-                    ) => match self.resolve(*id) {
-                        Ok(_) | Err(Fault::Throw(_)) => {}
-                        Err(Fault::Host(error)) => return Err(error),
-                    },
-                    _ => {}
                 }
             }
-            if let Some(id) = self.first_settled_race_sibling(ids) {
-                return Ok(id);
+            if progressed {
+                continue;
             }
             self.tick()?;
             match self.receiver.recv_timeout(
@@ -2054,14 +2115,10 @@ impl<'tree> Interpreter<'tree> {
             }
             Value::Promise(parent) if name == "then" => {
                 let mut args = args.into_iter();
-                let on_fulfilled = optional_promise_callback(
-                    args.next().unwrap_or(Value::Undefined),
-                    "then",
-                )?;
-                let on_rejected = optional_promise_callback(
-                    args.next().unwrap_or(Value::Undefined),
-                    "then",
-                )?;
+                let on_fulfilled =
+                    optional_promise_callback(args.next().unwrap_or(Value::Undefined), "then")?;
+                let on_rejected =
+                    optional_promise_callback(args.next().unwrap_or(Value::Undefined), "then")?;
                 if on_fulfilled.is_none() && on_rejected.is_none() {
                     return Err(Fault::Host(HostError::Data(
                         "Promise.then expects a function".into(),
@@ -2089,11 +2146,11 @@ impl<'tree> Interpreter<'tree> {
                     on_rejected,
                 })))
             }
-            Value::Promise(_) if name == "finally" => Err(Fault::Host(
-                HostError::UnsupportedSyntax(
+            Value::Promise(_) if name == "finally" => {
+                Err(Fault::Host(HostError::UnsupportedSyntax(
                     "Promise.prototype.finally is not supported; use await with try/catch".into(),
-                ),
-            )),
+                )))
+            }
             _ => Err(Fault::Host(self.unsupported_name(name, "method"))),
         }
     }
@@ -3353,9 +3410,7 @@ fn to_key(value: &Value<'_>) -> String {
 /// taking `borrow_mut` on the target. The same object can be both target and
 /// descriptor (`Object.defineProperty(o, "x", o)`); holding borrow_mut +
 /// borrow on one RefCell panics.
-fn object_define_property<'tree>(
-    args: Vec<Value<'tree>>,
-) -> Result<Value<'tree>, Fault<'tree>> {
+fn object_define_property<'tree>(args: Vec<Value<'tree>>) -> Result<Value<'tree>, Fault<'tree>> {
     let mut iter = args.into_iter();
     let target = iter.next().unwrap_or(Value::Undefined);
     let key = to_key(&iter.next().unwrap_or(Value::Undefined));
@@ -3524,7 +3579,7 @@ mod promise_race_then_tests {
     use crate::host::{Connector, ConnectorCompletion, ConnectorError, DispatchContext, Host};
     use crate::limits::HostLimits;
     use std::rc::Rc;
-    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
     use std::thread;
     use std::time::Duration;
     use zero_abi::{CapabilityDescriptor, GlobalRegistration};
@@ -3646,5 +3701,69 @@ mod promise_race_then_tests {
         .expect("fulfilled sibling must beat pending all");
         assert_eq!(value, serde_json::json!("fast"));
     }
-}
 
+    struct SequencedPing {
+        delays: Vec<Duration>,
+        payloads: Vec<String>,
+        calls: AtomicUsize,
+    }
+
+    impl Connector for SequencedPing {
+        fn dispatch(
+            &self,
+            _capability: &CapabilityDescriptor,
+            _args_json: &str,
+            _context: DispatchContext,
+            completion: ConnectorCompletion,
+        ) -> Result<(), ConnectorError> {
+            let index = self.calls.fetch_add(1, Ordering::AcqRel);
+            let payload = self
+                .payloads
+                .get(index)
+                .cloned()
+                .unwrap_or_else(|| "late".into());
+            let delay = self
+                .delays
+                .get(index)
+                .copied()
+                .unwrap_or(Duration::from_millis(80));
+            thread::spawn(move || {
+                thread::sleep(delay);
+                let _ = completion.complete(Ok(format!(
+                    r#"{{"ack":"ok","content":{{"kind":"inline","value":"{payload}"}}}}"#
+                )));
+            });
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn race_fast_connector_beats_pending_all_of_slow() {
+        let connector = Rc::new(SequencedPing {
+            delays: vec![Duration::from_millis(80), Duration::from_millis(5)],
+            payloads: vec!["all-slow".into(), "sibling-fast".into()],
+            calls: AtomicUsize::new(0),
+        });
+        let value = run(
+            "return await Promise.race([Promise.all([zero.test.ping()]), zero.test.ping()]);",
+            connector,
+        )
+        .expect("fast sibling must beat all-of-slow");
+        assert_eq!(value, serde_json::json!("sibling-fast"));
+    }
+
+    #[test]
+    fn race_fast_connector_beats_pending_then_of_slow() {
+        let connector = Rc::new(SequencedPing {
+            delays: vec![Duration::from_millis(80), Duration::from_millis(5)],
+            payloads: vec!["then-slow".into(), "sibling-fast".into()],
+            calls: AtomicUsize::new(0),
+        });
+        let value = run(
+            "return await Promise.race([zero.test.ping().then(x => x), zero.test.ping()]);",
+            connector,
+        )
+        .expect("fast sibling must beat then-of-slow");
+        assert_eq!(value, serde_json::json!("sibling-fast"));
+    }
+}
