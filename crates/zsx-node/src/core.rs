@@ -12,6 +12,7 @@ use std::time::Duration;
 use zsx_core::{
     SessionReplacementReason, SessionReplacementReceipt, ZsxAttemptJournalStatus,
     ZsxExecutionResult, ZsxSession, ZsxSessionError, ZsxSessionFailureCode,
+    fs_write_grant_count_for_plan, harness_fs_write_grants,
 };
 
 /// Canonical initial generation used by [`ZsxSession::builder`].
@@ -233,7 +234,16 @@ impl SessionCore {
         plan: &str,
         timeout: Duration,
     ) -> Result<ZsxExecutionResult, ZsxSessionError> {
-        session.execute(generation, request_id, plan, timeout)
+        let approval_root = std::fs::canonicalize(&self.config.root)
+            .map(|path| path.to_string_lossy().into_owned())
+            .unwrap_or_else(|_| self.config.root.clone());
+        let grants = harness_fs_write_grants(
+            &approval_root,
+            generation,
+            request_id,
+            fs_write_grant_count_for_plan(plan),
+        );
+        session.execute_with_approvals(generation, request_id, plan, timeout, grants)
     }
 
     pub fn reconcile_pending(&self) -> Result<Vec<ZsxAttemptJournalStatus>, ZsxSessionError> {
