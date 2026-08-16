@@ -751,6 +751,8 @@ mod post_dispatch_cancel_tests {
         late.cancel();
         assert!(late.is_cancelled());
         assert!(outcome.is_ok(), "read fixture should commit Ok: {outcome:?}");
+        // bind_outcome is the post-dispatch path and must not consult cancel.
+        let _ = late.is_cancelled();
         let bound = adapter.bind_outcome(&req, outcome, Duration::from_millis(1));
         assert!(
             bound.is_ok(),

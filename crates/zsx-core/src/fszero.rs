@@ -23,13 +23,11 @@
 //! # Cancellation and deadline
 //!
 //! `call()` checks [`AdapterCall::cancellation`] and
-//! `request.deadline_unix_ms` before enqueueing, the session thread checks
-//! both again immediately before dispatch and after it returns, and `call()`
-//! re-checks after the reply arrives. The immutable revision's typed
-//! dispatcher does not consult the session request guard during kernel work
-//! (`request_expired` is only read by the MCP stdio/HTTP transports), so
-//! boundary checks are the cooperative granularity the raw worker path also
-//! provides.
+//! `request.deadline_unix_ms` before enqueueing. After enqueue, the waiter
+//! holds until the session thread replies -- a late cancel must not drop
+//! Heavy while `run_call` is still mutating. The typed dispatcher does not
+//! consult the session request guard during kernel work
+//! (`request_expired` is only read by the MCP stdio/HTTP transports).
 //!
 //! # Ref bridge
 //!
@@ -97,9 +95,8 @@ const SESSION_THREAD_STOP_TIMEOUT: Duration = Duration::from_secs(5);
 /// stores).
 const SESSION_INIT_TIMEOUT: Duration = Duration::from_secs(60);
 
-/// Maximum time a connector dispatcher waits before re-checking cancellation.
-/// FSZero kernel work remains on its dedicated session thread; abandoning a
-/// cancelled reply must never pin one of the shared aggregate dispatchers.
+/// How often the waiter peeks for a sitting session reply. Cancel after
+/// enqueue is ignored until that reply arrives (zerostack-2kut).
 const CALL_REPLY_POLL_INTERVAL: Duration = Duration::from_millis(5);
 
 /// Mirror of the raw worker's revision resolution: `ZEROSTACK_WORKER_REVISION`
@@ -932,9 +929,8 @@ impl DomainAdapter for FsZeroAdapter {
                 request,
             ));
         }
-        // Cancellation and deadline are checked before enqueueing and again
-        // after the reply arrives; the session thread re-checks both right
-        // before and right after the dispatch itself.
+        // Cancel/deadline refuse enqueue. After send, the waiter holds for
+        // the session reply even if the token flips (zerostack-2kut).
         if call.cancellation.is_cancelled() {
             return Err(adapter_error(
                 "cancelled",
@@ -1028,6 +1024,28 @@ mod tests {
         let again = collect_and_conform_refs(&session, &empty_request(), &result)
             .expect("idempotent");
         assert_eq!(refs, again);
+    }
+
+    #[test]
+    fn sitting_reply_wins_over_cancel() {
+        let (tx, rx) = std::sync::mpsc::sync_channel(1);
+        let request = empty_request();
+        let cancel = CancellationSignal::new();
+        cancel.cancel();
+        let sent = adapter_error("internal", "sitting-reply", &request);
+        let worker = std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(15));
+            let _ = tx.send(Err(sent));
+        });
+        let err = receive_call_response(&rx, &cancel, &request)
+            .expect_err("sitting reply is an adapter error");
+        assert_eq!(err.error.kind, "internal", "{}", err.error.message);
+        assert!(
+            err.error.message.contains("sitting-reply"),
+            "{}",
+            err.error.message
+        );
+        worker.join().expect("reply sender");
     }
 
     #[test]
