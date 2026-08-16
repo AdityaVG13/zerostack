@@ -1847,6 +1847,12 @@ impl<'tree> Interpreter<'tree> {
         Ok(())
     }
 
+    fn first_settled_race_sibling(&self, ids: &[u64]) -> Option<u64> {
+        ids.iter()
+            .copied()
+            .find(|id| !matches!(self.promises.get(id), Some(PromiseState::Pending(_))))
+    }
+
     fn race(&mut self, ids: &[u64]) -> Result<u64, HostError> {
         if ids.is_empty() {
             return Err(HostError::Data(
@@ -1855,6 +1861,12 @@ impl<'tree> Interpreter<'tree> {
         }
         loop {
             self.drain()?;
+            // Already-settled siblings win before Then/All pumps. pitl pumped
+            // first, so race([resolve(1).then(x=>x+1), resolve('fast')])
+            // returned 2 (zerostack-gtoj).
+            if let Some(id) = self.first_settled_race_sibling(ids) {
+                return Ok(id);
+            }
             // Pump Then / nested combinators as microtasks before the next
             // host tick. Promise.all already resolve()s each child; race used
             // to wait for a non-Pending state and so a Fulfilled parent with
@@ -1875,11 +1887,7 @@ impl<'tree> Interpreter<'tree> {
                     _ => {}
                 }
             }
-            if let Some(id) = ids
-                .iter()
-                .copied()
-                .find(|id| !matches!(self.promises.get(id), Some(PromiseState::Pending(_))))
-            {
+            if let Some(id) = self.first_settled_race_sibling(ids) {
                 return Ok(id);
             }
             self.tick()?;
@@ -3612,6 +3620,31 @@ mod promise_race_then_tests {
         )
         .expect("nested all");
         assert_eq!(value, serde_json::json!([1]));
+    }
+
+    #[test]
+    fn race_fulfilled_sibling_beats_then() {
+        let value = run(
+            "return await Promise.race([Promise.resolve(1).then(x => x + 1), Promise.resolve('fast')]);",
+            Rc::new(NoDispatch),
+        )
+        .expect("fulfilled sibling");
+        assert_eq!(value, serde_json::json!("fast"));
+    }
+
+    #[test]
+    fn race_fulfilled_sibling_beats_pending_all() {
+        let connector = Rc::new(DelayedPing {
+            delay: Duration::from_millis(80),
+            payload: "all-win".into(),
+            started: AtomicBool::new(false),
+        });
+        let value = run(
+            "return await Promise.race([Promise.all([zero.test.ping()]), Promise.resolve('fast')]);",
+            connector,
+        )
+        .expect("fulfilled sibling must beat pending all");
+        assert_eq!(value, serde_json::json!("fast"));
     }
 }
 
