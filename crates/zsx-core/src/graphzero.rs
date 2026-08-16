@@ -34,7 +34,7 @@
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
-use graphzero_query::dispatcher::{AdapterKind, EngineContext};
+use graphzero_query::dispatcher::{AdapterKind, CancellationToken, EngineContext};
 use graphzero_query::operation_abi::Mutability;
 use graphzero_query::surface_handshake::v2::worker_revision;
 use graphzero_query::{
@@ -168,7 +168,11 @@ impl GraphZeroAdapter {
     /// Converts the absolute wall-clock `deadline_unix_ms` into the
     /// dispatcher's monotonic `Instant` budget; a deadline already in the
     /// past is rejected by [`DomainAdapter::call`] before this is built.
-    fn engine_context(&self, request: &CallRequest) -> EngineContext {
+    fn engine_context(
+        &self,
+        request: &CallRequest,
+        cancellation: &zero_codemode::CancellationSignal,
+    ) -> EngineContext {
         let mut context = EngineContext::for_paths(
             self.embedded
                 .repo_root()
@@ -176,7 +180,8 @@ impl GraphZeroAdapter {
                 .unwrap_or_else(|| PathBuf::from(".")),
             self.embedded.store_root().to_path_buf(),
             AdapterKind::PrivateWorker,
-        );
+        )
+        .with_cancellation_token(CancellationToken::from_arc(cancellation.as_atomic()));
         if let Some(deadline_unix_ms) = request.deadline_unix_ms
             && let Some(remaining_ms) = deadline_unix_ms.checked_sub(now_ms())
         {
@@ -282,7 +287,7 @@ impl DomainAdapter for GraphZeroAdapter {
                 Some(trace),
             ));
         }
-        let context = self.engine_context(request);
+        let context = self.engine_context(request, call.cancellation);
         match private_worker_dispatch(&context, &request.op, &request.args) {
             Ok(result) => {
                 let mut refs = result.refs.clone();
