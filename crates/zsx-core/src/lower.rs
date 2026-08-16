@@ -876,5 +876,5 @@ pub fn lower(
 }
 
 #[cfg(test)]
-#[path = "../../../tests/rust/zsx-core/lower_compound_search_alias_tests.rs"]
+#[path = "../../../tests/unit/zsx-core/lower_compound_search_alias_tests.rs"]
 mod compound_search_alias_tests;

@@ -334,5 +334,5 @@ impl SessionCore {
 }
 
 #[cfg(test)]
-#[path = "../../../tests/rust/zsx-node/core_tests.rs"]
+#[path = "../../../tests/unit/zsx-node/core_tests.rs"]
 mod tests;

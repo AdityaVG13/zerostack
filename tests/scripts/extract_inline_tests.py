@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Move #[cfg(test)] mod blocks from crate src/ into repo-root tests/rust/."""
+"""Move #[cfg(test)] mod blocks from crate src/ into repo-root tests/unit/."""
 
 from __future__ import annotations
 

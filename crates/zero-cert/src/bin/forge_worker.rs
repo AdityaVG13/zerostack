@@ -1,6 +1,6 @@
 //! Out-of-process malicious-worker fixture (ZS-OPS-005 / V6-R14).
 //!
-//! Spawned by `tests/rust/zero-cert/worker_trust.rs` through
+//! Spawned by `tests/unit/zero-cert/worker_trust.rs` through
 //! `CARGO_BIN_EXE_forge_worker`. Reads one JSON `ForgeSpecV1` line from
 //! stdin and prints the forged `WorkerEnvelopeV1` canonical JSON line to
 //! stdout. The parent feeds the envelope bytes to

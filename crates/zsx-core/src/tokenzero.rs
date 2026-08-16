@@ -768,8 +768,8 @@ fn bind_terminal_exact_expansion(request: &CallRequest, value: &mut Value) {
 }
 
 #[cfg(test)]
-#[path = "../../../tests/rust/zsx-core/tokenzero_post_dispatch_cancel_tests.rs"]
+#[path = "../../../tests/unit/zsx-core/tokenzero_post_dispatch_cancel_tests.rs"]
 mod post_dispatch_cancel_tests;
 #[cfg(test)]
-#[path = "../../../tests/rust/zsx-core/tokenzero_output_too_large_hint_tests.rs"]
+#[path = "../../../tests/unit/zsx-core/tokenzero_output_too_large_hint_tests.rs"]
 mod output_too_large_hint_tests;

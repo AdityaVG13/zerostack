@@ -20,7 +20,7 @@
 //!   [`verify_commit_authority_v1`] are the read-side checks that refuse a
 //!   record the journal never saw (an "authority" forged by role code).
 //! - The replayed-authority acceptance (captured-epoch replay) is tested in
-//!   `tests/rust/zero-cert/boundary_audit.rs`: an authority captured at
+//!   `tests/unit/zero-cert/boundary_audit.rs`: an authority captured at
 //!   epoch N, replayed after the project root advanced, fails loud with no
 //!   journal event and no CAS mutation.
 //!

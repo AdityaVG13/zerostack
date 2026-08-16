@@ -2750,5 +2750,5 @@ fn validate_session_approvals(
 }
 
 #[cfg(test)]
-#[path = "../../../tests/rust/zsx-core/session_shutdown_deadline_tests.rs"]
+#[path = "../../../tests/unit/zsx-core/session_shutdown_deadline_tests.rs"]
 mod shutdown_deadline_tests;

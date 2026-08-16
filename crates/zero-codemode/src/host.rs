@@ -792,8 +792,8 @@ pub(crate) fn spill_result(cas_root: &Path, encoded: &str) -> Result<JsonValue, 
 }
 
 #[cfg(test)]
-#[path = "../../../tests/rust/zero-codemode/host_extract_useful_result_text_tests.rs"]
+#[path = "../../../tests/unit/zero-codemode/host_extract_useful_result_text_tests.rs"]
 mod extract_useful_result_text_tests;
 #[cfg(test)]
-#[path = "../../../tests/rust/zero-codemode/host_public_result_shape_tests.rs"]
+#[path = "../../../tests/unit/zero-codemode/host_public_result_shape_tests.rs"]
 mod public_result_shape_tests;

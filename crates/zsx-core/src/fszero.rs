@@ -969,5 +969,5 @@ impl DomainAdapter for FsZeroAdapter {
 }
 
 #[cfg(test)]
-#[path = "../../../tests/rust/zsx-core/fszero_tests.rs"]
+#[path = "../../../tests/unit/zsx-core/fszero_tests.rs"]
 mod tests;

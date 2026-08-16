@@ -4,7 +4,7 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-ROOT = Path("/Users/aditya/AI/ZeroStack/tests/rust")
+ROOT = Path("/Users/aditya/AI/ZeroStack/tests/unit")
 HEADER = re.compile(r"^#\[cfg\(test\)\]\s*\nmod [A-Za-z0-9_]+ \{\n", re.M)
 
 

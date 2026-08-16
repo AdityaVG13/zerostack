@@ -91,7 +91,7 @@ beads_compliance_audit/
 MODES_OF_REASONING_REPORT_AND_ANALYSIS_OF_PROJECT.md
 MOR_CASE.md
 MOR_CLAIMS.jsonl
-# Liquidated farm leftovers stay ignored; unit tests live in tests/rust/.
+# Unit tests live in tests/unit/. Keep leftover dump dirs out of git.
 /tests/python/
 /tests/tests/
 archive/

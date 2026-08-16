@@ -1890,8 +1890,8 @@ pub(crate) fn host_limits() -> Result<zero_codemode::HostLimits, HostError> {
 }
 
 #[cfg(test)]
-#[path = "../../../tests/rust/zsx-core/connector_rmja_already_terminal_tests.rs"]
+#[path = "../../../tests/unit/zsx-core/connector_rmja_already_terminal_tests.rs"]
 mod rmja_already_terminal_tests;
 #[cfg(test)]
-#[path = "../../../tests/rust/zsx-core/connector_reconcile_journal_symlink_tests.rs"]
+#[path = "../../../tests/unit/zsx-core/connector_reconcile_journal_symlink_tests.rs"]
 mod reconcile_journal_symlink_tests;

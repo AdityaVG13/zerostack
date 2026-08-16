@@ -395,5 +395,5 @@ pub fn help_search(input: &Value) -> Value {
 }
 
 #[cfg(test)]
-#[path = "../../../tests/rust/zsx-core/help_help_search_mr_tests.rs"]
+#[path = "../../../tests/unit/zsx-core/help_help_search_mr_tests.rs"]
 mod help_search_mr_tests;
