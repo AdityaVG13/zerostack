@@ -128,7 +128,9 @@ impl std::error::Error for ConnectorError {}
 pub const RESULT_SPILL_SCHEMA: &str = "zerostack.codemode.result_spill.v1";
 
 /// Upper bound on the inline preview carried beside a spilled result ref.
-pub const RESULT_SPILL_PREVIEW_BYTES: usize = 512;
+/// 3 KiB holds a real HIT list or the head of a crash dump; 512 bytes was
+/// only enough for the metadata envelope (`ack`/`trace`/`ownership`).
+pub const RESULT_SPILL_PREVIEW_BYTES: usize = 3_072;
 
 /// Conservative byte ceiling for aggregate values shown directly to a model.
 /// Receipts label bytes only; tokenizer-specific visible-token certification
@@ -137,7 +139,7 @@ pub const DEFAULT_MAX_VISIBLE_RESULT_BYTES: usize = 1_024;
 
 /// Hard ceiling for the serialized spill envelope itself, including its
 /// exact-byte receipt. Crossing this bound fails typed instead of leaking text.
-pub const MAX_RESULT_SPILL_ENVELOPE_BYTES: usize = 2_000;
+pub const MAX_RESULT_SPILL_ENVELOPE_BYTES: usize = 5_120;
 
 /// Bound for typed error text emitted by a model-facing adapter.
 pub const MAX_VISIBLE_ERROR_BYTES: usize = 1_024;
@@ -439,7 +441,7 @@ impl fmt::Display for HostError {
 
 impl std::error::Error for HostError {}
 
-fn public_result_ack(value: &JsonValue) -> String {
+pub(crate) fn public_result_ack(value: &JsonValue) -> String {
     [
         value.pointer("/value/tool_response/ack"),
         value.pointer("/value/ack"),
@@ -616,6 +618,93 @@ pub(crate) fn is_terminal_exact_token_expansion(value: &JsonValue) -> bool {
             == visible
 }
 
+/// Pull the agent-usable payload out of a CodeMode result envelope.
+///
+/// Search/list/read results wrap HIT lines and file bytes under
+/// `payload_utf8` / `detail` / `visible.text`. Taking the first N bytes of
+/// the serialized envelope shows `ack`/`trace`/`ownership` and hides the
+/// answer.
+pub(crate) fn extract_useful_result_text(value: &JsonValue) -> Option<String> {
+    if let Some(text) = first_string_field(value, "payload_utf8") {
+        if !text.trim().is_empty() {
+            return Some(text);
+        }
+    }
+    if let Some(text) = first_string_field(value, "detail") {
+        if looks_agent_payload(&text) {
+            return Some(text);
+        }
+    }
+    if let Some(visible) = first_object_field(value, "visible") {
+        for key in ["text", "preview"] {
+            if let Some(text) = visible.get(key).and_then(JsonValue::as_str) {
+                if !text.trim().is_empty() {
+                    return Some(text.to_owned());
+                }
+            }
+        }
+    }
+    None
+}
+
+fn looks_agent_payload(text: &str) -> bool {
+    let trimmed = text.trim();
+    !trimmed.is_empty()
+        && (trimmed.contains("HIT ")
+            || trimmed.contains("search:")
+            || trimmed.contains("sample_matches:")
+            || trimmed.contains('\n')
+            || trimmed.len() >= 24)
+}
+
+fn first_string_field(value: &JsonValue, key: &str) -> Option<String> {
+    match value {
+        JsonValue::Object(map) => {
+            if let Some(JsonValue::String(text)) = map.get(key) {
+                return Some(text.clone());
+            }
+            map.values().find_map(|nested| first_string_field(nested, key))
+        }
+        JsonValue::Array(items) => items.iter().find_map(|item| first_string_field(item, key)),
+        _ => None,
+    }
+}
+
+fn first_object_field<'a>(value: &'a JsonValue, key: &str) -> Option<&'a JsonValue> {
+    match value {
+        JsonValue::Object(map) => {
+            if let Some(found) = map.get(key).filter(|found| found.is_object()) {
+                return Some(found);
+            }
+            map.values().find_map(|nested| first_object_field(nested, key))
+        }
+        JsonValue::Array(items) => items.iter().find_map(|item| first_object_field(item, key)),
+        _ => None,
+    }
+}
+
+fn clip_preview(source: &str, max_bytes: usize) -> (String, bool) {
+    let mut preview_end = source.len().min(max_bytes);
+    while preview_end > 0 && !source.is_char_boundary(preview_end) {
+        preview_end -= 1;
+    }
+    // JSON escaping can expand up to 6x; shrink until the escaped form stays
+    // inside twice the raw preview budget so the envelope cap always holds.
+    while preview_end > 0 {
+        let escaped_len = serde_json::to_string(&source[..preview_end])
+            .map(|escaped| escaped.len())
+            .unwrap_or(usize::MAX);
+        if escaped_len <= max_bytes.saturating_mul(2) {
+            break;
+        }
+        preview_end /= 2;
+        while preview_end > 0 && !source.is_char_boundary(preview_end) {
+            preview_end -= 1;
+        }
+    }
+    (source[..preview_end].to_owned(), preview_end < source.len())
+}
+
 /// Publish an oversized encoded result into the CAS and describe it with a ref
 /// plus a bounded preview, so a large final value degrades to a fetchable
 /// reference instead of a hard framing error.
@@ -625,29 +714,13 @@ pub(crate) fn spill_result(cas_root: &Path, encoded: &str) -> Result<JsonValue, 
         .put(encoded.as_bytes())
         .map_err(|error| HostError::ResultSpill(error.to_string()))?;
     let reference = format!("tz://blob/{hash}");
-    // Real head-of-content preview: a spill receipt that hides everything
-    // behind "[exact result omitted]" makes small-but-spilled results
-    // unusable without a second expand round trip.
-    let mut preview_end = encoded.len().min(RESULT_SPILL_PREVIEW_BYTES);
-    while preview_end > 0 && !encoded.is_char_boundary(preview_end) {
-        preview_end -= 1;
-    }
-    // JSON escaping can expand up to 6x; shrink until the escaped form stays
-    // inside twice the raw preview budget so the envelope cap always holds.
-    while preview_end > 0 {
-        let escaped_len = serde_json::to_string(&encoded[..preview_end])
-            .map(|escaped| escaped.len())
-            .unwrap_or(usize::MAX);
-        if escaped_len <= RESULT_SPILL_PREVIEW_BYTES * 2 {
-            break;
-        }
-        preview_end /= 2;
-        while preview_end > 0 && !encoded.is_char_boundary(preview_end) {
-            preview_end -= 1;
-        }
-    }
-    let preview_truncated = preview_end < encoded.len();
-    let preview = &encoded[..preview_end];
+    // Prefer HIT/payload/visible text over the head of the JSON envelope.
+    let parsed = serde_json::from_str::<JsonValue>(encoded).ok();
+    let preview_source = parsed
+        .as_ref()
+        .and_then(extract_useful_result_text)
+        .unwrap_or_else(|| encoded.to_owned());
+    let (preview, preview_truncated) = clip_preview(&preview_source, RESULT_SPILL_PREVIEW_BYTES);
     debug_assert!(preview.len() <= RESULT_SPILL_PREVIEW_BYTES);
     let raw_bytes = encoded.len();
     let mut envelope = serde_json::json!({
@@ -703,4 +776,46 @@ pub(crate) fn spill_result(cas_root: &Path, encoded: &str) -> Result<JsonValue, 
     Err(HostError::ResultSpill(
         "finalized spill receipt length did not converge".into(),
     ))
+}
+
+#[cfg(test)]
+mod extract_useful_result_text_tests {
+    use super::extract_useful_result_text;
+    use serde_json::json;
+
+    #[test]
+    fn prefers_payload_utf8_over_envelope_metadata() {
+        let value = json!({
+            "ack": "S1",
+            "content": {
+                "kind": "inline",
+                "value": {
+                    "metadata": {
+                        "trace": { "request_id": "long-trace-id" },
+                        "ownership": { "engine": "fszero" }
+                    },
+                    "value": {
+                        "ok": true,
+                        "operation": "fs.search",
+                        "value": {
+                            "payload_utf8": "HIT crates/zero-codemode/src/host.rs#L131\nHIT crates/zsx-core/src/session.rs#L83",
+                            "detail": "search:2 hits"
+                        }
+                    }
+                }
+            }
+        });
+        let useful = extract_useful_result_text(&value).expect("payload_utf8");
+        assert!(useful.starts_with("HIT "), "{useful}");
+        assert!(!useful.contains("request_id"), "{useful}");
+    }
+
+    #[test]
+    fn falls_back_to_hit_detail_when_payload_missing() {
+        let value = json!({
+            "value": { "detail": "search:1 hits\nHIT src/lib.rs#L1 kind=literal" }
+        });
+        let useful = extract_useful_result_text(&value).expect("detail");
+        assert!(useful.contains("HIT src/lib.rs"), "{useful}");
+    }
 }

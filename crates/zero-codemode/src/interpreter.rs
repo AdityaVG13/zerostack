@@ -18,8 +18,8 @@ use tree_sitter_javascript::LANGUAGE;
 use zero_abi::{CapabilityDescriptor, canonical_json, sha256_hex};
 
 use crate::host::{
-    ConnectorCompletionMessage, directly_expands_one_spill_ref, is_terminal_exact_token_expansion,
-    normalize_public_result, spill_result,
+    ConnectorCompletionMessage, directly_expands_one_spill_ref, extract_useful_result_text,
+    is_terminal_exact_token_expansion, normalize_public_result, public_result_ack, spill_result,
 };
 use crate::{
     Connector, ConnectorCompletion, DispatchContext, ExecutionMetrics, ExecutionOutcome, Host,
@@ -226,7 +226,8 @@ enum PromiseKind<'tree> {
     Connector,
     Then {
         parent: u64,
-        on_fulfilled: Value<'tree>,
+        on_fulfilled: Option<Value<'tree>>,
+        on_rejected: Option<Value<'tree>>,
     },
     All(Vec<u64>),
     AllSettled(Vec<u64>),
@@ -354,6 +355,20 @@ fn execute_inner(
     if encoded.len() > host.max_visible_result_bytes
         && !(directly_expands_one_spill_ref(source) && is_terminal_exact_token_expansion(&public))
     {
+        // Prefer the HIT list / payload / visible text when that fits the
+        // budget. Envelope metadata is why a 2 KiB search became a 19 KiB
+        // spill with a 512-byte preview of `ack`/`trace`.
+        if let Some(useful) = extract_useful_result_text(&public) {
+            let slim = serde_json::json!({
+                "ack": public_result_ack(&public),
+                "content": { "kind": "inline", "value": useful },
+            });
+            if let Ok(slim_encoded) = serde_json::to_string(&slim) {
+                if slim_encoded.len() <= host.max_visible_result_bytes {
+                    return Ok(slim);
+                }
+            }
+        }
         return match host.spill_root.as_deref() {
             Some(root)
                 if host
@@ -1631,6 +1646,28 @@ impl<'tree> Interpreter<'tree> {
         }
     }
 
+    fn apply_then_callback(
+        &mut self,
+        callback: Option<Value<'tree>>,
+        value: Value<'tree>,
+        passthrough_rejected: bool,
+    ) -> Result<PromiseState<'tree>, HostError> {
+        match callback {
+            Some(callback) => match self.call(callback, vec![value]) {
+                Ok(Value::Promise(child)) => match self.resolve(child) {
+                    Ok(value) => Ok(PromiseState::Fulfilled(value)),
+                    Err(Fault::Throw(value)) => Ok(PromiseState::Rejected(value)),
+                    Err(Fault::Host(error)) => Err(error),
+                },
+                Ok(value) => Ok(PromiseState::Fulfilled(value)),
+                Err(Fault::Throw(value)) => Ok(PromiseState::Rejected(value)),
+                Err(Fault::Host(error)) => Err(error),
+            },
+            None if passthrough_rejected => Ok(PromiseState::Rejected(value)),
+            None => Ok(PromiseState::Fulfilled(value)),
+        }
+    }
+
     fn resolve(&mut self, id: u64) -> Result<Value<'tree>, Fault<'tree>> {
         let _depth = DepthGuard::enter(&self.depth, self.max_depth).map_err(Fault::Host)?;
         self.pump(id).map_err(Fault::Host)?;
@@ -1738,23 +1775,17 @@ impl<'tree> Interpreter<'tree> {
                 PromiseState::Pending(PromiseKind::Then {
                     parent,
                     on_fulfilled,
+                    on_rejected,
                 }) => {
                     self.microtasks = self.microtasks.saturating_add(1);
                     if self.microtasks > self.host.limits.microtask_ceiling {
                         return Err(HostError::MicrotaskLimit);
                     }
                     let state = match self.resolve(parent) {
-                        Ok(value) => match self.call(on_fulfilled, vec![value]) {
-                            Ok(Value::Promise(child)) => match self.resolve(child) {
-                                Ok(value) => PromiseState::Fulfilled(value),
-                                Err(Fault::Throw(value)) => PromiseState::Rejected(value),
-                                Err(Fault::Host(error)) => return Err(error),
-                            },
-                            Ok(value) => PromiseState::Fulfilled(value),
-                            Err(Fault::Throw(value)) => PromiseState::Rejected(value),
-                            Err(Fault::Host(error)) => return Err(error),
-                        },
-                        Err(Fault::Throw(value)) => PromiseState::Rejected(value),
+                        Ok(value) => self.apply_then_callback(on_fulfilled, value, false)?,
+                        Err(Fault::Throw(value)) => {
+                            self.apply_then_callback(on_rejected, value, true)?
+                        }
                         Err(Fault::Host(error)) => return Err(error),
                     };
                     self.promises.insert(target, state);
@@ -1993,8 +2024,16 @@ impl<'tree> Interpreter<'tree> {
                 ))
             }
             Value::Promise(parent) if name == "then" => {
-                let on_fulfilled = args.into_iter().next().unwrap_or(Value::Undefined);
-                if !matches!(on_fulfilled, Value::Function(_)) {
+                let mut args = args.into_iter();
+                let on_fulfilled = optional_promise_callback(
+                    args.next().unwrap_or(Value::Undefined),
+                    "then",
+                )?;
+                let on_rejected = optional_promise_callback(
+                    args.next().unwrap_or(Value::Undefined),
+                    "then",
+                )?;
+                if on_fulfilled.is_none() && on_rejected.is_none() {
                     return Err(Fault::Host(HostError::Data(
                         "Promise.then expects a function".into(),
                     )));
@@ -2002,13 +2041,30 @@ impl<'tree> Interpreter<'tree> {
                 Ok(self.new_promise(PromiseState::Pending(PromiseKind::Then {
                     parent,
                     on_fulfilled,
+                    on_rejected,
                 })))
             }
-            Value::Promise(_) if matches!(name, "catch" | "finally") => {
-                Err(Fault::Host(HostError::UnsupportedSyntax(format!(
-                    "Promise.prototype.{name} is not supported; use await with try/catch"
-                ))))
+            Value::Promise(parent) if name == "catch" => {
+                let on_rejected = optional_promise_callback(
+                    args.into_iter().next().unwrap_or(Value::Undefined),
+                    "catch",
+                )?;
+                if on_rejected.is_none() {
+                    return Err(Fault::Host(HostError::Data(
+                        "Promise.catch expects a function".into(),
+                    )));
+                }
+                Ok(self.new_promise(PromiseState::Pending(PromiseKind::Then {
+                    parent,
+                    on_fulfilled: None,
+                    on_rejected,
+                })))
             }
+            Value::Promise(_) if name == "finally" => Err(Fault::Host(
+                HostError::UnsupportedSyntax(
+                    "Promise.prototype.finally is not supported; use await with try/catch".into(),
+                ),
+            )),
             _ => Err(Fault::Host(self.unsupported_name(name, "method"))),
         }
     }
@@ -3076,6 +3132,19 @@ impl<'tree> Interpreter<'tree> {
 
     fn unsupported_name(&self, name: &str, context: &str) -> HostError {
         HostError::UnsupportedSyntax(format!("{context} '{name}' is not supported in CodeMode"))
+    }
+}
+
+fn optional_promise_callback<'tree>(
+    value: Value<'tree>,
+    method: &str,
+) -> Result<Option<Value<'tree>>, Fault<'tree>> {
+    match value {
+        Value::Function(_) => Ok(Some(value)),
+        Value::Undefined | Value::Null => Ok(None),
+        _ => Err(Fault::Host(HostError::Data(format!(
+            "Promise.{method} expects a function"
+        )))),
     }
 }
 

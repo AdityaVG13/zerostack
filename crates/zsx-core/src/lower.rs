@@ -623,6 +623,18 @@ pub fn lower(
     }
     if surface == "fs" && method == "compound" {
         let (name, compound_args) = compound_name_and_args(&input)?;
+        if compound_args.get("paths").is_some() {
+            let op = match name {
+                "read" => "fs.multiRead",
+                "list" | "inventory" | "tree" => "fs.multiList",
+                _ => {
+                    return Err(ConnectorError::new(
+                        "fs.compound paths= is only valid for read/list/inventory",
+                    ));
+                }
+            };
+            return Ok((engine, op.into(), compound_args));
+        }
         let op = COMPOUND_OPS
             .iter()
             .find(|(alias, _)| *alias == name)

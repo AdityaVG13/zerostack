@@ -522,13 +522,61 @@ fn run_call(
     let recovery_key = outcome.recovery_key.clone();
     let mut result: DomainResult = outcome.result;
     if !result.ok {
-        let error = result.error.unwrap_or_else(|| {
+        let error = result.error.clone().unwrap_or_else(|| {
             DomainError::internal(format!(
                 "fszero operation '{}' failed without typed error",
                 request.op
             ))
         });
-        return Err(domain_error_to_adapter(&error, request));
+        // Mutations still abort the plan. A missing sibling file on a
+        // read/list/search must not throw: sequential compound reads in one
+        // plan should return the files that existed.
+        if result.mutated {
+            return Err(domain_error_to_adapter(&error, request));
+        }
+        let mut value = serde_json::to_value(&result).unwrap_or(Value::Null);
+        if let Value::Object(map) = &mut value {
+            map.entry("error_text")
+                .or_insert_with(|| Value::String(error.message.clone()));
+        }
+        return Ok(AdapterResponse {
+            result: WorkerResult {
+                value,
+                metadata: WorkerResultMetadata {
+                    effect: EffectClass::ReadOnly,
+                    approval: ApprovalMetadata {
+                        state: ApprovalState::NotRequired,
+                        approval_id: None,
+                        policy: None,
+                    },
+                    revert: RevertMetadata {
+                        supported: false,
+                        journal_id: None,
+                        rollback_op: None,
+                    },
+                    ownership: WorkerRefOwnership {
+                        engine: EngineIdentity::FsZero,
+                        session_id: session_id.to_owned(),
+                        refs: Vec::new(),
+                        snapshot: None,
+                    },
+                    trace: request.trace.clone(),
+                },
+            },
+            engine_timeline: request
+                .telemetry_request
+                .as_ref()
+                .is_some_and(|value| value.engine_stage_timeline)
+                .then(|| EngineStageTimelineV1 {
+                    total_ns: wall_ns,
+                    spans: vec![EngineStageSpanV1 {
+                        stage: "fszero.dispatch".into(),
+                        start_ns: 0,
+                        duration_ns: wall_ns,
+                    }],
+                }),
+            worker_token_accounting: None,
+        });
     }
 
     let refs = collect_and_conform_refs(session, request, &result)?;
