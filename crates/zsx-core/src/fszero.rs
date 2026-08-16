@@ -208,20 +208,11 @@ fn receive_call_response(
             }
             Err(TryRecvError::Empty) => {}
         }
-        if cancellation.is_cancelled() {
-            return Err(adapter_error(
-                "cancelled",
-                "fszero adapter cancelled while awaiting dispatch",
-                request,
-            ));
-        }
-        if deadline_expired(request) {
-            return Err(adapter_error(
-                "deadline_exceeded",
-                "fszero adapter deadline exceeded while awaiting dispatch",
-                request,
-            ));
-        }
+        // Command already sits on the session thread. Returning cancel here
+        // would drop Heavy/engine locks while run_call is still mutating
+        // (zerostack-2kut). Wait for the reply; pre-enqueue cancel is
+        // handled in send_session_command.
+        let _ = cancellation;
     }
 }
 
@@ -1034,5 +1025,27 @@ mod tests {
             refs.iter().any(|reference| reference == &fz_blob),
             "expandable fz://blob must still be kept: {refs:?}"
         );
+        let again = collect_and_conform_refs(&session, &empty_request(), &result)
+            .expect("idempotent");
+        assert_eq!(refs, again);
+    }
+
+    #[test]
+    fn domain_error_kind_table_is_rw5_closed() {
+        let rows = [
+            ("invalid_argument", "validation"),
+            ("permission_denied", "policy"),
+            ("incompatible_contract", "policy"),
+            ("cancelled", "cancelled"),
+            ("deadline", "deadline_exceeded"),
+            ("deadline_exceeded", "deadline_exceeded"),
+            ("busy", "timeout"),
+            ("not-a-real-class", "internal"),
+        ];
+        for (class, want) in rows {
+            assert_eq!(domain_error_kind(class), want, "class={class}");
+        }
+        assert!(is_forbidden_operation("planner"));
+        assert!(is_forbidden_operation("js.execute"));
     }
 }
