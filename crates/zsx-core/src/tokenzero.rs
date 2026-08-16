@@ -47,8 +47,9 @@
 //! Cancellation and deadline are checked before dispatch; the connector
 //! re-checks both at every boundary. The remaining deadline is installed as
 //! the engine's cooperative wall deadline for the dispatch so hot loops stop
-//! inside the declared bound, and a post-dispatch cancellation check mirrors
-//! the v2 worker.
+//! inside the declared bound. After the kernel returns, a committed Ok is
+//! bound even if cancel is now set (na21 / rd6o). Cooperative cancel during
+//! dispatch surfaces as a domain Err from the engine checkpoints.
 
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, OnceLock};
@@ -478,14 +479,7 @@ impl DomainAdapter for TokenZeroAdapter {
             call.cancellation.as_atomic(),
             || self.dispatch(request),
         );
-        if call.cancellation.is_cancelled() {
-            return Err(AdapterError::new(
-                "cancelled",
-                "token adapter cancelled during dispatch",
-                false,
-                Some(request.trace.clone()),
-            ));
-        }
+        // Kernel already ran. Do not rewrite a finished Ok as cancelled.
         self.bind_outcome(request, outcome, started.elapsed())
     }
 }
@@ -693,5 +687,75 @@ fn bind_terminal_exact_expansion(request: &CallRequest, value: &mut Value) {
             }
         }),
     );
+}
+
+#[cfg(test)]
+mod post_dispatch_cancel_tests {
+    use super::*;
+    use crate::adapter::{AdapterCall, DomainAdapter};
+    use zero_abi::WorkerTrace;
+    use zero_codemode::CancellationSignal;
+
+    fn empty_trace() -> WorkerTrace {
+        WorkerTrace {
+            runtime_id: String::new(),
+            cell_id: String::new(),
+            request_id: String::new(),
+            trace_id: String::new(),
+            parent_span_id: None,
+            worker_revision: String::new(),
+            contract_digest: String::new(),
+        }
+    }
+
+    fn request(op: &str, args: Value) -> CallRequest {
+        CallRequest {
+            request_id: "rd6o".into(),
+            op: op.into(),
+            args,
+            deadline_unix_ms: None,
+            trace: empty_trace(),
+            approval_grant: None,
+            telemetry_request: None,
+        }
+    }
+
+    #[test]
+    fn post_dispatch_cancel_keeps_committed_ok() {
+        let root = std::env::temp_dir().join(format!("zerostack-rd6o-{}", std::process::id()));
+        std::fs::create_dir_all(&root).expect("temp root");
+        let fixture = root.join("committed.txt");
+        std::fs::write(&fixture, b"committed-ok").expect("fixture");
+        let adapter = TokenZeroAdapter::new(&root, "rd6o").expect("adapter");
+
+        let path = fixture.to_string_lossy().into_owned();
+        let pre = request("read", serde_json::json!({ "path": path.clone() }));
+        let cancelled = CancellationSignal::new();
+        cancelled.cancel();
+        let err = adapter
+            .call(AdapterCall {
+                request: &pre,
+                cancellation: &cancelled,
+            })
+            .expect_err("pre-dispatch cancel");
+        assert_eq!(err.error.kind, "cancelled");
+        assert!(
+            err.error.message.contains("before dispatch"),
+            "{}",
+            err.error.message
+        );
+
+        let late = CancellationSignal::new();
+        let req = request("read", serde_json::json!({ "path": path }));
+        let outcome = adapter.dispatch(&req);
+        late.cancel();
+        assert!(late.is_cancelled());
+        assert!(outcome.is_ok(), "read fixture should commit Ok: {outcome:?}");
+        let bound = adapter.bind_outcome(&req, outcome, Duration::from_millis(1));
+        assert!(
+            bound.is_ok(),
+            "committed Ok must bind after post-dispatch cancel: {bound:?}"
+        );
+    }
 }
 

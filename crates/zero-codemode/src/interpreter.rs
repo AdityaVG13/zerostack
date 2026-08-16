@@ -569,11 +569,12 @@ impl<'tree> Interpreter<'tree> {
 
     fn finish_inflight(&mut self) -> Result<(), HostError> {
         while self.inflight_connector_calls > 0 {
-            self.tick()?;
+            // Sitting ConnectorCompletion Ok wins over cancel/deadline.
             self.drain()?;
             if self.inflight_connector_calls == 0 {
                 break;
             }
+            self.tick()?;
             match self.receiver.recv_timeout(
                 self.deadline
                     .saturating_duration_since(Instant::now())
@@ -1608,11 +1609,11 @@ impl<'tree> Interpreter<'tree> {
             .first_saturation_cause
             .get_or_insert_with(|| "connector_concurrency".into());
         while self.inflight_connector_calls >= limit {
-            self.tick().map_err(Fault::Host)?;
             self.drain().map_err(Fault::Host)?;
             if self.inflight_connector_calls < limit {
                 break;
             }
+            self.tick().map_err(Fault::Host)?;
             match self.receiver.recv_timeout(
                 self.deadline
                     .saturating_duration_since(Instant::now())
@@ -1726,13 +1727,13 @@ impl<'tree> Interpreter<'tree> {
     fn pump(&mut self, target: u64) -> Result<(), HostError> {
         let _depth = DepthGuard::enter(&self.depth, self.max_depth)?;
         loop {
-            self.tick()?;
             self.drain()?;
             let Some(state) = self.promises.get(&target).cloned() else {
                 return Err(HostError::Data("unknown promise".into()));
             };
             match state {
                 PromiseState::Pending(PromiseKind::Connector) => {
+                    self.tick()?;
                     self.microtasks = self.microtasks.saturating_add(1);
                     if self.microtasks > self.host.limits.microtask_ceiling {
                         return Err(HostError::MicrotaskLimit);
@@ -1853,7 +1854,6 @@ impl<'tree> Interpreter<'tree> {
             ));
         }
         loop {
-            self.tick()?;
             self.drain()?;
             if let Some(id) = ids
                 .iter()
@@ -1862,6 +1862,7 @@ impl<'tree> Interpreter<'tree> {
             {
                 return Ok(id);
             }
+            self.tick()?;
             match self.receiver.recv_timeout(
                 self.deadline
                     .saturating_duration_since(Instant::now())
