@@ -34,12 +34,12 @@ Every public `zero.*` capability returns `zero-result/v1` with exactly two top-l
 - `ack` -- a bounded status atom.
 - `content` -- either `{kind:"inline", value:...}` or `{kind:"ref", ref:"<canonical ref>", preview?:"..."}`.
 
-The aggregate host normalizes the transport-owned worker result before JavaScript observes it. It never synthesizes legacy `text`, `visible`, `stdout_ref`, or flat `ref` aliases. Inline content retains the complete validated worker result, including its domain value and transport metadata. A producer selects ref content only with an explicit typed `kind:"ref"` result.
+The aggregate host normalizes the transport-owned worker result before JavaScript observes it. It never synthesizes legacy `text`, `visible`, `stdout_ref`, or flat `ref` aliases. `content.value` is the **domain payload** (the worker `value`), not the `{metadata, value}` wrapper. A producer or an oversized execute result uses `kind:"ref"` -- the same shape whether the call is cold or warm.
 
 ~~~js
 const run = await zero.token.shell("echo hi");
 if (run.content.kind === "inline") {
-  return run.content.value;
+  return run.content.value; // domain payload
 }
 return await zero.token.expand(run.content.ref);
 ~~~

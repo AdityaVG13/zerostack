@@ -138,6 +138,33 @@ struct ObjectValue<'tree> {
     access: ObjectAccess,
 }
 
+fn unknown_property_message(key: &str, object: &ObjectValue<'_>) -> String {
+    let available = object.fields.keys().cloned().collect::<Vec<_>>().join(", ");
+    let suggestion = ["value", "content"].iter().find_map(|nest| {
+        let Value::Object(inner) = object.fields.get(*nest)? else {
+            return None;
+        };
+        let inner = inner.borrow();
+        if inner.fields.contains_key(key) {
+            return Some(format!("{nest}.{key}"));
+        }
+        let Value::Object(deeper) = inner.fields.get("value")? else {
+            return None;
+        };
+        deeper
+            .borrow()
+            .fields
+            .contains_key(key)
+            .then(|| format!("{nest}.value.{key}"))
+    });
+    match suggestion {
+        Some(path) => format!(
+            "unknown property '{key}' on object; available: {available} (did you mean {path}?)"
+        ),
+        None => format!("unknown property '{key}' on object; available: {available}"),
+    }
+}
+
 fn object_field<'tree>(value: &Value<'tree>, key: &str) -> Option<Value<'tree>> {
     match value {
         Value::Object(object) => object.borrow().fields.get(key).cloned(),
@@ -2085,10 +2112,7 @@ impl<'tree> Interpreter<'tree> {
                         match object.access {
                             ObjectAccess::Strict => Err(Fault::Throw(Value::Error(ErrorValue {
                                 name: "TypeError".into(),
-                                message: format!(
-                                    "unknown property '{key}' on connector result; available properties: {}",
-                                    object.fields.keys().cloned().collect::<Vec<_>>().join(", ")
-                                ),
+                                message: unknown_property_message(key, &object),
                             }))),
                             ObjectAccess::CapabilityRoot
                                 if matches!(key, "then" | "toJSON" | "toString") =>

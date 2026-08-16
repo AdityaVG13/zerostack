@@ -522,7 +522,7 @@ pub(crate) fn normalize_public_result(encoded: &str) -> Result<String, HostError
     let result = match explicit_result_reference(&value)? {
         Some((reference, preview)) => ZeroResultV1::reference(&ack, reference, preview)
             .map_err(|error| HostError::Json(format!("invalid explicit ref result: {error}")))?,
-        None => ZeroResultV1::inline(ack, value).map_err(|error| {
+        None => ZeroResultV1::inline(ack, unwrap_worker_envelope(value)).map_err(|error| {
             HostError::Json(format!(
                 "validated fallback ack failed to construct zero-result/v1: {error}"
             ))
@@ -570,25 +570,59 @@ pub(crate) fn directly_expands_one_spill_ref(plan: &str) -> bool {
     reference.as_deref().is_some_and(is_canonical_spill_ref)
 }
 
+/// Lift the domain payload out of a worker `{metadata, value}` envelope so
+/// `content.value` is the payload, not the transport wrapper.
+fn unwrap_worker_envelope(value: JsonValue) -> JsonValue {
+    let Some(object) = value.as_object() else {
+        return value;
+    };
+    if object.contains_key("ack") && object.contains_key("content") {
+        return value;
+    }
+    if !(object.contains_key("metadata") && object.contains_key("value")) {
+        return value;
+    }
+    let mut domain = object
+        .get("value")
+        .cloned()
+        .unwrap_or(JsonValue::Null);
+    if let JsonValue::Object(map) = &mut domain {
+        if !map.contains_key("refs") {
+            if let Some(refs) = value.pointer("/metadata/ownership/refs") {
+                map.insert("refs".into(), refs.clone());
+            }
+        }
+    }
+    domain
+}
+
+fn looks_like_expand_domain(value: &JsonValue) -> bool {
+    value.get("op").and_then(JsonValue::as_str) == Some("tz_expand")
+}
+
 pub(crate) fn is_terminal_exact_token_expansion(value: &JsonValue) -> bool {
     let inline = serde_json::from_value::<ZeroResultV1>(value.clone())
         .ok()
         .and_then(|result| result.inline_value().ok().cloned());
     let value = inline.as_ref().unwrap_or(value);
-    let Some(root) = value.as_object().filter(|root| root.len() == 2) else {
-        return false;
-    };
-    let Some(metadata) = root.get("metadata") else {
-        return false;
-    };
-    if metadata
-        .pointer("/ownership/engine")
-        .and_then(JsonValue::as_str)
-        != Some("tokenzero")
+    let result = if looks_like_expand_domain(value) {
+        value
+    } else if value
+        .as_object()
+        .is_some_and(|root| root.contains_key("metadata") && root.contains_key("value"))
     {
-        return false;
-    }
-    let Some(result) = root.get("value") else {
+        let Some(result) = value.get("value") else {
+            return false;
+        };
+        if value
+            .pointer("/metadata/ownership/engine")
+            .and_then(JsonValue::as_str)
+            != Some("tokenzero")
+        {
+            return false;
+        }
+        result
+    } else {
         return false;
     };
     let visible = result.get("visible").and_then(JsonValue::as_str);
@@ -683,99 +717,36 @@ fn first_object_field<'a>(value: &'a JsonValue, key: &str) -> Option<&'a JsonVal
     }
 }
 
-fn clip_preview(source: &str, max_bytes: usize) -> (String, bool) {
-    let mut preview_end = source.len().min(max_bytes);
-    while preview_end > 0 && !source.is_char_boundary(preview_end) {
-        preview_end -= 1;
+fn clip_preview_chars(source: &str, max_chars: usize) -> (String, bool) {
+    let count = source.chars().count();
+    if count <= max_chars {
+        return (source.to_owned(), false);
     }
-    // JSON escaping can expand up to 6x; shrink until the escaped form stays
-    // inside twice the raw preview budget so the envelope cap always holds.
-    while preview_end > 0 {
-        let escaped_len = serde_json::to_string(&source[..preview_end])
-            .map(|escaped| escaped.len())
-            .unwrap_or(usize::MAX);
-        if escaped_len <= max_bytes.saturating_mul(2) {
-            break;
-        }
-        preview_end /= 2;
-        while preview_end > 0 && !source.is_char_boundary(preview_end) {
-            preview_end -= 1;
-        }
-    }
-    (source[..preview_end].to_owned(), preview_end < source.len())
+    let end: usize = source.chars().take(max_chars).map(char::len_utf8).sum();
+    (source[..end].to_owned(), true)
 }
 
-/// Publish an oversized encoded result into the CAS and describe it with a ref
-/// plus a bounded preview, so a large final value degrades to a fetchable
-/// reference instead of a hard framing error.
+/// Publish an oversized encoded result into the CAS and describe it with the
+/// same `zero-result/v1` shape as an inline capability (`content.kind=ref`).
 pub(crate) fn spill_result(cas_root: &Path, encoded: &str) -> Result<JsonValue, HostError> {
     let cas = SharedCas::open_labeled(cas_root, "codemode-result-spill");
     let hash = cas
         .put(encoded.as_bytes())
         .map_err(|error| HostError::ResultSpill(error.to_string()))?;
     let reference = format!("tz://blob/{hash}");
-    // Prefer HIT/payload/visible text over the head of the JSON envelope.
     let parsed = serde_json::from_str::<JsonValue>(encoded).ok();
     let preview_source = parsed
         .as_ref()
         .and_then(extract_useful_result_text)
         .unwrap_or_else(|| encoded.to_owned());
-    let (preview, preview_truncated) = clip_preview(&preview_source, RESULT_SPILL_PREVIEW_BYTES);
-    debug_assert!(preview.len() <= RESULT_SPILL_PREVIEW_BYTES);
-    let raw_bytes = encoded.len();
-    let mut envelope = serde_json::json!({
-        "schema": RESULT_SPILL_SCHEMA,
-        "spilled": true,
-        "ref": reference,
-        "sha256": hash,
-        "bytes": raw_bytes,
-        "preview": preview,
-        "previewBytes": preview.len(),
-        "previewTruncated": preview_truncated,
-        "receipt": {
-            "schema": "zerostack.codemode.result_finalization_receipt.v1",
-            "rawResultJsonBytes": raw_bytes,
-            "inlineResultBytes": 0,
-            "omittedBehindExactRefBytes": raw_bytes,
-            "typedFailureBytes": 0,
-            "finalizedValueJsonBytes": 0,
-            "visibleTokenCount": JsonValue::Null,
-            "visibleTokenCountStatus": "requires_tokenzero_certification",
-            "savingsBytes": 0,
-            "integrity": "sha256-cas",
-        },
-    });
-    for _ in 0..16 {
-        let visible_bytes = serde_json::to_vec(&envelope)
-            .map_err(|error| HostError::ResultSpill(error.to_string()))?
-            .len();
-        let savings_bytes = raw_bytes.saturating_sub(visible_bytes);
-        let receipt = envelope
-            .get_mut("receipt")
-            .and_then(JsonValue::as_object_mut)
-            .ok_or_else(|| HostError::ResultSpill("missing finalization receipt".into()))?;
-        let prior_visible = receipt
-            .get("finalizedValueJsonBytes")
-            .and_then(JsonValue::as_u64)
-            .unwrap_or(0) as usize;
-        let prior_savings = receipt
-            .get("savingsBytes")
-            .and_then(JsonValue::as_u64)
-            .unwrap_or(0) as usize;
-        if prior_visible == visible_bytes && prior_savings == savings_bytes {
-            if visible_bytes > MAX_RESULT_SPILL_ENVELOPE_BYTES {
-                return Err(HostError::ResultSpill(format!(
-                    "finalized spill envelope is {visible_bytes} bytes; maximum is {MAX_RESULT_SPILL_ENVELOPE_BYTES}"
-                )));
-            }
-            return Ok(envelope);
-        }
-        receipt.insert("finalizedValueJsonBytes".into(), visible_bytes.into());
-        receipt.insert("savingsBytes".into(), savings_bytes.into());
-    }
-    Err(HostError::ResultSpill(
-        "finalized spill receipt length did not converge".into(),
-    ))
+    let (preview, _) = clip_preview_chars(&preview_source, zero_abi::MAX_PREVIEW_CHARS);
+    let ack = parsed
+        .as_ref()
+        .map(public_result_ack)
+        .unwrap_or_else(|| "ok".into());
+    let result = ZeroResultV1::reference(ack, reference, Some(preview))
+        .map_err(|error| HostError::ResultSpill(error.to_string()))?;
+    serde_json::to_value(&result).map_err(|error| HostError::ResultSpill(error.to_string()))
 }
 
 #[cfg(test)]
@@ -817,5 +788,37 @@ mod extract_useful_result_text_tests {
         });
         let useful = extract_useful_result_text(&value).expect("detail");
         assert!(useful.contains("HIT src/lib.rs"), "{useful}");
+    }
+}
+
+#[cfg(test)]
+mod public_result_shape_tests {
+    use super::{normalize_public_result, unwrap_worker_envelope};
+    use serde_json::{Value, json};
+
+    #[test]
+    fn unwraps_worker_envelope_to_domain_payload() {
+        let wrapped = json!({
+            "metadata": {
+                "ownership": { "engine": "fszero", "refs": ["fz://blob/aa"] }
+            },
+            "value": { "operation": "fs.search", "ok": true }
+        });
+        let domain = unwrap_worker_envelope(wrapped);
+        assert_eq!(domain["operation"], "fs.search");
+        assert_eq!(domain["refs"], json!(["fz://blob/aa"]));
+    }
+
+    #[test]
+    fn normalize_puts_domain_in_content_value() {
+        let encoded = serde_json::to_string(&json!({
+            "metadata": { "ownership": { "engine": "fszero", "refs": [] } },
+            "value": { "operation": "fs.search", "ok": true }
+        }))
+        .unwrap();
+        let public: Value = serde_json::from_str(&normalize_public_result(&encoded).unwrap()).unwrap();
+        assert_eq!(public["content"]["kind"], "inline");
+        assert_eq!(public["content"]["value"]["operation"], "fs.search");
+        assert!(public["content"]["value"].get("metadata").is_none());
     }
 }

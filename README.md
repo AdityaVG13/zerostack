@@ -46,17 +46,20 @@ const [files, graph] = await Promise.all([
 return { files: files.content, graph: graph.content };
 ```
 
-Every public `zero.*` call returns `zero-result/v1`: `ack` plus `content` that is either inline or a typed ref.
+Every public `zero.*` call returns `zero-result/v1`: `ack` plus `content`.
+
+- `content.kind === "inline"` -- `content.value` is the **domain payload** (search hits, file bytes, shell `visible`, …), not the transport `{metadata, value}` wrapper.
+- `content.kind === "ref"` -- the payload spilled; expand `content.ref` (`tz://blob/…`). Oversized plan results use this same shape, never a separate spill schema.
 
 ```js
 const run = await zero.token.shell("echo hi");
 if (run.content.kind === "inline") {
-  return run.content.value;
+  return run.content.value; // domain payload (e.g. { visible, status })
 }
 return await zero.token.expand(run.content.ref);
 ```
 
-`zero-mcp` is an optional FastMCP carrier for harnesses that want ordinary tool calls. A deployment uses CodeMode or MCP, not both catalogs at once.
+`zsx mcp` is the one-catalog carrier (`zero_execute` / `zero_wait`). Do not also register engine MCP servers (fszero / graphzero / tokenzero) in the same harness. `zero-mcp` is an optional FastMCP crate and is not a second catalog on that path.
 
 More: [docs/codemode.md](docs/codemode.md), [docs/architecture.md](docs/architecture.md).
 

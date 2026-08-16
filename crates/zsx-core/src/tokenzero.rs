@@ -70,7 +70,7 @@ use zero_abi::{
     EngineStageTimelineV1, RefOwnership, RevertMetadata, TOKEN_JOB_OPERATION_V1, WorkerResult,
     WorkerResultMetadata, WorkerTokenAccountingV1, WorkerTokenCountKind,
 };
-use zero_ref::{ZeroRefV1, ZeroScheme};
+use zero_ref::{ZeroFragment, ZeroRefV1, ZeroScheme};
 use zero_store::{Engine as StoreEngine, ResolvedStore, SharedCas};
 
 use crate::adapter::{
@@ -234,17 +234,7 @@ impl TokenZeroAdapter {
         // becomes a typed error naming the limit, never a truncated result.
         let output_bytes = serde_json::to_vec(&value).map_or(0, |bytes| bytes.len());
         if output_bytes > MAX_OUTPUT_BYTES {
-            let range_hint = request
-                .args
-                .get("ref")
-                .and_then(Value::as_str)
-                .filter(|reference| !reference.contains('#'))
-                .map(|reference| {
-                    format!(
-                        "; retry with {reference}#B0-32768 and continue with later byte ranges"
-                    )
-                })
-                .unwrap_or_default();
+            let range_hint = output_too_large_range_hint(request, &value, output_bytes);
             return Err(AdapterError::new(
                 "output_too_large",
                 format!(
@@ -701,6 +691,48 @@ fn checked_u64_count(field: &str, value: usize) -> Result<u64, String> {
     u64::try_from(value).map_err(|_| format!("{field} exceeds the raw-worker accounting range"))
 }
 
+/// Hint a `#B` range whose *wrapped* expand JSON is expected to fit
+/// `MAX_OUTPUT_BYTES`. A fixed `#B0-32768` can still exceed the cap after
+/// envelope wrap; always emit a next-range even when the ref already has a
+/// fragment.
+fn output_too_large_range_hint(
+    request: &CallRequest,
+    value: &Value,
+    output_bytes: usize,
+) -> String {
+    let Some(reference) = request.args.get("ref").and_then(Value::as_str) else {
+        return String::new();
+    };
+    let visible_len = value
+        .get("visible")
+        .and_then(Value::as_str)
+        .map(str::len)
+        .unwrap_or(0);
+    let overhead = output_bytes.saturating_sub(visible_len);
+    let max_chunk = MAX_OUTPUT_BYTES
+        .saturating_sub(overhead)
+        .saturating_sub(512)
+        .max(1024);
+    let (base, start) = match ZeroRefV1::parse(reference) {
+        Ok(parsed) => {
+            let base = format!("{}://blob/{}", parsed.scheme.as_str(), parsed.hash);
+            let start = match parsed.fragment {
+                ZeroFragment::Bytes { start, .. } => start,
+                _ => 0,
+            };
+            (base, start)
+        }
+        Err(_) => {
+            let base = reference.split('#').next().unwrap_or(reference).to_owned();
+            (base, 0)
+        }
+    };
+    format!(
+        "; retry with {base}#B{start}-{} and continue with later byte ranges",
+        start.saturating_add(max_chunk as u64)
+    )
+}
+
 fn bind_terminal_exact_expansion(request: &CallRequest, value: &mut Value) {
     if request.op != "expand"
         || value.get("status").and_then(Value::as_str) != Some("ok")
@@ -833,6 +865,78 @@ mod post_dispatch_cancel_tests {
             "{rendered}"
         );
         let _ = std::fs::remove_dir_all(&root);
+    }
+}
+
+#[cfg(test)]
+mod output_too_large_hint_tests {
+    use super::{MAX_OUTPUT_BYTES, output_too_large_range_hint};
+    use serde_json::json;
+    use zero_abi::CallRequest;
+    use zero_abi::WorkerTrace;
+
+    const HASH: &str = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+
+    fn request(op: &str, args: serde_json::Value) -> CallRequest {
+        CallRequest {
+            request_id: "expand-hint".into(),
+            op: op.into(),
+            args,
+            deadline_unix_ms: None,
+            trace: WorkerTrace {
+                runtime_id: String::new(),
+                cell_id: String::new(),
+                request_id: String::new(),
+                trace_id: String::new(),
+                parent_span_id: None,
+                worker_revision: String::new(),
+                contract_digest: String::new(),
+            },
+            approval_grant: None,
+            telemetry_request: None,
+        }
+    }
+
+    #[test]
+    fn hinted_range_accounts_for_envelope_overhead() {
+        let reference = format!("tz://blob/{HASH}");
+        let visible = "x".repeat(32_768);
+        let value = json!({ "visible": visible, "status": "ok" });
+        let output_bytes = MAX_OUTPUT_BYTES + 12_000;
+        let hint = output_too_large_range_hint(
+            &request("expand", json!({ "ref": reference })),
+            &value,
+            output_bytes,
+        );
+        assert!(
+            hint.contains(&format!("retry with tz://blob/{HASH}#B0-")),
+            "{hint}"
+        );
+        let end: u64 = hint
+            .split("#B0-")
+            .nth(1)
+            .and_then(|tail| tail.split_whitespace().next())
+            .and_then(|n| n.parse().ok())
+            .expect("end");
+        assert!(end < 32_768, "hint end {end} must be smaller than the failed 32768 slice");
+        assert!(end >= 1024, "{end}");
+    }
+
+    #[test]
+    fn existing_fragment_still_gets_a_smaller_hint() {
+        let reference = format!("tz://blob/{HASH}#B0-32768");
+        let visible = "x".repeat(32_768);
+        let value = json!({ "visible": visible });
+        let hint = output_too_large_range_hint(
+            &request("expand", json!({ "ref": reference })),
+            &value,
+            MAX_OUTPUT_BYTES + 11_557,
+        );
+        assert!(
+            hint.contains(&format!("tz://blob/{HASH}#B0-")),
+            "{hint}"
+        );
+        assert!(!hint.contains("#B0-32768"), "{hint}");
     }
 }
 
