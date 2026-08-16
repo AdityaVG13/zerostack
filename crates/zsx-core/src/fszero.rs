@@ -56,7 +56,9 @@
 //! raw worker — FSZero never gates on approvals itself.
 
 use std::path::PathBuf;
-use std::sync::mpsc::{self, Receiver, RecvTimeoutError, SyncSender, TrySendError};
+use std::sync::mpsc::{
+    self, Receiver, RecvTimeoutError, SyncSender, TryRecvError, TrySendError,
+};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 
@@ -192,6 +194,19 @@ fn receive_call_response(
                     request,
                 ));
             }
+        }
+        // A reply that landed in the 5ms gap after Timeout must still win
+        // over cancel/deadline (zerostack-8hs3).
+        match reply.try_recv() {
+            Ok(response) => return response,
+            Err(TryRecvError::Disconnected) => {
+                return Err(adapter_error(
+                    "internal",
+                    "fszero session thread is gone",
+                    request,
+                ));
+            }
+            Err(TryRecvError::Empty) => {}
         }
         if cancellation.is_cancelled() {
             return Err(adapter_error(
