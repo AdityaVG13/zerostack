@@ -542,6 +542,61 @@ fn exactly_one_options_object(input: Value) -> Result<Value, ConnectorError> {
 /// Callers pass `regex` / `pattern` (and optional `path`) because help
 /// says `{query, path?}`. The kernel only reads `query`/`arg`; extra keys
 /// were previously a silent miss, and regex-only calls failed "missing query".
+/// `compound('list', {paths})` must become `fs.multiList` with `items`.
+/// `compound('read', {paths})` keeps `paths` for `fs.multiRead`.
+/// `compound('search', {query, path})` becomes `fs.multiSearch` so the
+/// kernel's per-query `paths` filter actually scopes hits. Bare `fs.search`
+/// ignores `path`.
+fn lower_compound_search_scope(args: Value) -> Result<(String, Value), ConnectorError> {
+    let path = args
+        .get("path")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|path| !path.is_empty() && *path != ".");
+    let Some(path) = path else {
+        return Ok(("fs.search".into(), args));
+    };
+    let query = args
+        .get("query")
+        .and_then(Value::as_str)
+        .ok_or_else(|| ConnectorError::new("fs.compound search requires query"))?;
+    let limit = args
+        .get("max_results")
+        .or_else(|| args.get("limit"))
+        .cloned()
+        .unwrap_or(serde_json::json!(80));
+    Ok((
+        "fs.multiSearch".into(),
+        serde_json::json!({
+            "queries": [{
+                "query": query,
+                "paths": [path],
+                "limit": limit,
+            }]
+        }),
+    ))
+}
+
+fn remap_compound_paths_args(
+    name: &str,
+    mut args: Value,
+) -> Result<(String, Value), ConnectorError> {
+    match name {
+        "read" => Ok(("fs.multiRead".into(), args)),
+        "list" | "inventory" | "tree" => {
+            if let Some(object) = args.as_object_mut() {
+                if let Some(paths) = object.remove("paths") {
+                    object.insert("items".into(), paths);
+                }
+            }
+            Ok(("fs.multiList".into(), args))
+        }
+        _ => Err(ConnectorError::new(
+            "fs.compound paths= is only valid for read/list/inventory",
+        )),
+    }
+}
+
 fn normalize_compound_search_args(args: Value) -> Value {
     let Value::Object(mut map) = args else {
         return args;
@@ -661,17 +716,13 @@ pub fn lower(
         } else {
             compound_args
         };
+        if matches!(name, "search" | "find" | "grep") {
+            let (op, compound_args) = lower_compound_search_scope(compound_args)?;
+            return Ok((engine, op, compound_args));
+        }
         if compound_args.get("paths").is_some() {
-            let op = match name {
-                "read" => "fs.multiRead",
-                "list" | "inventory" | "tree" => "fs.multiList",
-                _ => {
-                    return Err(ConnectorError::new(
-                        "fs.compound paths= is only valid for read/list/inventory",
-                    ));
-                }
-            };
-            return Ok((engine, op.into(), compound_args));
+            let (op, compound_args) = remap_compound_paths_args(name, compound_args)?;
+            return Ok((engine, op, compound_args));
         }
         let op = COMPOUND_OPS
             .iter()
@@ -780,9 +831,9 @@ mod compound_search_alias_tests {
             json!(["search", {"regex": "HIT_MARKER", "path": "src"}]),
         )
         .expect("lower");
-        assert_eq!(op, "fs.search");
-        assert_eq!(args["query"], "HIT_MARKER");
-        assert_eq!(args["path"], "src");
+        assert_eq!(op, "fs.multiSearch");
+        assert_eq!(args["queries"][0]["query"], "HIT_MARKER");
+        assert_eq!(args["queries"][0]["paths"], json!(["src"]));
     }
 
     #[test]
@@ -795,6 +846,45 @@ mod compound_search_alias_tests {
         .expect("lower");
         assert_eq!(op, "fs.search");
         assert_eq!(args["query"], "keep");
+    }
+
+    #[test]
+    fn list_paths_become_multilist_items() {
+        let (_engine, op, args) = lower(
+            "fs",
+            "compound",
+            json!(["list", {"paths": ["crates/zsx-core/src", "crates/zsx/src"]}]),
+        )
+        .expect("lower");
+        assert_eq!(op, "fs.multiList");
+        assert_eq!(args["items"], json!(["crates/zsx-core/src", "crates/zsx/src"]));
+        assert!(args.get("paths").is_none());
+    }
+
+    #[test]
+    fn search_path_becomes_multisearch_paths() {
+        let (_engine, op, args) = lower(
+            "fs",
+            "compound",
+            json!(["search", {"query": "fs.compound", "path": "crates/"}]),
+        )
+        .expect("lower");
+        assert_eq!(op, "fs.multiSearch");
+        assert_eq!(args["queries"][0]["query"], "fs.compound");
+        assert_eq!(args["queries"][0]["paths"], json!(["crates/"]));
+    }
+
+    #[test]
+    fn read_paths_stay_multiread_paths() {
+        let (_engine, op, args) = lower(
+            "fs",
+            "compound",
+            json!(["read", {"paths": ["Cargo.toml", "README.md"]}]),
+        )
+        .expect("lower");
+        assert_eq!(op, "fs.multiRead");
+        assert_eq!(args["paths"], json!(["Cargo.toml", "README.md"]));
+        assert!(args.get("items").is_none());
     }
 }
 
