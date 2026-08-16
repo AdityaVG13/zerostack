@@ -91,7 +91,9 @@ beads_compliance_audit/
 MODES_OF_REASONING_REPORT_AND_ANALYSIS_OF_PROJECT.md
 MOR_CASE.md
 MOR_CLAIMS.jsonl
-/tests/
+# Liquidated farm leftovers stay ignored; unit tests live in tests/rust/.
+/tests/python/
+/tests/tests/
 archive/
 docs/adr/
 docs/internal/
@@ -168,3 +170,9 @@ conformance/schemas/*
 .rotational-code-analysis/
 .rotational-code-analysis
 *.rotational-code-analysis/
+agy.mcp.json
+cursor.mcp.json
+factory.mcp.json
+gemini.mcp.json
+opencode.json
+windsurf.mcp.json
