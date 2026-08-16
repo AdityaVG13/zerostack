@@ -119,6 +119,12 @@ impl McpHost {
                 break;
             }
         }
+        if self.sessions.len() >= MAX_LIVE_SESSIONS {
+            return Err(format!(
+                "cannot open root {}: live session cap {MAX_LIVE_SESSIONS} is full (a shutdown is still joining)",
+                root.display()
+            ));
+        }
         let session_id = mint_mcp_session_id(&root);
         let state_root = root.join(".zerostack");
         let next_request_id = load_next_request_id(&state_root);

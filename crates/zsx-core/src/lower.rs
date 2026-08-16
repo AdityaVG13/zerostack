@@ -809,10 +809,17 @@ pub fn lower(
             token_method_args(&input, "read", "path", TOKEN_READ_OPTIONS)?,
         ),
         "job" => (TOKEN_JOB_OPERATION_V1, token_job_args(&input)?),
-        "shell" => (
-            "shell",
-            token_method_args(&input, "shell", "command", TOKEN_SHELL_OPTIONS)?,
-        ),
+        "shell" => {
+            let mut args = token_method_args(&input, "shell", "command", TOKEN_SHELL_OPTIONS)?;
+            if let Some(object) = args.as_object_mut() {
+                if object.get("command").is_some_and(Value::is_array) {
+                    if let Some(argv) = object.remove("command") {
+                        object.insert("argv".into(), argv);
+                    }
+                }
+            }
+            ("shell", args)
+        }
         _ => return Err(unsupported_method("token")),
     };
     Ok((engine, op.into(), args))
@@ -872,6 +879,19 @@ mod compound_search_alias_tests {
         assert_eq!(op, "fs.multiSearch");
         assert_eq!(args["queries"][0]["query"], "fs.compound");
         assert_eq!(args["queries"][0]["paths"], json!(["crates/"]));
+    }
+
+    #[test]
+    fn shell_string_array_becomes_argv() {
+        let (_engine, op, args) = lower(
+            "token",
+            "shell",
+            json!(["wc", "-l", "README.md"]),
+        )
+        .expect("lower");
+        assert_eq!(op, "shell");
+        assert_eq!(args["argv"], json!(["wc", "-l", "README.md"]));
+        assert!(args.get("command").is_none());
     }
 
     #[test]

@@ -2186,23 +2186,37 @@ pub(crate) fn join_thread_within(
     handle: JoinHandle<()>,
     timeout: Duration,
 ) -> Result<(), String> {
+    // Zero budget: join on this thread. Never drop JoinHandle (that detaches).
     if timeout.is_zero() {
+        return handle
+            .join()
+            .map_err(|_| "session executor panicked during inline join".into());
+    }
+    let parked = std::sync::Arc::new(Mutex::new(Some(handle)));
+    let (done_tx, done_rx) = mpsc::sync_channel(1);
+    let watcher = {
+        let parked = std::sync::Arc::clone(&parked);
         thread::Builder::new()
             .name("zsx-shutdown-join".into())
             .spawn(move || {
-                let _ = handle.join();
+                let handle = parked.lock().ok().and_then(|mut slot| slot.take());
+                let panicked = match handle {
+                    Some(handle) => handle.join().is_err(),
+                    None => false,
+                };
+                let _ = done_tx.send(panicked);
             })
-            .map_err(|error| format!("cannot park shutdown join: {error}"))?;
-        return Err("session executor join had no remaining shutdown budget; parked".into());
+    };
+    if let Err(error) = watcher {
+        let handle = parked
+            .lock()
+            .ok()
+            .and_then(|mut slot| slot.take())
+            .ok_or_else(|| format!("watcher spawn failed ({error}); handle already taken"))?;
+        return handle.join().map_err(|_| {
+            format!("watcher spawn failed ({error}); worker panicked during inline join")
+        });
     }
-    let (done_tx, done_rx) = mpsc::sync_channel(1);
-    thread::Builder::new()
-        .name("zsx-shutdown-join".into())
-        .spawn(move || {
-            let panicked = handle.join().is_err();
-            let _ = done_tx.send(panicked);
-        })
-        .map_err(|error| format!("cannot park shutdown join: {error}"))?;
     match done_rx.recv_timeout(timeout) {
         Ok(true) => Err("session executor panicked during shutdown".into()),
         Ok(false) => Ok(()),

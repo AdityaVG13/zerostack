@@ -1205,7 +1205,10 @@ impl Drop for ZsxConnector {
     fn drop(&mut self) {
         self.dispatch_sender.take();
         for dispatcher in self.dispatchers.drain(..) {
-            let _ = dispatcher.join();
+            let _ = crate::session::join_thread_within(
+                dispatcher,
+                crate::session::SESSION_SHUTDOWN_SETTLE_TIMEOUT,
+            );
         }
     }
 }
