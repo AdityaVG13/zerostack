@@ -131,6 +131,12 @@ impl NativeZsxSession {
 
     /// Shutdown the session: stops only the in-process worker thread.
     /// Idempotent; returns the generation the session stopped at.
+    ///
+    /// The host hook races native shutdown against an 800ms ceiling so a
+    /// stalled control/settlement/join cannot keep a Node listener pending
+    /// past the host's 2000ms exit deadline. A timeout resolves the same
+    /// receipt with `reason: "host_shutdown_timeout"` and does not replay
+    /// native shutdown.
     #[napi]
     pub fn shutdown(&self) -> AsyncTask<ControlTask> {
         AsyncTask::new(ControlTask::shutdown(Arc::clone(&self.core)))

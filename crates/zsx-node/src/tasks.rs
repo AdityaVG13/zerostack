@@ -12,7 +12,7 @@ use std::time::Duration;
 use napi::bindgen_prelude::{ToNapiValue, TypeName, ValueType};
 use napi::{Env, Result, Task};
 
-use crate::core::SessionCore;
+use crate::core::{shutdown_with_host_ceiling, HostShutdown, SessionCore};
 use crate::envelope::Envelope;
 use crate::error;
 
@@ -215,18 +215,21 @@ impl Task for ControlTask {
                     reason: Some(receipt.reason.as_str().to_string()),
                 })
             }
-            ControlOp::Shutdown => {
-                let generation = self
-                    .core
-                    .shutdown()
-                    .map_err(|err| error::zsx_error("shutdown", &err))?;
-                Ok(ControlOutcome {
+            ControlOp::Shutdown => match shutdown_with_host_ceiling(Arc::clone(&self.core)) {
+                Ok(HostShutdown::Stopped { generation }) => Ok(ControlOutcome {
                     kind: "shutdown",
                     generation,
                     previous_generation: None,
                     reason: None,
-                })
-            }
+                }),
+                Ok(HostShutdown::TimedOut { generation }) => Ok(ControlOutcome {
+                    kind: "shutdown",
+                    generation,
+                    previous_generation: None,
+                    reason: Some(crate::core::CODE_HOST_SHUTDOWN_TIMEOUT.to_string()),
+                }),
+                Err(err) => Err(error::zsx_error("shutdown", &err)),
+            },
         }))
         .unwrap_or_else(|_| Err(error::panic_error("control")))
     }

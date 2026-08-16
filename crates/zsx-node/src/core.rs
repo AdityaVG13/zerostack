@@ -6,7 +6,8 @@
 //! never in the JavaScript constructor on Pi's TUI thread.
 
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::{mpsc, Arc, Mutex};
+use std::thread;
 use std::time::Duration;
 
 use zsx_core::{
@@ -38,6 +39,71 @@ pub const CODE_COMMIT_RACE: &str = "commit_race";
 
 /// Addon-level failure code for a panic contained by `catch_unwind`.
 pub const CODE_PANIC: &str = "internal_panic";
+
+/// Outer host-hook ceiling for session teardown.
+///
+/// Host runtimes enforce a 2000ms exit deadline on session listeners.
+/// Core shutdown already shares a 500ms budget; this 800ms ceiling leaves
+/// scheduler and N-API binding slack so a stalled control/settlement/join
+/// cannot keep the hook pending past the host deadline.
+pub const HOST_SHUTDOWN_HOOK_CEILING_MS: u64 = 800;
+
+/// Typed host-hook timeout reason. Distinct from the core 500ms settle
+/// failure so callers can tell a bounded fallback from a native error.
+pub const CODE_HOST_SHUTDOWN_TIMEOUT: &str = "host_shutdown_timeout";
+
+/// Result of racing a closure against the host shutdown ceiling.
+#[derive(Debug, PartialEq, Eq)]
+pub enum HostCeiling<T> {
+    Ready(T),
+    TimedOut,
+}
+
+/// Outcome of a host-bounded native shutdown. `TimedOut` is a bounded
+/// fallback: the session is already marked terminated and native shutdown
+/// is not replayed.
+#[derive(Debug, PartialEq, Eq)]
+pub enum HostShutdown {
+    Stopped { generation: u64 },
+    TimedOut { generation: u64 },
+}
+
+/// Run `op` on a helper thread and settle within `ceiling`. On timeout the
+/// helper is detached; the caller must not join it (that would defeat the
+/// ceiling). Native shutdown is independently bounded at 500ms.
+pub fn run_with_host_ceiling<T, F>(ceiling: Duration, op: F) -> HostCeiling<T>
+where
+    F: FnOnce() -> T + Send + 'static,
+    T: Send + 'static,
+{
+    let (tx, rx) = mpsc::sync_channel(1);
+    let _worker = thread::Builder::new()
+        .name("zsx-node-host-shutdown".into())
+        .spawn(move || {
+            let _ = tx.send(op());
+        });
+    match rx.recv_timeout(ceiling) {
+        Ok(value) => HostCeiling::Ready(value),
+        Err(_) => HostCeiling::TimedOut,
+    }
+}
+
+/// Mark the session terminated, then race native shutdown against the 800ms
+/// host-hook ceiling. Idempotent: a second call does not replay effects.
+pub fn shutdown_with_host_ceiling(core: Arc<SessionCore>) -> Result<HostShutdown, ZsxSessionError> {
+    let generation = core.generation();
+    core.mark_terminated();
+    match run_with_host_ceiling(
+        Duration::from_millis(HOST_SHUTDOWN_HOOK_CEILING_MS),
+        move || core.shutdown(),
+    ) {
+        HostCeiling::Ready(Ok(stopped)) => Ok(HostShutdown::Stopped {
+            generation: stopped,
+        }),
+        HostCeiling::Ready(Err(err)) => Err(err),
+        HostCeiling::TimedOut => Ok(HostShutdown::TimedOut { generation }),
+    }
+}
 
 struct SessionConfig {
     root: String,
@@ -264,5 +330,50 @@ impl SessionCore {
             return Ok(self.generation());
         };
         session.shutdown()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::time::Instant;
+
+    #[test]
+    fn host_ceiling_is_800ms_between_core_budget_and_host_deadline() {
+        assert_eq!(HOST_SHUTDOWN_HOOK_CEILING_MS, 800);
+        assert!(HOST_SHUTDOWN_HOOK_CEILING_MS > zsx_core::DEFAULT_SHUTDOWN_WAIT_MS);
+        assert!(HOST_SHUTDOWN_HOOK_CEILING_MS < 2000);
+    }
+
+    #[test]
+    fn host_ceiling_returns_fast_path_value() {
+        let started = Instant::now();
+        let outcome = run_with_host_ceiling(Duration::from_millis(HOST_SHUTDOWN_HOOK_CEILING_MS), || 42u64);
+        assert_eq!(outcome, HostCeiling::Ready(42));
+        assert!(started.elapsed() < Duration::from_millis(400));
+    }
+
+    #[test]
+    fn host_ceiling_settles_when_op_stalls() {
+        let (release_tx, release_rx) = mpsc::sync_channel::<()>(1);
+        let started = Instant::now();
+        let outcome = run_with_host_ceiling(
+            Duration::from_millis(HOST_SHUTDOWN_HOOK_CEILING_MS),
+            move || {
+                let _ = release_rx.recv();
+                1u64
+            },
+        );
+        let elapsed = started.elapsed();
+        drop(release_tx);
+        assert_eq!(outcome, HostCeiling::TimedOut);
+        assert!(
+            elapsed >= Duration::from_millis(750),
+            "ceiling fired too early: {elapsed:?}"
+        );
+        assert!(
+            elapsed < Duration::from_millis(1200),
+            "hook stayed pending past 800ms slack: {elapsed:?}"
+        );
     }
 }

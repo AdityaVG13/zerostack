@@ -5,6 +5,7 @@
   "main": "loader.js",
   "files": [
     "loader.js",
+    "host-shutdown.js",
     "prebuilds/"
   ],
   "engines": {
