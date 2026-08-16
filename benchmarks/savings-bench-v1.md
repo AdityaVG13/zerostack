@@ -1,6 +1,6 @@
 # Savings bench v1
 
-Measured 2026-08-16 on live `zsx mcp` against `/tmp/zsx-savings-20260816`.
+Measured 2026-08-16 on live `zsx mcp` with a disposable 36,645-byte fixture (`sha256 d7bd8d96…`).
 Machine-readable twin: [`savings-bench-v1.json`](savings-bench-v1.json).
 
 This is the citation set for the next ZeroStack bench iteration. Three layers. Do not mix them.
@@ -59,7 +59,7 @@ Small HIT (`SNAP_FILE_NEEDLE` in a 79-byte file) did not spill. No byte savings 
 
 ## How to rerun
 
-1. Temp root only. Do not measure `~/AI/ZeroStack`.
+1. Use a disposable fixture directory. Do not measure this checkout.
 2. One `zero_execute` per row. Do not hide N searches inside a plan and call that one snap.
 3. Record the full MCP envelope, including `receipt` when `spilled: true`.
 4. Exact column stays empty unless TokenZero `accounting` is present.

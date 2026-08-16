@@ -1,12 +1,13 @@
 {
   "schema": "zerostack.savings-bench.v1",
   "measured_at": "2026-08-16T03:47:00Z",
-  "fixture_root": "/tmp/zsx-savings-20260816",
-  "mcp_session": "zsx-mcp-6827-8dcabefc3bebee23",
+  "fixture": {
+    "file": "compact_50k.txt",
+    "bytes": 36645,
+    "sha256": "d7bd8d9611e6b4b02440ce8d5a2f462b70f36597c52cafab92540ea823b6db06"
+  },
   "binary": {
-    "pid": 26663,
-    "lifetime": "harness-stdio",
-    "image": { "stale": false, "running_inode": 199187587 }
+    "lifetime": "harness-stdio"
   },
   "layers": {
     "exact_tokens": "TokenZero WorkerTokenAccountingV1 with count_kind implied Exact (billed/raw/visible present). Only token.* surfaces emit this.",

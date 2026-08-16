@@ -68,9 +68,9 @@ return { operation: domain.operation, text: payload.payload_utf8, refs };
 Build the canonical one-process runtime:
 
 ~~~sh
-rch exec -- env CARGO_TARGET_DIR=/tmp/rch_target_zerostack cargo build --locked -p zsx
+cargo build -p zsx --release
 printf '%s\n' 'return await zero.fs.read({path:"Cargo.toml"});' \
-  | /tmp/rch_target_zerostack/debug/zsx exec -C "$PWD"
+  | ./target/release/zsx exec -C "$PWD"
 ~~~
 
 `zsx exec` reads a plan from stdin or `--file PLAN`. `-C ROOT` authorizes and canonicalizes one engine root. `--timeout-ms N` overrides the 30000 ms default.

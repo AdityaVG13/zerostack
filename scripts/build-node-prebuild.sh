@@ -2,7 +2,6 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-TARGET_DIR=/tmp/rch_target_zerostack
 MAX_BYTES=20000000
 
 case "$(uname -s):$(uname -m)" in
@@ -14,10 +13,9 @@ case "$(uname -s):$(uname -m)" in
 esac
 
 cd "$ROOT"
-rch exec -- env CARGO_TARGET_DIR="$TARGET_DIR" \
-  cargo build --locked --profile release-node -p zsx-node
+cargo build --locked --profile release-node -p zsx-node
 
-source="$TARGET_DIR/release-node/$library"
+source="target/release-node/$library"
 destination="bindings/node/prebuilds/$platform/zsx_node.node"
 install -d "$(dirname "$destination")"
 install -m 0755 "$source" "$destination"
