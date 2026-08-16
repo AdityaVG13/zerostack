@@ -1855,6 +1855,26 @@ impl<'tree> Interpreter<'tree> {
         }
         loop {
             self.drain()?;
+            // Pump Then / nested combinators as microtasks before the next
+            // host tick. Promise.all already resolve()s each child; race used
+            // to wait for a non-Pending state and so a Fulfilled parent with
+            // a Pending(Then) child never settled (zerostack-pitl).
+            for id in ids {
+                match self.promises.get(id) {
+                    Some(PromiseState::Pending(PromiseKind::Then { .. })) => {
+                        self.pump(*id)?;
+                    }
+                    Some(
+                        PromiseState::Pending(PromiseKind::All(_))
+                        | PromiseState::Pending(PromiseKind::AllSettled(_))
+                        | PromiseState::Pending(PromiseKind::Race(_)),
+                    ) => match self.resolve(*id) {
+                        Ok(_) | Err(Fault::Throw(_)) => {}
+                        Err(Fault::Host(error)) => return Err(error),
+                    },
+                    _ => {}
+                }
+            }
             if let Some(id) = ids
                 .iter()
                 .copied()
@@ -3488,5 +3508,110 @@ fn unquote(value: &str) -> String {
         }
     }
     value.into()
+}
+
+#[cfg(test)]
+mod promise_race_then_tests {
+    use super::*;
+    use crate::host::{Connector, ConnectorCompletion, ConnectorError, DispatchContext, Host};
+    use crate::limits::HostLimits;
+    use std::rc::Rc;
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::thread;
+    use std::time::Duration;
+    use zero_abi::{CapabilityDescriptor, GlobalRegistration};
+
+    struct NoDispatch;
+
+    impl Connector for NoDispatch {
+        fn dispatch(
+            &self,
+            _capability: &CapabilityDescriptor,
+            _args_json: &str,
+            _context: DispatchContext,
+            _completion: ConnectorCompletion,
+        ) -> Result<(), ConnectorError> {
+            Err(ConnectorError::new("unexpected connector dispatch"))
+        }
+    }
+
+    struct DelayedPing {
+        delay: Duration,
+        payload: String,
+        started: AtomicBool,
+    }
+
+    impl Connector for DelayedPing {
+        fn dispatch(
+            &self,
+            _capability: &CapabilityDescriptor,
+            _args_json: &str,
+            _context: DispatchContext,
+            completion: ConnectorCompletion,
+        ) -> Result<(), ConnectorError> {
+            self.started.store(true, Ordering::Release);
+            let payload = self.payload.clone();
+            let delay = self.delay;
+            thread::spawn(move || {
+                thread::sleep(delay);
+                let _ = completion.complete(Ok(format!(
+                    r#"{{"ack":"ok","content":{{"kind":"inline","value":"{payload}"}}}}"#
+                )));
+            });
+            Ok(())
+        }
+    }
+
+    fn host() -> Host {
+        Host::new(
+            HostLimits::default(),
+            GlobalRegistration::zero(vec![CapabilityDescriptor::new("test", "ping")]),
+        )
+        .expect("host")
+    }
+
+    fn run(plan: &str, connector: Rc<dyn Connector>) -> Result<serde_json::Value, HostError> {
+        host().execute_with_cancel_timeout(
+            plan,
+            connector,
+            std::sync::Arc::new(AtomicBool::new(false)),
+            Duration::from_millis(400),
+        )
+    }
+
+    #[test]
+    fn race_resolved_then_settles_without_deadline() {
+        let value = run(
+            "return await Promise.race([Promise.resolve(1).then(x => x + 1)]);",
+            Rc::new(NoDispatch),
+        )
+        .expect("then-only race");
+        assert_eq!(value, serde_json::json!(2));
+    }
+
+    #[test]
+    fn race_then_beats_pending_connector() {
+        let connector = Rc::new(DelayedPing {
+            delay: Duration::from_millis(80),
+            payload: "conn-win".into(),
+            started: AtomicBool::new(false),
+        });
+        let value = run(
+            "return await Promise.race([Promise.resolve('then-win').then(x => x), zero.test.ping()]);",
+            connector,
+        )
+        .expect("then should win");
+        assert_eq!(value, serde_json::json!("then-win"));
+    }
+
+    #[test]
+    fn race_of_all_of_resolved_settles() {
+        let value = run(
+            "return await Promise.race([Promise.all([Promise.resolve(1)])]);",
+            Rc::new(NoDispatch),
+        )
+        .expect("nested all");
+        assert_eq!(value, serde_json::json!([1]));
+    }
 }
 
