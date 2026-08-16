@@ -270,24 +270,26 @@ impl TokenZeroAdapter {
         } else {
             None
         };
-        // Job tails are arbitrary shell bytes; a line beginning with `tz://`
-        // is content, not a minted ref, so job results never contribute
-        // ownership (mirrors the v2 worker). The v2 worker's ownership scan
-        // runs over its envelope value, whose `refs` key carries exactly
-        // `DomainResult.refs`; the in-process envelope carries the same list
-        // in `metadata.ownership.refs`, so the declared refs are merged with
-        // any standalone `tz://` strings found in the value (deduplicated,
-        // order-preserving).
+        // Job tails and content-scan bodies (find/grep/search/read/shell) are
+        // arbitrary text: a line beginning with `tz://blob/` is content, not a
+        // minted TokenZero object. Harvesting those strings and then requiring
+        // them from the recovery store is what made `token.find` throw
+        // "token blob tz://blob/… is not resolvable" (zerostack-6jpf).
+        // Declared `DomainResult.refs` are still published; unresolvable
+        // content-scan refs are dropped instead of failing the call.
         let mut refs = Vec::new();
-        if request.op != TOKEN_JOB_OPERATION_V1 {
+        let content_scan = is_content_scan_op(&request.op);
+        if !content_scan {
             collect_refs(&value, &mut refs);
+        }
+        if request.op != TOKEN_JOB_OPERATION_V1 {
             for reference in &domain_refs {
                 if !refs.iter().any(|existing| existing == reference) {
                     refs.push(reference.clone());
                 }
             }
         }
-        self.publish_refs(&refs)?;
+        self.publish_refs(&mut refs, content_scan)?;
         let result = WorkerResult {
             value,
             metadata: WorkerResultMetadata {
@@ -335,28 +337,44 @@ impl TokenZeroAdapter {
     /// verification and GC retention can resolve it. Foreign-scheme blob refs
     /// route to their owning engine and are skipped; non-portable refs do not
     /// contain `://blob/` and are skipped by the core anyway.
-    fn publish_refs(&self, refs: &[String]) -> Result<(), AdapterError> {
+    fn publish_refs(
+        &self,
+        refs: &mut Vec<String>,
+        drop_unresolvable: bool,
+    ) -> Result<(), AdapterError> {
         let cas = SharedCas::open(&self.root);
-        for reference in refs {
+        let mut kept = Vec::with_capacity(refs.len());
+        for reference in refs.drain(..) {
             if !reference.contains("://blob/") {
+                kept.push(reference);
                 continue;
             }
-            let parsed = ZeroRefV1::parse(reference).map_err(|error| {
-                AdapterError::new(
-                    "validation",
-                    format!("token adapter ref {reference:?} is not portable v1: {error}"),
-                    false,
-                    None,
-                )
-            })?;
+            let parsed = match ZeroRefV1::parse(&reference) {
+                Ok(parsed) => parsed,
+                Err(_error) if drop_unresolvable => continue,
+                Err(error) => {
+                    return Err(AdapterError::new(
+                        "validation",
+                        format!("token adapter ref {reference:?} is not portable v1: {error}"),
+                        false,
+                        None,
+                    ));
+                }
+            };
             if parsed.scheme != ZeroScheme::Tz {
+                kept.push(reference);
                 continue;
             }
             // Presence is not identity: a tampered dest still `contains()`.
             if cas.get_verified(&parsed.hash).is_ok() {
+                kept.push(reference);
                 continue;
             }
-            let payload = self.resolve_payload(&parsed.hash)?;
+            let payload = match self.resolve_payload(&parsed.hash) {
+                Ok(payload) => payload,
+                Err(_) if drop_unresolvable => continue,
+                Err(error) => return Err(error),
+            };
             let published = cas.put(&payload).map_err(|error| {
                 AdapterError::new(
                     "internal",
@@ -379,7 +397,9 @@ impl TokenZeroAdapter {
                     None,
                 ));
             }
+            kept.push(reference);
         }
+        *refs = kept;
         Ok(())
     }
 
@@ -393,10 +413,13 @@ impl TokenZeroAdapter {
         // which is derived from the configured recovery-cache path. The legacy
         // RecoveryStore lookup below is still needed for non-CAS compatibility
         // records, but cannot resolve a full-hash blob by itself.
-        if let Some(cas) = tokenzero_recovery::shared_cas::SharedCas::detect_from_cache_path(
+        // attach_for_cache_path matches the engine writer. detect_from_cache_path
+        // returns None until a blobs/ dir or unified tokenzero/ layout exists,
+        // which is exactly the first-find window.
+        let cas = tokenzero_recovery::shared_cas::SharedCas::attach_for_cache_path(
             &self.engine.config.cache_path,
-        ) && let Ok(payload) = cas.resolve(hash)
-        {
+        );
+        if let Ok(payload) = cas.resolve(hash) {
             return Ok(payload);
         }
         let store = self.recovery.get_or_init(|| {
@@ -531,6 +554,29 @@ fn effect_class(op: &str) -> EffectClass {
         | "ingest" | "tz_ingest" | "zero.ingest" => EffectClass::Irreversible,
         _ => EffectClass::ReadOnly,
     }
+}
+
+/// Operations whose result body is scanned content, not a TokenZero-owned
+/// structure. `tz://` strings inside that body are not minted refs.
+fn is_content_scan_op(op: &str) -> bool {
+    matches!(
+        op,
+        TOKEN_JOB_OPERATION_V1
+            | "find"
+            | "tz_find"
+            | "zero.find"
+            | "grep"
+            | "tz_grep"
+            | "zero.grep"
+            | "search"
+            | "tz_search"
+            | "read"
+            | "tz_read"
+            | "zero.read"
+            | "shell"
+            | "tz_shell"
+            | "zero.shell"
+    )
 }
 
 /// Recursively collect every `tz://` string in `value`, byte-identical to the
@@ -758,6 +804,35 @@ mod post_dispatch_cancel_tests {
             bound.is_ok(),
             "committed Ok must bind after post-dispatch cancel: {bound:?}"
         );
+    }
+
+    #[test]
+    fn find_does_not_fail_on_unresolvable_tz_blob_in_content() {
+        let root = std::env::temp_dir().join(format!("zerostack-6jpf-{}", std::process::id()));
+        std::fs::create_dir_all(&root).expect("temp root");
+        let phantom = "tz://blob/8bb4f40ade21d5e1f6c3dd5d955f2b46c06059863bdc0b497820481d86d03f60";
+        let fixture = root.join("hits.txt");
+        std::fs::write(&fixture, format!("cancel timeout {phantom}\n")).expect("fixture");
+        let adapter = TokenZeroAdapter::new(&root, "6jpf").expect("adapter");
+        let req = request(
+            "find",
+            serde_json::json!({
+                "query": "cancel",
+                "path": fixture.to_string_lossy(),
+            }),
+        );
+        let outcome = adapter
+            .call(AdapterCall {
+                request: &req,
+                cancellation: &CancellationSignal::new(),
+            })
+            .expect("find must return hits, not an unresolvable tz://blob error");
+        let rendered = serde_json::to_string(&outcome.result.value).unwrap_or_default();
+        assert!(
+            !rendered.contains("not resolvable from the engine recovery store"),
+            "{rendered}"
+        );
+        let _ = std::fs::remove_dir_all(&root);
     }
 }
 
