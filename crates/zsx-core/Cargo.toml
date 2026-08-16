@@ -8,10 +8,6 @@ description = "Single-process canonical ZSX composition: in-process DomainAdapte
 
 [features]
 default = []
-fixture-adapters = []
-# Occupancy / cancellation tests may stall FsZeroAdapter::run_call.
-# Production builds must not honor `__delay_ms` (zerostack-54p0).
-stall-inject = []
 # Real FSZero engine adapter over the engine's public domain API. The fs-zero
 # dependency builds with default-features = false so no MCP, CodeMode, watch,
 # or AST-sgrep surface is linked; sqlite-bundled keeps the durable store

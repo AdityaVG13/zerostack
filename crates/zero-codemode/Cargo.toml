@@ -6,15 +6,6 @@ edition.workspace = true
 license.workspace = true
 description = "Pure-safe generic CodeMode host foundation"
 
-[features]
-default = []
-worker-fixture = []
-
-[[bin]]
-name = "zero-codemode-worker-fixture"
-path = "src/bin/worker_fixture.rs"
-required-features = ["worker-fixture"]
-
 [dependencies]
 serde.workspace = true
 serde_json.workspace = true

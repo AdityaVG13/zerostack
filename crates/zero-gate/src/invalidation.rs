@@ -664,28 +664,6 @@ impl BoundCausalCacheInvalidationV1 {
             && binding_digest == self.binding_digest
             && expected_bound == self.bound_digest)
     }
-
-    #[cfg(test)]
-    pub(crate) fn test_only(binding: &CausalCacheBindingV1) -> Self {
-        let binding_digest = binding.digest().expect("test binding is valid");
-        let support_class = SupportCompletenessClassV1::Exact;
-        let invalidation_authority_digest = binding.invalidation_certificate_digest;
-        let bound_digest = domain_digest(
-            CACHE_BINDING_DOMAIN_V1,
-            canonical_json(&json!({
-                "binding_digest": binding_digest,
-                "invalidation_authority_digest": invalidation_authority_digest,
-                "support_class": support_class,
-            }))
-            .as_bytes(),
-        );
-        Self {
-            binding_digest,
-            invalidation_authority_digest,
-            support_class,
-            bound_digest,
-        }
-    }
 }
 
 #[derive(Debug)]

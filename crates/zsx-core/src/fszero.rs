@@ -501,30 +501,6 @@ fn run_call(
             request,
         ));
     }
-    // Occupancy tests inject a stall via feature `stall-inject` or crate
-    // unit tests. Production builds ignore `__delay_ms` (zerostack-54p0).
-    #[cfg(any(test, feature = "stall-inject"))]
-    if let Some(delay_ms) = request.args.get("__delay_ms").and_then(Value::as_u64) {
-        let budget = Duration::from_millis(delay_ms);
-        let started = Instant::now();
-        while started.elapsed() < budget {
-            if cancellation.is_cancelled() {
-                return Err(adapter_error(
-                    "cancelled",
-                    "fszero adapter cancelled during delay",
-                    request,
-                ));
-            }
-            if deadline_expired(request) {
-                return Err(adapter_error(
-                    "deadline_exceeded",
-                    "fszero adapter deadline exceeded during delay",
-                    request,
-                ));
-            }
-            thread::sleep(CALL_REPLY_POLL_INTERVAL);
-        }
-    }
     if is_forbidden_operation(&request.op) {
         return Err(adapter_error(
             "forbidden",
@@ -841,11 +817,6 @@ impl FsZeroAdapter {
     /// in-memory engine.
     pub fn degraded(&self) -> bool {
         self.degraded
-    }
-
-    #[cfg(test)]
-    fn session_is_live(&self) -> bool {
-        self.session_thread.is_some() && !self.degraded
     }
 
     /// The session root this adapter serves.

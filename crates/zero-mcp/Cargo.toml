@@ -14,7 +14,3 @@ serde.workspace = true
 serde_json.workspace = true
 zero-abi = { path = "../zero-abi" }
 fastmcp-rust = { git = "https://github.com/Dicklesworthstone/fastmcp_rust", rev = "1c66097b15dea9550e833ee9e433beeb66eefece", optional = true }
-
-[dev-dependencies]
-tempfile = "3"
-serde_json.workspace = true

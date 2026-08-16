@@ -486,23 +486,6 @@ impl MachinePermit {
         )
     }
 
-    #[cfg(test)]
-    fn acquire_slots_with_wake(
-        base: &Path,
-        slots: usize,
-        deadline: Instant,
-        command: &str,
-        make_wake: impl FnOnce(&Path) -> PermitWake,
-    ) -> Result<Self, AcquireError> {
-        Self::acquire_slots_with_wake_and_owner(
-            base,
-            slots,
-            deadline,
-            PermitOwnerMetadata::from_command(command),
-            make_wake,
-        )
-    }
-
     fn acquire_slots_with_wake_and_owner(
         base: &Path,
         slots: usize,
@@ -1412,15 +1395,6 @@ impl PermitWake {
             }
         }
         std::thread::sleep(timeout);
-    }
-
-    #[cfg(test)]
-    fn fallback() -> Self {
-        Self {
-            base: PathBuf::new(),
-            native: None,
-            reusable: false,
-        }
     }
 }
 

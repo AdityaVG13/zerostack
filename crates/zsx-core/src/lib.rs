@@ -39,9 +39,6 @@ mod result_v6;
 mod session;
 mod verdict;
 
-#[cfg(feature = "fixture-adapters")]
-pub mod fixture;
-
 /// Real FSZero engine adapter (feature `fszero`), over the immutable FSZero
 /// revision API's canonical typed dispatcher (`FSZeroSession` +
 /// `dispatch_codemode_method`). No worker process, NDJSON framing, session

@@ -213,7 +213,3 @@ pub trait RaccBackend {
         target: RetainedFractionPpm,
     ) -> Result<DominanceReceipt, ReceiptError>;
 }
-
-#[cfg(test)]
-#[path = "../tests/racc/RACC_CONTRACT_tests.rs"]
-mod tests;

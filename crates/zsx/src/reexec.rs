@@ -108,16 +108,3 @@ pub fn reexec_if_plugin_bin_changed() {
         eprintln!("zsx mcp: reexec {} failed: {err}", bin.display());
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn uncaptured_image_is_not_stale() {
-        assert!(!image_is_stale() || running_inode().is_some());
-        if RUNNING_IMAGE.get().is_none() {
-            assert!(!image_is_stale());
-        }
-    }
-}

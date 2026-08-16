@@ -7,15 +7,6 @@ license.workspace = true
 description = "Hub-owned process identity, owner-death, and verified child-tree lifecycle"
 autobins = false
 
-[features]
-default = []
-test-fixture = []
-
-[[bin]]
-name = "process_fixture"
-path = "src/bin/process_fixture.rs"
-required-features = ["test-fixture"]
-
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
 

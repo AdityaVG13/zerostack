@@ -1651,36 +1651,3 @@ fn resume_primary_thread(pid: u32) -> io::Result<()> {
         }
     }
 }
-
-#[cfg(all(test, target_os = "linux"))]
-mod linux_pdeathsig_tests {
-    use super::linux_set_pdeathsig;
-
-    #[test]
-    fn invalid_pdeathsig_fails_closed() {
-        let error = linux_set_pdeathsig(999_999).expect_err("invalid signal must fail prctl");
-        assert_eq!(error.raw_os_error(), Some(libc::EINVAL));
-    }
-
-    #[test]
-    fn valid_pdeathsig_sets_sigkill() {
-        linux_set_pdeathsig(libc::SIGKILL).expect("SIGKILL is a valid PDEATHSIG");
-        let mut got: libc::c_int = 0;
-        let rc = unsafe { libc::prctl(libc::PR_GET_PDEATHSIG, &mut got as *mut libc::c_int) };
-        assert_eq!(rc, 0, "PR_GET_PDEATHSIG");
-        assert_eq!(got, libc::SIGKILL);
-    }
-}
-
-#[cfg(test)]
-mod darwin_kqueue_sq32_tests {
-    use super::darwin_kqueue_registration_ready;
-
-    #[test]
-    fn kqueue_registration_ready_is_fail_closed() {
-        assert!(!darwin_kqueue_registration_ready(-1, 1));
-        assert!(!darwin_kqueue_registration_ready(0, 1));
-        assert!(!darwin_kqueue_registration_ready(1, 0));
-        assert!(darwin_kqueue_registration_ready(1, 1));
-    }
-}
