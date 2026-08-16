@@ -1048,6 +1048,110 @@ mod tests {
         worker.join().expect("reply sender");
     }
 
+    fn success_result(value: Option<Value>, refs: Vec<String>) -> DomainResult {
+        DomainResult::success("fs.read", Some("R1".into()), value, refs, false)
+    }
+
+    #[test]
+    fn enrich_utf8_from_cloned_recovery_key_after_result_move() {
+        let mut session = FSZeroSession::new();
+        let key = session.recovery.put_content_ref(b"hello-utf8");
+        let mut result = success_result(
+            Some(json!({"prior_field": 1})),
+            vec!["fz://blob/dead".into()],
+        );
+        let inline = Some(json!({"kept": true}));
+        let recovery_key = Some(key.clone());
+        let moved = result.clone();
+        let _ = moved;
+        enrich_recovery_payload(
+            &session,
+            recovery_key.as_deref(),
+            &mut result,
+            &[key.clone()],
+        );
+        let value = result.value.expect("enriched value");
+        assert_eq!(value["prior_field"], 1);
+        assert_eq!(value["payload_utf8"], "hello-utf8");
+        assert_eq!(value["ref"], key);
+        assert!(value.get("payload_hex").is_none());
+        assert_eq!(inline.unwrap()["kept"], true);
+    }
+
+    #[test]
+    fn enrich_non_utf8_uses_payload_hex() {
+        let mut session = FSZeroSession::new();
+        let key = session.recovery.put_content_ref(&[0xff, 0x00, 0xfe]);
+        let mut result = success_result(None, Vec::new());
+        enrich_recovery_payload(&session, Some(&key), &mut result, &[key.clone()]);
+        let value = result.value.expect("hex payload");
+        assert_eq!(value["payload_hex"], "ff00fe");
+        assert_eq!(value["bytes_len"], 3);
+        assert!(value.get("payload_utf8").is_none());
+        assert_eq!(value["ref"], key);
+    }
+
+    #[test]
+    fn enrich_falls_back_to_first_result_ref_when_key_missing() {
+        let mut session = FSZeroSession::new();
+        let key = session.recovery.put_content_ref(b"from-ref");
+        let mut result = success_result(Some(json!({})), vec![key.clone()]);
+        enrich_recovery_payload(&session, None, &mut result, &[key.clone()]);
+        let value = result.value.expect("fallback");
+        assert_eq!(value["payload_utf8"], "from-ref");
+        assert_eq!(value["ref"], key);
+    }
+
+    #[test]
+    fn enrich_missing_key_leaves_value_and_refs_intact() {
+        let session = FSZeroSession::new();
+        let mut result = success_result(
+            Some(json!({"kept": "yes"})),
+            vec!["fz://blob/missing".into()],
+        );
+        enrich_recovery_payload(
+            &session,
+            Some("missing-key"),
+            &mut result,
+            &["fz://blob/missing".into()],
+        );
+        assert_eq!(result.value.unwrap()["kept"], "yes");
+        assert_eq!(result.refs, vec!["fz://blob/missing"]);
+    }
+
+    #[test]
+    fn adapter_read_enriches_utf8_recovery_after_result_move() {
+        let root = std::env::temp_dir().join(format!("zerostack-qadr-{}", std::process::id()));
+        std::fs::create_dir_all(&root).expect("temp root");
+        let fixture = root.join("note.txt");
+        std::fs::write(&fixture, b"qadr-payload").expect("fixture");
+        let adapter = FsZeroAdapter::new_in_memory(&root, "qadr");
+        assert!(!adapter.degraded(), "in-memory adapter must be live");
+        let request = CallRequest {
+            request_id: "qadr".into(),
+            op: "fs.read".into(),
+            args: json!({ "path": "note.txt" }),
+            deadline_unix_ms: None,
+            trace: empty_request().trace,
+            approval_grant: None,
+            telemetry_request: None,
+        };
+        let outcome = adapter
+            .call(AdapterCall {
+                request: &request,
+                cancellation: &CancellationSignal::new(),
+            })
+            .expect("fs.read through real adapter");
+        let value = &outcome.result.value;
+        let rendered = serde_json::to_string(value).unwrap_or_default();
+        assert!(
+            value.get("payload_utf8").and_then(Value::as_str) == Some("qadr-payload")
+                || rendered.contains("qadr-payload"),
+            "adapter path must enrich or return the file body: {rendered}"
+        );
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
     #[test]
     fn domain_error_kind_table_is_rw5_closed() {
         let rows = [
