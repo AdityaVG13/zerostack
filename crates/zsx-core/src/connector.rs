@@ -36,19 +36,23 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
-use zero_abi::raw_worker::{ApprovalGrant as WorkerApprovalGrant, EngineIdentity};
 use zero_abi::WorkerTokenAccountingV1;
+use zero_abi::raw_worker::{ApprovalGrant as WorkerApprovalGrant, EngineIdentity};
 use zero_abi::{
     ApprovalState, CallRequest, CapabilityDescriptor, DigestV1, EffectClass, GlobalRegistration,
     TelemetryRequestV1, WorkerRequestFrame, WorkerResponseFrame, WorkerTrace, canonical_json,
     encode_frame, sha256, validate_response_frame,
 };
-use zero_ledger::{LedgerConfig, ResourceGauge, TokenCharge, TokenizerIdentity};
-use zero_gate::residency::LayerValidityLedgerV1;
 use zero_codemode::CancellationSignal;
 use zero_codemode::{
     Connector, ConnectorCompletion, ConnectorError, DispatchContext, HostError,
     MAX_INFLIGHT_CONNECTOR_CALLS,
+};
+use zero_gate::residency::LayerValidityLedgerV1;
+use zero_ledger::{LedgerConfig, ResourceGauge, TokenCharge, TokenizerIdentity};
+use zero_machine_permit::{
+    MachinePermit, MachinePermitHeartbeat, PERMIT_HEARTBEAT_INTERVAL, PermitOwnerMetadata,
+    try_scoped_permit_base_for,
 };
 use zero_ref::{ZeroRefV1, ZeroScheme};
 use zero_store::{
@@ -56,10 +60,6 @@ use zero_store::{
     DurableProfileIdV1, SharedCas, atomic_write_file, current_reachability_snapshot, gc_project_id,
     mark_dispatch_crossed_v1, mark_indeterminate_v1, mark_succeeded_v1, prepare_attempt_v1,
     publish_reachability_snapshot, read_current_attempt_v1, recover_attempt_v1,
-};
-use zero_machine_permit::{
-    MachinePermit, MachinePermitHeartbeat, PERMIT_HEARTBEAT_INTERVAL, PermitOwnerMetadata,
-    try_scoped_permit_base_for,
 };
 
 use crate::adapter::{AdapterCall, DomainAdapter};
@@ -202,8 +202,10 @@ fn dispatch_permit_class(engine: EngineIdentity, operation: &str) -> Option<Disp
     }
     if matches!(
         (engine, operation),
-        (EngineIdentity::FsZero, "fs.edit" | "fs.write" | "fs.transact")
-            | (EngineIdentity::TokenZero, "ingest" | "shell")
+        (
+            EngineIdentity::FsZero,
+            "fs.edit" | "fs.write" | "fs.transact"
+        ) | (EngineIdentity::TokenZero, "ingest" | "shell")
     ) {
         return Some(DispatchPermitClass::Heavy);
     }
@@ -342,11 +344,63 @@ fn journal_dir_for(
         .join(sequence.to_string())
 }
 
+/// True when `path` exists as a symlink. `Path::is_dir` and `read_dir` follow
+/// a planted directory symlink; `DirEntry::file_type` only helps once we are
+/// already walking children of a followed parent (4js1 leftover / orwr).
+fn path_is_symlink(path: &Path) -> bool {
+    std::fs::symlink_metadata(path)
+        .map(|meta| meta.file_type().is_symlink())
+        .unwrap_or(false)
+}
+
+/// Refuse planted directory symlinks at `attempts/`, `gN/`, `gN/rN/`, or the
+/// journal slot itself. Walk from `attempts_root` so an intermediate
+/// component is not followed before it is inspected.
+fn refuse_planted_journal_symlinks(
+    attempts_root: &Path,
+    journal_dir: &Path,
+) -> Result<(), ConnectorError> {
+    if path_is_symlink(attempts_root) {
+        return Err(ConnectorError::new(format!(
+            "refusing planted journal ancestor symlink {}",
+            attempts_root.display()
+        )));
+    }
+    let relative = journal_dir.strip_prefix(attempts_root).map_err(|_| {
+        ConnectorError::new(format!(
+            "journal dir {} is outside attempts root {}",
+            journal_dir.display(),
+            attempts_root.display()
+        ))
+    })?;
+    let mut cursor = attempts_root.to_path_buf();
+    for component in relative.components() {
+        cursor.push(component);
+        if path_is_symlink(&cursor) {
+            let kind = if cursor == journal_dir {
+                "journal-dir"
+            } else {
+                "journal ancestor"
+            };
+            return Err(ConnectorError::new(format!(
+                "refusing planted {kind} symlink {}",
+                cursor.display()
+            )));
+        }
+    }
+    Ok(())
+}
+
 /// Persist the Prepared entry (and the identity manifest) durably before the
 /// dispatch is admitted. After this returns, the journal can only be
 /// recovered or aborted; it can never dispatch until crossed.
 fn prepare_error_is_already_terminal(error: &ConnectorError) -> bool {
     error.to_string().contains("already_terminal")
+}
+
+fn prepare_error_is_skippable_slot(error: &ConnectorError) -> bool {
+    let text = error.to_string();
+    text.contains("already_terminal") || text.contains("planted journal-dir symlink")
 }
 
 /// Prepare a mutation journal, skipping leftover terminal dirs from an
@@ -364,10 +418,16 @@ fn prepare_mutation_journal_unique(
     let mut last_error = None;
     for _ in 0..8 {
         let journal_dir = journal_dir_for(&state.attempts_root, execution, chosen);
-        match prepare_mutation_journal(state, execution, &journal_dir, request, engine, effect_class)
-        {
+        match prepare_mutation_journal(
+            state,
+            execution,
+            &journal_dir,
+            request,
+            engine,
+            effect_class,
+        ) {
             Ok(journal) => return Ok(journal),
-            Err(error) if prepare_error_is_already_terminal(&error) => {
+            Err(error) if prepare_error_is_skippable_slot(&error) => {
                 last_error = Some(error);
                 chosen = sequence_counter.fetch_add(1, Ordering::Relaxed);
             }
@@ -387,11 +447,14 @@ fn prepare_mutation_journal(
     engine: EngineIdentity,
     effect_class: EffectClass,
 ) -> Result<MutationJournal, ConnectorError> {
+    refuse_planted_journal_symlinks(&state.attempts_root, journal_dir)?;
     std::fs::create_dir_all(journal_dir).map_err(|error| {
         ConnectorError::new(format!(
             "cannot create mutation attempt journal directory: {error}"
         ))
     })?;
+    // create_dir_all follows a TOCTOU swap to a planted symlink-to-dir.
+    refuse_planted_journal_symlinks(&state.attempts_root, journal_dir)?;
     let manifest = AttemptManifestV1 {
         schema: ATTEMPT_MANIFEST_SCHEMA.into(),
         session_id: state.session_id.clone(),
@@ -576,9 +639,18 @@ pub(crate) fn reconcile_request_attempts(
     generation: u64,
     request_id: u64,
 ) -> Result<Vec<ZsxAttemptJournalStatus>, String> {
-    let request_dir = attempts_root
-        .join(format!("g{generation}"))
-        .join(format!("r{request_id}"));
+    let generation_dir = attempts_root.join(format!("g{generation}"));
+    let request_dir = generation_dir.join(format!("r{request_id}"));
+    // 4js1 leftover (orwr): read_dir follows a planted attempts/gN/rN
+    // directory symlink and then recover_attempt_v1 writes SafeToRetry into
+    // the victim's real journals. Inspect each component so an intermediate
+    // gN symlink is not followed before it is seen.
+    if path_is_symlink(attempts_root)
+        || path_is_symlink(&generation_dir)
+        || path_is_symlink(&request_dir)
+    {
+        return Ok(Vec::new());
+    }
     let entries = match std::fs::read_dir(&request_dir) {
         Ok(entries) => entries,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
@@ -641,6 +713,9 @@ pub(crate) fn reconcile_all_attempts(
     attempts_root: &Path,
     live_generation: u64,
 ) -> Result<Vec<ZsxAttemptJournalStatus>, String> {
+    if path_is_symlink(attempts_root) {
+        return Ok(Vec::new());
+    }
     let generations = match std::fs::read_dir(attempts_root) {
         Ok(entries) => entries,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
@@ -900,7 +975,9 @@ impl ZsxConnector {
 
     /// Snapshot of the session resource ledger minted on real dispatches.
     /// `None` when no measured dispatch has been charged yet.
-    pub(crate) fn resource_ledger(&self) -> Result<Option<zero_ledger::TokenLedger>, ConnectorError> {
+    pub(crate) fn resource_ledger(
+        &self,
+    ) -> Result<Option<zero_ledger::TokenLedger>, ConnectorError> {
         let gauge = self
             .state
             .resource_gauge
@@ -992,10 +1069,7 @@ impl ZsxConnector {
     /// Install the per-execution residency gate for one demand window.
     /// Fails when a previous gate was not finalized (balanced with
     /// [`Self::finish_residency_report`]).
-    pub(crate) fn install_residency_gate(
-        &self,
-        window_id: String,
-    ) -> Result<(), HostError> {
+    pub(crate) fn install_residency_gate(&self, window_id: String) -> Result<(), HostError> {
         let mut active = self
             .state
             .residency_gate
@@ -1048,9 +1122,7 @@ impl ZsxConnector {
     /// The last finalized Q99 report, or its rejection detail. Fails when no
     /// execution has finalized a report yet (impossible after the session
     /// prewarm, which installs and finalizes one window).
-    pub(crate) fn residency_report(
-        &self,
-    ) -> Result<SessionQ99ReportV1, ConnectorError> {
+    pub(crate) fn residency_report(&self) -> Result<SessionQ99ReportV1, ConnectorError> {
         let report = self
             .state
             .residency_report
@@ -1213,8 +1285,8 @@ impl Drop for ZsxConnector {
         self.dispatch_sender.take();
         let started = std::time::Instant::now();
         for dispatcher in self.dispatchers.drain(..) {
-            let remaining = crate::session::SESSION_SHUTDOWN_SETTLE_TIMEOUT
-                .saturating_sub(started.elapsed());
+            let remaining =
+                crate::session::SESSION_SHUTDOWN_SETTLE_TIMEOUT.saturating_sub(started.elapsed());
             let _ = crate::session::join_thread_within(dispatcher, remaining);
         }
     }
@@ -1819,7 +1891,7 @@ pub(crate) fn host_limits() -> Result<zero_codemode::HostLimits, HostError> {
 
 #[cfg(test)]
 mod rmja_already_terminal_tests {
-    use super::{prepare_error_is_already_terminal, ConnectorError};
+    use super::{ConnectorError, prepare_error_is_already_terminal};
 
     #[test]
     fn already_terminal_prepare_is_recognized() {
@@ -1837,7 +1909,8 @@ mod rmja_already_terminal_tests {
 mod reconcile_journal_symlink_tests {
     use super::{
         AttemptBindingV1, AttemptJournalPathsV1, AttemptStateV1, DurableProfileIdV1,
-        prepare_attempt_v1, read_current_attempt_v1, reconcile_request_attempts,
+        prepare_attempt_v1, read_current_attempt_v1, reconcile_all_attempts,
+        reconcile_request_attempts, refuse_planted_journal_symlinks,
     };
     use std::path::Path;
     use zero_abi::{DigestV1, EffectClass, sha256};
@@ -1913,5 +1986,127 @@ mod reconcile_journal_symlink_tests {
         );
         let _ = std::fs::remove_dir_all(&root);
     }
-}
 
+    #[cfg(unix)]
+    #[test]
+    fn planted_request_dir_symlink_is_not_followed() {
+        let root =
+            std::env::temp_dir().join(format!("zerostack-orwr-request-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let generation = root.join("g1");
+        std::fs::create_dir_all(&generation).expect("generation dir");
+        let victim = root.join("victim");
+        prepared_journal(&victim.join("d1"));
+        let before = journal_entry_names(&victim.join("d1"));
+        std::os::unix::fs::symlink(&victim, generation.join("r1")).expect("request-dir symlink");
+
+        let statuses = reconcile_request_attempts(&root, 1, 1)
+            .expect("planted request-dir symlink must be ignored");
+        assert!(
+            statuses.is_empty(),
+            "planted g1/r1 symlink must not become a resume status: {statuses:?}"
+        );
+        assert_eq!(
+            journal_entry_names(&victim.join("d1")),
+            before,
+            "recovery must not write SafeToRetry through a request-dir symlink"
+        );
+        let paths = AttemptJournalPathsV1::new(&victim.join("d1")).expect("victim paths");
+        let current = read_current_attempt_v1(&paths)
+            .expect("read victim")
+            .expect("victim still has a journal");
+        assert_eq!(
+            current.state,
+            AttemptStateV1::Prepared,
+            "victim must stay Prepared; write-through would classify SafeToRetry"
+        );
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn planted_generation_dir_symlink_is_not_followed() {
+        let root =
+            std::env::temp_dir().join(format!("zerostack-orwr-generation-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).expect("attempts root");
+        let victim = root.join("victim");
+        prepared_journal(&victim.join("r1").join("d1"));
+        let before = journal_entry_names(&victim.join("r1").join("d1"));
+        std::os::unix::fs::symlink(&victim, root.join("g1")).expect("generation-dir symlink");
+
+        let statuses = reconcile_request_attempts(&root, 1, 1)
+            .expect("planted generation-dir symlink must be ignored");
+        assert!(
+            statuses.is_empty(),
+            "planted g1 symlink must not become a resume status: {statuses:?}"
+        );
+        assert_eq!(
+            journal_entry_names(&victim.join("r1").join("d1")),
+            before,
+            "recovery must not write SafeToRetry through a generation-dir symlink"
+        );
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn planted_attempts_root_symlink_is_not_followed() {
+        let root =
+            std::env::temp_dir().join(format!("zerostack-orwr-attempts-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let victim = root.join("victim");
+        prepared_journal(&victim.join("g1").join("r1").join("d1"));
+        let planted = root.join("planted");
+        std::os::unix::fs::symlink(&victim, &planted).expect("attempts-root symlink");
+
+        let statuses = reconcile_all_attempts(&planted, 1)
+            .expect("planted attempts-root symlink must be ignored");
+        assert!(
+            statuses.is_empty(),
+            "planted attempts root must not become a resume status: {statuses:?}"
+        );
+        let paths = AttemptJournalPathsV1::new(&victim.join("g1").join("r1").join("d1"))
+            .expect("victim paths");
+        let current = read_current_attempt_v1(&paths)
+            .expect("read victim")
+            .expect("victim still has a journal");
+        assert_eq!(current.state, AttemptStateV1::Prepared);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn prepare_refuses_planted_journal_dir_and_ancestor_symlinks() {
+        let root =
+            std::env::temp_dir().join(format!("zerostack-orwr-prepare-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let attempts = root.join("attempts");
+        let request = attempts.join("g1").join("r1");
+        std::fs::create_dir_all(&request).expect("request dir");
+        let victim = root.join("victim");
+        std::fs::create_dir_all(&victim).expect("victim");
+        std::os::unix::fs::symlink(&victim, request.join("9")).expect("journal-dir symlink");
+
+        let err = refuse_planted_journal_symlinks(&attempts, &request.join("9"))
+            .expect_err("journal-dir symlink");
+        assert!(
+            err.to_string().contains("planted journal-dir symlink"),
+            "{err}"
+        );
+
+        std::os::unix::fs::symlink(&victim, attempts.join("g2")).expect("generation symlink");
+        let err =
+            refuse_planted_journal_symlinks(&attempts, &attempts.join("g2").join("r1").join("1"))
+                .expect_err("ancestor symlink");
+        assert!(
+            err.to_string().contains("planted journal ancestor symlink"),
+            "{err}"
+        );
+
+        let real = request.join("10");
+        refuse_planted_journal_symlinks(&attempts, &real)
+            .expect("missing real slot is not a planted symlink");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+}
