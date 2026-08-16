@@ -469,6 +469,13 @@ impl ZsxExecutor {
                 slot.active = None;
             }
         };
+        if let Err(error) = self
+            .connector
+            .wait_for_dispatch_idle(Duration::from_secs(15))
+        {
+            clear_active();
+            return Err(error);
+        }
         if let Err(error) = self.connector.install_approvals(approval_grants) {
             clear_active();
             return Err(error);
@@ -2158,13 +2165,20 @@ impl ZsxSession {
 impl Drop for ZsxSession {
     fn drop(&mut self) {
         self.cancellation().cancel();
-        if let Ok(state) = self.state.lock()
-            && (state.shutdown_sent || state.worker_stopped)
-        {
-            return;
+        let stopped = self
+            .state
+            .lock()
+            .ok()
+            .is_some_and(|state| state.worker_stopped);
+        if !stopped {
+            let (reply, _) = mpsc::sync_channel(1);
+            let _ = self.commands.try_send(ZsxCommand::Shutdown { reply });
         }
-        let (reply, _) = mpsc::sync_channel(1);
-        let _ = self.commands.try_send(ZsxCommand::Shutdown { reply });
+        if let Ok(mut worker) = self.worker.lock()
+            && let Some(handle) = worker.take()
+        {
+            let _ = join_thread_within(handle, SESSION_SHUTDOWN_SETTLE_TIMEOUT);
+        }
     }
 }
 
@@ -2173,13 +2187,22 @@ pub(crate) fn join_thread_within(
     timeout: Duration,
 ) -> Result<(), String> {
     if timeout.is_zero() {
-        return Err("session executor join had no remaining shutdown budget".into());
+        thread::Builder::new()
+            .name("zsx-shutdown-join".into())
+            .spawn(move || {
+                let _ = handle.join();
+            })
+            .map_err(|error| format!("cannot park shutdown join: {error}"))?;
+        return Err("session executor join had no remaining shutdown budget; parked".into());
     }
     let (done_tx, done_rx) = mpsc::sync_channel(1);
-    thread::spawn(move || {
-        let panicked = handle.join().is_err();
-        let _ = done_tx.send(panicked);
-    });
+    thread::Builder::new()
+        .name("zsx-shutdown-join".into())
+        .spawn(move || {
+            let panicked = handle.join().is_err();
+            let _ = done_tx.send(panicked);
+        })
+        .map_err(|error| format!("cannot park shutdown join: {error}"))?;
     match done_rx.recv_timeout(timeout) {
         Ok(true) => Err("session executor panicked during shutdown".into()),
         Ok(false) => Ok(()),

@@ -110,7 +110,10 @@ impl McpHost {
                 .map(|(path, _)| path.clone());
             if let Some(path) = oldest {
                 if let Some(live) = self.sessions.remove(&path) {
-                    let _ = live.session.shutdown();
+                    if live.session.shutdown().is_err() {
+                        self.sessions.insert(path, live);
+                        break;
+                    }
                 }
             } else {
                 break;
