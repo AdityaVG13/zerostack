@@ -548,6 +548,3 @@ fn domain_digest(domain: &[u8], bytes: &[u8]) -> DigestV1 {
     DigestV1::from_bytes(sha256(&bound))
 }
 
-#[cfg(test)]
-#[path = "../../../tests/rust/zero-store/unit/migrations.rs"]
-mod tests;

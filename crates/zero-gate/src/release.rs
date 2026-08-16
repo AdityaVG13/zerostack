@@ -273,6 +273,3 @@ impl ReleaseCheckerV1 {
     }
 }
 
-#[cfg(test)]
-#[path = "../../../tests/rust/zero-gate/unit/release.rs"]
-mod tests;

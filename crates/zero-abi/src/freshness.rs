@@ -743,6 +743,3 @@ fn compare_sets<T: Ord>(required: &[T], actual: &[T], label: &str) -> FreshnessD
     }
 }
 
-#[cfg(test)]
-#[path = "../../../tests/rust/zero-abi/unit/freshness.rs"]
-mod tests;

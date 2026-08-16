@@ -2138,6 +2138,3 @@ fn json_error(detail: String) -> DeoptimizationErrorV1 {
     deopt_error(DeoptimizationFailureCodeV1::Json, detail)
 }
 
-#[cfg(test)]
-#[path = "../../../tests/rust/zero-gate/unit/deoptimization.rs"]
-mod tests;

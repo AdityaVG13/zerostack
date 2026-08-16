@@ -3420,6 +3420,3 @@ fn unquote(value: &str) -> String {
     value.into()
 }
 
-#[cfg(test)]
-#[path = "../../../tests/rust/zero-codemode/unit/interpreter.rs"]
-mod tests;

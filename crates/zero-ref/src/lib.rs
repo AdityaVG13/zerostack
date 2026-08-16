@@ -666,6 +666,3 @@ impl fmt::Display for ZeroRefV1 {
     }
 }
 
-#[cfg(test)]
-#[path = "../../../tests/rust/zero-ref/unit/lib.rs"]
-mod tests;

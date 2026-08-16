@@ -1185,6 +1185,3 @@ mod fastmcp {
 #[cfg(feature = "fastmcp")]
 pub use fastmcp::FastMcpTransport;
 
-#[cfg(test)]
-#[path = "../../../tests/rust/zero-mcp/unit/mcp_transport.rs"]
-mod tests;

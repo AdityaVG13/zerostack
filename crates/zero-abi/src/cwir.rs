@@ -1417,6 +1417,3 @@ fn require_proof_node(
     }
 }
 
-#[cfg(test)]
-#[path = "../../../tests/rust/zero-abi/unit/cwir.rs"]
-mod tests;

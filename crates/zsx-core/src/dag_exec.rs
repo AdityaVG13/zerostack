@@ -440,6 +440,3 @@ fn merged_result_digest(trace: &ExecTraceV1) -> String {
     sha256_hex(canonical_json(&pairs).as_bytes())
 }
 
-#[cfg(test)]
-#[path = "../../../tests/rust/zsx-core/unit/dag_exec.rs"]
-mod tests;

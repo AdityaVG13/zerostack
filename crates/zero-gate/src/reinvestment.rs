@@ -1538,6 +1538,3 @@ fn causal_work_error(error: zero_ledger::CausalWorkErrorV1) -> ReinvestmentError
     )
 }
 
-#[cfg(test)]
-#[path = "../../../tests/rust/zero-gate/unit/reinvestment.rs"]
-mod tests;

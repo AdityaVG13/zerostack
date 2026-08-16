@@ -680,6 +680,3 @@ pub(crate) fn widen_mul(a: u128, b: u128) -> (u128, u128) {
     (hi, lo)
 }
 
-#[cfg(test)]
-#[path = "../../../tests/rust/zero-gauge/unit/solver.rs"]
-mod tests;

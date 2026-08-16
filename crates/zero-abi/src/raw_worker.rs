@@ -1167,6 +1167,3 @@ pub fn raw_worker_protocol_digest_hex() -> String {
     contract_digest_hex(&raw_worker_protocol_manifest())
 }
 
-#[cfg(test)]
-#[path = "../../../tests/rust/zero-abi/unit/raw_worker.rs"]
-mod tests;

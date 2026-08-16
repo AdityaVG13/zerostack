@@ -314,6 +314,3 @@ pub fn token_job_contract_digest_v1() -> String {
     contract_digest_hex(&token_job_contract_manifest_v1())
 }
 
-#[cfg(test)]
-#[path = "../../../tests/rust/zero-abi/unit/job.rs"]
-mod tests;

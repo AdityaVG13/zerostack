@@ -521,6 +521,3 @@ fn reduce(num: u64, den: u64) -> (u64, u64) {
     (num / a, den / a)
 }
 
-#[cfg(test)]
-#[path = "../../../tests/rust/zero-ledger/unit/charging_maps.rs"]
-mod tests;

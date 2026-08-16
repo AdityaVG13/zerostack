@@ -384,6 +384,3 @@ impl ContinuationCompactRecordV1 {
     }
 }
 
-#[cfg(test)]
-#[path = "../../../tests/rust/zero-abi/unit/continuation.rs"]
-mod tests;

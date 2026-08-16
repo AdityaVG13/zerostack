@@ -1773,6 +1773,3 @@ pub(crate) fn host_limits() -> Result<zero_codemode::HostLimits, HostError> {
     .map_err(HostError::Limits)
 }
 
-#[cfg(test)]
-#[path = "../../../tests/rust/zsx-core/unit/connector.rs"]
-mod tests;

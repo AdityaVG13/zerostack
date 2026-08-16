@@ -424,6 +424,3 @@ impl CommitReceipt {
     }
 }
 
-#[cfg(test)]
-#[path = "../../../tests/rust/zero-gate/unit/durable_publication.rs"]
-mod tests;

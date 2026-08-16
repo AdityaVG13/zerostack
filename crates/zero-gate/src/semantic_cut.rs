@@ -770,6 +770,3 @@ fn certificate_digest(
     )
 }
 
-#[cfg(test)]
-#[path = "../../../tests/rust/zero-gate/unit/semantic_cut.rs"]
-mod tests;

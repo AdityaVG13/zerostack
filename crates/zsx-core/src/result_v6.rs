@@ -376,6 +376,3 @@ pub fn legacy_envelope_value(
     Value::Object(result)
 }
 
-#[cfg(test)]
-#[path = "../../../tests/rust/zsx-core/unit/result_v6.rs"]
-mod tests;

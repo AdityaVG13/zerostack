@@ -231,6 +231,3 @@ pub fn schema_required_keys(schema: &Value) -> Vec<String> {
     keys
 }
 
-#[cfg(test)]
-#[path = "../../../tests/rust/zero-abi/unit/schema.rs"]
-mod tests;

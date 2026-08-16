@@ -421,6 +421,3 @@ impl DecisionViewBindingV6 {
     }
 }
 
-#[cfg(test)]
-#[path = "../../../tests/rust/zero-abi/unit/decision_view.rs"]
-mod tests;

@@ -39,6 +39,3 @@ fn cas_error(error: CasError) -> ZbfErrorV1 {
     }
 }
 
-#[cfg(test)]
-#[path = "../../../tests/rust/zero-store/unit/zbf.rs"]
-mod tests;

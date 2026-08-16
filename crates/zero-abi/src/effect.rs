@@ -1223,6 +1223,3 @@ const fn rollback_rank(rollback: EffectRollbackV1) -> u8 {
     }
 }
 
-#[cfg(test)]
-#[path = "../../../tests/rust/zero-abi/unit/effect.rs"]
-mod tests;

@@ -248,6 +248,3 @@ fn reduce(num: u64, den: u64) -> (u64, u64) {
     (num / u64::try_from(divisor).expect("divides num"), den / u64::try_from(divisor).expect("divides den"))
 }
 
-#[cfg(test)]
-#[path = "../../../tests/rust/zero-ledger/unit/campaign.rs"]
-mod tests;

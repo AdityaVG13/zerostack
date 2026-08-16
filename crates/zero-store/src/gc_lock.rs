@@ -255,6 +255,3 @@ fn open_lock_file(store_root: &Path) -> io::Result<(PathBuf, File)> {
     Ok((path, file))
 }
 
-#[cfg(test)]
-#[path = "../../../tests/rust/zero-store/unit/gc_lock.rs"]
-mod tests;

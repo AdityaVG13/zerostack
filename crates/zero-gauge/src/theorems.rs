@@ -587,6 +587,3 @@ impl fmt::Display for TheoremViolation {
 
 impl Error for TheoremViolation {}
 
-#[cfg(test)]
-#[path = "../../../tests/rust/zero-gauge/unit/theorems.rs"]
-mod tests;

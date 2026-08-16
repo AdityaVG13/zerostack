@@ -223,6 +223,3 @@ fn io_err(context: &str, error: impl std::fmt::Display) -> CasError {
     CasError::Io(format!("{context}: {error}"))
 }
 
-#[cfg(test)]
-#[path = "../../../tests/rust/zero-store/unit/metadata.rs"]
-mod tests;

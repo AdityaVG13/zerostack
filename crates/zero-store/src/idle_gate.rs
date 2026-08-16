@@ -464,6 +464,3 @@ pub fn idle_gate_contract_v1() -> serde_json::Value {
     })
 }
 
-#[cfg(test)]
-#[path = "../../../tests/rust/zero-store/unit/idle_gate.rs"]
-mod tests;

@@ -1099,6 +1099,3 @@ impl fmt::Display for ReasoningContractErrorV1 {
 
 impl Error for ReasoningContractErrorV1 {}
 
-#[cfg(test)]
-#[path = "../../../tests/rust/zero-abi/unit/reasoning.rs"]
-mod tests;

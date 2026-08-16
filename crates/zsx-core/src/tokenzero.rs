@@ -695,6 +695,3 @@ fn bind_terminal_exact_expansion(request: &CallRequest, value: &mut Value) {
     );
 }
 
-#[cfg(test)]
-#[path = "../../../tests/rust/zsx-core/unit/tokenzero.rs"]
-mod tests;

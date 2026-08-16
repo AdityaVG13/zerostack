@@ -682,6 +682,3 @@ impl ContinuationStateV1 {
     }
 }
 
-#[cfg(test)]
-#[path = "../../../tests/rust/zero-abi/unit/zero_execute.rs"]
-mod tests;

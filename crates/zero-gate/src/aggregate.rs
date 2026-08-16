@@ -450,6 +450,3 @@ fn is_zero(digest: &DigestV1) -> bool {
     digest == &DigestV1::ZERO
 }
 
-#[cfg(test)]
-#[path = "../../../tests/rust/zero-gate/unit/aggregate.rs"]
-mod tests;

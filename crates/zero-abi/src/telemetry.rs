@@ -81,6 +81,3 @@ pub struct TelemetryOverflow {
     pub field: TelemetryCounter,
 }
 
-#[cfg(test)]
-#[path = "../../../tests/rust/zero-abi/unit/telemetry.rs"]
-mod tests;

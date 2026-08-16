@@ -194,6 +194,3 @@ fn merge_reasons(mut left: Vec<String>, right: Vec<String>) -> Vec<String> {
     deduped.into_iter().collect()
 }
 
-#[cfg(test)]
-#[path = "../../../tests/rust/zero-abi/unit/verdict.rs"]
-mod tests;

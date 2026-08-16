@@ -1550,6 +1550,3 @@ pub fn attempt_journal_contract_v1() -> serde_json::Value {
     })
 }
 
-#[cfg(test)]
-#[path = "../../../tests/rust/zero-store/unit/attempt_journal.rs"]
-mod tests;

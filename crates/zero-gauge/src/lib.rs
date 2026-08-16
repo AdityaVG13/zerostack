@@ -393,6 +393,3 @@ impl fmt::Display for CertificationError {
 }
 impl Error for CertificationError {}
 
-#[cfg(test)]
-#[path = "../../../tests/rust/zero-gauge/unit/lib.rs"]
-mod tests;

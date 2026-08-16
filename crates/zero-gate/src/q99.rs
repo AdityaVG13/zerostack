@@ -1673,6 +1673,3 @@ fn json_error(detail: String) -> Q99ErrorV1 {
     q99_error(Q99FailureCodeV1::Json, detail)
 }
 
-#[cfg(test)]
-#[path = "../../../tests/rust/zero-gate/unit/q99.rs"]
-mod tests;

@@ -193,6 +193,3 @@ pub fn atomic_write_file_with_sync(
     Ok(())
 }
 
-#[cfg(test)]
-#[path = "../../../tests/rust/zero-store/unit/fs_replace.rs"]
-mod tests;

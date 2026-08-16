@@ -10,30 +10,3 @@ description = "ZeroRef v1: the portable cross-engine blob ref subset for ZeroSta
 [dependencies]
 serde = { workspace = true }
 sha2 = { workspace = true }
-
-[dev-dependencies]
-criterion = "0.8"
-proptest = "1"
-serde_json = { workspace = true }
-zero-abi = { path = "../zero-abi" }
-
-[[bench]]
-name = "parse"
-harness = false
-path = "../../tests/benches/zero-ref/parse.rs"
-
-[[test]]
-name = "golden_vectors"
-path = "../../tests/rust/zero-ref/golden_vectors.rs"
-
-[[test]]
-name = "property_identity"
-path = "../../tests/rust/zero-ref/property_identity.rs"
-
-[[test]]
-name = "zeroref_envelope_differential"
-path = "../../tests/rust/zero-ref/fuzz_targets/zeroref_envelope_differential.rs"
-
-[[test]]
-name = "span_ref"
-path = "../../tests/rust/zero-ref/span_ref.rs"

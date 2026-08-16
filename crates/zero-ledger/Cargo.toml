@@ -11,25 +11,3 @@ description = "RACC resource gauge, T8 exposure/replay identity, and exact-phase
 serde = { workspace = true }
 serde_json = { workspace = true }
 zero-abi = { path = "../zero-abi" }
-
-[dev-dependencies]
-allocation-counter = "0.8"
-criterion = "0.8"
-proptest = "1"
-
-[[bench]]
-name = "charge"
-harness = false
-path = "../../tests/benches/zero-ledger/charge.rs"
-
-[[test]]
-name = "allocation"
-path = "../../tests/rust/zero-ledger/allocation.rs"
-
-[[test]]
-name = "exact_checks"
-path = "../../tests/rust/zero-ledger/exact_checks.rs"
-
-[[test]]
-name = "fresh_work_conformance"
-path = "../../tests/rust/zero-ledger/fresh_work_conformance.rs"

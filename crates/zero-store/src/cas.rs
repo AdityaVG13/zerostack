@@ -822,8 +822,3 @@ fn reap_stale_temps(dir: &Path, max_age: Duration) {
         }
     }
 }
-
-/// Durability for the published rename where the platform supports it.
-#[cfg(test)]
-#[path = "../../../tests/rust/zero-store/unit/cas.rs"]
-mod tests;

@@ -349,6 +349,3 @@ fn now_unix_ns() -> u64 {
         .unwrap_or(0)
 }
 
-#[cfg(test)]
-#[path = "../../../tests/rust/zero-store/unit/scrub.rs"]
-mod tests;

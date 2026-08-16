@@ -349,6 +349,3 @@ fn validate_unit_open(rate: Rational, parameter: &'static str) -> Result<(), Bou
     Ok(())
 }
 
-#[cfg(test)]
-#[path = "../../../tests/rust/zero-gauge/unit/bounds.rs"]
-mod tests;

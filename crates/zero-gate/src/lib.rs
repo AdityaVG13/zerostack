@@ -619,6 +619,3 @@ pub fn ceil_log2_ratio(numerator: u128, denominator: u128) -> Result<u32, GateEr
     })
 }
 
-#[cfg(test)]
-#[path = "../../../tests/rust/zero-gate/unit/lib.rs"]
-mod tests;

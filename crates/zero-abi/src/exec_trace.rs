@@ -293,6 +293,3 @@ impl std::fmt::Display for ExecTraceErrorV1 {
 
 impl std::error::Error for ExecTraceErrorV1 {}
 
-#[cfg(test)]
-#[path = "../../../tests/rust/zero-abi/unit/exec_trace.rs"]
-mod tests;

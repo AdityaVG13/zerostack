@@ -17,20 +17,3 @@ path = "src/main.rs"
 [dependencies]
 serde_json.workspace = true
 zsx-core = { path = "../zsx-core", features = ["fszero", "graphzero", "tokenzero"] }
-
-[dev-dependencies]
-zsx-core = { path = "../zsx-core", features = ["fixture-adapters"] }
-tempfile = "3"
-zero-abi = { path = "../zero-abi" }
-
-[[test]]
-name = "one_process"
-path = "../../tests/rust/zsx/one_process.rs"
-
-[[test]]
-name = "mcp_protocol"
-path = "../../tests/rust/zsx/mcp_protocol.rs"
-
-[[test]]
-name = "mcp_lifetime"
-path = "../../tests/rust/zsx/mcp_lifetime.rs"

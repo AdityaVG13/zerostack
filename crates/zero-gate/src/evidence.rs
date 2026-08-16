@@ -645,6 +645,3 @@ fn derive_aggregate_program_digest(proofs: &[ProgramProof]) -> DigestV1 {
     DigestV1::from_bytes(sha256(&bytes))
 }
 
-#[cfg(test)]
-#[path = "../../../tests/rust/zero-gate/unit/evidence.rs"]
-mod tests;

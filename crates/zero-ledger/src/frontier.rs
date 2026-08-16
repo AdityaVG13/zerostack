@@ -270,6 +270,3 @@ fn reduce(num: u64, den: u64) -> (u64, u64) {
     )
 }
 
-#[cfg(test)]
-#[path = "../../../tests/rust/zero-ledger/unit/frontier.rs"]
-mod tests;

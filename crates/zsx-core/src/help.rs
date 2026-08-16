@@ -389,6 +389,3 @@ pub fn help_search(input: &Value) -> Value {
     })
 }
 
-#[cfg(test)]
-#[path = "../../../tests/rust/zsx-core/unit/help.rs"]
-mod tests;

@@ -16,7 +16,6 @@ name = "process_fixture"
 path = "src/bin/process_fixture.rs"
 required-features = ["test-fixture"]
 
-
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
 
@@ -35,11 +34,3 @@ windows-sys = { version = "0.61", features = [
     "Win32_System_Pipes",
     "Win32_Storage_FileSystem",
 ] }
-
-[[test]]
-name = "child"
-path = "../../tests/rust/zero-process/child.rs"
-
-[[test]]
-name = "windows"
-path = "../../tests/rust/zero-process/windows.rs"

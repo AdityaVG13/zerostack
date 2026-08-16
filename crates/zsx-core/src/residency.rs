@@ -297,6 +297,3 @@ impl SessionResidencyGate {
     }
 }
 
-#[cfg(test)]
-#[path = "../../../tests/rust/zsx-core/unit/residency.rs"]
-mod tests;

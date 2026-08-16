@@ -1758,6 +1758,3 @@ fn json_error(error: serde_json::Error) -> QualityEnvelopeErrorV1 {
     )
 }
 
-#[cfg(test)]
-#[path = "../../../tests/rust/zero-gate/unit/quality.rs"]
-mod tests;

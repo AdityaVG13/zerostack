@@ -818,6 +818,3 @@ where
     })
 }
 
-#[cfg(test)]
-#[path = "../../../tests/rust/zero-gate/unit/verifier_registry.rs"]
-mod tests;

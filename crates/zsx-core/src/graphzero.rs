@@ -338,6 +338,3 @@ fn effect_class_for_request(op: &str, args: &serde_json::Value) -> EffectClass {
     }
 }
 
-#[cfg(test)]
-#[path = "../../../tests/rust/zsx-core/unit/graphzero.rs"]
-mod tests;

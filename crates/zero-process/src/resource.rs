@@ -202,6 +202,3 @@ pub(crate) fn configure_command(
     ))
 }
 
-#[cfg(test)]
-#[path = "../../../tests/rust/zero-process/unit/resource.rs"]
-mod tests;

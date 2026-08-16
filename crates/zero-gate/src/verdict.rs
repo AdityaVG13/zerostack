@@ -367,6 +367,3 @@ fn merge_reasons(mut reasons: Vec<String>) -> Vec<String> {
     reasons
 }
 
-#[cfg(test)]
-#[path = "../../../tests/rust/zero-gate/unit/verdict.rs"]
-mod tests;

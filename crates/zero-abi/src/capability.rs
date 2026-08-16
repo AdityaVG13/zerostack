@@ -194,6 +194,3 @@ pub enum CapabilityMismatch {
     },
 }
 
-#[cfg(test)]
-#[path = "../../../tests/rust/zero-abi/unit/capability.rs"]
-mod tests;

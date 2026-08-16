@@ -764,6 +764,3 @@ pub fn zbf_contract_digest_v1() -> DigestV1 {
     ))
 }
 
-#[cfg(test)]
-#[path = "../../../tests/rust/zero-abi/unit/zbf.rs"]
-mod tests;

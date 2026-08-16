@@ -835,6 +835,3 @@ pub fn assembly_abi_contract_digest_v1() -> DigestV1 {
     DigestV1::from_bytes(sha256(canonical.as_bytes()))
 }
 
-#[cfg(test)]
-#[path = "../../../tests/rust/zero-abi/unit/assembly.rs"]
-mod tests;

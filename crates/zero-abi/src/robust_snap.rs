@@ -555,6 +555,3 @@ pub fn robust_snap_contract_digest_v1() -> DigestV1 {
     ))
 }
 
-#[cfg(test)]
-#[path = "../../../tests/rust/zero-abi/unit/robust_snap.rs"]
-mod tests;

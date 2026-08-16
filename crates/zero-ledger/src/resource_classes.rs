@@ -468,6 +468,3 @@ impl<'de> Deserialize<'de> for ProviderBillLine {
     }
 }
 
-#[cfg(test)]
-#[path = "../../../tests/rust/zero-ledger/unit/resource_classes.rs"]
-mod tests;

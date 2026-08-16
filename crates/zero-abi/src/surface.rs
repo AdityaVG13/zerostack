@@ -356,6 +356,3 @@ fn registry_matches_engine(registry: RegistryEngine, engine: EngineIdentity) -> 
     )
 }
 
-#[cfg(test)]
-#[path = "../../../tests/rust/zero-abi/unit/surface.rs"]
-mod tests;

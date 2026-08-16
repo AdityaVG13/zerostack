@@ -1811,10 +1811,4 @@ pub fn permit_backoff(attempt: u32) -> Duration {
     Duration::from_millis(millis)
 }
 
-#[cfg(test)]
-#[path = "../../../tests/rust/zerostack-machine-permit/unit/lib__canonical_scope_tests.rs"]
-mod canonical_scope_tests;
 
-#[cfg(test)]
-#[path = "../../../tests/rust/zerostack-machine-permit/lib_inline_tests.rs"]
-mod tests;

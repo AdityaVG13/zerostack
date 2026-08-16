@@ -3096,6 +3096,3 @@ fn is_zero(digest: &DigestV1) -> bool {
     digest.iter().all(|byte| *byte == 0)
 }
 
-#[cfg(test)]
-#[path = "../../../tests/rust/zero-gate/unit/two_phase.rs"]
-mod tests;

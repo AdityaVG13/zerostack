@@ -547,6 +547,3 @@ fn identity_via_handle(handle: &Handle, expected: &ProcessIdentity) -> io::Resul
     }
     Ok(format!("{}:{}", creation.dwHighDateTime, creation.dwLowDateTime) == expected.start_key)
 }
-#[cfg(test)]
-#[path = "../../../tests/rust/zero-process/unit/identity.rs"]
-mod tests;

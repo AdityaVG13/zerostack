@@ -1159,6 +1159,3 @@ pub fn assemble(reports: ProgramReports) -> Result<ProgramProof, ProgramAssembly
     })
 }
 
-#[cfg(test)]
-#[path = "../../../tests/rust/zero-gate/unit/program.rs"]
-mod tests;

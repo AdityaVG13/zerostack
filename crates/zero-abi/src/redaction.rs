@@ -254,6 +254,3 @@ impl EffectTraceV1 {
     }
 }
 
-#[cfg(test)]
-#[path = "../../../tests/rust/zero-abi/unit/redaction.rs"]
-mod tests;

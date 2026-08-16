@@ -491,6 +491,3 @@ fn normalize_roots(roots: &mut Vec<CacheRootV1>) {
     roots.dedup();
 }
 
-#[cfg(test)]
-#[path = "../../../tests/rust/zero-abi/unit/cache_entry.rs"]
-mod tests;

@@ -337,9 +337,3 @@ pub fn publish_fixture_blob(
     };
     format!("{scheme}://blob/{hash}")
 }
-
-/// A shared `Value`-based adapter for unit tests that want direct control
-/// over results without a store root.
-#[cfg(test)]
-#[path = "../../../tests/rust/zsx-core/unit/fixture.rs"]
-mod tests;

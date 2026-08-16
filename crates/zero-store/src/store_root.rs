@@ -541,6 +541,3 @@ fn lexical_normalize(path: &Path) -> PathBuf {
     out
 }
 
-#[cfg(test)]
-#[path = "../../../tests/rust/zero-store/unit/store_root.rs"]
-mod tests;

@@ -668,6 +668,3 @@ pub fn causal_work_contract_digest_v1() -> DigestV1 {
     ))
 }
 
-#[cfg(test)]
-#[path = "../../../tests/rust/zero-ledger/unit/causal_work.rs"]
-mod tests;

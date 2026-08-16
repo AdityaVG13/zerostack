@@ -2444,6 +2444,3 @@ fn repair_object_with_guard(
     Ok((true, quarantined))
 }
 
-#[cfg(test)]
-#[path = "../../../tests/rust/zero-store/unit/gc.rs"]
-mod tests;

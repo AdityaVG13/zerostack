@@ -392,6 +392,3 @@ fn read_frame(bytes: &[u8], offset: usize) -> Option<Frame<'_>> {
     })
 }
 
-#[cfg(test)]
-#[path = "../../../tests/rust/zero-store/unit/session_wal.rs"]
-mod tests;

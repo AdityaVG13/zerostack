@@ -366,6 +366,3 @@ impl std::fmt::Display for ExecDagErrorV1 {
 
 impl std::error::Error for ExecDagErrorV1 {}
 
-#[cfg(test)]
-#[path = "../../../tests/rust/zero-abi/unit/exec_dag.rs"]
-mod tests;

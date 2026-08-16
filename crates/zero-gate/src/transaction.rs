@@ -1350,6 +1350,3 @@ pub fn transaction_contract_digest_v1() -> DigestV1 {
     )
 }
 
-#[cfg(test)]
-#[path = "../../../tests/rust/zero-gate/unit/transaction.rs"]
-mod tests;

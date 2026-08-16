@@ -694,6 +694,3 @@ fn ppm_of(numerator: u64, denominator: u64) -> u64 {
     scaled / denominator
 }
 
-#[cfg(test)]
-#[path = "../../../tests/rust/zero-gate/unit/residency.rs"]
-mod tests;

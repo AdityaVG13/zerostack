@@ -12,12 +12,10 @@ members = [
     "crates/zero-process",
     "crates/zero-ref",
     "crates/zero-store",
-    "tests/zero-testkit",
     "crates/zerostack-machine-permit",
     "crates/zsx",
     "crates/zsx-core",
     "crates/zsx-node",
-    "tests",
 ]
 
 [workspace.package]

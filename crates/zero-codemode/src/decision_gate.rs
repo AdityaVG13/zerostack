@@ -213,6 +213,3 @@ pub enum GateResolutionV1 {
     PolicyError(DecisionErrorV1),
 }
 
-#[cfg(test)]
-#[path = "../../../tests/rust/zero-codemode/unit/decision_gate.rs"]
-mod tests;

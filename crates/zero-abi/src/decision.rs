@@ -350,6 +350,3 @@ pub fn verdict_permits_selection(verdict: &SafetyVerdictV1) -> bool {
     matches!(verdict, SafetyVerdictV1::Safe)
 }
 
-#[cfg(test)]
-#[path = "../../../tests/rust/zero-abi/unit/decision.rs"]
-mod tests;

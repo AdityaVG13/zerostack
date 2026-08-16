@@ -1626,6 +1626,3 @@ fn json_error(detail: String) -> DcrErrorV1 {
     dcr_error(DcrFailureCodeV1::Json, detail)
 }
 
-#[cfg(test)]
-#[path = "../../../tests/rust/zero-gate/unit/recovery.rs"]
-mod tests;

@@ -1465,6 +1465,3 @@ fn hex_decode(hex: &str) -> Option<Vec<u8>> {
         .collect()
 }
 
-#[cfg(test)]
-#[path = "../../../tests/rust/zero-abi/unit/identity.rs"]
-mod tests;

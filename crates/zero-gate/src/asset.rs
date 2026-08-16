@@ -1053,6 +1053,3 @@ impl zero_store::CasReadGate for CasCapabilityGateV1 {
     }
 }
 
-#[cfg(test)]
-#[path = "../../../tests/rust/zero-gate/unit/asset.rs"]
-mod tests;

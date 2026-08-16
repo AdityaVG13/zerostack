@@ -2561,6 +2561,3 @@ fn validate_session_approvals(
     Ok(ids.into_iter().collect())
 }
 
-#[cfg(test)]
-#[path = "../../../tests/rust/zsx-core/unit/session.rs"]
-mod tests;

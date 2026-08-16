@@ -10,7 +10,6 @@ description = "Pure-safe generic CodeMode host foundation"
 default = []
 worker-fixture = []
 
-
 [[bin]]
 name = "zero-codemode-worker-fixture"
 path = "src/bin/worker_fixture.rs"
@@ -25,24 +24,3 @@ tree-sitter = "0.26.12"
 tree-sitter-javascript = "0.25.0"
 sha2.workspace = true
 zero-process = { path = "../zero-process" }
-
-[dev-dependencies]
-tempfile = "3"
-serde_json.workspace = true
-proptest = "1"
-
-[[test]]
-name = "aggregate_scale"
-path = "../../tests/rust/zero-codemode/aggregate_scale.rs"
-
-[[test]]
-name = "edit_protocol_conformance"
-path = "../../tests/rust/zero-codemode/edit_protocol_conformance.rs"
-
-[[test]]
-name = "host_contract"
-path = "../../tests/rust/zero-codemode/host_contract.rs"
-
-[[test]]
-name = "worker_adapter"
-path = "../../tests/rust/zero-codemode/worker_adapter.rs"

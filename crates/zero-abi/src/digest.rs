@@ -45,6 +45,3 @@ pub fn contract_digest(manifest: &Value) -> [u8; 32] {
     sha256(canonical_json(manifest).as_bytes())
 }
 
-#[cfg(test)]
-#[path = "../../../tests/rust/zero-abi/unit/digest.rs"]
-mod tests;

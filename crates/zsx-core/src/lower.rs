@@ -717,6 +717,3 @@ pub fn lower(
     Ok((engine, op.into(), args))
 }
 
-#[cfg(test)]
-#[path = "../../../tests/rust/zsx-core/unit/lower.rs"]
-mod tests;

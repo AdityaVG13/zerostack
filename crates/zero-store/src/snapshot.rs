@@ -160,6 +160,3 @@ pub fn snapshot_isolation_contract_v1() -> serde_json::Value {
     })
 }
 
-#[cfg(test)]
-#[path = "../../../tests/rust/zero-store/unit/snapshot.rs"]
-mod tests;

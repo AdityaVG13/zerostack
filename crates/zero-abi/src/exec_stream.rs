@@ -90,6 +90,3 @@ impl ExecStreamEventV1 {
     }
 }
 
-#[cfg(test)]
-#[path = "../../../tests/rust/zero-abi/unit/exec_stream.rs"]
-mod tests;

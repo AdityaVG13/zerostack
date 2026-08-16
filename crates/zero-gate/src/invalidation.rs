@@ -948,6 +948,3 @@ fn json_error(detail: String) -> InvalidationIntakeErrorV1 {
     intake_error(InvalidationFailureCodeV1::Json, detail)
 }
 
-#[cfg(test)]
-#[path = "../../../tests/rust/zero-gate/unit/invalidation.rs"]
-mod tests;

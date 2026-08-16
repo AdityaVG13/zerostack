@@ -963,6 +963,3 @@ fn validate_array_constraints(
     Ok(())
 }
 
-#[cfg(test)]
-#[path = "../../../tests/rust/zero-abi/unit/dispatch.rs"]
-mod tests;

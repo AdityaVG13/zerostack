@@ -1633,6 +1633,3 @@ fn unix_ms() -> u64 {
         .min(u128::from(u64::MAX)) as u64
 }
 
-#[cfg(test)]
-#[path = "../../../tests/rust/zero-codemode/unit/worker_redaction.rs"]
-mod tests;

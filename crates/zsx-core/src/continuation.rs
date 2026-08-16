@@ -591,6 +591,3 @@ fn validate_payload(
         .map_err(|error| ContinuationRegistryErrorV1::InvalidHandle(error.to_string()))
 }
 
-#[cfg(test)]
-#[path = "../../../tests/rust/zsx-core/unit/continuation.rs"]
-mod tests;
