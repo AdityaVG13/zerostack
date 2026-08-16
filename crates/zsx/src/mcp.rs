@@ -76,6 +76,12 @@ struct LiveSession {
     next_request_id: u64,
 }
 
+enum CacheHit {
+    Live,
+    Joining,
+    Finished,
+}
+
 /// In-process session cache keyed by canonical root.
 pub struct McpHost {
     default_root: PathBuf,
@@ -97,16 +103,33 @@ impl McpHost {
         if !root.is_dir() {
             return Err(format!("root is not a directory: {}", root.display()));
         }
-        if self.sessions.contains_key(&root) {
-            let live = self.sessions.get_mut(&root).expect("just checked");
+        let cached_state = self.sessions.get(&root).map(|live| {
             if live.session.shutdown_in_progress() {
+                if live.session.shutdown().is_ok() {
+                    CacheHit::Finished
+                } else {
+                    CacheHit::Joining
+                }
+            } else {
+                CacheHit::Live
+            }
+        });
+        match cached_state {
+            Some(CacheHit::Joining) => {
                 return Err(format!(
                     "root {} is shutting down; worker has not stopped",
                     root.display()
                 ));
             }
-            live.last_used = Instant::now();
-            return Ok(live);
+            Some(CacheHit::Finished) => {
+                self.sessions.remove(&root);
+            }
+            Some(CacheHit::Live) => {
+                let live = self.sessions.get_mut(&root).expect("live cache hit");
+                live.last_used = Instant::now();
+                return Ok(live);
+            }
+            None => {}
         }
         while self.sessions.len() >= MAX_LIVE_SESSIONS {
             let oldest = self

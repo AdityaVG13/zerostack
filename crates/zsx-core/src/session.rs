@@ -847,6 +847,10 @@ pub struct ZsxSession {
     /// `cancel` store the next value before any Replace is enqueued so a
     /// FIFO-ahead Execute cannot dispatch under the retired generation.
     live_generation: Arc<AtomicU64>,
+    /// Receiver for a parked shutdown join watcher. First shutdown may time
+    /// out and leave the handle on the watcher; later shutdowns poll this
+    /// instead of latching Terminating forever (zerostack-ahzn).
+    join_watch: Mutex<Option<mpsc::Receiver<bool>>>,
 }
 
 #[derive(Clone)]
@@ -1042,6 +1046,7 @@ impl ZsxSession {
             worker: Mutex::new(Some(worker)),
             continuations,
             live_generation,
+            join_watch: Mutex::new(None),
         })
     }
 
@@ -1903,9 +1908,17 @@ impl ZsxSession {
                 return Ok(state.generation);
             }
             if state.shutdown_sent {
+                let generation = state.generation;
+                drop(state);
+                if self.finish_parked_join() {
+                    if let Ok(mut state) = self.state.lock() {
+                        state.worker_stopped = true;
+                    }
+                    return Ok(generation);
+                }
                 return Err(ZsxSessionError::new(
                     ZsxSessionFailureCode::Terminating,
-                    state.generation,
+                    generation,
                     None,
                     "session shutdown is still joining; worker has not stopped",
                 ));
@@ -1960,19 +1973,50 @@ impl ZsxSession {
         {
             let join_remaining =
                 SESSION_SHUTDOWN_SETTLE_TIMEOUT.saturating_sub(shutdown_started.elapsed());
-            join_thread_within(handle, join_remaining).map_err(|detail| {
-                ZsxSessionError::new(
+            if let Err(parked) = join_thread_within_parked(handle, join_remaining) {
+                if let Ok(mut watch) = self.join_watch.lock() {
+                    *watch = Some(parked.done);
+                }
+                return Err(ZsxSessionError::new(
                     ZsxSessionFailureCode::BackendUnavailable,
                     generation,
                     None,
-                    detail,
-                )
-            })?;
+                    parked.detail,
+                ));
+            }
         }
         if let Ok(mut state) = self.state.lock() {
             state.worker_stopped = true;
         }
         Ok(generation)
+    }
+
+    fn finish_parked_join(&self) -> bool {
+        if let Ok(mut watch) = self.join_watch.lock()
+            && let Some(done) = watch.as_mut()
+        {
+            match done.try_recv() {
+                Ok(_) | Err(mpsc::TryRecvError::Disconnected) => {
+                    *watch = None;
+                    return true;
+                }
+                Err(mpsc::TryRecvError::Empty) => {}
+            }
+        }
+        if let Ok(mut worker) = self.worker.lock()
+            && let Some(handle) = worker.take()
+        {
+            return match join_thread_within_parked(handle, Duration::ZERO) {
+                Ok(()) => true,
+                Err(parked) => {
+                    if let Ok(mut watch) = self.join_watch.lock() {
+                        *watch = Some(parked.done);
+                    }
+                    false
+                }
+            };
+        }
+        false
     }
 
     fn lock_state(
@@ -2198,10 +2242,22 @@ impl Drop for ZsxSession {
     }
 }
 
+pub(crate) struct ParkedJoin {
+    pub detail: String,
+    pub done: mpsc::Receiver<bool>,
+}
+
 pub(crate) fn join_thread_within(
     handle: JoinHandle<()>,
     timeout: Duration,
 ) -> Result<(), String> {
+    join_thread_within_parked(handle, timeout).map_err(|parked| parked.detail)
+}
+
+pub(crate) fn join_thread_within_parked(
+    handle: JoinHandle<()>,
+    timeout: Duration,
+) -> Result<(), ParkedJoin> {
     // Always park the JoinHandle on a watcher. A zero remaining budget must
     // not inline-join (that hangs the host after control send+settle eats the
     // 500ms shutdown window -- zerostack-vrnt / yi0b). recv_timeout(0) returns
@@ -2222,22 +2278,40 @@ pub(crate) fn join_thread_within(
             })
     };
     if let Err(error) = watcher {
-        let handle = parked
-            .lock()
-            .ok()
-            .and_then(|mut slot| slot.take())
-            .ok_or_else(|| format!("watcher spawn failed ({error}); handle already taken"))?;
-        return handle.join().map_err(|_| {
-            format!("watcher spawn failed ({error}); worker panicked during inline join")
+        let handle = parked.lock().ok().and_then(|mut slot| slot.take());
+        let detail = match handle {
+            Some(handle) => match handle.join() {
+                Ok(()) => {
+                    return Ok(());
+                }
+                Err(_) => format!(
+                    "watcher spawn failed ({error}); worker panicked during inline join"
+                ),
+            },
+            None => format!("watcher spawn failed ({error}); handle already taken"),
+        };
+        return Err(ParkedJoin {
+            detail,
+            done: done_rx,
         });
     }
     match done_rx.recv_timeout(timeout) {
-        Ok(true) => Err("session executor panicked during shutdown".into()),
+        Ok(true) => Err(ParkedJoin {
+            detail: "session executor panicked during shutdown".into(),
+            done: {
+                let (tx, rx) = mpsc::sync_channel(1);
+                let _ = tx.send(true);
+                rx
+            },
+        }),
         Ok(false) => Ok(()),
-        Err(_) => Err(format!(
-            "session executor did not join within {}ms",
-            timeout.as_millis()
-        )),
+        Err(_) => Err(ParkedJoin {
+            detail: format!(
+                "session executor did not join within {}ms",
+                timeout.as_millis()
+            ),
+            done: done_rx,
+        }),
     }
 }
 
@@ -2737,6 +2811,20 @@ mod shutdown_deadline_tests {
             "expected park timeout, got {err}"
         );
         drop(release_tx);
+    }
+
+    #[test]
+    fn parked_join_completion_is_observable() {
+        let (release_tx, release_rx) = mpsc::sync_channel::<()>(1);
+        let handle = thread::spawn(move || {
+            let _ = release_rx.recv();
+        });
+        let parked = join_thread_within_parked(handle, Duration::ZERO).expect_err("park");
+        drop(release_tx);
+        parked
+            .done
+            .recv_timeout(Duration::from_millis(200))
+            .expect("watcher must report join after worker unblocks");
     }
 }
 

@@ -1204,11 +1204,11 @@ impl ZsxConnector {
 impl Drop for ZsxConnector {
     fn drop(&mut self) {
         self.dispatch_sender.take();
+        let started = std::time::Instant::now();
         for dispatcher in self.dispatchers.drain(..) {
-            let _ = crate::session::join_thread_within(
-                dispatcher,
-                crate::session::SESSION_SHUTDOWN_SETTLE_TIMEOUT,
-            );
+            let remaining = crate::session::SESSION_SHUTDOWN_SETTLE_TIMEOUT
+                .saturating_sub(started.elapsed());
+            let _ = crate::session::join_thread_within(dispatcher, remaining);
         }
     }
 }
