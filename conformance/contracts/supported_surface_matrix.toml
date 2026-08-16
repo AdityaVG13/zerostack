@@ -132,8 +132,7 @@ family = "zero-store"
 name = "Crash-boundary / mid-write kill oracle suite"
 status = "missing"
 weight = 0.046511627907
-rationale = "unit tests exist; no deterministic FaultVFS / crash-boundary harness"
-notes = "unit tests exist; no deterministic FaultVFS / crash-boundary harness"
+rationale = "no deterministic FaultVFS / crash-boundary harness"
 
 [[feature]]
 id = "F-STORE-BENCH-HISTORY"
@@ -166,7 +165,7 @@ name = "Property encode/decode round-trip"
 status = "partial"
 weight = 0.031007751938
 evidence = ["crates/zero-abi/"]
-notes = "unit tests; limited proptest only in conformance raw_worker_v2"
+notes = "types and digest live in zero-abi; no property suite in-tree"
 
 [[feature]]
 id = "F-PERMIT-CORE"
@@ -180,14 +179,9 @@ evidence = ["crates/zerostack-machine-permit/"]
 id = "F-CONF-HARNESS"
 family = "conformance"
 name = "CodeMode conformance harness CLI + checks"
-status = "present"
+status = "missing"
 weight = 0.038759689922
-evidence = [
-  "conformance/",
-  "conformance/CONTRACT.md",
-  "tests/rust/zero-mcp/unit/mcp_transport.rs",
-]
-notes = "late Ok after cancel is commit_race (retryable false, never ok/cancelled); CONTRACT §4 late settlement; MCP crate test late_ok_after_cancel_is_commit_race_with_payload"
+rationale = "No in-repo conformance CLI. CONTRACT.md is the product contract; live zsx is the proof surface."
 
 [[feature]]
 id = "F-CONF-GOLDEN-SCHEMA"
@@ -219,8 +213,8 @@ family = "ci"
 name = "PR/push CI with clippy -D, deny, targeted tests"
 status = "partial"
 weight = 0.031007751938
-evidence = [".github/workflows/ci.yml", "AGENTS.md"]
-notes = "ci.yml exists; AGENTS says CI deliberately off in four repos — honesty gap"
+evidence = [".github/workflows/ci.yml"]
+notes = "manual workflow_dispatch: fmt, clippy, cargo build --workspace. No test suite."
 
 [[feature]]
 id = "F-FUZZ"
@@ -244,7 +238,7 @@ family = "surface"
 name = "In-repo FeatureUniverse + coverage dashboard"
 status = "partial"
 weight = 0.023255813953
-evidence = ["docs/contracts/supported_surface_matrix.toml", "scripts/check_feature_universe_weights.py"]
+evidence = ["conformance/contracts/supported_surface_matrix.toml", "scripts/check_feature_universe_weights.py"]
 notes = "The matrix and weight gate are in-repo; a coverage dashboard is not implemented."
 
 [[feature]]

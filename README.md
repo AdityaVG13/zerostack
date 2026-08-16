@@ -123,7 +123,7 @@ Foundation crates (no engine source):
 | --- | --- |
 | [`crates/`](crates/) | Hub crates listed above |
 | [`docs/`](docs/) | Architecture, RACC, papers, Lean |
-| [`conformance/`](conformance/) | Contracts and schemas |
+| [`conformance/`](conformance/) | Product contract |
 | [`benchmarks/`](benchmarks/) | Measured savings and catalog |
 
 ## Limitations

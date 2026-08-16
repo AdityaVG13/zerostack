@@ -1,513 +1,95 @@
-# zerostack-codemode-contract v1.0
+# ZeroStack contract
 
-## Conformance report completion
+Normative. This is the product contract for the hub and the three engines.
+It is not a test runner. A later harness, if written, must implement this
+file. It must not invent a second catalog.
 
-Conformance runs in two distinct, non-overlapping layers with disjoint gate vocabularies:
+RFC 2119 keywords apply.
 
-- **Plan-level G1-G10** (`surface = planner`): the canonical planner gates driving `{ns}_execute_code` (ctx.step, coalescing, sandbox). `contract_version = 1.0`.
-- **Raw-worker RW1-RW10** (`surface = codemode`): worker-boundary invariants for a planner-free raw-worker v2 binary. `contract_version = raw-worker-v2`. These are NOT aliases of G1-G10.
-- **MCP exposure** (`surface = mcp`): only G1 exposure applies.
+## 1. Composition
 
-Each gate reports a machine-readable status of pass, fail, or skipped; a skipped gate MUST include a stable skip_reason. The authoritative required set is surface-specific: G1-G10 for planner, RW1-RW10 for codemode, and G1 for mcp. Report completion is failed when a required gate fails, partial when required evidence is missing/skipped or the surface-specific evidence scope was not fully run, and complete only when the full surface scope ran and every required gate passed. The backward-compatible passed field is true only for a complete pass. A codemode report carrying plan-level G ids is partial (not complete), because its scope is RW1-RW10; conversely a planner report carrying RW ids cannot be complete. In particular, an MCP G1-only run is partial with passed=false; skipped non-required gates do not make it failed. The CLI exits 0 for a complete pass, 1 for failed, and 2 for partial.
+ZeroStack is the hub. FSZero, GraphZero, and TokenZero are independent
+engines. They MUST NOT import each other. The hub composes them in one
+process.
 
-The canonical harness report shape is defined by `schemas/harness-report.schema.json`; `schemas/harness_report.schema.json` is its deterministic resolved snapshot. Gate IDs serialize exactly as `G1` through `G10` for the plan layer and `RW1` through `RW10` for the raw-worker layer, while each check carries its semantic label separately in `name`. The two vocabularies never overlap and a single report must not mix them. The sole retained legacy compatibility spelling, `G4LEAKPROOF`, is deserialize-only and MUST NOT be emitted. A report MUST reject unknown fields, unknown gate IDs, and duplicate gate IDs. RACC gate names are a separate namespace and are not remapped by this table.
+| Engine | `ns` | Mutation |
+| --- | --- | --- |
+| FSZero | `fz` | `allowed` -- file mutation is journaled; a later failed step MUST roll back earlier mutation in the same execute |
+| TokenZero | `tz` | `denied` -- no workspace file mutation |
+| GraphZero | `gz` | `store_only` -- engine-store writes MAY occur; workspace file mutation MUST be rejected |
 
-Status: normative. This document supersedes prior prose specs for conformance purposes. Durable step-log/replay is explicitly deferred and is not part of v1.0.
+## 2. Surfaces
 
-## Canonical V3 claim authority
+CodeMode and MCP are mutually exclusive catalogs. A process MUST serve one.
 
-`authority/canonical-authority-v1.json` is the sole checked-in authority for the 138 V3 claims and 14 executable freezes. `zero_testkit::authority` must regenerate it byte-for-byte from the named pristine fixtures and `authority/provenance-v1.json`.
+| Surface | Entry | Tools |
+| --- | --- | --- |
+| CodeMode | `zsx exec -C ROOT` | none -- the plan calls `zero.fs.*`, `zero.graph.*`, `zero.token.*` |
+| MCP | `zsx mcp` | exactly `zero_execute` and `zero_wait` |
 
-Raw claim and freeze fields, source order, pristine hashes, duplicate digest observations, and source coordinates must remain unchanged. Missing named inputs, duplicate semantic IDs, hash drift, unregistered profiles, unsupported native profiles, and estimates presented as measured passes fail with typed errors.
+`zsx mcp` MUST be harness-owned stdio. It MUST die with the parent. It MUST
+NOT detach, wrap in Python, or register engine MCP servers.
 
-Every claim starts `NOT_YET_PROVEN`. Every freeze starts `UNIMPLEMENTED`. `VERIFIED_AT_FREEZE` is non-public. Only Z8 can authorize public promotion. Target, package, workload, metric, denominator, threshold, and cache identities are preregistrations, not evidence that a platform or release gate passed.
+`zero_execute` takes a JavaScript plan and an optional `timeout_ms`.
+`zero_wait` reports process identity and image freshness. It MUST NOT spawn
+a child.
 
-## Canonical engine migration gates
+Engine binaries MUST NOT be registered as MCP servers next to `zsx mcp`.
 
-`engine-topology-v1.json` defines the crate roles, binary names, dependency direction, and raw-worker boundary for ZeroStack, TokenZero, FSZero, and GraphZero. A package cannot enter the canonical topology until both quality gates pass through `rch`: `cargo fmt --all -- --check` and `cargo clippy -p <package> --all-targets --no-deps -- -D warnings`. Existing repository-wide lint or format debt does not weaken this per-package migration gate.
+## 3. Result shape
 
-## 1. Scope
+Every public `zero.*` call returns `zero-result/v1`:
 
-ZeroStack CodeMode v1.0 defines the machine-checkable contract shared by FSZero (`fz`), TokenZero (`tz`), and GraphZero (`gz`). A conforming substrate exposes a launch-mode-selected CodeMode MCP surface, accepts recipe, JSON, and JavaScript plans, returns ref-first execution artifacts, emits the telemetry vocabulary below, and enforces every limit it declares.
+- `ack` -- short status
+- `content` -- either inline value or a typed ref
 
-Normative keywords use RFC 2119 meanings.
+An oversize result MUST spill to a content-addressed ref. The visible
+envelope MAY carry `result_finalization_receipt.v1` (`rawResultJsonBytes`,
+`finalizedValueJsonBytes`, `savingsBytes`). `savingsBytes` is not a token
+count.
 
-## 2. Namespaces and mutation capability
+## 4. Refs
 
-Each substrate has one namespace:
+| Scheme | Producer |
+| --- | --- |
+| `fz://` | FSZero |
+| `gz://` | GraphZero |
+| `tz://` | TokenZero |
 
-| Substrate | `ns` | Required `mutation` value |
-|---|---:|---|
-| FSZero | `fz` | `allowed` |
-| TokenZero | `tz` | `denied` |
-| GraphZero | `gz` | `store_only` |
+A blob ref is `{ns}://blob/<64 lowercase hex>` plus an optional `#Bstart-end`
+or `#Lstart-end` fragment. Consumers MUST preserve the scheme. A missing or
+stale ref MUST fail loudly.
 
-`mutation` semantics:
+## 5. Honesty
 
-- `allowed`: mutating CodeMode bindings MAY be present. The substrate MUST wrap a multi-step execution in a cross-step transaction journal. If any later step fails, previously applied mutation in the same execution MUST roll back before the final `X0` response is returned. FSZero's TransactionJournal model is the reference behavior.
-- `denied`: mutating sandbox bindings MUST be absent. Structured or recipe plan operations that request mutation MUST be rejected with `Error.kind = "policy"`. No cross-step transaction journal is required while mutation is denied.
-- `readonly`: same rejection behavior as `denied`, and the substrate additionally declares that no mutating substrate operations exist in CodeMode. Read-only metadata/ref writes needed to store execution records are not domain mutation.
-- `store_only`: caller-triggered durable engine-store writes (memory, reservations, index shards, blob storage) MAY be present. Repository/workspace file mutation MUST be absent and MUST be rejected with `Error.kind = "policy"`; the generic `zero.edit` probe MUST reject with `policy` like `denied`/`readonly`.
+TokenZero MAY emit Exact `billed_tokens` / `raw_tokens` / `visible_tokens`.
+FSZero and GraphZero MUST NOT pretend to. Spill receipts that cannot certify
+tokens MUST set `visibleTokenCount` to null and
+`visibleTokenCountStatus` to `requires_tokenzero_certification`.
 
-## 3. Capability manifest
+`recovery_tokens` is the cost of expanding a ref. It is not billed.
 
-Every substrate MUST serve `{ns}.codemode.describe("capabilities")` and `{ns}_codemode_describe` with `name = "capabilities"` returning a JSON object matching `tests/contracts/capability-manifest.schema.json` (canonical; `conformance/schemas/capability-manifest.schema.json` is a legacy mirror and MUST NOT be treated as authoritative):
+Estimates MUST NOT be labeled Exact. A skipped measurement is not a pass.
 
-```json
-{
-  "contract_version": "1.0",
-  "ns": "fz",
-  "mutation": "allowed",
-  "plan_forms": ["recipe", "json", "js"],
-  "limits": {
-    "max_logical_ops": 1000,
-    "max_physical_ops": 256,
-    "max_wall_ms": 250,
-    "hard_max_wall_ms": 5000,
-    "max_microtasks": 4096,
-    "max_memory_bytes": 33554432,
-    "max_output_bytes": 65536,
-    "max_result_ref_bytes": 10485760,
-    "max_refs_emitted": 256,
-    "max_parallel_width": 16,
-    "max_code_bytes": 65536
-  }
-}
-```
+## 6. Settlement
 
-Required fields:
+If a call is already cancelled or timed out and a late Ok arrives, the
+reported kind MUST be `commit_race`, `retryable` false. The committed
+payload stays attached. A late domain Err MUST stay that Err.
 
-- `contract_version`: exactly `"1.0"`.
-- `ns`: one of `"fz"`, `"tz"`, `"gz"`.
-- `mutation`: one of `"allowed"`, `"denied"`, `"readonly"`, `"store_only"`.
-- `plan_forms`: MUST contain `"recipe"`, `"json"`, and `"js"`.
-- `limits`: object containing only enforced limits. Echoed means enforced. A substrate MAY omit a limit it cannot enforce, but MUST NOT echo a dead limit.
+## 7. What this folder holds
 
-These `limits` values are the **capability-manifest echo** only (arrangement
-`capability-manifest-echo` in `zero_codemode::OUTPUT_WALL_ARRANGEMENTS`).
-They are not `HostLimits::default` (64 MiB / 2 s / 1 MiB json), not the
-zsx session visible budget (12 KiB), and not the zsx-core connector host
-(128 MiB / 30 s / 16 MiB json). There is no product-wide output/wall ceiling.
+- `engine-topology-v1.json` -- crate roles and dependency direction
+- `contracts/` -- cache entry, fresh-work vector, edit protocol
+- `schemas/` -- JSON Schema for the wire types above
+- `models/` -- example instances
+- `authority/` -- claim ledger. Entries start unproven. A hash is not a pass.
 
-Normative default limits:
+## 8. What is not claimed
 
-| Limit | Default | Rule |
-|---|---:|---|
-| `max_logical_ops` | `1000` | Host-call or plan-op logical cap. |
-| `max_physical_ops` | `256` | Native/kernel operation cap. |
-| `max_wall_ms` | `250` | Default execution wall-clock cap. |
-| `hard_max_wall_ms` | `5000` | Absolute dev/benchmark wall-clock cap. |
-| `max_microtasks` | `4096` | Promise/microtask drain cap. |
-| `max_memory_bytes` | `33554432` | JS heap or nearest lower/equal engine cap. |
-| `max_output_bytes` | `65536` | Maximum visible response bytes before ref redirection. |
-| `max_result_ref_bytes` | `10485760` | Maximum stored execution-result payload bytes. |
-| `max_refs_emitted` | `256` | Maximum refs emitted in one response. |
-| `max_parallel_width` | `16` | Maximum concurrent/batched logical width. |
-| `max_code_bytes` | `65536` | Maximum accepted JavaScript source bytes. |
+There is no in-repo conformance CLI. There is no `{ns}_execute_code` catalog.
+Those were a previous surface. Do not resurrect them as synonyms for
+`zero_execute`.
 
-## 4. Launch modes and MCP exposure
-
-Each substrate server binary MUST accept exactly one launch mode flag:
-
-- `--mode=mcp`: serves per-operation MCP tools only. It MUST list zero CodeMode tools.
-- `--mode=codemode`: serves exactly three CodeMode tools and no per-operation tools.
-
-The CodeMode tools are:
-
-1. `{ns}_execute_code`
-2. `{ns}_codemode_search`
-3. `{ns}_codemode_describe`
-
-The two tool sets MUST NOT coexist in one process.
-
-### `{ns}_execute_code`
-
-Input schema:
-
-```json
-{
-  "type": "object",
-  "required": ["plan"],
-  "additionalProperties": false,
-  "properties": {
-    "plan": { "type": "string", "maxLength": 65536 },
-    "form": { "type": "string", "enum": ["recipe", "json", "js", "auto"] },
-    "limits": { "type": "object", "additionalProperties": { "type": "integer", "minimum": 0 } }
-  }
-}
-```
-
-Output on success:
-
-```json
-{
-  "ack": "C",
-  "execution_id": "cm://exec/1782920000000-012345abcdef",
-  "refs": {
-    "code": "fz://codemode/execution/1782920000000-012345abcdef/code",
-    "steps": "fz://codemode/execution/1782920000000-012345abcdef/steps",
-    "telemetry": "fz://codemode/execution/1782920000000-012345abcdef/telemetry",
-    "result": "fz://codemode/execution/1782920000000-012345abcdef/result"
-  },
-  "telemetry": {
-    "kind": "codemode.execute",
-    "status": "ok",
-    "logical_ops": 1,
-    "physical_ops": 1,
-    "batched_ops": 0,
-    "internal_actions": 1,
-    "cache_hits": 0,
-    "cache_misses": 0,
-    "store_writes": 4,
-    "wall_ms": 3,
-    "bytes_materialized": 128
-  }
-}
-```
-
-Output on failure:
-
-```json
-{
-  "ack": "X0",
-  "execution_id": "cm://exec/1782920000000-012345abcdef",
-  "error_ref": "fz://codemode/execution/1782920000000-012345abcdef/error",
-  "error": { "kind": "validation", "message": "invalid JSON plan", "retryable": false }
-}
-```
-
-When MCP wraps results, the canonical object shown above MUST be top-level `structuredContent`. `content[0].text` MAY remain a compact human/model ack but MUST NOT replace or omit any structured field. Private `zerostack.raw_worker.v2` frames are governed separately and are not subject to this envelope.
-
-#### Late settlement after cancel or timeout
-
-When a handler has already classified a request as cancelled or timed out
-and the worker later produces a result (MCP `zero-mcp` and session
-`zsx-core` share this law):
-
-- A late Ok MUST NOT be reported as Success or `ok`. `kind` MUST be
-  `commit_race` and `retryable` MUST be false. The committed payload
-  MUST remain attached (AR-004 / 3r3z).
-- A late domain Err MUST stay that Err. It MUST NOT be rewritten to
-  `cancelled` or `commit_race`.
-- An empty late channel MAY stay `cancelled` or `timeout` and MUST
-  attach `still_running` rather than detach silently.
-
-`commit_race` is a worker/MCP settlement kind. It is not one of the
-CodeMode sandbox `Error.kind` values in §9.
-
-### `{ns}_codemode_search`
-
-Input schema:
-
-```json
-{
-  "type": "object",
-  "required": ["query"],
-  "additionalProperties": false,
-  "properties": {
-    "query": { "type": "string", "minLength": 1 },
-    "limit": { "type": "integer", "minimum": 1, "maximum": 50 }
-  }
-}
-```
-
-The response MUST be small and MAY return refs for full method descriptions.
-
-### `{ns}_codemode_describe`
-
-Input schema:
-
-```json
-{
-  "type": "object",
-  "required": ["name"],
-  "additionalProperties": false,
-  "properties": {
-    "name": { "type": "string", "minLength": 1 }
-  }
-}
-```
-
-`name = "capabilities"` MUST return the manifest in §3.
-
-## 5. Plan forms
-
-A conforming substrate MUST accept:
-
-- `recipe`: named built-in recipe plus arguments.
-- `json`: structured DAG/plan with explicit operations and dependency edges.
-- `js`: sandboxed JavaScript using the substrate's CodeMode bindings and shared `ctx` helpers.
-
-## 6. Context helpers
-
-Every JS sandbox MUST bind `ctx.step` and `ctx.ref` with identical signatures:
-
-```ts
-ctx.step<T>(name: string, fn: () => T): T
-ctx.ref(value: unknown): string
-```
-
-`ctx.step` MUST execute the callback, record a step named `name`, and return the callback result. Value-form `ctx.step(name, value)` is non-conforming.
-
-`ctx.ref(value)` MUST store `value` behind a substrate ref and return a ref string matching §7.
-
-## 7. Ref and execution-ID scheme
-
-Execution IDs MUST match:
-
-```text
-^cm://exec/\d+-[0-9a-f]{12}$
-```
-
-Execution artifact refs MUST match:
-
-```text
-^{ns}://codemode/execution/[^/]+/(code|steps|telemetry|result|error)$
-```
-
-Payload blobs MUST match:
-
-```text
-^{ns}://blob/[0-9a-f]{64}$
-```
-
-All CodeMode output refs MUST use one of those two forms:
-
-```text
-^{ns}://(blob/[0-9a-f]{64}|codemode/execution/[^/]+/(code|steps|telemetry|result|error))$
-```
-
-No bare/unprefixed refs are allowed in CodeMode output. The same substrate resolver that expands `{ns}://blob/<sha256>` MUST also parse and expand `{ns}://codemode/execution/<safe-id>/<part>`.
-
-The `<safe-id>` segment is the execution id without the `cm://exec/` prefix. Example:
-
-```json
-{
-  "execution_id": "cm://exec/1782920000000-012345abcdef",
-  "result_ref": "gz://codemode/execution/1782920000000-012345abcdef/result"
-}
-```
-
-## 8. Telemetry schema
-
-Telemetry MUST validate against `schemas/telemetry.schema.json` and MUST contain only this frozen top-level vocabulary plus optional `extra`:
-
-```json
-{
-  "kind": "codemode.execute",
-  "status": "ok",
-  "logical_ops": 100,
-  "physical_ops": 4,
-  "batched_ops": 1,
-  "internal_actions": 110,
-  "cache_hits": 2,
-  "cache_misses": 1,
-  "store_writes": 5,
-  "wall_ms": 8,
-  "bytes_materialized": 4096,
-  "extra": {
-    "substrate_detail": "namespaced here only"
-  }
-}
-```
-
-Required keys: `kind`, `status`, `logical_ops`, `physical_ops`, `batched_ops`, `internal_actions`, `cache_hits`, `cache_misses`, `store_writes`, `wall_ms`, `bytes_materialized`.
-
-`raw_leak` is deleted from the contract. It MUST NOT appear in telemetry, execution records, capability manifests, reports, or success/failure responses. Leak safety is proven by G4: oversize results are reachable only by ref and never inline.
-
-## 9. Error taxonomy
-
-Every failure path MUST return `ack = "X0"` and an error ref pointing to an error object matching `schemas/error.schema.json`:
-
-```json
-{ "kind": "sandbox", "message": "fetch is not available", "retryable": false }
-```
-
-`kind` MUST be one of:
-
-- `validation`: malformed plan, invalid schema, invalid arguments.
-- `sandbox`: denied global, denied host capability, memory/microtask sandbox violation.
-- `runtime`: thrown JS, panic converted at the execution boundary, uncaught callback exception.
-- `substrate`: missing target, unresolved ref, native substrate failure.
-- `policy`: operation denied by declared mutation capability or launch policy.
-
-`message` MUST be a non-empty string. `retryable` MUST be boolean.
-
-## 10. Execution record
-
-An execution record MUST validate against `schemas/execution-record.schema.json`. It MUST include:
-
-- `execution_id`
-- `ns`
-- `status`
-- `refs` for `code`, `steps`, `telemetry`, and either `result` or `error`
-- `telemetry`
-- `error` when `status = "error"`
-
-Every ref in the record MUST follow §7.
-
-## 11. Output-guard and leak-proof rule
-
-A visible response MUST be less than or equal to the effective `max_output_bytes` limit. If an execution result would exceed the limit, the substrate MUST store it behind `{ns}://codemode/execution/<safe-id>/result` or `{ns}://blob/<sha256>` and return only refs and bounded summary metadata.
-
-## 12. Sandbox denial categories
-
-Every category below MUST have a dedicated negative conformance check and MUST fail with `Error.kind = "sandbox"`:
-
-| Category | Examples that must not be available |
-|---|---|
-| network/fetch | `fetch`, `XMLHttpRequest`, `WebSocket` |
-| env | environment variable APIs |
-| process/spawn | `process`, `child_process`, `spawn`, `exec` |
-| raw host FS | native filesystem modules outside substrate bindings |
-| direct DB/store | sqlite/store internals not mediated by CodeMode bindings |
-| native modules | `require`, `import`, `node:`, Deno/Bun native access |
-| timers | `setTimeout`, `setInterval`, unbounded timer APIs |
-
-Capability-scoped bindings are primary. Substring scanners MAY remain as defense in depth but MUST NOT be the only mechanism claimed by the contract.
-
-## 13. Conformance checks
-
-The conformance crate defines two distinct, non-overlapping check vocabularies.
-
-### 13.1 Plan-level G1-G10 (planner surface, `contract_version` 1.0)
-
-These drive a planner host serving `{ns}_execute_code` and check plan semantics:
-
-| Check | Maps audit gap(s) | Requirement |
-|---|---|---|
-| G1 exposure | #1 | `--mode=codemode` lists exactly the three CodeMode tools; `--mode=mcp` lists zero CodeMode tools. |
-| G2 refs | #2 | Every CodeMode ref and execution ID matches §7. |
-| G3 telemetry | #4, #5 | Telemetry validates schema; no unknown top-level fields; no `raw_leak`. |
-| G4 leak-proof | #5 | A >64 KiB result returns bounded visible output and only refs to full payload. |
-| G5 errors | #10 | One failure for each error kind validates the taxonomy. |
-| G6 ctx.step | #8 | `ctx.step(name, () => value)` executes callback and records the step. |
-| G7 limits | #6 | Every echoed limit is violated once and enforcement is observed. |
-| G8 mutation capability | #3 | Behavior matches `allowed`, `denied`, `readonly`, or `store_only`. |
-| G9 coalescing | #4, #9 | N=100 logical batch reads coalesce: `physical_ops` is much less than 100 and `batched_ops >= 1`. |
-| G10 sandbox denial | #7 | Every denial category in §12 fails with `kind = "sandbox"`. |
-
-Durable step-log/replay is deferred and is not mapped to a v1.0 conformance check.
-
-### 13.2 Raw-worker RW1-RW10 (codemode surface, `contract_version` raw-worker-v2)
-
-These drive a planner-free raw-worker v2 binary over the hub raw-v2 wire protocol and check worker-boundary invariants. They are NOT aliases of G1-G10: a raw worker cannot own planner semantics (the literal ctx.step primitive, aggregate op coalescing, or an in-planner JS sandbox).
-
-| Check | Requirement |
-|---|---|
-| RW1 artifact_exposure | `capabilities --json` probe + wire handshake + opposite-surface refusal. |
-| RW2 recoverable_refs | op result carries engine-scoped refs that resolve via the owning engine's expand op, plus echoed trace ids. |
-| RW3 telemetry_accounting | telemetry_request yields engine timeline; worker token accounting is REQUIRED for TokenZero and OPTIONAL for FSZero/GraphZero. |
-| RW4 output_bounds | oversize op output stays within negotiated frame/output bounds. |
-| RW5 typed_errors | validation/forbidden/substrate failures are typed WorkerError; host authorization is NOT a raw-worker gate. |
-| RW6 session_continuity | distinct calls on one worker process keep continuity and per-call ref/trace ownership (not a literal ctx.step primitive). |
-| RW7 frame_limits | negotiated protocol limits are nonzero and enforced. |
-| RW8 domain_mutation | domain-authority mutation op succeeds at the worker boundary; the engine owns mutation, the hub owns authorization. |
-| RW9 process_reuse | many sequential ops settle in one worker process (not aggregate plan-level op coalescing). |
-| RW10 planner_refusal | planner/JS/MCP ops are denied with typed errors and the worker stays alive. |
-
-## 14. Reports
-
-A local conformance run MAY emit a JSON report under `conformance/reports/`. These ignored reports are runtime evidence only and are not repository or CI attestations. A report used with the opt-in validator must match:
-
-```json
-{
-  "ns": "gz",
-  "bin": "/path/to/graphzero",
-  "contract_version": "1.0",
-  "passed": false,
-  "checks": [
-    { "id": "G1", "name": "exposure", "passed": true, "details": [] },
-    { "id": "G2", "name": "refs", "passed": false, "details": ["bare ref: codemode/execution/1/result"] }
-  ]
-}
-```
-
-A red report is useful output for Wave 1 substrate sessions. The conformance harness MUST prefer actionable diffs over only pass/fail booleans.
-
-## 12. RACC conformance gates
-
-The deterministic hub suite publishes six machine-readable gate IDs. It owns immutable fixtures, derives expected results independently, and MUST NOT accept a substrate verifier or self-reported arithmetic as proof.
-
-| Gate | Normative invariant | Reference |
-|---|---|---|
-| `RACC-CERT` | Every supported typed query returns the exact payload, locked parser/index/operator provenance, query-bound completeness witness, and no omissions or extras. | T2 |
-| `RACC-RECEIPT` | Replay identity and exact per-phase arithmetic include successful and failed trials, retries, verification/recovery calls, expansions, and fallback charges. | T8, 12.2 |
-| `RACC-GATE-IRREV` | An irreversible effect without verified evidence routes to `RawFallback` rather than committing a compressed decision. | T2, T8 |
-| `RACC-BUDGET` | Expansion budgets are nested monotone doublings; the coded last×4 check (`Σ measured ≤ 4 × last requested`) is an enclosure identity, **not** RACC paper Thm 6.1 (`Σ bids < 4K`). | T10 |
-| `RACC-INLINE` | A certified payload and its certificate arrive in one substrate round trip. | 12.2 |
-| `RACC-RESIDENCY` | Resident objects recover byte-identically with metadata; guarded removal produces a typed miss. | T8 |
-
-### Release aggregate
-
-Paper 12.2 release evidence MUST fix the preregistered target identity and digest before evaluation and report each task's raw cost `R`, compressed cost `C`, and ratio `C/R`. Every task MUST show no statistically or transactionally demonstrated regression through powered paired evidence or a valid T13 no-regret receipt. Accounting MUST include all fallback, retry, failed-trial, verification, recovery, and failed-expansion charges. A green run against the deterministic fake substrate validates the hub harness only; it is explicitly **not** a production release pass.
-
-These gates make no universal compression-percentage claim (T5) and no semantic-sufficiency claim (T6). They establish only the listed machine-checkable invariants.
-
-
-## CONTRACT T13: objective task-verified speculation
-
-A transactional task attempt begins inside a named journal and carries a nonzero, integer attempt cost. TaskAcceptanceReceipt is an opaque linear capability: it is not deserializable, has no public fields, and is minted only by the hub verify_task_acceptance function after an injected trusted TaskAcceptanceVerifier authenticates actual run evidence. The receipt fixes task_id, verifier CommandId, verifier-environment digest, passing outcome and zero exit code, expected and observed artifact digests, journal_id, and attempt cost. Artifact lists are bounded to 64 entries. A nonzero exit, count mismatch, or digest mismatch is a typed verifier failure; model judgment is never evidence.
-
-A sandbox attempt has no commit operation. A passing receipt permits the private commit transition. Verifier rejection, objective failure, or a missing receipt produces deterministic raw rollback carrying the same journal and attempt cost. Both committed and rolled-back attempts MUST charge their nonzero cost through zero-ledger checked append-only accounting (Billed for committed attempts, FailedTrial for rolled-back attempts). Missing charge and missing-receipt commit are conformance failures. Transaction mechanics are pure synchronous state transitions with no I/O or async work.
-
-EffectClass::Irreversible task speculation is rejected before an attempt even when a receipt is supplied. Pre-action Certified evidence behavior is unchanged. Reversible and approval-required transactional attempts remain policy-controlled. The prior six RACC gates and the Paper 12.2 release aggregate remain conjunctive; T13 adds a gate and does not weaken either.
-
-### Required pi-stack host mirror
-
-No existing T13 pi-stack host bead ID was found in repository metadata. Do not invent one. Create and link a downstream mirror with this exact specification:
-
-**Title:** `feat(pi-zerostack): drive T13 journaled task verification and charge attempts`
-
-**Acceptance:**
-
-1. Begin every speculative task under an FSZero TransactionJournal; capture the verifier CommandId, pinned environment digest, exit code, expected and observed artifact digests, journal ID, and nonzero integer attempt cost from the actual run.
-2. Inject the trusted host verifier and pass actual evidence to the hub contract; commit only with the returned passing TaskAcceptanceReceipt.
-3. Roll back to raw on verifier rejection, nonzero exit, artifact mismatch, or missing receipt; expose and charge the same attempt cost on every path.
-4. Reject EffectClass::Irreversible before sandbox execution while preserving Certified pre-action behavior and approval policy.
-5. Add end-to-end host tests for passing commit, failing rollback, missing-charge and missing-receipt mutations, irreversible rejection, and journal teardown.
-
-
-## Local report evidence (Option B)
-
-Engine reports and their index under conformance/reports/ are ignored, private, local-only runtime evidence. CI and clean clones do not contain or validate them. Run python3 tests/scripts/check_freshness.py <explicit-index.json> only against an intentionally supplied local set. The validator creates no evidence and cross-checks indexed report identity, digests, revision, completion, timestamp, and basename-only binary identity.
-
-Durable attestations require a separate signed publication flow that scrubs host/private data, pins provenance and immutable revisions, reviews artifacts before committing them outside the ignored directory, and verifies signatures and freshness in CI.
-
-### Raw-worker v2 engine identity and approval grants
-
-Raw-worker v2 keeps its version for additive compatibility. Engine identity is a
-closed enum: canonical writers emit fszero, graphzero, or tokenzero. Workers may
-dual-read only the deliberately enumerated legacy aliases and must reject unknown
-spellings and unknown fields. The optional approval_grant is likewise a typed
-additive field. Its absence remains compatible only when the operation's declared
-effect is not approval_required_mutation.
-
-The aggregate host decides policy, obtains authority, supplies the expected
-effect and current time, and owns the per-session consumed-grant set. The worker
-must validate and consume the grant immediately before action: identity,
-root/session/request/operation/effect bindings, lower-hex authority and policy
-digests, issuance/expiry ordering and current validity must match exactly.
-Approval-required calls fail with a typed rejection when a grant is missing,
-malformed, mismatched, expired, wrong-effect, or replayed. Policy orchestration
-stays in the host; fail-closed binding and replay enforcement stay at the worker
-boundary.
-
-
-## Public aggregate result envelope (zero-result/v1)
-
-Raw CodeMode worker envelopes are engine-internal and MAY differ. The public aggregate zero.* surface MUST normalize every zero.fs.compound/plan/structural, zero.graph.*, and zero.token.shell/compact/expand return before exposing it. The canonical wire form is {"ack":"...","content":{"kind":"inline","value":...}} or {"ack":"...","content":{"kind":"ref","ref":"<canonical ZeroRef>","preview":"<optional, at most 1024 characters>"}}. The kind discriminant and its payload are required and mutually exclusive. Unknown fields MUST fail closed. Writers emit only this nested tagged form. No legacy flat form is accepted because the audit found no single stable normalized predecessor shared by all surfaces.
-
-Consumers use exactly inline_value() for inline content and reference_value() for referenced content. Calling the wrong accessor MUST produce ZeroResultAccessError; hosts MUST NOT substitute empty strings, null, or JavaScript undefined. A ref payload uses an fz://, gz://, or tz:// canonical ref. Preview is bounded evidence only and never substitutes for expansion.
-
-### Read-only shape audit and adoption status
-
-| Family | Observed raw/current aggregate shape | v1 normalization | Adoption gap |
-|---|---|---|---|
-| zero.fs.compound | FS raw-worker response currently exposes operation/ok/ack/value/refs/mutated/error; value carries detail/ref/payload_utf8. Router code also handles an older execution envelope and inner ack/ref/detail/payload, adding text only for reads. | Inline value or canonical ref. | Not adopted; noncanonical aliases such as ls_manifest occur and missing text can still survive normalization. |
-| zero.fs.plan/structural | Declared by the typed wrapper, but aggregate raw workers currently reject both as planner-owned. | Same tagged result. | Not adopted and unavailable on the audited aggregate path. |
-| zero.graph.* | Router explicitly unwraps GraphZero's ack/ref/value blob envelope to the inner value. Read-only live probes required a snapshot and returned typed engine errors before a success payload. | Inline value or canonical gz:// ref. | No shared public result envelope is enforced. |
-| zero.token.shell | Rich CLI envelope with status/op/refs/visible/tool_response/accounting; the nested tool response has another ack/ref family. | Ref plus bounded preview when full output is stored; inline value only when complete and bounded. | Not adopted. |
-| zero.token.compact/expand | Compact currently returned the rich ingest envelope although the wrapper declaration says string; passing it to expand failed because expand expects a ref. Expand otherwise returns an untagged value. | Compact returns ref content; expand returns inline content or a new canonical ref. | Runtime and typed declaration diverge; not adopted. |
-
-The router's current null/undefined fallback synthesizes {ack, ref, refs}. That behavior is nonconforming: normalization must either produce zero-result/v1 or return a typed error. This hub contract and conformance fixture table define the target; they do not claim FSZero, GraphZero, TokenZero, or pi-stack already emit it.
+Proof that the product compiles: `cargo build --workspace`.
+Proof that a behavior holds: a live `zsx` receipt, not a paragraph here.

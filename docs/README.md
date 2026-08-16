@@ -10,5 +10,5 @@
 | [Papers](papers/README.md) | Publication scaffolds |
 | [Lean](lean/README.md) | Formal surface |
 
-Contracts live in [`../conformance/`](../conformance/CONTRACT.md).
+Contracts live in [`../conformance/`](../conformance/README.md).
 Measured numbers live in [`../benchmarks/`](../benchmarks/benchmarks.md).

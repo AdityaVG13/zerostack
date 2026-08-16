@@ -130,6 +130,7 @@ conformance/ATTESTATION.md
 # Conformance allowlist: contracts, authority, models, schemas
 conformance/*
 !conformance/
+!conformance/README.md
 !conformance/CONTRACT.md
 !conformance/authority/
 !conformance/authority/**
