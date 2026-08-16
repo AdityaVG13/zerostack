@@ -189,6 +189,32 @@
         );
     }
 
+    #[test]
+    fn harness_write_grants_follow_plan_write_mentions() {
+        assert_eq!(fs_write_grant_count_for_plan("return 1;"), 0);
+        assert_eq!(
+            fs_write_grant_count_for_plan(
+                r#"await zero.fs.write({path:"a",content:"A"});
+                   await zero.fs.write({path:"b",content:"B"});
+                   return await zero.fs.write({path:"c",content:"C"});"#
+            ),
+            3
+        );
+        assert_eq!(
+            fs_write_grant_count_for_plan(
+                r#"return await zero.fs.compound("write", {path:"a",content:"A"});"#
+            ),
+            1
+        );
+        let grants = harness_fs_write_grants("/tmp/root", 1, 7, 3);
+        assert_eq!(grants.len(), 3);
+        assert_eq!(grants[0].operation, "fs.write");
+        assert_eq!(grants[0].request_id, 7);
+        assert_eq!(grants[0].effect, EffectClass::ApprovalRequiredMutation);
+        assert_eq!(grants[0].grant_id, "harness-fs-write-7-0");
+        assert_ne!(grants[0].grant_id, grants[1].grant_id);
+    }
+
     fn journal_test_state(root: &Path, session_id: &str) -> ZsxState {
         ZsxState {
             adapters: BTreeMap::new(),

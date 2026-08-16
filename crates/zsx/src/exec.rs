@@ -11,8 +11,10 @@
 use std::path::PathBuf;
 use std::time::Duration;
 
-use serde_json::{Value, json};
-use zsx_core::ZsxSession;
+use serde_json::{json, Value};
+use zsx_core::{
+    ZsxSession, fs_write_grant_count_for_plan, harness_fs_write_grants,
+};
 
 /// Protocol label for the in-process zsx result envelope.
 pub const ZSX_PROTOCOL: &str = "zerostack.zsx.v1";
@@ -28,11 +30,18 @@ pub fn exec(
     let root = root.canonicalize()?;
     let session_id = format!("zsx-{:x}", std::process::id());
     let state_root = root.join(".zerostack");
+    let root_text = root.to_string_lossy().into_owned();
     let session = ZsxSession::builder(root)
         .with_state_root(state_root)
         .with_session_id(session_id)
         .build_canonical()?;
-    let result = session.execute(1, 1, source, timeout)?;
+    let grants = harness_fs_write_grants(
+        &root_text,
+        1,
+        1,
+        fs_write_grant_count_for_plan(source),
+    );
+    let result = session.execute_with_approvals(1, 1, source, timeout, grants)?;
     session.shutdown()?;
     Ok(json!({
         "protocol": ZSX_PROTOCOL,

@@ -16,7 +16,9 @@ use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
 use serde_json::{json, Value};
-use zsx_core::ZsxSession;
+use zsx_core::{
+    ZsxSession, fs_write_grant_count_for_plan, harness_fs_write_grants,
+};
 
 use crate::exec::{DEFAULT_TIMEOUT_MS, ZSX_PROTOCOL};
 use crate::reexec;
@@ -110,12 +112,28 @@ impl McpHost {
             return Err("timeout_ms must be nonzero".into());
         }
         let root = root.unwrap_or_else(|| self.default_root.clone());
+        let root = root.canonicalize().map_err(|error| {
+            format!("cannot canonicalize {}: {error}", root.display())
+        })?;
+        let root_text = root.to_string_lossy().into_owned();
         let live = self.session_for(root)?;
         let request_id = live.next_request_id;
         live.next_request_id = live.next_request_id.saturating_add(1);
+        let grants = harness_fs_write_grants(
+            &root_text,
+            1,
+            request_id,
+            fs_write_grant_count_for_plan(plan),
+        );
         let result = live
             .session
-            .execute(1, request_id, plan, Duration::from_millis(timeout_ms))
+            .execute_with_approvals(
+                1,
+                request_id,
+                plan,
+                Duration::from_millis(timeout_ms),
+                grants,
+            )
             .map_err(|error| error.to_string())?;
         Ok(json!({
             "protocol": ZSX_PROTOCOL,

@@ -90,6 +90,62 @@ pub const MAX_SESSION_APPROVAL_GRANTS: usize = 64;
 pub const MAX_SESSION_APPROVAL_LIFETIME_MS: u64 = 300_000;
 pub const MAX_SESSION_CONSUMED_APPROVALS: usize = 65_536;
 
+/// How many `fs.write` grants a harness-owned execute should install for one plan.
+///
+/// Public `ZsxSession::execute` stays grantless fail-closed. `zsx mcp` /
+/// `zsx exec` are the authorized host: they bind the root and mint one
+/// single-use grant per write mention so `zero.fs.write` works without a
+/// new verb. Transact / `multi_edit` writes do not need these.
+pub fn fs_write_grant_count_for_plan(plan: &str) -> usize {
+    let mut count = 0_usize;
+    let mut rest = plan;
+    while let Some(index) = rest.find("fs.write") {
+        count = count.saturating_add(1);
+        rest = &rest[index.saturating_add("fs.write".len())..];
+    }
+    rest = plan;
+    while let Some(index) = rest.find("compound(\"write\"") {
+        count = count.saturating_add(1);
+        rest = &rest[index.saturating_add("compound(\"write\"".len())..];
+    }
+    rest = plan;
+    while let Some(index) = rest.find("compound('write'") {
+        count = count.saturating_add(1);
+        rest = &rest[index.saturating_add("compound('write'".len())..];
+    }
+    count.min(MAX_SESSION_APPROVAL_GRANTS)
+}
+
+/// Single-use `fs.write` grants bound to one harness execute.
+pub fn harness_fs_write_grants(
+    root: &str,
+    generation: u64,
+    request_id: u64,
+    count: usize,
+) -> Vec<SessionApprovalGrantV1> {
+    let count = count.min(MAX_SESSION_APPROVAL_GRANTS);
+    if count == 0 {
+        return Vec::new();
+    }
+    let now = now_ms();
+    (0..count)
+        .map(|index| SessionApprovalGrantV1 {
+            schema: SESSION_APPROVAL_SCHEMA.into(),
+            grant_id: format!("harness-fs-write-{request_id}-{index}"),
+            engine: EngineIdentity::FsZero,
+            root: root.to_owned(),
+            generation,
+            request_id,
+            operation: "fs.write".into(),
+            effect: EffectClass::ApprovalRequiredMutation,
+            authority_digest: format!("{index:064x}"),
+            policy_digest: format!("{:064x}", index.saturating_add(1)),
+            issued_at_unix_ms: now.saturating_sub(1),
+            expires_at_unix_ms: now.saturating_add(60_000),
+        })
+        .collect()
+}
+
 // Fixed session-owned dispatchers keep admission bounded and block on the
 // channel while idle. Bursts may run at most this many in-process calls.
 const AGGREGATE_DISPATCH_THREADS: usize = 3;

@@ -53,3 +53,17 @@ fn second_execute_reuses_the_same_session() {
         "second call must reuse the live session: {second}"
     );
 }
+
+#[test]
+fn zero_execute_fs_write_creates_the_file() {
+    let dir = TempDir::new().unwrap();
+    let mut host = McpHost::new(dir.path().to_path_buf());
+    let plan = r#"return await zero.fs.write({ path: "created.txt", content: "WRITE_OK\n" });"#;
+    let result = host
+        .zero_execute(plan, None, 30_000)
+        .expect("fs.write via MCP must succeed with harness grants");
+    assert_eq!(result["ok"], true, "{result}");
+    let written = std::fs::read_to_string(dir.path().join("created.txt"))
+        .expect("write must land on disk");
+    assert_eq!(written, "WRITE_OK\n");
+}

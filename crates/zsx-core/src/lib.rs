@@ -64,7 +64,9 @@ pub mod tokenzero;
 pub use adapter::{
     AdapterBinding, AdapterCall, AdapterContractError, AdapterError, AdapterResponse, DomainAdapter,
 };
-pub use connector::SessionApprovalGrantV1;
+pub use connector::{
+    SessionApprovalGrantV1, fs_write_grant_count_for_plan, harness_fs_write_grants,
+};
 pub use connector::ZsxAttemptJournalStatus;
 pub use continuation::{
     CONTINUATION_REGISTRY_SCHEMA_VERSION_V1, CONTINUATION_REGISTRY_WAL_SNAPSHOT,
