@@ -345,6 +345,40 @@ fn journal_dir_for(
 /// Persist the Prepared entry (and the identity manifest) durably before the
 /// dispatch is admitted. After this returns, the journal can only be
 /// recovered or aborted; it can never dispatch until crossed.
+fn prepare_error_is_already_terminal(error: &ConnectorError) -> bool {
+    error.to_string().contains("already_terminal")
+}
+
+/// Prepare a mutation journal, skipping leftover terminal dirs from an
+/// evicted MCP session that reused `g<gen>/r<req>/<seq>`.
+fn prepare_mutation_journal_unique(
+    state: &ZsxState,
+    sequence_counter: &AtomicU64,
+    execution: AggregateExecutionContext,
+    first_sequence: u64,
+    request: &CallRequest,
+    engine: EngineIdentity,
+    effect_class: EffectClass,
+) -> Result<MutationJournal, ConnectorError> {
+    let mut chosen = first_sequence;
+    let mut last_error = None;
+    for _ in 0..8 {
+        let journal_dir = journal_dir_for(&state.attempts_root, execution, chosen);
+        match prepare_mutation_journal(state, execution, &journal_dir, request, engine, effect_class)
+        {
+            Ok(journal) => return Ok(journal),
+            Err(error) if prepare_error_is_already_terminal(&error) => {
+                last_error = Some(error);
+                chosen = sequence_counter.fetch_add(1, Ordering::Relaxed);
+            }
+            Err(error) => return Err(error),
+        }
+    }
+    Err(last_error.unwrap_or_else(|| {
+        ConnectorError::new("already_terminal: could not allocate a fresh attempt journal")
+    }))
+}
+
 fn prepare_mutation_journal(
     state: &ZsxState,
     execution: AggregateExecutionContext,
@@ -1274,11 +1308,11 @@ impl Connector for ZsxConnector {
         }
         let journal = match mutation_effect_class(engine, &request.op) {
             Some(effect_class) => {
-                let journal_dir = journal_dir_for(&self.state.attempts_root, execution, sequence);
-                match prepare_mutation_journal(
+                match prepare_mutation_journal_unique(
                     &self.state,
+                    &self.sequence,
                     execution,
-                    &journal_dir,
+                    sequence,
                     &request,
                     engine,
                     effect_class,
@@ -1771,5 +1805,21 @@ pub(crate) fn host_limits() -> Result<zero_codemode::HostLimits, HostError> {
         16 * 1024 * 1024,
     )
     .map_err(HostError::Limits)
+}
+
+#[cfg(test)]
+mod rmja_already_terminal_tests {
+    use super::{prepare_error_is_already_terminal, ConnectorError};
+
+    #[test]
+    fn already_terminal_prepare_is_recognized() {
+        let error = ConnectorError::new(
+            "already_terminal: attempt journal already crossed dispatch or is terminal",
+        );
+        assert!(prepare_error_is_already_terminal(&error));
+        assert!(!prepare_error_is_already_terminal(&ConnectorError::new(
+            "aggregate dispatch deadline or cancellation"
+        )));
+    }
 }
 

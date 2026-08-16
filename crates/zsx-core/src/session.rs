@@ -516,16 +516,17 @@ impl ZsxExecutor {
             generation,
             request_id,
         );
-        let mut result = outcome.result;
+        let result = outcome.result;
         let host_metrics = outcome.metrics;
         if result.is_err() {
             signal.cancel();
-            if let Err(tail_error) = self
+            // Wait for the cancelled adapter (and its process group) to
+            // settle. Do not replace the original error with a tail-idle
+            // timeout -- that made `already_terminal` / cancel failures
+            // sticky on the next plan.
+            let _ = self
                 .connector
-                .wait_for_dispatch_idle(Duration::from_secs(5))
-            {
-                result = Err(tail_error);
-            }
+                .wait_for_dispatch_idle(Duration::from_secs(15));
         }
         let dispatch = self.connector.dispatch_metrics();
         let engine_wall_ns_sum = dispatch

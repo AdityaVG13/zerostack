@@ -12,8 +12,8 @@
 use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
 use std::io::{self, BufRead, Write};
-use std::path::PathBuf;
-use std::time::{Duration, Instant};
+use std::path::{Path, PathBuf};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use serde_json::{json, Value};
 use zsx_core::{
@@ -25,7 +25,45 @@ use crate::reexec;
 
 const PROTOCOL: &str = "2024-11-05";
 const SERVER_NAME: &str = "zerostack-zsx";
-const MAX_LIVE_SESSIONS: usize = 4;
+const MAX_LIVE_SESSIONS: usize = 8;
+const NEXT_REQUEST_ID_FILE: &str = "mcp-next-request-id";
+
+/// Session id must change when a cached live session is evicted and
+/// recreated. `pid + root` alone collides with leftover attempt journals
+/// at `g1/r1/<seed>` and surfaces as `already_terminal`.
+fn mint_mcp_session_id(root: &Path) -> String {
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    root.hash(&mut hasher);
+    let nonce = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|elapsed| elapsed.as_nanos())
+        .unwrap_or(0);
+    format!(
+        "zsx-mcp-{:x}-{:x}-{:x}",
+        std::process::id(),
+        hasher.finish(),
+        nonce
+    )
+}
+
+fn next_request_id_path(state_root: &Path) -> PathBuf {
+    state_root.join(NEXT_REQUEST_ID_FILE)
+}
+
+fn load_next_request_id(state_root: &Path) -> u64 {
+    std::fs::read_to_string(next_request_id_path(state_root))
+        .ok()
+        .and_then(|text| text.trim().parse::<u64>().ok())
+        .filter(|value| *value >= 1)
+        .unwrap_or(1)
+}
+
+fn store_next_request_id(state_root: &Path, next: u64) {
+    if std::fs::create_dir_all(state_root).is_err() {
+        return;
+    }
+    let _ = std::fs::write(next_request_id_path(state_root), format!("{next}\n"));
+}
 
 enum FrameKind {
     Ndjson,
@@ -78,10 +116,9 @@ impl McpHost {
                 break;
             }
         }
-        let mut hasher = std::collections::hash_map::DefaultHasher::new();
-        root.hash(&mut hasher);
-        let session_id = format!("zsx-mcp-{:x}-{:x}", std::process::id(), hasher.finish());
+        let session_id = mint_mcp_session_id(&root);
         let state_root = root.join(".zerostack");
+        let next_request_id = load_next_request_id(&state_root);
         let session = ZsxSession::builder(root.clone())
             .with_state_root(state_root)
             .with_session_id(session_id)
@@ -92,7 +129,7 @@ impl McpHost {
             LiveSession {
                 session,
                 last_used: Instant::now(),
-                next_request_id: 1,
+                next_request_id,
             },
         );
         Ok(self.sessions.get_mut(&root).expect("just inserted"))
@@ -116,9 +153,11 @@ impl McpHost {
             format!("cannot canonicalize {}: {error}", root.display())
         })?;
         let root_text = root.to_string_lossy().into_owned();
+        let state_root = root.join(".zerostack");
         let live = self.session_for(root)?;
         let request_id = live.next_request_id;
         live.next_request_id = live.next_request_id.saturating_add(1);
+        store_next_request_id(&state_root, live.next_request_id);
         let grants = harness_fs_write_grants(
             &root_text,
             1,
@@ -555,4 +594,37 @@ pub fn serve(default_root: PathBuf) -> io::Result<()> {
     }
     host.shutdown();
     Ok(())
+}
+
+#[cfg(test)]
+mod rmja_session_identity_tests {
+    use super::{load_next_request_id, mint_mcp_session_id, store_next_request_id};
+    use std::path::PathBuf;
+
+    #[test]
+    fn mint_mcp_session_id_changes_across_calls() {
+        let root = PathBuf::from("/tmp/zerostack-rmja-root");
+        let first = mint_mcp_session_id(&root);
+        let second = mint_mcp_session_id(&root);
+        assert_ne!(
+            first, second,
+            "evicted MCP sessions must not reuse a session id"
+        );
+        assert!(first.starts_with("zsx-mcp-"), "{first}");
+        assert!(second.starts_with("zsx-mcp-"), "{second}");
+    }
+
+    #[test]
+    fn next_request_id_survives_recreate() {
+        let dir = std::env::temp_dir().join(format!(
+            "zerostack-rmja-req-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).expect("temp state root");
+        assert_eq!(load_next_request_id(&dir), 1);
+        store_next_request_id(&dir, 7);
+        assert_eq!(load_next_request_id(&dir), 7);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 }
