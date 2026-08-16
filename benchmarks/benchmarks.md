@@ -1,50 +1,35 @@
 # Benchmarks
 
-ZeroStack is not a published product. These are local development measurements.
+Local development measurements. Do not ratchet a number from a single run.
 
-## Aggregate CodeMode
+## Savings (v1)
 
-Compare in-process `zsx-core` at three granularities:
+Live `zsx mcp` against a 36,645-byte unique file. Full table: [savings-bench-v1.md](savings-bench-v1.md).
 
-- one aggregate model-visible cell
-- one standalone CodeMode cell per engine
-- one model-visible cell per logical operation
+Three layers. Do not mix them.
 
-Corpus: mixed three-engine work, exact refs, shell, mutation, cancellation, failure.
+| Layer | What |
+| --- | --- |
+| Exact tokens | TokenZero `billed_tokens` / `raw_tokens` |
+| Envelope bytes | spill `savingsBytes` (not tokens) |
+| Call fusion | 1 MCP call vs N |
 
-Previously this lived as a Node harness under `bench/aggregate-codemode/`. That
-harness is parked with the rest of the install/CLI clutter. Reintroduce a
-single runner here only when we need a new number, and keep the runner out of
-this folder -- this file is the catalog.
+Headline Exact: `token.read` with `max_visible_tokens: 200` billed **198** against raw **4500**. Ranged read of the hit window billed **55**.
 
-## Native warm read
+FS surfaces do not certify Exact. Their spill receipts say `requires_tokenzero_certification`.
 
-Warm `zsx` / CodeMode read path. Same rule: one catalog entry, no extra schema
-or validate scripts in this folder.
+## Call fusion (same fixture)
 
-## Crate microbenchmarks
+| Path | Calls | Naive |
+| --- | ---: | --- |
+| `multi_edit` writes (6 files) | 1 | 6 |
+| snap-to-file | 1 | search + read |
+| snap-to-effect | 1 | search + edit |
+| `multi_read` 5 files | 1 | 5 |
+| `multi_edit` 3 files | 1 | 3 |
 
-| Crate | Bench | Command |
-|---|---|---|
-| `zero-cert` | `verify` | `cargo bench -p zero-cert --bench verify` |
-| `zero-gate` | `decide` | `cargo bench -p zero-gate --bench decide` |
-| `zero-ledger` | `charge` | `cargo bench -p zero-ledger --bench charge` |
-| `zero-ref` | `parse` | `cargo bench -p zero-ref --bench parse` |
+`multi_read` kernel time: 506 µs, one physical pass.
 
-Sources: `tests/benches/<crate>/`.
+## How to add a number
 
-## Rule
-
-Do not ratchet a number from a single run. Keep-gate honesty is
-`zerostack-keep-gate-honesty-063e`.
-
-## Machine-readable workload catalog (V6-R12)
-
-`benchmarks/workloads/` holds machine-readable catalog entries (workload
-specs) for the benchmark execution program (`zero-testkit::bench_exec`,
-ZS-BENCH-001). Each entry is a JSON task manifest with a root seal
-(`workload_digest`) over all other fields; entries are loaded, validated,
-and executed by `bench_exec::load_catalog_entry_v1` / `execute_and_emit_v1`,
-which seal every run into a `SealedBenchmarkManifestV1` and refuse to
-overwrite a sealed manifest. Keep this folder data-only: no runners, no
-schema scripts -- the runner lives in the testkit.
+One `zero_execute` per row. Record the full MCP envelope, including `receipt` when spilled. Exact column stays empty unless TokenZero `accounting` is present. Bump to v2 when the method changes; do not backfill estimates into v1.

@@ -2,7 +2,6 @@
 
 - **Policy version:** 2.0
 - **Date:** 2026-08-12
-- **Decision basis:** [ADR 0001: CodeMode execution boundary](adr/0001-codemode-execution-boundary.md)
 - **Owner:** ZeroStack owner
 
 ## No-release boundary

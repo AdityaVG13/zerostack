@@ -85,6 +85,13 @@ CLAUDE.md.*
 beads_compliance_audit/
 
 # --- Historical / internal (local only) ---
+.v6-distill/
+.mor/
+.skill-loop-progress.*
+MODES_OF_REASONING_REPORT_AND_ANALYSIS_OF_PROJECT.md
+MOR_CASE.md
+MOR_CLAIMS.jsonl
+/tests/
 archive/
 docs/adr/
 docs/internal/
@@ -107,6 +114,8 @@ benchmarks/**
 !benchmarks/
 !benchmarks/README.md
 !benchmarks/benchmarks.md
+!benchmarks/savings-bench-v1.md
+!benchmarks/savings-bench-v1.json
 
 # Private local runtime evidence; not a repository/CI attestation.
 conformance/reports/

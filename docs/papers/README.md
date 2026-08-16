@@ -16,5 +16,5 @@ Public claim rules:
 Run the gate from the repository root (through RCH on this project):
 
 ```bash
-rch exec -- make -C papers verify
+rch exec -- make -C docs/papers verify
 ```

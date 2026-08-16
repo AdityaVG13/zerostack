@@ -1,7 +1,6 @@
 //! ZS-CACHE-009: exact zero-failure Q99 statistical certification bounds.
 //!
-//! Implements Proposition 11.1 (Zero-Failure Q99 Sample Bound,
-//! racc/v6/packs/01_CURRENT_PAPERS_TEXT.md lines 2482-2506): with `q` the
+//! Implements Proposition 11.1 (Zero-Failure Q99 Sample Bound): with `q` the
 //! certified success rate and `alpha` the one-sided error, `n` zero-failure
 //! independent trials certify the bound exactly when `q^n <= alpha`
 //! (equivalently `n >= ln(alpha) / ln(q)`). Known constants: `q = 99/100`,

@@ -1,6 +1,6 @@
 # Savings bench v1
 
-Measured 2026-08-16 on live `zsx mcp` (`pid 26663`, harness-stdio) against `/tmp/zsx-savings-20260816`.
+Measured 2026-08-16 on live `zsx mcp` against `/tmp/zsx-savings-20260816`.
 Machine-readable twin: [`savings-bench-v1.json`](savings-bench-v1.json).
 
 This is the citation set for the next ZeroStack bench iteration. Three layers. Do not mix them.

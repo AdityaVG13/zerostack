@@ -31,7 +31,7 @@ TokenZero (tokens)  ─┘
 | `fz://` | FSZero |
 | `gz://` | GraphZero |
 
-See [racc/RACC.md](racc/RACC.md).
+See [docs/racc/RACC.md](docs/racc/RACC.md).
 
 ## CodeMode
 
@@ -122,10 +122,9 @@ Foundation crates (no engine source):
 | Path | What |
 | --- | --- |
 | [`crates/`](crates/) | Hub crates listed above |
-| [`docs/`](docs/) | Architecture, CodeMode, MCP policy |
-| [`racc/`](racc/) | RACC notes |
-| [`conformance/`](conformance/) | Contracts |
-| [`tests/`](tests/) | Shared test tree (`zero-testkit` plus crate `[[test]]` targets) |
+| [`docs/`](docs/) | Architecture, RACC, papers, Lean |
+| [`conformance/`](conformance/) | Contracts and schemas |
+| [`benchmarks/`](benchmarks/) | Measured savings and catalog |
 
 ## Limitations
 

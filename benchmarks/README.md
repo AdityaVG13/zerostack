@@ -1,7 +1,5 @@
 # Benchmarks
 
-This folder is the catalog. The numbers and how to take them are in
-[benchmarks.md](benchmarks.md). Nothing else belongs here.
+Catalog and measured numbers: [benchmarks.md](benchmarks.md).
 
-Criterion microbenchmarks that `cargo bench -p <crate>` runs live under
-`tests/benches/`, next to the rest of the test tree.
+The v1 savings run (Exact tokens, envelope bytes, call fusion) is [savings-bench-v1.md](savings-bench-v1.md).

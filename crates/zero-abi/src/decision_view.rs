@@ -1,8 +1,7 @@
 //! Typed `DecisionViewV6`: the model-facing decision view (ZS-VIEW-010).
 //!
-//! Wire shape matches `racc/v6/schemas/decision_view_v6.schema.json` field
-//! for field (`additionalProperties: false`): the six schema-required roots
-//! and grades -- `task_contract_root`, `project_root`, `causal_lens_root`,
+//! Wire shape is closed (`additionalProperties: false`). Required roots
+//! and grades: `task_contract_root`, `project_root`, `causal_lens_root`,
 //! `supported_decisions`, `completeness_grade`, `baseline_escape` -- plus the
 //! optional `evidence_refs`, `omitted_classes`, `expansion_handles`,
 //! `unresolved_question`, and `canonical_render_root`.

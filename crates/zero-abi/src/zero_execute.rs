@@ -1,9 +1,8 @@
 //! V6 zero execute result envelope and continuation state machine
 //! (ZS-ADAPTER-003, ZS-EXEC-003).
 //!
-//! `ZeroExecuteResultV6` is the one stable semantic tool surface result. Its
-//! wire shape matches `racc/v6/schemas/zero_execute_result_v6.schema.json`
-//! exactly: `abi_version` is pinned to `zerostack.racc.v6`, the six base
+//! `ZeroExecuteResultV6` is the one stable semantic tool surface result.
+//! `abi_version` is pinned to `zerostack.racc.v6`, the six base
 //! `kind`s are the schema enum, and `Cancelled`/`FailedNoAuthority` are the
 //! two D5 adapter outcomes that extend it.
 //!

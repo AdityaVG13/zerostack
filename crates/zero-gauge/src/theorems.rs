@@ -6,7 +6,7 @@
 //! no floats, no rounding, no extrapolation. An unmet premise is a typed
 //! refusal, never a weaker certificate.
 //!
-//! Theorem texts (racc/v6/packs/01_CURRENT_PAPERS_TEXT.md):
+//! Theorem texts:
 //!
 //! * Thm 5.1 Explanation Evidence Preservation: if every factual claim in a
 //!   compact explanation is supported by an exact rooted source/runtime
