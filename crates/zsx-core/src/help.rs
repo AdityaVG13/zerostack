@@ -62,9 +62,9 @@ const HELP_ENTRIES: &[HelpEntry] = &[
     HelpEntry {
         surface: "fs",
         method: "write",
-        signature: "zero.fs.write({ path, content, base? }) — content is a UTF-8 string (extract with ctx.payload / payload_utf8 or expand a ref; never pass a tool-result object). base: null requires create (must not exist); base: fz://blob/<sha256> is a compare-and-swap overwrite",
-        description: "Atomic create or overwrite with optional CAS base gate and bounded diff result. Non-string content is rejected (non_byte_provenance).",
-        keywords: &["write", "create", "overwrite", "put", "cas", "base"],
+        signature: "zero.fs.write({ path, content, base? }) — content is a UTF-8 string (aliases: contents, body, text). Extract with ctx.payload / payload_utf8 or expand a ref; never pass a tool-result object. base: null requires create (must not exist); base: fz://blob/<sha256> is a compare-and-swap overwrite",
+        description: "Atomic create or overwrite with optional CAS base gate and bounded diff result. contents/body/text fold to content. Unknown keys and missing content fail loud (unknown_write_field / missing_write_content). Non-string content is rejected (non_byte_provenance).",
+        keywords: &["write", "create", "overwrite", "put", "cas", "base", "contents", "body", "text"],
     },
     HelpEntry {
         surface: "fs",

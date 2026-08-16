@@ -483,8 +483,25 @@ fn is_utf8_string_content(value: &Value) -> bool {
     }
 }
 
+/// Common agent misspellings of `content`. Folded before dispatch so a
+/// `contents:` write does not create an empty file.
+const WRITE_CONTENT_ALIASES: &[&str] = &["contents", "body", "text"];
+const WRITE_KNOWN_KEYS: &[&str] = &[
+    "path",
+    "base",
+    "content",
+    "op",
+    "contents",
+    "body",
+    "text",
+];
+const MISSING_WRITE_CONTENT: &str = "missing_write_content";
+const UNKNOWN_WRITE_FIELD: &str = "unknown_write_field";
+const WRITE_CONTENT_CONFLICT: &str = "write_content_conflict";
+
 /// Reject tool-result / provenance objects smuggled as `content`.
-/// Missing `content` stays legal (empty create); present content must be a string.
+/// Missing `content` is allowed for `fs.edit` (find/replace). Writes go
+/// through [`normalize_write_args`].
 fn reject_non_byte_write_content(args: &Value) -> Result<(), ConnectorError> {
     let Some(map) = args.as_object() else {
         return Ok(());
@@ -494,6 +511,87 @@ fn reject_non_byte_write_content(args: &Value) -> Result<(), ConnectorError> {
         Some(value) if is_utf8_string_content(value) => Ok(()),
         Some(_) => Err(write_content_error()),
     }
+}
+
+fn fold_write_content_aliases(args: &mut Value) -> Result<(), ConnectorError> {
+    let Some(map) = args.as_object_mut() else {
+        return Ok(());
+    };
+    let mut alias_hits: Vec<(String, Value)> = Vec::new();
+    for key in WRITE_CONTENT_ALIASES {
+        if let Some(value) = map.remove(*key) {
+            alias_hits.push(((*key).to_string(), value));
+        }
+    }
+    if alias_hits.is_empty() {
+        return Ok(());
+    }
+    if let Some(existing) = map.get("content") {
+        if alias_hits.iter().any(|(_, value)| value != existing) {
+            let names = alias_hits
+                .iter()
+                .map(|(key, _)| key.as_str())
+                .collect::<Vec<_>>()
+                .join("/");
+            return Err(ConnectorError::new(format!(
+                "{WRITE_CONTENT_CONFLICT}: fs.write got both content and {names}; keep one UTF-8 string in content"
+            )));
+        }
+        return Ok(());
+    }
+    let first = alias_hits[0].1.clone();
+    if alias_hits.iter().any(|(_, value)| value != &first) {
+        let names = alias_hits
+            .iter()
+            .map(|(key, _)| key.as_str())
+            .collect::<Vec<_>>()
+            .join("/");
+        return Err(ConnectorError::new(format!(
+            "{WRITE_CONTENT_CONFLICT}: fs.write got conflicting {names}; keep one UTF-8 string in content"
+        )));
+    }
+    map.insert("content".into(), first);
+    Ok(())
+}
+
+fn reject_unknown_write_keys(args: &Value) -> Result<(), ConnectorError> {
+    let Some(map) = args.as_object() else {
+        return Ok(());
+    };
+    let mut unknown: Vec<&str> = map
+        .keys()
+        .map(String::as_str)
+        .filter(|key| !WRITE_KNOWN_KEYS.contains(key))
+        .collect();
+    if unknown.is_empty() {
+        return Ok(());
+    }
+    unknown.sort_unstable();
+    Err(ConnectorError::new(format!(
+        "{UNKNOWN_WRITE_FIELD}: fs.write does not take {}; use content (also accepted: contents, body, text)",
+        unknown.join(", ")
+    )))
+}
+
+fn require_write_content_string(args: &Value) -> Result<(), ConnectorError> {
+    let Some(map) = args.as_object() else {
+        return Ok(());
+    };
+    match map.get("content") {
+        None => Err(ConnectorError::new(format!(
+            "{MISSING_WRITE_CONTENT}: fs.write needs a UTF-8 string in content \
+             (also accepted: contents, body, text). Use content: \"\" to create an empty file"
+        ))),
+        Some(value) if is_utf8_string_content(value) => Ok(()),
+        Some(_) => Err(write_content_error()),
+    }
+}
+
+fn normalize_write_args(mut args: Value) -> Result<Value, ConnectorError> {
+    fold_write_content_aliases(&mut args)?;
+    reject_unknown_write_keys(&args)?;
+    require_write_content_string(&args)?;
+    Ok(args)
 }
 
 /// Fill `op` when a batch step omits it: find/replace → edit, else write.
@@ -517,7 +615,11 @@ fn default_batch_step_op(step: &mut Value) -> Result<(), ConnectorError> {
             "fs.multi_edit edit step needs both find/old and replace/new",
         ));
     }
-    if map.get("content").is_some() {
+    if map.get("content").is_some()
+        || WRITE_CONTENT_ALIASES
+            .iter()
+            .any(|key| map.get(*key).is_some())
+    {
         map.insert("op".into(), Value::String("write".into()));
         return Ok(());
     }
@@ -555,16 +657,17 @@ fn collect_batch_steps(input: Value) -> Result<Value, ConnectorError> {
     Ok(Value::Array(steps))
 }
 
-fn reject_non_byte_transact_writes(steps: &Value) -> Result<(), ConnectorError> {
-    let Some(items) = steps.as_array() else {
+fn normalize_transact_writes(steps: &mut Value) -> Result<(), ConnectorError> {
+    let Some(items) = steps.as_array_mut() else {
         return Ok(());
     };
     for step in items {
-        let Some(op) = step.get("op").and_then(Value::as_str) else {
-            continue;
-        };
-        if op == "write" {
-            reject_non_byte_write_content(step)?;
+        let is_write = step
+            .get("op")
+            .and_then(Value::as_str)
+            .is_some_and(|op| op == "write");
+        if is_write {
+            *step = normalize_write_args(std::mem::take(step))?;
         }
     }
     Ok(())
@@ -747,16 +850,21 @@ pub fn lower(
     // gate (null = must-not-exist create, fz://blob/<sha256> = compare-
     // and-swap against current content). Write `content` is hub-gated:
     // a tool-result object must not stringify into a tracked file.
-    if surface == "fs" && (method == "edit" || method == "write") {
+    // `contents`/`body`/`text` fold to `content`; unknown keys fail loud.
+    if surface == "fs" && method == "write" {
+        let args = normalize_write_args(exactly_one_options_object(input)?)?;
+        return Ok((engine, "fs.write".into(), args));
+    }
+    if surface == "fs" && method == "edit" {
         let args = exactly_one_options_object(input)?;
         reject_non_byte_write_content(&args)?;
-        return Ok((engine, format!("fs.{method}"), args));
+        return Ok((engine, "fs.edit".into(), args));
     }
     // All-or-nothing multi-file mutation. multi_edit is the dogfood name
     // (implicit op:edit|write); transact is the kernel.
     if surface == "fs" && matches!(method, "transact" | "multi_edit") {
-        let steps = collect_batch_steps(input)?;
-        reject_non_byte_transact_writes(&steps)?;
+        let mut steps = collect_batch_steps(input)?;
+        normalize_transact_writes(&mut steps)?;
         return Ok((engine, "fs.transact".into(), serde_json::json!({"steps": steps})));
     }
     if surface == "fs" && method == "compound" {
@@ -788,7 +896,11 @@ pub fn lower(
                 "fs.edit and fs.write take exactly one options object",
             ));
         }
-        if matches!(op, "fs.write" | "fs.edit") {
+        if op == "fs.write" {
+            let compound_args = normalize_write_args(compound_args)?;
+            return Ok((engine, op.into(), compound_args));
+        }
+        if op == "fs.edit" {
             reject_non_byte_write_content(&compound_args)?;
         }
         return Ok((engine, op.into(), compound_args));
@@ -878,3 +990,6 @@ pub fn lower(
 #[cfg(test)]
 #[path = "../../../tests/unit/zsx-core/lower_compound_search_alias_tests.rs"]
 mod compound_search_alias_tests;
+#[cfg(test)]
+#[path = "../../../tests/unit/zsx-core/lower_write_content_alias_tests.rs"]
+mod write_content_alias_tests;
