@@ -482,6 +482,16 @@ enum SessionCommand {
     },
 }
 
+/// True when a failed domain result must abort the plan instead of the
+/// read/list/search late-Ok salvage.
+///
+/// Keep this list aligned with [`crate::connector`] journaled FS mutations
+/// (`fs.write` / `fs.edit` / `fs.transact`). `result.mutated` is kept as a
+/// backstop if a future engine starts setting it on failure.
+fn domain_failure_aborts_plan(op: &str, mutated: bool) -> bool {
+    mutated || matches!(op, "fs.write" | "fs.edit" | "fs.transact")
+}
+
 /// Execute one canonical call against `session` and convert the outcome,
 /// entirely on the session thread (the session is not `Send`).
 fn run_call(
@@ -532,10 +542,11 @@ fn run_call(
                 request.op
             ))
         });
-        // Mutations still abort the plan. A missing sibling file on a
-        // read/list/search must not throw: sequential compound reads in one
-        // plan should return the files that existed.
-        if result.mutated {
+        // Mutations still abort the plan. DomainResult::failure always
+        // sets mutated=false (FSZero op_mutated(!ok) is also false), so
+        // classify by journaled op, not the result flag. A missed write
+        // here is salvaged as Ok and the connector marks Succeeded.
+        if domain_failure_aborts_plan(&request.op, result.mutated) {
             return Err(domain_error_to_adapter(&error, request));
         }
         let mut value = serde_json::to_value(&result).unwrap_or(Value::Null);
@@ -1169,5 +1180,81 @@ mod tests {
         }
         assert!(is_forbidden_operation("planner"));
         assert!(is_forbidden_operation("js.execute"));
+    }
+
+    #[test]
+    fn late_ok_aborts_journaled_mutations_not_reads() {
+        assert!(domain_failure_aborts_plan("fs.write", false));
+        assert!(domain_failure_aborts_plan("fs.edit", false));
+        assert!(domain_failure_aborts_plan("fs.transact", false));
+        assert!(domain_failure_aborts_plan("fs.read", true));
+        assert!(!domain_failure_aborts_plan("fs.read", false));
+        assert!(!domain_failure_aborts_plan("fs.search", false));
+        assert!(!domain_failure_aborts_plan("fs.list", false));
+    }
+
+    fn adapter_call(
+        adapter: &FsZeroAdapter,
+        op: &str,
+        args: Value,
+    ) -> Result<AdapterResponse, AdapterError> {
+        let request = CallRequest {
+            request_id: format!("late-ok-{op}"),
+            op: op.into(),
+            args,
+            deadline_unix_ms: None,
+            trace: empty_request().trace,
+            approval_grant: None,
+            telemetry_request: None,
+        };
+        adapter.call(AdapterCall {
+            request: &request,
+            cancellation: &CancellationSignal::new(),
+        })
+    }
+
+    #[test]
+    fn failed_write_aborts_instead_of_late_ok() {
+        let root = std::env::temp_dir().join(format!(
+            "zerostack-late-ok-write-{}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&root).expect("temp root");
+        let adapter = FsZeroAdapter::new_in_memory(&root, "late-ok-write");
+        assert!(!adapter.degraded(), "in-memory adapter must be live");
+        let err = adapter_call(&adapter, "fs.write", json!({}))
+            .expect_err("failed fs.write must abort the plan");
+        assert!(
+            !err.error.message.contains("sitting-reply"),
+            "must be the domain failure, not a channel drop: {}",
+            err.error.message
+        );
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn missing_read_stays_late_ok() {
+        let root = std::env::temp_dir().join(format!(
+            "zerostack-late-ok-read-{}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&root).expect("temp root");
+        let adapter = FsZeroAdapter::new_in_memory(&root, "late-ok-read");
+        assert!(!adapter.degraded(), "in-memory adapter must be live");
+        let outcome = adapter_call(
+            &adapter,
+            "fs.read",
+            json!({ "path": "does-not-exist.txt" }),
+        )
+        .expect("missing sibling read must stay Ok");
+        let value = &outcome.result.value;
+        let ok = value.get("ok").and_then(Value::as_bool);
+        let error_text = value.get("error_text").and_then(Value::as_str);
+        assert_eq!(ok, Some(false), "salvage must carry DomainResult.ok=false: {value}");
+        assert!(
+            error_text.is_some() || value.get("error").is_some(),
+            "salvage must keep the typed error: {value}"
+        );
+        let _ = std::fs::remove_dir_all(&root);
     }
 }
