@@ -851,6 +851,13 @@ pub struct ZsxSession {
     /// out and leave the handle on the watcher; later shutdowns poll this
     /// instead of latching Terminating forever (zerostack-ahzn).
     join_watch: Mutex<Option<mpsc::Receiver<bool>>>,
+    /// First shutdown owns the JoinHandle from `shutdown_sent` through the
+    /// join attempt so a concurrent `finish_parked_join` cannot steal it
+    /// (zerostack-huw1).
+    join_in_flight: AtomicBool,
+    /// Broadcast: a parked or inline join finished. `try_recv` is
+    /// single-consumer; later waiters read this instead of Terminating.
+    join_done: AtomicBool,
 }
 
 #[derive(Clone)]
@@ -1047,6 +1054,8 @@ impl ZsxSession {
             continuations,
             live_generation,
             join_watch: Mutex::new(None),
+            join_in_flight: AtomicBool::new(false),
+            join_done: AtomicBool::new(false),
         })
     }
 
@@ -1904,7 +1913,8 @@ impl ZsxSession {
     pub fn shutdown(&self) -> Result<u64, ZsxSessionError> {
         let (generation, should_send) = {
             let mut state = self.lock_state(None)?;
-            if state.worker_stopped {
+            if state.worker_stopped || self.join_done.load(Ordering::Acquire) {
+                state.worker_stopped = true;
                 return Ok(state.generation);
             }
             if state.shutdown_sent {
@@ -1927,8 +1937,19 @@ impl ZsxSession {
             state.terminating = true;
             state.replacing = false;
             state.shutdown_sent = true;
+            self.join_in_flight.store(true, Ordering::Release);
             (state.generation, true)
         };
+        let result = self.shutdown_after_sent(generation, should_send);
+        self.join_in_flight.store(false, Ordering::Release);
+        result
+    }
+
+    fn shutdown_after_sent(
+        &self,
+        generation: u64,
+        should_send: bool,
+    ) -> Result<u64, ZsxSessionError> {
         cancel_backend(&self.cancellation);
         let shutdown_started = Instant::now();
         if should_send {
@@ -1985,6 +2006,7 @@ impl ZsxSession {
                 ));
             }
         }
+        self.join_done.store(true, Ordering::Release);
         if let Ok(mut state) = self.state.lock() {
             state.worker_stopped = true;
         }
@@ -1992,22 +2014,32 @@ impl ZsxSession {
     }
 
     fn finish_parked_join(&self) -> bool {
+        if self.join_done.load(Ordering::Acquire) {
+            return true;
+        }
         if let Ok(mut watch) = self.join_watch.lock()
             && let Some(done) = watch.as_mut()
         {
             match done.try_recv() {
                 Ok(_) | Err(mpsc::TryRecvError::Disconnected) => {
                     *watch = None;
+                    self.join_done.store(true, Ordering::Release);
                     return true;
                 }
                 Err(mpsc::TryRecvError::Empty) => {}
             }
         }
+        if self.join_in_flight.load(Ordering::Acquire) {
+            return self.join_done.load(Ordering::Acquire);
+        }
         if let Ok(mut worker) = self.worker.lock()
             && let Some(handle) = worker.take()
         {
             return match join_thread_within_parked(handle, Duration::ZERO) {
-                Ok(()) => true,
+                Ok(()) => {
+                    self.join_done.store(true, Ordering::Release);
+                    true
+                }
                 Err(parked) => {
                     if let Ok(mut watch) = self.join_watch.lock() {
                         *watch = Some(parked.done);
@@ -2016,7 +2048,7 @@ impl ZsxSession {
                 }
             };
         }
-        false
+        self.join_done.load(Ordering::Acquire)
     }
 
     fn lock_state(
@@ -2218,6 +2250,36 @@ impl ZsxSession {
             state.replacing = false;
             state.accepting = false;
             state.terminating = true;
+        }
+    }
+
+    #[cfg(test)]
+    fn test_has_worker(&self) -> bool {
+        self.worker.lock().ok().is_some_and(|slot| slot.is_some())
+    }
+
+    #[cfg(test)]
+    fn test_mark_join_in_flight(&self) {
+        if let Ok(mut state) = self.state.lock() {
+            state.shutdown_sent = true;
+            state.accepting = false;
+            state.terminating = true;
+        }
+        self.join_in_flight.store(true, Ordering::Release);
+    }
+
+    #[cfg(test)]
+    fn test_install_parked_watch(&self, done: mpsc::Receiver<bool>) {
+        if let Ok(mut state) = self.state.lock() {
+            state.shutdown_sent = true;
+            state.accepting = false;
+            state.terminating = true;
+        }
+        if let Ok(mut worker) = self.worker.lock() {
+            let _ = worker.take();
+        }
+        if let Ok(mut watch) = self.join_watch.lock() {
+            *watch = Some(done);
         }
     }
 }
@@ -2825,6 +2887,54 @@ mod shutdown_deadline_tests {
             .done
             .recv_timeout(Duration::from_millis(200))
             .expect("watcher must report join after worker unblocks");
+    }
+
+    #[test]
+    fn parked_join_second_waiter_sees_consumed_watch() {
+        let root = temp_root();
+        let session = stub_session(&root);
+        let (release_tx, release_rx) = mpsc::sync_channel::<()>(1);
+        let handle = thread::spawn(move || {
+            let _ = release_rx.recv();
+        });
+        let parked = join_thread_within_parked(handle, Duration::ZERO).expect_err("park");
+        session.test_install_parked_watch(parked.done);
+        drop(release_tx);
+        let deadline = Instant::now() + Duration::from_millis(200);
+        let mut first = false;
+        while Instant::now() < deadline {
+            first = session.finish_parked_join();
+            if first {
+                break;
+            }
+            thread::sleep(Duration::from_millis(1));
+        }
+        assert!(first, "watcher must become readable");
+        assert!(
+            session.finish_parked_join(),
+            "second waiter must observe join_done after try_recv is consumed"
+        );
+        let again = session.shutdown().expect("idempotent after join_done");
+        assert_eq!(again, 1);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn parked_join_does_not_steal_in_flight_handle() {
+        let root = temp_root();
+        let session = stub_session(&root);
+        assert!(session.test_has_worker(), "stub starts with a worker");
+        session.test_mark_join_in_flight();
+        assert!(
+            !session.finish_parked_join(),
+            "in-flight first shutdown still owns the join"
+        );
+        assert!(
+            session.test_has_worker(),
+            "second waiter must not take the JoinHandle"
+        );
+        let _ = session.shutdown();
+        let _ = std::fs::remove_dir_all(&root);
     }
 }
 
