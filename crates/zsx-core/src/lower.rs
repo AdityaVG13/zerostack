@@ -39,6 +39,7 @@ pub const METHODS: &[(&str, &str)] = &[
     ("token", "job"),
     ("token", "shell"),
     ("help", "search"),
+    ("help", "catalog"),
 ];
 
 /// Map a public surface name to its single engine.
@@ -122,16 +123,16 @@ const TOKEN_SHELL_OPTIONS: &[(&str, TokenOptionType)] = &[
     ("background", TokenOptionType::Bool),
 ];
 
-/// First-match expand schemes. `gz://` must precede `g:` (`gz://` starts with `g:`).
-/// Prefix lengths stay on the original string bytes (`"fz://"` and `"tz://"`
-/// are both 5); the table does not slice.
-const EXPAND_SCHEMES: &[(&str, EngineIdentity, &str, &str)] = &[
-    ("fz://", EngineIdentity::FsZero, "fs.expand", "ref"),
-    ("gz://", EngineIdentity::GraphZero, "expand", "reference"),
-    ("g:", EngineIdentity::GraphZero, "expand", "reference"),
-    ("q:", EngineIdentity::GraphZero, "expand", "reference"),
-    ("tz://", EngineIdentity::TokenZero, "expand", "ref"),
+/// Portable blob expand only. Query / node / file / path refs are not
+/// expand targets (they used to hit GraphZero/FSZero parsers and dump
+/// the payload into a garbled malformed-parse error).
+const EXPAND_BLOB_OWNERS: &[(&str, EngineIdentity, &str, &str)] = &[
+    ("fz://blob/", EngineIdentity::FsZero, "fs.expand", "ref"),
+    ("gz://blob/", EngineIdentity::GraphZero, "expand", "reference"),
+    ("tz://blob/", EngineIdentity::TokenZero, "expand", "ref"),
 ];
+
+const EXPAND_SCHEMES_HELP: &str = "tz://blob, fz://blob, gz://blob";
 
 const COMPOUND_OPS: &[(&str, &str)] = &[
     ("read", "fs.read"),
@@ -331,6 +332,24 @@ fn token_job_args(input: &Value) -> Result<Value, ConnectorError> {
     serde_json::to_value(request).map_err(|error| ConnectorError::new(error.to_string()))
 }
 
+fn short_ref(reference: &str) -> String {
+    const MAX: usize = 72;
+    if reference.len() <= MAX {
+        return reference.to_owned();
+    }
+    let mut end = MAX;
+    while end > 0 && !reference.is_char_boundary(end) {
+        end -= 1;
+    }
+    format!("{}…", &reference[..end])
+}
+
+fn is_location_expand_ref(reference: &str) -> bool {
+    reference.starts_with("fz://file/")
+        || reference.starts_with("file://")
+        || (!reference.contains("://") && !reference.starts_with("g:") && !reference.starts_with("q:"))
+}
+
 fn lower_token_expand(input: &Value) -> Result<(EngineIdentity, String, Value), ConnectorError> {
     let reference = input
         .as_array()
@@ -339,14 +358,45 @@ fn lower_token_expand(input: &Value) -> Result<(EngineIdentity, String, Value), 
         .or_else(|| input.get("ref").and_then(Value::as_str))
         .or_else(|| input.as_str())
         .ok_or_else(|| ConnectorError::new("token.expand requires ref"))?;
-    let (engine, op, key) = EXPAND_SCHEMES
+    if is_location_expand_ref(reference) {
+        let preview = short_ref(reference);
+        return Err(ConnectorError::new(format!(
+            "cannot expand location ref {preview}; expected a portable blob ({EXPAND_SCHEMES_HELP}). \
+             For a HIT window use zero.fs.compound(\"read\", {{path, start_line, end_line}}) with #Lstart-Lend \
+             (1-based inclusive). A bare #L25 is not a window — use #L25-L25 or start_line/end_line."
+        )));
+    }
+    if let Some((_, engine, op, key)) = EXPAND_BLOB_OWNERS
         .iter()
         .find(|(prefix, _, _, _)| reference.starts_with(prefix))
-        .map(|(_, engine, op, key)| (*engine, *op, *key))
-        .ok_or_else(|| ConnectorError::new("unsupported ref scheme"))?;
-    let mut args = serde_json::Map::new();
-    args.insert(key.into(), Value::String(reference.into()));
-    Ok((engine, op.into(), Value::Object(args)))
+    {
+        if zero_ref::ZeroRefV1::parse(reference).is_err() {
+            return Err(ConnectorError::new(format!(
+                "cannot expand {}; expected {EXPAND_SCHEMES_HELP} with a 64-hex digest and optional #Bstart-end or #Lstart-end",
+                short_ref(reference)
+            )));
+        }
+        let mut args = serde_json::Map::new();
+        args.insert((*key).into(), Value::String(reference.into()));
+        return Ok((*engine, (*op).into(), Value::Object(args)));
+    }
+    if reference.starts_with("gz://query/") || reference.starts_with("q:") {
+        return Err(ConnectorError::new(format!(
+            "cannot expand query ref {}; expected a portable blob ({EXPAND_SCHEMES_HELP}). \
+             Use the query result's evidence_ref / gz://blob/…, not gz://query/…",
+            short_ref(reference)
+        )));
+    }
+    if reference.starts_with("gz://") || reference.starts_with("g:") {
+        return Err(ConnectorError::new(format!(
+            "cannot expand graph ref {}; expected a portable blob ({EXPAND_SCHEMES_HELP})",
+            short_ref(reference)
+        )));
+    }
+    Err(ConnectorError::new(format!(
+        "unsupported ref scheme on {}; valid expand schemes: {EXPAND_SCHEMES_HELP}",
+        short_ref(reference)
+    )))
 }
 
 fn lower_fs_plan(engine: EngineIdentity, input: &Value) -> (EngineIdentity, String, Value) {
@@ -905,6 +955,43 @@ mod compound_search_alias_tests {
         assert_eq!(op, "fs.multiRead");
         assert_eq!(args["paths"], json!(["Cargo.toml", "README.md"]));
         assert!(args.get("items").is_none());
+    }
+
+    #[test]
+    fn expand_rejects_query_ref_without_dumping_payload() {
+        let payload = format!(
+            "gz://query/{}",
+            r#"{"evidence_ref":"1049","noise":""# .repeat(40)
+        );
+        let err = lower("token", "expand", json!({"ref": payload})).unwrap_err();
+        let message = err.to_string();
+        assert!(message.contains("cannot expand query ref"), "{message}");
+        assert!(message.contains("tz://blob"), "{message}");
+        assert!(!message.contains("1049"), "{message}");
+        assert!(message.len() < 400, "{}", message.len());
+    }
+
+    #[test]
+    fn expand_lists_schemes_on_bare_path() {
+        let err = lower("token", "expand", json!({"ref": "AGENTS.md"})).unwrap_err();
+        let message = err.to_string();
+        assert!(message.contains("tz://blob"), "{message}");
+        assert!(message.contains("fz://blob"), "{message}");
+        assert!(message.contains("gz://blob"), "{message}");
+    }
+
+    #[test]
+    fn expand_rejects_file_line_as_window() {
+        let err = lower(
+            "token",
+            "expand",
+            json!({"ref": "fz://file/crates/zsx-core/src/lower.rs#L25"}),
+        )
+        .unwrap_err();
+        let message = err.to_string();
+        assert!(message.contains("location ref"), "{message}");
+        assert!(message.contains("#Lstart-Lend") || message.contains("start_line"), "{message}");
+        assert!(!message.contains("bad window"), "{message}");
     }
 }
 

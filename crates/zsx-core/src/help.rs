@@ -7,8 +7,6 @@
 
 use serde_json::{json, Value};
 
-use crate::lower::METHODS;
-
 /// Globals available inside a plan. Everything else is rejected by the
 /// bounded interpreter with `unsupported syntax`.
 pub const SANDBOX_GLOBALS: &[&str] = &["Promise", "JSON", "Array", "Object", "Map", "Set", "Math"];
@@ -225,9 +223,16 @@ const HELP_ENTRIES: &[HelpEntry] = &[
     HelpEntry {
         surface: "help",
         method: "search",
-        signature: "zero.help.search({ query, namespace?, limit?, offset? })",
+        signature: "zero.help.search({ query, namespace?, limit?, offset? }) — empty query lists every method; zero.help() is the same browse",
         description: "Discover surface operations and exact call signatures; empty query browses everything",
-        keywords: &["help", "discover", "catalog", "signature", "docs"],
+        keywords: &["help", "discover", "catalog", "signature", "docs", "meta"],
+    },
+    HelpEntry {
+        surface: "help",
+        method: "catalog",
+        signature: "zero.help.catalog() — full method list with signatures (alias of help.search with empty query)",
+        description: "List every registered surface method and its call signature",
+        keywords: &["help", "catalog", "list", "methods", "meta", "introspection"],
     },
 ];
 
@@ -391,8 +396,18 @@ pub fn help_search(input: &Value) -> Value {
 
 #[cfg(test)]
 mod help_search_mr_tests {
-    use super::help_search;
+    use super::{HELP_ENTRIES, help_search};
+    use crate::lower::METHODS;
     use serde_json::json;
+
+    #[test]
+    fn help_entries_match_methods() {
+        assert_eq!(HELP_ENTRIES.len(), METHODS.len());
+        for ((surface, method), entry) in METHODS.iter().zip(HELP_ENTRIES.iter()) {
+            assert_eq!(*surface, entry.surface, "{surface}.{method}");
+            assert_eq!(*method, entry.method, "{surface}.{method}");
+        }
+    }
 
     fn paths(query: &str, limit: usize, offset: usize) -> Vec<String> {
         let value = help_search(&json!({"query": query, "limit": limit, "offset": offset}));

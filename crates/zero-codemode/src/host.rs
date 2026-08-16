@@ -592,8 +592,50 @@ fn unwrap_worker_envelope(value: JsonValue) -> JsonValue {
                 map.insert("refs".into(), refs.clone());
             }
         }
+        attach_search_targets(map);
     }
     domain
+}
+
+fn attach_search_targets(domain: &mut serde_json::Map<String, JsonValue>) {
+    if domain.contains_key("targets") {
+        return;
+    }
+    let text = domain
+        .get("payload_utf8")
+        .and_then(JsonValue::as_str)
+        .or_else(|| {
+            domain
+                .get("value")
+                .and_then(|inner| inner.get("payload_utf8"))
+                .and_then(JsonValue::as_str)
+        });
+    let Some(text) = text else {
+        return;
+    };
+    let targets: Vec<JsonValue> = text
+        .lines()
+        .filter_map(|line| {
+            let rest = line.strip_prefix("HIT ")?;
+            let target = rest.split_whitespace().next()?;
+            let (path, suffix) = target.rsplit_once("#L")?;
+            let (start, end) = suffix.split_once("-L")?;
+            let start_line: u64 = start.parse().ok()?;
+            let end_line: u64 = end.parse().ok()?;
+            if path.is_empty() || start_line == 0 || end_line < start_line {
+                return None;
+            }
+            Some(serde_json::json!({
+                "path": path,
+                "start_line": start_line,
+                "end_line": end_line,
+                "target": target,
+            }))
+        })
+        .collect();
+    if !targets.is_empty() {
+        domain.insert("targets".into(), JsonValue::Array(targets));
+    }
 }
 
 fn looks_like_expand_domain(value: &JsonValue) -> bool {
@@ -820,5 +862,20 @@ mod public_result_shape_tests {
         assert_eq!(public["content"]["kind"], "inline");
         assert_eq!(public["content"]["value"]["operation"], "fs.search");
         assert!(public["content"]["value"].get("metadata").is_none());
+    }
+
+    #[test]
+    fn search_payload_exposes_snap_targets() {
+        let wrapped = json!({
+            "metadata": { "ownership": { "engine": "fszero", "refs": [] } },
+            "value": {
+                "operation": "fs.search",
+                "payload_utf8": "HIT crates/zsx-core/src/lower.rs#L10-L14 kind=literal\n| 10: fn lower"
+            }
+        });
+        let domain = unwrap_worker_envelope(wrapped);
+        assert_eq!(domain["targets"][0]["path"], "crates/zsx-core/src/lower.rs");
+        assert_eq!(domain["targets"][0]["start_line"], 10);
+        assert_eq!(domain["targets"][0]["end_line"], 14);
     }
 }

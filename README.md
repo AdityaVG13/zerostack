@@ -61,6 +61,8 @@ return await zero.token.expand(run.content.ref);
 
 `zsx mcp` is the one-catalog carrier (`zero_execute` / `zero_wait`). Do not also register engine MCP servers (fszero / graphzero / tokenzero) in the same harness. `zero-mcp` is an optional FastMCP crate and is not a second catalog on that path.
 
+Paths in plans are workspace-relative to `-C` / `root`. Absolute paths and `file://` are rejected even when `root` is set; that is intentional. `zero.help()` (or `zero.help.search({})`) lists every method and signature.
+
 More: [docs/codemode.md](docs/codemode.md), [docs/architecture.md](docs/architecture.md).
 
 ## `zsx`

@@ -1409,8 +1409,11 @@ impl<'tree> Interpreter<'tree> {
             Value::Namespace(name) if name == "Boolean" => {
                 Ok(Value::Bool(args.first().is_some_and(truthy)))
             }
+            Value::Namespace(name) if name == "help" => {
+                self.call_tool("help", "search", args)
+            }
             Value::Namespace(name) => Err(Fault::Host(HostError::UnsupportedSyntax(format!(
-                "namespace '{name}' is not callable"
+                "namespace '{name}' is not callable; try zero.help() or zero.help.search({{query}})"
             )))),
             _ => Err(Fault::Host(HostError::Data("value is not callable".into()))),
         }

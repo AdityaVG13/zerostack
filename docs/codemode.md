@@ -73,7 +73,7 @@ printf '%s\n' 'return await zero.fs.read({path:"Cargo.toml"});' \
   | ./target/release/zsx exec -C "$PWD"
 ~~~
 
-`zsx exec` reads a plan from stdin or `--file PLAN`. `-C ROOT` authorizes and canonicalizes one engine root. `--timeout-ms N` overrides the 30000 ms default.
+`zsx exec` reads a plan from stdin or `--file PLAN`. `-C ROOT` authorizes and canonicalizes one engine root. Paths in the plan are relative to that root; absolute paths stay rejected. `--timeout-ms N` overrides the 30000 ms default. Discover call shapes with `zero.help()` or `zero.help.search({query})`.
 
 The executable embeds `zsx-core` and all three domain adapters. It creates no engine worker, NDJSON pipe, session socket, or daemon. Pi and OMP load the same runtime through `@zerostack/zsx-native`; their adapters do not own execution authority.
 
