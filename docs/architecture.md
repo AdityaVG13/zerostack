@@ -1,6 +1,6 @@
 # Architecture
 
-ZeroStack is an aggregation layer for three sibling engines. It defines their shared concepts, integration patterns, benchmarks, and conformance contract without merging their implementations.
+ZeroStack is an aggregation layer for three sibling engines. It defines their shared concepts, integration patterns, and conformance contract without merging their implementations.
 
 ## Boundaries
 

@@ -7,8 +7,6 @@
 | [CodeMode](codemode.md) | In-process plans vs MCP |
 | [MCP policy](mcp-compatibility-policy.md) | CodeMode default |
 | [RACC](racc/RACC.md) | Recovery-aware context compression |
-| [Papers](papers/README.md) | Publication scaffolds |
-| [Lean](lean/README.md) | Formal surface |
 
 Contracts live in [`../conformance/`](../conformance/README.md).
-Measured numbers live in [`../benchmarks/`](../benchmarks/benchmarks.md).
+Benchmark catalog: [`../benchmarks/`](../benchmarks/benchmarks.md).

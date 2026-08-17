@@ -13,7 +13,7 @@ case "$(uname -s):$(uname -m)" in
 esac
 
 cd "$ROOT"
-cargo build --locked --profile release-node -p zsx-node
+cargo build --profile release-node -p zsx-node
 
 source="target/release-node/$library"
 destination="bindings/node/prebuilds/$platform/zsx_node.node"

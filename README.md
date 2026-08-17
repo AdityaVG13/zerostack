@@ -85,7 +85,7 @@ printf '%s\n' 'return (await zero.fs.compound("read", { path: "README.md" })).co
 
 ## Build
 
-Rust nightly as pinned in [`rust-toolchain.toml`](rust-toolchain.toml). License: MIT OR Apache-2.0.
+Rust nightly as pinned in [`rust-toolchain.toml`](rust-toolchain.toml). License: [MIT](LICENSE-MIT) OR [Apache-2.0](LICENSE-APACHE).
 
 ```bash
 git clone https://github.com/AdityaVG13/zerostack.git

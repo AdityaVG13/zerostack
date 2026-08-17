@@ -1,5 +1,5 @@
 # Benchmarks
 
-Catalog and measured numbers: [benchmarks.md](benchmarks.md).
+Catalog: [benchmarks.md](benchmarks.md).
 
-The savings run (Exact tokens, envelope bytes, call fusion) is [savings-bench.md](savings-bench.md).
+Measured dumps stay local (`.bench-history/`, `savings-bench.json`). They are not part of a clone.

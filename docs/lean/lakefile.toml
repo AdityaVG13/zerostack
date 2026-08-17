@@ -1,6 +1,0 @@
-name = "zero-racc"
-version = "0.1.0"
-defaultTargets = ["ZeroRacc"]
-
-[[lean_lib]]
-name = "ZeroRacc"

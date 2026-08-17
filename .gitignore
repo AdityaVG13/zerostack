@@ -71,12 +71,17 @@ CLAUDE.md.*
 docs/progress/
 docs/spec/
 docs/CHARTER.md
+docs/lean/
+docs/papers/
+docs/authority-boundaries.md
 conformance/golden/
-conformance/contracts/spec_version_contract.toml
-conformance/contracts/feature_coverage_dashboard.json
-conformance/contracts/invariant_catalog.toml
 fuzz/
 crates/zerostack-harness/
+.zsx_patch.diff
+*.diff
+*.patch
+bindings/node/prebuilds/
+tests/scripts/
 scripts/bench/
 scripts/bless-golden.sh
 scripts/capture_golden.py
@@ -136,13 +141,11 @@ tests/artifacts/
 tests/reports/
 .ubs-loop/
 
-# Benchmarks catalog only (no harness dumps)
+# Benchmarks catalog only (no measured dumps)
 benchmarks/**
 !benchmarks/
 !benchmarks/README.md
 !benchmarks/benchmarks.md
-!benchmarks/savings-bench-v1.md
-!benchmarks/savings-bench-v1.json
 
 # Private local runtime evidence; not a repository/CI attestation.
 conformance/reports/
@@ -154,35 +157,20 @@ conformance/Cargo.toml
 conformance/Cargo.lock
 conformance/ATTESTATION.md
 
-# Conformance allowlist: contracts, authority, models, schemas
+# Conformance allowlist: what a clone needs to understand the product
+# and run the FeatureUniverse weight gate. Everything else stays local.
 conformance/*
 !conformance/
 !conformance/README.md
 !conformance/CONTRACT.md
-!conformance/authority/
-!conformance/authority/**
-!conformance/contracts/
-!conformance/contracts/**
 !conformance/engine-topology.json
-!conformance/models/
-!conformance/models/**
+!conformance/contracts/
+!conformance/contracts/cache-entry.md
+!conformance/contracts/fresh-work-vector.md
+!conformance/contracts/zero-edit-protocol.md
+!conformance/contracts/supported_surface_matrix.toml
 !conformance/schemas/
-conformance/schemas/*
 !conformance/schemas/engine-topology.schema.json
-!conformance/schemas/reasoning-contract.schema.json
-!conformance/schemas/dominance-complete-recovery.schema.json
-!conformance/schemas/exact-deoptimization-resume.schema.json
-!conformance/schemas/exact-deoptimization-execution.schema.json
-!conformance/schemas/exact-deoptimization-plan.schema.json
-!conformance/schemas/q99-causal-cache-component.schema.json
-!conformance/schemas/q99-claim.schema.json
-!conformance/schemas/robust-snap-intake.schema.json
-!conformance/schemas/causal-artifact-intake.schema.json
-!conformance/schemas/reinvestment-plan.schema.json
-!conformance/schemas/reinvestment-selection.schema.json
-!conformance/schemas/zerobench-r-run.schema.json
-!conformance/schemas/zerobench-r-report.schema.json
-!conformance/schemas/two-phase-gate.schema.json
 !conformance/schemas/zero-result.schema.json
 
 # Local bench-history ratchet (dotfile, not public).
