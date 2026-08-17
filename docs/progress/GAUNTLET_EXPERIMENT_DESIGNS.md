@@ -24,16 +24,16 @@ Negative-evidence ledgers (grep first): `perf-negative-results.md`, `conformance
 
 ## Census
 
-| Status | Count | Meaning for pass 11 |
+| Status | Count | Meaning after Phase 12 |
 |---|---:|---|
-| `CLOSED` | 25 | Already correct, or pass-11 remediations landed. |
-| `CONFIRMED_GAP` | 5 | Remaining holes (CI tests, cancel hub test, Q99 residual, plus non-ranked). |
-| `OPEN` | 19 | Experiment not yet run, or unverified SPEC tag. Do not treat as a bug. |
-| `NO_EVIDENCE` | 0 | -- |
+| `CLOSED` | 30 | Already correct, pass-11 remediations, or Phase-12 AUTO-FIX tests. |
+| `CONFIRMED_GAP` | 3 | Remaining holes: CI tests (`SURF-0006`), savings-bench `cv_pct` (`PERF-0001`), cass (`PERF-0003`). |
+| `OPEN` | 15 | Experiment not yet run, or unverified SPEC tag. Do not treat as a bug. |
+| `NO_EVIDENCE` | 1 | `OPEN-0014`: DSR has zero quality checks for zerostack. |
 | `NEEDS_REFINEMENT` | 0 | -- |
 | `NEW_HYPOTHESIS_SPAWNED` | 0 | Spawned children are listed as their own `OPEN`/`CONFIRMED_GAP` cards. |
 | **Total cards** | **49** | |
-| **Open-hypothesis count** | **19** | `OPEN` only. `CONFIRMED_GAP` is resolved-as-gap. |
+| **Open-hypothesis count** | **15** | `OPEN` only. `CONFIRMED_GAP` is resolved-as-gap. |
 
 ---
 
@@ -1131,10 +1131,10 @@ rg -n "cargo test|^on:" .github/workflows/ci.yml
 
 ```
 result_status: CONFIRMED_GAP
-result_summary: GH workflow has no test job and no push/PR trigger. Do not spend GH Actions budget if DSR already gates tests -- check OPEN-0014 first.
+result_summary: GH workflow has no test job and no push/PR trigger. Phase 12 documented rch as the test runner in ci.yml + AGENTS-MANDATE.md. OPEN-0014 is NO_EVIDENCE (dsr quality has zero zerostack checks). Feature stays partial.
 result_evidence_paths:
   - .github/workflows/ci.yml
-  - AGENTS.md (DSR section)
+  - docs/progress/AGENTS-MANDATE.md
 result_impact: ci family verdict=partial 0.500000
 spawned_remediation_bead: F-CI-PR-GATES
 spawned_experiments: [OPEN-0014]
@@ -1336,7 +1336,7 @@ Closed when ensure_layout creates blobs/ and gc/ and a unit test fails if those 
 |---|---|
 | `experiment_id` | `SURF-0010` |
 | `pillar` | `surface` |
-| `status` | `CONFIRMED_GAP` |
+| `status` | `CLOSED` |
 | `created_at_utc` | `2026-08-17T16:00:00Z` |
 | `created_by_agent` | `idea-wizard-orchestrator` |
 | `bead_id` | `F-CODEMODE-CANCEL` |
@@ -1374,15 +1374,15 @@ rg -n "commit_race" crates/zero-mcp/src/mcp_transport.rs tests/unit --glob '!**/
 ### Results Inline
 
 ```
-result_status: CONFIRMED_GAP
-result_summary: Code present; matrix retry names the missing hub test. Do not touch rival-dirty files to "close" this.
+result_status: CLOSED
+result_summary: Hub tests in crates/zero-mcp/src/mcp_transport.rs (not fszero.rs). late Ok after cancel is commit_race / retryable=false / payload kept; late domain Err stays that Err; inflight permit released. F-CODEMODE-CANCEL present.
 result_evidence_paths:
-  - crates/zero-codemode/src/cancellation.rs
   - crates/zero-mcp/src/mcp_transport.rs
-  - docs/progress/conformance-negative-results.md
-result_impact: zero-codemode family 0.850000
+  - crates/zero-codemode/src/cancellation.rs
+  - conformance/contracts/supported_surface_matrix.toml (F-CODEMODE-CANCEL)
+result_impact: zero-codemode family full; present=67 partial=7
 spawned_remediation_bead: F-CODEMODE-CANCEL
-spawned_experiments: [IDEA-0015]
+spawned_experiments: [IDEA-0015, ADV-0003]
 closed_at_utc: 2026-08-17
 ```
 
@@ -1398,7 +1398,7 @@ Retry only when a cancelled or timed-out zero_execute that later receives Ok rep
 |---|---|
 | `experiment_id` | `SURF-0011` |
 | `pillar` | `surface` |
-| `status` | `CONFIRMED_GAP` |
+| `status` | `CLOSED` |
 | `created_at_utc` | `2026-08-17T16:00:00Z` |
 | `created_by_agent` | `idea-wizard-orchestrator` |
 | `bead_id` | `F-ZSX-Q99-REPORT` |
@@ -1435,12 +1435,12 @@ rg -n "Residual|WorkerTokenAccountingV1|empty" crates/zsx-core/src/residency.rs 
 ### Results Inline
 
 ```
-result_status: CONFIRMED_GAP
-result_summary: Documented residual. Pass 11 must not fake engine accounting. Hub test of unavailable-on-empty is in-hub (IDEA-0012).
+result_status: CLOSED
+result_summary: Hub empty-window test pins unavailable + no_demand_observations + no bare %. Feature stays **partial** honestly -- engines still supply no WorkerTokenAccountingV1. Do not fake engine accounting.
 result_evidence_paths:
   - crates/zsx-core/src/residency.rs
-  - conformance/contracts/supported_surface_matrix.toml
-result_impact: zsx-core family 0.961538
+  - conformance/contracts/supported_surface_matrix.toml (F-ZSX-Q99-REPORT)
+result_impact: zsx-core family stays partial 0.961538
 spawned_remediation_bead: F-ZSX-Q99-REPORT
 spawned_experiments: [IDEA-0012]
 closed_at_utc: 2026-08-17
@@ -2230,7 +2230,7 @@ Blocked until cass lands on PATH (`command -v cass` succeeds and `cass health --
 |---|---|
 | `experiment_id` | `OPEN-0014` |
 | `pillar` | `surface` |
-| `status` | `OPEN` |
+| `status` | `NO_EVIDENCE` |
 | `created_at_utc` | `2026-08-17T16:00:00Z` |
 | `created_by_agent` | `hypothesis-spawner` |
 | `bead_id` | `N/A` |
@@ -2267,13 +2267,16 @@ command -v dsr && dsr doctor || echo 'dsr missing'
 ### Results Inline
 
 ```
-result_status: OPEN
-result_summary: Not run this pass. Do not add a GH test job until this is resolved.
-result_evidence_paths: []
-result_impact:
+result_status: NO_EVIDENCE
+result_summary: dsr is on PATH. dsr quality --tool zerostack --dry-run prints "No quality checks configured for zerostack". Hypothesis that DSR already runs cargo test is false. SURF-0006 remains CONFIRMED_GAP.
+result_evidence_paths:
+  - ~/.config/dsr/repos.yaml (zerostack entry, no checks)
+  - .github/workflows/ci.yml
+  - docs/progress/AGENTS-MANDATE.md
+result_impact: none -- documents the hole, does not close F-CI-PR-GATES
 spawned_remediation_bead: N/A
 spawned_experiments: []
-closed_at_utc:
+closed_at_utc: 2026-08-17
 ```
 
 ### Closure Predicate
@@ -2592,7 +2595,7 @@ Worth reconsidering when oracle-preflight-doctor is green; tightening the smoke 
 |---|---|
 | `experiment_id` | `IDEA-0012` |
 | `pillar` | `conformance` |
-| `status` | `OPEN` |
+| `status` | `CLOSED` |
 | `created_at_utc` | `2026-08-17T16:00:00Z` |
 | `created_by_agent` | `idea-wizard-orchestrator` |
 | `bead_id` | `N/A` |
@@ -2627,14 +2630,14 @@ rg -n "unavailable|no_demand_observations" crates/zsx-core/src/residency.rs test
 ### Results Inline
 
 ```
-result_status: OPEN
-result_summary: Claim is documented. Test inventory not completed this pass.
+result_status: CLOSED
+result_summary: residency::tests::empty_window_report_is_unavailable_never_numeric green on rch. Unavailable + no_demand_observations + no bare %.
 result_evidence_paths:
   - crates/zsx-core/src/residency.rs
-result_impact:
+result_impact: SURF-0011 hub path closed; feature stays partial
 spawned_remediation_bead: N/A
 spawned_experiments: []
-closed_at_utc:
+closed_at_utc: 2026-08-17
 ```
 
 ### Closure Predicate
@@ -2706,7 +2709,7 @@ Closed when a reachability test for ZeroRefErrorClass::ALL landed.
 |---|---|
 | `experiment_id` | `IDEA-0015` |
 | `pillar` | `conformance` |
-| `status` | `OPEN` |
+| `status` | `CLOSED` |
 | `created_at_utc` | `2026-08-17T16:00:00Z` |
 | `created_by_agent` | `idea-wizard-orchestrator` |
 | `bead_id` | `N/A` |
@@ -2741,14 +2744,14 @@ rg -n "fn commit_race_error|late_ok" crates/zero-mcp/src/mcp_transport.rs
 ### Results Inline
 
 ```
-result_status: OPEN
-result_summary: Design only. Pass 11 may implement if SURF-0010 is picked.
+result_status: CLOSED
+result_summary: execute_call_with_cancel tests in zero-mcp (not fszero.rs). commit_race + retryable=false + payload; late domain Err stays that Err.
 result_evidence_paths:
   - crates/zero-mcp/src/mcp_transport.rs
-result_impact:
+result_impact: SURF-0010 closed; F-CODEMODE-CANCEL present
 spawned_remediation_bead: N/A
 spawned_experiments: []
-closed_at_utc:
+closed_at_utc: 2026-08-17
 ```
 
 ### Closure Predicate
@@ -3020,7 +3023,7 @@ Not worth retrying as a standalone patch.
 |---|---|
 | `experiment_id` | `ADV-0003` |
 | `pillar` | `conformance` |
-| `status` | `OPEN` |
+| `status` | `CLOSED` |
 | `created_at_utc` | `2026-08-17T16:00:00Z` |
 | `created_by_agent` | `advanced-methods-miner` |
 | `bead_id` | `N/A` |
@@ -3055,13 +3058,14 @@ rg -n "inflight" crates/zero-mcp/src/mcp_transport.rs crates/zero-codemode/src
 ### Results Inline
 
 ```
-result_status: OPEN
-result_summary: Not run. Complements IDEA-0015.
-result_evidence_paths: []
-result_impact:
+result_status: CLOSED
+result_summary: After commit_race, a second execute_call with max_inflight=1 succeeds. Inflight permit is released. No leftover busy.
+result_evidence_paths:
+  - crates/zero-mcp/src/mcp_transport.rs (late_ok_after_cancel_is_commit_race_and_keeps_payload)
+result_impact: none
 spawned_remediation_bead: N/A
 spawned_experiments: []
-closed_at_utc:
+closed_at_utc: 2026-08-17
 ```
 
 ### Closure Predicate

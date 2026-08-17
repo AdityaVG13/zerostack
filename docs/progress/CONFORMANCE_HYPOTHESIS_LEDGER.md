@@ -2,8 +2,8 @@
 
 Index into [GAUNTLET_EXPERIMENT_DESIGNS.md](GAUNTLET_EXPERIMENT_DESIGNS.md). Full template fields live there. Grep the negative ledger first: [conformance-negative-results.md](conformance-negative-results.md).
 
-**Open-hypothesis count (this pillar):** 12 (`CONF-0001..0005`, `IDEA-0002/0010/0012/0015/0024`, `ADV-0002`, `ADV-0003`).
-**Confirmed gaps owed to pass 11:** 1 remaining ranked conformance hole closed (`CONF-0006`). `SURF-0010` cancel test is still a surface-indexed CONFIRMED_GAP. SPEC tags stay `OPEN` until a live verifier runs.
+**Open-hypothesis count (this pillar):** 9 (`CONF-0001..0005`, `IDEA-0002/0010/0024`, `ADV-0002`).
+**Phase 12 AUTO-FIX:** `IDEA-0012`, `IDEA-0015`, `ADV-0003` CLOSED. SPEC tags stay `OPEN` until a live verifier runs.
 
 | ID | Status | One-line hypothesis | Invocation |
 |---|---|---|---|
@@ -21,12 +21,12 @@ Index into [GAUNTLET_EXPERIMENT_DESIGNS.md](GAUNTLET_EXPERIMENT_DESIGNS.md). Ful
 | CONF-0006 | CLOSED | AGENTS.md dropped from certifying preflight; advisory yellow only. | `cargo run -p zerostack-harness --bin oracle-preflight-doctor -- --json` |
 | IDEA-0002 | OPEN | Pin tracked `AGENTS-MANDATE.md` instead of gitignored law. | `shasum -a 256 docs/progress/AGENTS-MANDATE.md AGENTS.md` |
 | IDEA-0010 | OPEN | Smoke test allows certifying=false. | `rg fn preflight crates/zerostack-harness/tests/oracle_smoke.rs` |
-| IDEA-0012 | OPEN | Empty Q99 window is `unavailable`, never a number. | `rg unavailable crates/zsx-core/src/residency.rs` |
+| IDEA-0012 | CLOSED | Empty Q99 window is `unavailable`, never a number. | `cargo test -p zsx-core empty_window_report` |
 | IDEA-0013 | CLOSED | `ZeroRefErrorClass::ALL` reachability table in `zeroref_api.rs`. | `rg ZeroRefErrorClass::ALL crates/zero-ref` |
-| IDEA-0015 | OPEN | MCP late-Ok `commit_race` test without `fszero.rs`. | `rg commit_race crates/zero-mcp/src/mcp_transport.rs` |
+| IDEA-0015 | CLOSED | MCP late-Ok `commit_race` test without `fszero.rs`. | `cargo test -p zero-mcp` |
 | IDEA-0024 | OPEN | Oversize `zsx exec` nulls `visibleTokenCount`. | `rg result_finalization_receipt crates` |
 | ADV-0002 | OPEN | e-process on spec-hash is redundant with preflight. | `cargo test -p zerostack-harness --lib eprocess` |
-| ADV-0003 | OPEN | Inflight count returns to 0 after cancel. | `rg inflight crates/zero-mcp/src/mcp_transport.rs` |
+| ADV-0003 | CLOSED | Inflight count returns to 0 after cancel. | `cargo test -p zero-mcp late_ok_after_cancel` |
 
 ## Five UNVERIFIED SPEC tags (do not mark CONFIRMED_GAP)
 

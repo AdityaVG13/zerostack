@@ -19,6 +19,19 @@ Workspace ledgers (sibling gauntlet working memory, not this git tree):
 
 Lint: `python3 scripts/check_ledger_retry.py`
 
+Targeted Rust tests (DSR/rch, not GitHub Actions):
+
+```bash
+rch exec -- env CARGO_TARGET_DIR=/tmp/rch_target_zerostack \
+  cargo test -p <one-crate> -- --test-threads=1
+```
+
+Never `cargo test --workspace`. Never add a GH Actions test job that
+hammers the host. `.github/workflows/ci.yml` is `workflow_dispatch`
+fmt/clippy/build only. `dsr quality --tool zerostack` currently has
+zero checks configured -- that is a documented gap (`SURF-0006`),
+not a reason to spend GH budget.
+
 ---
 
 ## Negative-Evidence Discipline

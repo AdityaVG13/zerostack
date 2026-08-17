@@ -126,12 +126,12 @@
       "family": "zero-codemode",
       "feature_count": 3,
       "missing": 0,
-      "partial": 1,
-      "present": 2,
-      "strict_100": false,
-      "strict_coverage": 0.85,
-      "verdict": "partial",
-      "weighted_score": 0.85
+      "partial": 0,
+      "present": 3,
+      "strict_100": true,
+      "strict_coverage": 1.0,
+      "verdict": "full",
+      "weighted_score": 1.0
     },
     {
       "excluded": 0,
@@ -256,21 +256,21 @@
   ],
   "feature_count": 77,
   "global": {
-    "effective_coverage": 0.946058,
+    "effective_coverage": 0.952282,
     "excluded_is_strict_debt": true,
     "partial_contribution": 0.5,
     "partial_never_rounds_up": true,
     "release_gate_verdict": "red",
     "strict_100_certifiable": false,
-    "strict_coverage": 0.934426
+    "strict_coverage": 0.940573
   },
   "schema_version": "zerostack.feature_coverage_dashboard.v1",
   "source": "conformance/contracts/supported_surface_matrix.toml",
   "status_histogram": {
     "excluded": 3,
     "missing": 0,
-    "partial": 8,
-    "present": 66
+    "partial": 7,
+    "present": 67
   },
   "weight_policy": "global-sum-1.0"
 }

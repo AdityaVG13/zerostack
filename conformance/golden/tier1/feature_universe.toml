@@ -310,9 +310,9 @@ name = "PR/push CI with clippy -D, deny, targeted tests"
 status = "partial"
 weight = 0.016393442623
 weight_units = 4
-evidence = [".github/workflows/ci.yml"]
+evidence = [".github/workflows/ci.yml", "docs/progress/AGENTS-MANDATE.md"]
 retry_condition = "Retry only when .github/workflows/ci.yml or DSR runs cargo test (targeted or workspace) on every PR/push, not only workflow_dispatch fmt/clippy/build."
-notes = "manual workflow_dispatch: fmt, clippy, cargo build --workspace, feature-universe weights + dashboard + bench-history. Still no cargo test job."
+notes = "manual workflow_dispatch: fmt, clippy, cargo build --workspace, feature-universe weights + dashboard + bench-history. No cargo test job (intentional: GH budget). dsr quality --tool zerostack has zero checks. Targeted tests: rch exec cargo test -p <one>."
 
 [[feature]]
 id = "F-FUZZ"
@@ -606,8 +606,8 @@ status = "partial"
 weight = 0.008196721311
 weight_units = 2
 evidence = ["crates/zsx-core/src/residency.rs"]
-retry_condition = "Retry only when FSZero/GraphZero adapters supply measured WorkerTokenAccountingV1 so L1/L2 Q99 windows are non-empty in production, or the report loudly refuses to emit a numeric Q99 when observations are empty (already partial: empty windows documented)."
-notes = "Types + schema live; residual: engine adapters return no worker token accounting so L1/L2 stay empty."
+retry_condition = "Retry only when FSZero/GraphZero adapters supply measured WorkerTokenAccountingV1 so L1/L2 Q99 windows are non-empty in production."
+notes = "Types + schema live. Hub empty-window test pins unavailable + no_demand_observations + no bare %. Residual: engine adapters still return no WorkerTokenAccountingV1 so L1/L2 stay empty in production."
 
 [[feature]]
 id = "F-NODE-NATIVE-SESSION"
@@ -660,12 +660,15 @@ evidence = ["crates/zero-codemode/src/edit_protocol.rs", "conformance/contracts/
 id = "F-CODEMODE-CANCEL"
 family = "zero-codemode"
 name = "Cancellation + late-Ok commit_race settlement"
-status = "partial"
+status = "present"
 weight = 0.012295081967
 weight_units = 3
-evidence = ["crates/zero-codemode/src/cancellation.rs", "crates/zsx-core/src/session.rs", "crates/zero-mcp/src/mcp_transport.rs"]
-retry_condition = "Retry only when a cancelled or timed-out zero_execute that later receives Ok reports commit_race with retryable=false and keeps the committed payload, covered by a hub test that does not live only in rival dirty crates/zsx-core/src/fszero.rs. Late domain Err must stay that Err."
-notes = "CancellationSignal + CommitRace code + MCP late-Ok salvage exist; AGENTS still lists MCP late-Ok salvage as open."
+evidence = [
+  "crates/zero-codemode/src/cancellation.rs",
+  "crates/zsx-core/src/session.rs",
+  "crates/zero-mcp/src/mcp_transport.rs",
+]
+notes = "Hub tests in zero-mcp::mcp_transport::tests: late Ok after cancel is commit_race / retryable=false / payload kept; late domain Err stays that Err. Does not live in rival-dirty fszero.rs."
 
 [[feature]]
 id = "F-ABI-ZERO-EXECUTE"

@@ -166,8 +166,8 @@ untracked/modified in the working tree).
 
 ## Open Candidates (matrix-missed / still missing)
 
-- `F-CI-PR-GATES`, `F-CODEMODE-CANCEL`, `F-ZSX-Q99-REPORT`, `F-STORE-QUARANTINE-REAP`, `F-MIRI-NARROW` (partial until rch miri is green), `F-REF-ERROR-TAXONOMY` (honest partial)
-- Dashboard families still not `full`: ci, conformance, quality, zero-abi, zero-codemode, zero-ref, zero-store, zsx-core
+- `F-CI-PR-GATES`, `F-ZSX-Q99-REPORT` (hub empty-window tested; engine accounting residual), `F-STORE-QUARANTINE-REAP`, `F-MIRI-NARROW` (partial until rch miri is green), `F-REF-ERROR-TAXONOMY` (honest partial)
+- Dashboard families still not `full`: ci, conformance, quality, zero-ref, zero-store, zsx-core (zero-codemode is now full)
 
 ## Retired Candidates Worth Flagging
 
