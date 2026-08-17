@@ -82,6 +82,7 @@ crates/zerostack-harness/
 *.patch
 bindings/node/prebuilds/
 tests/scripts/
+tests/unit/zero-abi/fuzz_corpus_untrusted_bytes_20260815.rs
 scripts/bench/
 scripts/bless-golden.sh
 scripts/capture_golden.py
@@ -165,11 +166,13 @@ conformance/*
 !conformance/CONTRACT.md
 !conformance/engine-topology.json
 !conformance/contracts/
+conformance/contracts/*
 !conformance/contracts/cache-entry.md
 !conformance/contracts/fresh-work-vector.md
 !conformance/contracts/zero-edit-protocol.md
 !conformance/contracts/supported_surface_matrix.toml
 !conformance/schemas/
+conformance/schemas/*
 !conformance/schemas/engine-topology.schema.json
 !conformance/schemas/zero-result.schema.json
 
