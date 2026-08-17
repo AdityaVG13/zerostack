@@ -525,16 +525,7 @@ impl ZsxExecutor {
         );
         let result = outcome.result;
         let host_metrics = outcome.metrics;
-        if result.is_err() {
-            signal.cancel();
-            // Wait for the cancelled adapter (and its process group) to
-            // settle. Do not replace the original error with a tail-idle
-            // timeout -- that made `already_terminal` / cancel failures
-            // sticky on the next plan.
-            let _ = self
-                .connector
-                .wait_for_dispatch_idle(Duration::from_secs(15));
-        }
+        if result.is_err() {                signal.cancel();                if let Err(idle_error) = self                    .connector                    .wait_for_dispatch_idle(Duration::from_secs(15))                {                    self.connector.clear_request_cancellation();                    self.connector.clear_execution_context();                    self.connector.clear_approvals();                    clear_active();                    let _ = self.connector.finish_residency_report();                    return Err(idle_error);                }            }
         let dispatch = self.connector.dispatch_metrics();
         let engine_wall_ns_sum = dispatch
             .wall_ns
