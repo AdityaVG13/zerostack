@@ -19,10 +19,8 @@
 //!   issuance. [`verify_decision_authority`] and
 //!   [`verify_commit_authority`] are the read-side checks that refuse a
 //!   record the journal never saw (an "authority" forged by role code).
-//! - The replayed-authority acceptance (captured-epoch replay) is tested in
-//!   `tests/unit/zero-cert/boundary_audit.rs`: an authority captured at
-//!   epoch N, replayed after the project root advanced, fails loud with no
-//!   journal event and no CAS mutation.
+//! - A captured-epoch authority replayed after the project root advanced
+//!   fails loud with no journal event and no CAS mutation.
 //!
 //! ## Static module-boundary audit (compile-time)
 //!

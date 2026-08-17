@@ -21,8 +21,7 @@
 //! cache or commit authority -- cache admission requires
 //! [`CacheAdmissionGate`] over a rooted `PayloadFormationReceipt`, and
 //! commit requires [`ProjectRootGate`]'s verify -> authorize -> commit
-//! chain. The out-of-process fixture in `tests/unit/zero-cert/worker_trust.rs`
-//! proves that forged frames/traces acquire neither.
+//! chain. Forged frames and traces acquire neither.
 
 use std::time::{SystemTime, UNIX_EPOCH};
 
