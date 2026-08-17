@@ -812,8 +812,7 @@ mod heavy_cancel_regression_tests {
     fn heavy_shell_cancel_kills_child_group_and_releases_lease() {
         let root = std::env::temp_dir().join(format!("zsx-heavy-inline-{}-{}", std::process::id(), std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()));
         std::fs::create_dir_all(&root).expect("temp root");
-        let session = ZsxSession::builder(root.clone())
-            .fszero(Arc::new(StubAdapter { engine: EngineIdentity::FsZero, scheme: "fz://" }))
+        let session = ZsxSession::builder(root.clone())            .with_session_id("test")            .fszero(Arc::new(StubAdapter { engine: EngineIdentity::FsZero, scheme: "fz://" }))
             .graphzero(Arc::new(StubAdapter { engine: EngineIdentity::GraphZero, scheme: "gz://" }))
             .tokenzero(Arc::new(TokenZeroAdapter::new(&root, "test").expect("tokenzero")))
             .build().expect("session");
