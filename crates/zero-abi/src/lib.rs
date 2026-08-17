@@ -39,6 +39,7 @@ pub mod surface;
 pub mod telemetry;
 pub mod verdict;
 pub mod zbf;
+pub mod zerokernel;
 pub mod zero_execute;
 
 pub use assembly::{
@@ -198,6 +199,13 @@ pub use verdict::{
 pub use zero_execute::{
     AuditEventRangeV1, ContinuationStateV1, ZeroExecuteErrorV6, ZeroExecuteFieldsV6,
     ZeroExecuteKindV6, ZeroExecuteResultV6, ZERO_EXECUTE_ABI_VERSION_V6,
+};
+pub use zerokernel::{
+    ExactHandlesV1, FiniteBudgetV1, PreflightReportV1, ResourceLedgerV1, ReturnKindV1,
+    ReturnPolicyV1, RootBindingsV1, RootEvidenceV1, RootSnapshotV1, ZerokernelErrorV1,
+    ZerokernelExecuteRequestV1, ZerokernelExecuteResponseV1, ZerokernelResultKindV1,
+    ZEROKERNEL_ABI_VERSION_V1, ZERO_EXECUTE_V1_ABI_VERSION, MAX_CALLS_V1, MAX_CPU_MS_V1,
+    MAX_MEMORY_BYTES_V1, MAX_PREVIEW_CHARS_V1, MAX_WALL_MS_V1,
 };
 pub use zbf::{
     DurableProfileIdV1, DurableProfileV1, ZBF_CONTAINER_FLAG_V1, ZBF_CONTRACT_VERSION_V1,
