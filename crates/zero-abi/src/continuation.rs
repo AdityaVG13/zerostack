@@ -26,7 +26,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use crate::identity::{
-    ObjectClassV1, ROOTED_ABI_VERSION_V6, canonical_object_bytes, object_root,
+    ObjectClassV1, ROOTED_ABI_VERSION, canonical_object_bytes, object_root,
 };
 use crate::zero_execute::ContinuationStateV1;
 use crate::DigestV1;
@@ -54,7 +54,7 @@ impl fmt::Display for ContinuationErrorV1 {
             Self::InvalidHandle(detail) => write!(formatter, "invalid continuation handle: {detail}"),
             Self::ForgedHandle => write!(formatter, "continuation handle id is forged"),
             Self::WrongAbiVersion { actual } => {
-                write!(formatter, "continuation abi version must be {ROOTED_ABI_VERSION_V6}, got {actual}")
+                write!(formatter, "continuation abi version must be {ROOTED_ABI_VERSION}, got {actual}")
             }
             Self::ForbiddenTransition { from, to } => write!(
                 formatter,
@@ -155,7 +155,7 @@ impl ContinuationHandleV1 {
             state,
             roots,
             parent_handle,
-            abi_version: ROOTED_ABI_VERSION_V6.to_owned(),
+            abi_version: ROOTED_ABI_VERSION.to_owned(),
             handle_id: DigestV1::ZERO,
         };
         let handle_id = handle.compute_id()?;
@@ -176,13 +176,13 @@ impl ContinuationHandleV1 {
         object.remove("handle_id");
         let bytes = canonical_object_bytes(
             ObjectClassV1::ContinuationHandle,
-            ROOTED_ABI_VERSION_V6,
+            ROOTED_ABI_VERSION,
             &Value::Object(object),
         )
         .map_err(|error| ContinuationErrorV1::InvalidHandle(error.to_string()))?;
         object_root(
             ObjectClassV1::ContinuationHandle,
-            ROOTED_ABI_VERSION_V6,
+            ROOTED_ABI_VERSION,
             &bytes,
         )
         .map_err(|error| ContinuationErrorV1::InvalidHandle(error.to_string()))
@@ -307,7 +307,7 @@ impl ContinuationHandleV1 {
             .map_err(|error| ContinuationErrorV1::InvalidHandle(error.to_string()))?;
         canonical_object_bytes(
             ObjectClassV1::ContinuationHandle,
-            ROOTED_ABI_VERSION_V6,
+            ROOTED_ABI_VERSION,
             &value,
         )
         .map_err(|error| ContinuationErrorV1::InvalidHandle(error.to_string()))
@@ -340,7 +340,7 @@ impl ContinuationCompactRecordV1 {
             record_version: CONTINUATION_CONTRACT_VERSION_V1,
             handle_id: handle.handle_id(),
             sealed_snapshot_root,
-            abi_version: ROOTED_ABI_VERSION_V6.to_owned(),
+            abi_version: ROOTED_ABI_VERSION.to_owned(),
         })
     }
 
@@ -351,7 +351,7 @@ impl ContinuationCompactRecordV1 {
                 self.record_version
             )));
         }
-        if self.abi_version != ROOTED_ABI_VERSION_V6 {
+        if self.abi_version != ROOTED_ABI_VERSION {
             return Err(ContinuationErrorV1::WrongAbiVersion {
                 actual: self.abi_version.clone(),
             });

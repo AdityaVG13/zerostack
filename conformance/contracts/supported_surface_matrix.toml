@@ -647,7 +647,7 @@ notes = "Hub tests in zero-mcp::mcp_transport::tests: late Ok after cancel is co
 [[feature]]
 id = "F-ABI-ZERO-EXECUTE"
 family = "zero-abi"
-name = "ZeroExecuteResultV6 plan ABI"
+name = "ZeroExecuteResult plan ABI"
 status = "present"
 weight = 0.016393442623
 weight_units = 4

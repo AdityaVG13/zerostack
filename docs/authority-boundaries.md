@@ -18,8 +18,8 @@
 | V6-04 | Machine permits | `crates/zerostack-machine-permit/src/lib.rs:MachinePermit:371`, `MachinePermitHeartbeat:84`, `try_create:583` | Machine-local liveness under tmp; heartbeat reclaims stale | Busy/Fatal => deny; Dead reclaimable else deny |
 | V6-05 | Mutation journaling | `crates/zsx-core/src/connector.rs:MutationJournal:269`, `prepare_mutation_journal_unique:408`, `succeed:527`, `indeterminate:551`, `reconcile:629`; `zero-store/src/durable_journal.rs:ContinuationCartridgeRecord:729` | Durable prepare->cross->succeed/indeterminate; post-cross never redispatches | Missing dispatch_entry_digest => never crossed error |
 | V6-06 | Two-phase gate | `crates/zero-gate/src/two_phase.rs`, `lib.rs:DecisionGate:407`, `GateInput:415`, `GateState:429` | Proof-carrying pre/post; aggregate requires all engines | ConflictingProofs/IrreversibleSpeculation/TerminalState => gate error |
-| V6-07 | Decision escape | `crates/zero-gate/src/lib.rs:DecisionGate::RawFallback`, `session.rs:execute_v6` escape | Unknown/Unsafe never aliases Safe; ambiguous => escape | False-safe => kill |
-| V6-08 | V6 result envelopes | `crates/zero-abi/src/zero_execute.rs:ZeroExecuteResultV6`, `session.rs:dispatch_metrics:538` | Typed result with receipt/ledger/residency/Q99 | ZeroDigest mismatch => rollback |
+| V6-07 | Decision escape | `crates/zero-gate/src/lib.rs:DecisionGate::RawFallback`, `session.rs:execute_envelope` escape | Unknown/Unsafe never aliases Safe; ambiguous => escape | False-safe => kill |
+| V6-08 | execute result envelopes | `crates/zero-abi/src/zero_execute.rs:ZeroExecuteResult`, `session.rs:dispatch_metrics:538` | Typed result with receipt/ledger/residency/Q99 | ZeroDigest mismatch => rollback |
 | V6-09 | Cancellation | `crates/zsx-core/src/session.rs:cancel_request`, `CancellationSignal:362` | Checked before dispatch; flag shared | Not observed => audit fail |
 | V6-10 | Continuation scope | `crates/zero-abi/src/continuation.rs:ContinuationHandleV1:130`, `ContinuationRootsV1:90`, `validate_against:229`; `durable_journal.rs:ContinuationCartridgeRecord:729` | 8 roots + state Bound->Committed | Forged/CrossProject/Revoked => reject |
 | V6-11 | Resource/verdict metering | `crates/zero-ledger/src/lib.rs:TokenLedger`, `charging_maps.rs:200`, `zsx-core/src/verdict.rs:reserve_dispatch:165`, `zero-gauge/src/bounds.rs:237` | Finite budgets; ledger complete | BudgetOverflow => fail-closed |
@@ -70,7 +70,7 @@ Each row: Exists? No. Falsifier revokes claim. Bead = future work; no cross-repo
 
 | Surface | Bead | Paths/symbols | Falsifier |
 |---|---|---|---|
-| zero.execute zerokernel/v1 | `zerostack-0n55` | `zero_execute.rs:ZeroExecuteResultV6` + `ContinuationCartridgeRecord:729` | Unknown field not fail-closed => fail |
+| zero.execute zerokernel/v1 | `zerostack-0n55` | `zero_execute.rs:ZeroExecuteResult` + `ContinuationCartridgeRecord:729` | Unknown field not fail-closed => fail |
 | Supervisor embedded/one-shot | `zerostack-s0lx` | `zero-codemode/src/worker.rs`, `zero-process:VerifiedChild` | Executor !=0 after terminal => W10-T11 fail |
 | Preflight broker | `zerostack-pvwg` | `z.context.{projectRoot,workspaceRoot,requestRoot,sessionRoot}` | Semantic auto-repair => fail |
 | Guest z surface | `zerostack-fhcj`/`zerostack-xbg3` | `z.resolve`/`z.expand`/`z.snap`/`z.transaction` | Broken W9 chain with authority => W10-T12 fail |
@@ -103,7 +103,7 @@ ZeroStack only for this audit and W7-W10 shadow/K0 until per-repo bead. FSZero, 
 - Approval: `crates/zero-abi/src/raw_worker.rs:253,288`
 - Permits: `crates/zerostack-machine-permit/src/lib.rs:371,84,583`
 - Gate: `crates/zero-gate/src/lib.rs:407,429`, `two_phase.rs`, `aggregate.rs:106`
-- Results: `crates/zero-abi/src/zero_execute.rs:ZeroExecuteResultV6`, `session.rs:538`
+- Results: `crates/zero-abi/src/zero_execute.rs:ZeroExecuteResult`, `session.rs:538`
 - Cancel: `crates/zsx-core/src/session.rs:cancel_request`, `CancellationSignal:362`
 - Continuation: `crates/zero-abi/src/continuation.rs:130,90,229`, `durable_journal.rs:729`
 - Metering: `crates/zero-ledger/src/lib.rs:TokenLedger`, `charging_maps.rs:200`, `verdict.rs:165`, `zero-gauge/src/bounds.rs:237`

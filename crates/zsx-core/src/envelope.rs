@@ -1,7 +1,7 @@
-//! V6-R1: session outcome projection onto the V6 zero execute result
+//! session outcome projection onto the execute result
 //! envelope (ZS-ADAPTER-003, ZS-EXEC-003).
 //!
-//! The session execute path now emits the 8-kind [`ZeroExecuteResultV6`]
+//! The session execute path now emits the 8-kind [`ZeroExecuteResult`]
 //! envelope alongside the legacy result. The projection obeys one honesty
 //! law: **a kind is emitted only when the session can prove that outcome.**
 //! The session holds no safety verdict and no content roots for a plain
@@ -16,7 +16,7 @@
 //! | Uncovered decision point aborts the plan | `DecisionRequired` | typed [`DecisionRequiredV1`] payload: question, choices, decision id (bound as the continuation handle) |
 //! | Request cancelled through its token | `Cancelled` | `cancel_request` recorded the request in the cancellation slot |
 //! | Approval/permit admission rejection | `FailedNoAuthority` | typed approval validation failure (`InvalidApproval`/`ApprovalReplay`) |
-//! | Plain success, other failures | no envelope | no V6 kind is provable (no verdict/roots; lifecycle/transport failure) |
+//! | Plain success, other failures | no envelope | no execute kind is provable (no verdict/roots; lifecycle/transport failure) |
 //!
 //! `resource_ledger_root` and `audit_event_range` are mandatory envelope
 //! fields the session cannot derive, so the harness supplies them through
@@ -25,8 +25,8 @@
 //! [`legacy_envelope_value`] renders the envelope in the `zerostack.zsx`
 //! shape (`{protocol, ok, generation, request_id, result?, error?}`).
 //!
-//! V6-R5 (ZS-VIEW-010): a decision-bearing outcome optionally binds the
-//! typed [`DecisionViewV6`] into the envelope's `decision_view_root`. The
+//! (ZS-VIEW-010): a decision-bearing outcome optionally binds the
+//! typed [`DecisionView`] into the envelope's `decision_view_root`. The
 //! session can only build the view honestly when the harness supplies the
 //! roots the session cannot prove ([`DecisionViewContextV1`] through
 //! [`SessionEnvelopeContextV1::with_decision_view`]); with no context, the
@@ -35,8 +35,8 @@
 
 use serde_json::{Value, json};
 use zero_abi::{
-    AuditEventRangeV1, DecisionRequiredV1, DecisionViewErrorV6, DecisionViewV6,
-    ZeroExecuteErrorV6, ZeroExecuteFieldsV6, ZeroExecuteKindV6, ZeroExecuteResultV6,
+    AuditEventRangeV1, DecisionRequiredV1, DecisionViewError, DecisionView,
+    ZeroExecuteError, ZeroExecuteFields, ZeroExecuteKind, ZeroExecuteResult,
 };
 
 /// Protocol label on every `zsx exec` / `zsx mcp` result envelope.
@@ -53,8 +53,8 @@ pub struct SessionEnvelopeContextV1 {
     pub resource_ledger_root: String,
     /// Inclusive audit event range the envelope must carry.
     pub audit_event_range: AuditEventRangeV1,
-    /// Optional harness-supplied decision-view context (V6-R5). When
-    /// present, a decision-bearing outcome binds the typed [`DecisionViewV6`]
+    /// Optional harness-supplied decision-view context . When
+    /// present, a decision-bearing outcome binds the typed [`DecisionView`]
     /// root into `decision_view_root`; when absent the field stays empty --
     /// the session never fabricates a view root.
     pub decision_view: Option<DecisionViewContextV1>,
@@ -75,7 +75,7 @@ impl SessionEnvelopeContextV1 {
         Ok(context)
     }
 
-    /// Attach a harness-supplied decision-view context (V6-R5). Fail-closed:
+    /// Attach a harness-supplied decision-view context . Fail-closed:
     /// an invalid context is rejected so no envelope can bind a fabricated
     /// view root.
     pub fn with_decision_view(
@@ -104,8 +104,8 @@ impl SessionEnvelopeContextV1 {
     }
 }
 
-/// Harness-supplied decision-view facts the session cannot prove (V6-R5,
-/// ZS-VIEW-010): the engine roots the execution was bound to and the
+/// Harness-supplied decision-view facts the session cannot prove
+/// (ZS-VIEW-010): the engine roots the execution was bound to and the
 /// evidence/expansion surface of the decision. Fail-closed construction:
 /// empty roots are rejected, so a view built from this context can never
 /// carry a fabricated anchor.
@@ -187,8 +187,8 @@ impl DecisionViewContextV1 {
 }
 
 
-fn with_project_root(project_root: Option<&str>) -> ZeroExecuteFieldsV6 {
-    ZeroExecuteFieldsV6 {
+fn with_project_root(project_root: Option<&str>) -> ZeroExecuteFields {
+    ZeroExecuteFields {
         project_root: project_root.map(str::to_owned),
         ..Default::default()
     }
@@ -202,10 +202,10 @@ fn with_project_root(project_root: Option<&str>) -> ZeroExecuteFieldsV6 {
 /// re-validates: question, nonempty choices, and continuation handle are
 /// mandatory for this kind.
 ///
-/// V6-R5: when the harness supplied a [`DecisionViewContextV1`], the typed
-/// [`DecisionViewV6`] is built from the payload plus the context, its digest
+/// when the harness supplied a [`DecisionViewContextV1`], the typed
+/// [`DecisionView`] is built from the payload plus the context, its digest
 /// root is bound into `decision_view_root`, and a fail-closed build failure
-/// fails the envelope construction ([`ZeroExecuteErrorV6::InvalidDecisionView`]).
+/// fails the envelope construction ([`ZeroExecuteError::InvalidDecisionView`]).
 /// With no context the field stays absent -- a view root is never
 /// fabricated.
 pub fn decision_required(
@@ -214,8 +214,8 @@ pub fn decision_required(
     request_id: u64,
     project_root: Option<&str>,
     ledger: &SessionEnvelopeContextV1,
-) -> Result<ZeroExecuteResultV6, ZeroExecuteErrorV6> {
-    let mut fields = ZeroExecuteFieldsV6 {
+) -> Result<ZeroExecuteResult, ZeroExecuteError> {
+    let mut fields = ZeroExecuteFields {
         continuation_handle: Some(format!(
             "zsx://g{generation}-r{request_id}/{}",
             payload.decision_id
@@ -226,17 +226,17 @@ pub fn decision_required(
     };
     if let Some(context) = &ledger.decision_view {
         let view = build_decision_view(payload, project_root, context)
-            .map_err(|error| ZeroExecuteErrorV6::InvalidDecisionView(error.to_string()))?;
+            .map_err(|error| ZeroExecuteError::InvalidDecisionView(error.to_string()))?;
         fields.decision_view_root = Some(view.root());
     }
-    ZeroExecuteResultV6::decision_required(
+    ZeroExecuteResult::decision_required(
         fields,
         ledger.resource_ledger_root.clone(),
         ledger.audit_event_range,
     )
 }
 
-/// Build the typed decision view for a decision-bearing outcome (V6-R5).
+/// Build the typed decision view for a decision-bearing outcome .
 ///
 /// The session states only what it can prove: `supported_decisions` is the
 /// decision id that actually surfaced, `unresolved_question` is the payload
@@ -249,11 +249,11 @@ fn build_decision_view(
     payload: &DecisionRequiredV1,
     project_root: Option<&str>,
     context: &DecisionViewContextV1,
-) -> Result<DecisionViewV6, DecisionViewErrorV6> {
+) -> Result<DecisionView, DecisionViewError> {
     let project_root = project_root
-        .ok_or(DecisionViewErrorV6::EmptyRoot("project_root"))?
+        .ok_or(DecisionViewError::EmptyRoot("project_root"))?
         .to_owned();
-    DecisionViewV6::new(
+    DecisionView::new(
         context.task_contract_root.clone(),
         project_root,
         context.causal_lens_root.clone(),
@@ -261,7 +261,7 @@ fn build_decision_view(
         context.evidence_refs.clone(),
         context.omitted_classes.clone(),
         context.expansion_handles.clone(),
-        zero_abi::CompletenessGradeV6::Observed,
+        zero_abi::CompletenessGrade::Observed,
         Some(payload.question.clone()),
         context.baseline_escape,
         None,
@@ -274,8 +274,8 @@ fn build_decision_view(
 pub fn cancelled(
     project_root: Option<&str>,
     ledger: &SessionEnvelopeContextV1,
-) -> Result<ZeroExecuteResultV6, ZeroExecuteErrorV6> {
-    ZeroExecuteResultV6::cancelled(
+) -> Result<ZeroExecuteResult, ZeroExecuteError> {
+    ZeroExecuteResult::cancelled(
         with_project_root(project_root),
         ledger.resource_ledger_root.clone(),
         ledger.audit_event_range,
@@ -288,49 +288,49 @@ pub fn cancelled(
 pub fn failed_no_authority(
     project_root: Option<&str>,
     ledger: &SessionEnvelopeContextV1,
-) -> Result<ZeroExecuteResultV6, ZeroExecuteErrorV6> {
-    ZeroExecuteResultV6::failed_no_authority(
+) -> Result<ZeroExecuteResult, ZeroExecuteError> {
+    ZeroExecuteResult::failed_no_authority(
         with_project_root(project_root),
         ledger.resource_ledger_root.clone(),
         ledger.audit_event_range,
     )
 }
 
-/// Legacy failure code for a V6 kind, in the snake_case vocabulary existing
+/// Legacy failure code for an execute kind, in the snake_case vocabulary existing
 /// consumers already switch on (`cancelled`, `decision_required`, ...).
-pub fn legacy_kind_code(kind: ZeroExecuteKindV6) -> &'static str {
+pub fn legacy_kind_code(kind: ZeroExecuteKind) -> &'static str {
     match kind {
-        ZeroExecuteKindV6::Completed => "completed",
-        ZeroExecuteKindV6::DecisionRequired => "decision_required",
-        ZeroExecuteKindV6::EvidenceExpansionRequired => "evidence_expansion_required",
-        ZeroExecuteKindV6::VerificationUnknown => "verification_unknown",
-        ZeroExecuteKindV6::BaselineFallbackRequired => "baseline_fallback_required",
-        ZeroExecuteKindV6::RejectedNoMutation => "rejected_no_mutation",
-        ZeroExecuteKindV6::Cancelled => "cancelled",
-        ZeroExecuteKindV6::FailedNoAuthority => "failed_no_authority",
+        ZeroExecuteKind::Completed => "completed",
+        ZeroExecuteKind::DecisionRequired => "decision_required",
+        ZeroExecuteKind::EvidenceExpansionRequired => "evidence_expansion_required",
+        ZeroExecuteKind::VerificationUnknown => "verification_unknown",
+        ZeroExecuteKind::BaselineFallbackRequired => "baseline_fallback_required",
+        ZeroExecuteKind::RejectedNoMutation => "rejected_no_mutation",
+        ZeroExecuteKind::Cancelled => "cancelled",
+        ZeroExecuteKind::FailedNoAuthority => "failed_no_authority",
     }
 }
 
 /// Human-readable detail line for the legacy error object of a non-`Completed`
-/// kind. Kept stable and message-free of user content (the V6 envelope
+/// kind. Kept stable and message-free of user content (the execute envelope
 /// carries roots, not prose).
-fn legacy_kind_detail(envelope: &ZeroExecuteResultV6) -> String {
+fn legacy_kind_detail(envelope: &ZeroExecuteResult) -> String {
     match envelope.kind() {
-        ZeroExecuteKindV6::Completed => "completed".into(),
-        ZeroExecuteKindV6::DecisionRequired => format!(
+        ZeroExecuteKind::Completed => "completed".into(),
+        ZeroExecuteKind::DecisionRequired => format!(
             "decision required: {}",
             envelope.question().unwrap_or("uncovered semantic decision point")
         ),
-        ZeroExecuteKindV6::EvidenceExpansionRequired => {
+        ZeroExecuteKind::EvidenceExpansionRequired => {
             "evidence expansion required".into()
         }
-        ZeroExecuteKindV6::VerificationUnknown => "verification unknown".into(),
-        ZeroExecuteKindV6::BaselineFallbackRequired => {
+        ZeroExecuteKind::VerificationUnknown => "verification unknown".into(),
+        ZeroExecuteKind::BaselineFallbackRequired => {
             "baseline fallback required".into()
         }
-        ZeroExecuteKindV6::RejectedNoMutation => "rejected: no mutation".into(),
-        ZeroExecuteKindV6::Cancelled => "request cancelled".into(),
-        ZeroExecuteKindV6::FailedNoAuthority => "failed: no authority".into(),
+        ZeroExecuteKind::RejectedNoMutation => "rejected: no mutation".into(),
+        ZeroExecuteKind::Cancelled => "request cancelled".into(),
+        ZeroExecuteKind::FailedNoAuthority => "failed: no authority".into(),
     }
 }
 
@@ -341,18 +341,18 @@ fn legacy_kind_detail(envelope: &ZeroExecuteResultV6) -> String {
 /// legacy `commit_race` shape of error plus result) and a snake_case error
 /// code matching the legacy failure-code vocabulary.
 pub fn legacy_envelope_value(
-    envelope: &ZeroExecuteResultV6,
+    envelope: &ZeroExecuteResult,
     generation: u64,
     request_id: u64,
 ) -> Value {
     let kind = envelope.kind();
-    let ok = kind == ZeroExecuteKindV6::Completed;
+    let ok = kind == ZeroExecuteKind::Completed;
     let mut result = serde_json::Map::new();
     result.insert("protocol".into(), json!(ZSX_PROTOCOL));
     result.insert("ok".into(), json!(ok));
     result.insert("generation".into(), json!(generation));
     result.insert("request_id".into(), json!(request_id));
-    if kind == ZeroExecuteKindV6::DecisionRequired {
+    if kind == ZeroExecuteKind::DecisionRequired {
         let mut decision = serde_json::Map::new();
         decision.insert("question".into(), json!(envelope.question()));
         decision.insert("choices".into(), json!(envelope.choices()));

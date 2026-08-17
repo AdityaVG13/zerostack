@@ -79,8 +79,8 @@ pub use decision::{
     verdict_permits_selection,
 };
 pub use decision_view::{
-    CompletenessGradeV6, DecisionViewBindingV6, DecisionViewErrorV6, DecisionViewV6,
-    DECISION_VIEW_SCHEMA_ID_V6,
+    CompletenessGrade, DecisionViewBinding, DecisionViewError, DecisionView,
+    DECISION_VIEW_SCHEMA_ID,
 };
 pub use continuation::{
     ContinuationCompactRecordV1, ContinuationErrorV1, ContinuationHandleV1, ContinuationRootsV1,
@@ -92,7 +92,7 @@ pub use identity::{
     FallbackPolicyV1, HarnessContractV1, MessageOrderingV1,
     IdentityErrorV1, MIGRATION_RECEIPT_MAX_CANONICAL_BYTES_V1, MIGRATION_RECEIPT_MAX_REASON_BYTES_V1,
     ObjectClassV1, PayloadFormationReceiptV1, ProjectSuccessorCasV1,
-    ProtectedDimensionV1, ProtectedScopeObligationsV1, ROOTED_ABI_VERSION_V6, ROOT_HASH_ALGORITHM,
+    ProtectedDimensionV1, ProtectedScopeObligationsV1, ROOTED_ABI_VERSION, ROOT_HASH_ALGORITHM,
     RootedAbiMigrationReceiptV1, ScopeObligationV1, SerializationSchemeV1, SideEffectPolicyV1,
     StructuredTaskContractV1,
     SuccessorOutcomeV1,
@@ -197,8 +197,8 @@ pub use verdict::{
     PremiseV1, SafetyVerdictV1, VerdictBuildErrorV1, VERDICT_MAX_PREMISE_NAME_BYTES,
 };
 pub use zero_execute::{
-    AuditEventRangeV1, ContinuationStateV1, ZeroExecuteErrorV6, ZeroExecuteFieldsV6,
-    ZeroExecuteKindV6, ZeroExecuteResultV6, ZERO_EXECUTE_ABI_VERSION_V6,
+    AuditEventRangeV1, ContinuationStateV1, ZeroExecuteError, ZeroExecuteFields,
+    ZeroExecuteKind, ZeroExecuteResult, ZERO_EXECUTE_ABI_VERSION,
 };
 pub use zerokernel::{
     ExactHandlesV1, FiniteBudgetV1, PreflightReportV1, ResourceLedgerV1, ReturnKindV1,

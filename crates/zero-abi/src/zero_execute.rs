@@ -1,8 +1,8 @@
-//! V6 zero execute result envelope and continuation state machine
+//! Execute result envelope and continuation state machine
 //! (ZS-ADAPTER-003, ZS-EXEC-003).
 //!
-//! `ZeroExecuteResultV6` is the one stable semantic tool surface result.
-//! `abi_version` is pinned to `zerostack.racc.v6`, the six base
+//! `ZeroExecuteResult` is the one stable semantic tool surface result.
+//! `abi_version` is pinned to `zerostack.execute`. The six base
 //! `kind`s are the schema enum, and `Cancelled`/`FailedNoAuthority` are the
 //! two D5 adapter outcomes that extend it.
 //!
@@ -10,7 +10,7 @@
 //! - `completed(...)` accepts only a `Safe` verdict (ZS-KERNEL-004: removing
 //!   one required premise can never produce `Completed`).
 //! - Every kind-specific constructor requires its mandatory roots or payload
-//!   (typed `ZeroExecuteErrorV6` on violation).
+//!   (typed `ZeroExecuteError` on violation).
 //! - `Cancelled` and `FailedNoAuthority` must NOT carry `successor_root`.
 //! - The continuation machine's `allowed_transition` is a total function that
 //!   hard-rejects the D5 forbidden transitions regardless of arguments:
@@ -24,9 +24,9 @@ use serde_json::Value;
 
 use crate::verdict::SafetyVerdictV1;
 
-pub const ZERO_EXECUTE_ABI_VERSION_V6: &str = "zerostack.racc.v6";
+pub const ZERO_EXECUTE_ABI_VERSION: &str = "zerostack.execute";
 
-/// The eight result kinds of the V6 execute surface.
+/// The eight result kinds of the execute surface.
 ///
 /// Serialization is PascalCase exactly as the JSON schema spells them:
 /// `"Completed"`, `"DecisionRequired"`, `"EvidenceExpansionRequired"`,
@@ -35,7 +35,7 @@ pub const ZERO_EXECUTE_ABI_VERSION_V6: &str = "zerostack.racc.v6";
 /// `"FailedNoAuthority"`.
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "PascalCase")]
-pub enum ZeroExecuteKindV6 {
+pub enum ZeroExecuteKind {
     Completed,
     DecisionRequired,
     EvidenceExpansionRequired,
@@ -46,34 +46,34 @@ pub enum ZeroExecuteKindV6 {
     FailedNoAuthority,
 }
 
-impl ZeroExecuteKindV6 {
+impl ZeroExecuteKind {
     /// The PascalCase wire spelling of this kind, exactly as the JSON schema
     /// enumerates the six base kinds.
     pub fn kind_name(self) -> &'static str {
         match self {
-            ZeroExecuteKindV6::Completed => "Completed",
-            ZeroExecuteKindV6::DecisionRequired => "DecisionRequired",
-            ZeroExecuteKindV6::EvidenceExpansionRequired => "EvidenceExpansionRequired",
-            ZeroExecuteKindV6::VerificationUnknown => "VerificationUnknown",
-            ZeroExecuteKindV6::BaselineFallbackRequired => "BaselineFallbackRequired",
-            ZeroExecuteKindV6::RejectedNoMutation => "RejectedNoMutation",
-            ZeroExecuteKindV6::Cancelled => "Cancelled",
-            ZeroExecuteKindV6::FailedNoAuthority => "FailedNoAuthority",
+            ZeroExecuteKind::Completed => "Completed",
+            ZeroExecuteKind::DecisionRequired => "DecisionRequired",
+            ZeroExecuteKind::EvidenceExpansionRequired => "EvidenceExpansionRequired",
+            ZeroExecuteKind::VerificationUnknown => "VerificationUnknown",
+            ZeroExecuteKind::BaselineFallbackRequired => "BaselineFallbackRequired",
+            ZeroExecuteKind::RejectedNoMutation => "RejectedNoMutation",
+            ZeroExecuteKind::Cancelled => "Cancelled",
+            ZeroExecuteKind::FailedNoAuthority => "FailedNoAuthority",
         }
     }
 
-    /// Whether this kind is one of the six enumerated by the canonical V6
-    /// JSON schema (`zero_execute_result_v6.schema.json`). The two D5
+    /// Whether this kind is one of the six enumerated by the canonical
+    /// JSON schema (`zero_execute_result.schema.json`). The two D5
     /// adapter outcomes, `Cancelled` and `FailedNoAuthority`, extend it.
-    pub fn is_v6_base_schema_kind(self) -> bool {
+    pub fn is_base_schema_kind(self) -> bool {
         matches!(
             self,
-            ZeroExecuteKindV6::Completed
-                | ZeroExecuteKindV6::DecisionRequired
-                | ZeroExecuteKindV6::EvidenceExpansionRequired
-                | ZeroExecuteKindV6::VerificationUnknown
-                | ZeroExecuteKindV6::BaselineFallbackRequired
-                | ZeroExecuteKindV6::RejectedNoMutation
+            ZeroExecuteKind::Completed
+                | ZeroExecuteKind::DecisionRequired
+                | ZeroExecuteKind::EvidenceExpansionRequired
+                | ZeroExecuteKind::VerificationUnknown
+                | ZeroExecuteKind::BaselineFallbackRequired
+                | ZeroExecuteKind::RejectedNoMutation
         )
     }
 }
@@ -87,15 +87,15 @@ pub struct AuditEventRangeV1 {
 }
 
 impl AuditEventRangeV1 {
-    pub fn new(start: u64, end: u64) -> Result<Self, ZeroExecuteErrorV6> {
+    pub fn new(start: u64, end: u64) -> Result<Self, ZeroExecuteError> {
         let range = Self { start, end };
         range.validate()?;
         Ok(range)
     }
 
-    pub fn validate(&self) -> Result<(), ZeroExecuteErrorV6> {
+    pub fn validate(&self) -> Result<(), ZeroExecuteError> {
         if self.start > self.end {
-            return Err(ZeroExecuteErrorV6::InvalidAuditRange {
+            return Err(ZeroExecuteError::InvalidAuditRange {
                 start: self.start,
                 end: self.end,
             });
@@ -108,7 +108,7 @@ impl AuditEventRangeV1 {
 /// canonical content references; `None` means the kind does not carry them.
 #[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
-pub struct ZeroExecuteFieldsV6 {
+pub struct ZeroExecuteFields {
     pub continuation_handle: Option<String>,
     pub project_root: Option<String>,
     pub successor_root: Option<String>,
@@ -124,17 +124,18 @@ pub struct ZeroExecuteFieldsV6 {
     pub no_mutation_receipt_root: Option<String>,
 }
 
-/// The V6 zero execute result envelope.
+/// The zero execute result envelope.
 ///
-/// Serialization matches `zero_execute_result_v6.schema.json` field for
-/// field. Deserialization is fail-closed: `abi_version` must be the V6
-/// constant, `audit_event_range` must be valid, and the per-kind mandatory
-/// fields must be present (enforced by [`ZeroExecuteResultV6::validate`]).
+/// Serialization matches `zero_execute_result.schema.json` field for
+/// field. Deserialization is fail-closed: `abi_version` must be the
+/// `zerostack.execute` constant, `audit_event_range` must be valid, and the
+/// per-kind mandatory fields must be present (enforced by
+/// [`ZeroExecuteResult::validate`]).
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
-pub struct ZeroExecuteResultV6 {
+pub struct ZeroExecuteResult {
     abi_version: String,
-    kind: ZeroExecuteKindV6,
+    kind: ZeroExecuteKind,
     #[serde(default)]
     continuation_handle: Option<String>,
     #[serde(default)]
@@ -165,15 +166,15 @@ pub struct ZeroExecuteResultV6 {
     audit_event_range: AuditEventRangeV1,
 }
 
-impl ZeroExecuteResultV6 {
+impl ZeroExecuteResult {
     fn base(
-        kind: ZeroExecuteKindV6,
-        fields: ZeroExecuteFieldsV6,
+        kind: ZeroExecuteKind,
+        fields: ZeroExecuteFields,
         resource_ledger_root: impl Into<String>,
         audit_event_range: AuditEventRangeV1,
     ) -> Self {
         Self {
-            abi_version: ZERO_EXECUTE_ABI_VERSION_V6.to_owned(),
+            abi_version: ZERO_EXECUTE_ABI_VERSION.to_owned(),
             kind,
             continuation_handle: fields.continuation_handle,
             project_root: fields.project_root,
@@ -196,30 +197,30 @@ impl ZeroExecuteResultV6 {
     /// Construct a `Completed` envelope. ZS-KERNEL-004 acceptance: this is
     /// the ONLY path that yields `Completed`, and it requires a `Safe`
     /// verdict. An `Unknown` or `Unsafe` verdict is rejected with
-    /// [`ZeroExecuteErrorV6::VerdictNotSafe`] -- removing a required premise
+    /// [`ZeroExecuteError::VerdictNotSafe`] -- removing a required premise
     /// can never produce `Completed`.
     pub fn completed(
         verdict: SafetyVerdictV1,
-        fields: ZeroExecuteFieldsV6,
+        fields: ZeroExecuteFields,
         resource_ledger_root: impl Into<String>,
         audit_event_range: AuditEventRangeV1,
-    ) -> Result<Self, ZeroExecuteErrorV6> {
+    ) -> Result<Self, ZeroExecuteError> {
         if verdict != SafetyVerdictV1::Safe {
-            return Err(ZeroExecuteErrorV6::VerdictNotSafe);
+            return Err(ZeroExecuteError::VerdictNotSafe);
         }
         if fields.successor_root.is_none() {
-            return Err(ZeroExecuteErrorV6::MissingRequiredField("successor_root"));
+            return Err(ZeroExecuteError::MissingRequiredField("successor_root"));
         }
         if fields.result_root.is_none() {
-            return Err(ZeroExecuteErrorV6::MissingRequiredField("result_root"));
+            return Err(ZeroExecuteError::MissingRequiredField("result_root"));
         }
         if fields.verification_receipt_root.is_none() {
-            return Err(ZeroExecuteErrorV6::MissingRequiredField(
+            return Err(ZeroExecuteError::MissingRequiredField(
                 "verification_receipt_root",
             ));
         }
         let result = Self::base(
-            ZeroExecuteKindV6::Completed,
+            ZeroExecuteKind::Completed,
             fields,
             resource_ledger_root,
             audit_event_range,
@@ -231,23 +232,23 @@ impl ZeroExecuteResultV6 {
     /// Construct a `DecisionRequired` envelope: a question, a nonempty choice
     /// set, and a continuation handle are mandatory.
     pub fn decision_required(
-        fields: ZeroExecuteFieldsV6,
+        fields: ZeroExecuteFields,
         resource_ledger_root: impl Into<String>,
         audit_event_range: AuditEventRangeV1,
-    ) -> Result<Self, ZeroExecuteErrorV6> {
+    ) -> Result<Self, ZeroExecuteError> {
         if fields.question.is_none() {
-            return Err(ZeroExecuteErrorV6::MissingRequiredField("question"));
+            return Err(ZeroExecuteError::MissingRequiredField("question"));
         }
         if fields.choices.is_empty() {
-            return Err(ZeroExecuteErrorV6::EmptyChoices);
+            return Err(ZeroExecuteError::EmptyChoices);
         }
         if fields.continuation_handle.is_none() {
-            return Err(ZeroExecuteErrorV6::MissingRequiredField(
+            return Err(ZeroExecuteError::MissingRequiredField(
                 "continuation_handle",
             ));
         }
         let result = Self::base(
-            ZeroExecuteKindV6::DecisionRequired,
+            ZeroExecuteKind::DecisionRequired,
             fields,
             resource_ledger_root,
             audit_event_range,
@@ -259,17 +260,17 @@ impl ZeroExecuteResultV6 {
     /// Construct an `EvidenceExpansionRequired` envelope: a continuation
     /// handle is mandatory.
     pub fn evidence_expansion_required(
-        fields: ZeroExecuteFieldsV6,
+        fields: ZeroExecuteFields,
         resource_ledger_root: impl Into<String>,
         audit_event_range: AuditEventRangeV1,
-    ) -> Result<Self, ZeroExecuteErrorV6> {
+    ) -> Result<Self, ZeroExecuteError> {
         if fields.continuation_handle.is_none() {
-            return Err(ZeroExecuteErrorV6::MissingRequiredField(
+            return Err(ZeroExecuteError::MissingRequiredField(
                 "continuation_handle",
             ));
         }
         let result = Self::base(
-            ZeroExecuteKindV6::EvidenceExpansionRequired,
+            ZeroExecuteKind::EvidenceExpansionRequired,
             fields,
             resource_ledger_root,
             audit_event_range,
@@ -281,15 +282,15 @@ impl ZeroExecuteResultV6 {
     /// Construct a `VerificationUnknown` envelope: nonempty unknown reasons
     /// are mandatory (the reasons are what the fallback decision records).
     pub fn verification_unknown(
-        fields: ZeroExecuteFieldsV6,
+        fields: ZeroExecuteFields,
         resource_ledger_root: impl Into<String>,
         audit_event_range: AuditEventRangeV1,
-    ) -> Result<Self, ZeroExecuteErrorV6> {
+    ) -> Result<Self, ZeroExecuteError> {
         if fields.unknown_reasons.is_empty() {
-            return Err(ZeroExecuteErrorV6::EmptyUnknownReasons);
+            return Err(ZeroExecuteError::EmptyUnknownReasons);
         }
         let result = Self::base(
-            ZeroExecuteKindV6::VerificationUnknown,
+            ZeroExecuteKind::VerificationUnknown,
             fields,
             resource_ledger_root,
             audit_event_range,
@@ -301,15 +302,15 @@ impl ZeroExecuteResultV6 {
     /// Construct a `BaselineFallbackRequired` envelope: nonempty unknown
     /// reasons are mandatory.
     pub fn baseline_fallback_required(
-        fields: ZeroExecuteFieldsV6,
+        fields: ZeroExecuteFields,
         resource_ledger_root: impl Into<String>,
         audit_event_range: AuditEventRangeV1,
-    ) -> Result<Self, ZeroExecuteErrorV6> {
+    ) -> Result<Self, ZeroExecuteError> {
         if fields.unknown_reasons.is_empty() {
-            return Err(ZeroExecuteErrorV6::EmptyUnknownReasons);
+            return Err(ZeroExecuteError::EmptyUnknownReasons);
         }
         let result = Self::base(
-            ZeroExecuteKindV6::BaselineFallbackRequired,
+            ZeroExecuteKind::BaselineFallbackRequired,
             fields,
             resource_ledger_root,
             audit_event_range,
@@ -321,17 +322,17 @@ impl ZeroExecuteResultV6 {
     /// Construct a `RejectedNoMutation` envelope: a no-mutation receipt root
     /// is mandatory.
     pub fn rejected_no_mutation(
-        fields: ZeroExecuteFieldsV6,
+        fields: ZeroExecuteFields,
         resource_ledger_root: impl Into<String>,
         audit_event_range: AuditEventRangeV1,
-    ) -> Result<Self, ZeroExecuteErrorV6> {
+    ) -> Result<Self, ZeroExecuteError> {
         if fields.no_mutation_receipt_root.is_none() {
-            return Err(ZeroExecuteErrorV6::MissingRequiredField(
+            return Err(ZeroExecuteError::MissingRequiredField(
                 "no_mutation_receipt_root",
             ));
         }
         let result = Self::base(
-            ZeroExecuteKindV6::RejectedNoMutation,
+            ZeroExecuteKind::RejectedNoMutation,
             fields,
             resource_ledger_root,
             audit_event_range,
@@ -343,15 +344,15 @@ impl ZeroExecuteResultV6 {
     /// Construct a `Cancelled` envelope (D5 adapter extension). No extra
     /// roots are required, and `successor_root` is rejected if present.
     pub fn cancelled(
-        fields: ZeroExecuteFieldsV6,
+        fields: ZeroExecuteFields,
         resource_ledger_root: impl Into<String>,
         audit_event_range: AuditEventRangeV1,
-    ) -> Result<Self, ZeroExecuteErrorV6> {
+    ) -> Result<Self, ZeroExecuteError> {
         if fields.successor_root.is_some() {
-            return Err(ZeroExecuteErrorV6::ForbiddenRoot("successor_root"));
+            return Err(ZeroExecuteError::ForbiddenRoot("successor_root"));
         }
         let result = Self::base(
-            ZeroExecuteKindV6::Cancelled,
+            ZeroExecuteKind::Cancelled,
             fields,
             resource_ledger_root,
             audit_event_range,
@@ -363,15 +364,15 @@ impl ZeroExecuteResultV6 {
     /// Construct a `FailedNoAuthority` envelope (D5 adapter extension). No
     /// extra roots are required, and `successor_root` is rejected if present.
     pub fn failed_no_authority(
-        fields: ZeroExecuteFieldsV6,
+        fields: ZeroExecuteFields,
         resource_ledger_root: impl Into<String>,
         audit_event_range: AuditEventRangeV1,
-    ) -> Result<Self, ZeroExecuteErrorV6> {
+    ) -> Result<Self, ZeroExecuteError> {
         if fields.successor_root.is_some() {
-            return Err(ZeroExecuteErrorV6::ForbiddenRoot("successor_root"));
+            return Err(ZeroExecuteError::ForbiddenRoot("successor_root"));
         }
         let result = Self::base(
-            ZeroExecuteKindV6::FailedNoAuthority,
+            ZeroExecuteKind::FailedNoAuthority,
             fields,
             resource_ledger_root,
             audit_event_range,
@@ -383,12 +384,12 @@ impl ZeroExecuteResultV6 {
     /// The fail-closed kind for a non-`Safe` verdict, used by the
     /// no-completion constructor path. `Safe` maps to `Completed` here only
     /// as the label of the completing kind -- never as permission to skip
-    /// [`ZeroExecuteResultV6::completed`].
-    pub fn kind_for_verdict(verdict: &SafetyVerdictV1) -> ZeroExecuteKindV6 {
+    /// [`ZeroExecuteResult::completed`].
+    pub fn kind_for_verdict(verdict: &SafetyVerdictV1) -> ZeroExecuteKind {
         match verdict {
-            SafetyVerdictV1::Safe => ZeroExecuteKindV6::Completed,
-            SafetyVerdictV1::Unsafe { .. } => ZeroExecuteKindV6::RejectedNoMutation,
-            SafetyVerdictV1::Unknown { .. } => ZeroExecuteKindV6::VerificationUnknown,
+            SafetyVerdictV1::Safe => ZeroExecuteKind::Completed,
+            SafetyVerdictV1::Unsafe { .. } => ZeroExecuteKind::RejectedNoMutation,
+            SafetyVerdictV1::Unknown { .. } => ZeroExecuteKind::VerificationUnknown,
         }
     }
 
@@ -396,16 +397,16 @@ impl ZeroExecuteResultV6 {
     /// completion path. `Unsafe` maps to `RejectedNoMutation` (no-mutation
     /// receipt required), `Unknown` maps to `VerificationUnknown` (reasons
     /// required). A `Safe` verdict is rejected here: the only way to produce
-    /// `Completed` is [`ZeroExecuteResultV6::completed`], which re-checks the
+    /// `Completed` is [`ZeroExecuteResult::completed`], which re-checks the
     /// verdict. This constructor therefore has no reachable `Completed` path.
     pub fn from_verdict_never_completed(
         verdict: &SafetyVerdictV1,
-        fields: ZeroExecuteFieldsV6,
+        fields: ZeroExecuteFields,
         resource_ledger_root: impl Into<String>,
         audit_event_range: AuditEventRangeV1,
-    ) -> Result<Self, ZeroExecuteErrorV6> {
+    ) -> Result<Self, ZeroExecuteError> {
         match verdict {
-            SafetyVerdictV1::Safe => Err(ZeroExecuteErrorV6::VerdictMustNotBeSafe),
+            SafetyVerdictV1::Safe => Err(ZeroExecuteError::VerdictMustNotBeSafe),
             SafetyVerdictV1::Unsafe { .. } => {
                 Self::rejected_no_mutation(fields, resource_ledger_root, audit_event_range)
             }
@@ -418,63 +419,63 @@ impl ZeroExecuteResultV6 {
     /// Per-kind validation of a fully constructed (or deserialized) envelope.
     /// Enforces the schema contract: correct `abi_version`, valid audit
     /// range, and the kind-specific mandatory fields.
-    pub fn validate(&self) -> Result<(), ZeroExecuteErrorV6> {
-        if self.abi_version != ZERO_EXECUTE_ABI_VERSION_V6 {
-            return Err(ZeroExecuteErrorV6::WrongAbiVersion {
+    pub fn validate(&self) -> Result<(), ZeroExecuteError> {
+        if self.abi_version != ZERO_EXECUTE_ABI_VERSION {
+            return Err(ZeroExecuteError::WrongAbiVersion {
                 actual: self.abi_version.clone(),
             });
         }
         self.audit_event_range.validate()?;
         match self.kind {
-            ZeroExecuteKindV6::Completed => {
+            ZeroExecuteKind::Completed => {
                 if self.successor_root.is_none() {
-                    return Err(ZeroExecuteErrorV6::MissingRequiredField("successor_root"));
+                    return Err(ZeroExecuteError::MissingRequiredField("successor_root"));
                 }
                 if self.result_root.is_none() {
-                    return Err(ZeroExecuteErrorV6::MissingRequiredField("result_root"));
+                    return Err(ZeroExecuteError::MissingRequiredField("result_root"));
                 }
                 if self.verification_receipt_root.is_none() {
-                    return Err(ZeroExecuteErrorV6::MissingRequiredField(
+                    return Err(ZeroExecuteError::MissingRequiredField(
                         "verification_receipt_root",
                     ));
                 }
             }
-            ZeroExecuteKindV6::DecisionRequired => {
+            ZeroExecuteKind::DecisionRequired => {
                 if self.question.is_none() {
-                    return Err(ZeroExecuteErrorV6::MissingRequiredField("question"));
+                    return Err(ZeroExecuteError::MissingRequiredField("question"));
                 }
                 if self.choices.is_empty() {
-                    return Err(ZeroExecuteErrorV6::EmptyChoices);
+                    return Err(ZeroExecuteError::EmptyChoices);
                 }
                 if self.continuation_handle.is_none() {
-                    return Err(ZeroExecuteErrorV6::MissingRequiredField(
+                    return Err(ZeroExecuteError::MissingRequiredField(
                         "continuation_handle",
                     ));
                 }
             }
-            ZeroExecuteKindV6::EvidenceExpansionRequired => {
+            ZeroExecuteKind::EvidenceExpansionRequired => {
                 if self.continuation_handle.is_none() {
-                    return Err(ZeroExecuteErrorV6::MissingRequiredField(
+                    return Err(ZeroExecuteError::MissingRequiredField(
                         "continuation_handle",
                     ));
                 }
             }
-            ZeroExecuteKindV6::VerificationUnknown
-            | ZeroExecuteKindV6::BaselineFallbackRequired => {
+            ZeroExecuteKind::VerificationUnknown
+            | ZeroExecuteKind::BaselineFallbackRequired => {
                 if self.unknown_reasons.is_empty() {
-                    return Err(ZeroExecuteErrorV6::EmptyUnknownReasons);
+                    return Err(ZeroExecuteError::EmptyUnknownReasons);
                 }
             }
-            ZeroExecuteKindV6::RejectedNoMutation => {
+            ZeroExecuteKind::RejectedNoMutation => {
                 if self.no_mutation_receipt_root.is_none() {
-                    return Err(ZeroExecuteErrorV6::MissingRequiredField(
+                    return Err(ZeroExecuteError::MissingRequiredField(
                         "no_mutation_receipt_root",
                     ));
                 }
             }
-            ZeroExecuteKindV6::Cancelled | ZeroExecuteKindV6::FailedNoAuthority => {
+            ZeroExecuteKind::Cancelled | ZeroExecuteKind::FailedNoAuthority => {
                 if self.successor_root.is_some() {
-                    return Err(ZeroExecuteErrorV6::ForbiddenRoot("successor_root"));
+                    return Err(ZeroExecuteError::ForbiddenRoot("successor_root"));
                 }
             }
         }
@@ -485,7 +486,7 @@ impl ZeroExecuteResultV6 {
         &self.abi_version
     }
 
-    pub fn kind(&self) -> ZeroExecuteKindV6 {
+    pub fn kind(&self) -> ZeroExecuteKind {
         self.kind
     }
 
@@ -550,9 +551,9 @@ impl ZeroExecuteResultV6 {
     }
 }
 
-/// Fail-closed construction and validation error for the V6 envelope.
+/// Fail-closed construction and validation error for the execute envelope.
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub enum ZeroExecuteErrorV6 {
+pub enum ZeroExecuteError {
     InvalidAuditRange { start: u64, end: u64 },
     WrongAbiVersion { actual: String },
     VerdictNotSafe,
@@ -562,18 +563,18 @@ pub enum ZeroExecuteErrorV6 {
     EmptyChoices,
     EmptyUnknownReasons,
     /// A decision-bearing envelope requested a decision view but the typed
-    /// view failed fail-closed construction or certification (V6-R5).
+    /// view failed fail-closed construction or certification (ZS-VIEW-010).
     InvalidDecisionView(String),
 }
 
-impl fmt::Display for ZeroExecuteErrorV6 {
+impl fmt::Display for ZeroExecuteError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::InvalidAuditRange { start, end } => {
                 write!(formatter, "audit range start {start} exceeds end {end}")
             }
             Self::WrongAbiVersion { actual } => {
-                write!(formatter, "abi_version must be {ZERO_EXECUTE_ABI_VERSION_V6}, got {actual}")
+                write!(formatter, "abi_version must be {ZERO_EXECUTE_ABI_VERSION}, got {actual}")
             }
             Self::VerdictNotSafe => {
                 write!(formatter, "Completed requires a Safe verdict; Unknown/Unsafe must not complete")
@@ -598,7 +599,7 @@ impl fmt::Display for ZeroExecuteErrorV6 {
     }
 }
 
-impl Error for ZeroExecuteErrorV6 {}
+impl Error for ZeroExecuteError {}
 
 /// The 14-state D5 continuation machine.
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]

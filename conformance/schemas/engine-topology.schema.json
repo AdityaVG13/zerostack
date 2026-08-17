@@ -13,7 +13,7 @@
     "hub",
     "canonical_engine_skeleton",
     "dependency_direction",
-    "raw_worker_v2",
+    "raw_worker",
     "harness_adapters",
     "engines"
   ],
@@ -383,7 +383,7 @@
         }
       }
     },
-    "raw_worker_v2": {
+    "raw_worker": {
       "type": "object",
       "additionalProperties": false,
       "required": [

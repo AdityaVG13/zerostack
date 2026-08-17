@@ -11,7 +11,7 @@
 //! socket, no MCP transport, and no CodeMode runtime.
 //!
 //! Identity mirrors the GraphZero raw-worker-v2 binding
-//! (`graphzero_query::surface_handshake::v2::RawWorkerV2`):
+//! (`graphzero_query::surface_handshake::RawWorker`):
 //!
 //! - engine [`EngineIdentity::GraphZero`], ref scheme `gz://`;
 //! - `worker_revision` from `ZEROSTACK_WORKER_REVISION` with the

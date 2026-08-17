@@ -22,7 +22,7 @@ use crate::{
 };
 
 /// One protocol across FSZero, GraphZero, and TokenZero.
-pub const RAW_WORKER_PROTOCOL_VERSION: &str = "zerostack.raw_worker.v2";
+pub const RAW_WORKER_PROTOCOL_VERSION: &str = "zerostack.raw_worker";
 
 /// Default maximum encoded NDJSON frame, excluding the trailing newline.
 pub const DEFAULT_MAX_FRAME_BYTES: usize = 1_048_576;

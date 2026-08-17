@@ -62,7 +62,7 @@ satisfy:
 ~~~text
 mode == "codemode"
 and ingress in {"zero_execute", "zero_wait"}
-and engine_transport == "raw_worker_v2"
+and engine_transport == "raw_worker"
 and engine_mcp_hop_count == 0
 and engine_mcp_catalog_registered == false
 and trace_id is non-empty

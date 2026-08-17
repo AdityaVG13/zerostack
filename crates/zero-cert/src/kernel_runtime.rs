@@ -51,7 +51,7 @@ use serde::{Deserialize, Serialize};
 use zero_abi::identity::EventClassV1;
 use zero_abi::{
     DigestV1, EventLogV1, EventRecordV1, IdentityErrorV1, ObjectClassV1,
-    PayloadFormationReceiptV1, ProjectSuccessorCasV1, ROOTED_ABI_VERSION_V6,
+    PayloadFormationReceiptV1, ProjectSuccessorCasV1, ROOTED_ABI_VERSION,
     SuccessorOutcomeV1, SuccessorRecordV1, SuccessorUnchangedReasonV1, canonical_json,
     event_log_genesis, verify_object_root,
 };
@@ -678,7 +678,7 @@ impl CacheAdmissionRecordV1 {
             contract_root: contract_root.to_hex(),
             payload_root: payload_root.to_owned(),
             dependency_roots,
-            abi_version: ROOTED_ABI_VERSION_V6.to_owned(),
+            abi_version: ROOTED_ABI_VERSION.to_owned(),
         }
     }
 
@@ -753,7 +753,7 @@ impl CacheAdmissionGateV1 {
         let canonical = receipt.canonical_bytes()?;
         if !verify_object_root(
             ObjectClassV1::FormationReceipt,
-            ROOTED_ABI_VERSION_V6,
+            ROOTED_ABI_VERSION,
             &canonical,
             expected_receipt_root,
         ) {

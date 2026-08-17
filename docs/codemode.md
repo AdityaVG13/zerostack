@@ -140,14 +140,14 @@ compatibility transport remains an optional feature of `zero-mcp`.
 
 ## Legacy raw-worker conformance client
 
-`zero_codemode::worker` remains only for raw-worker v2 compatibility tests and
+`zero_codemode::worker` remains only for raw-worker compatibility tests and
 protocol conformance. `zsx`, the Node binding, Pi, and OMP do not construct it.
 The module owns bounded spawn, framed I/O, handshake, cancellation, shutdown,
 and reap when a compatibility test explicitly creates a `WorkerClient`.
 
 Clients provide an explicit store root and session id in WorkerContext and pin
 worker revision, semantic contract digest, and operation registry digest in the
-factory. The adapter propagates context through the canonical raw-worker v2
+factory. The adapter propagates context through the canonical raw-worker
 handshake and ZEROSTACK_STORE_ROOT, ZEROSTACK_SESSION_ID, and ZEROSTACK_ENGINE.
 Startup fails closed unless protocol version/digest, engine, root, session,
 semantic digest, registry digest, and revision all match. Raw-worker v2 and its
@@ -169,7 +169,7 @@ expose the direct child wait result without platform-specific PID probing.
 Engine migration beads adopt this boundary without moving runtime logic:
 
 1. Keep each engine's operation registry and domain dispatch in its engine.
-2. Expose one planner-free raw-worker v2 binary using the existing zero-abi
+2. Expose one planner-free raw-worker binary using the existing zero-abi
    frames and digest.
 3. Register a factory with the engine identity, executable, revision, semantic
    contract digest, and registry digest.

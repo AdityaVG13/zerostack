@@ -29,7 +29,7 @@ use serde_json::Value;
 use crate::digest::sha256;
 use crate::DigestV1;
 
-pub const ROOTED_ABI_VERSION_V6: &str = "zerostack.racc.v6";
+pub const ROOTED_ABI_VERSION: &str = "zerostack.racc";
 pub const ROOT_HASH_ALGORITHM: &str = "sha256";
 pub const EVENT_LOG_GENESIS_DOMAIN: &[u8] = b"zerostack.eventlog.genesis.v1\0";
 pub const CONTRACT_VERSION_V1: u16 = 1;
@@ -63,7 +63,7 @@ impl fmt::Display for IdentityErrorV1 {
                 write!(formatter, "unknown object class {class:?}")
             }
             Self::WrongAbiVersion { actual } => {
-                write!(formatter, "abi version must be {ROOTED_ABI_VERSION_V6}, got {actual}")
+                write!(formatter, "abi version must be {ROOTED_ABI_VERSION}, got {actual}")
             }
             Self::NonCanonicalBytes(detail) => write!(formatter, "noncanonical bytes: {detail}"),
             Self::InvalidTaskContract(detail) => write!(formatter, "invalid task contract: {detail}"),
@@ -98,7 +98,7 @@ impl fmt::Display for IdentityErrorV1 {
             ),
             Self::TargetRootMismatch => write!(
                 formatter,
-                "migration receipt target root does not match the rooted v6 object"
+                "migration receipt target root does not match the rooted object"
             ),
             Self::MigrationWithoutAbiChange => write!(
                 formatter,
@@ -106,7 +106,7 @@ impl fmt::Display for IdentityErrorV1 {
             ),
             Self::LegacyTargetAbi(actual) => write!(
                 formatter,
-                "migration target must use {ROOTED_ABI_VERSION_V6}, got {actual}"
+                "migration target must use {ROOTED_ABI_VERSION}, got {actual}"
             ),
         }
     }
@@ -197,7 +197,7 @@ pub fn canonical_object_bytes(
     abi_version: &str,
     payload: &Value,
 ) -> Result<Vec<u8>, IdentityErrorV1> {
-    if abi_version != ROOTED_ABI_VERSION_V6 {
+    if abi_version != ROOTED_ABI_VERSION {
         return Err(IdentityErrorV1::WrongAbiVersion {
             actual: abi_version.to_owned(),
         });
@@ -218,7 +218,7 @@ pub fn object_root(
     abi_version: &str,
     canonical_payload: &[u8],
 ) -> Result<DigestV1, IdentityErrorV1> {
-    if abi_version != ROOTED_ABI_VERSION_V6 {
+    if abi_version != ROOTED_ABI_VERSION {
         return Err(IdentityErrorV1::WrongAbiVersion {
             actual: abi_version.to_owned(),
         });
@@ -443,9 +443,9 @@ impl SideEffectPolicyV1 {
     }
 }
 
-/// What happens when the run reaches `Unknown`: V6 routes to the frozen raw
-/// baseline; a policy can also reject with no mutation, or treat Unknown as a
-/// hard error.
+/// What happens when the run reaches `Unknown`: the execute surface routes
+/// to the frozen raw baseline; a policy can also reject with no mutation, or
+/// treat Unknown as a hard error.
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum FallbackPolicyV1 {
@@ -613,13 +613,13 @@ impl StructuredTaskContractV1 {
     pub fn canonical_bytes(&self) -> Result<Vec<u8>, IdentityErrorV1> {
         let value = serde_json::to_value(self)
             .map_err(|error| IdentityErrorV1::NonCanonicalBytes(error.to_string()))?;
-        canonical_object_bytes(ObjectClassV1::TaskContract, ROOTED_ABI_VERSION_V6, &value)
+        canonical_object_bytes(ObjectClassV1::TaskContract, ROOTED_ABI_VERSION, &value)
     }
 
     /// The contract root: any field change produces a different root.
     pub fn contract_root(&self) -> Result<DigestV1, IdentityErrorV1> {
         let bytes = self.canonical_bytes()?;
-        object_root(ObjectClassV1::TaskContract, ROOTED_ABI_VERSION_V6, &bytes)
+        object_root(ObjectClassV1::TaskContract, ROOTED_ABI_VERSION, &bytes)
     }
 }
 
@@ -661,7 +661,7 @@ impl PayloadFormationReceiptV1 {
             execution_record_root: execution_record_root.into(),
             payload_root: payload_root.into(),
             epoch,
-            abi_version: ROOTED_ABI_VERSION_V6.to_owned(),
+            abi_version: ROOTED_ABI_VERSION.to_owned(),
         };
         receipt.validate()?;
         Ok(receipt)
@@ -674,7 +674,7 @@ impl PayloadFormationReceiptV1 {
                 self.receipt_version
             )));
         }
-        if self.abi_version != ROOTED_ABI_VERSION_V6 {
+        if self.abi_version != ROOTED_ABI_VERSION {
             return Err(IdentityErrorV1::WrongAbiVersion {
                 actual: self.abi_version.clone(),
             });
@@ -700,12 +700,12 @@ impl PayloadFormationReceiptV1 {
     pub fn canonical_bytes(&self) -> Result<Vec<u8>, IdentityErrorV1> {
         let value = serde_json::to_value(self)
             .map_err(|error| IdentityErrorV1::NonCanonicalBytes(error.to_string()))?;
-        canonical_object_bytes(ObjectClassV1::FormationReceipt, ROOTED_ABI_VERSION_V6, &value)
+        canonical_object_bytes(ObjectClassV1::FormationReceipt, ROOTED_ABI_VERSION, &value)
     }
 
     pub fn receipt_root(&self) -> Result<DigestV1, IdentityErrorV1> {
         let bytes = self.canonical_bytes()?;
-        object_root(ObjectClassV1::FormationReceipt, ROOTED_ABI_VERSION_V6, &bytes)
+        object_root(ObjectClassV1::FormationReceipt, ROOTED_ABI_VERSION, &bytes)
     }
 
     /// Verify a payload against this receipt: the payload root must match the
@@ -867,12 +867,12 @@ impl EventRecordV1 {
     pub fn canonical_bytes(&self) -> Result<Vec<u8>, IdentityErrorV1> {
         let value = serde_json::to_value(self)
             .map_err(|error| IdentityErrorV1::NonCanonicalBytes(error.to_string()))?;
-        canonical_object_bytes(ObjectClassV1::EventRecord, ROOTED_ABI_VERSION_V6, &value)
+        canonical_object_bytes(ObjectClassV1::EventRecord, ROOTED_ABI_VERSION, &value)
     }
 
     pub fn record_root(&self) -> Result<DigestV1, IdentityErrorV1> {
         let bytes = self.canonical_bytes()?;
-        object_root(ObjectClassV1::EventRecord, ROOTED_ABI_VERSION_V6, &bytes)
+        object_root(ObjectClassV1::EventRecord, ROOTED_ABI_VERSION, &bytes)
     }
 }
 
@@ -1085,7 +1085,7 @@ impl SuccessorRecordV1 {
             verified_successor_root,
             advanced,
             authority: authority.into(),
-            abi_version: ROOTED_ABI_VERSION_V6.to_owned(),
+            abi_version: ROOTED_ABI_VERSION.to_owned(),
         };
         record.validate()?;
         Ok(record)
@@ -1098,7 +1098,7 @@ impl SuccessorRecordV1 {
                 self.record_version
             )));
         }
-        if self.abi_version != ROOTED_ABI_VERSION_V6 {
+        if self.abi_version != ROOTED_ABI_VERSION {
             return Err(IdentityErrorV1::WrongAbiVersion {
                 actual: self.abi_version.clone(),
             });
@@ -1114,12 +1114,12 @@ impl SuccessorRecordV1 {
     pub fn canonical_bytes(&self) -> Result<Vec<u8>, IdentityErrorV1> {
         let value = serde_json::to_value(self)
             .map_err(|error| IdentityErrorV1::NonCanonicalBytes(error.to_string()))?;
-        canonical_object_bytes(ObjectClassV1::SuccessorRecord, ROOTED_ABI_VERSION_V6, &value)
+        canonical_object_bytes(ObjectClassV1::SuccessorRecord, ROOTED_ABI_VERSION, &value)
     }
 
     pub fn record_root(&self) -> Result<DigestV1, IdentityErrorV1> {
         let bytes = self.canonical_bytes()?;
-        object_root(ObjectClassV1::SuccessorRecord, ROOTED_ABI_VERSION_V6, &bytes)
+        object_root(ObjectClassV1::SuccessorRecord, ROOTED_ABI_VERSION, &bytes)
     }
 }
 
@@ -1197,7 +1197,7 @@ impl HarnessContractV1 {
             cancellation_semantics,
             native_tool_set_digest,
             adapter_renderer_version,
-            abi_version: ROOTED_ABI_VERSION_V6.to_owned(),
+            abi_version: ROOTED_ABI_VERSION.to_owned(),
         };
         contract.validate()?;
         Ok(contract)
@@ -1210,7 +1210,7 @@ impl HarnessContractV1 {
                 self.contract_version
             )));
         }
-        if self.abi_version != ROOTED_ABI_VERSION_V6 {
+        if self.abi_version != ROOTED_ABI_VERSION {
             return Err(IdentityErrorV1::WrongAbiVersion {
                 actual: self.abi_version.clone(),
             });
@@ -1231,12 +1231,12 @@ impl HarnessContractV1 {
     pub fn canonical_bytes(&self) -> Result<Vec<u8>, IdentityErrorV1> {
         let value = serde_json::to_value(self)
             .map_err(|error| IdentityErrorV1::NonCanonicalBytes(error.to_string()))?;
-        canonical_object_bytes(ObjectClassV1::TaskContract, ROOTED_ABI_VERSION_V6, &value)
+        canonical_object_bytes(ObjectClassV1::TaskContract, ROOTED_ABI_VERSION, &value)
     }
 
     pub fn contract_root(&self) -> Result<DigestV1, IdentityErrorV1> {
         let bytes = self.canonical_bytes()?;
-        object_root(ObjectClassV1::TaskContract, ROOTED_ABI_VERSION_V6, &bytes)
+        object_root(ObjectClassV1::TaskContract, ROOTED_ABI_VERSION, &bytes)
     }
 }
 
@@ -1254,8 +1254,8 @@ pub const MIGRATION_RECEIPT_MAX_REASON_BYTES_V1: usize = 512;
 /// - the legacy object's class, declared ABI version, canonical bytes, and
 ///   recorded root (verified against the versioned `root_preimage` with the
 ///   legacy ABI tag -- legacy payloads are not re-canonicalized);
-/// - the v6 replacement object's class and rooted v6 bytes (verified through
-///   [`canonical_object_bytes`] + [`object_root`], the only v6 path);
+/// - the replacement object's class and rooted bytes (verified through
+///   [`canonical_object_bytes`] + [`object_root`], the only current path);
 /// - a real ABI version change (source != target);
 /// - a nonempty migration reason.
 ///
@@ -1285,7 +1285,7 @@ impl RootedAbiMigrationReceiptV1 {
     /// `source_canonical_bytes` are the legacy object's own canonical bytes
     /// (already canonical under its legacy ABI); the source root must match
     /// `sha256(root_preimage(source_class, source_abi_version, source_bytes))`.
-    /// `target_value` is re-canonicalized and rooted through the v6 path.
+    /// `target_value` is re-canonicalized and rooted through the current path.
     pub fn new(
         source_class: ObjectClassV1,
         source_abi_version: impl Into<String>,
@@ -1297,7 +1297,7 @@ impl RootedAbiMigrationReceiptV1 {
     ) -> Result<Self, IdentityErrorV1> {
         let source_abi_version = source_abi_version.into();
         let migration_reason = migration_reason.into();
-        if source_abi_version == ROOTED_ABI_VERSION_V6 {
+        if source_abi_version == ROOTED_ABI_VERSION {
             return Err(IdentityErrorV1::MigrationWithoutAbiChange);
         }
         if migration_reason.trim().is_empty()
@@ -1323,9 +1323,9 @@ impl RootedAbiMigrationReceiptV1 {
             return Err(IdentityErrorV1::SourceRootMismatch);
         }
         let target_canonical =
-            canonical_object_bytes(target_class, ROOTED_ABI_VERSION_V6, target_value)?;
+            canonical_object_bytes(target_class, ROOTED_ABI_VERSION, target_value)?;
         let target_root =
-            object_root(target_class, ROOTED_ABI_VERSION_V6, &target_canonical)?;
+            object_root(target_class, ROOTED_ABI_VERSION, &target_canonical)?;
         let receipt = Self {
             receipt_version: CONTRACT_VERSION_V1,
             source_class,
@@ -1333,11 +1333,11 @@ impl RootedAbiMigrationReceiptV1 {
             source_canonical_bytes_hex: hex_encode(source_canonical_bytes),
             source_root,
             target_class,
-            target_abi_version: ROOTED_ABI_VERSION_V6.to_owned(),
+            target_abi_version: ROOTED_ABI_VERSION.to_owned(),
             target_canonical_bytes_hex: hex_encode(&target_canonical),
             target_root,
             migration_reason,
-            abi_version: ROOTED_ABI_VERSION_V6.to_owned(),
+            abi_version: ROOTED_ABI_VERSION.to_owned(),
         };
         receipt.validate()?;
         Ok(receipt)
@@ -1350,12 +1350,12 @@ impl RootedAbiMigrationReceiptV1 {
                 self.receipt_version
             )));
         }
-        if self.abi_version != ROOTED_ABI_VERSION_V6 {
+        if self.abi_version != ROOTED_ABI_VERSION {
             return Err(IdentityErrorV1::WrongAbiVersion {
                 actual: self.abi_version.clone(),
             });
         }
-        if self.target_abi_version != ROOTED_ABI_VERSION_V6 {
+        if self.target_abi_version != ROOTED_ABI_VERSION {
             return Err(IdentityErrorV1::LegacyTargetAbi(
                 self.target_abi_version.clone(),
             ));
@@ -1406,7 +1406,7 @@ impl RootedAbiMigrationReceiptV1 {
                 "target canonical bytes must be nonempty and bounded".into(),
             ));
         }
-        if object_root(self.target_class, ROOTED_ABI_VERSION_V6, &target_bytes)?
+        if object_root(self.target_class, ROOTED_ABI_VERSION, &target_bytes)?
             != self.target_root
         {
             return Err(IdentityErrorV1::TargetRootMismatch);
@@ -1417,12 +1417,12 @@ impl RootedAbiMigrationReceiptV1 {
     pub fn canonical_bytes(&self) -> Result<Vec<u8>, IdentityErrorV1> {
         let value = serde_json::to_value(self)
             .map_err(|error| IdentityErrorV1::NonCanonicalBytes(error.to_string()))?;
-        canonical_object_bytes(ObjectClassV1::MigrationReceipt, ROOTED_ABI_VERSION_V6, &value)
+        canonical_object_bytes(ObjectClassV1::MigrationReceipt, ROOTED_ABI_VERSION, &value)
     }
 
     pub fn receipt_root(&self) -> Result<DigestV1, IdentityErrorV1> {
         let bytes = self.canonical_bytes()?;
-        object_root(ObjectClassV1::MigrationReceipt, ROOTED_ABI_VERSION_V6, &bytes)
+        object_root(ObjectClassV1::MigrationReceipt, ROOTED_ABI_VERSION, &bytes)
     }
 
     pub fn from_canonical_bytes(bytes: &[u8]) -> Result<Self, IdentityErrorV1> {

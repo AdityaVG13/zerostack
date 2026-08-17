@@ -1,4 +1,4 @@
-//! V6-R2: session-level continuation persist/resume runtime
+//! session-level continuation persist/resume runtime
 //! (ZS-ADAPTER-004, ZS-SESSION-001/005).
 //!
 //! When an execution aborts at an uncovered semantic decision point, the
@@ -16,7 +16,7 @@
 //! - the plan source that a resume re-executes,
 //! - the session project root (the only authority root the session boundary
 //!   can prove; the other seven roots are left unbound as `DigestV1::ZERO`
-//!   rather than fabricated -- the same honesty law as the V6 envelope),
+//!   rather than fabricated -- the same honesty law as the execute envelope),
 //! - an expiry deadline.
 //!
 //! The registry is durable through the zero-store session WAL journal
@@ -47,7 +47,7 @@ use std::path::Path;
 use serde::{Deserialize, Serialize};
 use zero_abi::{
     ContingentPolicyRuleV1, ContingentPolicyV1, ContinuationHandleV1, ContinuationRootsV1,
-    DecisionRequiredV1, DigestV1, ObservedMatchV1, ROOTED_ABI_VERSION_V6, sha256,
+    DecisionRequiredV1, DigestV1, ObservedMatchV1, ROOTED_ABI_VERSION, sha256,
 };
 use zero_store::{AppendOutcome, SessionWal, SessionWalConfig};
 
@@ -420,7 +420,7 @@ impl ContinuationRegistryV1 {
         record
             .handle
             .validate_against(
-                ROOTED_ABI_VERSION_V6,
+                ROOTED_ABI_VERSION,
                 DigestV1::from_bytes(sha256(project_root.as_bytes())),
                 epoch,
             )
@@ -524,7 +524,7 @@ impl ContinuationRegistryV1 {
     }
 }
 
-/// The scoped handle shape the V6 envelope emits and the resume API accepts:
+/// The scoped handle shape the execute envelope emits and the resume API accepts:
 /// `zsx://g<generation>-r<request_id>/<decision_id>`.
 fn scoped_handle(key: &ContinuationKeyV1) -> String {
     format!("zsx://g{}-r{}/{}", key.generation, key.request_id, key.decision_id)

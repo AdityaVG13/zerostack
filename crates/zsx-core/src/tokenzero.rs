@@ -5,34 +5,34 @@
 //! `tokenzero-engine` 1.4.0) by dispatching through the engine's embedded
 //! value entry (`tokenzero_engine::execute_embedded_value`) first and falling
 //! back to the canonical typed dispatcher (`tokenzero_engine::dispatch_operation`
-//! — the same entries the raw-worker-v2 path funnels through), converting the
+//! — the same entries the raw-worker path funnels through), converting the
 //! typed `DomainResult` / `DomainError` outcomes into the [`WorkerResult`]
 //! envelope the aggregate connector validates. No raw-worker framing crosses
 //! this boundary: the module contains no `Command::spawn`, no NDJSON codec,
 //! no socket, no MCP transport, and no CodeMode runtime.
 //!
-//! Identity mirrors the TokenZero raw-worker-v2 binding
-//! (`raw_worker_v2_impl::revision` + `surface_handshake::build_surface_capability`):
+//! Identity mirrors the TokenZero raw-worker binding
+//! (`raw_worker_impl::revision` + `surface_handshake::build_surface_capability`):
 //!
 //! - engine [`EngineIdentity::TokenZero`], ref scheme `tz://`;
 //! - `worker_revision` from `ZEROSTACK_WORKER_REVISION` with the pinned
 //!   `tokenzero-engine` crate version fallback;
 //! - `semantic_contract_version` from the registry
 //!   [`SEMANTIC_CONTRACT_VERSION`];
-//! - both digests from [`contract_digest_hex`] (the v2 worker binds the
+//! - both digests from [`contract_digest_hex`] (the raw worker binds the
 //!   operation-registry digest to the same contract digest).
 //!
-//! Outcome conversion mirrors the v2 worker frame mapping
-//! (`raw_worker_v2_impl::dispatch_call`): shell/compact/ingest operations
+//! Outcome conversion mirrors the raw-worker frame mapping
+//! (`raw_worker_impl::dispatch_call`): shell/compact/ingest operations
 //! report [`EffectClass::Irreversible`], everything else
 //! [`EffectClass::ReadOnly`]; approvals and revert are never claimed; `tz://`
 //! refs are collected recursively from the result value (job polls never
-//! contribute ownership, exactly like the v2 `refs` scan); the response
+//! contribute ownership, exactly like the raw-worker `refs` scan); the response
 //! echoes `request.trace` verbatim, as the connector requires.
 //!
 //! Dispatch runs `tokenzero_engine::execute_embedded_value` first — the
 //! engine's own embedded seam for `job` polls and background `shell`, the
-//! same entry the raw-worker-v2 dispatcher uses — and falls back to
+//! same entry the raw-worker dispatcher uses — and falls back to
 //! `dispatch_operation` for every registry operation. No job or
 //! background-shell execution or parsing is duplicated in this module.
 //!

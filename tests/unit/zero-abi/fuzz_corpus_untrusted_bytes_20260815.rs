@@ -16,7 +16,7 @@ const FRAME_SEEDS: &[&[u8]] = &[
     b"[]",
     b"{\"kind\":\"\"}",
     b"{\"kind\":\"handshake\"}",
-    br#"{"kind":"handshake","request":{"protocol_version":"zerostack.raw_worker.v2","root":"/repo","session_id":"s1","expected_engine":"fszero","expected_worker_revision":"r1","expected_contract_digest":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","expected_registry_digest":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"}}"#,
+    br#"{"kind":"handshake","request":{"protocol_version":"zerostack.raw_worker","root":"/repo","session_id":"s1","expected_engine":"fszero","expected_worker_revision":"r1","expected_contract_digest":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","expected_registry_digest":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"}}"#,
     b"\x00\x01\x02\xff",
 ];
 

@@ -110,7 +110,7 @@ pub enum ZsxSessionFailureCode {
     VerdictRejected,
     /// The plan reached an uncovered semantic decision point and aborted
     /// with a typed `DecisionRequired` payload instead of privately
-    /// selecting a branch (V6-C03/H03).
+    /// selecting a branch (ZS-EXEC-004).
     DecisionRequired,
     /// The request was cancelled through its per-request token before it
     /// settled. The session itself remains accepting.
@@ -120,11 +120,11 @@ pub enum ZsxSessionFailureCode {
     CommitRace,
     /// A continuation persist/resume was refused loudly: unknown, tampered,
     /// expired, cross-project, revoked-epoch, already-consumed, or
-    /// unoffered-choice (V6-R2, ZS-ADAPTER-004).
+    /// unoffered-choice (ZS-ADAPTER-004).
     ContinuationRefused,
     /// The contingent policy attached to an execute request failed
-    /// validation and was refused before any execution began (V6-R3,
-    /// ZS-EXEC-004/007): fail closed, never run with a defective policy.
+    /// validation and was refused before any execution began
+    /// (ZS-EXEC-004/007): fail closed, never run with a defective policy.
     InvalidPolicy,
     Internal,
 }
@@ -221,11 +221,11 @@ pub struct ZsxExecutionResult {
     pub metrics: ZsxExecutionMetrics,
 }
 
-/// One settled execution before legacy/V6 projection: the raw backend
-/// outcome plus the per-request cancellation fact, kept raw so the V6
-/// envelope projection (V6-R1) can prove its kinds from the typed
+/// One settled execution before legacy/envelope projection: the raw backend
+/// outcome plus the per-request cancellation fact, kept raw so the
+/// execute envelope projection can prove its kinds from the typed
 /// [`HostError`] instead of a lossy code string. `policy_report` rides the
-/// outcome of a policy execution (V6-R3) and is captured from the gate
+/// outcome of a policy execution  and is captured from the gate
 /// before it is restored, on success and failure alike.
 #[derive(Debug)]
 pub(crate) struct ZsxSettledExecution {
@@ -237,7 +237,7 @@ pub(crate) struct ZsxSettledExecution {
 }
 
 impl ZsxSettledExecution {
-    /// Legacy projection of the backend failure, exactly the pre-V6 code:
+    /// Legacy projection of the backend failure, exactly the legacy code:
     /// a cancelled request reports `Cancelled`, otherwise the typed backend
     /// failure code. `None` on success.
     fn legacy_error(&self, generation: u64, request_id: u64) -> Option<ZsxSessionError> {
@@ -252,23 +252,23 @@ impl ZsxSettledExecution {
     }
 }
 
-/// The V6 envelope emission of one execution (V6-R1, ZS-ADAPTER-003,
+/// The execute envelope emission of one execution (ZS-ADAPTER-003,
 /// ZS-EXEC-003): the legacy-visible value, metrics, and typed error
 /// (unchanged for existing consumers) plus the kind-tagged
-/// [`zero_abi::ZeroExecuteResultV6`] envelope. `envelope` is `None` only
-/// when no V6 kind is provable at the session boundary -- plain success
+/// [`zero_abi::ZeroExecuteResult`] envelope. `envelope` is `None` only
+/// when no execute kind is provable at the session boundary -- plain success
 /// without a safety verdict and content roots, or a transport/lifecycle
 /// failure -- per the honesty law in [`crate::envelope`]. `policy_report`
 /// is the honest usage report of the contingent policy attached to this
-/// execution (V6-R3): `None` when no policy rode in.
+/// execution : `None` when no policy rode in.
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct ZsxExecutionResultV6 {
+pub struct ZsxExecuteEnvelope {
     pub generation: u64,
     pub request_id: u64,
     pub value: Option<Value>,
     pub metrics: Option<ZsxExecutionMetrics>,
     pub error: Option<ZsxSessionError>,
-    pub envelope: Option<zero_abi::ZeroExecuteResultV6>,
+    pub envelope: Option<zero_abi::ZeroExecuteResult>,
     /// Honest per-rule usage of the attached contingent policy over this
     /// execution: every rule with its match count and the explicit list of
     /// rules that never matched. `None` when no policy was attached.
@@ -310,8 +310,8 @@ enum ZsxCommand {
         approval_grants: Vec<SessionApprovalGrantV1>,
         verdict_envelope: Option<VerdictLoopEnvelope>,
         /// One-shot contingent policy installed on the host decision gate
-        /// for exactly this execution (V6-R2 continuation resume; V6-R3
-        /// ordinary execute requests with an attached policy). The gate is
+        /// for exactly this execution (continuation resume; ordinary
+        /// execute requests with an attached policy). The gate is
         /// restored to the policy-less fail-closed state after settle.
         contingent_policy: Option<zero_abi::ContingentPolicyV1>,
         /// The policy usage report rides the outcome on success AND backend
@@ -500,7 +500,7 @@ impl ZsxExecutor {
             clear_active();
             return Err(error);
         }
-        // One Q99/residency demand window per execution (V6-R4): the gate
+        // One Q99/residency demand window per execution (): the gate
         // collects per-tier observations and the demanded-object closure
         // while the request dispatches, and is finalized after it settles.
         if let Err(error) = self
@@ -581,8 +581,8 @@ impl ZsxExecutor {
     }
 
     /// Execute one plan with the host's decision gate temporarily replaced
-    /// by the attached contingent policy (V6-R2 continuation resume; V6-R3
-    /// ordinary execute requests). The policy is validated fail-closed
+    /// by the attached contingent policy (continuation resume; ordinary
+    /// execute requests). The policy is validated fail-closed
     /// first -- a defective policy is refused before the gate is touched and
     /// before any execution begins. The gate is installed immediately before
     /// the plan runs and restored to the policy-less fail-closed state when
@@ -843,7 +843,7 @@ pub struct ZsxSession {
     commands: SyncSender<ZsxCommand>,
     cancellation: Arc<Mutex<ActiveCancellationSlot>>,
     worker: Mutex<Option<JoinHandle<()>>>,
-    /// Durable continuation registry (V6-R2) journaled under the session
+    /// Durable continuation registry  journaled under the session
     /// state root; shared with no worker state, since persist and resume
     /// are facade operations.
     continuations: Arc<Mutex<crate::continuation::ContinuationRegistryV1>>,
@@ -1115,34 +1115,34 @@ impl ZsxSession {
         .map(|(result, _)| result)
     }
 
-    /// Execute one plan and emit the V6 result envelope (V6-R1,
-    /// ZS-ADAPTER-003, ZS-EXEC-003) alongside the legacy-visible result.
+    /// Execute one plan and emit the execute result envelope
+    /// (ZS-ADAPTER-003, ZS-EXEC-003) alongside the legacy-visible result.
     ///
     /// The envelope is kind-tagged and honest: it is emitted only when the
     /// session can prove the kind -- an uncovered decision point surfaces as
     /// `DecisionRequired` with the typed question/choices/continuation
     /// handle, a cancelled request as `Cancelled`, and an approval/permit
     /// rejection as `FailedNoAuthority`. A plain successful execution has no
-    /// provable V6 kind at the session boundary (no safety verdict, no
+    /// provable execute kind at the session boundary (no safety verdict, no
     /// content roots), so `envelope` is `None` and the legacy value/metrics
-    /// are returned unchanged; the legacy `error` field keeps the pre-V6
+    /// are returned unchanged; the legacy `error` field keeps the legacy
     /// typed failure so existing consumers keep working.
-    pub fn execute_v6(
+    pub fn execute_envelope(
         &self,
         generation: u64,
         request_id: u64,
         source: impl Into<String>,
         timeout: Duration,
         ledger: crate::envelope::SessionEnvelopeContextV1,
-    ) -> Result<ZsxExecutionResultV6, ZsxSessionError> {
-        self.execute_with_approvals_v6(generation, request_id, source, timeout, Vec::new(), ledger)
+    ) -> Result<ZsxExecuteEnvelope, ZsxSessionError> {
+        self.execute_with_approvals_envelope(generation, request_id, source, timeout, Vec::new(), ledger)
     }
 
-    /// Execute with approval grants and emit the V6 result envelope. An
+    /// Execute with approval grants and emit the execute result envelope. An
     /// approval/permit admission rejection is a provable `FailedNoAuthority`
     /// outcome, so it returns the envelope together with the legacy typed
     /// error instead of a bare error.
-    pub fn execute_with_approvals_v6(
+    pub fn execute_with_approvals_envelope(
         &self,
         generation: u64,
         request_id: u64,
@@ -1150,13 +1150,13 @@ impl ZsxSession {
         timeout: Duration,
         approval_grants: Vec<SessionApprovalGrantV1>,
         ledger: crate::envelope::SessionEnvelopeContextV1,
-    ) -> Result<ZsxExecutionResultV6, ZsxSessionError> {
+    ) -> Result<ZsxExecuteEnvelope, ZsxSessionError> {
         ledger.validate().map_err(|detail| {
             ZsxSessionError::new(
                 ZsxSessionFailureCode::Internal,
                 generation,
                 Some(request_id),
-                format!("invalid V6 envelope context: {detail}"),
+                format!("invalid execute envelope context: {detail}"),
             )
         })?;
         let project_root = self.lock_state(Some(request_id))?.root.clone();
@@ -1169,7 +1169,7 @@ impl ZsxSession {
             None,
             None,
         ) {
-            Ok(settled) => self.project_v6(generation, request_id, settled, project_root, &ledger),
+            Ok(settled) => self.project_envelope(generation, request_id, settled, project_root, &ledger),
             Err(error)
                 if matches!(
                     error.code,
@@ -1185,7 +1185,7 @@ impl ZsxSession {
                             format!("envelope projection failed: {build}"),
                         )
                     })?;
-                Ok(ZsxExecutionResultV6 {
+                Ok(ZsxExecuteEnvelope {
                     generation,
                     request_id,
                     value: None,
@@ -1199,8 +1199,8 @@ impl ZsxSession {
         }
     }
 
-    /// Execute one plan with a typed contingent policy attached (V6-R3,
-    /// ZS-EXEC-004/007): the policy rides the ordinary execute request and
+    /// Execute one plan with a typed contingent policy attached
+    /// (ZS-EXEC-004/007): the policy rides the ordinary execute request and
     /// is installed on the host's decision gate for exactly this execution
     /// (restored to the policy-less fail-closed state after settle), so
     /// covered decision points resolve within one call and uncovered ones
@@ -1210,7 +1210,7 @@ impl ZsxSession {
     /// Every policy rule is reported honestly in `policy_report`, including
     /// rules that never matched (unused-rule report), on success and abort
     /// alike.
-    pub fn execute_with_policy_v6(
+    pub fn execute_with_policy_envelope(
         &self,
         generation: u64,
         request_id: u64,
@@ -1218,8 +1218,8 @@ impl ZsxSession {
         policy: &zero_abi::ContingentPolicyV1,
         timeout: Duration,
         ledger: crate::envelope::SessionEnvelopeContextV1,
-    ) -> Result<ZsxExecutionResultV6, ZsxSessionError> {
-        self.execute_with_approvals_and_policy_v6(
+    ) -> Result<ZsxExecuteEnvelope, ZsxSessionError> {
+        self.execute_with_approvals_and_policy_envelope(
             generation,
             request_id,
             source,
@@ -1231,7 +1231,7 @@ impl ZsxSession {
     }
 
     /// Execute with approval grants plus a typed contingent policy attached
-    /// (V6-R3, ZS-EXEC-004/007). The policy is validated fail-closed before
+    /// (ZS-EXEC-004/007). The policy is validated fail-closed before
     /// admission: an invalid policy is refused synchronously with
     /// `InvalidPolicy` and the request id is not consumed. The policy is
     /// installed on the host decision gate for exactly this execution and
@@ -1239,7 +1239,7 @@ impl ZsxSession {
     /// uncovered ones abort with the typed `DecisionRequired`, and the
     /// result carries the honest per-rule usage report (unused rules are
     /// listed, never silently dropped).
-    pub fn execute_with_approvals_and_policy_v6(
+    pub fn execute_with_approvals_and_policy_envelope(
         &self,
         generation: u64,
         request_id: u64,
@@ -1248,13 +1248,13 @@ impl ZsxSession {
         timeout: Duration,
         approval_grants: Vec<SessionApprovalGrantV1>,
         ledger: crate::envelope::SessionEnvelopeContextV1,
-    ) -> Result<ZsxExecutionResultV6, ZsxSessionError> {
+    ) -> Result<ZsxExecuteEnvelope, ZsxSessionError> {
         ledger.validate().map_err(|detail| {
             ZsxSessionError::new(
                 ZsxSessionFailureCode::Internal,
                 generation,
                 Some(request_id),
-                format!("invalid V6 envelope context: {detail}"),
+                format!("invalid execute envelope context: {detail}"),
             )
         })?;
         policy.validate().map_err(|detail| {
@@ -1275,7 +1275,7 @@ impl ZsxSession {
             None,
             Some(policy.clone()),
         ) {
-            Ok(settled) => self.project_v6(generation, request_id, settled, project_root, &ledger),
+            Ok(settled) => self.project_envelope(generation, request_id, settled, project_root, &ledger),
             Err(error)
                 if matches!(
                     error.code,
@@ -1291,7 +1291,7 @@ impl ZsxSession {
                             format!("envelope projection failed: {build}"),
                         )
                     })?;
-                Ok(ZsxExecutionResultV6 {
+                Ok(ZsxExecuteEnvelope {
                     generation,
                     request_id,
                     value: None,
@@ -1305,19 +1305,19 @@ impl ZsxSession {
         }
     }
 
-    /// Project one settled execution onto the V6 envelope. Honest kinds
+    /// Project one settled execution onto the execute envelope. Honest kinds
     /// only: `DecisionRequired` from the typed payload, `Cancelled` from a
     /// cancelled request, `FailedNoAuthority` from approval admission
     /// rejections (handled by the caller); everything else keeps the legacy
     /// shape with no envelope.
-    fn project_v6(
+    fn project_envelope(
         &self,
         generation: u64,
         request_id: u64,
         settled: ZsxSettledExecution,
         project_root: String,
         ledger: &crate::envelope::SessionEnvelopeContextV1,
-    ) -> Result<ZsxExecutionResultV6, ZsxSessionError> {
+    ) -> Result<ZsxExecuteEnvelope, ZsxSessionError> {
         let legacy_error = settled.legacy_error(generation, request_id);
         let envelope = match &settled.backend_error {
             None => None,
@@ -1336,11 +1336,11 @@ impl ZsxSession {
                             )
                         }
                         // Deadline, method/surface, verdict-rejection, and
-                        // connector failures have no provable V6 kind at the
+                        // connector failures have no provable execute kind at the
                         // session boundary: they remain legacy errors with no
                         // envelope.
                         _ => {
-                            return Ok(ZsxExecutionResultV6 {
+                            return Ok(ZsxExecuteEnvelope {
                                 generation,
                                 request_id,
                                 value: None,
@@ -1362,7 +1362,7 @@ impl ZsxSession {
                 })?)
             }
         };
-        Ok(ZsxExecutionResultV6 {
+        Ok(ZsxExecuteEnvelope {
             generation,
             request_id,
             value: settled.result.as_ref().map(|result| result.value.clone()),
@@ -1404,7 +1404,7 @@ impl ZsxSession {
 
     /// Settle one execution through the session worker: admission, queue,
     /// and per-request cancellation bookkeeping stay here; the raw backend
-    /// outcome is returned for legacy/V6 projection (V6-R1). Admission and
+    /// outcome is returned for legacy/envelope projection . Admission and
     /// lifecycle failures surface as errors; backend failures surface raw in
     /// [`ZsxSettledExecution`].
     fn execute_settled(
@@ -1492,7 +1492,7 @@ impl ZsxSession {
     }
 
     /// Legacy projection of one settled execution: backend failures become
-    /// typed [`ZsxSessionError`]s exactly as before V6 (a cancelled request
+    /// typed [`ZsxSessionError`]s exactly as before the execute envelope (a cancelled request
     /// reports `Cancelled`, a typed backend failure keeps its code), so
     /// existing consumers keep working unchanged.
     fn execute_internal(
@@ -1579,13 +1579,13 @@ impl ZsxSession {
     }
 
     /// Persist one uncovered decision as a typed continuation record
-    /// (V6-R2, ZS-ADAPTER-004): the self-verifying handle, the decision
+    /// (ZS-ADAPTER-004): the self-verifying handle, the decision
     /// payload, the bound generation/request identity, the plan source, and
     /// the expiry are journaled durably under the session state root, so a
     /// restarted process can resume the handle without retransmitting
     /// evidence. `decision` must be the typed payload of the
     /// `DecisionRequired` outcome the harness captured at the abort point
-    /// (the V6 envelope carries only its projection); `generation` must be
+    /// (the execute envelope carries only its projection); `generation` must be
     /// the active session generation. Returns the scoped handle the model
     /// holds, identical to the envelope's `continuation_handle`.
     pub fn persist_continuation(
@@ -1638,16 +1638,16 @@ impl ZsxSession {
         })
     }
 
-    /// Resume a persisted continuation with the model's decision (V6-R2,
-    /// ZS-SESSION-001/005). The handle is validated against the session
+    /// Resume a persisted continuation with the model's decision
+    /// (ZS-SESSION-001/005). The handle is validated against the session
     /// (unknown, tampered, expired, cross-project, revoked-epoch,
     /// already-consumed, or unoffered choices refuse loudly and consume
     /// nothing), durably consumed (single-use), and the recorded plan is
     /// re-executed with the decision supplied as a one-shot contingent
-    /// policy. The V6 envelope projection runs on the settled outcome, so a
+    /// policy. The execute envelope projection runs on the settled outcome, so a
     /// resumed plan that hits another uncovered decision point surfaces a
     /// fresh `DecisionRequired` envelope.
-    pub fn resume_continuation_v6(
+    pub fn resume_continuation_envelope(
         &self,
         generation: u64,
         request_id: u64,
@@ -1656,13 +1656,13 @@ impl ZsxSession {
         timeout: Duration,
         approval_grants: Vec<SessionApprovalGrantV1>,
         ledger: crate::envelope::SessionEnvelopeContextV1,
-    ) -> Result<ZsxExecutionResultV6, ZsxSessionError> {
+    ) -> Result<ZsxExecuteEnvelope, ZsxSessionError> {
         ledger.validate().map_err(|detail| {
             ZsxSessionError::new(
                 ZsxSessionFailureCode::Internal,
                 generation,
                 Some(request_id),
-                format!("invalid V6 envelope context: {detail}"),
+                format!("invalid execute envelope context: {detail}"),
             )
         })?;
         let project_root = {
@@ -1709,7 +1709,7 @@ impl ZsxSession {
             None,
             Some(binding.policy),
         )?;
-        self.project_v6(generation, request_id, settled, project_root, &ledger)
+        self.project_envelope(generation, request_id, settled, project_root, &ledger)
     }
 
     pub fn replace(
@@ -1854,7 +1854,7 @@ impl ZsxSession {
 
     /// The session's last finalized Q99/residency report: per-tier windows,
     /// the measured demanded-object closure, and layer-validity accounting
-    /// (V6-R4). Measured only: no observation is ever claimed from an
+    /// (). Measured only: no observation is ever claimed from an
     /// estimate, and a rejected closure surfaces as this error instead of a
     /// silent omission. The prewarm execution finalizes one window, so a
     /// report is available immediately after build.

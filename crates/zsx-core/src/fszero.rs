@@ -628,7 +628,7 @@ fn run_call(
     result.refs = refs.clone();
 
     // Serialized DomainResult envelope plus inline evidence (worker parity:
-    // raw_worker_v2 merges evidence into the value object).
+    // raw-worker merges evidence into the value object).
     let mut value = serde_json::to_value(&result).unwrap_or(Value::Null);
     if let (Some(evidence), Value::Object(map)) = (inline_evidence, &mut value) {
         map.insert("evidence".into(), serde_json::json!(evidence));

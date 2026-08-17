@@ -83,14 +83,14 @@ pub use envelope::{
 pub use session::{
     DEFAULT_SHUTDOWN_WAIT_MS, SESSION_EXECUTION_QUEUE_CAPACITY, SESSION_EXECUTOR_START_TIMEOUT,
     SESSION_REPLACEMENT_SETTLE_TIMEOUT, SessionReplacementReason, SessionReplacementReceipt,
-    ZsxBuilder, ZsxExecutionMetrics, ZsxExecutionResult, ZsxExecutionResultV6, ZsxSession,
+    ZsxBuilder, ZsxExecutionMetrics, ZsxExecutionResult, ZsxExecuteEnvelope, ZsxSession,
     ZsxSessionCancellation, ZsxSessionError, ZsxSessionFailureCode,
 };
 pub use verdict::{
     VERDICT_LOOP_RECEIPT_SCHEMA, VerdictDecision, VerdictLoopEnvelope, VerdictLoopReceiptV1,
     VerdictLoopResult,
 };
-/// Q99/residency gate (V6-R4): session telemetry receipts measured by the
+/// Q99/residency gate (): session telemetry receipts measured by the
 /// zero-gate W4 contracts. The gate itself is internal to the connector;
 /// the report is the session's typed quality claim surface.
 pub use residency::{
