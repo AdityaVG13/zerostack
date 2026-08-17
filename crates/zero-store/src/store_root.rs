@@ -335,6 +335,11 @@ impl ResolvedStore {
         self.cas_host().join(BLOBS_DIR)
     }
 
+    /// The GC namespace (`gc/`) beside [Self::blobs_dir].
+    pub fn gc_dir(&self) -> PathBuf {
+        self.cas_host().join(crate::gc_lock::GC_DIR)
+    }
+
     /// A named file inside [Self::engine_dir].
     pub fn engine_file(&self, name: &str) -> Result<PathBuf, EngineFileError> {
         validate_engine_file_name(name)?;
@@ -431,7 +436,10 @@ pub fn ensure_layout(resolved: &ResolvedStore) -> std::io::Result<()> {
             ),
         ));
     }
-    std::fs::create_dir_all(resolved.engine_dir())
+    std::fs::create_dir_all(resolved.engine_dir())?;
+    std::fs::create_dir_all(resolved.blobs_dir())?;
+    std::fs::create_dir_all(resolved.gc_dir())?;
+    Ok(())
 }
 
 /// True only for a real directory: a symlinked `.zerostack` is refused.

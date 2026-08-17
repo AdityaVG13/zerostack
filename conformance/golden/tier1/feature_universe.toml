@@ -238,12 +238,11 @@ evidence = ["crates/zero-abi/src/schema.rs"]
 id = "F-ABI-PROPTEST-ROUNDTRIP"
 family = "zero-abi"
 name = "Property encode/decode round-trip"
-status = "partial"
+status = "present"
 weight = 0.016393442623
 weight_units = 4
-evidence = ["crates/zero-abi/src/schema.rs"]
-retry_condition = "Retry only when crates/zero-abi (or a later harness crate) has a proptest! encode/decode identity for a wire type and cargo test -p zero-abi runs it."
-notes = "types and digest live in zero-abi; no property suite in-tree"
+evidence = ["crates/zero-abi/tests/abi_proptest.rs"]
+notes = "proptest! encode_frame/decode_request_frame identity on Handshake and Shutdown frames."
 
 [[feature]]
 id = "F-PERMIT-CORE"
@@ -319,23 +318,27 @@ notes = "manual workflow_dispatch: fmt, clippy, cargo build --workspace, feature
 id = "F-FUZZ"
 family = "quality"
 name = "cargo-fuzz targets for parse/CAS/protocol"
-status = "missing"
+status = "present"
 weight = 0.012295081967
 weight_units = 3
-evidence = ["tests/unit/zero-abi/fuzz_corpus_untrusted_bytes_20260815.rs"]
-rationale = "No fuzz/fuzz_targets/ cargo-fuzz campaign; only a checked-in untrusted-bytes corpus file"
-retry_condition = "Retry only when fuzz/fuzz_targets/ contains at least one cargo-fuzz target for ZeroRef parse, CAS put, or raw_worker frame decode, and cargo fuzz list names it."
+evidence = [
+  "fuzz/fuzz_targets/zeroref_parse.rs",
+  "fuzz/fuzz_targets/abi_frame_decode.rs",
+  "tests/unit/zero-abi/fuzz_corpus_untrusted_bytes_20260815.rs",
+]
+notes = "cargo-fuzz workspace at fuzz/; targets zeroref_parse and abi_frame_decode. Floor, not a 24h campaign."
 
 [[feature]]
 id = "F-MIRI-NARROW"
 family = "quality"
 name = "Miri on zero-ref/zero-store hot paths"
-status = "missing"
+status = "partial"
 weight = 0.008196721311
 weight_units = 2
-evidence = ["rust-toolchain.toml"]
-rationale = "No CI or rch job runs cargo +nightly miri test on zero-ref or zero-store"
-retry_condition = "Retry only when CI or rch runs cargo +nightly miri test -p zero-ref (or -p zero-store hot paths) and a failing UB report fails the gate."
+evidence = ["scripts/run_miri_narrow.sh", "rust-toolchain.toml"]
+rationale = "Script exists and host miri test -p zero-ref is green; rch classified the command as non-compilation and ran it locally, so this is not yet a remote/CI gate."
+retry_condition = "miri test -p zero-ref green on rch"
+notes = "scripts/run_miri_narrow.sh is the floor. Host rust-toolchain presence is not the feature."
 
 [[feature]]
 id = "F-FEATURE-UNIVERSE-INREPO"
@@ -369,9 +372,10 @@ name = "ZeroRefErrorClass + ZeroRefError public taxonomy"
 status = "partial"
 weight = 0.004098360656
 weight_units = 1
-evidence = ["crates/zero-ref/src/lib.rs"]
-retry_condition = "Retry only when production paths in crates/zero-ref/src/lib.rs construct every ZeroRefErrorClass variant, or tests assert ZeroRefErrorClass::ALL is reachable — not merely that the enum is public."
-notes = "Types public; bead ZS-REF-003 taxonomy overclaims in-crate production."
+evidence = ["crates/zero-ref/src/lib.rs", "crates/zero-ref/tests/zeroref_api.rs"]
+rationale = "Parser/selector emit 5 classes; negotiate emits IncompatibleVersion; Missing/Io/PolicyDenied/LegacyAmbiguity are reserved for store/resolution and are not constructed here."
+retry_condition = "Retry only when store/resolution production paths in this crate construct Missing, Io, PolicyDenied, and LegacyAmbiguity, or those variants are removed from ALL."
+notes = "Honest partial. Reserved classes are documented; ALL is constructible; parser never emits reserved classes."
 
 [[feature]]
 id = "F-REF-LEGACY-ALIAS"
@@ -387,25 +391,21 @@ notes = "Const + parse path for GraphZero legacy #B start+len form."
 id = "F-REF-SERDE-FROMSTR"
 family = "zero-ref"
 name = "FromStr / serde for ZeroRefV1"
-status = "missing"
+status = "present"
 weight = 0.004098360656
 weight_units = 1
-evidence = ["crates/zero-ref/src/lib.rs"]
-rationale = "ZeroRefV1 has Display and parse(); no FromStr impl and no serde of the Display form"
-retry_condition = "Retry only when ZeroRefV1 implements FromStr and serde (de)serialization of the Display form, with a unit test that s.parse::<ZeroRefV1>()? equals ZeroRefV1::parse(s)?."
-notes = "bead ZS-REF-008; only Display/parse helpers today."
+evidence = ["crates/zero-ref/src/lib.rs", "crates/zero-ref/tests/zeroref_api.rs"]
+notes = "FromStr delegates to parse(); serde (de)serializes the Display string."
 
 [[feature]]
 id = "F-REF-CAPABILITY-NEGOTIATION"
 family = "zero-ref"
 name = "Capability / version negotiation API"
-status = "missing"
+status = "present"
 weight = 0.004098360656
 weight_units = 1
-evidence = ["crates/zero-ref/src/lib.rs"]
-rationale = "ZEROREF_VERSION / ZEROREF_MAJOR / ZEROREF_MINOR consts only; no public negotiate function"
-retry_condition = "Retry only when a public function (not just ZEROREF_VERSION) accepts a peer (major, minor) and returns IncompatibleVersion for a different major before any payload work."
-notes = "bead ZS-REF-009; ZEROREF_VERSION const only."
+evidence = ["crates/zero-ref/src/lib.rs", "crates/zero-ref/tests/zeroref_api.rs"]
+notes = "public negotiate(major, minor) returns IncompatibleVersion on major mismatch. Minor is additive."
 
 [[feature]]
 id = "F-STORE-REPLACE-FILE"
@@ -421,12 +421,11 @@ notes = "Distinct from atomic_write_file; bead ZS-STORE-004 notes zero dedicated
 id = "F-STORE-ENSURE-LAYOUT"
 family = "zero-store"
 name = "ensure_layout + project_key layout helpers"
-status = "partial"
+status = "present"
 weight = 0.004098360656
 weight_units = 1
-evidence = ["crates/zero-store/src/store_root.rs"]
-retry_condition = "Retry only when ensure_layout creates blobs/ and gc/ (or documents a loud error if a caller expected them) and a unit test fails if those directories are absent after a successful call."
-notes = "bead ZS-STORE-011: ensure_layout creates unified_root + engine_dir, not blobs/ or gc/."
+evidence = ["crates/zero-store/src/store_root.rs", "crates/zero-store/tests/ensure_layout.rs"]
+notes = "ensure_layout creates engine_dir, blobs/, and gc/ under cas_host()."
 
 [[feature]]
 id = "F-STORE-QUARANTINE-REAP"
@@ -864,7 +863,7 @@ status = "present"
 weight = 0.008196721311
 weight_units = 2
 evidence = ["crates/zero-abi/src/capability.rs"]
-notes = "Cross-engine capability descriptors. Distinct from missing F-REF-CAPABILITY-NEGOTIATION (no ZeroRef negotiate())."
+notes = "Cross-engine capability descriptors. Distinct from present F-REF-CAPABILITY-NEGOTIATION (ZeroRef negotiate())."
 
 [[feature]]
 id = "F-STORE-GC"

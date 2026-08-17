@@ -672,12 +672,21 @@ pub fn verify_spec_neg_001(root: &Path) -> Result<(), ScenarioError> {
             "conformance/src/main.rs exists; CONTRACT §8 forbids an in-repo CLI",
         ));
     }
-    let root_manifest = read_text(root, "Cargo.toml").map_err(|e| fail("SPEC-NEG-001", e))?;
-    require_contains(
-        "SPEC-NEG-001",
-        &root_manifest,
-        r#"exclude = ["conformance"]"#,
-    )?;
+    let manifest = parse_toml(root, "Cargo.toml")?;
+    let excluded = manifest
+        .get("workspace")
+        .and_then(|value| value.get("exclude"))
+        .and_then(toml::Value::as_array)
+        .ok_or_else(|| fail("SPEC-NEG-001", "workspace.exclude missing"))?;
+    if !excluded
+        .iter()
+        .any(|value| value.as_str() == Some("conformance"))
+    {
+        return Err(fail(
+            "SPEC-NEG-001",
+            format!("workspace.exclude does not list conformance: {excluded:?}"),
+        ));
+    }
     Ok(())
 }
 
@@ -1148,7 +1157,18 @@ pub fn verify_spec_fu_006(root: &Path) -> Result<(), ScenarioError> {
     Ok(())
 }
 
-/// Used by preflight: confirm spec-source hashes still match the contract.
+fn spec_source_is_certifying(source: &toml::Value) -> bool {
+    source
+        .get("certifying")
+        .and_then(toml::Value::as_bool)
+        .unwrap_or(true)
+}
+
+/// Used by preflight: confirm *certifying* spec-source hashes still match.
+///
+/// Sources with `certifying = false` (gitignored working copies such as
+/// `AGENTS.md`) are skipped here and reported by
+/// [report_advisory_spec_sources] instead.
 pub fn verify_spec_source_hashes(root: &Path) -> Result<Vec<(String, String)>, ScenarioError> {
     let contract = parse_toml(root, "conformance/contracts/spec_version_contract.toml")?;
     let sources = contract
@@ -1157,6 +1177,9 @@ pub fn verify_spec_source_hashes(root: &Path) -> Result<Vec<(String, String)>, S
         .ok_or_else(|| fail("preflight", "spec_sources missing"))?;
     let mut checked = Vec::new();
     for source in sources {
+        if !spec_source_is_certifying(source) {
+            continue;
+        }
         let name = source
             .get("name")
             .and_then(toml::Value::as_str)
@@ -1179,4 +1202,50 @@ pub fn verify_spec_source_hashes(root: &Path) -> Result<Vec<(String, String)>, S
         checked.push((name.to_owned(), actual));
     }
     Ok(checked)
+}
+
+/// Non-certifying spec sources (gitignored working copies).
+///
+/// A missing file or a drifted hash is advisory only: it must never flip
+/// preflight `certifying` to false.
+pub fn report_advisory_spec_sources(root: &Path) -> Result<Vec<(String, String)>, ScenarioError> {
+    let contract = parse_toml(root, "conformance/contracts/spec_version_contract.toml")?;
+    let sources = contract
+        .get("spec_sources")
+        .and_then(toml::Value::as_array)
+        .ok_or_else(|| fail("preflight", "spec_sources missing"))?;
+    let mut rows = Vec::new();
+    for source in sources {
+        if spec_source_is_certifying(source) {
+            continue;
+        }
+        let name = source
+            .get("name")
+            .and_then(toml::Value::as_str)
+            .unwrap_or("unnamed");
+        let path = source
+            .get("path")
+            .and_then(toml::Value::as_str)
+            .unwrap_or("?");
+        let expected = source.get("sha256").and_then(toml::Value::as_str);
+        match file_sha256_hex(root, path) {
+            Ok(actual) => {
+                let detail = match expected {
+                    Some(pin) if pin == actual => {
+                        format!("{name} ({path}) present; advisory hash matches")
+                    }
+                    Some(pin) => format!(
+                        "{name} ({path}) advisory hash drifted: expected {pin} got {actual} (not certifying; file is gitignored)"
+                    ),
+                    None => format!("{name} ({path}) present; no advisory pin"),
+                };
+                rows.push((name.to_owned(), detail));
+            }
+            Err(_) => rows.push((
+                name.to_owned(),
+                format!("{name} ({path}) absent (gitignored; not a certifying pin)"),
+            )),
+        }
+    }
+    Ok(rows)
 }

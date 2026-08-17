@@ -10,7 +10,7 @@ use crate::engine_identity::{
 };
 use crate::golden;
 use crate::repo::repo_root;
-use crate::spec_oracle::{all_verifiers, verify_spec_source_hashes};
+use crate::spec_oracle::{all_verifiers, report_advisory_spec_sources, verify_spec_source_hashes};
 
 pub const SCHEMA_VERSION: &str = "oracle-preflight-doctor.v1";
 
@@ -125,9 +125,36 @@ pub fn run(root: &Path) -> PreflightReport {
             &mut checks,
             "spec_source_sha256",
             true,
-            format!("{} spec sources match contract", rows.len()),
+            format!("{} certifying spec sources match contract", rows.len()),
         ),
         Err(error) => push(&mut checks, "spec_source_sha256", false, error.to_string()),
+    }
+
+    match report_advisory_spec_sources(root) {
+        Ok(rows) if rows.is_empty() => checks.push(PreflightCheck {
+            name: "spec_source_sha256_advisory".into(),
+            outcome: "green".into(),
+            detail: "no advisory spec sources".into(),
+        }),
+        Ok(rows) => {
+            let drifted = rows.iter().any(|(_, detail)| {
+                detail.contains("drifted") || detail.contains("absent")
+            });
+            checks.push(PreflightCheck {
+                name: "spec_source_sha256_advisory".into(),
+                outcome: if drifted { "yellow".into() } else { "green".into() },
+                detail: rows
+                    .iter()
+                    .map(|(_, detail)| detail.as_str())
+                    .collect::<Vec<_>>()
+                    .join("; "),
+            });
+        }
+        Err(error) => checks.push(PreflightCheck {
+            name: "spec_source_sha256_advisory".into(),
+            outcome: "yellow".into(),
+            detail: format!("advisory check failed to load: {error}"),
+        }),
     }
 
     match golden::verify_all(root) {

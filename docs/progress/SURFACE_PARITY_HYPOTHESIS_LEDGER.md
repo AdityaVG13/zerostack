@@ -2,19 +2,14 @@
 
 Index into [GAUNTLET_EXPERIMENT_DESIGNS.md](GAUNTLET_EXPERIMENT_DESIGNS.md). Full template fields live there. Grep the deferral ledger first: [surface-deferrals.md](surface-deferrals.md).
 
-**Open-hypothesis count (this pillar):** 4 (`SURF-0013`, `OPEN-0014`, `IDEA-0017`, `ADV-0001`). Combined with perf+conformance OPEN cards the global open-hypothesis count is **20**.
-**Confirmed gaps owed to pass 11:** 8 in-hub rows (see rank table in the designs file).
+**Open-hypothesis count (this pillar):** 4 (`SURF-0013`, `OPEN-0014`, `IDEA-0017`, `ADV-0001`). Combined with perf+conformance OPEN cards the global open-hypothesis count is **19**.
+**Pass-11 ranked remediations:** 8 closed (FromStr, AGENTS advisory, fuzz, ABI proptest, ensure_layout, negotiate, error taxonomy honest-partial, miri script).
 
-Matrix at Phase 9: 77 features; present=61 partial=9 missing=4 excluded=3; weight_sum=1.000000; effective=0.910788; strict=0.899590; gate=red.
+Matrix after pass 11: 77 features; missing/partial counts move with the dashboard rewrite.
 
 ## Missing (CONFIRMED_GAP)
 
-| ID | Feature | Evidence |
-|---|---|---|
-| SURF-0001 | `F-FUZZ` | no `fuzz/` directory |
-| SURF-0002 | `F-MIRI-NARROW` | no CI/rch miri test job |
-| SURF-0003 | `F-REF-SERDE-FROMSTR` | no `FromStr`; `ZeroRefV1` has no serde |
-| SURF-0004 | `F-REF-CAPABILITY-NEGOTIATION` | consts only; no `negotiate` |
+None of the pass-11 ranked missing rows remain. Residual missing is only if the dashboard still lists other holes.
 
 ## Partial
 
@@ -22,12 +17,16 @@ Matrix at Phase 9: 77 features; present=61 partial=9 missing=4 excluded=3; weigh
 |---|---|---|---|
 | SURF-0005 | `F-CONF-HARNESS` | CLOSED | CONTRACT §8 forbids a product CLI |
 | SURF-0006 | `F-CI-PR-GATES` | CONFIRMED_GAP | GH `workflow_dispatch` only; no `cargo test` job |
-| SURF-0007 | `F-ABI-PROPTEST-ROUNDTRIP` | CONFIRMED_GAP | no `crates/zero-abi/tests/`; no `proptest!` |
+| SURF-0001 | `F-FUZZ` | CLOSED | cargo-fuzz targets `zeroref_parse` + `abi_frame_decode` |
+| SURF-0002 | `F-MIRI-NARROW` | CLOSED | script landed; feature stays **partial** until rch miri is green |
+| SURF-0003 | `F-REF-SERDE-FROMSTR` | CLOSED | FromStr + Display-form serde |
+| SURF-0004 | `F-REF-CAPABILITY-NEGOTIATION` | CLOSED | `negotiate(major, minor)` |
+| SURF-0007 | `F-ABI-PROPTEST-ROUNDTRIP` | CLOSED | `crates/zero-abi/tests/abi_proptest.rs` |
 | SURF-0008 | `F-REF-ENGINE-ADOPTION-LOCKSTEP` | CLOSED | out-of-repo; hub cannot enforce engines |
-| SURF-0009 | `F-STORE-ENSURE-LAYOUT` | CONFIRMED_GAP | `ensure_layout` does not mkdir `blobs/`/`gc/` |
+| SURF-0009 | `F-STORE-ENSURE-LAYOUT` | CLOSED | `ensure_layout` creates `blobs/` + `gc/` |
 | SURF-0010 | `F-CODEMODE-CANCEL` | CONFIRMED_GAP | no hub test outside rival-dirty `fszero.rs` |
 | SURF-0011 | `F-ZSX-Q99-REPORT` | CONFIRMED_GAP | adapters return no worker token accounting |
-| SURF-0012 | `F-REF-ERROR-TAXONOMY` | CONFIRMED_GAP | 5/10 error classes unused in `lib.rs` |
+| SURF-0012 | `F-REF-ERROR-TAXONOMY` | CLOSED | reserved classes documented; feature stays **partial** |
 | SURF-0013 | `F-STORE-QUARANTINE-REAP` | OPEN | functions exist; tests not inventoried |
 
 ## Excluded / gate

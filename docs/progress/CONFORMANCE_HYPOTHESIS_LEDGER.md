@@ -2,8 +2,8 @@
 
 Index into [GAUNTLET_EXPERIMENT_DESIGNS.md](GAUNTLET_EXPERIMENT_DESIGNS.md). Full template fields live there. Grep the negative ledger first: [conformance-negative-results.md](conformance-negative-results.md).
 
-**Open-hypothesis count (this pillar):** 13 (`CONF-0001..0005`, `IDEA-0002/0010/0012/0013/0015/0024`, `ADV-0002`, `ADV-0003`).
-**Confirmed gaps owed to pass 11:** 3 (`CONF-0006` hash pin; `SURF-0010` cancel test is surface-indexed but conformance-shaped; plus idea children). SPEC tags stay `OPEN` until a live verifier runs.
+**Open-hypothesis count (this pillar):** 12 (`CONF-0001..0005`, `IDEA-0002/0010/0012/0015/0024`, `ADV-0002`, `ADV-0003`).
+**Confirmed gaps owed to pass 11:** 1 remaining ranked conformance hole closed (`CONF-0006`). `SURF-0010` cancel test is still a surface-indexed CONFIRMED_GAP. SPEC tags stay `OPEN` until a live verifier runs.
 
 | ID | Status | One-line hypothesis | Invocation |
 |---|---|---|---|
@@ -18,11 +18,11 @@ Index into [GAUNTLET_EXPERIMENT_DESIGNS.md](GAUNTLET_EXPERIMENT_DESIGNS.md). Ful
 | CONF-0003 | OPEN | `[SPEC-HON-006]` hub accepts TokenZero Exact receipt. | `rg SPEC-HON-006 docs/spec/SPEC-TAGS.md` |
 | CONF-0004 | OPEN | `[SPEC-HUB-002]` fail-loud suite on live receipts. | `rg SPEC-HUB-002 docs/spec/SPEC-TAGS.md` |
 | CONF-0005 | OPEN | `[SPEC-HUB-005]` digest bump mutation test. | `rg SPEC-HUB-005 docs/spec/SPEC-TAGS.md` |
-| CONF-0006 | CONFIRMED_GAP | AGENTS.md sha256 drifted; preflight red. | `cargo run -p zerostack-harness --bin oracle-preflight-doctor -- --json` |
+| CONF-0006 | CLOSED | AGENTS.md dropped from certifying preflight; advisory yellow only. | `cargo run -p zerostack-harness --bin oracle-preflight-doctor -- --json` |
 | IDEA-0002 | OPEN | Pin tracked `AGENTS-MANDATE.md` instead of gitignored law. | `shasum -a 256 docs/progress/AGENTS-MANDATE.md AGENTS.md` |
 | IDEA-0010 | OPEN | Smoke test allows certifying=false. | `rg fn preflight crates/zerostack-harness/tests/oracle_smoke.rs` |
 | IDEA-0012 | OPEN | Empty Q99 window is `unavailable`, never a number. | `rg unavailable crates/zsx-core/src/residency.rs` |
-| IDEA-0013 | OPEN | `ZeroRefErrorClass::ALL` reachability table. | `rg ZeroRefErrorClass::ALL crates/zero-ref` |
+| IDEA-0013 | CLOSED | `ZeroRefErrorClass::ALL` reachability table in `zeroref_api.rs`. | `rg ZeroRefErrorClass::ALL crates/zero-ref` |
 | IDEA-0015 | OPEN | MCP late-Ok `commit_race` test without `fszero.rs`. | `rg commit_race crates/zero-mcp/src/mcp_transport.rs` |
 | IDEA-0024 | OPEN | Oversize `zsx exec` nulls `visibleTokenCount`. | `rg result_finalization_receipt crates` |
 | ADV-0002 | OPEN | e-process on spec-hash is redundant with preflight. | `cargo test -p zerostack-harness --lib eprocess` |
@@ -49,4 +49,4 @@ Index into [GAUNTLET_EXPERIMENT_DESIGNS.md](GAUNTLET_EXPERIMENT_DESIGNS.md). Ful
 
 ## Pass-11 note
 
-Smallest conformance close: CONF-0006 (re-pin agents-law hash + bless golden). Do not invent a conformance CLI. Do not emit Exact from the hub. Do not edit rival-dirty `fszero.rs`.
+Pass 11 closed CONF-0006 by dropping gitignored AGENTS.md from the certifying pin set. Do not invent a conformance CLI. Do not emit Exact from the hub. Do not edit rival-dirty `fszero.rs`.

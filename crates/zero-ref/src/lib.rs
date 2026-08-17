@@ -33,8 +33,9 @@
 //!     # Ok::<(), zero_ref::ZeroRefError>(())
 
 use std::fmt;
+use std::str::FromStr;
 
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use sha2::{Digest as ShaDigest, Sha256};
 
 /// Version tag for capability negotiation and fixture manifests.
@@ -44,6 +45,23 @@ pub const ZEROREF_VERSION: &str = "v1";
 /// work. Minor bumps are additive and forward-compatible.
 pub const ZEROREF_MAJOR: u64 = 1;
 pub const ZEROREF_MINOR: u64 = 0;
+
+/// Refuse a peer whose contract major does not match [ZEROREF_MAJOR].
+///
+/// Minor bumps are additive and forward-compatible: any peer minor is
+/// accepted when the major matches. This is not a wire handshake protocol.
+pub fn negotiate(major: u64, minor: u64) -> Result<(), ZeroRefError> {
+    let _ = minor;
+    if major != ZEROREF_MAJOR {
+        return Err(ZeroRefError::new(
+            ZeroRefErrorClass::IncompatibleVersion,
+            format!(
+                "peer ZeroRef {major}.{minor} is incompatible with {ZEROREF_MAJOR}.{ZEROREF_MINOR}"
+            ),
+        ));
+    }
+    Ok(())
+}
 
 /// Identity algorithm and hex length shared by the parser and the fixture.
 pub const HASH_ALGORITHM: &str = "sha256";
@@ -79,17 +97,29 @@ pub enum ZeroRefErrorClass {
     /// #L selection over bytes that are not valid UTF-8.
     NotUtf8,
     /// Object not present in any reachable store.
+    ///
+    /// Reserved for store/resolution layers. The v1 text parser never emits
+    /// this class.
     Missing,
     /// Store I/O failed while resolving.
+    ///
+    /// Reserved for store/resolution layers. The v1 text parser never emits
+    /// this class.
     Io,
     /// Resolved bytes do not hash to the ref identity.
     DigestMismatch,
     /// Resolution denied by storage policy (e.g. shared root not opted in).
+    ///
+    /// Reserved for store/resolution layers. The v1 text parser never emits
+    /// this class.
     PolicyDenied,
     /// Peer speaks an incompatible ZeroRef version.
     IncompatibleVersion,
     /// Legacy short-prefix input matched zero-or-many objects during legacy
     /// resolution. v1 parsing itself rejects prefixes as malformed.
+    ///
+    /// Reserved for a store-layer legacy resolver. The v1 text parser never
+    /// emits this class.
     LegacyAmbiguity,
 }
 
@@ -121,6 +151,24 @@ impl ZeroRefErrorClass {
             Self::LegacyAmbiguity => "legacy_ambiguity",
         }
     }
+
+    /// Classes the v1 text parser and selector construct today.
+    pub const PARSER_AND_SELECTOR: [ZeroRefErrorClass; 5] = [
+        Self::Malformed,
+        Self::Unsupported,
+        Self::RangeOutOfBounds,
+        Self::NotUtf8,
+        Self::DigestMismatch,
+    ];
+
+    /// Classes reserved for store/resolution layers. The v1 parser never
+    /// emits these. [Self::IncompatibleVersion] is constructed by [negotiate].
+    pub const RESERVED_FOR_RESOLUTION: [ZeroRefErrorClass; 4] = [
+        Self::Missing,
+        Self::Io,
+        Self::PolicyDenied,
+        Self::LegacyAmbiguity,
+    ];
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -663,6 +711,27 @@ impl fmt::Display for ZeroRefV1 {
             ZeroFragment::Bytes { start, end } => write!(f, "#B{start}-{end}"),
             ZeroFragment::Lines { start, end } => write!(f, "#L{start}-{end}"),
         }
+    }
+}
+
+impl FromStr for ZeroRefV1 {
+    type Err = ZeroRefError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Self::parse(s)
+    }
+}
+
+impl Serialize for ZeroRefV1 {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_str(&self.to_string())
+    }
+}
+
+impl<'de> Deserialize<'de> for ZeroRefV1 {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let raw = String::deserialize(deserializer)?;
+        Self::parse(&raw).map_err(serde::de::Error::custom)
     }
 }
 

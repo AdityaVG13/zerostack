@@ -13,7 +13,12 @@ sha2 = { workspace = true }
 
 [dev-dependencies]
 proptest = "1"
+serde_json = { workspace = true }
 
 [[test]]
 name = "zeroref_proptest"
 path = "tests/zeroref_proptest.rs"
+
+[[test]]
+name = "zeroref_api"
+path = "tests/zeroref_api.rs"

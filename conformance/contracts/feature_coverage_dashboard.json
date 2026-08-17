@@ -77,13 +77,13 @@
       "excluded": 0,
       "family": "quality",
       "feature_count": 2,
-      "missing": 2,
-      "partial": 0,
-      "present": 0,
+      "missing": 0,
+      "partial": 1,
+      "present": 1,
       "strict_100": false,
-      "strict_coverage": 0.0,
-      "verdict": "none",
-      "weighted_score": 0.0
+      "strict_coverage": 0.8,
+      "verdict": "partial",
+      "weighted_score": 0.8
     },
     {
       "excluded": 0,
@@ -102,12 +102,12 @@
       "family": "zero-abi",
       "feature_count": 11,
       "missing": 0,
-      "partial": 1,
-      "present": 10,
-      "strict_100": false,
-      "strict_coverage": 0.941176,
-      "verdict": "partial",
-      "weighted_score": 0.941176
+      "partial": 0,
+      "present": 11,
+      "strict_100": true,
+      "strict_coverage": 1.0,
+      "verdict": "full",
+      "weighted_score": 1.0
     },
     {
       "excluded": 0,
@@ -197,25 +197,25 @@
       "excluded": 0,
       "family": "zero-ref",
       "feature_count": 9,
-      "missing": 2,
+      "missing": 0,
       "partial": 2,
-      "present": 5,
+      "present": 7,
       "strict_100": false,
-      "strict_coverage": 0.828947,
+      "strict_coverage": 0.881578,
       "verdict": "partial",
-      "weighted_score": 0.828947
+      "weighted_score": 0.881578
     },
     {
       "excluded": 0,
       "family": "zero-store",
       "feature_count": 14,
       "missing": 0,
-      "partial": 2,
-      "present": 12,
+      "partial": 1,
+      "present": 13,
       "strict_100": false,
-      "strict_coverage": 0.979166,
+      "strict_coverage": 0.989583,
       "verdict": "partial",
-      "weighted_score": 0.979166
+      "weighted_score": 0.989583
     },
     {
       "excluded": 0,
@@ -256,21 +256,21 @@
   ],
   "feature_count": 77,
   "global": {
-    "effective_coverage": 0.910788,
+    "effective_coverage": 0.946058,
     "excluded_is_strict_debt": true,
     "partial_contribution": 0.5,
     "partial_never_rounds_up": true,
     "release_gate_verdict": "red",
     "strict_100_certifiable": false,
-    "strict_coverage": 0.89959
+    "strict_coverage": 0.934426
   },
   "schema_version": "zerostack.feature_coverage_dashboard.v1",
   "source": "conformance/contracts/supported_surface_matrix.toml",
   "status_histogram": {
     "excluded": 3,
-    "missing": 4,
-    "partial": 9,
-    "present": 61
+    "missing": 0,
+    "partial": 8,
+    "present": 66
   },
   "weight_policy": "global-sum-1.0"
 }

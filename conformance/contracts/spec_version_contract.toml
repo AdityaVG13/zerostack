@@ -1,6 +1,8 @@
 # spec_version_contract.toml -- Phase 2 final pin (greenfield, 5 families)
-# Oracle preflight (Phase 3) must refuse to certify if any sha256 drifts.
-# AGENTS.md is gitignored in the hub; its hash is of the on-disk working copy.
+# Oracle preflight (Phase 3) must refuse to certify if any *certifying*
+# sha256 drifts. AGENTS.md is gitignored in the hub: it is an advisory
+# spec source (`certifying = false`). Preflight reports advisory drift
+# as yellow and must not refuse to certify on that hash.
 
 schema_version = "gauntlet.spec_version_contract.v1"
 
@@ -37,6 +39,7 @@ description = "Normative hub+engine product contract. RFC 2119. Not a test runne
 [[spec_sources]]
 name = "agents-law"
 path = "AGENTS.md"
+certifying = false
 section_anchors = [
   "Law (all four repos)",
   "One repo at a time (cutover)",
@@ -44,7 +47,7 @@ section_anchors = [
   "Ops defaults",
 ]
 sha256 = "da53da8383380c712f781c5f5cc85f48e56bc43281f824af11e47fabb7cca6f4"
-description = "Hub law: daemonless, RCH-only tests, one-repo, fail loud. File is gitignored; pin is the working-copy hash."
+description = "Hub law: daemonless, RCH-only tests, one-repo, fail loud. File is gitignored; hash is an advisory working-copy pin only and is not a certifying preflight gate."
 
 [[spec_sources]]
 name = "racc-model"
@@ -68,8 +71,8 @@ sha256 = "32712333e2ebe73add922d8de2b339af22007f4ee7ee0e5f966da9a0992f4d7e"
 [[spec_sources]]
 name = "feature-universe"
 path = "conformance/contracts/supported_surface_matrix.toml"
-sha256 = "3946a4367cf6a9b2ccd7915a588b11da9695a2923dd7564556153bbfee050d9d"
-description = "In-repo FeatureUniverse. Phase 7: dashboard + invariant catalog present; F-FEATURE-UNIVERSE-INREPO promoted. Missing remain fuzz/miri/serde/capability-negotiate."
+sha256 = "d0ab26d469ed3f33c8787778acd2dc332d65e1887eef0df8d74f9fc2112b9456"
+description = "In-repo FeatureUniverse. Phase 11: FromStr/serde, negotiate, fuzz targets, ABI proptest, ensure_layout landed. F-MIRI-NARROW and F-REF-ERROR-TAXONOMY remain partial."
 
 [[spec_sources]]
 name = "cache-entry-v1"
@@ -95,7 +98,7 @@ test_dir = "tests/"
 proptest_version = "1"   # only conformance/Cargo.toml [dev-dependencies]; crate is workspace-excluded
 proptest_regressions_dir = "UNPINNED"
 property_count_floor = 0
-notes = "F-REF-PROPTEST present (zeroref_proptest.rs). F-ABI-PROPTEST-ROUNDTRIP still partial. Floor 0 remains honest for the harness crate."
+notes = "F-REF-PROPTEST present (zeroref_proptest.rs). F-ABI-PROPTEST-ROUNDTRIP present (abi_proptest.rs). Floor 0 remains honest for the harness crate."
 
 # ---------------------------------------------------------------------------
 # Family 3 -- [golden_snapshots]
@@ -116,7 +119,7 @@ name = "zeroref-v1-parse-display"
 encoder = "zero_ref::ZeroRefV1 Display"
 decoder = "zero_ref::ZeroRefV1::parse"
 fuzz_target = "UNPINNED"
-notes = "FromStr/serde missing (F-REF-SERDE-FROMSTR)."
+notes = "FromStr + Display-form serde present (F-REF-SERDE-FROMSTR)."
 
 [[roundtrip_corpus]]
 name = "abi-schema-digest"
@@ -142,7 +145,7 @@ fuzz_target = "UNPINNED"
 [external_tools.miri]
 toolchain = "nightly-2026-05-31"
 miriflags = "-Zmiri-strict-provenance"
-status = "host rust-toolchain matches; no CI job; F-MIRI-NARROW missing"
+status = "scripts/run_miri_narrow.sh is the floor; F-MIRI-NARROW partial until miri test -p zero-ref is green on rch"
 
 [external_tools.clippy]
 toolchain = "nightly-2026-05-31"

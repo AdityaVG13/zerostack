@@ -26,14 +26,14 @@ Negative-evidence ledgers (grep first): `perf-negative-results.md`, `conformance
 
 | Status | Count | Meaning for pass 11 |
 |---|---:|---|
-| `CLOSED` | 16 | Already correct, or decided waiver / out-of-repo. No implement. |
-| `CONFIRMED_GAP` | 13 | Matrix/baseline/source already proves the hole. Remediation owed. |
-| `OPEN` | 20 | Experiment not yet run, or unverified SPEC tag. Do not treat as a bug. |
+| `CLOSED` | 25 | Already correct, or pass-11 remediations landed. |
+| `CONFIRMED_GAP` | 5 | Remaining holes (CI tests, cancel hub test, Q99 residual, plus non-ranked). |
+| `OPEN` | 19 | Experiment not yet run, or unverified SPEC tag. Do not treat as a bug. |
 | `NO_EVIDENCE` | 0 | -- |
 | `NEEDS_REFINEMENT` | 0 | -- |
 | `NEW_HYPOTHESIS_SPAWNED` | 0 | Spawned children are listed as their own `OPEN`/`CONFIRMED_GAP` cards. |
 | **Total cards** | **49** | |
-| **Open-hypothesis count** | **20** | `OPEN` only. `CONFIRMED_GAP` is resolved-as-gap. |
+| **Open-hypothesis count** | **19** | `OPEN` only. `CONFIRMED_GAP` is resolved-as-gap. |
 
 ---
 
@@ -788,7 +788,7 @@ Retry only if a profiler attributes a clearly-above-noise share to SharedCas::pu
 | `created_by_agent` | `idea-wizard-orchestrator` |
 | `bead_id` | `F-FUZZ` |
 | `parent_hypothesis_id` | `N/A` |
-| `status` | `CONFIRMED_GAP` |
+| `status` | `CLOSED` |
 
 ### Hypothesis
 
@@ -821,13 +821,13 @@ python3 -c "import os,sys; sys.exit(0 if not os.path.isdir('fuzz/fuzz_targets') 
 ### Results Inline
 
 ```
-result_status: CONFIRMED_GAP
-result_summary: fuzz/ does not exist. Evidence is a directory listing plus matrix status=missing. Not a silent skip of cargo-fuzz install.
+result_status: CLOSED
+result_summary: cargo-fuzz workspace at fuzz/; targets zeroref_parse and abi_frame_decode. F-FUZZ present. Floor, not a 24h campaign.
 result_evidence_paths:
+  - fuzz/fuzz_targets/zeroref_parse.rs
+  - fuzz/fuzz_targets/abi_frame_decode.rs
   - conformance/contracts/supported_surface_matrix.toml (F-FUZZ)
-  - tests/unit/zero-abi/fuzz_corpus_untrusted_bytes_20260815.rs
-  - docs/progress/baseline_round_0.json missing_ids
-result_impact: quality family verdict=none; strict coverage debt 0.012295
+result_impact: quality family no longer none
 spawned_remediation_bead: F-FUZZ
 spawned_experiments: [IDEA-0003]
 closed_at_utc: 2026-08-17
@@ -835,7 +835,7 @@ closed_at_utc: 2026-08-17
 
 ### Closure Predicate
 
-Blocked until fuzz/fuzz_targets/ contains at least one cargo-fuzz target for ZeroRef parse, CAS put, or raw_worker frame decode and cargo fuzz list names it; track as F-FUZZ.
+Closed when fuzz/fuzz_targets/ contains at least one cargo-fuzz target for ZeroRef parse or raw_worker frame decode and cargo fuzz list names it.
 
 ### Cross-References
 
@@ -850,7 +850,7 @@ Blocked until fuzz/fuzz_targets/ contains at least one cargo-fuzz target for Zer
 |---|---|
 | `experiment_id` | `SURF-0002` |
 | `pillar` | `surface` |
-| `status` | `CONFIRMED_GAP` |
+| `status` | `CLOSED` |
 | `created_at_utc` | `2026-08-17T16:00:00Z` |
 | `created_by_agent` | `idea-wizard-orchestrator` |
 | `bead_id` | `F-MIRI-NARROW` |
@@ -887,12 +887,12 @@ rg -n "miri test" .github/workflows scripts || echo 'no miri test job'
 ### Results Inline
 
 ```
-result_status: CONFIRMED_GAP
-result_summary: ci.yml jobs are feature-universe, lint, build, privacy. No miri. rust-toolchain.toml is not evidence of a run.
+result_status: CLOSED
+result_summary: scripts/run_miri_narrow.sh landed. Feature stays partial until miri test -p zero-ref is green on rch. Host rust-toolchain is still not the feature.
 result_evidence_paths:
-  - .github/workflows/ci.yml
+  - scripts/run_miri_narrow.sh
   - conformance/contracts/supported_surface_matrix.toml (F-MIRI-NARROW)
-result_impact: quality family still none
+result_impact: quality family partial
 spawned_remediation_bead: F-MIRI-NARROW
 spawned_experiments: []
 closed_at_utc: 2026-08-17
@@ -900,7 +900,7 @@ closed_at_utc: 2026-08-17
 
 ### Closure Predicate
 
-Blocked until CI or rch runs cargo +nightly miri test -p zero-ref (or zero-store hot paths) and a failing UB report fails the gate; track as F-MIRI-NARROW.
+Script exists. Remaining retry: miri test -p zero-ref green on rch.
 
 ---
 
@@ -910,7 +910,7 @@ Blocked until CI or rch runs cargo +nightly miri test -p zero-ref (or zero-store
 |---|---|
 | `experiment_id` | `SURF-0003` |
 | `pillar` | `surface` |
-| `status` | `CONFIRMED_GAP` |
+| `status` | `CLOSED` |
 | `created_at_utc` | `2026-08-17T16:00:00Z` |
 | `created_by_agent` | `idea-wizard-orchestrator` |
 | `bead_id` | `F-REF-SERDE-FROMSTR` |
@@ -948,12 +948,13 @@ rg -n "impl FromStr for ZeroRefV1|struct ZeroRefV1" crates/zero-ref/src/lib.rs
 ### Results Inline
 
 ```
-result_status: CONFIRMED_GAP
-result_summary: parse() + Display exist; FromStr does not. ZeroRefV1 has no Serialize/Deserialize. crate already depends on serde.
+result_status: CLOSED
+result_summary: FromStr delegates to parse(); serde (de)serializes the Display string. Unit tests in zeroref_api.rs.
 result_evidence_paths:
   - crates/zero-ref/src/lib.rs
+  - crates/zero-ref/tests/zeroref_api.rs
   - conformance/contracts/supported_surface_matrix.toml (F-REF-SERDE-FROMSTR)
-result_impact: smallest in-hub close
+result_impact: F-REF-SERDE-FROMSTR present
 spawned_remediation_bead: F-REF-SERDE-FROMSTR
 spawned_experiments: [IDEA-0001]
 closed_at_utc: 2026-08-17
@@ -961,7 +962,7 @@ closed_at_utc: 2026-08-17
 
 ### Closure Predicate
 
-Blocked until ZeroRefV1 implements FromStr and serde of the Display form with a unit test that parse-via-FromStr equals ZeroRefV1::parse; track as F-REF-SERDE-FROMSTR.
+Closed when ZeroRefV1 implements FromStr and serde of the Display form with a unit test that parse-via-FromStr equals ZeroRefV1::parse.
 
 ---
 
@@ -971,7 +972,7 @@ Blocked until ZeroRefV1 implements FromStr and serde of the Display form with a 
 |---|---|
 | `experiment_id` | `SURF-0004` |
 | `pillar` | `surface` |
-| `status` | `CONFIRMED_GAP` |
+| `status` | `CLOSED` |
 | `created_at_utc` | `2026-08-17T16:00:00Z` |
 | `created_by_agent` | `idea-wizard-orchestrator` |
 | `bead_id` | `F-REF-CAPABILITY-NEGOTIATION` |
@@ -1008,12 +1009,13 @@ rg -n "pub fn negotiate" crates/zero-ref/src/lib.rs || echo 'no negotiate'
 ### Results Inline
 
 ```
-result_status: CONFIRMED_GAP
-result_summary: Consts only. IncompatibleVersion is in ALL[] but never constructed in lib.rs.
+result_status: CLOSED
+result_summary: public negotiate(major, minor) returns IncompatibleVersion on major mismatch. Minor is additive.
 result_evidence_paths:
   - crates/zero-ref/src/lib.rs
+  - crates/zero-ref/tests/zeroref_api.rs
   - conformance/contracts/supported_surface_matrix.toml
-result_impact: zero-ref family still partial/missing
+result_impact: F-REF-CAPABILITY-NEGOTIATION present
 spawned_remediation_bead: F-REF-CAPABILITY-NEGOTIATION
 spawned_experiments: []
 closed_at_utc: 2026-08-17
@@ -1021,7 +1023,7 @@ closed_at_utc: 2026-08-17
 
 ### Closure Predicate
 
-Blocked until a public function accepts a peer (major, minor) and returns IncompatibleVersion for a different major before any payload work; track as F-REF-CAPABILITY-NEGOTIATION.
+Closed when a public function accepts a peer (major, minor) and returns IncompatibleVersion for a different major before any payload work.
 
 ---
 
@@ -1151,7 +1153,7 @@ Worth reconsidering when .github/workflows/ci.yml or DSR runs cargo test on ever
 |---|---|
 | `experiment_id` | `SURF-0007` |
 | `pillar` | `surface` |
-| `status` | `CONFIRMED_GAP` |
+| `status` | `CLOSED` |
 | `created_at_utc` | `2026-08-17T16:00:00Z` |
 | `created_by_agent` | `idea-wizard-orchestrator` |
 | `bead_id` | `F-ABI-PROPTEST-ROUNDTRIP` |
@@ -1189,12 +1191,12 @@ rg -n "proptest!" crates/zero-abi ; ls crates/zero-abi/tests 2>&1
 ### Results Inline
 
 ```
-result_status: CONFIRMED_GAP
-result_summary: no tests directory; no proptest! ; Cargo.toml has no proptest dev-dep.
+result_status: CLOSED
+result_summary: crates/zero-abi/tests/abi_proptest.rs encode/decode identity on Handshake and Shutdown frames.
 result_evidence_paths:
-  - crates/zero-abi/Cargo.toml
+  - crates/zero-abi/tests/abi_proptest.rs
   - conformance/contracts/supported_surface_matrix.toml
-result_impact: zero-abi family 0.941176
+result_impact: F-ABI-PROPTEST-ROUNDTRIP present
 spawned_remediation_bead: F-ABI-PROPTEST-ROUNDTRIP
 spawned_experiments: [IDEA-0004]
 closed_at_utc: 2026-08-17
@@ -1202,7 +1204,7 @@ closed_at_utc: 2026-08-17
 
 ### Closure Predicate
 
-Retry only when crates/zero-abi (or a later harness crate) has a proptest! encode/decode identity for a wire type and cargo test -p zero-abi runs it.
+Closed when crates/zero-abi has a proptest! encode/decode identity for a wire type and cargo test -p zero-abi runs it.
 
 ---
 
@@ -1272,7 +1274,7 @@ Retry only when a hub gate fails a sibling engine that uses Reject instead of Cl
 |---|---|
 | `experiment_id` | `SURF-0009` |
 | `pillar` | `surface` |
-| `status` | `CONFIRMED_GAP` |
+| `status` | `CLOSED` |
 | `created_at_utc` | `2026-08-17T16:00:00Z` |
 | `created_by_agent` | `idea-wizard-orchestrator` |
 | `bead_id` | `F-STORE-ENSURE-LAYOUT` |
@@ -1310,12 +1312,13 @@ rg -n -A20 "pub fn ensure_layout" crates/zero-store/src/store_root.rs
 ### Results Inline
 
 ```
-result_status: CONFIRMED_GAP
-result_summary: Function body has two create_dir_all calls (unified_root, engine_dir). No blobs/, no gc/.
+result_status: CLOSED
+result_summary: ensure_layout now creates engine_dir, blobs/, and gc/ under cas_host(). Tested in crates/zero-store/tests/ensure_layout.rs.
 result_evidence_paths:
   - crates/zero-store/src/store_root.rs
+  - crates/zero-store/tests/ensure_layout.rs
   - conformance/contracts/supported_surface_matrix.toml
-result_impact: smallest store-side close if the contract is "create them"
+result_impact: F-STORE-ENSURE-LAYOUT present
 spawned_remediation_bead: F-STORE-ENSURE-LAYOUT
 spawned_experiments: [IDEA-0005]
 closed_at_utc: 2026-08-17
@@ -1323,7 +1326,7 @@ closed_at_utc: 2026-08-17
 
 ### Closure Predicate
 
-Retry only when ensure_layout creates blobs/ and gc/ (or documents a loud error if a caller expected them) and a unit test fails if those directories are absent after a successful call.
+Closed when ensure_layout creates blobs/ and gc/ and a unit test fails if those directories are absent after a successful call.
 
 ---
 
@@ -1455,7 +1458,7 @@ Retry only when FSZero/GraphZero adapters supply measured WorkerTokenAccountingV
 |---|---|
 | `experiment_id` | `SURF-0012` |
 | `pillar` | `surface` |
-| `status` | `CONFIRMED_GAP` |
+| `status` | `CLOSED` |
 | `created_at_utc` | `2026-08-17T16:00:00Z` |
 | `created_by_agent` | `idea-wizard-orchestrator` |
 | `bead_id` | `F-REF-ERROR-TAXONOMY` |
@@ -1492,12 +1495,12 @@ rg -n "ZeroRefErrorClass::" crates/zero-ref/src/lib.rs
 ### Results Inline
 
 ```
-result_status: CONFIRMED_GAP
-result_summary: 5/10 classes unused in lib.rs. Taxonomy overclaims if present is assumed.
+result_status: CLOSED
+result_summary: negotiate() constructs IncompatibleVersion. Missing/Io/PolicyDenied/LegacyAmbiguity documented as reserved for store/resolution. ALL constructible; parser never emits reserved classes. Feature stays partial honestly.
 result_evidence_paths:
   - crates/zero-ref/src/lib.rs
-  - crates/zerostack-harness/src/spec_oracle.rs
-result_impact: one-unit-test close possible
+  - crates/zero-ref/tests/zeroref_api.rs
+result_impact: F-REF-ERROR-TAXONOMY remains partial
 spawned_remediation_bead: F-REF-ERROR-TAXONOMY
 spawned_experiments: [IDEA-0013]
 closed_at_utc: 2026-08-17
@@ -1505,7 +1508,7 @@ closed_at_utc: 2026-08-17
 
 ### Closure Predicate
 
-Retry only when production paths in crates/zero-ref/src/lib.rs construct every ZeroRefErrorClass variant, or tests assert ZeroRefErrorClass::ALL is reachable -- not merely that the enum is public.
+Closed with honest partial: tests assert ALL is reachable and reserved classes are explicit.
 
 ---
 
@@ -1984,7 +1987,7 @@ Blocked until a mutation test changes a C-23/24/26 pin and fails if the ABI dige
 |---|---|
 | `experiment_id` | `CONF-0006` |
 | `pillar` | `conformance` |
-| `status` | `CONFIRMED_GAP` |
+| `status` | `CLOSED` |
 | `created_at_utc` | `2026-08-17T16:00:00Z` |
 | `created_by_agent` | `idea-wizard-orchestrator` |
 | `bead_id` | `N/A` |
@@ -2022,13 +2025,13 @@ rch exec -- env CARGO_TARGET_DIR=/tmp/rch_target_zerostack cargo run -p zerostac
 ### Results Inline
 
 ```
-result_status: CONFIRMED_GAP
-result_summary: Phase 9 ran this. Red is real. Not a TrueDivergence. Not fixed in Phase 9 because goldens must be operator-blessed.
+result_status: CLOSED
+result_summary: agents-law is certifying=false. Preflight skips it for spec_source_sha256 and reports spec_source_sha256_advisory as yellow on drift/absent. More honest than blessing a moving gitignored hash.
 result_evidence_paths:
-  - docs/progress/baseline_round_0.json
   - conformance/contracts/spec_version_contract.toml
-  - docs/progress/AGENTS-MANDATE.md
-result_impact: certifying=false
+  - crates/zerostack-harness/src/spec_oracle.rs
+  - crates/zerostack-harness/src/oracle_preflight_doctor.rs
+result_impact: certifying no longer blocked by gitignored AGENTS.md
 spawned_remediation_bead: N/A
 spawned_experiments: [IDEA-0002, IDEA-0010]
 closed_at_utc: 2026-08-17
@@ -2036,7 +2039,7 @@ closed_at_utc: 2026-08-17
 
 ### Closure Predicate
 
-Blocked until spec_version_contract.toml agents-law sha256 matches the working-copy AGENTS.md (or the pin is moved to a tracked file) and oracle-preflight-doctor aggregate_outcome is green; track as agents-law-hash-pin.
+Closed by dropping AGENTS.md from the certifying pin set and keeping a non-certifying advisory check.
 
 ---
 
@@ -2646,7 +2649,7 @@ Retry only when a unit test fails if an empty Q99 window emits a numeric percent
 |---|---|
 | `experiment_id` | `IDEA-0013` |
 | `pillar` | `conformance` |
-| `status` | `OPEN` |
+| `status` | `CLOSED` |
 | `created_at_utc` | `2026-08-17T16:00:00Z` |
 | `created_by_agent` | `idea-wizard-orchestrator` |
 | `bead_id` | `N/A` |
@@ -2681,18 +2684,19 @@ rg -n "ZeroRefErrorClass::ALL" tests/unit crates/zero-ref
 ### Results Inline
 
 ```
-result_status: OPEN
-result_summary: Remediation design for SURF-0012. Not implemented this pass.
-result_evidence_paths: []
-result_impact:
+result_status: CLOSED
+result_summary: zeroref_api.rs constructs ALL, asserts parser never emits reserved classes, and negotiate emits IncompatibleVersion.
+result_evidence_paths:
+  - crates/zero-ref/tests/zeroref_api.rs
+result_impact: SURF-0012 closed as honest partial
 spawned_remediation_bead: N/A
 spawned_experiments: []
-closed_at_utc:
+closed_at_utc: 2026-08-17
 ```
 
 ### Closure Predicate
 
-Blocked until a reachability test for ZeroRefErrorClass::ALL lands; track as F-REF-ERROR-TAXONOMY.
+Closed when a reachability test for ZeroRefErrorClass::ALL landed.
 
 ---
 

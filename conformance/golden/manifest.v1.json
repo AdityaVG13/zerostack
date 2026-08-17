@@ -31,7 +31,7 @@
       "path": "tier1/feature_universe.toml",
       "reference_version": "spec-v1",
       "replay_command": "python3 scripts/check_golden_integrity.py",
-      "sha256": "3946a4367cf6a9b2ccd7915a588b11da9695a2923dd7564556153bbfee050d9d",
+      "sha256": "d0ab26d469ed3f33c8787778acd2dc332d65e1887eef0df8d74f9fc2112b9456",
       "source": "curated-corpus",
       "source_artifact_path": "conformance/contracts/supported_surface_matrix.toml",
       "tier": "Tier1Raw"
@@ -43,7 +43,7 @@
       "path": "tier2/feature_universe.canonical.json",
       "reference_version": "spec-v1",
       "replay_command": "python3 scripts/check_golden_integrity.py",
-      "sha256": "eb0c0baccb941921db7fdc711ff0ed6e11e27735602d9e69e5b7c489d8ff1c55",
+      "sha256": "e7e3b91ba9016cca45d48f37ce137c4e78d12b7b1068efca9fdc9d2a1ffca8ad",
       "source": "curated-corpus",
       "source_artifact_path": "conformance/contracts/supported_surface_matrix.toml",
       "tier": "Tier2Canonical"
@@ -79,7 +79,7 @@
       "path": "tier3/logical_dump.json",
       "reference_version": "spec-v1",
       "replay_command": "python3 scripts/check_golden_integrity.py",
-      "sha256": "e7ef805c90a91215157f3dc4f2534cbe6976dba51618610ae9ee53cac0800019",
+      "sha256": "0767bb338872b7e00e09514d1b9bd820cfbf37c735da549d8086a9e014017bfb",
       "source": "curated-corpus",
       "source_artifact_path": "conformance/contracts/supported_surface_matrix.toml",
       "tier": "Tier3Logical"
@@ -115,7 +115,7 @@
       "path": "tier1/spec_version_contract.toml",
       "reference_version": "spec-v1",
       "replay_command": "python3 scripts/check_golden_integrity.py",
-      "sha256": "f224820de6476dd5d8bcae37f342058b3f56664662b91553a5919ea770884573",
+      "sha256": "a5e386d28ff0a5bd5d42a17493282424a2cd410323dd27bff5733387d9e08ec8",
       "source": "curated-corpus",
       "source_artifact_path": "conformance/contracts/spec_version_contract.toml",
       "tier": "Tier1Raw"
@@ -127,7 +127,7 @@
       "path": "tier2/spec_version_contract.canonical.json",
       "reference_version": "spec-v1",
       "replay_command": "python3 scripts/check_golden_integrity.py",
-      "sha256": "87dcda07fa29caf9041381d0411c6831c0d12b0cd00ac7c4710b382b25d910e2",
+      "sha256": "654369fed244b327818231f86aea692ac4fd847b284934759d8a8238f021a012",
       "source": "curated-corpus",
       "source_artifact_path": "conformance/contracts/spec_version_contract.toml",
       "tier": "Tier2Canonical"

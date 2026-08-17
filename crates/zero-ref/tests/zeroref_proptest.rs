@@ -14,10 +14,15 @@ fn scheme() -> impl Strategy<Value = &'static str> {
 
 fn config() -> Config {
     Config {
-        cases: 64,
-        failure_persistence: Some(Box::new(FileFailurePersistence::WithSource(
-            "proptest-regressions",
-        ))),
+        cases: if cfg!(miri) { 8 } else { 64 },
+        // File persistence calls getcwd; Miri isolation rejects that.
+        failure_persistence: if cfg!(miri) {
+            None
+        } else {
+            Some(Box::new(FileFailurePersistence::WithSource(
+                "proptest-regressions",
+            )))
+        },
         ..Config::default()
     }
 }
@@ -44,6 +49,8 @@ proptest! {
             ),
         };
         let parsed = ZeroRefV1::parse(&input).expect("canonical grammar");
+        let via_fromstr: ZeroRefV1 = input.parse().expect("FromStr");
+        prop_assert_eq!(&via_fromstr, &parsed);
         let rendered = parsed.to_string();
         prop_assert_eq!(&rendered, &input);
         let again = ZeroRefV1::parse(&rendered).expect("reparse");

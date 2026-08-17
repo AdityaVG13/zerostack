@@ -99,7 +99,10 @@ docs/adr/
 docs/internal/
 packages/
 reports/
-fuzz/
+# cargo-fuzz work products. Source under fuzz/fuzz_targets/ is tracked.
+fuzz/artifacts/
+fuzz/target/
+fuzz/coverage/
 scripts/dev/
 scripts/__pycache__/
 __pycache__/

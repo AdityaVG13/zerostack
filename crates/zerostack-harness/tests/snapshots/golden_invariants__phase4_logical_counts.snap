@@ -4,9 +4,9 @@ expression: pin
 ---
 {
   "feature_count": 77,
-  "present": 61,
-  "partial": 9,
-  "missing": 4,
+  "present": 66,
+  "partial": 8,
+  "missing": 0,
   "excluded": 3,
   "wired_count": 48,
   "catalog_tag_count": 53,

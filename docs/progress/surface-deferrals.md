@@ -166,7 +166,7 @@ untracked/modified in the working tree).
 
 ## Open Candidates (matrix-missed / still missing)
 
-- `F-FUZZ`, `F-MIRI-NARROW`, `F-REF-SERDE-FROMSTR`, `F-REF-CAPABILITY-NEGOTIATION`
+- `F-CI-PR-GATES`, `F-CODEMODE-CANCEL`, `F-ZSX-Q99-REPORT`, `F-STORE-QUARANTINE-REAP`, `F-MIRI-NARROW` (partial until rch miri is green), `F-REF-ERROR-TAXONOMY` (honest partial)
 - Dashboard families still not `full`: ci, conformance, quality, zero-abi, zero-codemode, zero-ref, zero-store, zsx-core
 
 ## Retired Candidates Worth Flagging
