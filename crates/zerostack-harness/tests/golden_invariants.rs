@@ -70,7 +70,7 @@ fn never_label_tier2_as_tier1() {
 fn tier3_logical_invariants() {
     let root = repo_root();
     let dump = load_tier3_logical(&root).expect("tier3");
-    assert_tier3_invariants(&dump).expect("tier3 invariants");
+    assert_tier3_invariants(&root, &dump).expect("tier3 invariants");
     let wired = dump["spec_verifiers"]["wired_count"]
         .as_u64()
         .expect("wired_count");

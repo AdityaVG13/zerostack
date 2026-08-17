@@ -5,7 +5,7 @@ Does not replace benchmarks/savings-bench-v1.json. Invokes the harness
 test that already uses measure_with_teardown and emits JSON v3 fields.
 
     python3 scripts/bench/store_cas.py
-    rch exec -- env CARGO_TARGET_DIR=/tmp/rch_target_zerostack cargo test -p zerostack-harness store_cas -- --test-threads=1
+    rch exec -- env CARGO_TARGET_DIR="${RCH_TARGET_BASE:-${TMPDIR:-/tmp}}/rch_target_zerostack" cargo test -p zerostack-harness store_cas -- --test-threads=1
 """
 
 from __future__ import annotations
@@ -37,12 +37,14 @@ def main() -> None:
         "--test-threads=1",
     ]
     if args.via_rch:
+        base = os.environ.get("RCH_TARGET_BASE") or os.environ.get("TMPDIR") or "/tmp"
+        target = str(Path(base) / "rch_target_zerostack")
         cmd = [
             "rch",
             "exec",
             "--",
             "env",
-            "CARGO_TARGET_DIR=/tmp/rch_target_zerostack",
+            f"CARGO_TARGET_DIR={target}",
             *cargo,
         ]
     else:

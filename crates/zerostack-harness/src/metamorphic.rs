@@ -2,11 +2,11 @@
 
 use serde_json::Value;
 use zero_abi::raw_worker::{
-    decode_request_frame, encode_frame, ShutdownRequest, WorkerRequestFrame,
-    DEFAULT_MAX_FRAME_BYTES,
+    DEFAULT_MAX_FRAME_BYTES, ShutdownRequest, WorkerRequestFrame, decode_request_frame,
+    encode_frame,
 };
 use zero_abi::schema::{canonical_schema_json, normalize_schema};
-use zero_ref::{select_fragment_with_policy, LineEndPolicy, ZeroFragment, ZeroRefV1};
+use zero_ref::{LineEndPolicy, ZeroFragment, ZeroRefV1, select_fragment_with_policy};
 
 use crate::repo::sha256_hex;
 

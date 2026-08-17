@@ -3,7 +3,7 @@
 
 use serde::Serialize;
 
-use crate::engine_identity::{EngineIdentity, SUBJECT_IDENTITY_LABEL};
+use crate::engine_identity::{EngineIdentity, SUBJECT_IDENTITY_LABEL, assert_identities};
 use crate::repo::sha256_hex;
 
 pub const FORMAT_VERSION: u32 = 2;
@@ -16,9 +16,10 @@ pub struct EngineVersions {
 
 impl EngineVersions {
     pub fn new(oracle: &EngineIdentity) -> Self {
+        assert_identities(&EngineIdentity::subject(), oracle);
         Self {
             subject_identity: SUBJECT_IDENTITY_LABEL.to_owned(),
-            reference_identity: oracle.label.clone(),
+            reference_identity: oracle.label().to_owned(),
         }
     }
 }

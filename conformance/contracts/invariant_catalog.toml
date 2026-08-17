@@ -14,7 +14,7 @@ status = "enforced"
 [[invariant.artifact]]
 path = "crates/zerostack-harness/src/engine_identity.rs"
 schema_version = "zerostack.engine-identity.v1"
-hash = "9e1b30d4a742f3c1c1b83a1ccdb6c9530df1bdab3479f3b40493f6f44d74c4c1"
+hash = "9e628dac150f5fbd9b754b3e07ff98b933eaa7441fed4d41652eccdd9e376877"
 
 [[invariant]]
 id = "INV-BOTH-ERROR"
@@ -38,7 +38,7 @@ status = "enforced"
 [[invariant.artifact]]
 path = "scripts/check_golden_integrity.py"
 schema_version = "1.0.0"
-hash = "2f086a61155dfbf44d9f7b49ec43e8d003d79fc91abd6c0b5478971dcb84defb"
+hash = "33eb3abc3ce6ad0098eeb9ec678c64c2b998d049276c1bf454a5d65d42460ba1"
 
 [[invariant.artifact]]
 path = "conformance/golden/checksums.sha256"

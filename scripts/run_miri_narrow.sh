@@ -8,5 +8,6 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
 
-exec rch exec -- env CARGO_TARGET_DIR=/tmp/rch_target_zerostack \
+TARGET_DIR="${RCH_TARGET_BASE:-${TMPDIR:-/tmp}}/rch_target_zerostack"
+exec rch exec -- env CARGO_TARGET_DIR="$TARGET_DIR" \
   cargo +nightly miri test -p zero-ref -- --test-threads=1

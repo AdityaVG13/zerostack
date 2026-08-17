@@ -124,6 +124,7 @@ impl FailureBundle {
                     exact_repro_command: &self.exact_repro_command,
                     first_divergence_jsonptr: FIRST_DIVERGENCE_JSONPTR,
                     environment: &self.environment,
+                    failure: &self.failure,
                     partial: true,
                     write_error: error,
                 };
@@ -144,6 +145,7 @@ struct PartialOnDisk<'a> {
     exact_repro_command: &'a str,
     first_divergence_jsonptr: &'static str,
     environment: &'a Environment,
+    failure: &'a FailureSection,
     partial: bool,
     write_error: String,
 }
@@ -247,9 +249,49 @@ mod tests {
         .write_manifest(&dir)
         .expect("partial still writes");
         let text = fs::read_to_string(&path).expect("read");
-        assert!(text.contains(FIRST_DIVERGENCE_JSONPTR));
-        assert!(text.contains("\"partial\": true"));
-        assert!(text.contains("\"seed\": 7"));
+        let value: serde_json::Value = serde_json::from_str(&text).expect("json");
+        assert_eq!(
+            value
+                .pointer(FIRST_DIVERGENCE_JSONPTR)
+                .and_then(|v| v.get("kind"))
+                .and_then(|v| v.as_str()),
+            Some("root"),
+            "partial bundle must still materialize {FIRST_DIVERGENCE_JSONPTR}: {text}"
+        );
+        assert_eq!(value["partial"], true);
+        assert_eq!(value["seed"], 7);
         let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn partial_on_disk_keeps_first_divergence() {
+        let first = FirstDivergence {
+            kind: "canonical".into(),
+            subject: "left".into(),
+            oracle: "right".into(),
+            byte_offset: Some(4),
+        };
+        let fallback = PartialOnDisk {
+            schema_version: SCHEMA_VERSION,
+            seed: 1,
+            fixture_id: "fallback",
+            schedule_fingerprint: "abc",
+            exact_repro_command: "repro",
+            first_divergence_jsonptr: FIRST_DIVERGENCE_JSONPTR,
+            environment: &capture_environment(),
+            failure: &FailureSection {
+                first_divergence: first,
+            },
+            partial: true,
+            write_error: "serialize failed".into(),
+        };
+        let value = serde_json::to_value(&fallback).expect("serialize fallback");
+        assert_eq!(
+            value
+                .pointer("/failure/first_divergence/oracle")
+                .and_then(|v| v.as_str()),
+            Some("right")
+        );
+        assert_eq!(value["partial"], true);
     }
 }

@@ -229,6 +229,44 @@ pub fn run_all(root: &Path) -> Result<(), ScenarioError> {
     Ok(())
 }
 
+/// Table-cell `[SPEC-NNN]` tags from `docs/spec/SPEC-TAGS.md`, first-seen order.
+///
+/// Matches `scripts/capture_golden.py` (`SPEC_TAG_CELL_RE` on `|` rows) so
+/// the live catalog count cannot drift from the golden recapture.
+pub fn catalog_spec_tags(root: &Path) -> Result<Vec<String>, ScenarioError> {
+    let text = read_text(root, "docs/spec/SPEC-TAGS.md").map_err(|e| fail("catalog", e))?;
+    let mut tags = Vec::new();
+    let mut seen = std::collections::BTreeSet::new();
+    for line in text.lines() {
+        if !line.starts_with('|') {
+            continue;
+        }
+        let mut rest = line;
+        while let Some(start) = rest.find("`[SPEC-") {
+            let after_tick = &rest[start + 2..];
+            let Some(end) = after_tick.find("]`") else {
+                break;
+            };
+            let tag = &after_tick[..end];
+            if tag
+                .bytes()
+                .all(|b| b.is_ascii_uppercase() || b.is_ascii_digit() || b == b'-')
+                && seen.insert(tag.to_owned())
+            {
+                tags.push(tag.to_owned());
+            }
+            rest = &after_tick[end..];
+        }
+    }
+    if tags.is_empty() {
+        return Err(fail(
+            "catalog",
+            "no SPEC tags found in docs/spec/SPEC-TAGS.md table cells",
+        ));
+    }
+    Ok(tags)
+}
+
 pub fn run_tag(tag: &str, root: &Path) -> Result<(), ScenarioError> {
     let verifier = all_verifiers()
         .iter()

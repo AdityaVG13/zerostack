@@ -97,12 +97,12 @@ where
     }
     let start_total = Instant::now();
     let mut times = Vec::new();
-    for iter in 0..MAX_ITERS {
+    for _ in 0..MAX_ITERS {
         let start = Instant::now();
         f();
         let elapsed = start.elapsed();
         times.push(elapsed);
-        if iter >= MIN_ITERS && start_total.elapsed() >= TARGET_DURATION {
+        if times.len() >= MIN_ITERS && start_total.elapsed() >= TARGET_DURATION {
             break;
         }
     }
@@ -124,13 +124,13 @@ where
     }
     let start_total = Instant::now();
     let mut times = Vec::new();
-    for iter in 0..MAX_ITERS {
+    for _ in 0..MAX_ITERS {
         let start = Instant::now();
         f();
         let elapsed = start.elapsed();
         times.push(elapsed);
         teardown();
-        if iter >= MIN_ITERS && start_total.elapsed() >= TARGET_DURATION {
+        if times.len() >= MIN_ITERS && start_total.elapsed() >= TARGET_DURATION {
             break;
         }
     }

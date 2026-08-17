@@ -171,12 +171,16 @@ mod tests {
     #[test]
     fn reduces_to_schema_plus_one() {
         let minimal = minimize(&fixture(), has_bug);
-        assert!(minimal
-            .iter()
-            .any(|s| s.schema && s.text == "CREATE TABLE t"));
-        assert!(minimal
-            .iter()
-            .any(|s| s.schema && s.text == "CREATE INDEX i"));
+        assert!(
+            minimal
+                .iter()
+                .any(|s| s.schema && s.text == "CREATE TABLE t")
+        );
+        assert!(
+            minimal
+                .iter()
+                .any(|s| s.schema && s.text == "CREATE INDEX i")
+        );
         assert_eq!(minimal.iter().filter(|s| !s.schema).count(), 1);
         assert_eq!(minimal.iter().find(|s| !s.schema).unwrap().text, "BUG");
     }

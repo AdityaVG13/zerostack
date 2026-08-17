@@ -7,7 +7,7 @@ name: ci
 # Tests are NOT this workflow. DSR (`dsr quality`) is the repo-level
 # release/quality runner; as of 2026-08-17 it has zero checks configured
 # for zerostack. Targeted Cargo tests go through rch, never a GH job:
-#   rch exec -- env CARGO_TARGET_DIR=/tmp/rch_target_zerostack \
+#   rch exec -- env CARGO_TARGET_DIR="${RCH_TARGET_BASE:-${TMPDIR:-/tmp}}/rch_target_zerostack" \
 #     cargo test -p <one> -- --test-threads=1
 # Do not add a cargo test / cargo test --workspace job here: it hammers
 # the Actions budget and the host. See docs/progress/AGENTS-MANDATE.md.

@@ -154,6 +154,30 @@ untracked/modified in the working tree).
 - **evidence:** Pass 1: CI has no test job. `.github/workflows/ci.yml` is `workflow_dispatch` only (no push/PR). Jobs: feature-universe, lint, build, privacy. Matrix: `F-CI-PR-GATES` partial. Notes: still no `cargo test` job.
 - **retry_condition_predicate:** "Worth reconsidering when .github/workflows/ci.yml or DSR runs cargo test on every PR/push, not only workflow_dispatch fmt/clippy/build."
 
+### 2026-08-17 -- F-FUZZ-landed -- CLOSED
+
+- **date:** 2026-08-17
+- **hypothesis:** The Pass-7 "no fuzz/fuzz_targets/" deferral still describes HEAD after Phase 11.
+- **result:** CLOSED
+- **evidence:** `626145c` added `fuzz/fuzz_targets/zeroref_parse.rs` and `fuzz/fuzz_targets/abi_frame_decode.rs`. Matrix `F-FUZZ` is **present**. The earlier `F-FUZZ` DEFERRED row is historical Pass-7 evidence, not current status.
+- **retry_condition_predicate:** "Retry condition not applicable -- the gain is structural, not numerical."
+
+### 2026-08-17 -- F-REF-SERDE-FROMSTR-landed -- CLOSED
+
+- **date:** 2026-08-17
+- **hypothesis:** `ZeroRefV1` still has no FromStr / Display-form serde after Phase 11.
+- **result:** CLOSED
+- **evidence:** `626145c` added `FromStr` (delegates to `parse`) and Display-form serde. `crates/zero-ref/tests/zeroref_api.rs` `fromstr_equals_parse` / `serde_roundtrips_display_form`. Matrix `F-REF-SERDE-FROMSTR` is **present**.
+- **retry_condition_predicate:** "Retry condition not applicable -- the gain is structural, not numerical."
+
+### 2026-08-17 -- F-REF-CAPABILITY-NEGOTIATION-landed -- CLOSED
+
+- **date:** 2026-08-17
+- **hypothesis:** `ZEROREF_MAJOR` / `MINOR` consts are still the only negotiation surface.
+- **result:** CLOSED
+- **evidence:** `626145c` added public `negotiate(major, minor)` that returns `IncompatibleVersion` on major mismatch. `crates/zero-ref/tests/zeroref_api.rs` `negotiate_rejects_other_major`. Matrix `F-REF-CAPABILITY-NEGOTIATION` is **present**.
+- **retry_condition_predicate:** "Retry condition not applicable -- the gain is structural, not numerical."
+
 ### 2026-08-17 -- agents-md-as-feature-evidence -- REJECTED
 
 - **date:** 2026-08-17
@@ -166,7 +190,12 @@ untracked/modified in the working tree).
 
 ## Open Candidates (matrix-missed / still missing)
 
-- `F-CI-PR-GATES`, `F-ZSX-Q99-REPORT` (hub empty-window tested; engine accounting residual), `F-STORE-QUARANTINE-REAP`, `F-MIRI-NARROW` (partial until rch miri is green), `F-REF-ERROR-TAXONOMY` (honest partial)
+- `F-CI-PR-GATES` (partial; no PR/push cargo test job)
+- `F-ZSX-Q99-REPORT` (hub empty-window tested; engine accounting residual)
+- `F-STORE-QUARANTINE-REAP`
+- `F-MIRI-NARROW` (partial until `miri test -p zero-ref` is green on rch)
+- `F-REF-ERROR-TAXONOMY` (honest partial)
+- `F-CONF-HARNESS` (harness library exists; CONTRACT §8 still forbids an in-repo CLI)
 - Dashboard families still not `full`: ci, conformance, quality, zero-ref, zero-store, zsx-core (zero-codemode is now full)
 
 ## Retired Candidates Worth Flagging

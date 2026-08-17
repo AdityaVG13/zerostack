@@ -137,12 +137,16 @@ pub fn run(root: &Path) -> PreflightReport {
             detail: "no advisory spec sources".into(),
         }),
         Ok(rows) => {
-            let drifted = rows.iter().any(|(_, detail)| {
-                detail.contains("drifted") || detail.contains("absent")
-            });
+            let drifted = rows
+                .iter()
+                .any(|(_, detail)| detail.contains("drifted") || detail.contains("absent"));
             checks.push(PreflightCheck {
                 name: "spec_source_sha256_advisory".into(),
-                outcome: if drifted { "yellow".into() } else { "green".into() },
+                outcome: if drifted {
+                    "yellow".into()
+                } else {
+                    "green".into()
+                },
                 detail: rows
                     .iter()
                     .map(|(_, detail)| detail.as_str())

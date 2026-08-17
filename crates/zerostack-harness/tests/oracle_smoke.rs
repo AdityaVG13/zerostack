@@ -20,10 +20,11 @@ fn ok_output() -> SubjectOutput {
 
 #[test]
 fn subject_equals_subject() {
-    let left = ok_output();
-    let right = ok_output();
+    let left = EngineIdentity::subject();
+    let right = EngineIdentity::subject();
     assert_eq!(left, right);
-    assert_eq!(SUBJECT_IDENTITY_LABEL, SUBJECT_IDENTITY_LABEL);
+    assert_ne!(left, EngineIdentity::oracle("spec-v1"));
+    assert_eq!(left.label(), SUBJECT_IDENTITY_LABEL);
 }
 
 #[test]
@@ -135,7 +136,7 @@ fn spec_verifiers_hold_on_this_tree() {
 }
 
 #[test]
-fn preflight_does_not_panic_and_is_green() {
+fn preflight_does_not_panic_and_certifying_matches_aggregate() {
     let report = oracle_preflight_doctor::run(&repo_root());
     assert_eq!(report.schema_version, "oracle-preflight-doctor.v1");
     assert!(

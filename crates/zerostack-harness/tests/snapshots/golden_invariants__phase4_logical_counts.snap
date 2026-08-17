@@ -4,8 +4,8 @@ expression: pin
 ---
 {
   "feature_count": 77,
-  "present": 66,
-  "partial": 8,
+  "present": 67,
+  "partial": 7,
   "missing": 0,
   "excluded": 3,
   "wired_count": 48,

@@ -6,7 +6,7 @@ use serde::Deserialize;
 use serde_json::Value;
 
 use crate::repo::{read_bytes, repo_root, sha256_hex};
-use crate::spec_oracle::all_verifiers;
+use crate::spec_oracle::{all_verifiers, catalog_spec_tags};
 
 pub const MANIFEST_SCHEMA_VERSION: &str = "1.0.0";
 pub const GOLDEN_DIR: &str = "conformance/golden";
@@ -127,8 +127,16 @@ pub fn verify_manifest_hashes(root: &Path, manifest: &GoldenManifest) -> Result<
 }
 
 pub fn verify_checksums_file(root: &Path) -> Result<usize, String> {
+    let listed = checksum_paths(root)?;
+    if listed.is_empty() {
+        return Err("checksums.sha256 has no rows".into());
+    }
+    Ok(listed.len())
+}
+
+fn checksum_paths(root: &Path) -> Result<Vec<String>, String> {
     let text = crate::repo::read_text(root, CHECKSUMS_REL)?;
-    let mut rows = 0;
+    let mut listed = Vec::new();
     for (index, line) in text.lines().enumerate() {
         if line.is_empty() || line.starts_with('#') {
             continue;
@@ -149,12 +157,24 @@ pub fn verify_checksums_file(root: &Path) -> Result<usize, String> {
                 "{rel} checksum drifted: expected {digest} got {actual}"
             ));
         }
-        rows += 1;
+        listed.push(rel.to_owned());
     }
-    if rows == 0 {
-        return Err("checksums.sha256 has no rows".into());
+    Ok(listed)
+}
+
+fn verify_checksums_cover_manifest(
+    checksum_rels: &[String],
+    manifest: &GoldenManifest,
+) -> Result<(), String> {
+    for artifact in &manifest.artifacts {
+        if !checksum_rels.iter().any(|rel| rel == &artifact.path) {
+            return Err(format!(
+                "{}: {} is in the manifest but missing from checksums.sha256",
+                artifact.fixture_id, artifact.path
+            ));
+        }
     }
-    Ok(rows)
+    Ok(())
 }
 
 pub fn verify_tier1_byte_equality(root: &Path, manifest: &GoldenManifest) -> Result<usize, String> {
@@ -198,7 +218,22 @@ pub fn load_tier3_logical(root: &Path) -> Result<Value, String> {
     serde_json::from_str(&text).map_err(|error| format!("tier3 parse: {error}"))
 }
 
-pub fn assert_tier3_invariants(dump: &Value) -> Result<(), String> {
+fn live_contract_section_count(root: &Path) -> Result<u64, String> {
+    let text = crate::repo::read_text(root, "conformance/CONTRACT.md")?;
+    Ok(text.lines().filter(|line| line.starts_with("## ")).count() as u64)
+}
+
+fn live_fixture_entry_count(root: &Path) -> Result<u64, String> {
+    let text = crate::repo::read_text(root, "conformance/fixtures/raw_worker_v2_frames.json")?;
+    let value: Value =
+        serde_json::from_str(&text).map_err(|error| format!("fixture parse: {error}"))?;
+    value
+        .as_array()
+        .map(|rows| rows.len() as u64)
+        .ok_or_else(|| "raw_worker_v2_frames.json is not an array".into())
+}
+
+pub fn assert_tier3_invariants(root: &Path, dump: &Value) -> Result<(), String> {
     if dump.get("equivalence_tier").and_then(Value::as_str) != Some("Tier3Logical") {
         return Err("tier3 dump is not labeled Tier3Logical".into());
     }
@@ -263,15 +298,23 @@ pub fn assert_tier3_invariants(dump: &Value) -> Result<(), String> {
     if wired != live {
         return Err(format!("wired_count {wired} != live verifiers {live}"));
     }
-    if catalog != 53 {
-        return Err(format!("catalog_tag_count is {catalog}, expected 53"));
+    let live_catalog = catalog_spec_tags(root)
+        .map_err(|error| error.to_string())?
+        .len() as u64;
+    if catalog != live_catalog {
+        return Err(format!(
+            "catalog_tag_count {catalog} != live SPEC-TAGS.md {live_catalog}"
+        ));
     }
     if unverified != catalog.saturating_sub(wired) {
         return Err("unverified_count is not catalog - wired".into());
     }
     let contract = dump.get("contract_md").ok_or("tier3 missing contract_md")?;
-    if contract.get("section_count").and_then(Value::as_u64) != Some(8) {
-        return Err("CONTRACT.md section_count is not 8".into());
+    let live_sections = live_contract_section_count(root)?;
+    if contract.get("section_count").and_then(Value::as_u64) != Some(live_sections) {
+        return Err(format!(
+            "CONTRACT.md section_count is not live {live_sections}"
+        ));
     }
     let schema = dump
         .get("schema_zero_result_v1")
@@ -291,8 +334,11 @@ pub fn assert_tier3_invariants(dump: &Value) -> Result<(), String> {
     let fixture = dump
         .get("fixture_raw_worker_v2")
         .ok_or("tier3 missing fixture_raw_worker_v2")?;
-    if fixture.get("entry_count").and_then(Value::as_u64) != Some(4) {
-        return Err("raw_worker_v2 entry_count is not 4".into());
+    let live_entries = live_fixture_entry_count(root)?;
+    if fixture.get("entry_count").and_then(Value::as_u64) != Some(live_entries) {
+        return Err(format!(
+            "raw_worker_v2 entry_count is not live {live_entries}"
+        ));
     }
     Ok(())
 }
@@ -332,11 +378,16 @@ pub fn assert_tier2_not_mislabeled(root: &Path, manifest: &GoldenManifest) -> Re
 pub fn verify_all(root: &Path) -> Result<String, String> {
     let manifest = load_manifest(root)?;
     verify_manifest_hashes(root, &manifest)?;
-    let checksums = verify_checksums_file(root)?;
+    let checksum_rels = checksum_paths(root)?;
+    if checksum_rels.is_empty() {
+        return Err("checksums.sha256 has no rows".into());
+    }
+    verify_checksums_cover_manifest(&checksum_rels, &manifest)?;
+    let checksums = checksum_rels.len();
     let tier1 = verify_tier1_byte_equality(root, &manifest)?;
     assert_tier2_not_mislabeled(root, &manifest)?;
     let dump = load_tier3_logical(root)?;
-    assert_tier3_invariants(&dump)?;
+    assert_tier3_invariants(root, &dump)?;
     Ok(format!(
         "artifacts={} checksums={checksums} tier1={tier1} schema={MANIFEST_SCHEMA_VERSION}",
         manifest.artifacts.len()

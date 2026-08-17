@@ -50,11 +50,11 @@ def load_manifest() -> dict[str, Any]:
     return data
 
 
-def verify_checksums() -> int:
+def verify_checksums() -> set[str]:
     path = GOLDEN_ROOT / CHECKSUMS_NAME
     if not path.is_file():
         fail(f"missing {path.relative_to(REPO_ROOT)}")
-    rows = 0
+    listed: set[str] = set()
     for line_no, raw in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
         if not raw or raw.startswith("#"):
             continue
@@ -68,10 +68,10 @@ def verify_checksums() -> int:
         actual = sha256_hex(target.read_bytes())
         if actual != expected:
             fail(f"{rel} checksum drifted: expected {expected} got {actual}")
-        rows += 1
-    if rows == 0:
+        listed.add(rel)
+    if not listed:
         fail(f"{CHECKSUMS_NAME} has no checksum rows")
-    return rows
+    return listed
 
 
 def verify_manifest(manifest: dict[str, Any]) -> list[dict[str, Any]]:
@@ -114,6 +114,45 @@ def verify_manifest(manifest: dict[str, Any]) -> list[dict[str, Any]]:
     return [item for item in artifacts if isinstance(item, dict)]
 
 
+def verify_checksums_cover_manifest(
+    checksum_rels: set[str], artifacts: list[dict[str, Any]]
+) -> None:
+    for item in artifacts:
+        rel = str(item["path"])
+        if rel not in checksum_rels:
+            fail(
+                f"{item['fixture_id']}: {rel} is in the manifest but missing "
+                "from checksums.sha256"
+            )
+
+
+def verify_live_recapture(artifacts: list[dict[str, Any]]) -> None:
+    """Recompute every golden from live sources. A matrix/SPEC-TAGS edit
+    must fail here even if the on-disk checksums still agree with themselves.
+    """
+    scripts_dir = str(REPO_ROOT / "scripts")
+    if scripts_dir not in sys.path:
+        sys.path.insert(0, scripts_dir)
+    from capture_golden import capture
+
+    result = capture(REPO_ROOT, write=False)
+    live_items = {
+        str(item["fixture_id"]): str(item["sha256"])
+        for item in result["manifest"]["artifacts"]
+    }
+    for item in artifacts:
+        fixture_id = str(item["fixture_id"])
+        expected = live_items.get(fixture_id)
+        if expected is None:
+            fail(f"{fixture_id}: on-disk manifest artifact missing from live recapture")
+        actual = sha256_hex((GOLDEN_ROOT / str(item["path"])).read_bytes())
+        if actual != expected:
+            fail(
+                f"{fixture_id}: on-disk golden drifted from live recapture "
+                f"(disk={actual} live={expected})"
+            )
+
+
 def verify_tier1(artifacts: list[dict[str, Any]]) -> int:
     checked = 0
     for item in artifacts:
@@ -143,12 +182,14 @@ def verify_tier1(artifacts: list[dict[str, Any]]) -> int:
 
 
 def main() -> None:
-    checksum_rows = verify_checksums()
+    checksum_rels = verify_checksums()
     manifest = load_manifest()
     artifacts = verify_manifest(manifest)
+    verify_checksums_cover_manifest(checksum_rels, artifacts)
+    verify_live_recapture(artifacts)
     tier1 = verify_tier1(artifacts)
     print(
-        f"golden-integrity ok: checksums={checksum_rows} "
+        f"golden-integrity ok: checksums={len(checksum_rels)} "
         f"artifacts={len(artifacts)} tier1={tier1} schema={MANIFEST_SCHEMA}"
     )
 

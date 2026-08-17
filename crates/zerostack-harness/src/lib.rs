@@ -27,10 +27,10 @@ pub mod self_oracle;
 pub mod spec_oracle;
 
 pub use engine_identity::{
-    assert_subject_ne_oracle, oracle_label_is_allowed, EngineIdentity, EngineRole,
-    SUBJECT_IDENTITY_LABEL,
+    EngineIdentity, EngineRole, SUBJECT_IDENTITY_LABEL, assert_identities,
+    assert_subject_ne_oracle, oracle_label_is_allowed,
 };
 pub use oracle::{
-    compare, scenario, ExternalTool, OracleMode, ScenarioError, SubjectOutput, SubjectState,
+    ExternalTool, OracleMode, ScenarioError, SubjectOutput, SubjectState, compare, scenario,
 };
 pub use repo::repo_root;

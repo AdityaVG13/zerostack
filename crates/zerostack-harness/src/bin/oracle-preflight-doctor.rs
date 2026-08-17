@@ -14,7 +14,7 @@ fn main() -> ExitCode {
             report.aggregate_outcome, report.certifying, report.verifier_count
         );
         for check in &report.checks {
-            println!("  [{}] {} — {}", check.outcome, check.name, check.detail);
+            println!("  [{}] {} -- {}", check.outcome, check.name, check.detail);
         }
         if let Some(diag) = &report.first_failure_diagnosis {
             println!("first_failure_diagnosis: {diag}");

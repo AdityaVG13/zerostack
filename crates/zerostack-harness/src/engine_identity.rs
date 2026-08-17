@@ -21,13 +21,24 @@ pub enum EngineRole {
 
 /// Harness-side identity. Distinct type from `raw_worker::EngineIdentity`
 /// (`fszero` / `graphzero` / `tokenzero` dispatch).
+///
+/// Fields are private so a Subject label cannot be smuggled in as an Oracle
+/// (or vice versa) after construction.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct EngineIdentity {
-    pub role: EngineRole,
-    pub label: String,
+    role: EngineRole,
+    label: String,
 }
 
 impl EngineIdentity {
+    pub fn role(&self) -> EngineRole {
+        self.role
+    }
+
+    pub fn label(&self) -> &str {
+        &self.label
+    }
+
     pub fn subject() -> Self {
         Self {
             role: EngineRole::Subject,
@@ -35,10 +46,24 @@ impl EngineIdentity {
         }
     }
 
+    /// Panics if `label` is empty, equals the Subject label, or is not an
+    /// allowed oracle identity. Construction is the first self-compare guard.
     pub fn oracle(label: impl Into<String>) -> Self {
+        let label = label.into();
+        if label.is_empty() {
+            panic!("EngineIdentity unset: oracle label is empty");
+        }
+        if label == SUBJECT_IDENTITY_LABEL {
+            panic!("EngineIdentity collision: oracle being compared against itself ({label})");
+        }
+        if !oracle_label_is_allowed(&label) {
+            panic!(
+                "Oracle identity {label:?} is not in {{spec-v1,property-suite-v1,prior-commit-<sha>,round-trip,miri,clippy}}"
+            );
+        }
         Self {
             role: EngineRole::Oracle,
-            label: label.into(),
+            label,
         }
     }
 
@@ -102,6 +127,23 @@ pub fn assert_subject_ne_oracle(subject: &str, oracle: &str) {
     }
 }
 
+/// Typed comparator guard. Roles must be Subject vs Oracle; labels must differ.
+pub fn assert_identities(subject: &EngineIdentity, oracle: &EngineIdentity) {
+    if subject.role() != EngineRole::Subject {
+        panic!(
+            "EngineIdentity role hole: expected Subject, got {:?}",
+            subject.role()
+        );
+    }
+    if oracle.role() != EngineRole::Oracle {
+        panic!(
+            "EngineIdentity role hole: expected Oracle, got {:?}",
+            oracle.role()
+        );
+    }
+    assert_subject_ne_oracle(subject.label(), oracle.label());
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -122,5 +164,27 @@ mod tests {
     #[should_panic(expected = "EngineIdentity collision")]
     fn self_comparison_panics() {
         assert_subject_ne_oracle("zerostack", "zerostack");
+    }
+
+    #[test]
+    #[should_panic(expected = "EngineIdentity collision")]
+    fn oracle_constructor_rejects_subject_label() {
+        let _ = EngineIdentity::oracle(SUBJECT_IDENTITY_LABEL);
+    }
+
+    #[test]
+    #[should_panic(expected = "not in")]
+    fn oracle_constructor_rejects_unknown_label() {
+        let _ = EngineIdentity::oracle("not-an-oracle");
+    }
+
+    #[test]
+    fn typed_identities_are_distinct() {
+        let subject = EngineIdentity::subject();
+        let oracle = EngineIdentity::oracle(ORACLE_SPEC_V1);
+        assert_identities(&subject, &oracle);
+        assert_ne!(subject, oracle);
+        assert_eq!(subject.label(), SUBJECT_IDENTITY_LABEL);
+        assert_eq!(oracle.role(), EngineRole::Oracle);
     }
 }
