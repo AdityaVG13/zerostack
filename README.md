@@ -85,7 +85,7 @@ printf '%s\n' 'return (await zero.fs.compound("read", { path: "README.md" })).co
 
 ## Build
 
-Rust nightly as pinned in [`rust-toolchain.toml`](rust-toolchain.toml). License: [MIT](LICENSE-MIT) OR [Apache-2.0](LICENSE-APACHE).
+Rust nightly as pinned in [`rust-toolchain.toml`](rust-toolchain.toml). License: [MIT](LICENSE).
 
 ```bash
 git clone https://github.com/AdityaVG13/zerostack.git
@@ -153,4 +153,4 @@ No. `zsx exec` runs the session in that process and exits.
 
 ## License
 
-MIT OR Apache-2.0.
+[MIT](LICENSE).
