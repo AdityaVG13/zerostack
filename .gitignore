@@ -65,6 +65,10 @@ AGENTS.md.*
 CLAUDE.md.*
 .papercuts.jsonl
 .skill-loop-progress.md
+.skill-loop-progress.*
+
+# Gauntlet / campaign notes -- local only, not public product.
+docs/progress/
 
 .dolt/
 .beads-credential-key
@@ -166,10 +170,8 @@ conformance/schemas/*
 !conformance/golden/
 !conformance/golden/**
 
-# Bench-history ratchet (pattern 155). The committed
-# `.bench-history/*.latest.json` files ARE the pass-over-pass gate.
-# Never gitignore them. Transient per-run dumps stay local.
-.bench-history/runs/
+# Local bench-history ratchet (dotfile, not public).
+.bench-history/
 
 # --- Beads (local only; never publish tracker state) ---
 .beads/

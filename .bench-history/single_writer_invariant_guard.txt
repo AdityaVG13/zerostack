@@ -1,6 +1,0 @@
-SINGLE_WRITER_INVARIANT=true
-HUB_COMPOSITION=one-process
-ENGINES_IMPORT_EACH_OTHER=false
-GLOBAL_DAEMON=false
-SOURCE=AGENTS.md composition law
-NOTE=ZeroStack hub composition is one process. Engines do not import each other. There is no global daemon. The hub composes FSZero/GraphZero/TokenZero in-process; the session-owned sidecar is parent-death-bound. This file is the class-equivalent of concurrent_mode_default_guard.txt.

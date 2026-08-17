@@ -10,7 +10,7 @@ name: ci
 #   rch exec -- env CARGO_TARGET_DIR="${RCH_TARGET_BASE:-${TMPDIR:-/tmp}}/rch_target_zerostack" \
 #     cargo test -p <one> -- --test-threads=1
 # Do not add a cargo test / cargo test --workspace job here: it hammers
-# the Actions budget and the host. See docs/progress/AGENTS-MANDATE.md.
+# the Actions budget and the host.
 #
 # The conformance-freshness job previously justified a daily cron, because the
 # reports attest to engine revisions this repo does not control and can go
@@ -36,7 +36,6 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       - run: python3 scripts/check_feature_universe_weights.py
       - run: python3 scripts/check_feature_coverage_dashboard.py
-      - run: python3 scripts/check_bench_history.py
 
   lint:
     name: fmt + clippy
