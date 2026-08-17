@@ -68,3 +68,5 @@ Small HIT (`SNAP_FILE_NEEDLE` in a 79-byte file) did not spill. No byte savings 
 ## Residual
 
 FS Exact is still omitted. Next iteration of the bench should either certify HIT windows through TokenZero or keep the two-step (search HIT + `token.read` range) and quote the Exact window number, as v1 does.
+
+The pass-over-pass ratchet seeds this v1 file into `.bench-history/savings-bench.latest.json`. `cv_pct` is unknown on that seed (null; not invented). Check a new run with `python3 scripts/check_bench_history.py --current <report.json>`. Do not backfill estimates into v1.

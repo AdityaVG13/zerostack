@@ -161,8 +161,10 @@ conformance/schemas/*
 !conformance/golden/
 !conformance/golden/**
 
-# Local bench history
-.bench-history/
+# Bench-history ratchet (pattern 155). The committed
+# `.bench-history/*.latest.json` files ARE the pass-over-pass gate.
+# Never gitignore them. Transient per-run dumps stay local.
+.bench-history/runs/
 
 # --- Beads (local only; never publish tracker state) ---
 .beads/

@@ -22,3 +22,4 @@ zero-ref = { path = "../zero-ref" }
 
 [dev-dependencies]
 insta = { version = "1", features = ["json"] }
+zero-store = { path = "../zero-store" }

@@ -44,11 +44,28 @@ zero-ref = { path = "crates/zero-ref" }
 zero-store = { path = "crates/zero-store" }
 zero-machine-permit = { path = "crates/zerostack-machine-permit" }
 
+# Honest perf measurement profile (gauntlet keep-gate rule 3).
+# Never use `--release` for a keep claim: size-optimized release can strip
+# frames and change LTO/codegen enough to swamp the signal.
+#
+# Aligned with the gauntlet template:
+#   opt-level = 3, codegen-units = 1, debug = "line-tables-only", strip = false
+#
+# LTO fat-vs-thin waiver: this workspace already uses lto = "fat" for
+# release-perf and release-node. Switching to thin would change the binary
+# versus every prior local measurement and versus the shipped Node addon
+# profile family. Fat LTO is kept on purpose and named here. This is not a
+# silent lying profile: line tables stay, symbols stay, panic=abort stays.
+# Cargo has no per-profile key for frame pointers; honest runs must also set
+#   RUSTFLAGS="-C force-frame-pointers=yes"
 [profile.release-perf]
 inherits = "release"
+opt-level = 3
 codegen-units = 1
 incremental = false
 lto = "fat"
+debug = "line-tables-only"
+strip = false
 panic = "abort"
 
 # Native package profile: preserve release semantics while minimizing the

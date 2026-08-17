@@ -195,12 +195,14 @@ retry_condition = "Retry only when crates/zero-store has a deterministic FaultVF
 id = "F-STORE-BENCH-HISTORY"
 family = "zero-store"
 name = ".bench-history pass-over-pass ratchet"
-status = "missing"
+status = "present"
 weight = 0.021551724137
 weight_units = 5
-evidence = ["benchmarks/savings-bench-v1.json"]
-rationale = "No committed .bench-history/*.latest.json and no numeric pass-over-pass gate"
-retry_condition = "Retry only when .bench-history/<bench>.latest.json is committed and a script or CI job compares a new run against it with a numeric pass-over-pass gate."
+evidence = [
+  ".bench-history/savings-bench.latest.json",
+  "scripts/check_bench_history.py",
+]
+notes = "Seeded from benchmarks/savings-bench-v1.json (self-oracle prior-commit). cv_pct is null on the seed (unknown; not invented). Gate: primary -3%, geomean -5%, per-category -10%, p90 -15%, throughput -5%. Seed is not a keep and is not a claim the port is faster than anything."
 
 [[feature]]
 id = "F-ABI-RAW-WORKER-V2"

@@ -31,7 +31,7 @@
       "path": "tier1/feature_universe.toml",
       "reference_version": "spec-v1",
       "replay_command": "python3 scripts/check_golden_integrity.py",
-      "sha256": "204b2059875d499dd4d5e97d4b1b75407fc585e6c1b6a840f74262c5997f3a05",
+      "sha256": "488577b8c3d3079cadd3f39119b99d5ae38993ba28ff4a75659605c0d74eb79b",
       "source": "curated-corpus",
       "source_artifact_path": "conformance/contracts/supported_surface_matrix.toml",
       "tier": "Tier1Raw"
@@ -43,7 +43,7 @@
       "path": "tier2/feature_universe.canonical.json",
       "reference_version": "spec-v1",
       "replay_command": "python3 scripts/check_golden_integrity.py",
-      "sha256": "d898aac1d1991db13e9c4554b2195f9af5f057d5a6c3b3aa50ec7fb9e5e28de4",
+      "sha256": "7bd24df543338443dcd860d0771302a8281f498cc6b1158b96a8e0dd5ef91009",
       "source": "curated-corpus",
       "source_artifact_path": "conformance/contracts/supported_surface_matrix.toml",
       "tier": "Tier2Canonical"
@@ -79,7 +79,7 @@
       "path": "tier3/logical_dump.json",
       "reference_version": "spec-v1",
       "replay_command": "python3 scripts/check_golden_integrity.py",
-      "sha256": "74fe7ed42018c31d622f7e2a37b9a1fe61e71818067d388420ac3345a1545ff2",
+      "sha256": "93c020f92c9394b5f4b7a1b877749c0e2c4a98ec5f521c7833838df9096145de",
       "source": "curated-corpus",
       "source_artifact_path": "conformance/contracts/supported_surface_matrix.toml",
       "tier": "Tier3Logical"
