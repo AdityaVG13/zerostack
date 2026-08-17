@@ -264,12 +264,15 @@ evidence = ["conformance/schemas/zero-result-v1.schema.json", "conformance/fixtu
 id = "F-ORACLE-ENGINE-IDENTITY"
 family = "gauntlet-oracle"
 name = "EngineIdentity Subject≠Oracle discriminator"
-status = "missing"
+status = "present"
 weight = 0.012931034482
 weight_units = 3
-evidence = ["crates/zero-abi/src/raw_worker.rs"]
-rationale = "zero-abi raw_worker::EngineIdentity names fz/gz/tz dispatch, not a gauntlet Subject≠Oracle comparator discriminator"
-retry_condition = "Retry only when a harness crate emits EngineIdentity::{Subject,Oracle} on every comparator artifact and asserts they are distinct (Phase 3 greenfield oracle wiring)."
+evidence = [
+  "crates/zerostack-harness/src/engine_identity.rs",
+  "crates/zerostack-harness/src/oracle.rs",
+  "crates/zerostack-harness/src/oracle_preflight_doctor.rs",
+]
+notes = "Harness EngineIdentity is Subject=zerostack vs Oracle in {spec-v1,property-suite-v1,prior-commit-<sha>,round-trip,miri,clippy}. Distinct from raw_worker::EngineIdentity (fz/gz/tz)."
 
 [[feature]]
 id = "F-ORACLE-FAILURE-BUNDLE"

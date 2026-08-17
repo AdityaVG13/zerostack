@@ -68,8 +68,8 @@ sha256 = "32712333e2ebe73add922d8de2b339af22007f4ee7ee0e5f966da9a0992f4d7e"
 [[spec_sources]]
 name = "feature-universe"
 path = "conformance/contracts/supported_surface_matrix.toml"
-sha256 = "a468bf050554672210ead8a107a6304bdeae1fd58bcdd178ae987133b3a1d814"
-description = "In-repo FeatureUniverse. Phase 2 expanded to 71 rows covering all 14 hub crates."
+sha256 = "395764fb1222c35aeac2cf4e677fe7525c16827f1902670c9c7269d68b4cba7c"
+description = "In-repo FeatureUniverse. Phase 3 wired F-ORACLE-ENGINE-IDENTITY present via crates/zerostack-harness."
 
 [[spec_sources]]
 name = "cache-entry-v1"
@@ -90,7 +90,7 @@ sha256 = "3830f72b487abaa4f05a19fdb831b074686c35e6c0e76983209dea985b706973"
 # Family 2 -- [property_suite]
 # ---------------------------------------------------------------------------
 [property_suite]
-crate = "UNPINNED -- no zerostack-harness; product crates have no proptest"
+crate = "zerostack-harness -- smoke property only; no proptest suite yet"
 test_dir = "tests/"
 proptest_version = "1"   # only conformance/Cargo.toml [dev-dependencies]; crate is workspace-excluded
 proptest_regressions_dir = "UNPINNED"
@@ -174,7 +174,7 @@ external_tool_oracle = true
 [engine_identity]
 subject_identity_label = "zerostack"
 reference_identity_label = "spec-v1"
-notes = "F-ORACLE-ENGINE-IDENTITY is missing. raw_worker::EngineIdentity is fz/gz/tz dispatch, not this discriminator."
+notes = "F-ORACLE-ENGINE-IDENTITY is present in crates/zerostack-harness. raw_worker::EngineIdentity remains fz/gz/tz dispatch."
 
 [fixture_corpus]
 fixture_directory = "conformance/fixtures/"
