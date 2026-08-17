@@ -35,7 +35,7 @@ mod dag_exec;
 mod help;
 mod lower;
 mod residency;
-mod result_v6;
+mod envelope;
 mod session;
 mod verdict;
 
@@ -76,7 +76,7 @@ pub use dag_exec::{
     DagExecErrorV1, DagExecutionOutcomeV1, DagExecutorV1, DagNodeOutcomeV1, ScheduleModeV1,
     StreamErrorV1, StreamSinkV1,
 };
-pub use result_v6::{
+pub use envelope::{
     SESSION_V6_ENVELOPE_LEGACY_PROTOCOL, SessionEnvelopeContextV1, DecisionViewContextV1,
     legacy_envelope_value, legacy_kind_code,
 };

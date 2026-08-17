@@ -1,7 +1,7 @@
 //! Zero Edit Protocol v1: the compact, ref-based edit contract shared by
 //! FSZero, GraphZero and TokenZero surfaces.
 //!
-//! Normative prose: `conformance/contracts/zero-edit-protocol-v1.md`.
+//! Normative prose: `conformance/contracts/zero-edit-protocol.md`.
 //!
 //! Schema budget: the protocol is exposed as ONE generic `EDIT` operation whose
 //! argument is a list of [`EditOp`] values. Verbs live in the payload (`v`
@@ -9,7 +9,7 @@
 //!
 //! Ref grammar is NOT redefined here. It is the existing one:
 //! * FSZero snap-to-file target refs `<path>#L<start>-L<end>` (1-based, inclusive),
-//! * ZeroRef v1 portable blob refs `fz://blob/<sha256>[#L..|#B..]`,
+//! * ZeroRef portable blob refs `fz://blob/<sha256>[#L..|#B..]`,
 //! * GraphZero symbol refs `gz://node/<symbol>` (and `gz://blob/...` evidence).
 
 use serde::{Deserialize, Serialize};
@@ -22,7 +22,7 @@ pub const EDIT_PROTOCOL_VERSION: &str = "zep/1";
 pub enum RefKind {
     /// `<path>#L<start>-L<end>` -- FSZero snap-to-file target grammar.
     FileSpan,
-    /// `fz://blob/<sha256>[#L..|#B..]` -- ZeroRef v1 portable blob ref.
+    /// `fz://blob/<sha256>[#L..|#B..]` -- ZeroRef portable blob ref.
     BlobSpan,
     /// `gz://node/<symbol>` -- GraphZero symbol ref.
     Symbol,

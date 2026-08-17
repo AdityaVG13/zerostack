@@ -46,7 +46,7 @@ const [files, graph] = await Promise.all([
 return { files: files.content, graph: graph.content };
 ```
 
-Every public `zero.*` call returns `zero-result/v1`: `ack` plus `content`.
+Every public `zero.*` call returns `zero-result`: `ack` plus `content`.
 
 - `content.kind === "inline"` -- `content.value` is the **domain payload** (search hits, file bytes, shell `visible`, …), not the transport `{metadata, value}` wrapper.
 - `content.kind === "ref"` -- the payload spilled; expand `content.ref` (`tz://blob/…`). Oversized plan results use this same shape, never a separate spill schema.
@@ -112,8 +112,8 @@ Foundation crates (no engine source):
 
 | Crate | Role |
 | --- | --- |
-| `zero-abi` | JSON contract, schema normalize, operation digest, raw-worker v2 |
-| `zero-ref` | ZeroRef v1 parse, format, fragment select |
+| `zero-abi` | JSON contract, schema normalize, operation digest, raw-worker |
+| `zero-ref` | ZeroRef parse, format, fragment select |
 | `zero-store` | Content-addressed blob layout and publish protocol |
 | `zero-process` | Process identity, owner-death, child-tree lifecycle |
 | `zero-codemode` | Restricted in-process CodeMode host |

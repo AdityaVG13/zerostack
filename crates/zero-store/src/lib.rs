@@ -1,6 +1,6 @@
 #![forbid(unsafe_code)]
 
-//! Canonical ZeroRef v1 content-addressed store layout, publish protocol,
+//! Canonical ZeroRef content-addressed store layout, publish protocol,
 //! store-root resolution, and collection coordination.
 //!
 //! Layout: <store_root>/blobs/sha256/<first-two-hex>/<64-lowercase-hex>,

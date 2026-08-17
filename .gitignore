@@ -67,8 +67,24 @@ CLAUDE.md.*
 .skill-loop-progress.md
 .skill-loop-progress.*
 
-# Gauntlet / campaign notes -- local only, not public product.
+# Gauntlet / campaign -- local only. A clone does not need these.
 docs/progress/
+docs/spec/
+docs/CHARTER.md
+conformance/golden/
+conformance/contracts/spec_version_contract.toml
+conformance/contracts/feature_coverage_dashboard.json
+conformance/contracts/invariant_catalog.toml
+fuzz/
+crates/zerostack-harness/
+scripts/bench/
+scripts/bless-golden.sh
+scripts/capture_golden.py
+scripts/check_bench_history.py
+scripts/check_feature_coverage_dashboard.py
+scripts/check_golden_integrity.py
+scripts/check_ledger_retry.py
+scripts/run_miri_narrow.sh
 
 .dolt/
 .beads-credential-key
@@ -147,28 +163,27 @@ conformance/*
 !conformance/authority/**
 !conformance/contracts/
 !conformance/contracts/**
-!conformance/engine-topology-v1.json
+!conformance/engine-topology.json
 !conformance/models/
 !conformance/models/**
 !conformance/schemas/
 conformance/schemas/*
-!conformance/schemas/engine-topology-v1.schema.json
-!conformance/schemas/reasoning-contract-v1.schema.json
-!conformance/schemas/dominance-complete-recovery-v1.schema.json
-!conformance/schemas/exact-deoptimization-resume-v1.schema.json
-!conformance/schemas/exact-deoptimization-execution-v1.schema.json
-!conformance/schemas/exact-deoptimization-plan-v1.schema.json
-!conformance/schemas/q99-causal-cache-component-v1.schema.json
-!conformance/schemas/q99-claim-v1.schema.json
-!conformance/schemas/robust-snap-intake-v1.schema.json
-!conformance/schemas/causal-artifact-intake-v1.schema.json
-!conformance/schemas/reinvestment-plan-v1.schema.json
-!conformance/schemas/reinvestment-selection-v1.schema.json
-!conformance/schemas/zerobench-r-run-v1.schema.json
-!conformance/schemas/zerobench-r-report-v1.schema.json
-!conformance/schemas/two-phase-gate-v1.schema.json
-!conformance/golden/
-!conformance/golden/**
+!conformance/schemas/engine-topology.schema.json
+!conformance/schemas/reasoning-contract.schema.json
+!conformance/schemas/dominance-complete-recovery.schema.json
+!conformance/schemas/exact-deoptimization-resume.schema.json
+!conformance/schemas/exact-deoptimization-execution.schema.json
+!conformance/schemas/exact-deoptimization-plan.schema.json
+!conformance/schemas/q99-causal-cache-component.schema.json
+!conformance/schemas/q99-claim.schema.json
+!conformance/schemas/robust-snap-intake.schema.json
+!conformance/schemas/causal-artifact-intake.schema.json
+!conformance/schemas/reinvestment-plan.schema.json
+!conformance/schemas/reinvestment-selection.schema.json
+!conformance/schemas/zerobench-r-run.schema.json
+!conformance/schemas/zerobench-r-report.schema.json
+!conformance/schemas/two-phase-gate.schema.json
+!conformance/schemas/zero-result.schema.json
 
 # Local bench-history ratchet (dotfile, not public).
 .bench-history/

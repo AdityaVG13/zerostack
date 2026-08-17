@@ -10,5 +10,5 @@ Version string: `zep/1`.
 Ref grammar is not redefined here:
 
 - FSZero snap-to-file: `<path>#L<start>-L<end>` (1-based, inclusive)
-- ZeroRef v1: `fz://blob/<sha256>[#L..|#B..]`
+- ZeroRef: `fz://blob/<sha256>[#L..|#B..]`
 - GraphZero: `gz://node/<symbol>` and `gz://blob/...` evidence

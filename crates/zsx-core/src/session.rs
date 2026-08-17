@@ -258,7 +258,7 @@ impl ZsxSettledExecution {
 /// [`zero_abi::ZeroExecuteResultV6`] envelope. `envelope` is `None` only
 /// when no V6 kind is provable at the session boundary -- plain success
 /// without a safety verdict and content roots, or a transport/lifecycle
-/// failure -- per the honesty law in [`crate::result_v6`]. `policy_report`
+/// failure -- per the honesty law in [`crate::envelope`]. `policy_report`
 /// is the honest usage report of the contingent policy attached to this
 /// execution (V6-R3): `None` when no policy rode in.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -525,7 +525,20 @@ impl ZsxExecutor {
         );
         let result = outcome.result;
         let host_metrics = outcome.metrics;
-        if result.is_err() {                signal.cancel();                if let Err(idle_error) = self                    .connector                    .wait_for_dispatch_idle(Duration::from_secs(15))                {                    self.connector.clear_request_cancellation();                    self.connector.clear_execution_context();                    self.connector.clear_approvals();                    clear_active();                    let _ = self.connector.finish_residency_report();                    return Err(idle_error);                }            }
+        if result.is_err() {
+            signal.cancel();
+            if let Err(idle_error) = self
+                .connector
+                .wait_for_dispatch_idle(Duration::from_secs(15))
+            {
+                self.connector.clear_request_cancellation();
+                self.connector.clear_execution_context();
+                self.connector.clear_approvals();
+                clear_active();
+                let _ = self.connector.finish_residency_report();
+                return Err(idle_error);
+            }
+        }
         let dispatch = self.connector.dispatch_metrics();
         let engine_wall_ns_sum = dispatch
             .wall_ns
@@ -1120,7 +1133,7 @@ impl ZsxSession {
         request_id: u64,
         source: impl Into<String>,
         timeout: Duration,
-        ledger: crate::result_v6::SessionEnvelopeContextV1,
+        ledger: crate::envelope::SessionEnvelopeContextV1,
     ) -> Result<ZsxExecutionResultV6, ZsxSessionError> {
         self.execute_with_approvals_v6(generation, request_id, source, timeout, Vec::new(), ledger)
     }
@@ -1136,7 +1149,7 @@ impl ZsxSession {
         source: impl Into<String>,
         timeout: Duration,
         approval_grants: Vec<SessionApprovalGrantV1>,
-        ledger: crate::result_v6::SessionEnvelopeContextV1,
+        ledger: crate::envelope::SessionEnvelopeContextV1,
     ) -> Result<ZsxExecutionResultV6, ZsxSessionError> {
         ledger.validate().map_err(|detail| {
             ZsxSessionError::new(
@@ -1156,17 +1169,14 @@ impl ZsxSession {
             None,
             None,
         ) {
-            Ok(settled) => {
-                self.project_v6(generation, request_id, settled, project_root, &ledger)
-            }
+            Ok(settled) => self.project_v6(generation, request_id, settled, project_root, &ledger),
             Err(error)
                 if matches!(
                     error.code,
-                    ZsxSessionFailureCode::InvalidApproval
-                        | ZsxSessionFailureCode::ApprovalReplay
+                    ZsxSessionFailureCode::InvalidApproval | ZsxSessionFailureCode::ApprovalReplay
                 ) =>
             {
-                let envelope = crate::result_v6::failed_no_authority(Some(&project_root), &ledger)
+                let envelope = crate::envelope::failed_no_authority(Some(&project_root), &ledger)
                     .map_err(|build| {
                         ZsxSessionError::new(
                             ZsxSessionFailureCode::Internal,
@@ -1207,7 +1217,7 @@ impl ZsxSession {
         source: impl Into<String>,
         policy: &zero_abi::ContingentPolicyV1,
         timeout: Duration,
-        ledger: crate::result_v6::SessionEnvelopeContextV1,
+        ledger: crate::envelope::SessionEnvelopeContextV1,
     ) -> Result<ZsxExecutionResultV6, ZsxSessionError> {
         self.execute_with_approvals_and_policy_v6(
             generation,
@@ -1237,7 +1247,7 @@ impl ZsxSession {
         policy: &zero_abi::ContingentPolicyV1,
         timeout: Duration,
         approval_grants: Vec<SessionApprovalGrantV1>,
-        ledger: crate::result_v6::SessionEnvelopeContextV1,
+        ledger: crate::envelope::SessionEnvelopeContextV1,
     ) -> Result<ZsxExecutionResultV6, ZsxSessionError> {
         ledger.validate().map_err(|detail| {
             ZsxSessionError::new(
@@ -1265,17 +1275,14 @@ impl ZsxSession {
             None,
             Some(policy.clone()),
         ) {
-            Ok(settled) => {
-                self.project_v6(generation, request_id, settled, project_root, &ledger)
-            }
+            Ok(settled) => self.project_v6(generation, request_id, settled, project_root, &ledger),
             Err(error)
                 if matches!(
                     error.code,
-                    ZsxSessionFailureCode::InvalidApproval
-                        | ZsxSessionFailureCode::ApprovalReplay
+                    ZsxSessionFailureCode::InvalidApproval | ZsxSessionFailureCode::ApprovalReplay
                 ) =>
             {
-                let envelope = crate::result_v6::failed_no_authority(Some(&project_root), &ledger)
+                let envelope = crate::envelope::failed_no_authority(Some(&project_root), &ledger)
                     .map_err(|build| {
                         ZsxSessionError::new(
                             ZsxSessionFailureCode::Internal,
@@ -1309,23 +1316,25 @@ impl ZsxSession {
         request_id: u64,
         settled: ZsxSettledExecution,
         project_root: String,
-        ledger: &crate::result_v6::SessionEnvelopeContextV1,
+        ledger: &crate::envelope::SessionEnvelopeContextV1,
     ) -> Result<ZsxExecutionResultV6, ZsxSessionError> {
         let legacy_error = settled.legacy_error(generation, request_id);
         let envelope = match &settled.backend_error {
             None => None,
             Some(host_error) => {
                 let built = if settled.request_cancelled {
-                    crate::result_v6::cancelled(Some(&project_root), ledger)
+                    crate::envelope::cancelled(Some(&project_root), ledger)
                 } else {
                     match host_error {
-                        HostError::DecisionRequired(payload) => crate::result_v6::decision_required(
-                            payload,
-                            generation,
-                            request_id,
-                            Some(&project_root),
-                            ledger,
-                        ),
+                        HostError::DecisionRequired(payload) => {
+                            crate::envelope::decision_required(
+                                payload,
+                                generation,
+                                request_id,
+                                Some(&project_root),
+                                ledger,
+                            )
+                        }
                         // Deadline, method/surface, verdict-rejection, and
                         // connector failures have no provable V6 kind at the
                         // session boundary: they remain legacy errors with no
@@ -1409,8 +1418,7 @@ impl ZsxSession {
         contingent_policy: Option<zero_abi::ContingentPolicyV1>,
     ) -> Result<ZsxSettledExecution, ZsxSessionError> {
         let (reply_tx, reply_rx) = mpsc::sync_channel(1);
-        let approval_ids =
-            self.admit_execution(generation, request_id, &approval_grants)?;
+        let approval_ids = self.admit_execution(generation, request_id, &approval_grants)?;
         self.send_or_release_execute(
             generation,
             request_id,
@@ -1508,8 +1516,9 @@ impl ZsxSession {
         let legacy = settled.legacy_error(generation, request_id);
         match (settled.result, settled.verdict, settled.backend_error) {
             (Some(result), verdict, None) => Ok((result, verdict)),
-            (None, None, Some(_)) => Err(legacy
-                .expect("a backend failure always projects a legacy error")),
+            (None, None, Some(_)) => {
+                Err(legacy.expect("a backend failure always projects a legacy error"))
+            }
             _ => unreachable!("a settled execution has exactly one of result or backend error"),
         }
     }
@@ -1601,7 +1610,8 @@ impl ZsxSession {
                 ),
             ));
         }
-        let expires_at_unix_ms = now_ms().saturating_add(u64::try_from(ttl.as_millis()).unwrap_or(u64::MAX));
+        let expires_at_unix_ms =
+            now_ms().saturating_add(u64::try_from(ttl.as_millis()).unwrap_or(u64::MAX));
         let request = crate::continuation::ContinuationPersistRequestV1 {
             generation,
             request_id,
@@ -1645,7 +1655,7 @@ impl ZsxSession {
         decision: &str,
         timeout: Duration,
         approval_grants: Vec<SessionApprovalGrantV1>,
-        ledger: crate::result_v6::SessionEnvelopeContextV1,
+        ledger: crate::envelope::SessionEnvelopeContextV1,
     ) -> Result<ZsxExecutionResultV6, ZsxSessionError> {
         ledger.validate().map_err(|detail| {
             ZsxSessionError::new(
@@ -1679,14 +1689,16 @@ impl ZsxSession {
                     "continuation registry is poisoned",
                 )
             })?;
-            registry.consume(handle, decision, &project_root, generation, now_ms()).map_err(|error| {
-                ZsxSessionError::new(
-                    ZsxSessionFailureCode::ContinuationRefused,
-                    generation,
-                    Some(request_id),
-                    error.to_string(),
-                )
-            })?
+            registry
+                .consume(handle, decision, &project_root, generation, now_ms())
+                .map_err(|error| {
+                    ZsxSessionError::new(
+                        ZsxSessionFailureCode::ContinuationRefused,
+                        generation,
+                        Some(request_id),
+                        error.to_string(),
+                    )
+                })?
         };
         let settled = self.execute_settled(
             generation,
@@ -1896,9 +1908,10 @@ impl ZsxSession {
     /// True while a shutdown was sent but the executor has not joined.
     /// Cache hits must not treat this as a live session (zerostack-gswf).
     pub fn shutdown_in_progress(&self) -> bool {
-        self.state.lock().ok().is_some_and(|state| {
-            state.shutdown_sent && !state.worker_stopped
-        })
+        self.state
+            .lock()
+            .ok()
+            .is_some_and(|state| state.shutdown_sent && !state.worker_stopped)
     }
 
     pub fn shutdown(&self) -> Result<u64, ZsxSessionError> {
@@ -2149,10 +2162,7 @@ impl ZsxSession {
         }
     }
 
-    fn begin_replacement(
-        &self,
-        expected_generation: u64,
-    ) -> Result<u64, ZsxSessionError> {
+    fn begin_replacement(&self, expected_generation: u64) -> Result<u64, ZsxSessionError> {
         let mut state = self.lock_state(None)?;
         if expected_generation != state.generation {
             return Err(ZsxSessionError::new(
@@ -2300,10 +2310,7 @@ pub(crate) struct ParkedJoin {
     pub done: mpsc::Receiver<bool>,
 }
 
-pub(crate) fn join_thread_within(
-    handle: JoinHandle<()>,
-    timeout: Duration,
-) -> Result<(), String> {
+pub(crate) fn join_thread_within(handle: JoinHandle<()>, timeout: Duration) -> Result<(), String> {
     join_thread_within_parked(handle, timeout).map_err(|parked| parked.detail)
 }
 
@@ -2337,9 +2344,9 @@ pub(crate) fn join_thread_within_parked(
                 Ok(()) => {
                     return Ok(());
                 }
-                Err(_) => format!(
-                    "watcher spawn failed ({error}); worker panicked during inline join"
-                ),
+                Err(_) => {
+                    format!("watcher spawn failed ({error}); worker panicked during inline join")
+                }
             },
             None => format!("watcher spawn failed ({error}); handle already taken"),
         };

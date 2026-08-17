@@ -1,4 +1,4 @@
-//! Canonical ZeroStack private raw-worker v2 wire contract.
+//! Canonical ZeroStack private raw-worker wire contract.
 //!
 //! Aggregate CodeMode owns JavaScript, scheduling, policy orchestration, refs,
 //! journaling, and telemetry. A raw worker receives canonical typed operations

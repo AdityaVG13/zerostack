@@ -16,7 +16,6 @@ members = [
     "crates/zsx",
     "crates/zsx-core",
     "crates/zsx-node",
-    "crates/zerostack-harness",
 ]
 
 [workspace.package]

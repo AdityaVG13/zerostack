@@ -1,4 +1,4 @@
-# spec hashes (gauntlet p11i1 dangling-contract)
-2aa73487fcc858be8a591ed258fec087f6001fbd7fea34ade6bca613f49002b0  cache-entry-v1.md
-1ec0964e1d57932bf1d9fdc49802e1ac170ad908ae07457dac5a2044c3013611  fresh-work-vector-v1.md
-3830f72b487abaa4f05a19fdb831b074686c35e6c0e76983209dea985b706973  zero-edit-protocol-v1.md
+# spec hashes
+2aa73487fcc858be8a591ed258fec087f6001fbd7fea34ade6bca613f49002b0  cache-entry.md
+1ec0964e1d57932bf1d9fdc49802e1ac170ad908ae07457dac5a2044c3013611  fresh-work-vector.md
+3830f72b487abaa4f05a19fdb831b074686c35e6c0e76983209dea985b706973  zero-edit-protocol.md

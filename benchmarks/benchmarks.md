@@ -2,9 +2,9 @@
 
 Local development measurements. Do not ratchet a number from a single run.
 
-## Savings (v1)
+## Savings
 
-Live `zsx mcp` against a 36,645-byte unique file. Full table: [savings-bench-v1.md](savings-bench-v1.md).
+Live `zsx mcp` against a 36,645-byte unique file. Full table: [savings-bench.md](savings-bench.md).
 
 Three layers. Do not mix them.
 

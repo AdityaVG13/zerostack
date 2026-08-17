@@ -1,4 +1,4 @@
-//! Canonical ZeroRef v1 content-addressed store.
+//! Canonical ZeroRef content-addressed store.
 //!
 //! Derived from the GraphZero shared_cas implementation (the strictest of
 //! the three engines), generalized behind engine-neutral errors.
@@ -105,7 +105,7 @@ pub struct PutOutcome {
     pub created: bool,
 }
 
-/// Engine-neutral CAS error aligned with the ZeroRef v1 error classes.
+/// Engine-neutral CAS error aligned with the ZeroRef error classes.
 #[derive(Debug)]
 pub enum CasError {
     /// Object not present in this store.
@@ -122,7 +122,7 @@ pub enum CasError {
 }
 
 impl CasError {
-    /// Stable class string aligned with ZeroRef v1 error classes.
+    /// Stable class string aligned with ZeroRef error classes.
     pub fn class(&self) -> &'static str {
         match self {
             Self::NotFound => "missing",

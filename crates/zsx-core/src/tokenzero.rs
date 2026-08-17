@@ -70,7 +70,7 @@ use zero_abi::{
     EngineStageTimelineV1, RefOwnership, RevertMetadata, TOKEN_JOB_OPERATION_V1, WorkerResult,
     WorkerResultMetadata, WorkerTokenAccountingV1, WorkerTokenCountKind,
 };
-use zero_ref::{ZeroFragment, ZeroRefV1, ZeroScheme};
+use zero_ref::{ZeroFragment, ZeroRef, ZeroScheme};
 use zero_store::{Engine as StoreEngine, ResolvedStore, SharedCas};
 
 use crate::adapter::{
@@ -180,7 +180,7 @@ impl TokenZeroAdapter {
 
     /// Dispatch one validated call. Embedded raw-worker seams (`job` polls
     /// and background `shell`) run through `execute_embedded_value` first,
-    /// exactly like the raw-worker v2 dispatcher; everything else falls back
+    /// exactly like the raw-worker dispatcher; everything else falls back
     /// to the canonical typed dispatcher. Returns the raw domain value plus
     /// the domain operation's declared ref list on success, or a typed
     /// registry error. The ref list is the canonical `DomainResult.refs` the
@@ -339,7 +339,7 @@ impl TokenZeroAdapter {
                 kept.push(reference);
                 continue;
             }
-            let parsed = match ZeroRefV1::parse(&reference) {
+            let parsed = match ZeroRef::parse(&reference) {
                 Ok(parsed) => parsed,
                 Err(_error) if drop_unresolvable => continue,
                 Err(error) => {
@@ -501,8 +501,14 @@ impl DomainAdapter for TokenZeroAdapter {
                     || msg.contains("operation cancelled")
                     || msg.contains("command cancelled");
                 if is_cancelled {
-                    Err(DomainError::new(DomainErrorKind::Cancelled, "token adapter cancelled during dispatch".to_string()).with_op(request.op.clone()))
-                } else { Err(error) }
+                    Err(DomainError::new(
+                        DomainErrorKind::Cancelled,
+                        "token adapter cancelled during dispatch".to_string(),
+                    )
+                    .with_op(request.op.clone()))
+                } else {
+                    Err(error)
+                }
             }
             other => other,
         };
@@ -727,7 +733,7 @@ fn output_too_large_range_hint(
         .saturating_sub(overhead)
         .saturating_sub(512)
         .max(1024);
-    let (base, start) = match ZeroRefV1::parse(reference) {
+    let (base, start) = match ZeroRef::parse(reference) {
         Ok(parsed) => {
             let base = format!("{}://blob/{}", parsed.scheme.as_str(), parsed.hash);
             let start = match parsed.fragment {
@@ -782,55 +788,12 @@ fn bind_terminal_exact_expansion(request: &CallRequest, value: &mut Value) {
 }
 
 #[cfg(test)]
-#[path = "../../../tests/unit/zsx-core/tokenzero_post_dispatch_cancel_tests.rs"]
-mod post_dispatch_cancel_tests;
-#[cfg(test)]
 #[path = "../../../tests/unit/zsx-core/tokenzero_output_too_large_hint_tests.rs"]
 mod output_too_large_hint_tests;
+#[cfg(test)]
+#[path = "../../../tests/unit/zsx-core/tokenzero_post_dispatch_cancel_tests.rs"]
+mod post_dispatch_cancel_tests;
 
 #[cfg(test)]
-mod heavy_cancel_regression_tests {
-    use super::*;
-    use crate::adapter::{AdapterCall, AdapterResponse};
-    use std::sync::Arc;
-    use std::time::Duration;
-    use zero_abi::{EngineIdentity, WorkerTrace};
-    use crate::{AdapterBinding, DomainAdapter, ZsxSession};
-
-    struct StubAdapter { engine: EngineIdentity, scheme: &'static str }
-    impl DomainAdapter for StubAdapter {
-        fn engine(&self) -> EngineIdentity { self.engine }
-        fn binding(&self) -> AdapterBinding {
-            AdapterBinding::new(self.engine, "test", "test.v1", "a".repeat(64), "b".repeat(64), self.scheme).expect("stub")
-        }
-        fn call(&self, _call: AdapterCall<'_>) -> Result<AdapterResponse, crate::adapter::AdapterError> {
-            Err(crate::adapter::AdapterError::new("internal", "stub unused", false, None))
-        }
-    }
-    fn empty_trace() -> WorkerTrace { WorkerTrace { runtime_id: String::new(), cell_id: String::new(), request_id: String::new(), trace_id: String::new(), parent_span_id: None, worker_revision: String::new(), contract_digest: String::new() } }
-    #[test]
-    fn heavy_shell_cancel_kills_child_group_and_releases_lease() {
-        let root = std::env::temp_dir().join(format!("zsx-heavy-inline-{}-{}", std::process::id(), std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()));
-        std::fs::create_dir_all(&root).expect("temp root");
-        let session = ZsxSession::builder(root.clone())            .with_session_id("test")            .fszero(Arc::new(StubAdapter { engine: EngineIdentity::FsZero, scheme: "fz://" }))
-            .graphzero(Arc::new(StubAdapter { engine: EngineIdentity::GraphZero, scheme: "gz://" }))
-            .tokenzero(Arc::new(TokenZeroAdapter::new(&root, "test").expect("tokenzero")))
-            .build().expect("session");
-        let generation = session.generation().expect("generation");
-        let request_id = 1u64;
-        let sess = Arc::new(session);
-        let sess2 = Arc::clone(&sess);
-        let handle = std::thread::spawn(move || sess2.execute(generation, request_id, r#"await zero.token.shell("sleep 10")"#, Duration::from_secs(30)));
-        std::thread::sleep(Duration::from_millis(900));
-        let cancelled = sess.cancellation().cancel_request(generation, request_id);
-        assert!(cancelled, "cancel_request must actively cancel");
-        let result = handle.join().expect("join");
-        let err = result.expect_err("heavy cancel must error");
-        assert_eq!(err.code, crate::session::ZsxSessionFailureCode::Cancelled, "dispatch must return Cancelled, got {err:?}");
-        let next_id = 2u64;
-        let next = sess.execute(generation, next_id, r#"await zero.token.shell("echo heavy-ok")"#, Duration::from_secs(10));
-        assert!(next.is_ok(), "next Heavy must acquire permit after cancel, got {next:?}");
-        let _ = std::fs::remove_dir_all(&root);
-    }
-}
-
+#[path = "../../../tests/unit/zsx-core/heavy_cancel_lease_regression.rs"]
+mod heavy_cancel_regression_tests;

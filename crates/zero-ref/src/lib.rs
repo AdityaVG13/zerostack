@@ -1,10 +1,10 @@
 #![forbid(unsafe_code)]
 
-//! ZeroRef v1: the portable cross-engine blob ref subset.
+//! ZeroRef: the portable cross-engine blob ref subset.
 //!
-//! Canonical contract: GraphZero docs/adr/002-zeroref-v1.md, shared verbatim
+//! Canonical contract: GraphZero docs/adr/002-zeroref.md, shared verbatim
 //! across TokenZero, FSZero, and GraphZero. Golden vectors live in
-//! fixtures/zeroref_v1_vectors.json and are asserted by this crate's tests.
+//! fixtures/zeroref_vectors.json and are asserted by this crate's tests.
 //!
 //! Interoperability scope is blob refs only:
 //! (fz|gz|tz)://blob/<sha256>              whole blob
@@ -22,11 +22,11 @@
 //! g:/q: forms, tz session keys) are wider and stay engine-owned; this crate
 //! is the strict v1 layer only.
 //!
-//! Parse refs and use [ZeroRefV1::verify_and_select] for normal access:
+//! Parse refs and use [ZeroRef::verify_and_select] for normal access:
 //!
-//!     use zero_ref::{content_hash_hex, ZeroRefV1};
+//!     use zero_ref::{content_hash_hex, ZeroRef};
 //!     let bytes = b"hello";
-//!     let reference = ZeroRefV1::parse(&format!(
+//!     let reference = ZeroRef::parse(&format!(
 //!         "fz://blob/{}#B0-5", content_hash_hex(bytes)
 //!     ))?;
 //!     assert_eq!(reference.verify_and_select(bytes)?, bytes);
@@ -244,14 +244,18 @@ pub enum ZeroFragment {
     },
 }
 
-/// A parsed canonical ZeroRef v1 portable blob ref.
+/// A parsed canonical ZeroRef portable blob ref.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct ZeroRefV1 {
+pub struct ZeroRef {
     pub scheme: ZeroScheme,
     /// Full lowercase 64-hex SHA-256 of the complete unfragmented bytes.
     pub hash: String,
     pub fragment: ZeroFragment,
 }
+
+/// Prefer [`ZeroRef`]. Kept so in-flight adapters still compile.
+#[doc(hidden)]
+pub type ZeroRefV1 = ZeroRef;
 
 fn malformed(message: impl Into<String>) -> ZeroRefError {
     ZeroRefError::new(ZeroRefErrorClass::Malformed, message)
@@ -414,7 +418,7 @@ fn parse_u64_strict(s: &str, input: &str) -> Result<u64, ZeroRefError> {
         .map_err(|_| malformed(format!("number '{s}' overflows u64 in ref: {input}")))
 }
 
-impl ZeroRefV1 {
+impl ZeroRef {
     /// Parse a portable v1 blob ref. Engine-owned forms (non-blob kinds,
     /// compact g:/q: refs) fail as [ZeroRefErrorClass::Unsupported];
     /// anything outside the grammar fails as [ZeroRefErrorClass::Malformed].
@@ -465,7 +469,7 @@ impl ZeroRefV1 {
         })
     }
 
-    /// Apply the fragment using the canonical v1 bounds policy without
+    /// Apply the fragment using the canonical bounds policy without
     /// verifying the ref digest.
     ///
     /// This is safe only after the bytes have been independently authenticated.
@@ -568,7 +572,7 @@ pub enum LineEndPolicy {
     ClampEnd,
 }
 
-/// Canonical ZeroRef v1 line-end policy. Byte bounds and line starts remain strict.
+/// Canonical ZeroRef line-end policy. Byte bounds and line starts remain strict.
 pub const CANONICAL_LINE_END_POLICY: LineEndPolicy = LineEndPolicy::ClampEnd;
 
 /// Shared canonical fragment selector: byte bounds and line starts are strict;
@@ -703,7 +707,7 @@ fn line_span_bytes<'a>(bytes: &'a [u8], line_starts: &[usize], start: u64, end: 
     &bytes[start_byte..end_byte]
 }
 
-impl fmt::Display for ZeroRefV1 {
+impl fmt::Display for ZeroRef {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}://blob/{}", self.scheme.as_str(), self.hash)?;
         match self.fragment {
@@ -714,7 +718,7 @@ impl fmt::Display for ZeroRefV1 {
     }
 }
 
-impl FromStr for ZeroRefV1 {
+impl FromStr for ZeroRef {
     type Err = ZeroRefError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
@@ -722,13 +726,13 @@ impl FromStr for ZeroRefV1 {
     }
 }
 
-impl Serialize for ZeroRefV1 {
+impl Serialize for ZeroRef {
     fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
         serializer.serialize_str(&self.to_string())
     }
 }
 
-impl<'de> Deserialize<'de> for ZeroRefV1 {
+impl<'de> Deserialize<'de> for ZeroRef {
     fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         let raw = String::deserialize(deserializer)?;
         Self::parse(&raw).map_err(serde::de::Error::custom)

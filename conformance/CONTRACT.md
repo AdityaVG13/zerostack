@@ -38,7 +38,7 @@ Engine binaries MUST NOT be registered as MCP servers next to `zsx mcp`.
 
 ## 3. Result shape
 
-Every public `zero.*` call returns `zero-result/v1`:
+Every public `zero.*` call returns `zero-result`:
 
 - `ack` -- short status
 - `content` -- either inline value or a typed ref
@@ -79,7 +79,7 @@ payload stays attached. A late domain Err MUST stay that Err.
 
 ## 7. What this folder holds
 
-- `engine-topology-v1.json` -- crate roles and dependency direction
+- `engine-topology.json` -- crate roles and dependency direction
 - `contracts/` -- cache entry, fresh-work vector, edit protocol
 - `schemas/` -- JSON Schema for the wire types above
 - `models/` -- example instances

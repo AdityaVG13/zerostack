@@ -9,11 +9,11 @@ use std::num::NonZeroU64;
 
 use serde::{Deserialize, Serialize};
 
-/// The shared capability schema version.
+/// The shared capability schema.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum CapabilitySchema {
-    #[serde(rename = "zeroref-capability/v1")]
-    ZeroRefV1,
+    #[serde(rename = "zeroref-capability")]
+    ZeroRef,
 }
 
 /// Hash algorithms observed in peer descriptors.
@@ -77,7 +77,7 @@ pub enum FragmentBehavior {
     ClampEnd,
 }
 
-/// Independent fragment behavior for each ZeroRef v1 dimension.
+/// Independent fragment behavior for each ZeroRef dimension.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct FragmentPolicy {
@@ -87,7 +87,7 @@ pub struct FragmentPolicy {
 }
 
 impl FragmentPolicy {
-    pub const ZEROREF_V1: Self = Self {
+    pub const CANONICAL: Self = Self {
         byte: FragmentBehavior::Strict,
         line_start: FragmentBehavior::Strict,
         line_end: FragmentBehavior::ClampEnd,
@@ -105,19 +105,19 @@ pub struct SharedCapability {
 }
 
 impl SharedCapability {
-    pub const fn zeroref_v1(
+    pub const fn zeroref(
         algorithm: HashAlgorithm,
         layout: CasLayout,
         layout_version: LayoutVersion,
     ) -> Self {
         Self {
-            schema: CapabilitySchema::ZeroRefV1,
+            schema: CapabilitySchema::ZeroRef,
             hash: HashCapability { algorithm },
             shared_cas: SharedCasCapability {
                 layout,
                 layout_version,
             },
-            fragments: FragmentPolicy::ZEROREF_V1,
+            fragments: FragmentPolicy::CANONICAL,
         }
     }
 

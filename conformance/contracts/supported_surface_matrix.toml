@@ -28,7 +28,7 @@ declared_feature_ids = [
   "F-STORE-ROOT-RESOLVE",
   "F-STORE-CRASH-ORACLE",
   "F-STORE-BENCH-HISTORY",
-  "F-ABI-RAW-WORKER-V2",
+  "F-ABI-RAW-WORKER",
   "F-ABI-SCHEMA-DIGEST",
   "F-ABI-PROPTEST-ROUNDTRIP",
   "F-PERMIT-CORE",
@@ -63,7 +63,7 @@ declared_feature_ids = [
   "F-ZSX-LOWER",
   "F-ZSX-CONTINUATION",
   "F-ZSX-DAG-EXEC",
-  "F-ZSX-RESULT-V6",
+  "F-ZSX-RESULT",
   "F-ZSX-Q99-REPORT",
   "F-NODE-NATIVE-SESSION",
   "F-MCP-TRANSPORT",
@@ -72,7 +72,7 @@ declared_feature_ids = [
   "F-CODEMODE-EDIT-PROTOCOL",
   "F-CODEMODE-CANCEL",
   "F-ABI-ZERO-EXECUTE",
-  "F-ABI-RESULT-V1",
+  "F-ABI-RESULT",
   "F-ABI-CWIR",
   "F-ABI-CACHE-ENTRY",
   "F-CERT-VERIFIED-EVIDENCE",
@@ -99,7 +99,7 @@ declared_feature_ids = [
 [[feature]]
 id = "F-REF-PARSE"
 family = "zero-ref"
-name = "ZeroRefV1 parse + Display round-trip"
+name = "ZeroRef parse + Display round-trip"
 status = "present"
 weight = 0.032786885246
 weight_units = 8
@@ -192,34 +192,26 @@ evidence = ["crates/zero-store/src/store_root.rs"]
 id = "F-STORE-CRASH-ORACLE"
 family = "zero-store"
 name = "Crash-boundary / mid-write kill oracle suite"
-status = "present"
+status = "missing"
 weight = 0.024590163934
 weight_units = 6
-evidence = [
-  "crates/zero-store/src/durable_journal.rs",
-  "crates/zerostack-harness/src/crash_boundary.rs",
-  "crates/zerostack-harness/src/fault_vfs.rs",
-  "crates/zerostack-harness/tests/crash_oracle.rs",
-]
-notes = "Harness crash oracle arms FaultPlanV1 at named JournalBoundaryV1 points. AfterTmpWriteBeforeRename leaves no visible dest; leftover temps are not dest; MidJournalRecover is fail-closed or a consistent prefix."
+rationale = "Journal recover types live in zero-store; there is no in-repo crash-injection suite on the public tree."
+retry_condition = "Retry only when a targeted zero-store test crashes at a named journal boundary and asserts the recover contract."
 
 [[feature]]
 id = "F-STORE-BENCH-HISTORY"
 family = "zero-store"
-name = ".bench-history pass-over-pass ratchet"
-status = "present"
+name = "Pass-over-pass bench ratchet"
+status = "missing"
 weight = 0.020491803279
 weight_units = 5
-evidence = [
-  ".bench-history/savings-bench.latest.json",
-  "scripts/check_bench_history.py",
-]
-notes = "Seeded from benchmarks/savings-bench-v1.json (self-oracle prior-commit). cv_pct is null on the seed (unknown; not invented). Gate: primary -3%, geomean -5%, per-category -10%, p90 -15%, throughput -5%. Seed is not a keep and is not a claim the port is faster than anything."
+rationale = "Bench history is local-only. Public tree ships the savings citation, not a ratchet file."
+retry_condition = "Retry only when a tracked, clone-visible ratchet file and checker exist."
 
 [[feature]]
-id = "F-ABI-RAW-WORKER-V2"
+id = "F-ABI-RAW-WORKER"
 family = "zero-abi"
-name = "raw_worker protocol v2 types + handshake"
+name = "raw_worker protocol types + handshake"
 status = "present"
 weight = 0.024590163934
 weight_units = 6
@@ -257,13 +249,11 @@ evidence = ["crates/zerostack-machine-permit/src/lib.rs"]
 id = "F-CONF-HARNESS"
 family = "conformance"
 name = "CodeMode conformance harness CLI + checks"
-status = "partial"
+status = "missing"
 weight = 0.020491803279
 weight_units = 5
-evidence = ["crates/zerostack-harness/", "conformance/CONTRACT.md"]
-rationale = "crates/zerostack-harness exists (EngineIdentity, 48 spec verifiers, preflight, FailureBundle, crash oracle, e-process). CONTRACT.md §8 still forbids an in-repo conformance CLI catalog."
-retry_condition = "Reconsider only if conformance/CONTRACT.md §8 is amended to allow an in-repo conformance CLI. Do not resurrect {ns}_execute_code as a synonym for zero_execute."
-notes = "Phase 6: harness implements the contract (bundle, metamorphic, fault, e-process). Still not a second MCP catalog and not a product CLI."
+rationale = "CONTRACT.md is the product contract. Live zsx is the proof surface. No in-repo conformance CLI."
+retry_condition = "Reconsider only if CONTRACT.md §8 is amended to allow an in-repo conformance CLI."
 
 [[feature]]
 id = "F-CONF-GOLDEN-SCHEMA"
@@ -272,36 +262,28 @@ name = "Schema golden + mapping checks"
 status = "present"
 weight = 0.012295081967
 weight_units = 3
-evidence = ["conformance/schemas/zero-result-v1.schema.json", "conformance/fixtures/raw_worker_v2_frames.json"]
-notes = "Phase 4 expanded: three-tier goldens at conformance/golden/ (Tier1Raw byte copies, Tier2Canonical normalized, Tier3Logical dumps). Never label a Tier-2 match as Tier-1. Integrity: scripts/check_golden_integrity.py."
+evidence = ["conformance/schemas/zero-result.schema.json"]
+notes = "JSON Schema for the public result envelope. Fixtures stay local."
 
 [[feature]]
 id = "F-ORACLE-ENGINE-IDENTITY"
 family = "gauntlet-oracle"
 name = "EngineIdentity Subject≠Oracle discriminator"
-status = "present"
+status = "missing"
 weight = 0.012295081967
 weight_units = 3
-evidence = [
-  "crates/zerostack-harness/src/engine_identity.rs",
-  "crates/zerostack-harness/src/oracle.rs",
-  "crates/zerostack-harness/src/oracle_preflight_doctor.rs",
-]
-notes = "Harness EngineIdentity is Subject=zerostack vs Oracle in {spec-v1,property-suite-v1,prior-commit-<sha>,round-trip,miri,clippy}. Distinct from raw_worker::EngineIdentity (fz/gz/tz)."
+rationale = "Not a product surface. raw_worker EngineIdentity is fz/gz/tz dispatch, not a Subject/Oracle comparator."
+retry_condition = "Retry only if the hub ships a public Subject≠Oracle comparator that is not a second catalog."
 
 [[feature]]
 id = "F-ORACLE-FAILURE-BUNDLE"
 family = "gauntlet-oracle"
-name = "FailureBundle v1 provenance on divergence"
-status = "present"
+name = "FailureBundle provenance on divergence"
+status = "missing"
 weight = 0.012295081967
 weight_units = 3
-evidence = [
-  "crates/zerostack-harness/src/failure_bundle.rs",
-  "crates/zerostack-harness/src/mismatch.rs",
-  "crates/zerostack-harness/src/mismatch_minimizer.rs",
-]
-notes = "FailureBundle v1.0.0 writes /failure/first_divergence even when partial. CI fails only on TrueDivergence."
+rationale = "Not on the public clone surface."
+retry_condition = "Retry only if product tests emit a provenance bundle on a real TrueDivergence."
 
 [[feature]]
 id = "F-CI-PR-GATES"
@@ -310,50 +292,42 @@ name = "PR/push CI with clippy -D, deny, targeted tests"
 status = "partial"
 weight = 0.016393442623
 weight_units = 4
-evidence = [".github/workflows/ci.yml", "docs/progress/AGENTS-MANDATE.md"]
+evidence = [".github/workflows/ci.yml"]
 retry_condition = "Retry only when .github/workflows/ci.yml or DSR runs cargo test (targeted or workspace) on every PR/push, not only workflow_dispatch fmt/clippy/build."
-notes = "manual workflow_dispatch: fmt, clippy, cargo build --workspace, feature-universe weights + dashboard + bench-history. No cargo test job (intentional: GH budget). dsr quality --tool zerostack has zero checks. Targeted tests: rch exec cargo test -p <one>."
+notes = "manual workflow_dispatch: fmt, clippy, cargo build --workspace, feature-universe weights. No cargo test job (intentional: GH budget). Targeted tests: rch exec cargo test -p <one>."
 
 [[feature]]
 id = "F-FUZZ"
 family = "quality"
 name = "cargo-fuzz targets for parse/CAS/protocol"
-status = "present"
+status = "missing"
 weight = 0.012295081967
 weight_units = 3
-evidence = [
-  "fuzz/fuzz_targets/zeroref_parse.rs",
-  "fuzz/fuzz_targets/abi_frame_decode.rs",
-  "tests/unit/zero-abi/fuzz_corpus_untrusted_bytes_20260815.rs",
-]
-notes = "cargo-fuzz workspace at fuzz/; targets zeroref_parse and abi_frame_decode. Floor, not a 24h campaign."
+rationale = "Fuzz workspace is not on the public clone surface."
+retry_condition = "Retry only when a tracked fuzz target ships with the clone."
 
 [[feature]]
 id = "F-MIRI-NARROW"
 family = "quality"
 name = "Miri on zero-ref/zero-store hot paths"
-status = "partial"
+status = "missing"
 weight = 0.008196721311
 weight_units = 2
-evidence = ["scripts/run_miri_narrow.sh", "rust-toolchain.toml"]
-rationale = "Script exists and host miri test -p zero-ref is green; rch classified the command as non-compilation and ran it locally, so this is not yet a remote/CI gate."
-retry_condition = "miri test -p zero-ref green on rch"
-notes = "scripts/run_miri_narrow.sh is the floor. Host rust-toolchain presence is not the feature."
+rationale = "No clone-visible Miri gate."
+retry_condition = "Retry only when rust-toolchain plus a documented targeted miri command is part of the public tree."
 
 [[feature]]
 id = "F-FEATURE-UNIVERSE-INREPO"
 family = "surface"
-name = "In-repo FeatureUniverse + coverage dashboard"
+name = "In-repo FeatureUniverse"
 status = "present"
 weight = 0.012295081967
 weight_units = 3
 evidence = [
   "conformance/contracts/supported_surface_matrix.toml",
   "scripts/check_feature_universe_weights.py",
-  "scripts/check_feature_coverage_dashboard.py",
-  "conformance/contracts/invariant_catalog.toml",
 ]
-notes = "Matrix, global-sum-1.0 weight gate, per-family dashboard, and compact invariant catalog are in-repo. Partial never rounds up. Excluded remains strict-100% debt."
+notes = "Matrix plus the global-sum weight gate. Partial never rounds up."
 
 [[feature]]
 id = "F-HUB-NO-ENGINE-SOURCE"
@@ -390,7 +364,7 @@ notes = "Const + parse path for GraphZero legacy #B start+len form."
 [[feature]]
 id = "F-REF-SERDE-FROMSTR"
 family = "zero-ref"
-name = "FromStr / serde for ZeroRefV1"
+name = "FromStr / serde for ZeroRef"
 status = "present"
 weight = 0.004098360656
 weight_units = 1
@@ -486,7 +460,7 @@ status = "present"
 weight = 0.004098360656
 weight_units = 1
 evidence = ["README.md", "crates/zero-abi/src/raw_worker.rs"]
-notes = "README documents raw-worker v2 as the shared canonical dispatch contract."
+notes = "README documents raw-worker as the shared canonical dispatch contract."
 
 [[feature]]
 id = "F-FSZERO-PRIVATE-ENGINE-SURFACE"
@@ -589,14 +563,14 @@ weight_units = 2
 evidence = ["crates/zsx-core/src/dag_exec.rs"]
 
 [[feature]]
-id = "F-ZSX-RESULT-V6"
+id = "F-ZSX-RESULT"
 family = "zsx-core"
 name = "Session v6 / legacy zerostack.zsx.v1 envelope"
 status = "present"
 weight = 0.020491803279
 weight_units = 5
-evidence = ["crates/zsx-core/src/result_v6.rs"]
-notes = "pairs with F-ABI-RESULT-V1 zero-result/v1"
+evidence = ["crates/zsx-core/src/envelope.rs"]
+notes = "pairs with F-ABI-RESULT zero-result"
 
 [[feature]]
 id = "F-ZSX-Q99-REPORT"
@@ -654,7 +628,7 @@ name = "zero-edit-protocol/v1 EditOp list"
 status = "present"
 weight = 0.008196721311
 weight_units = 2
-evidence = ["crates/zero-codemode/src/edit_protocol.rs", "conformance/contracts/zero-edit-protocol-v1.md"]
+evidence = ["crates/zero-codemode/src/edit_protocol.rs", "conformance/contracts/zero-edit-protocol.md"]
 
 [[feature]]
 id = "F-CODEMODE-CANCEL"
@@ -680,13 +654,13 @@ weight_units = 4
 evidence = ["crates/zero-abi/src/zero_execute.rs"]
 
 [[feature]]
-id = "F-ABI-RESULT-V1"
+id = "F-ABI-RESULT"
 family = "zero-abi"
-name = "zero-result/v1 ack + content envelope"
+name = "zero-result ack + content envelope"
 status = "present"
 weight = 0.020491803279
 weight_units = 5
-evidence = ["crates/zero-abi/src/result.rs", "conformance/schemas/zero-result-v1.schema.json"]
+evidence = ["crates/zero-abi/src/result.rs", "conformance/schemas/zero-result.schema.json"]
 notes = "CONTRACT.md §3"
 
 [[feature]]
@@ -705,7 +679,7 @@ name = "cache-entry/v1 completeness-witness key"
 status = "present"
 weight = 0.008196721311
 weight_units = 2
-evidence = ["crates/zero-abi/src/cache_entry.rs", "conformance/contracts/cache-entry-v1.md"]
+evidence = ["crates/zero-abi/src/cache_entry.rs", "conformance/contracts/cache-entry.md"]
 
 [[feature]]
 id = "F-CERT-VERIFIED-EVIDENCE"
@@ -769,7 +743,7 @@ name = "fresh-work-vector/v1 four-component sum"
 status = "present"
 weight = 0.008196721311
 weight_units = 2
-evidence = ["crates/zero-ledger/src/fresh_work.rs", "conformance/contracts/fresh-work-vector-v1.md"]
+evidence = ["crates/zero-ledger/src/fresh_work.rs", "conformance/contracts/fresh-work-vector.md"]
 
 [[feature]]
 id = "F-GAUGE-ORDINAL-REF"

@@ -1,7 +1,7 @@
-# Savings bench v1
+# Savings bench
 
 Measured 2026-08-16 on live `zsx mcp` with a disposable 36,645-byte fixture (`sha256 d7bd8d96…`).
-Machine-readable twin: [`savings-bench-v1.json`](savings-bench-v1.json).
+Machine-readable twin: [`savings-bench.json`](savings-bench.json).
 
 This is the citation set for the next ZeroStack bench iteration. Three layers. Do not mix them.
 

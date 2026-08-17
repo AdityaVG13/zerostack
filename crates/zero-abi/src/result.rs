@@ -4,19 +4,19 @@ use serde_json::Value;
 use std::error::Error;
 use std::fmt;
 
-pub const ZERO_RESULT_V1: &str = "zero-result/v1";
+pub const ZERO_RESULT: &str = "zero-result";
 pub const MAX_ACK_CHARS: usize = 64;
 pub const MAX_PREVIEW_CHARS: usize = 1024;
 
 #[derive(Clone, Debug, PartialEq, Serialize)]
-pub struct ZeroResultV1 {
+pub struct ZeroResult {
     ack: String,
-    content: ZeroResultContentV1,
+    content: ZeroResultContent,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
-enum ZeroResultContentV1 {
+enum ZeroResultContent {
     Inline {
         value: Value,
     },
@@ -30,9 +30,9 @@ enum ZeroResultContentV1 {
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
-struct ZeroResultWireV1 {
+struct ZeroResultWire {
     ack: String,
-    content: ZeroResultContentV1,
+    content: ZeroResultContent,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -46,7 +46,7 @@ impl fmt::Display for ZeroResultBuildError {
         f.write_str(match self {
             Self::InvalidAck => "ack must contain 1 to 64 characters",
             Self::InvalidRef => "ref must be a canonical fz://, gz://, or tz:// reference",
-            Self::PreviewTooLong => "preview exceeds the 1024-character v1 bound",
+            Self::PreviewTooLong => "preview exceeds the 1024-character bound",
         })
     }
 }
@@ -67,13 +67,13 @@ impl fmt::Display for ZeroResultAccessError {
 }
 impl Error for ZeroResultAccessError {}
 
-impl ZeroResultV1 {
+impl ZeroResult {
     pub fn inline(ack: impl Into<String>, value: Value) -> Result<Self, ZeroResultBuildError> {
         let ack = ack.into();
         validate_ack(&ack)?;
         Ok(Self {
             ack,
-            content: ZeroResultContentV1::Inline { value },
+            content: ZeroResultContent::Inline { value },
         })
     }
     pub fn reference(
@@ -88,7 +88,7 @@ impl ZeroResultV1 {
         validate_preview(preview.as_deref())?;
         Ok(Self {
             ack,
-            content: ZeroResultContentV1::Ref { reference, preview },
+            content: ZeroResultContent::Ref { reference, preview },
         })
     }
     pub fn ack(&self) -> &str {
@@ -96,41 +96,41 @@ impl ZeroResultV1 {
     }
     pub fn kind(&self) -> &'static str {
         match self.content {
-            ZeroResultContentV1::Inline { .. } => "inline",
-            ZeroResultContentV1::Ref { .. } => "ref",
+            ZeroResultContent::Inline { .. } => "inline",
+            ZeroResultContent::Ref { .. } => "ref",
         }
     }
     pub fn inline_value(&self) -> Result<&Value, ZeroResultAccessError> {
         match &self.content {
-            ZeroResultContentV1::Inline { value } => Ok(value),
-            ZeroResultContentV1::Ref { .. } => {
+            ZeroResultContent::Inline { value } => Ok(value),
+            ZeroResultContent::Ref { .. } => {
                 Err(ZeroResultAccessError::ExpectedInline { actual: "ref" })
             }
         }
     }
     pub fn reference_value(&self) -> Result<&str, ZeroResultAccessError> {
         match &self.content {
-            ZeroResultContentV1::Ref { reference, .. } => Ok(reference),
-            ZeroResultContentV1::Inline { .. } => {
+            ZeroResultContent::Ref { reference, .. } => Ok(reference),
+            ZeroResultContent::Inline { .. } => {
                 Err(ZeroResultAccessError::ExpectedRef { actual: "inline" })
             }
         }
     }
     pub fn preview(&self) -> Result<Option<&str>, ZeroResultAccessError> {
         match &self.content {
-            ZeroResultContentV1::Ref { preview, .. } => Ok(preview.as_deref()),
-            ZeroResultContentV1::Inline { .. } => {
+            ZeroResultContent::Ref { preview, .. } => Ok(preview.as_deref()),
+            ZeroResultContent::Inline { .. } => {
                 Err(ZeroResultAccessError::ExpectedRef { actual: "inline" })
             }
         }
     }
 }
-impl<'de> Deserialize<'de> for ZeroResultV1 {
+impl<'de> Deserialize<'de> for ZeroResult {
     fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let wire = ZeroResultWireV1::deserialize(deserializer)?;
+        let wire = ZeroResultWire::deserialize(deserializer)?;
         match wire.content {
-            ZeroResultContentV1::Inline { value } => Self::inline(wire.ack, value),
-            ZeroResultContentV1::Ref { reference, preview } => {
+            ZeroResultContent::Inline { value } => Self::inline(wire.ack, value),
+            ZeroResultContent::Ref { reference, preview } => {
                 Self::reference(wire.ack, reference, preview)
             }
         }
@@ -145,7 +145,7 @@ fn validate_ack(ack: &str) -> Result<(), ZeroResultBuildError> {
     }
 }
 fn validate_ref(reference: &str) -> Result<(), ZeroResultBuildError> {
-    zero_ref::ZeroRefV1::parse(reference)
+    zero_ref::ZeroRef::parse(reference)
         .map(|_| ())
         .map_err(|_| ZeroResultBuildError::InvalidRef)
 }
@@ -157,7 +157,7 @@ fn validate_preview(preview: Option<&str>) -> Result<(), ZeroResultBuildError> {
     }
 }
 
-/// Build a `zero-result/v1` envelope from one engine step.
+/// Build a `zero-result` envelope from one engine step.
 ///
 /// Extracted from the engine-local CodeMode hosts. Canonical `fz://` /
 /// `gz://` / `tz://` recovery keys become `content.kind=ref`. Non-canonical
@@ -169,7 +169,7 @@ pub fn zero_result_from_engine_step(
     recovery_key: &str,
     payload_wire: &Value,
     detail: Option<&str>,
-) -> ZeroResultV1 {
+) -> ZeroResult {
     let ack = normalize_ack(ack, ok);
     if !ok {
         return inline_or_x0(
@@ -193,7 +193,7 @@ pub fn zero_result_from_engine_step(
             .and_then(Value::as_str)
             .map(|s| truncate_chars(s, MAX_PREVIEW_CHARS))
             .or_else(|| detail.map(|d| truncate_chars(d, MAX_PREVIEW_CHARS)));
-        if let Ok(result) = ZeroResultV1::reference(ack.clone(), reference, preview) {
+        if let Ok(result) = ZeroResult::reference(ack.clone(), reference, preview) {
             return result;
         }
     }
@@ -213,8 +213,8 @@ pub fn zero_result_from_engine_step(
 }
 
 /// Serialize a result for the CodeMode wire (canonical tagged shape only).
-pub fn zero_result_to_wire(result: &ZeroResultV1) -> Value {
-    serde_json::to_value(result).expect("ZeroResultV1 always serializes")
+pub fn zero_result_to_wire(result: &ZeroResult) -> Value {
+    serde_json::to_value(result).expect("ZeroResult always serializes")
 }
 
 fn normalize_ack(ack: &str, ok: bool) -> String {
@@ -228,9 +228,9 @@ fn normalize_ack(ack: &str, ok: bool) -> String {
     }
 }
 
-fn inline_or_x0(ack: &str, value: Value) -> ZeroResultV1 {
-    ZeroResultV1::inline(ack, value).unwrap_or_else(|_| {
-        ZeroResultV1::inline(
+fn inline_or_x0(ack: &str, value: Value) -> ZeroResult {
+    ZeroResult::inline(ack, value).unwrap_or_else(|_| {
+        ZeroResult::inline(
             "X0",
             serde_json::json!({"ok": false, "detail": "invalid zero-result ack"}),
         )

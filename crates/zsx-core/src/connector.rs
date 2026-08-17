@@ -54,7 +54,7 @@ use zero_machine_permit::{
     MachinePermit, MachinePermitHeartbeat, PERMIT_HEARTBEAT_INTERVAL, PermitOwnerMetadata,
     try_scoped_permit_base_for,
 };
-use zero_ref::{ZeroRefV1, ZeroScheme};
+use zero_ref::{ZeroRef, ZeroScheme};
 use zero_store::{
     AttemptBindingV1, AttemptJournalPathsV1, AttemptRecoveryReceiptV1, AttemptStateV1,
     DurableProfileIdV1, SharedCas, atomic_write_file, current_reachability_snapshot, gc_project_id,
@@ -1725,7 +1725,7 @@ fn retain_reachability(
         if !reference.contains("://blob/") {
             continue;
         }
-        let parsed = ZeroRefV1::parse(reference).map_err(|error| {
+        let parsed = ZeroRef::parse(reference).map_err(|error| {
             ConnectorError::new(format!(
                 "invalid portable adapter ref {reference:?}: {error}"
             ))

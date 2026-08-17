@@ -27,7 +27,7 @@ select exactly one mode and must not register both.
 - Standard MCP registers only the selected engine catalogs.
 - CodeMode does not register, discover, proxy, or call engine MCP catalogs.
 - A generic MCP carrier may expose only `zero_execute` and `zero_wait`; engine
-  calls still cross planner-free raw-worker v2 boundaries.
+  calls still cross planner-free raw-worker boundaries.
 
 ## Compatibility maintenance
 

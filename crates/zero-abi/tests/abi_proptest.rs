@@ -1,4 +1,4 @@
-//! Encode/decode identity for raw-worker v2 frames. Seed contract: WithSource.
+//! Encode/decode identity for raw-worker frames. Seed contract: WithSource.
 
 use proptest::prelude::*;
 use proptest::test_runner::{Config, FileFailurePersistence};

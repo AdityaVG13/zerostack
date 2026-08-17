@@ -15,7 +15,7 @@ use std::time::{Duration, Instant};
 use serde::Serialize;
 use serde_json::Value as JsonValue;
 use zero_abi::{
-    CapabilityDescriptor, GlobalRegistration, RegistrationError, ZeroResultV1,
+    CapabilityDescriptor, GlobalRegistration, RegistrationError, ZeroResult,
 };
 use zero_store::SharedCas;
 
@@ -455,7 +455,7 @@ pub(crate) fn public_result_ack(value: &JsonValue) -> String {
     .to_owned()
 }
 
-fn declared_zero_result(value: &JsonValue) -> Result<Option<ZeroResultV1>, HostError> {
+fn declared_zero_result(value: &JsonValue) -> Result<Option<ZeroResult>, HostError> {
     let declared = (value.get("ack").is_some() && value.get("content").is_some())
         || value.pointer("/content/kind").is_some();
     if !declared {
@@ -463,7 +463,7 @@ fn declared_zero_result(value: &JsonValue) -> Result<Option<ZeroResultV1>, HostE
     }
     serde_json::from_value(value.clone())
         .map(Some)
-        .map_err(|error| HostError::Json(format!("invalid declared zero-result/v1: {error}")))
+        .map_err(|error| HostError::Json(format!("invalid declared zero-result: {error}")))
 }
 
 fn explicit_result_reference(
@@ -520,11 +520,11 @@ pub(crate) fn normalize_public_result(encoded: &str) -> Result<String, HostError
     }
     let ack = public_result_ack(&value);
     let result = match explicit_result_reference(&value)? {
-        Some((reference, preview)) => ZeroResultV1::reference(&ack, reference, preview)
+        Some((reference, preview)) => ZeroResult::reference(&ack, reference, preview)
             .map_err(|error| HostError::Json(format!("invalid explicit ref result: {error}")))?,
-        None => ZeroResultV1::inline(ack, unwrap_worker_envelope(value)).map_err(|error| {
+        None => ZeroResult::inline(ack, unwrap_worker_envelope(value)).map_err(|error| {
             HostError::Json(format!(
-                "validated fallback ack failed to construct zero-result/v1: {error}"
+                "validated fallback ack failed to construct zero-result: {error}"
             ))
         })?,
     };
@@ -643,7 +643,7 @@ fn looks_like_expand_domain(value: &JsonValue) -> bool {
 }
 
 pub(crate) fn is_terminal_exact_token_expansion(value: &JsonValue) -> bool {
-    let inline = serde_json::from_value::<ZeroResultV1>(value.clone())
+    let inline = serde_json::from_value::<ZeroResult>(value.clone())
         .ok()
         .and_then(|result| result.inline_value().ok().cloned());
     let value = inline.as_ref().unwrap_or(value);
@@ -769,7 +769,7 @@ fn clip_preview_chars(source: &str, max_chars: usize) -> (String, bool) {
 }
 
 /// Publish an oversized encoded result into the CAS and describe it with the
-/// same `zero-result/v1` shape as an inline capability (`content.kind=ref`).
+/// same `zero-result` shape as an inline capability (`content.kind=ref`).
 pub(crate) fn spill_result(cas_root: &Path, encoded: &str) -> Result<JsonValue, HostError> {
     let cas = SharedCas::open_labeled(cas_root, "codemode-result-spill");
     let hash = cas
@@ -786,7 +786,7 @@ pub(crate) fn spill_result(cas_root: &Path, encoded: &str) -> Result<JsonValue, 
         .as_ref()
         .map(public_result_ack)
         .unwrap_or_else(|| "ok".into());
-    let result = ZeroResultV1::reference(ack, reference, Some(preview))
+    let result = ZeroResult::reference(ack, reference, Some(preview))
         .map_err(|error| HostError::ResultSpill(error.to_string()))?;
     serde_json::to_value(&result).map_err(|error| HostError::ResultSpill(error.to_string()))
 }

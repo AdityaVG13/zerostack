@@ -251,7 +251,16 @@ fn token_method_args(
     first_key: &str,
     contract: &[(&str, TokenOptionType)],
 ) -> Result<Value, ConnectorError> {
-    let args = normalize_token_args(input, method, first_key)?;
+    let mut args = normalize_token_args(input, method, first_key)?;
+    if method == "shell"
+        && let Some(timeout_ms) = args.remove("timeoutMs")
+    {
+        if args.insert("timeout_ms".into(), timeout_ms).is_some() {
+            return Err(ConnectorError::new(
+                "token.shell options must not include both 'timeoutMs' and 'timeout_ms'",
+            ));
+        }
+    }
 
     let first = args
         .get(first_key)
@@ -370,7 +379,7 @@ fn lower_token_expand(input: &Value) -> Result<(EngineIdentity, String, Value), 
         .iter()
         .find(|(prefix, _, _, _)| reference.starts_with(prefix))
     {
-        if zero_ref::ZeroRefV1::parse(reference).is_err() {
+        if zero_ref::ZeroRef::parse(reference).is_err() {
             return Err(ConnectorError::new(format!(
                 "cannot expand {}; expected {EXPAND_SCHEMES_HELP} with a 64-hex digest and optional #Bstart-end or #Lstart-end",
                 short_ref(reference)

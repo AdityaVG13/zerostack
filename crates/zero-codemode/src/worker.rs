@@ -1,4 +1,4 @@
-//! Harness-neutral raw-worker v2 process ownership and dispatch.
+//! Harness-neutral raw-worker process ownership and dispatch.
 
 use std::collections::BTreeMap;
 use std::fmt;

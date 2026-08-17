@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://zerostack.dev/schemas/zero-result-v1.schema.json",
-  "title": "ZeroResultV1",
+  "$id": "https://zerostack.dev/schemas/zero-result.schema.json",
+  "title": "ZeroResult",
   "type": "object",
   "additionalProperties": false,
   "required": ["ack", "content"],

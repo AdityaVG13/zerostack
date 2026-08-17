@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://zerostack.local/schemas/engine-topology-v1.schema.json",
+  "$id": "https://zerostack.local/schemas/engine-topology.schema.json",
   "title": "ZeroStack canonical engine topology v1",
   "type": "object",
   "additionalProperties": false,
@@ -665,7 +665,7 @@
       }
     },
     "$schema": {
-      "const": "https://zerostack.local/schemas/engine-topology-v1.schema.json"
+      "const": "https://zerostack.local/schemas/engine-topology.schema.json"
     }
   },
   "$defs": {

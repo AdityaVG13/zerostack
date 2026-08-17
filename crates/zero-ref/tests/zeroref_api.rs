@@ -3,7 +3,7 @@
 use std::str::FromStr;
 
 use zero_ref::{
-    negotiate, ZeroRefError, ZeroRefErrorClass, ZeroRefV1, ZEROREF_MAJOR, ZEROREF_MINOR,
+    negotiate, ZeroRefError, ZeroRefErrorClass, ZeroRef, ZEROREF_MAJOR, ZEROREF_MINOR,
 };
 
 const HASH: &str = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
@@ -15,9 +15,9 @@ fn canonical_blob() -> String {
 #[test]
 fn fromstr_equals_parse() {
     let input = canonical_blob();
-    let via_parse = ZeroRefV1::parse(&input).expect("parse");
-    let via_fromstr = ZeroRefV1::from_str(&input).expect("FromStr");
-    let via_parse_method: ZeroRefV1 = input.parse().expect("str::parse");
+    let via_parse = ZeroRef::parse(&input).expect("parse");
+    let via_fromstr = ZeroRef::from_str(&input).expect("FromStr");
+    let via_parse_method: ZeroRef = input.parse().expect("str::parse");
     assert_eq!(via_fromstr, via_parse);
     assert_eq!(via_parse_method, via_parse);
 }
@@ -25,17 +25,17 @@ fn fromstr_equals_parse() {
 #[test]
 fn serde_roundtrips_display_form() {
     let input = format!("tz://blob/{HASH}#B0-4");
-    let parsed = ZeroRefV1::parse(&input).expect("parse");
+    let parsed = ZeroRef::parse(&input).expect("parse");
     let json = serde_json::to_string(&parsed).expect("serialize");
     assert_eq!(json, serde_json::to_string(&input).expect("string json"));
-    let back: ZeroRefV1 = serde_json::from_str(&json).expect("deserialize");
+    let back: ZeroRef = serde_json::from_str(&json).expect("deserialize");
     assert_eq!(back, parsed);
     assert_eq!(back.to_string(), input);
 }
 
 #[test]
 fn serde_rejects_malformed_display_form() {
-    let err = serde_json::from_str::<ZeroRefV1>("\"not-a-ref\"").unwrap_err();
+    let err = serde_json::from_str::<ZeroRef>("\"not-a-ref\"").unwrap_err();
     assert!(err.to_string().contains("not a ZeroRef"), "{err}");
 }
 
@@ -75,7 +75,7 @@ fn parser_never_emits_reserved_resolution_classes() {
         &format!("fz://blob/{HASH}#Z1-2"),
     ];
     for sample in samples {
-        let class = ZeroRefV1::parse(sample).expect_err(sample).class;
+        let class = ZeroRef::parse(sample).expect_err(sample).class;
         assert!(
             !reserved.contains(&class),
             "parser emitted reserved {class:?} for {sample}"
@@ -92,17 +92,17 @@ fn parser_never_emits_reserved_resolution_classes() {
 fn selector_emits_range_and_utf8_and_digest() {
     let bytes = b"hello";
     let hash = zero_ref::content_hash_hex(bytes);
-    let oob = ZeroRefV1::parse(&format!("fz://blob/{hash}#B0-99")).unwrap();
+    let oob = ZeroRef::parse(&format!("fz://blob/{hash}#B0-99")).unwrap();
     assert_eq!(
         oob.verify_and_select(bytes).unwrap_err().class,
         ZeroRefErrorClass::RangeOutOfBounds
     );
-    let lines = ZeroRefV1::parse(&format!("fz://blob/{hash}#L1-1")).unwrap();
+    let lines = ZeroRef::parse(&format!("fz://blob/{hash}#L1-1")).unwrap();
     assert_eq!(
         lines.verify_and_select(b"\xff").unwrap_err().class,
         ZeroRefErrorClass::DigestMismatch
     );
-    let utf = ZeroRefV1::parse(&format!(
+    let utf = ZeroRef::parse(&format!(
         "fz://blob/{}#L1-1",
         zero_ref::content_hash_hex(b"\xff")
     ))

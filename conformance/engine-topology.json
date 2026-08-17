@@ -1,5 +1,5 @@
 {
-  "$schema": "https://zerostack.local/schemas/engine-topology-v1.schema.json",
+  "$schema": "https://zerostack.local/schemas/engine-topology.schema.json",
   "schema_version": "1",
   "topology_id": "zerostack.engine-topology",
   "status": "accepted-for-migration",

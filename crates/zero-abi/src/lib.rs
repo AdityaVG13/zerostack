@@ -170,8 +170,8 @@ pub use reasoning::{
     verify_strict_no_downshift_v1,
 };
 pub use result::{
-    MAX_ACK_CHARS, MAX_PREVIEW_CHARS, ZERO_RESULT_V1, ZeroResultAccessError, ZeroResultBuildError,
-    ZeroResultV1, zero_result_from_engine_step, zero_result_to_wire,
+    MAX_ACK_CHARS, MAX_PREVIEW_CHARS, ZERO_RESULT, ZeroResultAccessError, ZeroResultBuildError,
+    ZeroResult, zero_result_from_engine_step, zero_result_to_wire,
 };
 pub use redaction::{EffectTraceV1, RedactionPolicyV1, RedactorV1, SecretsErrorV1};
 pub use redaction::DEFAULT_REDACTION_TOKEN;

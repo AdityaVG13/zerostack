@@ -2,7 +2,7 @@
 
 use proptest::prelude::*;
 use proptest::test_runner::{Config, FileFailurePersistence};
-use zero_ref::ZeroRefV1;
+use zero_ref::ZeroRef;
 
 fn hex64() -> impl Strategy<Value = String> {
     proptest::string::string_regex("[0-9a-f]{64}").unwrap()
@@ -48,12 +48,12 @@ proptest! {
                 line_start + line_span
             ),
         };
-        let parsed = ZeroRefV1::parse(&input).expect("canonical grammar");
-        let via_fromstr: ZeroRefV1 = input.parse().expect("FromStr");
+        let parsed = ZeroRef::parse(&input).expect("canonical grammar");
+        let via_fromstr: ZeroRef = input.parse().expect("FromStr");
         prop_assert_eq!(&via_fromstr, &parsed);
         let rendered = parsed.to_string();
         prop_assert_eq!(&rendered, &input);
-        let again = ZeroRefV1::parse(&rendered).expect("reparse");
+        let again = ZeroRef::parse(&rendered).expect("reparse");
         prop_assert_eq!(again, parsed);
     }
 
@@ -65,10 +65,10 @@ proptest! {
         len in 0u64..2048,
     ) {
         let input = format!("{scheme}://blob/{hash}#B{start}+{len}");
-        let parsed = ZeroRefV1::parse(&input).expect("legacy alias");
+        let parsed = ZeroRef::parse(&input).expect("legacy alias");
         let rendered = parsed.to_string();
         let expected = format!("{scheme}://blob/{hash}#B{start}-{}", start + len);
         prop_assert_eq!(&rendered, &expected);
-        prop_assert_eq!(ZeroRefV1::parse(&rendered).unwrap(), parsed);
+        prop_assert_eq!(ZeroRef::parse(&rendered).unwrap(), parsed);
     }
 }
