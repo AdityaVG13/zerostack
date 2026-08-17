@@ -100,9 +100,11 @@ docs/internal/
 packages/
 reports/
 # cargo-fuzz work products. Source under fuzz/fuzz_targets/ is tracked.
+# Named seed files (valid_blob, handshake.json) stay tracked.
 fuzz/artifacts/
 fuzz/target/
 fuzz/coverage/
+fuzz/corpus/*/[0-9a-f]*
 scripts/dev/
 scripts/__pycache__/
 __pycache__/

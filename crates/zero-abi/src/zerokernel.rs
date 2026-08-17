@@ -556,7 +556,7 @@ mod tests {
         v["daemon"] = json!(true);
         assert!(serde_json::from_value::<ZerokernelExecuteRequestV1>(v).is_err());
 
-        let mut v2 = json!({"abi_version": ZEROKERNEL_ABI_VERSION_V1, "kind":"Failed", "handles":{}, "preflight":{"ok":true,"checked_roots":[],"warnings":[],"errors":[]}, "ledger":{"wall_ms_used":1,"cpu_ms_used":1,"calls_made":1,"bytes_out":0}, "root_evidence":{"before":{"project_root":"p"},"after":{"project_root":"p"},"unchanged":true}, "unknown":1});
+        let v2 = json!({"abi_version": ZEROKERNEL_ABI_VERSION_V1, "kind":"Failed", "handles":{}, "preflight":{"ok":true,"checked_roots":[],"warnings":[],"errors":[]}, "ledger":{"wall_ms_used":1,"cpu_ms_used":1,"calls_made":1,"bytes_out":0}, "root_evidence":{"before":{"project_root":"p"},"after":{"project_root":"p"},"unchanged":true}, "unknown":1});
         assert!(serde_json::from_value::<ZerokernelExecuteResponseV1>(v2).is_err());
     }
 

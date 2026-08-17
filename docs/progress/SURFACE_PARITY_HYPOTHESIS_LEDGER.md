@@ -18,7 +18,7 @@ None of the pass-11 ranked missing rows remain. Residual missing is only if the 
 | SURF-0005 | `F-CONF-HARNESS` | CLOSED | CONTRACT §8 forbids a product CLI |
 | SURF-0006 | `F-CI-PR-GATES` | CONFIRMED_GAP | GH `workflow_dispatch` only; DSR has zero quality checks; rch is documented test runner |
 | SURF-0001 | `F-FUZZ` | CLOSED | cargo-fuzz targets `zeroref_parse` + `abi_frame_decode` |
-| SURF-0002 | `F-MIRI-NARROW` | CLOSED | script landed; feature stays **partial** until rch miri is green |
+| SURF-0002 | `F-MIRI-NARROW` | CLOSED | script landed; host miri green (Phase 15: 8+2+1). Stays **partial**: rch does not intercept `cargo +nightly miri`; spark-1672 nightly has no `cargo-miri` |
 | SURF-0003 | `F-REF-SERDE-FROMSTR` | CLOSED | FromStr + Display-form serde |
 | SURF-0004 | `F-REF-CAPABILITY-NEGOTIATION` | CLOSED | `negotiate(major, minor)` |
 | SURF-0007 | `F-ABI-PROPTEST-ROUNDTRIP` | CLOSED | `crates/zero-abi/tests/abi_proptest.rs` |
