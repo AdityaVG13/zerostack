@@ -68,8 +68,8 @@ sha256 = "32712333e2ebe73add922d8de2b339af22007f4ee7ee0e5f966da9a0992f4d7e"
 [[spec_sources]]
 name = "feature-universe"
 path = "conformance/contracts/supported_surface_matrix.toml"
-sha256 = "4fe0fb88eae721cfeba673f2943eab0a661871afe3141d49cc476011bb806ee1"
-description = "In-repo FeatureUniverse. Phase 6: FailureBundle + crash oracle present; F-CONF-HARNESS still partial (no CLI catalog)."
+sha256 = "3946a4367cf6a9b2ccd7915a588b11da9695a2923dd7564556153bbfee050d9d"
+description = "In-repo FeatureUniverse. Phase 7: dashboard + invariant catalog present; F-FEATURE-UNIVERSE-INREPO promoted. Missing remain fuzz/miri/serde/capability-negotiate."
 
 [[spec_sources]]
 name = "cache-entry-v1"
@@ -95,7 +95,7 @@ test_dir = "tests/"
 proptest_version = "1"   # only conformance/Cargo.toml [dev-dependencies]; crate is workspace-excluded
 proptest_regressions_dir = "UNPINNED"
 property_count_floor = 0
-notes = "F-REF-PROPTEST missing; F-ABI-PROPTEST-ROUNDTRIP partial. Floor 0 is honest. Phase 6 raises the floor when a suite exists."
+notes = "F-REF-PROPTEST present (zeroref_proptest.rs). F-ABI-PROPTEST-ROUNDTRIP still partial. Floor 0 remains honest for the harness crate."
 
 # ---------------------------------------------------------------------------
 # Family 3 -- [golden_snapshots]

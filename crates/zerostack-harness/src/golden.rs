@@ -218,9 +218,6 @@ pub fn assert_tier3_invariants(dump: &Value) -> Result<(), String> {
             "feature_count {feature_count} != declared_id_count {declared}"
         ));
     }
-    if feature_count != 71 {
-        return Err(format!("feature_count is {feature_count}, expected 71"));
-    }
     let weight = universe
         .get("weight_sum")
         .and_then(Value::as_f64)

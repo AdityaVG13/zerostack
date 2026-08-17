@@ -1,0 +1,85 @@
+# Compact Phase 7 catalog of ProofObligations already enforced.
+# Hashes are of the enforcer source, not of blessed outputs that recapture.
+schema_version = "zerostack.invariant_catalog.v1"
+project = "ZeroStack"
+class = "Greenfield-Rust-class"
+
+[[invariant]]
+id = "INV-ENGINE-IDENTITY"
+statement = "Subject identity is never compared to itself. Harness EngineIdentity Subject=zerostack is distinct from every Oracle label."
+kind = "OracleDifferential"
+feature_ids = ["F-ORACLE-ENGINE-IDENTITY"]
+status = "enforced"
+
+[[invariant.artifact]]
+path = "crates/zerostack-harness/src/engine_identity.rs"
+schema_version = "zerostack.engine-identity.v1"
+hash = "9e1b30d4a742f3c1c1b83a1ccdb6c9530df1bdab3479f3b40493f6f44d74c4c1"
+
+[[invariant]]
+id = "INV-BOTH-ERROR"
+statement = "Both-error is agreement regardless of message text. One-error-one-OK is a hard failure."
+kind = "OracleDifferential"
+feature_ids = ["F-ORACLE-ENGINE-IDENTITY", "F-ORACLE-FAILURE-BUNDLE"]
+status = "enforced"
+
+[[invariant.artifact]]
+path = "crates/zerostack-harness/src/oracle.rs"
+schema_version = "zerostack.oracle-compare.v1"
+hash = "c8c3fefd2adcb2ea31a9e6275f3af47e248c25113cdb704ef7b01548a2a06534"
+
+[[invariant]]
+id = "INV-GOLDEN-CHECKSUMS"
+statement = "Three-tier goldens: checksums.sha256 and manifest hashes match on-disk bytes. Tier1Raw is byte-equal to the live source. A Tier-2 match is never labeled Tier-1."
+kind = "InstaSnapshot"
+feature_ids = ["F-CONF-GOLDEN-SCHEMA"]
+status = "enforced"
+
+[[invariant.artifact]]
+path = "scripts/check_golden_integrity.py"
+schema_version = "1.0.0"
+hash = "2f086a61155dfbf44d9f7b49ec43e8d003d79fc91abd6c0b5478971dcb84defb"
+
+[[invariant.artifact]]
+path = "conformance/golden/checksums.sha256"
+schema_version = "1.0.0"
+
+[[invariant]]
+id = "INV-BENCH-HISTORY"
+statement = "Pass-over-pass bench-history ratchet is a committed file. Seed is not a keep. Gates: primary -3%, geomean -5%, per-category -10%, p90 -15%, throughput -5%."
+kind = "InstaSnapshot"
+feature_ids = ["F-STORE-BENCH-HISTORY"]
+status = "enforced"
+
+[[invariant.artifact]]
+path = "scripts/check_bench_history.py"
+schema_version = "zerostack.comprehensive-bench-report.v3"
+hash = "da0c9bec5d4cc9858226ecea4d11fdc7a3c2a5c64786e41923b5785c345bef3a"
+
+[[invariant.artifact]]
+path = ".bench-history/savings-bench.latest.json"
+schema_version = "zerostack.comprehensive-bench-report.v3"
+
+[[invariant]]
+id = "INV-CRASH-ORACLE"
+statement = "Named JournalBoundaryV1 crash points are armed. AfterTmpWriteBeforeRename leaves no visible dest; leftover temps are not dest; MidJournalRecover is fail-closed or a consistent prefix."
+kind = "CrashBoundary"
+feature_ids = ["F-STORE-CRASH-ORACLE"]
+status = "enforced"
+
+[[invariant.artifact]]
+path = "crates/zerostack-harness/tests/crash_oracle.rs"
+schema_version = "zerostack.crash-oracle.v1"
+hash = "6ec7ea017e10a0c54f27ff7b03bce5b14ade39d0130db1b48ade8a040cea6878"
+
+[[invariant]]
+id = "INV-WEIGHT-SUM"
+statement = "FeatureUniverse sum(weights) == 1.0 globally (tolerance 1e-9). Family labels are not independent scoring categories."
+kind = "ProptestInvariant"
+feature_ids = ["F-FEATURE-UNIVERSE-INREPO"]
+status = "enforced"
+
+[[invariant.artifact]]
+path = "scripts/check_feature_universe_weights.py"
+schema_version = "zerostack.supported_surface_matrix.v1"
+hash = "f4bb63d02dbcfdeacbdcd81bbd56b18ed0a0cdb6731c67ec8f72be610381cdd4"

@@ -3,9 +3,9 @@ source: crates/zerostack-harness/tests/golden_invariants.rs
 expression: pin
 ---
 {
-  "feature_count": 71,
-  "present": 54,
-  "partial": 10,
+  "feature_count": 77,
+  "present": 61,
+  "partial": 9,
   "missing": 4,
   "excluded": 3,
   "wired_count": 48,

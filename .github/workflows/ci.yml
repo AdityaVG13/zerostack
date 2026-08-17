@@ -27,6 +27,7 @@ jobs:
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       - run: python3 scripts/check_feature_universe_weights.py
+      - run: python3 scripts/check_feature_coverage_dashboard.py
       - run: python3 scripts/check_bench_history.py
 
   lint:
