@@ -1,18 +1,15 @@
 //! Canonical zsx result envelope.
 //!
-//! Mirrors the JSON envelope `zsx exec` resolves (`zerostack.zsx.v1`):
+//! Mirrors the JSON envelope `zsx exec` resolves (`zerostack.zsx`):
 //! `{ protocol, ok, generation, request_id, result, metrics }`, extended with
 //! a typed `error` object `{ code, detail, retry_after_ms? }` for failures.
 //! Every execution resolves this envelope; rejections are reserved for
 //! napi-level failures (e.g. an abort before the async work started).
 
 use serde_json::Value;
-use zsx_core::{ZsxExecutionMetrics, ZsxExecutionResult, ZsxSessionError};
+use zsx_core::{ZSX_PROTOCOL, ZsxExecutionMetrics, ZsxExecutionResult, ZsxSessionError};
 
 use crate::core::{CODE_CANCELLED, CODE_COMMIT_RACE, CODE_PANIC};
-
-/// Protocol label for the in-process zsx result envelope.
-pub const ZSX_PROTOCOL: &str = "zerostack.zsx.v1";
 
 /// Typed failure detail inside a non-ok envelope.
 #[derive(Debug, Clone)]

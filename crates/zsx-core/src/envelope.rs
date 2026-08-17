@@ -22,11 +22,8 @@
 //! fields the session cannot derive, so the harness supplies them through
 //! [`SessionEnvelopeContextV1`]; the session never fabricates a root.
 //!
-//! The explicit legacy conversion [`legacy_envelope_value`] renders the
-//! envelope in the `zerostack.zsx.v1` shape (`{protocol, ok, generation,
-//! request_id, result?, error?}`) so existing consumers keep working with
-//! unchanged failure codes (`decision_required`, `cancelled`, ...) while the
-//! V6 envelope carries the semantic payload.
+//! [`legacy_envelope_value`] renders the envelope in the `zerostack.zsx`
+//! shape (`{protocol, ok, generation, request_id, result?, error?}`).
 //!
 //! V6-R5 (ZS-VIEW-010): a decision-bearing outcome optionally binds the
 //! typed [`DecisionViewV6`] into the envelope's `decision_view_root`. The
@@ -42,9 +39,8 @@ use zero_abi::{
     ZeroExecuteErrorV6, ZeroExecuteFieldsV6, ZeroExecuteKindV6, ZeroExecuteResultV6,
 };
 
-/// Protocol label of the legacy zsx envelope shape the conversion emits,
-/// identical to the label existing consumers already resolve.
-pub const SESSION_V6_ENVELOPE_LEGACY_PROTOCOL: &str = "zerostack.zsx.v1";
+/// Protocol label on every `zsx exec` / `zsx mcp` result envelope.
+pub const ZSX_PROTOCOL: &str = "zerostack.zsx";
 
 /// The envelope fields the session cannot prove by itself, supplied by the
 /// harness. Fail-closed construction: an empty ledger root or an invalid
@@ -338,8 +334,7 @@ fn legacy_kind_detail(envelope: &ZeroExecuteResultV6) -> String {
     }
 }
 
-/// Explicit legacy conversion: render a V6 envelope in the
-/// `zerostack.zsx.v1` shape existing consumers already resolve.
+/// Render an execute envelope in the `zerostack.zsx` shape.
 ///
 /// `ok` is true only for `Completed`; a `DecisionRequired` envelope carries
 /// its question/choices/continuation handle in `result` (mirroring the
@@ -353,7 +348,7 @@ pub fn legacy_envelope_value(
     let kind = envelope.kind();
     let ok = kind == ZeroExecuteKindV6::Completed;
     let mut result = serde_json::Map::new();
-    result.insert("protocol".into(), json!(SESSION_V6_ENVELOPE_LEGACY_PROTOCOL));
+    result.insert("protocol".into(), json!(ZSX_PROTOCOL));
     result.insert("ok".into(), json!(ok));
     result.insert("generation".into(), json!(generation));
     result.insert("request_id".into(), json!(request_id));

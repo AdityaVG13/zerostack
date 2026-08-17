@@ -253,10 +253,6 @@ pub struct ZeroRef {
     pub fragment: ZeroFragment,
 }
 
-/// Prefer [`ZeroRef`]. Kept so in-flight adapters still compile.
-#[doc(hidden)]
-pub type ZeroRefV1 = ZeroRef;
-
 fn malformed(message: impl Into<String>) -> ZeroRefError {
     ZeroRefError::new(ZeroRefErrorClass::Malformed, message)
 }

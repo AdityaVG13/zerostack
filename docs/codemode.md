@@ -29,7 +29,7 @@ The upstream MIT terms permit use, copying, modification, distribution, sublicen
 
 ### Capability result shape
 
-Every public `zero.*` capability returns `zero-result/v1` with exactly two top-level fields:
+Every public `zero.*` capability returns `zero-result` with exactly two top-level fields:
 
 - `ack` -- a bounded status atom.
 - `content` -- either `{kind:"inline", value:...}` or `{kind:"ref", ref:"<canonical ref>", preview?:"..."}`.
@@ -69,11 +69,11 @@ Build the canonical one-process runtime:
 
 ~~~sh
 cargo build -p zsx --release
-printf '%s\n' 'return await zero.fs.read({path:"Cargo.toml"});' \
+printf '%s\n' 'return await zero.fs.compound("read", { path: "Cargo.toml" });' \
   | ./target/release/zsx exec -C "$PWD"
 ~~~
 
-`zsx exec` reads a plan from stdin or `--file PLAN`. `-C ROOT` authorizes and canonicalizes one engine root. Paths in the plan are relative to that root; absolute paths stay rejected. `--timeout-ms N` overrides the 30000 ms default. Discover call shapes with `zero.help()` or `zero.help.search({query})`.
+`zsx exec` reads a plan from stdin or `--file PLAN`. `-C ROOT` sets the primary project root for indexes, snaps, certificates, and unscoped searches. Relative filesystem paths stay rooted there. Explicit absolute `fs.read` and `fs.multiRead` paths may read OS-accessible files without indexing their parent trees; one `fs.multiRead` call cannot mix relative and absolute paths. Mutations remain primary-root jailed. `--timeout-ms N` overrides the 30000 ms default. Discover call shapes with `zero.help()` or `zero.help.search({query})`.
 
 The executable embeds `zsx-core` and all three domain adapters. It creates no engine worker, NDJSON pipe, session socket, or daemon. Pi and OMP load the same runtime through `@zerostack/zsx-native`; their adapters do not own execution authority.
 

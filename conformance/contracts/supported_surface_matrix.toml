@@ -565,7 +565,7 @@ evidence = ["crates/zsx-core/src/dag_exec.rs"]
 [[feature]]
 id = "F-ZSX-RESULT"
 family = "zsx-core"
-name = "Session v6 / legacy zerostack.zsx.v1 envelope"
+name = "Session zerostack.zsx envelope"
 status = "present"
 weight = 0.020491803279
 weight_units = 5

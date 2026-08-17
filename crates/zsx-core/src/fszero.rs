@@ -53,10 +53,8 @@
 //! grant reports `ReversibleMutation` with `NotRequired`, exactly like the
 //! raw worker — FSZero never gates on approvals itself.
 
-use std::path::PathBuf;
-use std::sync::mpsc::{
-    self, Receiver, RecvTimeoutError, SyncSender, TryRecvError, TrySendError,
-};
+use std::path::{Path, PathBuf};
+use std::sync::mpsc::{self, Receiver, RecvTimeoutError, SyncSender, TryRecvError, TrySendError};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 
@@ -72,7 +70,7 @@ use zero_abi::{
     WorkerResultMetadata, canonical_worker_error_kind,
 };
 use zero_codemode::CancellationSignal;
-use zero_ref::ZeroRefV1;
+use zero_ref::ZeroRef;
 use zero_store::SharedCas;
 
 use crate::adapter::{AdapterBinding, AdapterCall, AdapterError, AdapterResponse, DomainAdapter};
@@ -235,10 +233,10 @@ fn domain_error_kind(class: &str) -> String {
         .to_string()
 }
 
-/// Same acceptance as `ZeroResult::validate_ref`: legal ZeroRef v1 blobs
+/// Same acceptance as `ZeroResult::validate_ref`: legal ZeroRef blobs
 /// (including `#B0-4` / `#L…` fragments) pass; non-ZeroRef tokens fail.
 fn is_conformant_blob_ref(reference: &str) -> bool {
-    ZeroRefV1::parse(reference).is_ok()
+    ZeroRef::parse(reference).is_ok()
 }
 
 /// Mirror of `collect_portable_refs`: gather `fz://`/`gz://`/`tz://` tokens
@@ -280,7 +278,7 @@ fn retainable_ref(session: &FSZeroSession, reference: &str) -> bool {
     if !is_conformant_blob_ref(reference) {
         return false;
     }
-    let Ok(parsed) = ZeroRefV1::parse(reference) else {
+    let Ok(parsed) = ZeroRef::parse(reference) else {
         return false;
     };
     if !reference.starts_with("fz://blob/") {
@@ -405,8 +403,7 @@ fn enrich_recovery_payload(
     result: &mut DomainResult,
     refs: &[String],
 ) {
-    if let Some(key) = recovery_key
-        .or_else(|| result.refs.first().map(String::as_str))
+    if let Some(key) = recovery_key.or_else(|| result.refs.first().map(String::as_str))
         && let Some(batch_bytes) = session.expand(key)
     {
         let portable_ref = refs
@@ -725,6 +722,213 @@ fn domain_error_to_adapter(error: &DomainError, request: &CallRequest) -> Adapte
     )
 }
 
+/// Return the narrow temporary workspace needed for explicit absolute reads.
+///
+/// The primary session root remains the project root. Relative reads stay there.
+/// Absolute `fs.read` / `fs.multiRead` paths may point elsewhere because the
+/// harness could open those same bytes natively. Re-rooting does not rebind the
+/// durable store, build an index, or widen mutation authority.
+fn explicit_external_read_root(
+    primary_root: Option<&Path>,
+    request: &CallRequest,
+) -> Result<Option<PathBuf>, AdapterError> {
+    let paths: Vec<&str> = match request.op.as_str() {
+        "fs.read" => request
+            .args
+            .get("path")
+            .or_else(|| request.args.get("arg"))
+            .and_then(Value::as_str)
+            .into_iter()
+            .collect(),
+        "fs.multiRead" => match request.args.get("paths").and_then(Value::as_array) {
+            Some(values) if values.iter().all(Value::is_string) => {
+                values.iter().filter_map(Value::as_str).collect()
+            }
+            _ => Vec::new(),
+        },
+        _ => Vec::new(),
+    };
+    if paths.is_empty() || paths.iter().all(|path| !Path::new(path).is_absolute()) {
+        return Ok(None);
+    }
+    if paths.iter().any(|path| !Path::new(path).is_absolute()) {
+        return Err(adapter_error(
+            "validation",
+            "fs.multiRead cannot mix project-relative and absolute paths",
+            request,
+        ));
+    }
+
+    let primary =
+        primary_root.map(|root| root.canonicalize().unwrap_or_else(|_| root.to_path_buf()));
+    let targets: Vec<PathBuf> = paths
+        .iter()
+        .map(|path| {
+            let path = Path::new(path);
+            path.canonicalize().unwrap_or_else(|_| path.to_path_buf())
+        })
+        .collect();
+    if let Some(root) = primary.as_deref()
+        && targets.iter().all(|path| path.starts_with(root))
+    {
+        return Ok(Some(root.to_path_buf()));
+    }
+
+    let mut parents = targets.iter().filter_map(|path| path.parent());
+    let Some(first) = parents.next() else {
+        return Err(adapter_error(
+            "validation",
+            "explicit absolute read path has no parent directory",
+            request,
+        ));
+    };
+    let mut common = first.to_path_buf();
+    for parent in parents {
+        while !parent.starts_with(&common) {
+            if !common.pop() {
+                return Err(adapter_error(
+                    "validation",
+                    "explicit absolute read paths have no common root",
+                    request,
+                ));
+            }
+        }
+    }
+    if common.as_os_str().is_empty() {
+        return Err(adapter_error(
+            "validation",
+            "explicit absolute read root is empty",
+            request,
+        ));
+    }
+    Ok(Some(common))
+}
+
+fn rewrite_external_read_request(
+    request: &CallRequest,
+    external_root: &Path,
+) -> Result<CallRequest, AdapterError> {
+    let relative_path = |path: &str| -> Result<Value, AdapterError> {
+        let path = Path::new(path);
+        let target = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
+        let relative = target.strip_prefix(external_root).map_err(|_| {
+            adapter_error(
+                "validation",
+                format!(
+                    "explicit read path {} is outside selected root {}",
+                    path.display(),
+                    external_root.display()
+                ),
+                request,
+            )
+        })?;
+        if relative.as_os_str().is_empty() {
+            return Err(adapter_error(
+                "validation",
+                "explicit read path must name a file below its selected root",
+                request,
+            ));
+        }
+        Ok(Value::String(relative.to_string_lossy().into_owned()))
+    };
+
+    let mut rewritten = request.clone();
+    match request.op.as_str() {
+        "fs.read" => {
+            let key = if request.args.get("path").is_some() {
+                "path"
+            } else {
+                "arg"
+            };
+            let Some(path) = request.args.get(key).and_then(Value::as_str) else {
+                return Ok(rewritten);
+            };
+            rewritten.args[key] = relative_path(path)?;
+        }
+        "fs.multiRead" => {
+            let Some(paths) = request.args.get("paths").and_then(Value::as_array) else {
+                return Ok(rewritten);
+            };
+            let paths = paths
+                .iter()
+                .filter_map(Value::as_str)
+                .map(relative_path)
+                .collect::<Result<Vec<_>, _>>()?;
+            rewritten.args["paths"] = Value::Array(paths);
+        }
+        _ => {}
+    }
+    Ok(rewritten)
+}
+
+fn run_session_call(
+    session: &mut FSZeroSession,
+    request: &CallRequest,
+    cancellation: &CancellationSignal,
+    state_root: &Path,
+    session_id: &str,
+) -> (Result<AdapterResponse, AdapterError>, bool) {
+    let original_root = session.workspace_root().map(Path::to_path_buf);
+    let external_root = match explicit_external_read_root(original_root.as_deref(), request) {
+        Ok(Some(root)) => root,
+        Ok(None) => {
+            return (
+                run_call(session, request, cancellation, state_root, session_id),
+                false,
+            );
+        }
+        Err(error) => return (Err(error), false),
+    };
+    let Some(original_root) = original_root else {
+        return (
+            Err(adapter_error(
+                "internal",
+                "explicit absolute read requires an active primary root",
+                request,
+            )),
+            false,
+        );
+    };
+    let rewritten_request = match rewrite_external_read_request(request, &external_root) {
+        Ok(request) => request,
+        Err(error) => return (Err(error), false),
+    };
+    if let Err(error) = session.set_workspace_root(&external_root) {
+        return (
+            Err(adapter_error(
+                "policy",
+                format!(
+                    "cannot open explicit read root {}: {error}",
+                    external_root.display()
+                ),
+                request,
+            )),
+            false,
+        );
+    }
+    let result = run_call(
+        session,
+        &rewritten_request,
+        cancellation,
+        state_root,
+        session_id,
+    );
+    if let Err(error) = session.set_workspace_root(&original_root) {
+        return (
+            Err(adapter_error(
+                "internal",
+                format!(
+                    "cannot restore primary read root {}: {error}",
+                    original_root.display()
+                ),
+                request,
+            )),
+            true,
+        );
+    }
+    (result, false)
+}
+
 /// Session-thread main loop: owns the single-threaded [`FSZeroSession`] and
 /// serves one dispatch at a time.
 fn session_loop(
@@ -740,8 +944,12 @@ fn session_loop(
                 cancellation,
                 reply,
             } => {
-                let response = run_call(&mut session, &request, &cancellation, &root, &session_id);
+                let (response, terminate_session) =
+                    run_session_call(&mut session, &request, &cancellation, &root, &session_id);
                 let _ = reply.send(response);
+                if terminate_session {
+                    break;
+                }
             }
             SessionCommand::Shutdown { reply } => {
                 let _ = reply.send(());
@@ -809,9 +1017,7 @@ impl FsZeroAdapter {
         let state_root = state_root.into();
         let fszero_dir = state_root.join("fszero");
         if std::fs::create_dir_all(&fszero_dir).is_err() {
-            eprintln!(
-                "zsx-core: FSZero durable state root unusable; refusing with_root fallback"
-            );
+            eprintln!("zsx-core: FSZero durable state root unusable; refusing with_root fallback");
             return Self::inert(workspace_root, state_root);
         }
         let database = fszero_dir.join("store.sqlite3");

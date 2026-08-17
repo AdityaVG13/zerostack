@@ -16,8 +16,7 @@ use zsx_core::{
     ZsxSession, fs_write_grant_count_for_plan, harness_fs_write_grants,
 };
 
-/// Protocol label for the in-process zsx result envelope.
-pub const ZSX_PROTOCOL: &str = "zerostack.zsx.v1";
+pub use zsx_core::ZSX_PROTOCOL;
 /// Default execution timeout, matching the historical 30s zsx default.
 pub const DEFAULT_TIMEOUT_MS: u64 = 30_000;
 

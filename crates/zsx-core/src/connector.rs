@@ -248,7 +248,7 @@ pub(crate) fn execution_cell_ref(session_id: &str, context: AggregateExecutionCo
 /// The manifest is informational identity (the journal entries themselves are
 /// authoritative); it lets a native addon resuming a session name each
 /// attempt's engine, operation, and effect class without re-deriving digests.
-pub(crate) const ATTEMPT_MANIFEST_SCHEMA: &str = "zerostack.zsx.attempt_manifest.v1";
+pub(crate) const ATTEMPT_MANIFEST_SCHEMA: &str = "zerostack.zsx.attempt_manifest";
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]

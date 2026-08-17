@@ -77,7 +77,7 @@ pub use dag_exec::{
     StreamErrorV1, StreamSinkV1,
 };
 pub use envelope::{
-    SESSION_V6_ENVELOPE_LEGACY_PROTOCOL, SessionEnvelopeContextV1, DecisionViewContextV1,
+    ZSX_PROTOCOL, SessionEnvelopeContextV1, DecisionViewContextV1,
     legacy_envelope_value, legacy_kind_code,
 };
 pub use session::{
