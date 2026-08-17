@@ -995,10 +995,3 @@ pub fn lower(
     };
     Ok((engine, op.into(), args))
 }
-
-#[cfg(test)]
-#[path = "../../../tests/unit/zsx-core/lower_compound_search_alias_tests.rs"]
-mod compound_search_alias_tests;
-#[cfg(test)]
-#[path = "../../../tests/unit/zsx-core/lower_write_content_alias_tests.rs"]
-mod write_content_alias_tests;

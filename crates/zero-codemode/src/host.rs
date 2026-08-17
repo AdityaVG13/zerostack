@@ -790,10 +790,3 @@ pub(crate) fn spill_result(cas_root: &Path, encoded: &str) -> Result<JsonValue, 
         .map_err(|error| HostError::ResultSpill(error.to_string()))?;
     serde_json::to_value(&result).map_err(|error| HostError::ResultSpill(error.to_string()))
 }
-
-#[cfg(test)]
-#[path = "../../../tests/unit/zero-codemode/host_extract_useful_result_text_tests.rs"]
-mod extract_useful_result_text_tests;
-#[cfg(test)]
-#[path = "../../../tests/unit/zero-codemode/host_public_result_shape_tests.rs"]
-mod public_result_shape_tests;

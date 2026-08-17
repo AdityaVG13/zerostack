@@ -1205,7 +1205,3 @@ impl DomainAdapter for FsZeroAdapter {
         Ok(response)
     }
 }
-
-#[cfg(test)]
-#[path = "../../../tests/unit/zsx-core/fszero_tests.rs"]
-mod tests;

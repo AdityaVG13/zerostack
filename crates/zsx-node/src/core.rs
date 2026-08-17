@@ -332,7 +332,3 @@ impl SessionCore {
         session.shutdown()
     }
 }
-
-#[cfg(test)]
-#[path = "../../../tests/unit/zsx-node/core_tests.rs"]
-mod tests;

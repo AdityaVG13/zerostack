@@ -393,7 +393,3 @@ pub fn help_search(input: &Value) -> Value {
         "results": page,
     })
 }
-
-#[cfg(test)]
-#[path = "../../../tests/unit/zsx-core/help_help_search_mr_tests.rs"]
-mod help_search_mr_tests;

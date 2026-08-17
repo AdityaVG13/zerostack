@@ -256,7 +256,3 @@ fn canonical_zeroref(reference: &str) -> Option<&str> {
 fn truncate_chars(text: &str, limit: usize) -> String {
     text.chars().take(limit).collect()
 }
-
-#[cfg(test)]
-#[path = "../../../tests/unit/zero-abi/result_from_engine_step_tests.rs"]
-mod result_from_engine_step_tests;

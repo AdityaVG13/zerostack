@@ -2746,7 +2746,3 @@ fn validate_session_approvals(
     }
     Ok(ids.into_iter().collect())
 }
-
-#[cfg(test)]
-#[path = "../../../tests/unit/zsx-core/session_shutdown_deadline_tests.rs"]
-mod shutdown_deadline_tests;

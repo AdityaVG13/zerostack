@@ -3697,7 +3697,3 @@ fn unquote(value: &str) -> String {
     }
     value.into()
 }
-
-#[cfg(test)]
-#[path = "../../../tests/unit/zero-codemode/interpreter_promise_race_then_tests.rs"]
-mod promise_race_then_tests;

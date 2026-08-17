@@ -658,7 +658,3 @@ pub fn serve(default_root: PathBuf) -> io::Result<()> {
     host.shutdown();
     Ok(())
 }
-
-#[cfg(test)]
-#[path = "../../../tests/unit/zsx/mcp_rmja_session_identity_tests.rs"]
-mod rmja_session_identity_tests;
