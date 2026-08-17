@@ -1,4 +1,5 @@
 [package]
+autotests = false
 name = "zero-abi"
 version = "0.1.0"
 edition.workspace = true
@@ -13,3 +14,12 @@ zero-ref = { path = "../zero-ref" }
 
 [dev-dependencies]
 proptest = "1"
+serde_json = { workspace = true }
+
+[[test]]
+name = "abi_proptest"
+path = "../../tests/unit/zero-abi/abi_proptest.rs"
+
+[[test]]
+name = "zerokernel"
+path = "../../tests/unit/zero-abi/zerokernel.rs"

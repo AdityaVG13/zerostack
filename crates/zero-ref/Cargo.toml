@@ -17,8 +17,8 @@ serde_json = { workspace = true }
 
 [[test]]
 name = "zeroref_proptest"
-path = "tests/zeroref_proptest.rs"
+path = "../../tests/unit/zero-ref/zeroref_proptest.rs"
 
 [[test]]
 name = "zeroref_api"
-path = "tests/zeroref_api.rs"
+path = "../../tests/unit/zero-ref/zeroref_api.rs"

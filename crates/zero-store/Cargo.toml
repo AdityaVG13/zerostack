@@ -16,4 +16,4 @@ zero-ref = { path = "../zero-ref" }
 
 [[test]]
 name = "ensure_layout"
-path = "tests/ensure_layout.rs"
+path = "../../tests/unit/zero-store/ensure_layout.rs"

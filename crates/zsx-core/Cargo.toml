@@ -34,3 +34,10 @@ zero-codemode = { path = "../zero-codemode" }
 zero-ref = { path = "../zero-ref" }
 zero-store = { path = "../zero-store" }
 zero-machine-permit = { path = "../zerostack-machine-permit" }
+
+[dev-dependencies]
+serde_json.workspace = true
+
+[[test]]
+name = "residency"
+path = "../../tests/unit/zsx-core/residency.rs"

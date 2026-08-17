@@ -2253,36 +2253,6 @@ impl ZsxSession {
             state.terminating = true;
         }
     }
-
-    #[cfg(test)]
-    fn test_has_worker(&self) -> bool {
-        self.worker.lock().ok().is_some_and(|slot| slot.is_some())
-    }
-
-    #[cfg(test)]
-    fn test_mark_join_in_flight(&self) {
-        if let Ok(mut state) = self.state.lock() {
-            state.shutdown_sent = true;
-            state.accepting = false;
-            state.terminating = true;
-        }
-        self.join_in_flight.store(true, Ordering::Release);
-    }
-
-    #[cfg(test)]
-    fn test_install_parked_watch(&self, done: mpsc::Receiver<bool>) {
-        if let Ok(mut state) = self.state.lock() {
-            state.shutdown_sent = true;
-            state.accepting = false;
-            state.terminating = true;
-        }
-        if let Ok(mut worker) = self.worker.lock() {
-            let _ = worker.take();
-        }
-        if let Ok(mut watch) = self.join_watch.lock() {
-            *watch = Some(done);
-        }
-    }
 }
 
 impl Drop for ZsxSession {

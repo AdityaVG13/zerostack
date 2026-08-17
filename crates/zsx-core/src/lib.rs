@@ -94,7 +94,8 @@ pub use verdict::{
 /// zero-gate W4 contracts. The gate itself is internal to the connector;
 /// the report is the session's typed quality claim surface.
 pub use residency::{
-    SESSION_Q99_REPORT_SCHEMA, SessionQ99Report, TierQ99Report, tier_of_engine,
+    SESSION_Q99_REPORT_SCHEMA, SessionQ99Report, SessionResidencyGate, TierQ99Report,
+    tier_of_engine,
 };
 /// Bound untrusted error text for typed zsx envelopes.
 pub use zero_codemode::{
