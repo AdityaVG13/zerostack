@@ -14,10 +14,10 @@ use zero_process::{ProcessResourcePolicy, ResourceReceipt, VerifiedChild};
 use zero_abi::raw_worker::EngineIdentity;
 use zero_abi::{
     decode_response_frame, encode_frame, raw_worker_protocol_digest_hex,
-    validate_handshake_request, CallRequest, CancelRequest, EngineStageTimelineV1, FrameCodecError,
-    HandshakeAck, HandshakeRequest, ProtocolLimits, RedactorV1, SecretsErrorV1, ShutdownRequest,
-    TelemetryRequestV1, WorkerRequestFrame, WorkerResponseFrame, WorkerResult,
-    WorkerTokenAccountingV1, RAW_WORKER_PROTOCOL_VERSION, TIMELINE_CLOSURE_TOLERANCE_NS_V1,
+    validate_handshake_request, CallRequest, CancelRequest, EngineStageTimeline, FrameCodecError,
+    HandshakeAck, HandshakeRequest, ProtocolLimits, Redactor, SecretsError, ShutdownRequest,
+    TelemetryRequest, WorkerRequestFrame, WorkerResponseFrame, WorkerResult,
+    WorkerTokenAccounting, RAW_WORKER_PROTOCOL_VERSION, TIMELINE_CLOSURE_TOLERANCE_NS,
 };
 
 pub const STORE_ROOT_ENV: &str = "ZEROSTACK_STORE_ROOT";
@@ -208,13 +208,13 @@ pub enum WorkerEvent {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct WorkerSettlementReceiptV1 {
+pub struct WorkerSettlementReceipt {
     pub raw_worker_result_settlement_ns: u64,
     pub residual_transport_ns: u64,
     pub total_ns: u64,
     pub closure_error_ns: u64,
-    pub engine_timeline: Option<EngineStageTimelineV1>,
-    pub worker_token_accounting: Option<WorkerTokenAccountingV1>,
+    pub engine_timeline: Option<EngineStageTimeline>,
+    pub worker_token_accounting: Option<WorkerTokenAccounting>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -226,7 +226,7 @@ pub struct WorkerObservation {
     pub input_bytes: u64,
     pub output_bytes: u64,
     pub stderr_bytes: u64,
-    pub settlement: Option<WorkerSettlementReceiptV1>,
+    pub settlement: Option<WorkerSettlementReceipt>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -319,7 +319,7 @@ impl WorkerAdapterError {
     /// `Display` whenever the text crosses a model-visible or exported
     /// surface. Fails closed: if any configured secret survives redaction the
     /// caller gets `RedactionLeak` and must not emit the output.
-    pub fn redacted_message(&self, redactor: &RedactorV1) -> Result<String, SecretsErrorV1> {
+    pub fn redacted_message(&self, redactor: &Redactor) -> Result<String, SecretsError> {
         redactor.redact_text_checked(&self.to_string())
     }
 }
@@ -365,8 +365,8 @@ struct StderrState {
 
 struct SettlementSeed {
     arrived_at: Instant,
-    engine_timeline: Option<EngineStageTimelineV1>,
-    worker_token_accounting: Option<WorkerTokenAccountingV1>,
+    engine_timeline: Option<EngineStageTimeline>,
+    worker_token_accounting: Option<WorkerTokenAccounting>,
 }
 
 pub struct WorkerClient {
@@ -1283,7 +1283,7 @@ impl WorkerClient {
         elapsed: Duration,
         input_bytes: u64,
         output_bytes: u64,
-        settlement: Option<WorkerSettlementReceiptV1>,
+        settlement: Option<WorkerSettlementReceipt>,
     ) {
         if let Some(observer) = &self.config.observer {
             let stderr_bytes = self
@@ -1522,9 +1522,9 @@ fn spawn_stdio_threads(
 }
 
 fn telemetry_response_mismatch(
-    request: Option<&TelemetryRequestV1>,
-    engine_timeline: Option<&EngineStageTimelineV1>,
-    worker_token_accounting: Option<&WorkerTokenAccountingV1>,
+    request: Option<&TelemetryRequest>,
+    engine_timeline: Option<&EngineStageTimeline>,
+    worker_token_accounting: Option<&WorkerTokenAccounting>,
     require_requested_accounting: bool,
 ) -> Option<String> {
     let timeline_requested = request.is_some_and(|value| value.engine_stage_timeline);
@@ -1570,7 +1570,7 @@ pub fn settlement_close_refused(total_ns: u128, known_ns: u128, tolerance_ns: u6
 fn finalize_settlement(
     seed: SettlementSeed,
     call_started: Instant,
-) -> Result<WorkerSettlementReceiptV1, String> {
+) -> Result<WorkerSettlementReceipt, String> {
     let raw_worker_result_settlement_ns = duration_ns(seed.arrived_at.elapsed());
     let engine_internal_ns = seed
         .engine_timeline
@@ -1589,13 +1589,13 @@ fn finalize_settlement(
     if settlement_close_refused(
         u128::from(total_ns),
         known_ns,
-        TIMELINE_CLOSURE_TOLERANCE_NS_V1,
+        TIMELINE_CLOSURE_TOLERANCE_NS,
     ) {
         return Err(format!(
-            "worker settlement does not close: engine_internal_ns={engine_internal_ns} raw_worker_result_settlement_ns={raw_worker_result_settlement_ns} residual_transport_ns={residual_transport_ns} total_ns={total_ns} closure_error_ns={closure_error_ns} tolerance_ns={TIMELINE_CLOSURE_TOLERANCE_NS_V1}"
+            "worker settlement does not close: engine_internal_ns={engine_internal_ns} raw_worker_result_settlement_ns={raw_worker_result_settlement_ns} residual_transport_ns={residual_transport_ns} total_ns={total_ns} closure_error_ns={closure_error_ns} tolerance_ns={TIMELINE_CLOSURE_TOLERANCE_NS}"
         ));
     }
-    Ok(WorkerSettlementReceiptV1 {
+    Ok(WorkerSettlementReceipt {
         raw_worker_result_settlement_ns,
         residual_transport_ns,
         total_ns,

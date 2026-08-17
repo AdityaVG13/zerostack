@@ -26,7 +26,7 @@ static TEMP_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 ///
 /// Network mounts (smbfs/nfs) often return ENOTSUP/EPERM from `sync_all`.
 /// Engines must keep serving on those mounts; they cannot take
-/// [`DurableJournalV2`](crate::DurableJournalV2)'s fatal-sync path.
+/// [`DurableJournal`](crate::DurableJournal)'s fatal-sync path.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub enum SyncPolicy {
     /// `sync_all` errors are fatal, including ENOTSUP/EPERM.

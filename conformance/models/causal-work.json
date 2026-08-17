@@ -17,8 +17,8 @@
   ],
   "classification_law": "each unique measured work_unit_id has exactly one causal class",
   "conservation_law": "checked integer class total equals parent counter end minus start",
-  "measurement_namespace": "ParentCounterObservationV1::Measured",
-  "estimate_namespace": "DeclaredEstimateV1",
+  "measurement_namespace": "ParentCounterObservation::Measured",
+  "estimate_namespace": "DeclaredEstimate",
   "namespace_alias_allowed": false,
   "unavailable_counter": "UNMEASURED, never zero",
   "residue_policy": {
@@ -34,7 +34,7 @@
     "allocated_bytes",
     "io_bytes"
   ],
-  "legacy_v2": "readable mapping only; requires remeasurement and never becomes measured fact",
+  "legacy": "readable mapping only; requires remeasurement and never becomes measured fact",
   "native_counter_profiles": {
     "preregistered": ["macos", "linux", "windows"],
     "supported": [

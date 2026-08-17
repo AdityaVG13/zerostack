@@ -1,9 +1,9 @@
 //! Out-of-process worker trust boundary (ZS-OPS-005 / V6-R14).
 //!
 //! Workers are untrusted producers. Output crosses the process boundary as
-//! a serialized [`WorkerEnvelopeV1`] (identity claim + frames + traces) and
-//! is admitted -- or refused -- by [`WorkerTrustBoundaryV1`] against a
-//! digest-pinned [`TrustContextV1`]:
+//! a serialized [`WorkerTrustEnvelope`] (identity claim + frames + traces) and
+//! is admitted -- or refused -- by [`WorkerTrustBoundary`] against a
+//! digest-pinned [`TrustContext`]:
 //!
 //! - Identity must match the pinned engine/artifact/protocol digests
 //!   exactly (forged or stolen identity is refused).
@@ -15,12 +15,12 @@
 //!   overruns refused).
 //! - Envelopes are ordered by `seq`; a replayed envelope is refused.
 //!
-//! Every refusal is fail-loud with a sealed [`WorkerRefusalRecordV1`] (the
-//! receipt), and acceptance yields a sealed [`WorkerAdmissionReceiptV1`].
+//! Every refusal is fail-loud with a sealed [`WorkerRefusalRecord`] (the
+//! receipt), and acceptance yields a sealed [`WorkerAdmissionReceipt`].
 //! Admission is NOT authority: an admitted envelope still cannot acquire
 //! cache or commit authority -- cache admission requires
-//! [`CacheAdmissionGateV1`] over a rooted `PayloadFormationReceiptV1`, and
-//! commit requires [`ProjectRootGateV1`]'s verify -> authorize -> commit
+//! [`CacheAdmissionGate`] over a rooted `PayloadFormationReceipt`, and
+//! commit requires [`ProjectRootGate`]'s verify -> authorize -> commit
 //! chain. The out-of-process fixture in `tests/unit/zero-cert/worker_trust.rs`
 //! proves that forged frames/traces acquire neither.
 
@@ -28,18 +28,18 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde::{Deserialize, Serialize};
 
-use zero_abi::{DigestV1, canonical_json};
+use zero_abi::{Sha256Digest, canonical_json};
 
 /// Schema version of worker-trust artifacts.
-pub const WORKER_TRUST_SCHEMA_VERSION_V1: u16 = 1;
+pub const WORKER_TRUST_SCHEMA_VERSION: u16 = 1;
 /// Domain tag bound into worker envelope digests.
-pub const WORKER_TRUST_ENVELOPE_DOMAIN_V1: &[u8] = b"zerostack.worker-trust.envelope.v1\0";
+pub const WORKER_TRUST_ENVELOPE_DOMAIN: &[u8] = b"zerostack.worker-trust.envelope.v1\0";
 /// Domain tag bound into refusal record digests.
-pub const WORKER_TRUST_REFUSAL_DOMAIN_V1: &[u8] = b"zerostack.worker-trust.refusal.v1\0";
+pub const WORKER_TRUST_REFUSAL_DOMAIN: &[u8] = b"zerostack.worker-trust.refusal.v1\0";
 /// Domain tag bound into admission receipt digests.
-pub const WORKER_TRUST_ADMISSION_DOMAIN_V1: &[u8] = b"zerostack.worker-trust.admission.v1\0";
+pub const WORKER_TRUST_ADMISSION_DOMAIN: &[u8] = b"zerostack.worker-trust.admission.v1\0";
 /// ABI tag carried by worker-trust artifacts.
-pub const WORKER_TRUST_ABI_VERSION_V1: &str = "v6-r14";
+pub const WORKER_TRUST_ABI_VERSION: &str = "v6-r14";
 
 fn now_unix_ns() -> u64 {
     SystemTime::now()
@@ -48,16 +48,16 @@ fn now_unix_ns() -> u64 {
         .unwrap_or(0)
 }
 
-fn domain_digest(domain: &[u8], bytes: &[u8]) -> DigestV1 {
+fn domain_digest(domain: &[u8], bytes: &[u8]) -> Sha256Digest {
     let mut tagged = Vec::with_capacity(domain.len() + bytes.len());
     tagged.extend_from_slice(domain);
     tagged.extend_from_slice(bytes);
-    DigestV1::from_bytes(zero_abi::sha256(&tagged))
+    Sha256Digest::from_bytes(zero_abi::sha256(&tagged))
 }
 
-fn canonical_bytes<T: Serialize>(value: &T) -> Result<Vec<u8>, WorkerTrustErrorV1> {
+fn canonical_bytes<T: Serialize>(value: &T) -> Result<Vec<u8>, WorkerTrustError> {
     let json = serde_json::to_value(value)
-        .map_err(|error| WorkerTrustErrorV1::InvalidEnvelope(format!("not serializable: {error}")))?;
+        .map_err(|error| WorkerTrustError::InvalidEnvelope(format!("not serializable: {error}")))?;
     Ok(canonical_json(&json).into_bytes())
 }
 
@@ -65,32 +65,32 @@ fn canonical_bytes<T: Serialize>(value: &T) -> Result<Vec<u8>, WorkerTrustErrorV
 /// accepts claims that exactly match the pinned context.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
-pub struct WorkerIdentityClaimV1 {
+pub struct WorkerIdentityClaim {
     pub engine: String,
-    pub artifact_digest: DigestV1,
-    pub protocol_digest: DigestV1,
+    pub artifact_digest: Sha256Digest,
+    pub protocol_digest: Sha256Digest,
 }
 
 /// One worker frame. Frames are content-addressed: `payload_digest` must
 /// equal sha256 of `payload`.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
-pub struct WorkerFrameV1 {
+pub struct WorkerFrame {
     pub frame_index: u64,
     pub opcode: String,
     pub payload: Vec<u8>,
-    pub payload_digest: DigestV1,
+    pub payload_digest: Sha256Digest,
 }
 
 /// One worker trace line. Traces are bounded (stage registry + token
 /// budget).
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
-pub struct WorkerTraceV1 {
+pub struct WorkerTrustTrace {
     pub trace_index: u64,
     pub stage: String,
     pub tokens: u64,
-    pub root: DigestV1,
+    pub root: Sha256Digest,
 }
 
 /// The serialized worker output crossing the process boundary. This is the
@@ -98,85 +98,85 @@ pub struct WorkerTraceV1 {
 /// producer controls.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
-pub struct WorkerEnvelopeV1 {
+pub struct WorkerTrustEnvelope {
     pub schema_version: u16,
     pub seq: u64,
-    pub identity: WorkerIdentityClaimV1,
-    pub frames: Vec<WorkerFrameV1>,
-    pub traces: Vec<WorkerTraceV1>,
+    pub identity: WorkerIdentityClaim,
+    pub frames: Vec<WorkerFrame>,
+    pub traces: Vec<WorkerTrustTrace>,
     pub abi_version: String,
 }
 
-impl WorkerEnvelopeV1 {
+impl WorkerTrustEnvelope {
     pub fn new(
         seq: u64,
-        identity: WorkerIdentityClaimV1,
-        frames: Vec<WorkerFrameV1>,
-        traces: Vec<WorkerTraceV1>,
-    ) -> Result<Self, WorkerTrustErrorV1> {
+        identity: WorkerIdentityClaim,
+        frames: Vec<WorkerFrame>,
+        traces: Vec<WorkerTrustTrace>,
+    ) -> Result<Self, WorkerTrustError> {
         let envelope = Self {
-            schema_version: WORKER_TRUST_SCHEMA_VERSION_V1,
+            schema_version: WORKER_TRUST_SCHEMA_VERSION,
             seq,
             identity,
             frames,
             traces,
-            abi_version: WORKER_TRUST_ABI_VERSION_V1.to_owned(),
+            abi_version: WORKER_TRUST_ABI_VERSION.to_owned(),
         };
         envelope.validate()?;
         Ok(envelope)
     }
 
-    pub fn validate(&self) -> Result<(), WorkerTrustErrorV1> {
-        if self.schema_version != WORKER_TRUST_SCHEMA_VERSION_V1 {
-            return Err(WorkerTrustErrorV1::InvalidEnvelope(
+    pub fn validate(&self) -> Result<(), WorkerTrustError> {
+        if self.schema_version != WORKER_TRUST_SCHEMA_VERSION {
+            return Err(WorkerTrustError::InvalidEnvelope(
                 "envelope schema version is not supported".to_owned(),
             ));
         }
-        if self.abi_version != WORKER_TRUST_ABI_VERSION_V1 {
-            return Err(WorkerTrustErrorV1::InvalidEnvelope(
+        if self.abi_version != WORKER_TRUST_ABI_VERSION {
+            return Err(WorkerTrustError::InvalidEnvelope(
                 "envelope ABI version is not supported".to_owned(),
             ));
         }
         Ok(())
     }
 
-    pub fn canonical_bytes(&self) -> Result<Vec<u8>, WorkerTrustErrorV1> {
+    pub fn canonical_bytes(&self) -> Result<Vec<u8>, WorkerTrustError> {
         self.validate()?;
         canonical_bytes(self)
     }
 
     /// Content-derived envelope digest.
-    pub fn digest(&self) -> Result<DigestV1, WorkerTrustErrorV1> {
+    pub fn digest(&self) -> Result<Sha256Digest, WorkerTrustError> {
         Ok(domain_digest(
-            WORKER_TRUST_ENVELOPE_DOMAIN_V1,
+            WORKER_TRUST_ENVELOPE_DOMAIN,
             &self.canonical_bytes()?,
         ))
     }
 }
 
 /// The digest-pinned trust context the boundary checks against. Mirrors the
-/// `AssemblyManifestV1` identity binding from zero-abi: engine + artifact +
+/// `AssemblyManifest` identity binding from zero-abi: engine + artifact +
 /// protocol digests, plus bounded frame/trace budgets.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
-pub struct TrustContextV1 {
+pub struct TrustContext {
     pub expected_engine: String,
-    pub expected_artifact_digest: DigestV1,
-    pub expected_protocol_digest: DigestV1,
+    pub expected_artifact_digest: Sha256Digest,
+    pub expected_protocol_digest: Sha256Digest,
     pub max_frames: u64,
     pub max_traces: u64,
     pub max_trace_tokens: u64,
 }
 
-impl TrustContextV1 {
+impl TrustContext {
     pub fn new(
         expected_engine: impl Into<String>,
-        expected_artifact_digest: DigestV1,
-        expected_protocol_digest: DigestV1,
+        expected_artifact_digest: Sha256Digest,
+        expected_protocol_digest: Sha256Digest,
         max_frames: u64,
         max_traces: u64,
         max_trace_tokens: u64,
-    ) -> Result<Self, WorkerTrustErrorV1> {
+    ) -> Result<Self, WorkerTrustError> {
         let context = Self {
             expected_engine: expected_engine.into(),
             expected_artifact_digest,
@@ -186,15 +186,15 @@ impl TrustContextV1 {
             max_trace_tokens,
         };
         if context.expected_engine.is_empty()
-            || context.expected_artifact_digest == DigestV1::ZERO
-            || context.expected_protocol_digest == DigestV1::ZERO
+            || context.expected_artifact_digest == Sha256Digest::ZERO
+            || context.expected_protocol_digest == Sha256Digest::ZERO
         {
-            return Err(WorkerTrustErrorV1::InvalidEnvelope(
+            return Err(WorkerTrustError::InvalidEnvelope(
                 "trust context engine and digests must be nonzero".to_owned(),
             ));
         }
         if context.max_frames == 0 || context.max_traces == 0 || context.max_trace_tokens == 0 {
-            return Err(WorkerTrustErrorV1::InvalidEnvelope(
+            return Err(WorkerTrustError::InvalidEnvelope(
                 "trust context budgets must be nonzero".to_owned(),
             ));
         }
@@ -205,7 +205,7 @@ impl TrustContextV1 {
 /// Why the boundary refused a worker envelope.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
-pub enum WorkerRefusalReasonV1 {
+pub enum WorkerRefusalReason {
     IdentityMismatch,
     ForgedFrame { frame_index: u64 },
     ReplayedFrame { frame_index: u64 },
@@ -219,41 +219,41 @@ pub enum WorkerRefusalReasonV1 {
 /// never silent.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
-pub struct WorkerRefusalRecordV1 {
+pub struct WorkerRefusalRecord {
     pub schema_version: u16,
-    pub envelope_digest: DigestV1,
-    pub reason: WorkerRefusalReasonV1,
+    pub envelope_digest: Sha256Digest,
+    pub reason: WorkerRefusalReason,
     pub detail: String,
     pub seq: u64,
     pub refused_at_unix_ns: u64,
     pub abi_version: String,
 }
 
-impl WorkerRefusalRecordV1 {
+impl WorkerRefusalRecord {
     fn new(
-        envelope_digest: DigestV1,
-        reason: WorkerRefusalReasonV1,
+        envelope_digest: Sha256Digest,
+        reason: WorkerRefusalReason,
         detail: String,
         seq: u64,
     ) -> Self {
         Self {
-            schema_version: WORKER_TRUST_SCHEMA_VERSION_V1,
+            schema_version: WORKER_TRUST_SCHEMA_VERSION,
             envelope_digest,
             reason,
             detail,
             seq,
             refused_at_unix_ns: now_unix_ns(),
-            abi_version: WORKER_TRUST_ABI_VERSION_V1.to_owned(),
+            abi_version: WORKER_TRUST_ABI_VERSION.to_owned(),
         }
     }
 
-    pub fn canonical_bytes(&self) -> Result<Vec<u8>, WorkerTrustErrorV1> {
+    pub fn canonical_bytes(&self) -> Result<Vec<u8>, WorkerTrustError> {
         canonical_bytes(self)
     }
 
-    pub fn digest(&self) -> Result<DigestV1, WorkerTrustErrorV1> {
+    pub fn digest(&self) -> Result<Sha256Digest, WorkerTrustError> {
         Ok(domain_digest(
-            WORKER_TRUST_REFUSAL_DOMAIN_V1,
+            WORKER_TRUST_REFUSAL_DOMAIN,
             &self.canonical_bytes()?,
         ))
     }
@@ -263,9 +263,9 @@ impl WorkerRefusalRecordV1 {
 /// NOT authority -- cache/commit authority still requires the gates.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
-pub struct WorkerAdmissionReceiptV1 {
+pub struct WorkerAdmissionReceipt {
     pub schema_version: u16,
-    pub envelope_digest: DigestV1,
+    pub envelope_digest: Sha256Digest,
     pub seq: u64,
     pub frames: u64,
     pub traces: u64,
@@ -274,14 +274,14 @@ pub struct WorkerAdmissionReceiptV1 {
     pub abi_version: String,
 }
 
-impl WorkerAdmissionReceiptV1 {
-    pub fn canonical_bytes(&self) -> Result<Vec<u8>, WorkerTrustErrorV1> {
+impl WorkerAdmissionReceipt {
+    pub fn canonical_bytes(&self) -> Result<Vec<u8>, WorkerTrustError> {
         canonical_bytes(self)
     }
 
-    pub fn digest(&self) -> Result<DigestV1, WorkerTrustErrorV1> {
+    pub fn digest(&self) -> Result<Sha256Digest, WorkerTrustError> {
         Ok(domain_digest(
-            WORKER_TRUST_ADMISSION_DOMAIN_V1,
+            WORKER_TRUST_ADMISSION_DOMAIN,
             &self.canonical_bytes()?,
         ))
     }
@@ -290,36 +290,36 @@ impl WorkerAdmissionReceiptV1 {
 /// Loud, fail-closed worker-trust errors. Every refusal carries its sealed
 /// record; structural invalidity is a loud error.
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub enum WorkerTrustErrorV1 {
-    Refused { record: WorkerRefusalRecordV1 },
+pub enum WorkerTrustError {
+    Refused { record: WorkerRefusalRecord },
     InvalidEnvelope(String),
 }
 
-impl std::fmt::Display for WorkerTrustErrorV1 {
+impl std::fmt::Display for WorkerTrustError {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            WorkerTrustErrorV1::Refused { record } => {
+            WorkerTrustError::Refused { record } => {
                 write!(formatter, "worker trust refusal {:?}: {}", record.reason, record.detail)
             }
-            WorkerTrustErrorV1::InvalidEnvelope(detail) => {
+            WorkerTrustError::InvalidEnvelope(detail) => {
                 write!(formatter, "invalid worker envelope: {detail}")
             }
         }
     }
 }
 
-impl std::error::Error for WorkerTrustErrorV1 {}
+impl std::error::Error for WorkerTrustError {}
 
 /// The out-of-process trust boundary. Stateful: tracks the last accepted
 /// envelope sequence so whole-envelope replays are refused.
 #[derive(Clone, Debug)]
-pub struct WorkerTrustBoundaryV1 {
-    pub context: TrustContextV1,
+pub struct WorkerTrustBoundary {
+    pub context: TrustContext,
     pub last_accepted_seq: u64,
 }
 
-impl WorkerTrustBoundaryV1 {
-    pub fn new(context: TrustContextV1) -> Self {
+impl WorkerTrustBoundary {
+    pub fn new(context: TrustContext) -> Self {
         Self {
             context,
             last_accepted_seq: 0,
@@ -328,13 +328,13 @@ impl WorkerTrustBoundaryV1 {
 
     fn refuse(
         &self,
-        envelope_digest: DigestV1,
-        reason: WorkerRefusalReasonV1,
+        envelope_digest: Sha256Digest,
+        reason: WorkerRefusalReason,
         detail: String,
         seq: u64,
-    ) -> WorkerTrustErrorV1 {
-        WorkerTrustErrorV1::Refused {
-            record: WorkerRefusalRecordV1::new(envelope_digest, reason, detail, seq),
+    ) -> WorkerTrustError {
+        WorkerTrustError::Refused {
+            record: WorkerRefusalRecord::new(envelope_digest, reason, detail, seq),
         }
     }
 
@@ -343,12 +343,12 @@ impl WorkerTrustBoundaryV1 {
     /// accepted seq (replays refused thereafter).
     pub fn admit(
         &mut self,
-        envelope: &WorkerEnvelopeV1,
-    ) -> Result<WorkerAdmissionReceiptV1, WorkerTrustErrorV1> {
+        envelope: &WorkerTrustEnvelope,
+    ) -> Result<WorkerAdmissionReceipt, WorkerTrustError> {
         envelope.validate()?;
         let envelope_digest = envelope.digest()?;
 
-        let refusal = |reason: WorkerRefusalReasonV1, detail: String| {
+        let refusal = |reason: WorkerRefusalReason, detail: String| {
             self.refuse(envelope_digest, reason, detail, envelope.seq)
         };
 
@@ -359,7 +359,7 @@ impl WorkerTrustBoundaryV1 {
             || envelope.identity.protocol_digest != self.context.expected_protocol_digest
         {
             return Err(refusal(
-                WorkerRefusalReasonV1::IdentityMismatch,
+                WorkerRefusalReason::IdentityMismatch,
                 format!(
                     "identity claim (engine={}, artifact={}, protocol={}) does not match the pinned context",
                     envelope.identity.engine,
@@ -372,7 +372,7 @@ impl WorkerTrustBoundaryV1 {
         // 2. Envelope ordering: replays of a whole envelope are refused.
         if envelope.seq <= self.last_accepted_seq {
             return Err(refusal(
-                WorkerRefusalReasonV1::ReplayedEnvelope,
+                WorkerRefusalReason::ReplayedEnvelope,
                 format!(
                     "envelope seq {} is not newer than the last accepted seq {}",
                     envelope.seq, self.last_accepted_seq
@@ -384,7 +384,7 @@ impl WorkerTrustBoundaryV1 {
         //    indices (no forged or replayed frames).
         if envelope.frames.len() as u64 > self.context.max_frames {
             return Err(refusal(
-                WorkerRefusalReasonV1::FrameBudgetExceeded,
+                WorkerRefusalReason::FrameBudgetExceeded,
                 format!(
                     "{} frames exceed the bound {}",
                     envelope.frames.len(),
@@ -396,7 +396,7 @@ impl WorkerTrustBoundaryV1 {
         for frame in &envelope.frames {
             if !seen_frames.insert(frame.frame_index) {
                 return Err(refusal(
-                    WorkerRefusalReasonV1::ReplayedFrame {
+                    WorkerRefusalReason::ReplayedFrame {
                         frame_index: frame.frame_index,
                     },
                     format!("frame index {} appears more than once", frame.frame_index),
@@ -404,16 +404,16 @@ impl WorkerTrustBoundaryV1 {
             }
             if frame.opcode.is_empty() {
                 return Err(refusal(
-                    WorkerRefusalReasonV1::ForgedFrame {
+                    WorkerRefusalReason::ForgedFrame {
                         frame_index: frame.frame_index,
                     },
                     "frame opcode must be nonempty".to_owned(),
                 ));
             }
             let actual = zero_abi::sha256(&frame.payload);
-            if DigestV1::from_bytes(actual) != frame.payload_digest {
+            if Sha256Digest::from_bytes(actual) != frame.payload_digest {
                 return Err(refusal(
-                    WorkerRefusalReasonV1::ForgedFrame {
+                    WorkerRefusalReason::ForgedFrame {
                         frame_index: frame.frame_index,
                     },
                     format!(
@@ -427,7 +427,7 @@ impl WorkerTrustBoundaryV1 {
         // 4. Traces: bounded count and token budget, well-typed lines.
         if envelope.traces.len() as u64 > self.context.max_traces {
             return Err(refusal(
-                WorkerRefusalReasonV1::TraceTokenBudgetExceeded,
+                WorkerRefusalReason::TraceTokenBudgetExceeded,
                 format!(
                     "{} traces exceed the bound {}",
                     envelope.traces.len(),
@@ -440,15 +440,15 @@ impl WorkerTrustBoundaryV1 {
         for trace in &envelope.traces {
             if !seen_traces.insert(trace.trace_index) {
                 return Err(refusal(
-                    WorkerRefusalReasonV1::ForgedTrace {
+                    WorkerRefusalReason::ForgedTrace {
                         trace_index: trace.trace_index,
                     },
                     format!("trace index {} appears more than once", trace.trace_index),
                 ));
             }
-            if trace.stage.is_empty() || trace.root == DigestV1::ZERO {
+            if trace.stage.is_empty() || trace.root == Sha256Digest::ZERO {
                 return Err(refusal(
-                    WorkerRefusalReasonV1::ForgedTrace {
+                    WorkerRefusalReason::ForgedTrace {
                         trace_index: trace.trace_index,
                     },
                     format!(
@@ -461,7 +461,7 @@ impl WorkerTrustBoundaryV1 {
         }
         if total_tokens > self.context.max_trace_tokens {
             return Err(refusal(
-                WorkerRefusalReasonV1::TraceTokenBudgetExceeded,
+                WorkerRefusalReason::TraceTokenBudgetExceeded,
                 format!(
                     "trace token total {total_tokens} exceeds the bound {}",
                     self.context.max_trace_tokens
@@ -470,31 +470,31 @@ impl WorkerTrustBoundaryV1 {
         }
 
         self.last_accepted_seq = envelope.seq;
-        Ok(WorkerAdmissionReceiptV1 {
-            schema_version: WORKER_TRUST_SCHEMA_VERSION_V1,
+        Ok(WorkerAdmissionReceipt {
+            schema_version: WORKER_TRUST_SCHEMA_VERSION,
             envelope_digest,
             seq: envelope.seq,
             frames: envelope.frames.len() as u64,
             traces: envelope.traces.len() as u64,
             trace_tokens: total_tokens,
             admitted_at_unix_ns: now_unix_ns(),
-            abi_version: WORKER_TRUST_ABI_VERSION_V1.to_owned(),
+            abi_version: WORKER_TRUST_ABI_VERSION.to_owned(),
         })
     }
 }
 
 /// The frozen contract manifest for the worker trust boundary (ZS-OPS-005).
-pub fn worker_trust_contract_v1() -> serde_json::Value {
+pub fn worker_trust_contract() -> serde_json::Value {
     serde_json::json!({
-        "schema_version": WORKER_TRUST_SCHEMA_VERSION_V1,
+        "schema_version": WORKER_TRUST_SCHEMA_VERSION,
         "boundary": {
             "identity": "digest-pinned engine/artifact/protocol; forged or stolen identity refused",
             "frames": "content-addressed payloads; forged or replayed frames refused; bounded",
             "traces": "well-typed and token-bounded; forged traces refused",
             "envelope_order": "seq monotonic; replayed envelopes refused",
         },
-        "refusals": "fail-loud with sealed WorkerRefusalRecordV1; never silent",
-        "authority": "admission is NOT authority; cache authority requires CacheAdmissionGateV1, commit authority requires ProjectRootGateV1",
-        "abi_version": WORKER_TRUST_ABI_VERSION_V1,
+        "refusals": "fail-loud with sealed WorkerRefusalRecord; never silent",
+        "authority": "admission is NOT authority; cache authority requires CacheAdmissionGate, commit authority requires ProjectRootGate",
+        "abi_version": WORKER_TRUST_ABI_VERSION,
     })
 }

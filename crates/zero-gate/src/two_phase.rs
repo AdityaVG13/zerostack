@@ -4,17 +4,17 @@
 //! receipts are linear capabilities. Their fields are private, they are not
 //! cloneable, and only the preceding phase can construct the next phase.
 
-use crate::deoptimization::{deoptimization_contract_digest_v1, BaselineExecutionReceiptV1};
+use crate::deoptimization::{deoptimization_contract_digest, BaselineExecutionReceipt};
 use crate::quality::{
-    quality_envelope_contract_digest_v1, QualityAdmissionRecordV1, QualityAdmissionV1,
-    QualityEvidenceClassV1, QualityGuaranteeV1, QualitySelectionV1,
+    quality_envelope_contract_digest, QualityAdmissionRecord, QualityAdmission,
+    QualityEvidenceClass, QualityGuarantee, QualitySelection,
 };
 use crate::semantic_cut::{
-    semantic_cut_contract_digest_v1, SemanticCutCertificateRecordV1, SemanticCutEvidenceV1,
+    semantic_cut_contract_digest, SemanticCutCertificateRecord, SemanticCutEvidence,
 };
 use crate::transaction::{
-    transaction_contract_digest_v1, RestorationScopeV1, TransactionDispositionV1,
-    TransactionReceiptV1,
+    transaction_contract_digest, RestorationScope, TransactionDisposition,
+    TransactionReceipt,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -23,13 +23,13 @@ use std::collections::BTreeSet;
 use std::fmt;
 use std::time::{SystemTime, UNIX_EPOCH};
 use zero_abi::{
-    canonical_json, raw_worker::EffectClass, reasoning_contract_digest_v1,
-    verify_strict_no_downshift_v1, zbf_contract_digest_v1, ArtifactOwnerV1,
-    DigestV1 as AbiDigestV1, DurableProfileV1, ReasoningContractV1, RobustSnapCertificate,
-    SnapLevel, StrictReasoningAdmissionRecordV1, StrictReasoningAdmissionV1, ZbfArtifactKindV1,
-    ZbfObjectV1,
+    canonical_json, raw_worker::EffectClass, reasoning_contract_digest,
+    verify_strict_no_downshift, zbf_contract_digest, ArtifactOwner,
+    Sha256Digest as AbiDigest, DurableProfile, ReasoningContract, RobustSnapCertificate,
+    SnapLevel, StrictReasoningAdmissionRecord, StrictReasoningAdmission, ZbfArtifactKind,
+    ZbfObject,
 };
-use zero_cert::{effect_witness_contract_digest_v1, EffectAcceptedV1, VerifiedEvidence};
+use zero_cert::{effect_witness_contract_digest, EffectAccepted, VerifiedEvidence};
 
 /// Schema version. Bumped to 6 when the permit lease binding (expiry
 /// deadline, epoch, caller session id) entered the admission/permit digests
@@ -39,7 +39,7 @@ pub const GUARD_COUNT: usize = 10;
 pub const MAX_SOURCE_REPOSITORIES: usize = 64;
 pub const MAX_CONTROLLER_INSTRUCTIONS: usize = 4_096;
 
-pub type DigestV1 = [u8; 32];
+pub type Sha256Digest = [u8; 32];
 
 const TWO_PHASE_CONTRACT_DOMAIN_V2: &[u8] = b"zerostack.kernel.contract.v2\0";
 const TWO_PHASE_CONTRACT_DOMAIN_V3: &[u8] = b"zerostack.kernel.contract.v3\0";
@@ -52,9 +52,9 @@ pub fn two_phase_contract_manifest_v2() -> Value {
         "contract_version": 2,
         "guard_order": Guard::ALL,
         "linked_contracts": {
-            "effect_witness": effect_witness_contract_digest_v1(),
-            "transaction": transaction_contract_digest_v1(),
-            "zbf": zbf_contract_digest_v1(),
+            "effect_witness": effect_witness_contract_digest(),
+            "transaction": transaction_contract_digest(),
+            "zbf": zbf_contract_digest(),
         },
         "name": "zerostack.two_phase_kernel.v2",
         "negative_space": [
@@ -104,7 +104,7 @@ pub fn two_phase_contract_manifest_v2() -> Value {
     })
 }
 
-pub fn two_phase_contract_digest_v2() -> DigestV1 {
+pub fn two_phase_contract_digest_v2() -> Sha256Digest {
     let canonical = canonical_json(&two_phase_contract_manifest_v2());
     let mut bytes = Vec::with_capacity(TWO_PHASE_CONTRACT_DOMAIN_V2.len() + canonical.len());
     bytes.extend_from_slice(TWO_PHASE_CONTRACT_DOMAIN_V2);
@@ -125,10 +125,10 @@ pub fn two_phase_contract_manifest_v3() -> Value {
         "contract_version": 3,
         "guard_order": Guard::ALL,
         "linked_contracts": {
-            "effect_witness": effect_witness_contract_digest_v1(),
-            "quality_envelope": quality_envelope_contract_digest_v1(),
-            "transaction": transaction_contract_digest_v1(),
-            "zbf": zbf_contract_digest_v1(),
+            "effect_witness": effect_witness_contract_digest(),
+            "quality_envelope": quality_envelope_contract_digest(),
+            "transaction": transaction_contract_digest(),
+            "zbf": zbf_contract_digest(),
         },
         "name": "zerostack.two_phase_kernel.v3",
         "negative_space": [
@@ -185,7 +185,7 @@ pub fn two_phase_contract_manifest_v3() -> Value {
     })
 }
 
-pub fn two_phase_contract_digest_v3() -> DigestV1 {
+pub fn two_phase_contract_digest_v3() -> Sha256Digest {
     let canonical = canonical_json(&two_phase_contract_manifest_v3());
     let mut bytes = Vec::with_capacity(TWO_PHASE_CONTRACT_DOMAIN_V3.len() + canonical.len());
     bytes.extend_from_slice(TWO_PHASE_CONTRACT_DOMAIN_V3);
@@ -207,12 +207,12 @@ pub fn two_phase_contract_manifest_v4() -> Value {
         "contract_version": 4,
         "guard_order": Guard::ALL,
         "linked_contracts": {
-            "effect_witness": effect_witness_contract_digest_v1(),
-            "quality_envelope": quality_envelope_contract_digest_v1(),
-            "reasoning_contract": reasoning_contract_digest_v1(),
-            "semantic_cut": semantic_cut_contract_digest_v1(),
-            "transaction": transaction_contract_digest_v1(),
-            "zbf": zbf_contract_digest_v1(),
+            "effect_witness": effect_witness_contract_digest(),
+            "quality_envelope": quality_envelope_contract_digest(),
+            "reasoning_contract": reasoning_contract_digest(),
+            "semantic_cut": semantic_cut_contract_digest(),
+            "transaction": transaction_contract_digest(),
+            "zbf": zbf_contract_digest(),
         },
         "name": "zerostack.two_phase_kernel.v4",
         "negative_space": [
@@ -280,7 +280,7 @@ pub fn two_phase_contract_manifest_v4() -> Value {
     })
 }
 
-pub fn two_phase_contract_digest_v4() -> DigestV1 {
+pub fn two_phase_contract_digest_v4() -> Sha256Digest {
     let canonical = canonical_json(&two_phase_contract_manifest_v4());
     let mut bytes = Vec::with_capacity(TWO_PHASE_CONTRACT_DOMAIN_V4.len() + canonical.len());
     bytes.extend_from_slice(TWO_PHASE_CONTRACT_DOMAIN_V4);
@@ -302,13 +302,13 @@ pub fn two_phase_contract_manifest_v5() -> Value {
         "contract_version": TWO_PHASE_SCHEMA_VERSION,
         "guard_order": Guard::ALL,
         "linked_contracts": {
-            "deoptimization": deoptimization_contract_digest_v1(),
-            "effect_witness": effect_witness_contract_digest_v1(),
-            "quality_envelope": quality_envelope_contract_digest_v1(),
-            "reasoning_contract": reasoning_contract_digest_v1(),
-            "semantic_cut": semantic_cut_contract_digest_v1(),
-            "transaction": transaction_contract_digest_v1(),
-            "zbf": zbf_contract_digest_v1(),
+            "deoptimization": deoptimization_contract_digest(),
+            "effect_witness": effect_witness_contract_digest(),
+            "quality_envelope": quality_envelope_contract_digest(),
+            "reasoning_contract": reasoning_contract_digest(),
+            "semantic_cut": semantic_cut_contract_digest(),
+            "transaction": transaction_contract_digest(),
+            "zbf": zbf_contract_digest(),
         },
         "name": "zerostack.two_phase_kernel.v5",
         "negative_space": [
@@ -380,7 +380,7 @@ pub fn two_phase_contract_manifest_v5() -> Value {
     })
 }
 
-pub fn two_phase_contract_digest_v5() -> DigestV1 {
+pub fn two_phase_contract_digest_v5() -> Sha256Digest {
     let canonical = canonical_json(&two_phase_contract_manifest_v5());
     let mut bytes = Vec::with_capacity(TWO_PHASE_CONTRACT_DOMAIN_V5.len() + canonical.len());
     bytes.extend_from_slice(TWO_PHASE_CONTRACT_DOMAIN_V5);
@@ -543,30 +543,30 @@ impl fmt::Display for KernelError {
 impl std::error::Error for KernelError {}
 
 #[derive(Clone, Debug)]
-pub struct PeerArtifactInputV1 {
+pub struct PeerArtifactInput {
     pub bytes: Vec<u8>,
-    pub expected_owner: ArtifactOwnerV1,
-    pub expected_kind: ZbfArtifactKindV1,
-    pub expected_producer_contract_digest: DigestV1,
+    pub expected_owner: ArtifactOwner,
+    pub expected_kind: ZbfArtifactKind,
+    pub expected_producer_contract_digest: Sha256Digest,
 }
 
 /// Opaque G0/G1 evidence minted only by strict ZBF decode and coherence checks.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
-pub struct CanonicalArtifactSetV1 {
-    assembly_manifest_digest: DigestV1,
-    source_root_digest: DigestV1,
-    image_digest: DigestV1,
-    artifact_set_digest: DigestV1,
-    artifact_identities: Vec<DigestV1>,
-    producer_contract_digests: Vec<DigestV1>,
+pub struct CanonicalArtifactSet {
+    assembly_manifest_digest: Sha256Digest,
+    source_root_digest: Sha256Digest,
+    image_digest: Sha256Digest,
+    artifact_set_digest: Sha256Digest,
+    artifact_identities: Vec<Sha256Digest>,
+    producer_contract_digests: Vec<Sha256Digest>,
 }
 
-impl CanonicalArtifactSetV1 {
+impl CanonicalArtifactSet {
     pub fn verify(
-        assembly_manifest_digest: DigestV1,
-        source_root_digest: DigestV1,
-        artifacts: Vec<PeerArtifactInputV1>,
+        assembly_manifest_digest: Sha256Digest,
+        source_root_digest: Sha256Digest,
+        artifacts: Vec<PeerArtifactInput>,
     ) -> Result<Self, KernelError> {
         if is_zero(&assembly_manifest_digest) || is_zero(&source_root_digest) {
             return Err(KernelError::at(
@@ -576,9 +576,9 @@ impl CanonicalArtifactSetV1 {
             ));
         }
         let expected = [
-            (ArtifactOwnerV1::FsZero, ZbfArtifactKindV1::FsPack),
-            (ArtifactOwnerV1::GraphZero, ZbfArtifactKindV1::GraphPack),
-            (ArtifactOwnerV1::TokenZero, ZbfArtifactKindV1::TokenPack),
+            (ArtifactOwner::FsZero, ZbfArtifactKind::FsPack),
+            (ArtifactOwner::GraphZero, ZbfArtifactKind::GraphPack),
+            (ArtifactOwner::TokenZero, ZbfArtifactKind::TokenPack),
         ];
         if artifacts.len() != expected.len() {
             return Err(KernelError::at(
@@ -587,9 +587,9 @@ impl CanonicalArtifactSetV1 {
                 "canonical Zero Image requires exactly one FS, graph, and token pack",
             ));
         }
-        let assembly = AbiDigestV1::from_bytes(assembly_manifest_digest);
-        let source_root = AbiDigestV1::from_bytes(source_root_digest);
-        let profile = DurableProfileV1::portable_strict();
+        let assembly = AbiDigest::from_bytes(assembly_manifest_digest);
+        let source_root = AbiDigest::from_bytes(source_root_digest);
+        let profile = DurableProfile::portable_strict();
         let mut artifact_identities = Vec::with_capacity(expected.len());
         let mut producer_contract_digests = Vec::with_capacity(expected.len());
         for (index, (input, (owner, kind))) in artifacts.into_iter().zip(expected).enumerate() {
@@ -608,7 +608,7 @@ impl CanonicalArtifactSetV1 {
                 ));
             }
             let object =
-                ZbfObjectV1::from_bytes(&input.bytes, assembly, profile).map_err(|error| {
+                ZbfObject::from_bytes(&input.bytes, assembly, profile).map_err(|error| {
                     KernelError::at(
                         FailureCode::CanonicalDigestMismatch,
                         Guard::G0Canonical,
@@ -619,7 +619,7 @@ impl CanonicalArtifactSetV1 {
                 || object.header.kind != kind
                 || object.header.source_root_digest != source_root
                 || object.header.producer_contract_digest
-                    != AbiDigestV1::from_bytes(input.expected_producer_contract_digest)
+                    != AbiDigest::from_bytes(input.expected_producer_contract_digest)
             {
                 return Err(KernelError::at(
                     FailureCode::CoherenceFailure,
@@ -637,7 +637,7 @@ impl CanonicalArtifactSetV1 {
             artifact_identities.push(*identity.as_bytes());
             producer_contract_digests.push(input.expected_producer_contract_digest);
         }
-        let image_digest = image_digest_v1(source_root_digest, &artifact_identities);
+        let image_digest = image_digest(source_root_digest, &artifact_identities);
         let mut commitment = Vec::new();
         commitment.extend_from_slice(b"zerostack.kernel.artifact_set.v2\0");
         commitment.extend_from_slice(&assembly_manifest_digest);
@@ -657,16 +657,16 @@ impl CanonicalArtifactSetV1 {
         })
     }
 
-    pub const fn image_digest(&self) -> DigestV1 {
+    pub const fn image_digest(&self) -> Sha256Digest {
         self.image_digest
     }
 
-    pub const fn artifact_set_digest(&self) -> DigestV1 {
+    pub const fn artifact_set_digest(&self) -> Sha256Digest {
         self.artifact_set_digest
     }
 }
 
-fn image_digest_v1(source_root: DigestV1, artifacts: &[DigestV1]) -> DigestV1 {
+fn image_digest(source_root: Sha256Digest, artifacts: &[Sha256Digest]) -> Sha256Digest {
     let mut bytes = Vec::with_capacity(64 + artifacts.len() * 32);
     bytes.extend_from_slice(b"zerostack.kernel.image.v2\0");
     bytes.extend_from_slice(&source_root);
@@ -772,7 +772,7 @@ impl ExecutionTrace {
         Ok(())
     }
 
-    pub fn digest(&self) -> DigestV1 {
+    pub fn digest(&self) -> Sha256Digest {
         let mut bytes = Vec::with_capacity(96 + self.events.len() * 3);
         bytes.extend_from_slice(b"zerostack.kernel.trace.v5\0");
         bytes.extend_from_slice(&TWO_PHASE_SCHEMA_VERSION.to_be_bytes());
@@ -803,25 +803,25 @@ pub struct SourceHead {
 #[serde(deny_unknown_fields)]
 pub struct ExecutionBinding {
     pub schema_version: u16,
-    pub assembly_manifest_digest: DigestV1,
-    pub source_tree_digest: DigestV1,
+    pub assembly_manifest_digest: Sha256Digest,
+    pub source_tree_digest: Sha256Digest,
     pub source_repository_heads: Vec<SourceHead>,
-    pub image_digest: DigestV1,
-    pub state_snapshot_digest: DigestV1,
-    pub task_fingerprint_digest: DigestV1,
-    pub plan_digest: DigestV1,
-    pub fixed_model_digest: DigestV1,
-    pub baseline_reasoning_contract: ReasoningContractV1,
-    pub reasoning_contract: ReasoningContractV1,
-    pub baseline_reasoning_contract_digest: DigestV1,
-    pub reasoning_contract_digest: DigestV1,
-    pub comparison_identity_digest: DigestV1,
-    pub semantic_cut_verifier_identity_digest: DigestV1,
-    pub predecessor_receipt_head: DigestV1,
+    pub image_digest: Sha256Digest,
+    pub state_snapshot_digest: Sha256Digest,
+    pub task_fingerprint_digest: Sha256Digest,
+    pub plan_digest: Sha256Digest,
+    pub fixed_model_digest: Sha256Digest,
+    pub baseline_reasoning_contract: ReasoningContract,
+    pub reasoning_contract: ReasoningContract,
+    pub baseline_reasoning_contract_digest: Sha256Digest,
+    pub reasoning_contract_digest: Sha256Digest,
+    pub comparison_identity_digest: Sha256Digest,
+    pub semantic_cut_verifier_identity_digest: Sha256Digest,
+    pub predecessor_receipt_head: Sha256Digest,
 }
 
 impl ExecutionBinding {
-    pub fn digest(&self) -> DigestV1 {
+    pub fn digest(&self) -> Sha256Digest {
         let mut bytes = Vec::new();
         bytes.extend_from_slice(b"zerostack.kernel.binding.v5\0");
         bytes.extend_from_slice(&self.schema_version.to_be_bytes());
@@ -846,7 +846,7 @@ impl ExecutionBinding {
     }
 }
 
-pub fn candidate_protocol_identity_v1(binding: &ExecutionBinding) -> DigestV1 {
+pub fn candidate_protocol_identity(binding: &ExecutionBinding) -> Sha256Digest {
     let mut bytes = Vec::with_capacity(32 * 6);
     bytes.extend_from_slice(&binding.assembly_manifest_digest);
     bytes.extend_from_slice(&binding.source_tree_digest);
@@ -918,7 +918,7 @@ pub struct ControllerPlan {
     pub instructions: Vec<ControllerInstruction>,
 }
 impl ControllerPlan {
-    pub fn digest(&self) -> DigestV1 {
+    pub fn digest(&self) -> Sha256Digest {
         let mut bytes = Vec::with_capacity(40 + self.instructions.len());
         bytes.extend_from_slice(b"zerostack.kernel.plan.v5\0");
         bytes.extend_from_slice(&(self.instructions.len() as u64).to_be_bytes());
@@ -987,29 +987,29 @@ pub enum SnapEvidence {
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
-enum SafetyShieldKindV1 {
+enum SafetyShieldKind {
     ReadOnly,
     AcceptedEffect,
 }
 
-/// Opaque G6 evidence minted from verified zero-cert evidence or EffectAcceptedV1.
+/// Opaque G6 evidence minted from verified zero-cert evidence or EffectAccepted.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
-pub struct SafetyShieldEvidenceV1 {
-    kind: SafetyShieldKindV1,
-    shield_digest: DigestV1,
-    state_snapshot: DigestV1,
-    action_digest: Option<DigestV1>,
-    evidence_digest: DigestV1,
-    verifier_digest: DigestV1,
-    acceptance_digest: Option<DigestV1>,
-    accepted_effect: Option<EffectAcceptedV1>,
+pub struct SafetyShieldEvidence {
+    kind: SafetyShieldKind,
+    shield_digest: Sha256Digest,
+    state_snapshot: Sha256Digest,
+    action_digest: Option<Sha256Digest>,
+    evidence_digest: Sha256Digest,
+    verifier_digest: Sha256Digest,
+    acceptance_digest: Option<Sha256Digest>,
+    accepted_effect: Option<EffectAccepted>,
 }
 
-impl SafetyShieldEvidenceV1 {
+impl SafetyShieldEvidence {
     pub fn from_read_only_verified(
-        state_snapshot: DigestV1,
-        verifier_digest: DigestV1,
+        state_snapshot: Sha256Digest,
+        verifier_digest: Sha256Digest,
         evidence: &VerifiedEvidence<'_, '_>,
     ) -> Result<Self, KernelError> {
         if is_zero(&state_snapshot) || is_zero(&verifier_digest) {
@@ -1026,8 +1026,8 @@ impl SafetyShieldEvidenceV1 {
                 format!("verified read-only evidence is not canonical: {error}"),
             )
         })?;
-        let shield_digest = safety_shield_digest_v1(
-            SafetyShieldKindV1::ReadOnly,
+        let shield_digest = safety_shield_digest(
+            SafetyShieldKind::ReadOnly,
             state_snapshot,
             None,
             evidence_digest,
@@ -1035,7 +1035,7 @@ impl SafetyShieldEvidenceV1 {
             None,
         );
         Ok(Self {
-            kind: SafetyShieldKindV1::ReadOnly,
+            kind: SafetyShieldKind::ReadOnly,
             shield_digest,
             state_snapshot,
             action_digest: None,
@@ -1046,7 +1046,7 @@ impl SafetyShieldEvidenceV1 {
         })
     }
 
-    pub fn from_effect_accepted(accepted: EffectAcceptedV1) -> Result<Self, KernelError> {
+    pub fn from_effect_accepted(accepted: EffectAccepted) -> Result<Self, KernelError> {
         accepted.validate().map_err(|error| {
             KernelError::at(
                 FailureCode::MissingSafetyShield,
@@ -1059,8 +1059,8 @@ impl SafetyShieldEvidenceV1 {
         let evidence_digest = *accepted.evidence_digest().as_bytes();
         let verifier_digest = *accepted.verifier_digest().as_bytes();
         let acceptance_digest = *accepted.acceptance_digest().as_bytes();
-        let shield_digest = safety_shield_digest_v1(
-            SafetyShieldKindV1::AcceptedEffect,
+        let shield_digest = safety_shield_digest(
+            SafetyShieldKind::AcceptedEffect,
             state_snapshot,
             Some(action_digest),
             evidence_digest,
@@ -1068,7 +1068,7 @@ impl SafetyShieldEvidenceV1 {
             Some(acceptance_digest),
         );
         Ok(Self {
-            kind: SafetyShieldKindV1::AcceptedEffect,
+            kind: SafetyShieldKind::AcceptedEffect,
             shield_digest,
             state_snapshot,
             action_digest: Some(action_digest),
@@ -1079,32 +1079,32 @@ impl SafetyShieldEvidenceV1 {
         })
     }
 
-    pub const fn shield_digest(&self) -> DigestV1 {
+    pub const fn shield_digest(&self) -> Sha256Digest {
         self.shield_digest
     }
 
-    pub const fn action_digest(&self) -> Option<DigestV1> {
+    pub const fn action_digest(&self) -> Option<Sha256Digest> {
         self.action_digest
     }
 
-    pub const fn acceptance_digest(&self) -> Option<DigestV1> {
+    pub const fn acceptance_digest(&self) -> Option<Sha256Digest> {
         self.acceptance_digest
     }
 }
 
-fn safety_shield_digest_v1(
-    kind: SafetyShieldKindV1,
-    state_snapshot: DigestV1,
-    action_digest: Option<DigestV1>,
-    evidence_digest: DigestV1,
-    verifier_digest: DigestV1,
-    acceptance_digest: Option<DigestV1>,
-) -> DigestV1 {
+fn safety_shield_digest(
+    kind: SafetyShieldKind,
+    state_snapshot: Sha256Digest,
+    action_digest: Option<Sha256Digest>,
+    evidence_digest: Sha256Digest,
+    verifier_digest: Sha256Digest,
+    acceptance_digest: Option<Sha256Digest>,
+) -> Sha256Digest {
     let mut bytes = Vec::new();
     bytes.extend_from_slice(b"zerostack.kernel.safety_shield.v2\0");
     bytes.push(match kind {
-        SafetyShieldKindV1::ReadOnly => 0,
-        SafetyShieldKindV1::AcceptedEffect => 1,
+        SafetyShieldKind::ReadOnly => 0,
+        SafetyShieldKind::AcceptedEffect => 1,
     });
     bytes.extend_from_slice(&state_snapshot);
     append_optional_digest(&mut bytes, action_digest);
@@ -1115,18 +1115,18 @@ fn safety_shield_digest_v1(
 }
 
 /// Backward-compatible kernel name for the proof-carrying quality decision.
-pub type PerformanceAdmission = QualityAdmissionV1;
+pub type PerformanceAdmission = QualityAdmission;
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct GuardEvidence {
-    pub artifacts: CanonicalArtifactSetV1,
-    pub reasoning_admission: StrictReasoningAdmissionV1,
-    pub semantic_cut: SemanticCutEvidenceV1,
+    pub artifacts: CanonicalArtifactSet,
+    pub reasoning_admission: StrictReasoningAdmission,
+    pub semantic_cut: SemanticCutEvidence,
     pub snap: SnapEvidence,
-    pub safety_shield: SafetyShieldEvidenceV1,
-    pub approval_grant_digest: Option<DigestV1>,
-    pub irreversible_pre_action_evidence_digest: Option<DigestV1>,
+    pub safety_shield: SafetyShieldEvidence,
+    pub approval_grant_digest: Option<Sha256Digest>,
+    pub irreversible_pre_action_evidence_digest: Option<Sha256Digest>,
     pub performance: PerformanceAdmission,
 }
 
@@ -1151,7 +1151,7 @@ pub struct PrepareRequest {
 
 impl PrepareRequest {
     /// Canonical commitment to every G0-G7 admission input.
-    pub fn admission_digest(&self) -> DigestV1 {
+    pub fn admission_digest(&self) -> Sha256Digest {
         let mut bytes = Vec::new();
         bytes.extend_from_slice(b"zerostack.kernel.admission.v6\0");
         bytes.extend_from_slice(&self.binding.digest());
@@ -1222,9 +1222,9 @@ impl std::error::Error for PrepareFailure {}
 #[serde(deny_unknown_fields)]
 pub struct PermitRecord {
     pub schema_version: u16,
-    pub permit_id: DigestV1,
-    pub binding_digest: DigestV1,
-    pub admission_digest: DigestV1,
+    pub permit_id: Sha256Digest,
+    pub binding_digest: Sha256Digest,
+    pub admission_digest: Sha256Digest,
     pub surface: ExecutionSurface,
     pub trace: ExecutionTrace,
     /// Permit lease carried on the record; bound into `permit_id`.
@@ -1238,7 +1238,7 @@ pub struct PermitRecord {
 /// Opaque, linear execution authority. It cannot be deserialized or cloned.
 #[derive(Debug)]
 pub struct ExecutionPermit {
-    permit_id: DigestV1,
+    permit_id: Sha256Digest,
     request: PrepareRequest,
     trace: ExecutionTrace,
     expiry_deadline_ms: u64,
@@ -1480,7 +1480,7 @@ fn validate_g0(request: &PrepareRequest) -> Result<(), KernelError> {
             == request.binding.baseline_reasoning_contract_digest
         && *reasoning_admission.candidate_contract_digest().as_bytes()
             == request.binding.reasoning_contract_digest
-        && verify_strict_no_downshift_v1(
+        && verify_strict_no_downshift(
             &request.binding.baseline_reasoning_contract,
             &request.binding.reasoning_contract,
         )
@@ -1510,7 +1510,7 @@ fn validate_g1(request: &PrepareRequest) -> Result<(), KernelError> {
         || artifacts.source_root_digest != request.binding.source_tree_digest
         || artifacts.image_digest != request.binding.image_digest
         || artifacts.image_digest
-            != image_digest_v1(artifacts.source_root_digest, &artifacts.artifact_identities)
+            != image_digest(artifacts.source_root_digest, &artifacts.artifact_identities)
         || artifacts.producer_contract_digests.iter().any(is_zero)
     {
         return Err(KernelError::at(
@@ -1704,7 +1704,7 @@ fn validate_g6(request: &PrepareRequest) -> Result<(), KernelError> {
     if is_zero(&shield.shield_digest)
         || shield.state_snapshot != request.binding.state_snapshot_digest
         || shield.shield_digest
-            != safety_shield_digest_v1(
+            != safety_shield_digest(
                 shield.kind,
                 shield.state_snapshot,
                 shield.action_digest,
@@ -1720,16 +1720,16 @@ fn validate_g6(request: &PrepareRequest) -> Result<(), KernelError> {
         ));
     }
     match (request.effect_class, shield.kind) {
-        (EffectClass::ReadOnly, SafetyShieldKindV1::ReadOnly) => {}
-        (EffectClass::ReadOnly, SafetyShieldKindV1::AcceptedEffect)
-        | (_, SafetyShieldKindV1::ReadOnly) => {
+        (EffectClass::ReadOnly, SafetyShieldKind::ReadOnly) => {}
+        (EffectClass::ReadOnly, SafetyShieldKind::AcceptedEffect)
+        | (_, SafetyShieldKind::ReadOnly) => {
             return Err(KernelError::at(
                 FailureCode::MissingSafetyShield,
                 Guard::G6SafetyShield,
                 "shield kind does not match the admitted effect class",
             ));
         }
-        (_, SafetyShieldKindV1::AcceptedEffect) => {
+        (_, SafetyShieldKind::AcceptedEffect) => {
             let accepted = shield.accepted_effect.as_ref().ok_or_else(|| {
                 KernelError::at(
                     FailureCode::MissingSafetyShield,
@@ -1784,7 +1784,7 @@ fn validate_g7(request: &PrepareRequest) -> Result<(), KernelError> {
     })?;
     if *performance.comparison_identity_digest().as_bytes()
         != request.binding.comparison_identity_digest
-        || (performance.evidence_class() != QualityEvidenceClassV1::Distributional
+        || (performance.evidence_class() != QualityEvidenceClass::Distributional
             && *performance.scope_digest().as_bytes() != request.binding.task_fingerprint_digest)
     {
         return Err(KernelError::at(
@@ -1795,13 +1795,13 @@ fn validate_g7(request: &PrepareRequest) -> Result<(), KernelError> {
     }
     if matches!(
         performance.evidence_class(),
-        QualityEvidenceClassV1::ExactNeutral
-            | QualityEvidenceClassV1::PointwiseDominance
-            | QualityEvidenceClassV1::ScopedClassDominance
+        QualityEvidenceClass::ExactNeutral
+            | QualityEvidenceClass::PointwiseDominance
+            | QualityEvidenceClass::ScopedClassDominance
     ) && performance
         .candidate_identity_digest()
         .map(|digest| *digest.as_bytes())
-        != Some(candidate_protocol_identity_v1(&request.binding))
+        != Some(candidate_protocol_identity(&request.binding))
     {
         return Err(KernelError::at(
             FailureCode::PerformanceUnknown,
@@ -1816,25 +1816,25 @@ fn validate_g7(request: &PrepareRequest) -> Result<(), KernelError> {
             performance.guarantee(),
         ),
         (
-            QualityEvidenceClassV1::ExactNeutral,
-            QualitySelectionV1::Candidate,
-            QualityGuaranteeV1::ExactSubstitution,
+            QualityEvidenceClass::ExactNeutral,
+            QualitySelection::Candidate,
+            QualityGuarantee::ExactSubstitution,
         ) | (
-            QualityEvidenceClassV1::PointwiseDominance,
-            QualitySelectionV1::Candidate,
-            QualityGuaranteeV1::PointwiseNoWorse,
+            QualityEvidenceClass::PointwiseDominance,
+            QualitySelection::Candidate,
+            QualityGuarantee::PointwiseNoWorse,
         ) | (
-            QualityEvidenceClassV1::ScopedClassDominance,
-            QualitySelectionV1::Candidate,
-            QualityGuaranteeV1::ScopedClassNoWorse,
+            QualityEvidenceClass::ScopedClassDominance,
+            QualitySelection::Candidate,
+            QualityGuarantee::ScopedClassNoWorse,
         ) | (
-            QualityEvidenceClassV1::Distributional,
-            QualitySelectionV1::FrozenBaseline,
-            QualityGuaranteeV1::DistributionalOnly,
+            QualityEvidenceClass::Distributional,
+            QualitySelection::FrozenBaseline,
+            QualityGuarantee::DistributionalOnly,
         ) | (
-            QualityEvidenceClassV1::Unidentified,
-            QualitySelectionV1::FrozenBaseline,
-            QualityGuaranteeV1::Unidentified,
+            QualityEvidenceClass::Unidentified,
+            QualitySelection::FrozenBaseline,
+            QualityGuarantee::Unidentified,
         )
     );
     if coherent {
@@ -1890,7 +1890,7 @@ fn validate_source_heads(heads: &[SourceHead]) -> Result<(), KernelError> {
     Ok(())
 }
 
-fn permit_digest(request: &PrepareRequest, trace: &ExecutionTrace) -> DigestV1 {
+fn permit_digest(request: &PrepareRequest, trace: &ExecutionTrace) -> Sha256Digest {
     let mut bytes = Vec::new();
     bytes.extend_from_slice(b"zerostack.kernel.permit.v6\0");
     bytes.extend_from_slice(&request.admission_digest());
@@ -1905,17 +1905,17 @@ fn permit_digest(request: &PrepareRequest, trace: &ExecutionTrace) -> DigestV1 {
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct StagedEffect {
-    pub effect_digest: DigestV1,
+    pub effect_digest: Sha256Digest,
     pub effect_class: EffectClass,
-    pub acceptance_digest: Option<DigestV1>,
-    pub approval_grant_digest: Option<DigestV1>,
-    pub pre_action_evidence_digest: Option<DigestV1>,
+    pub acceptance_digest: Option<Sha256Digest>,
+    pub approval_grant_digest: Option<Sha256Digest>,
+    pub pre_action_evidence_digest: Option<Sha256Digest>,
 }
 
 /// Active execution owns private sinks. It exposes no output/effect getter.
 #[derive(Debug)]
 pub struct BrokeredExecution {
-    permit_id: DigestV1,
+    permit_id: Sha256Digest,
     request: PrepareRequest,
     trace: ExecutionTrace,
     expiry_deadline_ms: u64,
@@ -1923,7 +1923,7 @@ pub struct BrokeredExecution {
     caller_session_id: String,
     next_instruction: usize,
     usage: ResourceUsage,
-    verification_digest: Option<DigestV1>,
+    verification_digest: Option<Sha256Digest>,
     buffered_visible: Vec<u8>,
     staged_effects: Vec<StagedEffect>,
 }
@@ -1960,7 +1960,7 @@ impl BrokeredExecution {
         Ok(())
     }
 
-    pub fn record_verification(&mut self, evidence_digest: DigestV1) -> Result<(), KernelError> {
+    pub fn record_verification(&mut self, evidence_digest: Sha256Digest) -> Result<(), KernelError> {
         self.expect(ControllerInstruction::Verify)?; // ubs:ignore — BrokeredExecution::expect instruction matcher, not Result::expect
         if is_zero(&evidence_digest) {
             return Err(KernelError::execution(
@@ -2155,22 +2155,22 @@ pub struct RestorationAccounting {
 #[serde(deny_unknown_fields)]
 pub struct TransactionClosure {
     kind: ClosureKind,
-    root: DigestV1,
-    transaction_receipt_digest: DigestV1,
-    deoptimization_execution_receipt_digest: Option<DigestV1>,
-    deoptimization_kernel_binding_digest: Option<DigestV1>,
-    deoptimization_kernel_admission_digest: Option<DigestV1>,
-    action_digest: DigestV1,
-    acceptance_digest: Option<DigestV1>,
-    baseline_state: DigestV1,
-    candidate_state: DigestV1,
-    restoration_scope: RestorationScopeV1,
+    root: Sha256Digest,
+    transaction_receipt_digest: Sha256Digest,
+    deoptimization_execution_receipt_digest: Option<Sha256Digest>,
+    deoptimization_kernel_binding_digest: Option<Sha256Digest>,
+    deoptimization_kernel_admission_digest: Option<Sha256Digest>,
+    action_digest: Sha256Digest,
+    acceptance_digest: Option<Sha256Digest>,
+    baseline_state: Sha256Digest,
+    candidate_state: Sha256Digest,
+    restoration_scope: RestorationScope,
     external_restoration_debt_count: u16,
     restoration: RestorationAccounting,
 }
 
 impl TransactionClosure {
-    pub fn from_receipt(receipt: TransactionReceiptV1) -> Result<Self, KernelError> {
+    pub fn from_receipt(receipt: TransactionReceipt) -> Result<Self, KernelError> {
         receipt.canonical_bytes().map_err(|error| {
             KernelError::at(
                 FailureCode::IncompleteTransactionClosure,
@@ -2179,8 +2179,8 @@ impl TransactionClosure {
             )
         })?;
         let kind = match receipt.disposition() {
-            TransactionDispositionV1::CandidateCommitted => ClosureKind::Commit,
-            TransactionDispositionV1::BaselineRootRecovered => {
+            TransactionDisposition::CandidateCommitted => ClosureKind::Commit,
+            TransactionDisposition::BaselineRootRecovered => {
                 return Err(KernelError::at(
                     FailureCode::UnaccountedFallback,
                     Guard::G8TransactionClosure,
@@ -2218,7 +2218,7 @@ impl TransactionClosure {
     }
 
     pub fn from_baseline_execution(
-        execution_receipt: BaselineExecutionReceiptV1,
+        execution_receipt: BaselineExecutionReceipt,
     ) -> Result<Self, KernelError> {
         execution_receipt.validate().map_err(|error| {
             KernelError::at(
@@ -2255,7 +2255,7 @@ impl TransactionClosure {
             acceptance_digest: Some(baseline_acceptance_digest),
             baseline_state: *restored.baseline_state.as_bytes(),
             candidate_state: *restored.candidate_state.as_bytes(),
-            restoration_scope: RestorationScopeV1::DeclaredEffectClosure,
+            restoration_scope: RestorationScope::DeclaredEffectClosure,
             external_restoration_debt_count: 0,
             restoration: RestorationAccounting {
                 attempted: u64::from(restored.resource_count),
@@ -2268,10 +2268,10 @@ impl TransactionClosure {
     pub const fn kind(&self) -> ClosureKind {
         self.kind
     }
-    pub const fn root(&self) -> DigestV1 {
+    pub const fn root(&self) -> Sha256Digest {
         self.root
     }
-    pub const fn transaction_receipt_digest(&self) -> DigestV1 {
+    pub const fn transaction_receipt_digest(&self) -> Sha256Digest {
         self.transaction_receipt_digest
     }
     pub const fn restoration(&self) -> RestorationAccounting {
@@ -2314,13 +2314,13 @@ fn validate_closure(
                 || closure.deoptimization_kernel_admission_digest.is_some()
                 || closure.restoration != RestorationAccounting::default()
                 || closure.root != closure.candidate_state
-                || closure.restoration_scope != RestorationScopeV1::NotApplicableCandidateCommit
+                || closure.restoration_scope != RestorationScope::NotApplicableCandidateCommit
                 || closure.acceptance_digest
                     != execution.request.evidence.safety_shield.acceptance_digest
                 || execution.request.evidence.safety_shield.action_digest
                     != Some(closure.action_digest)
                 || execution.request.evidence.performance.selection()
-                    != QualitySelectionV1::Candidate
+                    != QualitySelection::Candidate
             {
                 return Err(KernelError::at(
                     FailureCode::IncompleteTransactionClosure,
@@ -2337,10 +2337,10 @@ fn validate_closure(
                     != Some(execution.request.admission_digest())
                 || closure.restoration.attempted == 0
                 || closure.restoration.completed != closure.restoration.attempted
-                || closure.restoration_scope != RestorationScopeV1::DeclaredEffectClosure
+                || closure.restoration_scope != RestorationScope::DeclaredEffectClosure
                 || (failure.is_none()
                     && execution.request.evidence.performance.selection()
-                        != QualitySelectionV1::FrozenBaseline)
+                        != QualitySelection::FrozenBaseline)
             {
                 return Err(KernelError::at(
                     FailureCode::UnaccountedFallback,
@@ -2366,46 +2366,46 @@ pub enum ReceiptKind {
 pub struct ReceiptRecord {
     pub schema_version: u16,
     pub kind: ReceiptKind,
-    pub permit_id: DigestV1,
-    pub binding_digest: DigestV1,
-    pub admission_digest: DigestV1,
-    pub assembly_manifest_digest: DigestV1,
-    pub source_tree_digest: DigestV1,
+    pub permit_id: Sha256Digest,
+    pub binding_digest: Sha256Digest,
+    pub admission_digest: Sha256Digest,
+    pub assembly_manifest_digest: Sha256Digest,
+    pub source_tree_digest: Sha256Digest,
     pub source_repository_heads: Vec<SourceHead>,
-    pub image_digest: DigestV1,
-    pub state_snapshot_digest: DigestV1,
-    pub task_fingerprint_digest: DigestV1,
-    pub plan_digest: DigestV1,
-    pub fixed_model_digest: DigestV1,
-    pub baseline_reasoning_contract: ReasoningContractV1,
-    pub reasoning_contract: ReasoningContractV1,
-    pub baseline_reasoning_contract_digest: DigestV1,
-    pub reasoning_contract_digest: DigestV1,
-    pub reasoning_admission: StrictReasoningAdmissionRecordV1,
-    pub comparison_identity_digest: DigestV1,
-    pub semantic_cut_verifier_identity_digest: DigestV1,
-    pub artifact_set_digest: DigestV1,
-    pub semantic_cut_certificate_digest: DigestV1,
-    pub semantic_cut: SemanticCutCertificateRecordV1,
-    pub terminal_rcq_identity_digest: DigestV1,
-    pub snap_certificate_digest: Option<DigestV1>,
-    pub safety_shield_digest: DigestV1,
-    pub quality_admission: QualityAdmissionRecordV1,
-    pub final_quality_selection: QualitySelectionV1,
-    pub transaction_receipt_digest: DigestV1,
-    pub deoptimization_execution_receipt_digest: Option<DigestV1>,
+    pub image_digest: Sha256Digest,
+    pub state_snapshot_digest: Sha256Digest,
+    pub task_fingerprint_digest: Sha256Digest,
+    pub plan_digest: Sha256Digest,
+    pub fixed_model_digest: Sha256Digest,
+    pub baseline_reasoning_contract: ReasoningContract,
+    pub reasoning_contract: ReasoningContract,
+    pub baseline_reasoning_contract_digest: Sha256Digest,
+    pub reasoning_contract_digest: Sha256Digest,
+    pub reasoning_admission: StrictReasoningAdmissionRecord,
+    pub comparison_identity_digest: Sha256Digest,
+    pub semantic_cut_verifier_identity_digest: Sha256Digest,
+    pub artifact_set_digest: Sha256Digest,
+    pub semantic_cut_certificate_digest: Sha256Digest,
+    pub semantic_cut: SemanticCutCertificateRecord,
+    pub terminal_rcq_identity_digest: Sha256Digest,
+    pub snap_certificate_digest: Option<Sha256Digest>,
+    pub safety_shield_digest: Sha256Digest,
+    pub quality_admission: QualityAdmissionRecord,
+    pub final_quality_selection: QualitySelection,
+    pub transaction_receipt_digest: Sha256Digest,
+    pub deoptimization_execution_receipt_digest: Option<Sha256Digest>,
     pub attribution_class: AttributionClass,
     pub effect_class: EffectClass,
     pub resource_envelope: WorkerEnvelope,
     pub surface: ExecutionSurface,
-    pub verification_digest: Option<DigestV1>,
-    pub output_digest: DigestV1,
-    pub effects_digest: DigestV1,
+    pub verification_digest: Option<Sha256Digest>,
+    pub output_digest: Sha256Digest,
+    pub effects_digest: Sha256Digest,
     pub resource_usage: ResourceUsage,
-    pub predecessor_receipt_head: DigestV1,
-    pub successor_root: DigestV1,
-    pub trace_digest: DigestV1,
-    pub receipt_head: DigestV1,
+    pub predecessor_receipt_head: Sha256Digest,
+    pub successor_root: Sha256Digest,
+    pub trace_digest: Sha256Digest,
+    pub receipt_head: Sha256Digest,
     pub failure_code: Option<FailureCode>,
     pub restoration: RestorationAccounting,
 }
@@ -2571,7 +2571,7 @@ fn reasoning_receipt_fields_valid(record: &ReceiptRecord) -> bool {
             .candidate_contract_digest
             .as_bytes()
             == record.reasoning_contract_digest
-        && verify_strict_no_downshift_v1(
+        && verify_strict_no_downshift(
             &record.baseline_reasoning_contract,
             &record.reasoning_contract,
         )
@@ -2600,18 +2600,18 @@ fn quality_receipt_fields_valid(record: &ReceiptRecord) -> bool {
             .comparison_identity_digest
             .as_bytes()
             == record.comparison_identity_digest
-        && (record.quality_admission.evidence_class == QualityEvidenceClassV1::Distributional
+        && (record.quality_admission.evidence_class == QualityEvidenceClass::Distributional
             || *record.quality_admission.scope_digest.as_bytes() == record.task_fingerprint_digest)
         && (!matches!(
             record.quality_admission.evidence_class,
-            QualityEvidenceClassV1::ExactNeutral
-                | QualityEvidenceClassV1::PointwiseDominance
-                | QualityEvidenceClassV1::ScopedClassDominance
+            QualityEvidenceClass::ExactNeutral
+                | QualityEvidenceClass::PointwiseDominance
+                | QualityEvidenceClass::ScopedClassDominance
         ) || record
             .quality_admission
             .candidate_identity_digest
             .map(|digest| *digest.as_bytes())
-            == Some(candidate_protocol_identity_v1(&ExecutionBinding {
+            == Some(candidate_protocol_identity(&ExecutionBinding {
                 schema_version: record.schema_version,
                 assembly_manifest_digest: record.assembly_manifest_digest,
                 source_tree_digest: record.source_tree_digest,
@@ -2631,11 +2631,11 @@ fn quality_receipt_fields_valid(record: &ReceiptRecord) -> bool {
             })))
         && matches!(
             (record.kind, record.final_quality_selection),
-            (ReceiptKind::Commit, QualitySelectionV1::Candidate)
-                | (ReceiptKind::Fallback, QualitySelectionV1::FrozenBaseline)
+            (ReceiptKind::Commit, QualitySelection::Candidate)
+                | (ReceiptKind::Fallback, QualitySelection::FrozenBaseline)
         )
         && (record.kind != ReceiptKind::Commit
-            || record.quality_admission.selection == QualitySelectionV1::Candidate)
+            || record.quality_admission.selection == QualitySelection::Candidate)
 }
 
 fn envelope_has_zero(envelope: WorkerEnvelope) -> bool {
@@ -2651,11 +2651,11 @@ fn envelope_has_zero(envelope: WorkerEnvelope) -> bool {
 
 #[derive(Debug)]
 pub struct ReadyToFinalize {
-    permit_id: DigestV1,
+    permit_id: Sha256Digest,
     request: PrepareRequest,
     trace: ExecutionTrace,
     usage: ResourceUsage,
-    verification_digest: Option<DigestV1>,
+    verification_digest: Option<Sha256Digest>,
     buffered_visible: Vec<u8>,
     staged_effects: Vec<StagedEffect>,
     closure: TransactionClosure,
@@ -2691,8 +2691,8 @@ impl ReadyToFinalize {
         let safety_shield_digest = self.request.evidence.safety_shield.shield_digest;
         let quality_admission = self.request.evidence.performance.record();
         let final_quality_selection = match kind {
-            ReceiptKind::Commit => QualitySelectionV1::Candidate,
-            ReceiptKind::Fallback => QualitySelectionV1::FrozenBaseline,
+            ReceiptKind::Commit => QualitySelection::Candidate,
+            ReceiptKind::Fallback => QualitySelection::FrozenBaseline,
         };
         let transaction_receipt_digest = self.closure.transaction_receipt_digest;
         let deoptimization_execution_receipt_digest =
@@ -2771,31 +2771,31 @@ impl ReadyToFinalize {
 
 #[derive(Debug)]
 struct ReceiptCommon {
-    permit_id: DigestV1,
+    permit_id: Sha256Digest,
     binding: ExecutionBinding,
-    admission_digest: DigestV1,
-    artifact_set_digest: DigestV1,
-    reasoning_admission: StrictReasoningAdmissionRecordV1,
-    semantic_cut_certificate_digest: DigestV1,
-    semantic_cut: SemanticCutCertificateRecordV1,
-    terminal_rcq_identity_digest: DigestV1,
-    snap_certificate_digest: Option<DigestV1>,
-    safety_shield_digest: DigestV1,
-    quality_admission: QualityAdmissionRecordV1,
-    final_quality_selection: QualitySelectionV1,
-    transaction_receipt_digest: DigestV1,
-    deoptimization_execution_receipt_digest: Option<DigestV1>,
+    admission_digest: Sha256Digest,
+    artifact_set_digest: Sha256Digest,
+    reasoning_admission: StrictReasoningAdmissionRecord,
+    semantic_cut_certificate_digest: Sha256Digest,
+    semantic_cut: SemanticCutCertificateRecord,
+    terminal_rcq_identity_digest: Sha256Digest,
+    snap_certificate_digest: Option<Sha256Digest>,
+    safety_shield_digest: Sha256Digest,
+    quality_admission: QualityAdmissionRecord,
+    final_quality_selection: QualitySelection,
+    transaction_receipt_digest: Sha256Digest,
+    deoptimization_execution_receipt_digest: Option<Sha256Digest>,
     attribution_class: AttributionClass,
     effect_class: EffectClass,
     resource_envelope: WorkerEnvelope,
     surface: ExecutionSurface,
-    verification_digest: Option<DigestV1>,
-    output_digest: DigestV1,
-    effects_digest: DigestV1,
+    verification_digest: Option<Sha256Digest>,
+    output_digest: Sha256Digest,
+    effects_digest: Sha256Digest,
     usage: ResourceUsage,
-    successor_root: DigestV1,
+    successor_root: Sha256Digest,
     trace: ExecutionTrace,
-    receipt_head: DigestV1,
+    receipt_head: Sha256Digest,
     failure_code: Option<FailureCode>,
     restoration: RestorationAccounting,
 }
@@ -2880,7 +2880,7 @@ impl CommitReceipt {
             approved_effects: self.staged_effects,
             receipt_head: self.common.receipt_head,
             successor_root: self.common.successor_root,
-            durability: PublicationDurabilityV1::JournalRootCommitted {
+            durability: PublicationDurability::JournalRootCommitted {
                 transaction_receipt_digest: self.common.transaction_receipt_digest,
             },
         }
@@ -2903,15 +2903,15 @@ impl FallbackReceipt {
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
-pub enum PublicationDurabilityV1 {
+pub enum PublicationDurability {
     BufferedOnly,
     /// A zero-store journal root commit. This is not a native filesystem durability claim.
     JournalRootCommitted {
-        transaction_receipt_digest: DigestV1,
+        transaction_receipt_digest: Sha256Digest,
     },
     JournalVerified {
-        evidence_digest: DigestV1,
-        durable_profile_digest: DigestV1,
+        evidence_digest: Sha256Digest,
+        durable_profile_digest: Sha256Digest,
     },
 }
 
@@ -2919,40 +2919,40 @@ pub enum PublicationDurabilityV1 {
 pub struct PublishedCommit {
     pub visible_bytes: Vec<u8>,
     pub approved_effects: Vec<StagedEffect>,
-    pub receipt_head: DigestV1,
-    pub successor_root: DigestV1,
-    pub durability: PublicationDurabilityV1,
+    pub receipt_head: Sha256Digest,
+    pub successor_root: Sha256Digest,
+    pub durability: PublicationDurability,
 }
 
 #[allow(clippy::too_many_arguments)]
 fn receipt_digest(
     kind: ReceiptKind,
-    permit_id: DigestV1,
+    permit_id: Sha256Digest,
     binding: &ExecutionBinding,
-    admission_digest: DigestV1,
-    artifact_set_digest: DigestV1,
-    reasoning_admission_digest: DigestV1,
-    semantic_cut_certificate_digest: DigestV1,
-    terminal_rcq_identity_digest: DigestV1,
-    snap_certificate_digest: Option<DigestV1>,
-    safety_shield_digest: DigestV1,
-    quality_admission: &QualityAdmissionRecordV1,
-    final_quality_selection: QualitySelectionV1,
-    transaction_receipt_digest: DigestV1,
-    deoptimization_execution_receipt_digest: Option<DigestV1>,
+    admission_digest: Sha256Digest,
+    artifact_set_digest: Sha256Digest,
+    reasoning_admission_digest: Sha256Digest,
+    semantic_cut_certificate_digest: Sha256Digest,
+    terminal_rcq_identity_digest: Sha256Digest,
+    snap_certificate_digest: Option<Sha256Digest>,
+    safety_shield_digest: Sha256Digest,
+    quality_admission: &QualityAdmissionRecord,
+    final_quality_selection: QualitySelection,
+    transaction_receipt_digest: Sha256Digest,
+    deoptimization_execution_receipt_digest: Option<Sha256Digest>,
     attribution_class: AttributionClass,
     effect_class: EffectClass,
     envelope: WorkerEnvelope,
     surface: ExecutionSurface,
-    verification_digest: Option<DigestV1>,
-    output_digest: DigestV1,
-    effects_digest: DigestV1,
+    verification_digest: Option<Sha256Digest>,
+    output_digest: Sha256Digest,
+    effects_digest: Sha256Digest,
     usage: ResourceUsage,
-    successor_root: DigestV1,
-    trace_digest: DigestV1,
+    successor_root: Sha256Digest,
+    trace_digest: Sha256Digest,
     failure: Option<FailureCode>,
     restoration: RestorationAccounting,
-) -> DigestV1 {
+) -> Sha256Digest {
     let mut bytes = Vec::new();
     bytes.extend_from_slice(b"zerostack.kernel.receipt.v5\0");
     bytes.extend_from_slice(&TWO_PHASE_SCHEMA_VERSION.to_be_bytes());
@@ -2968,8 +2968,8 @@ fn receipt_digest(
     bytes.extend_from_slice(&safety_shield_digest);
     bytes.extend_from_slice(quality_admission.admission_digest.as_bytes());
     bytes.push(match final_quality_selection {
-        QualitySelectionV1::Candidate => 0,
-        QualitySelectionV1::FrozenBaseline => 1,
+        QualitySelection::Candidate => 0,
+        QualitySelection::FrozenBaseline => 1,
     });
     bytes.extend_from_slice(&transaction_receipt_digest);
     append_optional_digest(&mut bytes, deoptimization_execution_receipt_digest);
@@ -3007,7 +3007,7 @@ fn receipt_digest(
     hash_bytes(&bytes)
 }
 
-fn effect_list_digest(effects: &[StagedEffect]) -> DigestV1 {
+fn effect_list_digest(effects: &[StagedEffect]) -> Sha256Digest {
     let mut bytes = Vec::new();
     bytes.extend_from_slice(b"zerostack.kernel.effects.v5\0");
     bytes.extend_from_slice(&(effects.len() as u64).to_be_bytes());
@@ -3031,17 +3031,17 @@ fn append_bounded(target: &mut Vec<u8>, value: &[u8]) {
     target.extend_from_slice(value);
 }
 
-fn append_optional_digest(target: &mut Vec<u8>, digest: Option<DigestV1>) {
+fn append_optional_digest(target: &mut Vec<u8>, digest: Option<Sha256Digest>) {
     target.push(digest.is_some() as u8);
     if let Some(digest) = digest {
         target.extend_from_slice(&digest);
     }
 }
 
-fn hash_bytes(bytes: &[u8]) -> DigestV1 {
+fn hash_bytes(bytes: &[u8]) -> Sha256Digest {
     Sha256::digest(bytes).into()
 }
-fn is_zero(digest: &DigestV1) -> bool {
+fn is_zero(digest: &Sha256Digest) -> bool {
     digest.iter().all(|byte| *byte == 0)
 }
 

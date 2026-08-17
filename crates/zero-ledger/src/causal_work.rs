@@ -9,16 +9,16 @@ use std::{collections::BTreeSet, error::Error, fmt};
 
 use serde::{Deserialize, Deserializer, Serialize, de};
 use serde_json::{Value, json};
-use zero_abi::{DigestV1, canonical_json, sha256};
+use zero_abi::{Sha256Digest, canonical_json, sha256};
 
-pub const CAUSAL_WORK_TAXONOMY_VERSION_V1: u16 = 3;
-pub const CAUSAL_WORK_RECEIPT_SCHEMA_V1: u16 = 1;
+pub const CAUSAL_WORK_TAXONOMY_VERSION: u16 = 3;
+pub const CAUSAL_WORK_RECEIPT_SCHEMA: u16 = 1;
 pub const CAUSAL_WORK_MAX_CHARGES: usize = 65_536;
 pub const CAUSAL_WORK_MAX_ID_BYTES: usize = 256;
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, Ord, PartialEq, PartialOrd, Serialize)]
 #[serde(rename_all = "snake_case")]
-pub enum CausalWorkClassV1 {
+pub enum CausalWorkClass {
     Candidate,
     Verification,
     Comparison,
@@ -29,7 +29,7 @@ pub enum CausalWorkClassV1 {
     Residue,
 }
 
-impl CausalWorkClassV1 {
+impl CausalWorkClass {
     pub const ALL: [Self; 8] = [
         Self::Candidate,
         Self::Verification,
@@ -57,7 +57,7 @@ impl CausalWorkClassV1 {
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
-pub enum CausalCounterUnitV1 {
+pub enum CausalCounterUnit {
     Tokens,
     Bytes,
     Calls,
@@ -69,27 +69,27 @@ pub enum CausalCounterUnitV1 {
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
-pub struct ParentCounterIdentityV1 {
+pub struct ParentCounterIdentity {
     pub counter_id: String,
-    pub unit: CausalCounterUnitV1,
-    pub boundary_digest: DigestV1,
-    pub adapter_digest: DigestV1,
-    pub platform_profile_digest: DigestV1,
+    pub unit: CausalCounterUnit,
+    pub boundary_digest: Sha256Digest,
+    pub adapter_digest: Sha256Digest,
+    pub platform_profile_digest: Sha256Digest,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
-pub struct ParentCounterWindowV1 {
-    pub identity: ParentCounterIdentityV1,
+pub struct ParentCounterWindow {
+    pub identity: ParentCounterIdentity,
     pub start: u64,
     pub end: u64,
 }
 
-impl ParentCounterWindowV1 {
-    pub fn delta(&self) -> Result<u64, CausalWorkErrorV1> {
+impl ParentCounterWindow {
+    pub fn delta(&self) -> Result<u64, CausalWorkError> {
         self.end
             .checked_sub(self.start)
-            .ok_or(CausalWorkErrorV1::CounterRegressed {
+            .ok_or(CausalWorkError::CounterRegressed {
                 start: self.start,
                 end: self.end,
             })
@@ -98,47 +98,47 @@ impl ParentCounterWindowV1 {
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(tag = "availability", rename_all = "snake_case", deny_unknown_fields)]
-pub enum ParentCounterObservationV1 {
+pub enum ParentCounterObservation {
     Measured {
-        window: ParentCounterWindowV1,
+        window: ParentCounterWindow,
     },
     Unmeasured {
-        identity: ParentCounterIdentityV1,
+        identity: ParentCounterIdentity,
         reason: String,
     },
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
-pub struct DeclaredEstimateV1 {
+pub struct DeclaredEstimate {
     pub estimator_id: String,
-    pub identity: ParentCounterIdentityV1,
+    pub identity: ParentCounterIdentity,
     pub declared_value: u64,
-    pub assumptions_digest: DigestV1,
+    pub assumptions_digest: Sha256Digest,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, Ord, PartialEq, PartialOrd, Serialize)]
 #[serde(deny_unknown_fields)]
-pub struct CausalWorkChargeV1 {
-    pub work_unit_id: DigestV1,
-    pub class: CausalWorkClassV1,
+pub struct CausalWorkCharge {
+    pub work_unit_id: Sha256Digest,
+    pub class: CausalWorkClass,
     pub amount: u64,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(tag = "policy", rename_all = "snake_case", deny_unknown_fields)]
-pub enum ResiduePolicyV1 {
+pub enum ResiduePolicy {
     RejectUnclassified,
     AssignToResidue {
         policy_id: String,
-        policy_digest: DigestV1,
-        residue_work_unit_id: DigestV1,
+        policy_digest: Sha256Digest,
+        residue_work_unit_id: Sha256Digest,
     },
 }
 
 #[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
-pub struct CausalClassTotalsV1 {
+pub struct CausalClassTotals {
     pub candidate: u64,
     pub verification: u64,
     pub comparison: u64,
@@ -149,81 +149,81 @@ pub struct CausalClassTotalsV1 {
     pub residue: u64,
 }
 
-impl CausalClassTotalsV1 {
-    pub fn class_total(&self, class: CausalWorkClassV1) -> u64 {
+impl CausalClassTotals {
+    pub fn class_total(&self, class: CausalWorkClass) -> u64 {
         match class {
-            CausalWorkClassV1::Candidate => self.candidate,
-            CausalWorkClassV1::Verification => self.verification,
-            CausalWorkClassV1::Comparison => self.comparison,
-            CausalWorkClassV1::Baseline => self.baseline,
-            CausalWorkClassV1::Fallback => self.fallback,
-            CausalWorkClassV1::Restoration => self.restoration,
-            CausalWorkClassV1::Prewarm => self.prewarm,
-            CausalWorkClassV1::Residue => self.residue,
+            CausalWorkClass::Candidate => self.candidate,
+            CausalWorkClass::Verification => self.verification,
+            CausalWorkClass::Comparison => self.comparison,
+            CausalWorkClass::Baseline => self.baseline,
+            CausalWorkClass::Fallback => self.fallback,
+            CausalWorkClass::Restoration => self.restoration,
+            CausalWorkClass::Prewarm => self.prewarm,
+            CausalWorkClass::Residue => self.residue,
         }
     }
 
-    fn add(&mut self, class: CausalWorkClassV1, amount: u64) -> Result<(), CausalWorkErrorV1> {
+    fn add(&mut self, class: CausalWorkClass, amount: u64) -> Result<(), CausalWorkError> {
         let target = match class {
-            CausalWorkClassV1::Candidate => &mut self.candidate,
-            CausalWorkClassV1::Verification => &mut self.verification,
-            CausalWorkClassV1::Comparison => &mut self.comparison,
-            CausalWorkClassV1::Baseline => &mut self.baseline,
-            CausalWorkClassV1::Fallback => &mut self.fallback,
-            CausalWorkClassV1::Restoration => &mut self.restoration,
-            CausalWorkClassV1::Prewarm => &mut self.prewarm,
-            CausalWorkClassV1::Residue => &mut self.residue,
+            CausalWorkClass::Candidate => &mut self.candidate,
+            CausalWorkClass::Verification => &mut self.verification,
+            CausalWorkClass::Comparison => &mut self.comparison,
+            CausalWorkClass::Baseline => &mut self.baseline,
+            CausalWorkClass::Fallback => &mut self.fallback,
+            CausalWorkClass::Restoration => &mut self.restoration,
+            CausalWorkClass::Prewarm => &mut self.prewarm,
+            CausalWorkClass::Residue => &mut self.residue,
         };
         *target = target
             .checked_add(amount)
-            .ok_or(CausalWorkErrorV1::CounterOverflow)?;
+            .ok_or(CausalWorkError::CounterOverflow)?;
         Ok(())
     }
 
-    pub fn checked_total(&self) -> Result<u64, CausalWorkErrorV1> {
-        CausalWorkClassV1::ALL
+    pub fn checked_total(&self) -> Result<u64, CausalWorkError> {
+        CausalWorkClass::ALL
             .into_iter()
             .try_fold(0_u64, |total, class| {
                 total
                     .checked_add(self.class_total(class))
-                    .ok_or(CausalWorkErrorV1::CounterOverflow)
+                    .ok_or(CausalWorkError::CounterOverflow)
             })
     }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
-pub struct CausalWorkReceiptV1 {
+pub struct CausalWorkReceipt {
     pub schema_version: u16,
     pub taxonomy_version: u16,
-    pub assembly_manifest_digest: DigestV1,
-    pub measurement: ParentCounterWindowV1,
-    pub residue_policy: ResiduePolicyV1,
-    pub charges: Vec<CausalWorkChargeV1>,
-    pub class_totals: CausalClassTotalsV1,
+    pub assembly_manifest_digest: Sha256Digest,
+    pub measurement: ParentCounterWindow,
+    pub residue_policy: ResiduePolicy,
+    pub charges: Vec<CausalWorkCharge>,
+    pub class_totals: CausalClassTotals,
     pub classified_total: u64,
     pub observed_total: u64,
-    pub receipt_digest: DigestV1,
+    pub receipt_digest: Sha256Digest,
 }
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
-struct CausalWorkReceiptWireV1 {
+struct CausalWorkReceiptWire {
     schema_version: u16,
     taxonomy_version: u16,
-    assembly_manifest_digest: DigestV1,
-    measurement: ParentCounterWindowV1,
-    residue_policy: ResiduePolicyV1,
-    charges: Vec<CausalWorkChargeV1>,
-    class_totals: CausalClassTotalsV1,
+    assembly_manifest_digest: Sha256Digest,
+    measurement: ParentCounterWindow,
+    residue_policy: ResiduePolicy,
+    charges: Vec<CausalWorkCharge>,
+    class_totals: CausalClassTotals,
     classified_total: u64,
     observed_total: u64,
-    receipt_digest: DigestV1,
+    receipt_digest: Sha256Digest,
 }
 
-impl<'de> Deserialize<'de> for CausalWorkReceiptV1 {
+impl<'de> Deserialize<'de> for CausalWorkReceipt {
     fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let wire = CausalWorkReceiptWireV1::deserialize(deserializer)?;
+        let wire = CausalWorkReceiptWire::deserialize(deserializer)?;
         let receipt = Self {
             schema_version: wire.schema_version,
             taxonomy_version: wire.taxonomy_version,
@@ -244,62 +244,62 @@ impl<'de> Deserialize<'de> for CausalWorkReceiptV1 {
 #[allow(clippy::large_enum_variant)]
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(tag = "outcome", rename_all = "snake_case", deny_unknown_fields)]
-pub enum CausalWorkOutcomeV1 {
+pub enum CausalWorkOutcome {
     Measured {
-        receipt: CausalWorkReceiptV1,
+        receipt: CausalWorkReceipt,
     },
     Unmeasured {
-        identity: ParentCounterIdentityV1,
+        identity: ParentCounterIdentity,
         reason: String,
     },
 }
 
-impl CausalWorkReceiptV1 {
+impl CausalWorkReceipt {
     pub fn build(
-        assembly_manifest_digest: DigestV1,
-        observation: ParentCounterObservationV1,
-        mut charges: Vec<CausalWorkChargeV1>,
-        residue_policy: ResiduePolicyV1,
-    ) -> Result<CausalWorkOutcomeV1, CausalWorkErrorV1> {
+        assembly_manifest_digest: Sha256Digest,
+        observation: ParentCounterObservation,
+        mut charges: Vec<CausalWorkCharge>,
+        residue_policy: ResiduePolicy,
+    ) -> Result<CausalWorkOutcome, CausalWorkError> {
         let window = match observation {
-            ParentCounterObservationV1::Unmeasured { identity, reason } => {
+            ParentCounterObservation::Unmeasured { identity, reason } => {
                 validate_identity(&identity)?;
                 validate_text("unmeasured.reason", &reason)?;
                 if !charges.is_empty() {
-                    return Err(CausalWorkErrorV1::ChargesForUnmeasuredCounter);
+                    return Err(CausalWorkError::ChargesForUnmeasuredCounter);
                 }
-                return Ok(CausalWorkOutcomeV1::Unmeasured { identity, reason });
+                return Ok(CausalWorkOutcome::Unmeasured { identity, reason });
             }
-            ParentCounterObservationV1::Measured { window } => window,
+            ParentCounterObservation::Measured { window } => window,
         };
         validate_identity(&window.identity)?;
         if charges.len() > CAUSAL_WORK_MAX_CHARGES {
-            return Err(CausalWorkErrorV1::TooManyCharges);
+            return Err(CausalWorkError::TooManyCharges);
         }
         charges.sort_by_key(|charge| charge.work_unit_id);
         for pair in charges.windows(2) {
             if pair[0].work_unit_id == pair[1].work_unit_id {
-                return Err(CausalWorkErrorV1::DoubleClassifiedWorkUnit(
+                return Err(CausalWorkError::DoubleClassifiedWorkUnit(
                     pair[0].work_unit_id,
                 ));
             }
         }
-        let mut totals = CausalClassTotalsV1::default();
+        let mut totals = CausalClassTotals::default();
         for charge in &charges {
             if charge.amount == 0 {
-                return Err(CausalWorkErrorV1::ZeroAmountCharge(charge.work_unit_id));
+                return Err(CausalWorkError::ZeroAmountCharge(charge.work_unit_id));
             }
-            if charge.class == CausalWorkClassV1::Residue
-                && !matches!(residue_policy, ResiduePolicyV1::AssignToResidue { .. })
+            if charge.class == CausalWorkClass::Residue
+                && !matches!(residue_policy, ResiduePolicy::AssignToResidue { .. })
             {
-                return Err(CausalWorkErrorV1::ResidueWithoutPolicy);
+                return Err(CausalWorkError::ResidueWithoutPolicy);
             }
             totals.add(charge.class, charge.amount)?;
         }
         let observed_total = window.delta()?;
         let classified_before_residue = totals.checked_total()?;
         if classified_before_residue > observed_total {
-            return Err(CausalWorkErrorV1::NonConservation {
+            return Err(CausalWorkError::NonConservation {
                 observed: observed_total,
                 classified: classified_before_residue,
             });
@@ -307,10 +307,10 @@ impl CausalWorkReceiptV1 {
         let missing = observed_total - classified_before_residue;
         if missing != 0 {
             match &residue_policy {
-                ResiduePolicyV1::RejectUnclassified => {
-                    return Err(CausalWorkErrorV1::UnclassifiedWork { amount: missing });
+                ResiduePolicy::RejectUnclassified => {
+                    return Err(CausalWorkError::UnclassifiedWork { amount: missing });
                 }
-                ResiduePolicyV1::AssignToResidue {
+                ResiduePolicy::AssignToResidue {
                     policy_id,
                     residue_work_unit_id,
                     ..
@@ -320,32 +320,32 @@ impl CausalWorkReceiptV1 {
                         .binary_search_by_key(residue_work_unit_id, |charge| charge.work_unit_id)
                         .is_ok()
                     {
-                        return Err(CausalWorkErrorV1::DoubleClassifiedWorkUnit(
+                        return Err(CausalWorkError::DoubleClassifiedWorkUnit(
                             *residue_work_unit_id,
                         ));
                     }
-                    charges.push(CausalWorkChargeV1 {
+                    charges.push(CausalWorkCharge {
                         work_unit_id: *residue_work_unit_id,
-                        class: CausalWorkClassV1::Residue,
+                        class: CausalWorkClass::Residue,
                         amount: missing,
                     });
                     charges.sort_by_key(|charge| charge.work_unit_id);
-                    totals.add(CausalWorkClassV1::Residue, missing)?;
+                    totals.add(CausalWorkClass::Residue, missing)?;
                 }
             }
-        } else if let ResiduePolicyV1::AssignToResidue { policy_id, .. } = &residue_policy {
+        } else if let ResiduePolicy::AssignToResidue { policy_id, .. } = &residue_policy {
             validate_text("residue_policy.policy_id", policy_id)?;
         }
         let classified_total = totals.checked_total()?;
         if classified_total != observed_total {
-            return Err(CausalWorkErrorV1::NonConservation {
+            return Err(CausalWorkError::NonConservation {
                 observed: observed_total,
                 classified: classified_total,
             });
         }
         let mut receipt = Self {
-            schema_version: CAUSAL_WORK_RECEIPT_SCHEMA_V1,
-            taxonomy_version: CAUSAL_WORK_TAXONOMY_VERSION_V1,
+            schema_version: CAUSAL_WORK_RECEIPT_SCHEMA,
+            taxonomy_version: CAUSAL_WORK_TAXONOMY_VERSION,
             assembly_manifest_digest,
             measurement: window,
             residue_policy,
@@ -353,53 +353,53 @@ impl CausalWorkReceiptV1 {
             class_totals: totals,
             classified_total,
             observed_total,
-            receipt_digest: DigestV1::ZERO,
+            receipt_digest: Sha256Digest::ZERO,
         };
         receipt.receipt_digest = receipt.compute_digest()?;
         receipt.validate()?;
-        Ok(CausalWorkOutcomeV1::Measured { receipt })
+        Ok(CausalWorkOutcome::Measured { receipt })
     }
 
-    pub fn validate(&self) -> Result<(), CausalWorkErrorV1> {
-        if self.schema_version != CAUSAL_WORK_RECEIPT_SCHEMA_V1
-            || self.taxonomy_version != CAUSAL_WORK_TAXONOMY_VERSION_V1
+    pub fn validate(&self) -> Result<(), CausalWorkError> {
+        if self.schema_version != CAUSAL_WORK_RECEIPT_SCHEMA
+            || self.taxonomy_version != CAUSAL_WORK_TAXONOMY_VERSION
         {
-            return Err(CausalWorkErrorV1::UnsupportedVersion);
+            return Err(CausalWorkError::UnsupportedVersion);
         }
         validate_identity(&self.measurement.identity)?;
         if self.charges.len() > CAUSAL_WORK_MAX_CHARGES {
-            return Err(CausalWorkErrorV1::TooManyCharges);
+            return Err(CausalWorkError::TooManyCharges);
         }
-        if let ResiduePolicyV1::AssignToResidue { policy_id, .. } = &self.residue_policy {
+        if let ResiduePolicy::AssignToResidue { policy_id, .. } = &self.residue_policy {
             validate_text("residue_policy.policy_id", policy_id)?;
         }
         let mut seen = BTreeSet::new();
-        let mut totals = CausalClassTotalsV1::default();
+        let mut totals = CausalClassTotals::default();
         for charge in &self.charges {
             if charge.amount == 0 {
-                return Err(CausalWorkErrorV1::ZeroAmountCharge(charge.work_unit_id));
+                return Err(CausalWorkError::ZeroAmountCharge(charge.work_unit_id));
             }
             if !seen.insert(charge.work_unit_id) {
-                return Err(CausalWorkErrorV1::DoubleClassifiedWorkUnit(
+                return Err(CausalWorkError::DoubleClassifiedWorkUnit(
                     charge.work_unit_id,
                 ));
             }
-            if charge.class == CausalWorkClassV1::Residue {
+            if charge.class == CausalWorkClass::Residue {
                 match &self.residue_policy {
-                    ResiduePolicyV1::AssignToResidue {
+                    ResiduePolicy::AssignToResidue {
                         residue_work_unit_id,
                         ..
                     } if charge.work_unit_id == *residue_work_unit_id => {}
-                    _ => return Err(CausalWorkErrorV1::ResidueWithoutPolicy),
+                    _ => return Err(CausalWorkError::ResidueWithoutPolicy),
                 }
             }
             totals.add(charge.class, charge.amount)?;
         }
         if self.charges.windows(2).any(|pair| pair[0] >= pair[1]) {
-            return Err(CausalWorkErrorV1::NonCanonicalCharges);
+            return Err(CausalWorkError::NonCanonicalCharges);
         }
         if totals != self.class_totals {
-            return Err(CausalWorkErrorV1::ClassTotalsMismatch);
+            return Err(CausalWorkError::ClassTotalsMismatch);
         }
         let observed = self.measurement.delta()?;
         let classified = totals.checked_total()?;
@@ -407,33 +407,33 @@ impl CausalWorkReceiptV1 {
             || classified != self.classified_total
             || observed != classified
         {
-            return Err(CausalWorkErrorV1::NonConservation {
+            return Err(CausalWorkError::NonConservation {
                 observed,
                 classified,
             });
         }
         if self.compute_digest()? != self.receipt_digest {
-            return Err(CausalWorkErrorV1::ReceiptDigestMismatch);
+            return Err(CausalWorkError::ReceiptDigestMismatch);
         }
         Ok(())
     }
 
-    pub fn compute_digest(&self) -> Result<DigestV1, CausalWorkErrorV1> {
+    pub fn compute_digest(&self) -> Result<Sha256Digest, CausalWorkError> {
         let mut value = serde_json::to_value(self)
-            .map_err(|error| CausalWorkErrorV1::Json(error.to_string()))?;
+            .map_err(|error| CausalWorkError::Json(error.to_string()))?;
         value
             .as_object_mut()
-            .ok_or_else(|| CausalWorkErrorV1::Json("receipt must be object".into()))?
+            .ok_or_else(|| CausalWorkError::Json("receipt must be object".into()))?
             .remove("receipt_digest");
         let mut bytes = b"zerostack.causal_work_receipt.v1\0".to_vec();
         bytes.extend_from_slice(canonical_json(&value).as_bytes());
-        Ok(DigestV1::from_bytes(sha256(&bytes)))
+        Ok(Sha256Digest::from_bytes(sha256(&bytes)))
     }
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
-pub enum CounterEvidenceModeV1 {
+pub enum CounterEvidenceMode {
     Synthetic,
     RchCompilation,
     Native,
@@ -441,29 +441,29 @@ pub enum CounterEvidenceModeV1 {
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
-pub struct CounterCorrespondenceReceiptV1 {
+pub struct CounterCorrespondenceReceipt {
     platform_profile: String,
-    evidence_mode: CounterEvidenceModeV1,
-    identity: ParentCounterIdentityV1,
-    parent_window: ParentCounterWindowV1,
+    evidence_mode: CounterEvidenceMode,
+    identity: ParentCounterIdentity,
+    parent_window: ParentCounterWindow,
     adapter_observed_delta: u64,
-    adapter_binary_digest: DigestV1,
+    adapter_binary_digest: Sha256Digest,
 }
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
-struct CounterCorrespondenceReceiptWireV1 {
+struct CounterCorrespondenceReceiptWire {
     platform_profile: String,
-    evidence_mode: CounterEvidenceModeV1,
-    identity: ParentCounterIdentityV1,
-    parent_window: ParentCounterWindowV1,
+    evidence_mode: CounterEvidenceMode,
+    identity: ParentCounterIdentity,
+    parent_window: ParentCounterWindow,
     adapter_observed_delta: u64,
-    adapter_binary_digest: DigestV1,
+    adapter_binary_digest: Sha256Digest,
 }
 
-impl<'de> Deserialize<'de> for CounterCorrespondenceReceiptV1 {
+impl<'de> Deserialize<'de> for CounterCorrespondenceReceipt {
     fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let wire = CounterCorrespondenceReceiptWireV1::deserialize(deserializer)?;
+        let wire = CounterCorrespondenceReceiptWire::deserialize(deserializer)?;
         Self::new(
             wire.platform_profile,
             wire.evidence_mode,
@@ -476,15 +476,15 @@ impl<'de> Deserialize<'de> for CounterCorrespondenceReceiptV1 {
     }
 }
 
-impl CounterCorrespondenceReceiptV1 {
+impl CounterCorrespondenceReceipt {
     pub fn new(
         platform_profile: String,
-        evidence_mode: CounterEvidenceModeV1,
-        identity: ParentCounterIdentityV1,
-        parent_window: ParentCounterWindowV1,
+        evidence_mode: CounterEvidenceMode,
+        identity: ParentCounterIdentity,
+        parent_window: ParentCounterWindow,
         adapter_observed_delta: u64,
-        adapter_binary_digest: DigestV1,
-    ) -> Result<Self, CausalWorkErrorV1> {
+        adapter_binary_digest: Sha256Digest,
+    ) -> Result<Self, CausalWorkError> {
         let receipt = Self {
             platform_profile,
             evidence_mode,
@@ -497,26 +497,26 @@ impl CounterCorrespondenceReceiptV1 {
         Ok(receipt)
     }
 
-    pub fn validate(&self) -> Result<(), CausalWorkErrorV1> {
+    pub fn validate(&self) -> Result<(), CausalWorkError> {
         validate_text("platform_profile", &self.platform_profile)?;
         validate_identity(&self.identity)?;
         if self.parent_window.identity != self.identity
             || self.parent_window.delta()? != self.adapter_observed_delta
             || self.identity.adapter_digest != self.adapter_binary_digest
         {
-            return Err(CausalWorkErrorV1::CounterCorrespondenceMismatch);
+            return Err(CausalWorkError::CounterCorrespondenceMismatch);
         }
         Ok(())
     }
 
     pub const fn is_native_evidence(&self) -> bool {
-        matches!(self.evidence_mode, CounterEvidenceModeV1::Native)
+        matches!(self.evidence_mode, CounterEvidenceMode::Native)
     }
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
-pub enum LegacyChargeClassV2 {
+pub enum LegacyChargeClass {
     Billed,
     FailedTrial,
     Retry,
@@ -527,25 +527,25 @@ pub enum LegacyChargeClassV2 {
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
-pub struct LegacyClassMappingV1 {
-    pub legacy: LegacyChargeClassV2,
-    pub suggested_causal_class: CausalWorkClassV1,
+pub struct LegacyClassMapping {
+    pub legacy: LegacyChargeClass,
+    pub suggested_causal_class: CausalWorkClass,
     pub requires_remeasurement: bool,
     pub measured_fact: bool,
 }
 
-pub const fn map_legacy_class_v2(legacy: LegacyChargeClassV2) -> LegacyClassMappingV1 {
+pub const fn map_legacy_class_v2(legacy: LegacyChargeClass) -> LegacyClassMapping {
     let suggested_causal_class = match legacy {
-        LegacyChargeClassV2::Billed | LegacyChargeClassV2::FailedTrial => {
-            CausalWorkClassV1::Candidate
+        LegacyChargeClass::Billed | LegacyChargeClass::FailedTrial => {
+            CausalWorkClass::Candidate
         }
-        LegacyChargeClassV2::Retry | LegacyChargeClassV2::Reexpansion => {
-            CausalWorkClassV1::Restoration
+        LegacyChargeClass::Retry | LegacyChargeClass::Reexpansion => {
+            CausalWorkClass::Restoration
         }
-        LegacyChargeClassV2::Recovery => CausalWorkClassV1::Verification,
-        LegacyChargeClassV2::Fallback => CausalWorkClassV1::Fallback,
+        LegacyChargeClass::Recovery => CausalWorkClass::Verification,
+        LegacyChargeClass::Fallback => CausalWorkClass::Fallback,
     };
-    LegacyClassMappingV1 {
+    LegacyClassMapping {
         legacy,
         suggested_causal_class,
         requires_remeasurement: true,
@@ -553,23 +553,23 @@ pub const fn map_legacy_class_v2(legacy: LegacyChargeClassV2) -> LegacyClassMapp
     }
 }
 
-fn validate_identity(identity: &ParentCounterIdentityV1) -> Result<(), CausalWorkErrorV1> {
+fn validate_identity(identity: &ParentCounterIdentity) -> Result<(), CausalWorkError> {
     validate_text("counter_id", &identity.counter_id)
 }
 
-fn validate_text(field: &'static str, text: &str) -> Result<(), CausalWorkErrorV1> {
+fn validate_text(field: &'static str, text: &str) -> Result<(), CausalWorkError> {
     if text.is_empty()
         || text.len() > CAUSAL_WORK_MAX_ID_BYTES
         || text.chars().any(char::is_control)
     {
-        return Err(CausalWorkErrorV1::InvalidText(field));
+        return Err(CausalWorkError::InvalidText(field));
     }
     Ok(())
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
-pub enum CausalWorkFailureCodeV1 {
+pub enum CausalWorkFailureCode {
     UnsupportedVersion,
     CounterRegressed,
     CounterOverflow,
@@ -589,14 +589,14 @@ pub enum CausalWorkFailureCodeV1 {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub enum CausalWorkErrorV1 {
+pub enum CausalWorkError {
     UnsupportedVersion,
     CounterRegressed { start: u64, end: u64 },
     CounterOverflow,
     InvalidText(&'static str),
     TooManyCharges,
-    DoubleClassifiedWorkUnit(DigestV1),
-    ZeroAmountCharge(DigestV1),
+    DoubleClassifiedWorkUnit(Sha256Digest),
+    ZeroAmountCharge(Sha256Digest),
     ChargesForUnmeasuredCounter,
     ResidueWithoutPolicy,
     UnclassifiedWork { amount: u64 },
@@ -608,47 +608,47 @@ pub enum CausalWorkErrorV1 {
     Json(String),
 }
 
-impl CausalWorkErrorV1 {
-    pub const fn code(&self) -> CausalWorkFailureCodeV1 {
+impl CausalWorkError {
+    pub const fn code(&self) -> CausalWorkFailureCode {
         match self {
-            Self::UnsupportedVersion => CausalWorkFailureCodeV1::UnsupportedVersion,
-            Self::CounterRegressed { .. } => CausalWorkFailureCodeV1::CounterRegressed,
-            Self::CounterOverflow => CausalWorkFailureCodeV1::CounterOverflow,
-            Self::InvalidText(_) => CausalWorkFailureCodeV1::InvalidText,
-            Self::TooManyCharges => CausalWorkFailureCodeV1::TooManyCharges,
-            Self::DoubleClassifiedWorkUnit(_) => CausalWorkFailureCodeV1::DoubleClassifiedWorkUnit,
-            Self::ZeroAmountCharge(_) => CausalWorkFailureCodeV1::ZeroAmountCharge,
+            Self::UnsupportedVersion => CausalWorkFailureCode::UnsupportedVersion,
+            Self::CounterRegressed { .. } => CausalWorkFailureCode::CounterRegressed,
+            Self::CounterOverflow => CausalWorkFailureCode::CounterOverflow,
+            Self::InvalidText(_) => CausalWorkFailureCode::InvalidText,
+            Self::TooManyCharges => CausalWorkFailureCode::TooManyCharges,
+            Self::DoubleClassifiedWorkUnit(_) => CausalWorkFailureCode::DoubleClassifiedWorkUnit,
+            Self::ZeroAmountCharge(_) => CausalWorkFailureCode::ZeroAmountCharge,
             Self::ChargesForUnmeasuredCounter => {
-                CausalWorkFailureCodeV1::ChargesForUnmeasuredCounter
+                CausalWorkFailureCode::ChargesForUnmeasuredCounter
             }
-            Self::ResidueWithoutPolicy => CausalWorkFailureCodeV1::ResidueWithoutPolicy,
-            Self::UnclassifiedWork { .. } => CausalWorkFailureCodeV1::UnclassifiedWork,
-            Self::NonConservation { .. } => CausalWorkFailureCodeV1::NonConservation,
-            Self::NonCanonicalCharges => CausalWorkFailureCodeV1::NonCanonicalCharges,
-            Self::ClassTotalsMismatch => CausalWorkFailureCodeV1::ClassTotalsMismatch,
-            Self::ReceiptDigestMismatch => CausalWorkFailureCodeV1::ReceiptDigestMismatch,
+            Self::ResidueWithoutPolicy => CausalWorkFailureCode::ResidueWithoutPolicy,
+            Self::UnclassifiedWork { .. } => CausalWorkFailureCode::UnclassifiedWork,
+            Self::NonConservation { .. } => CausalWorkFailureCode::NonConservation,
+            Self::NonCanonicalCharges => CausalWorkFailureCode::NonCanonicalCharges,
+            Self::ClassTotalsMismatch => CausalWorkFailureCode::ClassTotalsMismatch,
+            Self::ReceiptDigestMismatch => CausalWorkFailureCode::ReceiptDigestMismatch,
             Self::CounterCorrespondenceMismatch => {
-                CausalWorkFailureCodeV1::CounterCorrespondenceMismatch
+                CausalWorkFailureCode::CounterCorrespondenceMismatch
             }
-            Self::Json(_) => CausalWorkFailureCodeV1::Json,
+            Self::Json(_) => CausalWorkFailureCode::Json,
         }
     }
 }
 
-impl fmt::Display for CausalWorkErrorV1 {
+impl fmt::Display for CausalWorkError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "causal-work ledger failure: {:?}", self.code())
     }
 }
 
-impl Error for CausalWorkErrorV1 {}
+impl Error for CausalWorkError {}
 
-pub fn causal_work_contract_manifest_v1() -> Value {
+pub fn causal_work_contract_manifest() -> Value {
     json!({
         "contract": "zerostack.causal_work",
-        "taxonomy_version": CAUSAL_WORK_TAXONOMY_VERSION_V1,
-        "receipt_schema": CAUSAL_WORK_RECEIPT_SCHEMA_V1,
-        "classes": CausalWorkClassV1::ALL.map(CausalWorkClassV1::as_str),
+        "taxonomy_version": CAUSAL_WORK_TAXONOMY_VERSION,
+        "receipt_schema": CAUSAL_WORK_RECEIPT_SCHEMA,
+        "classes": CausalWorkClass::ALL.map(CausalWorkClass::as_str),
         "arithmetic": "checked_u64_integer_only",
         "classification": "one_unique_work_unit_id_one_class",
         "wire_decode": "all_receipt_invariants_validated_during_deserialization",
@@ -658,13 +658,13 @@ pub fn causal_work_contract_manifest_v1() -> Value {
         "unavailable_counter": "unmeasured_not_zero",
         "residue": "reject_or_preregistered_assign_to_residue",
         "residue_work_unit_id": "every_residue_charge_equals_preregistered_id",
-        "legacy_v2": "readable_mapping_requires_remeasurement_and_is_not_fact"
+        "legacy": "readable_mapping_requires_remeasurement_and_is_not_fact"
     })
 }
 
-pub fn causal_work_contract_digest_v1() -> DigestV1 {
-    DigestV1::from_bytes(sha256(
-        canonical_json(&causal_work_contract_manifest_v1()).as_bytes(),
+pub fn causal_work_contract_digest() -> Sha256Digest {
+    Sha256Digest::from_bytes(sha256(
+        canonical_json(&causal_work_contract_manifest()).as_bytes(),
     ))
 }
 

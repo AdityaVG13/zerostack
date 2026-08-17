@@ -12,7 +12,7 @@ use zero_store::{
 };
 
 use crate::{
-    AppliedGcEvidenceV1, GcProducerEpochV1, GcReport, PROGRAM_ASSEMBLY_SCHEMA_VERSION,
+    AppliedGcEvidence, GcProducerEpoch, GcReport, PROGRAM_ASSEMBLY_SCHEMA_VERSION,
     ProgramDigest,
 };
 
@@ -49,9 +49,9 @@ impl RealGcConfig {
 pub struct RealGcOutcome {
     pub project_id: String,
     pub run_receipt: GcRunReceipt,
-    pub producer_epochs: Vec<GcProducerEpochV1>,
+    pub producer_epochs: Vec<GcProducerEpoch>,
     pub verified_freed_bytes: u64,
-    applied: AppliedGcEvidenceV1,
+    applied: AppliedGcEvidence,
 }
 
 impl RealGcOutcome {
@@ -63,7 +63,7 @@ impl RealGcOutcome {
         )
     }
 
-    pub fn applied_evidence(&self) -> &AppliedGcEvidenceV1 {
+    pub fn applied_evidence(&self) -> &AppliedGcEvidence {
         &self.applied
     }
 }
@@ -107,7 +107,7 @@ fn verify_producer_snapshots(
     cas: &SharedCas,
     store_root: &std::path::Path,
     project_id: &str,
-) -> Result<Vec<GcProducerEpochV1>, RealGcError> {
+) -> Result<Vec<GcProducerEpoch>, RealGcError> {
     let mut producer_epochs = Vec::with_capacity(PRODUCERS.len());
     for (engine, producer) in PRODUCERS {
         let snapshot = current_reachability_snapshot(store_root, producer, project_id)
@@ -121,7 +121,7 @@ fn verify_producer_snapshots(
                 RealGcError::Store(format!("verify {producer} root {hash}: {error}"))
             })?;
         }
-        producer_epochs.push(GcProducerEpochV1 {
+        producer_epochs.push(GcProducerEpoch {
             engine,
             epoch: snapshot.epoch,
         });
@@ -208,7 +208,7 @@ pub fn apply_real_reachability_gc(config: &RealGcConfig) -> Result<RealGcOutcome
     let verified_freed_bytes =
         verify_freed_bytes(&cas, &run_receipt.deleted, &planned_bytes)?;
 
-    let applied = AppliedGcEvidenceV1::new(
+    let applied = AppliedGcEvidence::new(
         run_receipt.clone(),
         producer_epochs.clone(),
         verified_freed_bytes,

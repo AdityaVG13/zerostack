@@ -2,7 +2,7 @@
 //! reconciliation.
 //!
 //! The token classes in [`crate::ChargeClass`] and the causal classes in
-//! [`crate::CausalWorkClassV1`] account for model-visible tokens. This module
+//! [`crate::CausalWorkClass`] account for model-visible tokens. This module
 //! adds the non-token resource coordinates the complete resource vector
 //! requires: tool args/returns bytes, wire/disk bytes, CPU/GPU time, storage,
 //! maintenance, and uncached input.

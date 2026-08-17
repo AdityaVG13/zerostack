@@ -7,7 +7,7 @@
 //!
 //! Fail-closed law (V6-C03/H03): with no policy attached, or with no rule
 //! covering the observation, resolution is `DecisionRequired` -- the
-//! interpreter aborts the plan with a typed [`zero_abi::DecisionRequiredV1`]
+//! interpreter aborts the plan with a typed [`zero_abi::DecisionRequired`]
 //! payload instead of silently choosing a branch. A rule selecting an
 //! alternative the decision point does not offer is a policy error and
 //! aborts loudly as well; it is never a silent selection.
@@ -15,8 +15,8 @@
 use std::cell::{Cell, RefCell};
 
 use zero_abi::{
-    ContingentPolicyV1, DecisionErrorV1, DecisionRequiredV1, ObservationClassV1, PolicyResolutionV1,
-    SemanticDecisionPointV1,
+    ContingentPolicy, DecisionError, DecisionRequired, ObservationClass, PolicyResolution,
+    SemanticDecisionPoint,
 };
 
 pub const DECISION_SURFACE: &str = "decision";
@@ -29,11 +29,11 @@ pub const DECISION_REQUIRE_METHOD: &str = "require";
 /// still counts, because the loud policy error is reported separately at
 /// the abort.
 #[derive(Clone, Debug, Eq, PartialEq, serde::Serialize)]
-pub struct GateRuleUsageV1 {
+pub struct GateRuleUsage {
     /// Index of the rule in the attached policy's `rules` vector.
     pub rule_index: usize,
     /// The observation class the rule targets.
-    pub observation_class: ObservationClassV1,
+    pub observation_class: ObservationClass,
     /// How many `decision.require` observations this rule matched.
     pub matched_observations: u64,
 }
@@ -43,9 +43,9 @@ pub struct GateRuleUsageV1 {
 /// and the rules that never matched are listed explicitly, so a caller can
 /// prove which policy rules were exercised -- nothing is silently dropped.
 #[derive(Clone, Debug, Eq, PartialEq, serde::Serialize)]
-pub struct GateUsageReportV1 {
+pub struct GateUsageReport {
     /// One entry per policy rule, in policy order.
-    pub rules: Vec<GateRuleUsageV1>,
+    pub rules: Vec<GateRuleUsage>,
     /// Indexes into the policy `rules` vector of rules that never matched a
     /// single observation during the execution. Empty when every rule was
     /// exercised at least once.
@@ -62,7 +62,7 @@ pub struct GateUsageReportV1 {
 /// and execution stops.
 #[derive(Debug)]
 pub struct DecisionGate {
-    policy: Option<ContingentPolicyV1>,
+    policy: Option<ContingentPolicy>,
     /// Per-rule matched-observation counters aligned with `policy.rules`.
     /// The interpreter is single-threaded and the gate is only consulted
     /// while a plan runs, so plain interior cells are safe.
@@ -94,7 +94,7 @@ impl Clone for DecisionGate {
 }
 
 impl DecisionGate {
-    pub fn new(policy: Option<ContingentPolicyV1>) -> Self {
+    pub fn new(policy: Option<ContingentPolicy>) -> Self {
         Self {
             usage: RefCell::new(vec![0; policy.as_ref().map_or(0, |policy| policy.rules.len())]),
             resolved: Cell::new(0),
@@ -102,7 +102,7 @@ impl DecisionGate {
         }
     }
 
-    pub fn policy(&self) -> Option<&ContingentPolicyV1> {
+    pub fn policy(&self) -> Option<&ContingentPolicy> {
         self.policy.as_ref()
     }
 
@@ -118,29 +118,29 @@ impl DecisionGate {
     /// - Policy does not cover the observation -> `DecisionRequired`.
     pub fn resolve(
         &self,
-        point: &SemanticDecisionPointV1,
+        point: &SemanticDecisionPoint,
         observed_value: &str,
-    ) -> GateResolutionV1 {
+    ) -> GateResolution {
         self.resolved.set(self.resolved.get().saturating_add(1));
         let Some(policy) = &self.policy else {
-            return GateResolutionV1::DecisionRequired(decision_required_for(point, observed_value));
+            return GateResolution::DecisionRequired(decision_required_for(point, observed_value));
         };
         match policy.resolve(point, observed_value) {
-            PolicyResolutionV1::Selected {
+            PolicyResolution::Selected {
                 alternative,
                 rule_index,
             } => {
                 self.record_match(rule_index);
-                GateResolutionV1::Selected(alternative)
+                GateResolution::Selected(alternative)
             }
-            PolicyResolutionV1::Uncovered { decision_required } => {
-                GateResolutionV1::DecisionRequired(decision_required)
+            PolicyResolution::Uncovered { decision_required } => {
+                GateResolution::DecisionRequired(decision_required)
             }
-            PolicyResolutionV1::PolicyError(error) => {
-                if let DecisionErrorV1::AlternativeNotOffered { rule_index, .. } = &error {
+            PolicyResolution::PolicyError(error) => {
+                if let DecisionError::AlternativeNotOffered { rule_index, .. } = &error {
                     self.record_match(*rule_index);
                 }
-                GateResolutionV1::PolicyError(error)
+                GateResolution::PolicyError(error)
             }
         }
     }
@@ -160,14 +160,14 @@ impl DecisionGate {
     /// rule with its match count, plus the explicit list of rules that
     /// never matched. `None` when no policy is attached -- there is nothing
     /// to report and no coverage claim to check.
-    pub fn usage_report(&self) -> Option<GateUsageReportV1> {
+    pub fn usage_report(&self) -> Option<GateUsageReport> {
         let policy = self.policy.as_ref()?;
         let usage = self.usage.borrow();
         let rules = policy
             .rules
             .iter()
             .enumerate()
-            .map(|(rule_index, rule)| GateRuleUsageV1 {
+            .map(|(rule_index, rule)| GateRuleUsage {
                 rule_index,
                 observation_class: rule.observation_class.clone(),
                 matched_observations: usage.get(rule_index).copied().unwrap_or(0),
@@ -178,7 +178,7 @@ impl DecisionGate {
             .filter(|entry| entry.matched_observations == 0)
             .map(|entry| entry.rule_index)
             .collect();
-        Some(GateUsageReportV1 {
+        Some(GateUsageReport {
             observations: self.resolved.get(),
             rules,
             unused_rule_indexes,
@@ -188,10 +188,10 @@ impl DecisionGate {
 
 /// Build the `DecisionRequired` payload for an uncovered observation.
 fn decision_required_for(
-    point: &SemanticDecisionPointV1,
+    point: &SemanticDecisionPoint,
     observed_value: &str,
-) -> DecisionRequiredV1 {
-    DecisionRequiredV1 {
+) -> DecisionRequired {
+    DecisionRequired {
         decision_id: point.decision_id.clone(),
         observation_class: point.observation_class.clone(),
         question: point.question.clone(),
@@ -202,14 +202,14 @@ fn decision_required_for(
 
 /// Resolution of one `decision.require` call.
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub enum GateResolutionV1 {
+pub enum GateResolution {
     /// A covering rule selected an offered alternative; execution continues.
     Selected(String),
     /// No rule covered the observation (or no policy exists); execution must
     /// stop and surface the payload as `DecisionRequired`.
-    DecisionRequired(DecisionRequiredV1),
+    DecisionRequired(DecisionRequired),
     /// A rule selected an unoffered alternative; the policy is defective and
     /// execution must stop loudly.
-    PolicyError(DecisionErrorV1),
+    PolicyError(DecisionError),
 }
 

@@ -23,7 +23,7 @@ pub fn zsx_error(phase: &str, err: &ZsxSessionError) -> napi::Error {
 pub fn zsx_error_redacted(
     phase: &str,
     err: &ZsxSessionError,
-    redactor: &zero_abi::RedactorV1,
+    redactor: &zero_abi::Redactor,
 ) -> napi::Error {
     let rendered = format!("[zsx-node:{phase}] {}: {}", err.code.as_str(), err.detail);
     match redactor.redact_text_checked(&rendered) {
@@ -48,7 +48,7 @@ pub fn message(phase: &str, detail: impl Into<String>) -> napi::Error {
 pub fn message_redacted(
     phase: &str,
     detail: impl Into<String>,
-    redactor: &zero_abi::RedactorV1,
+    redactor: &zero_abi::Redactor,
 ) -> napi::Error {
     let rendered = format!("[zsx-node:{phase}] {}", detail.into());
     match redactor.redact_text_checked(&rendered) {

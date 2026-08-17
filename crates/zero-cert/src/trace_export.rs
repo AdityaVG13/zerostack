@@ -6,29 +6,29 @@
 //! annotations; cache events and invalidation reasons must be observable.
 //! This module is the observability surface:
 //!
-//! - [`TraceExportJournalV1`] is a durable, append-only, chain-sealed trace
+//! - [`TraceExportJournal`] is a durable, append-only, chain-sealed trace
 //!   export (JSONL under `<dir>/trace_records.jsonl` with a sealed head at
 //!   `<dir>/trace_sealed_head`), reusing the exact fail-closed pattern of
-//!   R6's `KernelEventJournalV1`: replay on open, torn-tail and tamper
+//!   R6's `KernelEventJournal`: replay on open, torn-tail and tamper
 //!   refusal, sealed-head verification. Every record chains to its parent
 //!   record digest.
-//! - [`TraceRecordV1`] carries a typed [`TraceEventKindV1`] (cache
+//! - [`TraceRecord`] carries a typed [`TraceEventKind`] (cache
 //!   decisions, invalidations, verification outcomes, commits, executions,
-//!   resource charges) and an optional [`DecisionBoundaryAnnotationV1`].
+//!   resource charges) and an optional [`DecisionBoundaryAnnotation`].
 //!   Cache-decision records MUST carry the annotation (enforced by the
-//!   typed constructor [`TraceRecordV1::cache_decision`]); the annotation
+//!   typed constructor [`TraceRecord::cache_decision`]); the annotation
 //!   names the boundary kind, the rationale, and the sealed decision
 //!   digest -- this is the decision-boundary annotation artifact.
-//! - [`DecisionBoundarySummaryV1`] summarizes every annotated boundary in
+//! - [`DecisionBoundarySummary`] summarizes every annotated boundary in
 //!   an export into one sealed artifact.
-//! - [`SealedBenchmarkManifestV1`] seals workload/engine/worker digests,
+//! - [`SealedBenchmarkManifest`] seals workload/engine/worker digests,
 //!   canonical parameters, result and receipt digests, and a
 //!   reproducibility statement (`Sealed` or explicit `NonReproducible`).
-//!   [`export_benchmark_manifest_v1`] persists the manifest next to its
-//!   seal; [`read_exported_benchmark_manifest_v1`] verifies the seal on
+//!   [`export_benchmark_manifest`] persists the manifest next to its
+//!   seal; [`read_exported_benchmark_manifest`] verifies the seal on
 //!   read-back (tampering is loud).
 //!
-//! The pipeline entry point is [`export_trace_pipeline_v1`]: append a
+//! The pipeline entry point is [`export_trace_pipeline`]: append a
 //! bounded batch of records, seal, and return a sealed receipt.
 
 use std::fs::{self, OpenOptions};
@@ -37,28 +37,28 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
-use zero_abi::{DigestV1, canonical_json};
+use zero_abi::{Sha256Digest, canonical_json};
 
 /// Schema version of trace-export artifacts.
-pub const TRACE_EXPORT_SCHEMA_VERSION_V1: u16 = 1;
+pub const TRACE_EXPORT_SCHEMA_VERSION: u16 = 1;
 /// Domain tag bound into trace record digests.
-pub const TRACE_EXPORT_DOMAIN_V1: &[u8] = b"zerostack.trace-export.v1\0";
+pub const TRACE_EXPORT_DOMAIN: &[u8] = b"zerostack.trace-export.v1\0";
 /// Records file name inside an export directory.
-pub const TRACE_EXPORT_RECORDS_FILE_V1: &str = "trace_records.jsonl";
+pub const TRACE_EXPORT_RECORDS_FILE: &str = "trace_records.jsonl";
 /// Sealed-head file name inside an export directory.
-pub const TRACE_EXPORT_SEALED_HEAD_FILE_V1: &str = "trace_sealed_head";
+pub const TRACE_EXPORT_SEALED_HEAD_FILE: &str = "trace_sealed_head";
 /// Benchmark manifest file name inside an export directory.
-pub const TRACE_EXPORT_MANIFEST_FILE_V1: &str = "benchmark_manifest.json";
+pub const TRACE_EXPORT_MANIFEST_FILE: &str = "benchmark_manifest.json";
 /// Maximum records exported in one pipeline call (bounded batches).
-pub const TRACE_EXPORT_MAX_BATCH_RECORDS_V1: usize = 10_000;
+pub const TRACE_EXPORT_MAX_BATCH_RECORDS: usize = 10_000;
 /// Maximum canonical bytes of one trace record.
-pub const TRACE_EXPORT_MAX_RECORD_BYTES_V1: usize = 64 * 1024;
+pub const TRACE_EXPORT_MAX_RECORD_BYTES: usize = 64 * 1024;
 /// ABI tag carried by trace-export artifacts.
-pub const TRACE_EXPORT_ABI_VERSION_V1: &str = "v6-r14";
+pub const TRACE_EXPORT_ABI_VERSION: &str = "v6-r14";
 
-fn canonical_bytes<T: Serialize>(value: &T) -> Result<Vec<u8>, TraceExportErrorV1> {
+fn canonical_bytes<T: Serialize>(value: &T) -> Result<Vec<u8>, TraceExportError> {
     let json = serde_json::to_value(value)
-        .map_err(|error| TraceExportErrorV1::InvalidRecord {
+        .map_err(|error| TraceExportError::InvalidRecord {
             seq: 0,
             detail: format!("artifact is not JSON-serializable: {error}"),
         })?;
@@ -66,12 +66,12 @@ fn canonical_bytes<T: Serialize>(value: &T) -> Result<Vec<u8>, TraceExportErrorV
 }
 
 /// Typed trace event kinds. These are observability classes, finer-grained
-/// than the authoritative `EventClassV1` (which remains the journal's
+/// than the authoritative `EventClass` (which remains the journal's
 /// vocabulary); the export is the human- and tool-readable lens over the
 /// same facts.
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
-pub enum TraceEventKindV1 {
+pub enum TraceEventKind {
     CacheDecision,
     Invalidation,
     VerificationOutcome,
@@ -80,24 +80,24 @@ pub enum TraceEventKindV1 {
     ResourceCharge,
 }
 
-impl TraceEventKindV1 {
-    pub const ALL: [TraceEventKindV1; 6] = [
-        TraceEventKindV1::CacheDecision,
-        TraceEventKindV1::Invalidation,
-        TraceEventKindV1::VerificationOutcome,
-        TraceEventKindV1::Commit,
-        TraceEventKindV1::Execution,
-        TraceEventKindV1::ResourceCharge,
+impl TraceEventKind {
+    pub const ALL: [TraceEventKind; 6] = [
+        TraceEventKind::CacheDecision,
+        TraceEventKind::Invalidation,
+        TraceEventKind::VerificationOutcome,
+        TraceEventKind::Commit,
+        TraceEventKind::Execution,
+        TraceEventKind::ResourceCharge,
     ];
 
     pub fn as_str(self) -> &'static str {
         match self {
-            TraceEventKindV1::CacheDecision => "cache_decision",
-            TraceEventKindV1::Invalidation => "invalidation",
-            TraceEventKindV1::VerificationOutcome => "verification_outcome",
-            TraceEventKindV1::Commit => "commit",
-            TraceEventKindV1::Execution => "execution",
-            TraceEventKindV1::ResourceCharge => "resource_charge",
+            TraceEventKind::CacheDecision => "cache_decision",
+            TraceEventKind::Invalidation => "invalidation",
+            TraceEventKind::VerificationOutcome => "verification_outcome",
+            TraceEventKind::Commit => "commit",
+            TraceEventKind::Execution => "execution",
+            TraceEventKind::ResourceCharge => "resource_charge",
         }
     }
 
@@ -109,7 +109,7 @@ impl TraceEventKindV1 {
 /// The decision-boundary kinds a trace record can annotate.
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
-pub enum DecisionBoundaryKindV1 {
+pub enum DecisionBoundaryKind {
     CacheAdmission,
     CacheRefusal,
     Invalidation,
@@ -122,32 +122,32 @@ pub enum DecisionBoundaryKindV1 {
     ResourceCharge,
 }
 
-impl DecisionBoundaryKindV1 {
-    pub const ALL: [DecisionBoundaryKindV1; 10] = [
-        DecisionBoundaryKindV1::CacheAdmission,
-        DecisionBoundaryKindV1::CacheRefusal,
-        DecisionBoundaryKindV1::Invalidation,
-        DecisionBoundaryKindV1::VerificationAccepted,
-        DecisionBoundaryKindV1::VerificationRejected,
-        DecisionBoundaryKindV1::CommitAuthorized,
-        DecisionBoundaryKindV1::CommitRefused,
-        DecisionBoundaryKindV1::ExecutionAccepted,
-        DecisionBoundaryKindV1::ExecutionRefused,
-        DecisionBoundaryKindV1::ResourceCharge,
+impl DecisionBoundaryKind {
+    pub const ALL: [DecisionBoundaryKind; 10] = [
+        DecisionBoundaryKind::CacheAdmission,
+        DecisionBoundaryKind::CacheRefusal,
+        DecisionBoundaryKind::Invalidation,
+        DecisionBoundaryKind::VerificationAccepted,
+        DecisionBoundaryKind::VerificationRejected,
+        DecisionBoundaryKind::CommitAuthorized,
+        DecisionBoundaryKind::CommitRefused,
+        DecisionBoundaryKind::ExecutionAccepted,
+        DecisionBoundaryKind::ExecutionRefused,
+        DecisionBoundaryKind::ResourceCharge,
     ];
 
     pub fn as_str(self) -> &'static str {
         match self {
-            DecisionBoundaryKindV1::CacheAdmission => "cache_admission",
-            DecisionBoundaryKindV1::CacheRefusal => "cache_refusal",
-            DecisionBoundaryKindV1::Invalidation => "invalidation",
-            DecisionBoundaryKindV1::VerificationAccepted => "verification_accepted",
-            DecisionBoundaryKindV1::VerificationRejected => "verification_rejected",
-            DecisionBoundaryKindV1::CommitAuthorized => "commit_authorized",
-            DecisionBoundaryKindV1::CommitRefused => "commit_refused",
-            DecisionBoundaryKindV1::ExecutionAccepted => "execution_accepted",
-            DecisionBoundaryKindV1::ExecutionRefused => "execution_refused",
-            DecisionBoundaryKindV1::ResourceCharge => "resource_charge",
+            DecisionBoundaryKind::CacheAdmission => "cache_admission",
+            DecisionBoundaryKind::CacheRefusal => "cache_refusal",
+            DecisionBoundaryKind::Invalidation => "invalidation",
+            DecisionBoundaryKind::VerificationAccepted => "verification_accepted",
+            DecisionBoundaryKind::VerificationRejected => "verification_rejected",
+            DecisionBoundaryKind::CommitAuthorized => "commit_authorized",
+            DecisionBoundaryKind::CommitRefused => "commit_refused",
+            DecisionBoundaryKind::ExecutionAccepted => "execution_accepted",
+            DecisionBoundaryKind::ExecutionRefused => "execution_refused",
+            DecisionBoundaryKind::ResourceCharge => "resource_charge",
         }
     }
 }
@@ -156,31 +156,31 @@ impl DecisionBoundaryKindV1 {
 /// the sealed digest of the decision artifact it refers to.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
-pub struct DecisionBoundaryAnnotationV1 {
-    pub boundary: DecisionBoundaryKindV1,
+pub struct DecisionBoundaryAnnotation {
+    pub boundary: DecisionBoundaryKind,
     pub rationale: String,
-    pub decision_digest: DigestV1,
+    pub decision_digest: Sha256Digest,
 }
 
-impl DecisionBoundaryAnnotationV1 {
+impl DecisionBoundaryAnnotation {
     pub fn new(
-        boundary: DecisionBoundaryKindV1,
+        boundary: DecisionBoundaryKind,
         rationale: impl Into<String>,
-        decision_digest: DigestV1,
-    ) -> Result<Self, TraceExportErrorV1> {
+        decision_digest: Sha256Digest,
+    ) -> Result<Self, TraceExportError> {
         let annotation = Self {
             boundary,
             rationale: rationale.into(),
             decision_digest,
         };
         if annotation.rationale.is_empty() {
-            return Err(TraceExportErrorV1::InvalidRecord {
+            return Err(TraceExportError::InvalidRecord {
                 seq: 0,
                 detail: "decision-boundary rationale must be nonempty".to_owned(),
             });
         }
-        if annotation.decision_digest == DigestV1::ZERO {
-            return Err(TraceExportErrorV1::InvalidRecord {
+        if annotation.decision_digest == Sha256Digest::ZERO {
+            return Err(TraceExportError::InvalidRecord {
                 seq: 0,
                 detail: "decision digest must be nonzero".to_owned(),
             });
@@ -194,50 +194,50 @@ impl DecisionBoundaryAnnotationV1 {
 /// chains the export.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
-pub struct TraceRecordV1 {
+pub struct TraceRecord {
     pub schema_version: u16,
     pub seq: u64,
-    pub kind: TraceEventKindV1,
-    pub decision_boundary: Option<DecisionBoundaryAnnotationV1>,
+    pub kind: TraceEventKind,
+    pub decision_boundary: Option<DecisionBoundaryAnnotation>,
     pub payload_root: String,
     pub authority: String,
-    pub parent_record_digest: Option<DigestV1>,
+    pub parent_record_digest: Option<Sha256Digest>,
     pub abi_version: String,
 }
 
-impl TraceRecordV1 {
+impl TraceRecord {
     pub fn new(
         seq: u64,
-        kind: TraceEventKindV1,
-        decision_boundary: Option<DecisionBoundaryAnnotationV1>,
+        kind: TraceEventKind,
+        decision_boundary: Option<DecisionBoundaryAnnotation>,
         payload_root: impl Into<String>,
         authority: impl Into<String>,
-        parent_record_digest: Option<DigestV1>,
-    ) -> Result<Self, TraceExportErrorV1> {
+        parent_record_digest: Option<Sha256Digest>,
+    ) -> Result<Self, TraceExportError> {
         let record = Self {
-            schema_version: TRACE_EXPORT_SCHEMA_VERSION_V1,
+            schema_version: TRACE_EXPORT_SCHEMA_VERSION,
             seq,
             kind,
             decision_boundary,
             payload_root: payload_root.into(),
             authority: authority.into(),
             parent_record_digest,
-            abi_version: TRACE_EXPORT_ABI_VERSION_V1.to_owned(),
+            abi_version: TRACE_EXPORT_ABI_VERSION.to_owned(),
         };
         if record.payload_root.is_empty() || record.authority.is_empty() {
-            return Err(TraceExportErrorV1::InvalidRecord {
+            return Err(TraceExportError::InvalidRecord {
                 seq,
                 detail: "trace payload root and authority must be nonempty".to_owned(),
             });
         }
-        if record.kind == TraceEventKindV1::CacheDecision && record.decision_boundary.is_none() {
-            return Err(TraceExportErrorV1::InvalidRecord {
+        if record.kind == TraceEventKind::CacheDecision && record.decision_boundary.is_none() {
+            return Err(TraceExportError::InvalidRecord {
                 seq,
                 detail: "cache-decision records require a decision-boundary annotation".to_owned(),
             });
         }
-        if record.canonical_bytes()?.len() > TRACE_EXPORT_MAX_RECORD_BYTES_V1 {
-            return Err(TraceExportErrorV1::InvalidRecord {
+        if record.canonical_bytes()?.len() > TRACE_EXPORT_MAX_RECORD_BYTES {
+            return Err(TraceExportError::InvalidRecord {
                 seq,
                 detail: "trace record exceeds the maximum canonical size".to_owned(),
             });
@@ -250,14 +250,14 @@ impl TraceRecordV1 {
     /// a cache event can never be exported without its boundary annotation.
     pub fn cache_decision(
         seq: u64,
-        annotation: DecisionBoundaryAnnotationV1,
+        annotation: DecisionBoundaryAnnotation,
         payload_root: impl Into<String>,
         authority: impl Into<String>,
-        parent_record_digest: Option<DigestV1>,
-    ) -> Result<Self, TraceExportErrorV1> {
+        parent_record_digest: Option<Sha256Digest>,
+    ) -> Result<Self, TraceExportError> {
         Self::new(
             seq,
-            TraceEventKindV1::CacheDecision,
+            TraceEventKind::CacheDecision,
             Some(annotation),
             payload_root,
             authority,
@@ -265,66 +265,66 @@ impl TraceRecordV1 {
         )
     }
 
-    pub fn canonical_bytes(&self) -> Result<Vec<u8>, TraceExportErrorV1> {
+    pub fn canonical_bytes(&self) -> Result<Vec<u8>, TraceExportError> {
         canonical_bytes(self)
     }
 
     /// Content-derived record digest over the domain-tagged canonical bytes.
-    pub fn record_digest(&self) -> Result<DigestV1, TraceExportErrorV1> {
-        let mut tagged = Vec::with_capacity(TRACE_EXPORT_DOMAIN_V1.len() + 128);
-        tagged.extend_from_slice(TRACE_EXPORT_DOMAIN_V1);
+    pub fn record_digest(&self) -> Result<Sha256Digest, TraceExportError> {
+        let mut tagged = Vec::with_capacity(TRACE_EXPORT_DOMAIN.len() + 128);
+        tagged.extend_from_slice(TRACE_EXPORT_DOMAIN);
         tagged.extend_from_slice(&self.canonical_bytes()?);
-        Ok(DigestV1::from_bytes(zero_abi::sha256(&tagged)))
+        Ok(Sha256Digest::from_bytes(zero_abi::sha256(&tagged)))
     }
 }
 
 /// Loud, fail-closed errors for the trace export surface.
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub enum TraceExportErrorV1 {
+pub enum TraceExportError {
     Io(String),
     InvalidRecord { seq: u64, detail: String },
     TornTail { seq: u64 },
-    HeadMismatch { sealed: DigestV1, replayed: DigestV1 },
+    HeadMismatch { sealed: Sha256Digest, replayed: Sha256Digest },
     InvalidManifest(String),
 }
 
-impl std::fmt::Display for TraceExportErrorV1 {
+impl std::fmt::Display for TraceExportError {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            TraceExportErrorV1::Io(detail) => write!(formatter, "trace export I/O failure: {detail}"),
-            TraceExportErrorV1::InvalidRecord { seq, detail } => {
+            TraceExportError::Io(detail) => write!(formatter, "trace export I/O failure: {detail}"),
+            TraceExportError::InvalidRecord { seq, detail } => {
                 write!(formatter, "invalid trace record at seq {seq}: {detail}")
             }
-            TraceExportErrorV1::TornTail { seq } => {
+            TraceExportError::TornTail { seq } => {
                 write!(formatter, "torn trace tail at seq {seq}")
             }
-            TraceExportErrorV1::HeadMismatch { sealed, replayed } => {
+            TraceExportError::HeadMismatch { sealed, replayed } => {
                 write!(formatter, "trace head mismatch: sealed {sealed} != replayed {replayed}")
             }
-            TraceExportErrorV1::InvalidManifest(detail) => {
+            TraceExportError::InvalidManifest(detail) => {
                 write!(formatter, "invalid benchmark manifest: {detail}")
             }
         }
     }
 }
 
-impl std::error::Error for TraceExportErrorV1 {}
+impl std::error::Error for TraceExportError {}
 
 /// The sealed-head marker persisted after a pipeline run.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
-pub struct TraceSealedHeadV1 {
+pub struct TraceSealedHead {
     pub schema_version: u16,
-    pub head: DigestV1,
+    pub head: Sha256Digest,
     pub abi_version: String,
 }
 
-impl TraceSealedHeadV1 {
-    pub fn new(head: DigestV1) -> Self {
+impl TraceSealedHead {
+    pub fn new(head: Sha256Digest) -> Self {
         Self {
-            schema_version: TRACE_EXPORT_SCHEMA_VERSION_V1,
+            schema_version: TRACE_EXPORT_SCHEMA_VERSION,
             head,
-            abi_version: TRACE_EXPORT_ABI_VERSION_V1.to_owned(),
+            abi_version: TRACE_EXPORT_ABI_VERSION.to_owned(),
         }
     }
 }
@@ -332,54 +332,54 @@ impl TraceSealedHeadV1 {
 /// Sealed receipt of one trace-export pipeline run.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
-pub struct TraceExportReceiptV1 {
+pub struct TraceExportReceipt {
     pub schema_version: u16,
     pub records: usize,
-    pub head: DigestV1,
+    pub head: Sha256Digest,
     pub sealed: bool,
     pub export_dir: String,
     pub abi_version: String,
 }
 
-impl TraceExportReceiptV1 {
-    pub fn digest(&self) -> DigestV1 {
+impl TraceExportReceipt {
+    pub fn digest(&self) -> Sha256Digest {
         let bytes = canonical_bytes(self).expect("trace export receipt is JSON-serializable");
-        let mut tagged = Vec::with_capacity(TRACE_EXPORT_DOMAIN_V1.len() + 128);
-        tagged.extend_from_slice(TRACE_EXPORT_DOMAIN_V1);
+        let mut tagged = Vec::with_capacity(TRACE_EXPORT_DOMAIN.len() + 128);
+        tagged.extend_from_slice(TRACE_EXPORT_DOMAIN);
         tagged.extend_from_slice(&bytes);
-        DigestV1::from_bytes(zero_abi::sha256(&tagged))
+        Sha256Digest::from_bytes(zero_abi::sha256(&tagged))
     }
 }
 
 /// A replayed trace export: the verified record chain plus its head.
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct TraceExportSnapshotV1 {
-    pub records: Vec<TraceRecordV1>,
-    pub head: DigestV1,
-    pub sealed_head: Option<DigestV1>,
+pub struct TraceExportSnapshot {
+    pub records: Vec<TraceRecord>,
+    pub head: Sha256Digest,
+    pub sealed_head: Option<Sha256Digest>,
 }
 
-fn read_records(dir: &Path) -> Result<Vec<TraceRecordV1>, TraceExportErrorV1> {
-    let path = dir.join(TRACE_EXPORT_RECORDS_FILE_V1);
+fn read_records(dir: &Path) -> Result<Vec<TraceRecord>, TraceExportError> {
+    let path = dir.join(TRACE_EXPORT_RECORDS_FILE);
     if !path.exists() {
         return Ok(Vec::new());
     }
     let content = fs::read_to_string(&path)
-        .map_err(|error| TraceExportErrorV1::Io(format!("read {}: {error}", path.display())))?;
+        .map_err(|error| TraceExportError::Io(format!("read {}: {error}", path.display())))?;
     // A nonempty records file must end in a newline: the final line is
     // otherwise the partial write of an interrupted append (torn tail).
     if !content.is_empty() && !content.ends_with('\n') {
-        return Err(TraceExportErrorV1::TornTail {
+        return Err(TraceExportError::TornTail {
             seq: content.lines().count() as u64,
         });
     }
     let mut records = Vec::new();
     for (index, line) in content.lines().enumerate() {
         if line.is_empty() {
-            return Err(TraceExportErrorV1::TornTail { seq: index as u64 });
+            return Err(TraceExportError::TornTail { seq: index as u64 });
         }
-        let record: TraceRecordV1 = serde_json::from_str(line).map_err(|error| {
-            TraceExportErrorV1::InvalidRecord {
+        let record: TraceRecord = serde_json::from_str(line).map_err(|error| {
+            TraceExportError::InvalidRecord {
                 seq: index as u64,
                 detail: format!("cannot parse persisted record: {error}"),
             }
@@ -389,39 +389,39 @@ fn read_records(dir: &Path) -> Result<Vec<TraceRecordV1>, TraceExportErrorV1> {
     Ok(records)
 }
 
-fn replay_and_verify(dir: &Path) -> Result<TraceExportSnapshotV1, TraceExportErrorV1> {
+fn replay_and_verify(dir: &Path) -> Result<TraceExportSnapshot, TraceExportError> {
     let records = read_records(dir)?;
-    let mut parent: Option<DigestV1> = None;
+    let mut parent: Option<Sha256Digest> = None;
     for (index, record) in records.iter().enumerate() {
         if record.seq != index as u64 {
-            return Err(TraceExportErrorV1::InvalidRecord {
+            return Err(TraceExportError::InvalidRecord {
                 seq: index as u64,
                 detail: format!("seq must equal the record index, got {}", record.seq),
             });
         }
         if record.parent_record_digest != parent {
-            return Err(TraceExportErrorV1::InvalidRecord {
+            return Err(TraceExportError::InvalidRecord {
                 seq: index as u64,
                 detail: "record does not chain to its parent digest".to_owned(),
             });
         }
         parent = Some(record.record_digest()?);
     }
-    let head = parent.unwrap_or_else(|| DigestV1::from_bytes([0; 32]));
-    let sealed_path = dir.join(TRACE_EXPORT_SEALED_HEAD_FILE_V1);
+    let head = parent.unwrap_or_else(|| Sha256Digest::from_bytes([0; 32]));
+    let sealed_path = dir.join(TRACE_EXPORT_SEALED_HEAD_FILE);
     let sealed_head = if sealed_path.exists() {
         let content = fs::read_to_string(&sealed_path)
-            .map_err(|error| TraceExportErrorV1::Io(format!("read sealed head: {error}")))?;
-        let sealed: TraceSealedHeadV1 = serde_json::from_str(&content).map_err(|error| {
-            TraceExportErrorV1::InvalidManifest(format!("sealed head not canonical: {error}"))
+            .map_err(|error| TraceExportError::Io(format!("read sealed head: {error}")))?;
+        let sealed: TraceSealedHead = serde_json::from_str(&content).map_err(|error| {
+            TraceExportError::InvalidManifest(format!("sealed head not canonical: {error}"))
         })?;
-        if sealed.schema_version != TRACE_EXPORT_SCHEMA_VERSION_V1 {
-            return Err(TraceExportErrorV1::InvalidManifest(
+        if sealed.schema_version != TRACE_EXPORT_SCHEMA_VERSION {
+            return Err(TraceExportError::InvalidManifest(
                 "sealed head schema version is not supported".to_owned(),
             ));
         }
         if sealed.head != head {
-            return Err(TraceExportErrorV1::HeadMismatch {
+            return Err(TraceExportError::HeadMismatch {
                 sealed: sealed.head,
                 replayed: head,
             });
@@ -430,7 +430,7 @@ fn replay_and_verify(dir: &Path) -> Result<TraceExportSnapshotV1, TraceExportErr
     } else {
         None
     };
-    Ok(TraceExportSnapshotV1 {
+    Ok(TraceExportSnapshot {
         records,
         head,
         sealed_head,
@@ -440,26 +440,26 @@ fn replay_and_verify(dir: &Path) -> Result<TraceExportSnapshotV1, TraceExportErr
 /// Open (or create) a trace export and verify its chain. Fails closed on
 /// torn tails, malformed, reordered, or non-chaining records, and on
 /// sealed-head mismatches.
-pub fn open_trace_export_v1(dir: impl Into<PathBuf>) -> Result<TraceExportSnapshotV1, TraceExportErrorV1> {
+pub fn open_trace_export(dir: impl Into<PathBuf>) -> Result<TraceExportSnapshot, TraceExportError> {
     let dir = dir.into();
     fs::create_dir_all(&dir)
-        .map_err(|error| TraceExportErrorV1::Io(format!("create {}: {error}", dir.display())))?;
+        .map_err(|error| TraceExportError::Io(format!("create {}: {error}", dir.display())))?;
     replay_and_verify(&dir)
 }
 
 /// Append one trace record, chaining it to the current head. The record is
 /// persisted durably first.
-pub fn append_trace_record_v1(
+pub fn append_trace_record(
     dir: impl Into<PathBuf>,
-    record: &TraceRecordV1,
-) -> Result<TraceExportReceiptV1, TraceExportErrorV1> {
+    record: &TraceRecord,
+) -> Result<TraceExportReceipt, TraceExportError> {
     let dir = dir.into();
     fs::create_dir_all(&dir)
-        .map_err(|error| TraceExportErrorV1::Io(format!("create {}: {error}", dir.display())))?;
+        .map_err(|error| TraceExportError::Io(format!("create {}: {error}", dir.display())))?;
     let current = replay_and_verify(&dir)?;
     let expected_seq = current.records.len() as u64;
     if record.seq != expected_seq {
-        return Err(TraceExportErrorV1::InvalidRecord {
+        return Err(TraceExportError::InvalidRecord {
             seq: record.seq,
             detail: format!("append must continue the chain at seq {expected_seq}"),
         });
@@ -470,94 +470,94 @@ pub fn append_trace_record_v1(
         Some(current.records.last().expect("records nonempty").record_digest()?)
     };
     if record.parent_record_digest != parent {
-        return Err(TraceExportErrorV1::InvalidRecord {
+        return Err(TraceExportError::InvalidRecord {
             seq: record.seq,
             detail: "record parent digest does not chain to the export head".to_owned(),
         });
     }
-    let path = dir.join(TRACE_EXPORT_RECORDS_FILE_V1);
+    let path = dir.join(TRACE_EXPORT_RECORDS_FILE);
     let mut file = OpenOptions::new()
         .create(true)
         .append(true)
         .open(&path)
-        .map_err(|error| TraceExportErrorV1::Io(format!("open {}: {error}", path.display())))?;
+        .map_err(|error| TraceExportError::Io(format!("open {}: {error}", path.display())))?;
     let mut bytes = record.canonical_bytes()?;
     bytes.push(b'\n');
     file.write_all(&bytes)
-        .map_err(|error| TraceExportErrorV1::Io(format!("append {}: {error}", path.display())))?;
+        .map_err(|error| TraceExportError::Io(format!("append {}: {error}", path.display())))?;
     file.sync_all()
-        .map_err(|error| TraceExportErrorV1::Io(format!("sync {}: {error}", path.display())))?;
+        .map_err(|error| TraceExportError::Io(format!("sync {}: {error}", path.display())))?;
     let snapshot = replay_and_verify(&dir)?;
-    Ok(TraceExportReceiptV1 {
-        schema_version: TRACE_EXPORT_SCHEMA_VERSION_V1,
+    Ok(TraceExportReceipt {
+        schema_version: TRACE_EXPORT_SCHEMA_VERSION,
         records: snapshot.records.len(),
         head: snapshot.head,
         sealed: snapshot.sealed_head.is_some(),
         export_dir: dir.display().to_string(),
-        abi_version: TRACE_EXPORT_ABI_VERSION_V1.to_owned(),
+        abi_version: TRACE_EXPORT_ABI_VERSION.to_owned(),
     })
 }
 
 /// Seal the current export head. A later open verifies the replayed chain
 /// against this head, detecting torn tails and tampering.
-pub fn seal_trace_export_v1(dir: impl Into<PathBuf>) -> Result<DigestV1, TraceExportErrorV1> {
+pub fn seal_trace_export(dir: impl Into<PathBuf>) -> Result<Sha256Digest, TraceExportError> {
     let dir = dir.into();
     let snapshot = replay_and_verify(&dir)?;
-    let sealed = TraceSealedHeadV1::new(snapshot.head);
+    let sealed = TraceSealedHead::new(snapshot.head);
     let content = serde_json::to_vec(&sealed).map_err(|error| {
-        TraceExportErrorV1::InvalidManifest(format!("sealed head not serializable: {error}"))
+        TraceExportError::InvalidManifest(format!("sealed head not serializable: {error}"))
     })?;
-    let path = dir.join(TRACE_EXPORT_SEALED_HEAD_FILE_V1);
+    let path = dir.join(TRACE_EXPORT_SEALED_HEAD_FILE);
     fs::write(&path, content)
-        .map_err(|error| TraceExportErrorV1::Io(format!("write {}: {error}", path.display())))?;
+        .map_err(|error| TraceExportError::Io(format!("write {}: {error}", path.display())))?;
     Ok(snapshot.head)
 }
 
 /// Full export pipeline for one batch: open (creating as needed), append
 /// the records in order, seal, and return the sealed receipt. Batches are
-/// bounded ([`TRACE_EXPORT_MAX_BATCH_RECORDS_V1`]) -- a larger batch is a
+/// bounded ([`TRACE_EXPORT_MAX_BATCH_RECORDS`]) -- a larger batch is a
 /// loud refusal, never a silent truncation.
-pub fn export_trace_pipeline_v1(
+pub fn export_trace_pipeline(
     dir: impl Into<PathBuf>,
-    records: &[TraceRecordV1],
-) -> Result<TraceExportReceiptV1, TraceExportErrorV1> {
+    records: &[TraceRecord],
+) -> Result<TraceExportReceipt, TraceExportError> {
     let dir = dir.into();
-    if records.len() > TRACE_EXPORT_MAX_BATCH_RECORDS_V1 {
-        return Err(TraceExportErrorV1::InvalidManifest(format!(
+    if records.len() > TRACE_EXPORT_MAX_BATCH_RECORDS {
+        return Err(TraceExportError::InvalidManifest(format!(
             "trace batch of {} records exceeds the bound {}",
             records.len(),
-            TRACE_EXPORT_MAX_BATCH_RECORDS_V1
+            TRACE_EXPORT_MAX_BATCH_RECORDS
         )));
     }
-    let current = open_trace_export_v1(&dir)?;
+    let current = open_trace_export(&dir)?;
     let start = current.records.len() as u64;
     for (offset, record) in records.iter().enumerate() {
         if record.seq != start + offset as u64 {
-            return Err(TraceExportErrorV1::InvalidRecord {
+            return Err(TraceExportError::InvalidRecord {
                 seq: record.seq,
                 detail: format!("pipeline batch must continue the chain at seq {}", start + offset as u64),
             });
         }
-        append_trace_record_v1(&dir, record)?;
+        append_trace_record(&dir, record)?;
     }
-    let head = seal_trace_export_v1(&dir)?;
+    let head = seal_trace_export(&dir)?;
     let snapshot = replay_and_verify(&dir)?;
-    Ok(TraceExportReceiptV1 {
-        schema_version: TRACE_EXPORT_SCHEMA_VERSION_V1,
+    Ok(TraceExportReceipt {
+        schema_version: TRACE_EXPORT_SCHEMA_VERSION,
         records: snapshot.records.len(),
         head,
         sealed: true,
         export_dir: dir.display().to_string(),
-        abi_version: TRACE_EXPORT_ABI_VERSION_V1.to_owned(),
+        abi_version: TRACE_EXPORT_ABI_VERSION.to_owned(),
     })
 }
 
 /// Read back an export and verify its chain and seal (alias for
-/// [`open_trace_export_v1`]).
-pub fn read_trace_export_v1(
+/// [`open_trace_export`]).
+pub fn read_trace_export(
     dir: impl Into<PathBuf>,
-) -> Result<TraceExportSnapshotV1, TraceExportErrorV1> {
-    open_trace_export_v1(dir)
+) -> Result<TraceExportSnapshot, TraceExportError> {
+    open_trace_export(dir)
 }
 
 // ---------------------------------------------------------------------------
@@ -567,34 +567,34 @@ pub fn read_trace_export_v1(
 /// One annotated boundary line in a summary.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
-pub struct DecisionBoundaryLineV1 {
+pub struct DecisionBoundaryLine {
     pub seq: u64,
-    pub kind: TraceEventKindV1,
-    pub boundary: DecisionBoundaryKindV1,
+    pub kind: TraceEventKind,
+    pub boundary: DecisionBoundaryKind,
     pub rationale: String,
-    pub decision_digest: DigestV1,
-    pub record_digest: DigestV1,
+    pub decision_digest: Sha256Digest,
+    pub record_digest: Sha256Digest,
 }
 
 /// Sealed summary of every decision boundary annotated in an export: the
 /// decision-boundary annotation artifact.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
-pub struct DecisionBoundarySummaryV1 {
+pub struct DecisionBoundarySummary {
     pub schema_version: u16,
     pub export_dir: String,
-    pub boundaries: Vec<DecisionBoundaryLineV1>,
+    pub boundaries: Vec<DecisionBoundaryLine>,
     pub annotated_records: usize,
     pub abi_version: String,
 }
 
-impl DecisionBoundarySummaryV1 {
-    pub fn digest(&self) -> DigestV1 {
+impl DecisionBoundarySummary {
+    pub fn digest(&self) -> Sha256Digest {
         let bytes = canonical_bytes(self).expect("decision-boundary summary is JSON-serializable");
-        let mut tagged = Vec::with_capacity(TRACE_EXPORT_DOMAIN_V1.len() + 128);
-        tagged.extend_from_slice(TRACE_EXPORT_DOMAIN_V1);
+        let mut tagged = Vec::with_capacity(TRACE_EXPORT_DOMAIN.len() + 128);
+        tagged.extend_from_slice(TRACE_EXPORT_DOMAIN);
         tagged.extend_from_slice(&bytes);
-        DigestV1::from_bytes(zero_abi::sha256(&tagged))
+        Sha256Digest::from_bytes(zero_abi::sha256(&tagged))
     }
 }
 
@@ -602,25 +602,25 @@ impl DecisionBoundarySummaryV1 {
 /// cache-decision record must carry an annotation (it does -- the typed
 /// constructor enforces it), and every annotated record is listed with its
 /// sealed decision digest. Unannotated records are listed as
-/// [`DecisionBoundaryKindV1`]-free lines only when they are not decisions;
+/// [`DecisionBoundaryKind`]-free lines only when they are not decisions;
 /// a decision record without an annotation is a loud error.
-pub fn summarize_decision_boundaries_v1(
+pub fn summarize_decision_boundaries(
     dir: impl Into<PathBuf>,
-) -> Result<DecisionBoundarySummaryV1, TraceExportErrorV1> {
+) -> Result<DecisionBoundarySummary, TraceExportError> {
     let dir = dir.into();
-    let snapshot = open_trace_export_v1(&dir)?;
+    let snapshot = open_trace_export(&dir)?;
     let mut boundaries = Vec::new();
     for record in &snapshot.records {
-        if record.kind == TraceEventKindV1::CacheDecision
+        if record.kind == TraceEventKind::CacheDecision
             && record.decision_boundary.is_none()
         {
-            return Err(TraceExportErrorV1::InvalidRecord {
+            return Err(TraceExportError::InvalidRecord {
                 seq: record.seq,
                 detail: "cache-decision record lacks a decision-boundary annotation".to_owned(),
             });
         }
         if let Some(annotation) = &record.decision_boundary {
-            boundaries.push(DecisionBoundaryLineV1 {
+            boundaries.push(DecisionBoundaryLine {
                 seq: record.seq,
                 kind: record.kind,
                 boundary: annotation.boundary,
@@ -631,12 +631,12 @@ pub fn summarize_decision_boundaries_v1(
         }
     }
     let annotated_records = boundaries.len();
-    Ok(DecisionBoundarySummaryV1 {
-        schema_version: TRACE_EXPORT_SCHEMA_VERSION_V1,
+    Ok(DecisionBoundarySummary {
+        schema_version: TRACE_EXPORT_SCHEMA_VERSION,
         export_dir: dir.display().to_string(),
         boundaries,
         annotated_records,
-        abi_version: TRACE_EXPORT_ABI_VERSION_V1.to_owned(),
+        abi_version: TRACE_EXPORT_ABI_VERSION.to_owned(),
     })
 }
 
@@ -649,7 +649,7 @@ pub fn summarize_decision_boundaries_v1(
 /// never implicitly reproducible.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
-pub enum BenchmarkReproducibilityV1 {
+pub enum BenchmarkReproducibility {
     Sealed,
     NonReproducible { reason: String },
 }
@@ -660,32 +660,32 @@ pub enum BenchmarkReproducibilityV1 {
 /// from the manifest or explicitly marked otherwise.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
-pub struct SealedBenchmarkManifestV1 {
+pub struct SealedBenchmarkManifest {
     pub schema_version: u16,
     pub benchmark_id: String,
-    pub workload_digest: DigestV1,
-    pub engine_digest: DigestV1,
+    pub workload_digest: Sha256Digest,
+    pub engine_digest: Sha256Digest,
     pub worker_digests: Vec<String>,
     pub parameters: serde_json::Value,
-    pub result_digest: DigestV1,
+    pub result_digest: Sha256Digest,
     pub receipt_digests: Vec<String>,
-    pub reproducibility: BenchmarkReproducibilityV1,
+    pub reproducibility: BenchmarkReproducibility,
     pub abi_version: String,
 }
 
-impl SealedBenchmarkManifestV1 {
+impl SealedBenchmarkManifest {
     pub fn new(
         benchmark_id: impl Into<String>,
-        workload_digest: DigestV1,
-        engine_digest: DigestV1,
+        workload_digest: Sha256Digest,
+        engine_digest: Sha256Digest,
         worker_digests: Vec<String>,
         parameters: serde_json::Value,
-        result_digest: DigestV1,
+        result_digest: Sha256Digest,
         receipt_digests: Vec<String>,
-        reproducibility: BenchmarkReproducibilityV1,
-    ) -> Result<Self, TraceExportErrorV1> {
+        reproducibility: BenchmarkReproducibility,
+    ) -> Result<Self, TraceExportError> {
         let manifest = Self {
-            schema_version: TRACE_EXPORT_SCHEMA_VERSION_V1,
+            schema_version: TRACE_EXPORT_SCHEMA_VERSION,
             benchmark_id: benchmark_id.into(),
             workload_digest,
             engine_digest,
@@ -694,30 +694,30 @@ impl SealedBenchmarkManifestV1 {
             result_digest,
             receipt_digests,
             reproducibility,
-            abi_version: TRACE_EXPORT_ABI_VERSION_V1.to_owned(),
+            abi_version: TRACE_EXPORT_ABI_VERSION.to_owned(),
         };
         manifest.validate()?;
         Ok(manifest)
     }
 
-    pub fn validate(&self) -> Result<(), TraceExportErrorV1> {
-        if self.schema_version != TRACE_EXPORT_SCHEMA_VERSION_V1 {
-            return Err(TraceExportErrorV1::InvalidManifest(
+    pub fn validate(&self) -> Result<(), TraceExportError> {
+        if self.schema_version != TRACE_EXPORT_SCHEMA_VERSION {
+            return Err(TraceExportError::InvalidManifest(
                 "manifest schema version is not supported".to_owned(),
             ));
         }
         if self.benchmark_id.is_empty()
-            || self.workload_digest == DigestV1::ZERO
-            || self.engine_digest == DigestV1::ZERO
-            || self.result_digest == DigestV1::ZERO
+            || self.workload_digest == Sha256Digest::ZERO
+            || self.engine_digest == Sha256Digest::ZERO
+            || self.result_digest == Sha256Digest::ZERO
         {
-            return Err(TraceExportErrorV1::InvalidManifest(
+            return Err(TraceExportError::InvalidManifest(
                 "benchmark id and workload/engine/result digests must be nonzero".to_owned(),
             ));
         }
-        if let BenchmarkReproducibilityV1::NonReproducible { reason } = &self.reproducibility {
+        if let BenchmarkReproducibility::NonReproducible { reason } = &self.reproducibility {
             if reason.is_empty() {
-                return Err(TraceExportErrorV1::InvalidManifest(
+                return Err(TraceExportError::InvalidManifest(
                     "nonreproducible benchmark must carry a reason".to_owned(),
                 ));
             }
@@ -725,52 +725,52 @@ impl SealedBenchmarkManifestV1 {
         Ok(())
     }
 
-    pub fn canonical_bytes(&self) -> Result<Vec<u8>, TraceExportErrorV1> {
+    pub fn canonical_bytes(&self) -> Result<Vec<u8>, TraceExportError> {
         self.validate()?;
         canonical_bytes(self)
     }
 
     /// The seal: content-derived digest over the domain-tagged canonical
     /// manifest bytes. Same inputs, same seal; tampering changes the seal.
-    pub fn digest(&self) -> Result<DigestV1, TraceExportErrorV1> {
-        let mut tagged = Vec::with_capacity(TRACE_EXPORT_DOMAIN_V1.len() + 128);
-        tagged.extend_from_slice(TRACE_EXPORT_DOMAIN_V1);
+    pub fn digest(&self) -> Result<Sha256Digest, TraceExportError> {
+        let mut tagged = Vec::with_capacity(TRACE_EXPORT_DOMAIN.len() + 128);
+        tagged.extend_from_slice(TRACE_EXPORT_DOMAIN);
         tagged.extend_from_slice(&self.canonical_bytes()?);
-        Ok(DigestV1::from_bytes(zero_abi::sha256(&tagged)))
+        Ok(Sha256Digest::from_bytes(zero_abi::sha256(&tagged)))
     }
 }
 
 /// The persisted form of a sealed manifest: manifest next to its seal.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
-pub struct SealedManifestFileV1 {
+pub struct SealedManifestFile {
     pub schema_version: u16,
-    pub manifest: SealedBenchmarkManifestV1,
-    pub seal: DigestV1,
+    pub manifest: SealedBenchmarkManifest,
+    pub seal: Sha256Digest,
     pub abi_version: String,
 }
 
-impl SealedManifestFileV1 {
-    pub fn seal(manifest: SealedBenchmarkManifestV1) -> Result<Self, TraceExportErrorV1> {
+impl SealedManifestFile {
+    pub fn seal(manifest: SealedBenchmarkManifest) -> Result<Self, TraceExportError> {
         let seal = manifest.digest()?;
         Ok(Self {
-            schema_version: TRACE_EXPORT_SCHEMA_VERSION_V1,
+            schema_version: TRACE_EXPORT_SCHEMA_VERSION,
             manifest,
             seal,
-            abi_version: TRACE_EXPORT_ABI_VERSION_V1.to_owned(),
+            abi_version: TRACE_EXPORT_ABI_VERSION.to_owned(),
         })
     }
 
     /// Verify the seal against the manifest bytes; tampering is loud.
-    pub fn verify_seal(&self) -> Result<(), TraceExportErrorV1> {
-        if self.schema_version != TRACE_EXPORT_SCHEMA_VERSION_V1 {
-            return Err(TraceExportErrorV1::InvalidManifest(
+    pub fn verify_seal(&self) -> Result<(), TraceExportError> {
+        if self.schema_version != TRACE_EXPORT_SCHEMA_VERSION {
+            return Err(TraceExportError::InvalidManifest(
                 "sealed manifest file schema version is not supported".to_owned(),
             ));
         }
         let recomputed = self.manifest.digest()?;
         if recomputed != self.seal {
-            return Err(TraceExportErrorV1::InvalidManifest(format!(
+            return Err(TraceExportError::InvalidManifest(format!(
                 "seal mismatch: persisted seal {} != recomputed {recomputed}",
                 self.seal
             )));
@@ -781,63 +781,63 @@ impl SealedManifestFileV1 {
 
 /// Export a sealed benchmark manifest into the export directory. The seal
 /// is persisted next to the manifest; read-back re-verifies it.
-pub fn export_benchmark_manifest_v1(
+pub fn export_benchmark_manifest(
     dir: impl Into<PathBuf>,
-    manifest: SealedBenchmarkManifestV1,
-) -> Result<DigestV1, TraceExportErrorV1> {
+    manifest: SealedBenchmarkManifest,
+) -> Result<Sha256Digest, TraceExportError> {
     let dir = dir.into();
     fs::create_dir_all(&dir)
-        .map_err(|error| TraceExportErrorV1::Io(format!("create {}: {error}", dir.display())))?;
-    let file = SealedManifestFileV1::seal(manifest)?;
+        .map_err(|error| TraceExportError::Io(format!("create {}: {error}", dir.display())))?;
+    let file = SealedManifestFile::seal(manifest)?;
     let content = serde_json::to_vec(&file).map_err(|error| {
-        TraceExportErrorV1::InvalidManifest(format!("manifest not serializable: {error}"))
+        TraceExportError::InvalidManifest(format!("manifest not serializable: {error}"))
     })?;
-    let path = dir.join(TRACE_EXPORT_MANIFEST_FILE_V1);
+    let path = dir.join(TRACE_EXPORT_MANIFEST_FILE);
     fs::write(&path, content)
-        .map_err(|error| TraceExportErrorV1::Io(format!("write {}: {error}", path.display())))?;
+        .map_err(|error| TraceExportError::Io(format!("write {}: {error}", path.display())))?;
     Ok(file.seal)
 }
 
 /// Read back and verify a sealed benchmark manifest.
-pub fn read_exported_benchmark_manifest_v1(
+pub fn read_exported_benchmark_manifest(
     dir: impl Into<PathBuf>,
-) -> Result<SealedBenchmarkManifestV1, TraceExportErrorV1> {
+) -> Result<SealedBenchmarkManifest, TraceExportError> {
     let dir = dir.into();
-    let path = dir.join(TRACE_EXPORT_MANIFEST_FILE_V1);
+    let path = dir.join(TRACE_EXPORT_MANIFEST_FILE);
     if !path.exists() {
-        return Err(TraceExportErrorV1::InvalidManifest(format!(
+        return Err(TraceExportError::InvalidManifest(format!(
             "no benchmark manifest at {}",
             path.display()
         )));
     }
     let content = fs::read_to_string(&path)
-        .map_err(|error| TraceExportErrorV1::Io(format!("read {}: {error}", path.display())))?;
-    let file: SealedManifestFileV1 = serde_json::from_str(&content).map_err(|error| {
-        TraceExportErrorV1::InvalidManifest(format!("cannot parse manifest: {error}"))
+        .map_err(|error| TraceExportError::Io(format!("read {}: {error}", path.display())))?;
+    let file: SealedManifestFile = serde_json::from_str(&content).map_err(|error| {
+        TraceExportError::InvalidManifest(format!("cannot parse manifest: {error}"))
     })?;
     file.verify_seal()?;
     Ok(file.manifest)
 }
 
 /// The frozen contract manifest for the trace-export surface (ZS-OPS-003).
-pub fn trace_export_contract_v1() -> serde_json::Value {
+pub fn trace_export_contract() -> serde_json::Value {
     serde_json::json!({
-        "schema_version": TRACE_EXPORT_SCHEMA_VERSION_V1,
+        "schema_version": TRACE_EXPORT_SCHEMA_VERSION,
         "pipeline": {
-            "records_file": TRACE_EXPORT_RECORDS_FILE_V1,
-            "sealed_head_file": TRACE_EXPORT_SEALED_HEAD_FILE_V1,
-            "manifest_file": TRACE_EXPORT_MANIFEST_FILE_V1,
+            "records_file": TRACE_EXPORT_RECORDS_FILE,
+            "sealed_head_file": TRACE_EXPORT_SEALED_HEAD_FILE,
+            "manifest_file": TRACE_EXPORT_MANIFEST_FILE,
             "fail_closed": "torn tails, tampered or reordered records, head mismatches",
-            "max_batch_records": TRACE_EXPORT_MAX_BATCH_RECORDS_V1,
+            "max_batch_records": TRACE_EXPORT_MAX_BATCH_RECORDS,
         },
         "decision_boundary": {
             "cache_decision_records": "annotation required (typed constructor)",
-            "artifact": "DecisionBoundarySummaryV1 with sealed decision digests",
+            "artifact": "DecisionBoundarySummary with sealed decision digests",
         },
         "benchmark_manifests": {
             "reproducibility": "sealed or explicitly nonreproducible with reason",
             "seal": "content-derived over canonical manifest bytes",
         },
-        "abi_version": TRACE_EXPORT_ABI_VERSION_V1,
+        "abi_version": TRACE_EXPORT_ABI_VERSION,
     })
 }

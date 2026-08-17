@@ -7,7 +7,7 @@
 //! scoped authority after rooted evidence. This module makes that boundary
 //! auditable and testable:
 //!
-//! - [`authority_boundary_audit_v1`] is the static audit artifact: a sealed
+//! - [`authority_boundary_audit`] is the static audit artifact: a sealed
 //!   registry of every authority artifact in the trusted crates, its
 //!   construction surface, and its guard. `role_constructible == false`
 //!   means the type cannot be constructed by role code -- enforced at
@@ -16,8 +16,8 @@
 //! - For serializable artifacts (records must cross process boundaries),
 //!   construction is public but *authority is not*: a record only carries
 //!   authority when a trusted gate issued it AND the journal shows the
-//!   issuance. [`verify_decision_authority_v1`] and
-//!   [`verify_commit_authority_v1`] are the read-side checks that refuse a
+//!   issuance. [`verify_decision_authority`] and
+//!   [`verify_commit_authority`] are the read-side checks that refuse a
 //!   record the journal never saw (an "authority" forged by role code).
 //! - The replayed-authority acceptance (captured-epoch replay) is tested in
 //!   `tests/unit/zero-cert/boundary_audit.rs`: an authority captured at
@@ -27,15 +27,15 @@
 //! ## Static module-boundary audit (compile-time)
 //!
 //! A planner/model/retriever/cache-optimizer module cannot construct an
-//! authority session -- `RootGateSessionV1` is a private-field type with no
+//! authority session -- `RootGateSession` is a private-field type with no
 //! public constructor:
 //!
 //! ~~~compile_fail
-//! use zero_cert::{DigestV1, RootGateSessionV1};
-//! fn forge_session() -> RootGateSessionV1 {
-//!     RootGateSessionV1 {
-//!         declared_parent_root: DigestV1::ZERO,
-//!         verified_successor_root: DigestV1::ZERO,
+//! use zero_cert::{Sha256Digest, RootGateSession};
+//! fn forge_session() -> RootGateSession {
+//!     RootGateSession {
+//!         declared_parent_root: Sha256Digest::ZERO,
+//!         verified_successor_root: Sha256Digest::ZERO,
 //!         authorized: true,
 //!     }
 //! }
@@ -53,16 +53,16 @@
 
 use serde::{Deserialize, Serialize};
 
-use zero_abi::{DigestV1, canonical_json};
+use zero_abi::{Sha256Digest, canonical_json};
 
-use crate::kernel_runtime::{CacheAdmissionRecordV1, KernelEventJournalV1, KernelRuntimeError, JournalStore};
+use crate::kernel_runtime::{CacheAdmissionRecord, KernelEventJournal, KernelRuntimeError, JournalStore};
 
 /// Schema version of the boundary audit report.
-pub const BOUNDARY_AUDIT_SCHEMA_VERSION_V1: u16 = 1;
+pub const BOUNDARY_AUDIT_SCHEMA_VERSION: u16 = 1;
 /// Domain tag bound into the audit report digest.
-pub const BOUNDARY_AUDIT_DOMAIN_V1: &[u8] = b"zerostack.boundary-audit.v1\0";
+pub const BOUNDARY_AUDIT_DOMAIN: &[u8] = b"zerostack.boundary-audit.v1\0";
 /// ABI tag carried by audit artifacts.
-pub const BOUNDARY_AUDIT_ABI_VERSION_V1: &str = "v6-r14";
+pub const BOUNDARY_AUDIT_ABI_VERSION: &str = "v6-r14";
 
 /// How an authority artifact is constructed. `PrivateFields` and
 /// `GuardedConstructor` surfaces are compile-time sealed; `PublicArtifact`
@@ -70,7 +70,7 @@ pub const BOUNDARY_AUDIT_ABI_VERSION_V1: &str = "v6-r14";
 /// verifying gate, never from construction.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
-pub enum ConstructionSurfaceV1 {
+pub enum ConstructionSurface {
     /// All fields private; no public constructor (compile-time sealed).
     PrivateFields,
     /// Constructed only through a named guarded function after rooted
@@ -84,9 +84,9 @@ pub enum ConstructionSurfaceV1 {
 /// One audited authority artifact.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
-pub struct AuthoritySurfaceV1 {
+pub struct AuthoritySurface {
     pub authority_type: String,
-    pub construction_surface: ConstructionSurfaceV1,
+    pub construction_surface: ConstructionSurface,
     /// False when role code cannot construct the artifact at all; true only
     /// for `PublicArtifact` records whose *authority* is still guarded.
     pub role_constructible: bool,
@@ -96,25 +96,25 @@ pub struct AuthoritySurfaceV1 {
 /// registry is the contract an external reviewer can diff against source.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
-pub struct AuthorityBoundaryAuditReportV1 {
+pub struct AuthorityBoundaryAuditReport {
     pub schema_version: u16,
     pub invariant: String,
-    pub entries: Vec<AuthoritySurfaceV1>,
+    pub entries: Vec<AuthoritySurface>,
     pub abi_version: String,
 }
 
-impl AuthorityBoundaryAuditReportV1 {
+impl AuthorityBoundaryAuditReport {
     pub fn canonical_bytes(&self) -> Result<Vec<u8>, KernelRuntimeError> {
         let json = serde_json::to_value(self)
             .map_err(|error| KernelRuntimeError::Io(format!("audit report serialization: {error}")))?;
         Ok(canonical_json(&json).into_bytes())
     }
 
-    pub fn digest(&self) -> Result<DigestV1, KernelRuntimeError> {
-        let mut tagged = Vec::with_capacity(BOUNDARY_AUDIT_DOMAIN_V1.len() + 128);
-        tagged.extend_from_slice(BOUNDARY_AUDIT_DOMAIN_V1);
+    pub fn digest(&self) -> Result<Sha256Digest, KernelRuntimeError> {
+        let mut tagged = Vec::with_capacity(BOUNDARY_AUDIT_DOMAIN.len() + 128);
+        tagged.extend_from_slice(BOUNDARY_AUDIT_DOMAIN);
         tagged.extend_from_slice(&self.canonical_bytes()?);
-        Ok(DigestV1::from_bytes(zero_abi::sha256(&tagged)))
+        Ok(Sha256Digest::from_bytes(zero_abi::sha256(&tagged)))
     }
 }
 
@@ -122,53 +122,53 @@ impl AuthorityBoundaryAuditReportV1 {
 /// artifacts. Every entry names the artifact, its construction surface, and
 /// the guard that issues it. The audit is honest: serializable records are
 /// marked `PublicArtifact` with their verifying gate, never claimed sealed.
-pub fn authority_boundary_audit_v1() -> AuthorityBoundaryAuditReportV1 {
-    AuthorityBoundaryAuditReportV1 {
-        schema_version: BOUNDARY_AUDIT_SCHEMA_VERSION_V1,
+pub fn authority_boundary_audit() -> AuthorityBoundaryAuditReport {
+    AuthorityBoundaryAuditReport {
+        schema_version: BOUNDARY_AUDIT_SCHEMA_VERSION,
         invariant:
             "planner/model/retriever/cache-optimizer code cannot construct authority objects; \
              only trusted checkers issue short-lived scoped authority after rooted evidence"
                 .to_owned(),
         entries: vec![
-            AuthoritySurfaceV1 {
+            AuthoritySurface {
                 authority_type: "zero_cert::VerifiedEvidence".to_owned(),
-                construction_surface: ConstructionSurfaceV1::PrivateFields,
+                construction_surface: ConstructionSurface::PrivateFields,
                 role_constructible: false,
             },
-            AuthoritySurfaceV1 {
-                authority_type: "zero_cert::RootGateSessionV1".to_owned(),
-                construction_surface: ConstructionSurfaceV1::PrivateFields,
+            AuthoritySurface {
+                authority_type: "zero_cert::RootGateSession".to_owned(),
+                construction_surface: ConstructionSurface::PrivateFields,
                 role_constructible: false,
             },
-            AuthoritySurfaceV1 {
-                authority_type: "zero_cert::CacheAdmissionRecordV1".to_owned(),
-                construction_surface: ConstructionSurfaceV1::PublicArtifact {
-                    verified_by: "CacheAdmissionGateV1::decide + journal CacheDecision event".to_owned(),
+            AuthoritySurface {
+                authority_type: "zero_cert::CacheAdmissionRecord".to_owned(),
+                construction_surface: ConstructionSurface::PublicArtifact {
+                    verified_by: "CacheAdmissionGate::decide + journal CacheDecision event".to_owned(),
                 },
                 role_constructible: true,
             },
-            AuthoritySurfaceV1 {
-                authority_type: "zero_abi::SuccessorRecordV1".to_owned(),
-                construction_surface: ConstructionSurfaceV1::PublicArtifact {
-                    verified_by: "ProjectRootGateV1::commit + journal Commit event".to_owned(),
+            AuthoritySurface {
+                authority_type: "zero_abi::SuccessorRecord".to_owned(),
+                construction_surface: ConstructionSurface::PublicArtifact {
+                    verified_by: "ProjectRootGate::commit + journal Commit event".to_owned(),
                 },
                 role_constructible: true,
             },
-            AuthoritySurfaceV1 {
-                authority_type: "zero_cert::WorkerAdmissionReceiptV1".to_owned(),
-                construction_surface: ConstructionSurfaceV1::PublicArtifact {
-                    verified_by: "WorkerTrustBoundaryV1::admit (digest-pinned context)".to_owned(),
+            AuthoritySurface {
+                authority_type: "zero_cert::WorkerAdmissionReceipt".to_owned(),
+                construction_surface: ConstructionSurface::PublicArtifact {
+                    verified_by: "WorkerTrustBoundary::admit (digest-pinned context)".to_owned(),
                 },
                 role_constructible: true,
             },
         ],
-        abi_version: BOUNDARY_AUDIT_ABI_VERSION_V1.to_owned(),
+        abi_version: BOUNDARY_AUDIT_ABI_VERSION.to_owned(),
     }
 }
 
 /// Loud read-side authority failures.
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub enum BoundaryAuditErrorV1 {
+pub enum BoundaryAuditError {
     /// A decision record was presented that the journal never issued: the
     /// record root does not match any journaled CacheDecision payload.
     UnauthorizedDecision { record_root: String },
@@ -177,13 +177,13 @@ pub enum BoundaryAuditErrorV1 {
     UnauthorizedCommit { claimed_new_root: String, journal_root: Option<String> },
 }
 
-impl std::fmt::Display for BoundaryAuditErrorV1 {
+impl std::fmt::Display for BoundaryAuditError {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            BoundaryAuditErrorV1::UnauthorizedDecision { record_root } => {
+            BoundaryAuditError::UnauthorizedDecision { record_root } => {
                 write!(formatter, "decision record {record_root} was never issued by the journal")
             }
-            BoundaryAuditErrorV1::UnauthorizedCommit {
+            BoundaryAuditError::UnauthorizedCommit {
                 claimed_new_root,
                 journal_root,
             } => write!(
@@ -194,42 +194,42 @@ impl std::fmt::Display for BoundaryAuditErrorV1 {
     }
 }
 
-impl std::error::Error for BoundaryAuditErrorV1 {}
+impl std::error::Error for BoundaryAuditError {}
 
-/// Read-side authority check for cache decisions: a `CacheAdmissionRecordV1`
+/// Read-side authority check for cache decisions: a `CacheAdmissionRecord`
 /// carries authority only when a `CacheDecision` journal event carries its
 /// exact record root. A record constructed by role code (same fields, never
 /// journaled) is refused -- construction is public, authority is not.
-pub fn verify_decision_authority_v1<S: JournalStore>(
-    journal: &KernelEventJournalV1<S>,
-    record: &CacheAdmissionRecordV1,
-) -> Result<(), BoundaryAuditErrorV1> {
+pub fn verify_decision_authority<S: JournalStore>(
+    journal: &KernelEventJournal<S>,
+    record: &CacheAdmissionRecord,
+) -> Result<(), BoundaryAuditError> {
     let record_root = record.record_root();
     for event in journal.records() {
         if event.payload_root == record_root {
             return Ok(());
         }
     }
-    Err(BoundaryAuditErrorV1::UnauthorizedDecision { record_root })
+    Err(BoundaryAuditError::UnauthorizedDecision { record_root })
 }
 
 /// Read-side authority check for commits: a presented successor claim
-/// (captured `SuccessorRecordV1`) carries authority only when the journal's
+/// (captured `SuccessorRecord`) carries authority only when the journal's
 /// last `Commit` event carries the exact new root. A captured-epoch replay
 /// -- the same successor presented after the project root advanced -- is
 /// refused because the journal's last commit is no longer the captured
 /// root.
-pub fn verify_commit_authority_v1<S: JournalStore>(
-    journal: &KernelEventJournalV1<S>,
-    claimed_new_root: DigestV1,
-) -> Result<(), BoundaryAuditErrorV1> {
+pub fn verify_commit_authority<S: JournalStore>(
+    journal: &KernelEventJournal<S>,
+    claimed_new_root: Sha256Digest,
+) -> Result<(), BoundaryAuditError> {
     match journal.current_project_root() {
         Ok(Some(journal_root)) if journal_root == claimed_new_root => Ok(()),
-        Ok(journal_root) => Err(BoundaryAuditErrorV1::UnauthorizedCommit {
+        Ok(journal_root) => Err(BoundaryAuditError::UnauthorizedCommit {
             claimed_new_root: claimed_new_root.to_hex(),
             journal_root: journal_root.map(|root| root.to_hex()),
         }),
-        Err(error) => Err(BoundaryAuditErrorV1::UnauthorizedCommit {
+        Err(error) => Err(BoundaryAuditError::UnauthorizedCommit {
             claimed_new_root: claimed_new_root.to_hex(),
             journal_root: Some(format!("journal read failed: {error}")),
         }),

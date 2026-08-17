@@ -15,13 +15,13 @@ pub enum TelemetrySchema {
 /// Exact cross-engine prevented-read counter set.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct ZeroTelemetryV1 {
+pub struct ZeroTelemetry {
     pub schema: TelemetrySchema,
     pub prevented_files: u64,
     pub prevented_bytes: u64,
 }
 
-impl Default for ZeroTelemetryV1 {
+impl Default for ZeroTelemetry {
     fn default() -> Self {
         Self {
             schema: TelemetrySchema::V1,
@@ -31,7 +31,7 @@ impl Default for ZeroTelemetryV1 {
     }
 }
 
-impl ZeroTelemetryV1 {
+impl ZeroTelemetry {
     /// Adds one typed counter without wrapping.
     pub fn checked_accumulate(
         &mut self,

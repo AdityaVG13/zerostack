@@ -13,26 +13,26 @@ use serde_json::{Value, json};
 
 use crate::{
     canonical_json,
-    cwir::{CWIR_CONTRACT_VERSION_V1, cwir_contract_digest_v1},
-    effect::{EFFECT_IR_CONTRACT_VERSION_V1, effect_ir_contract_digest_v1},
+    cwir::{CWIR_CONTRACT_VERSION, cwir_contract_digest},
+    effect::{EFFECT_IR_CONTRACT_VERSION, effect_ir_contract_digest},
     raw_worker::EngineIdentity,
-    reasoning::{REASONING_CONTRACT_VERSION_V1, reasoning_contract_digest_v1},
+    reasoning::{REASONING_CONTRACT_VERSION, reasoning_contract_digest},
     sha256,
-    zbf::{ZBF_CONTRACT_VERSION_V1, zbf_contract_digest_v1},
+    zbf::{ZBF_CONTRACT_VERSION, zbf_contract_digest},
 };
 
 pub const ASSEMBLY_MANIFEST_SCHEMA_VERSION: u16 = 1;
 pub const ASSEMBLY_ABI_CONTRACT_VERSION: u16 = 1;
-pub const ASSEMBLY_MANIFEST_DOMAIN_V1: &[u8] = b"zerostack.assembly_manifest.v1\0";
+pub const ASSEMBLY_MANIFEST_DOMAIN: &[u8] = b"zerostack.assembly_manifest.v1\0";
 pub const MAX_ASSEMBLY_MANIFEST_BYTES: usize = 1_048_576;
 pub const MAX_ASSEMBLY_ITEMS: usize = 64;
 pub const MAX_ASSEMBLY_STRING_BYTES: usize = 512;
 
 /// A fixed SHA-256 identity. Wire form is exactly 64 lowercase hexadecimal bytes.
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
-pub struct DigestV1([u8; 32]);
+pub struct Sha256Digest([u8; 32]);
 
-impl DigestV1 {
+impl Sha256Digest {
     pub const ZERO: Self = Self([0; 32]);
 
     pub const fn from_bytes(bytes: [u8; 32]) -> Self {
@@ -43,17 +43,17 @@ impl DigestV1 {
         &self.0
     }
 
-    pub fn from_hex(value: &str) -> Result<Self, DigestParseErrorV1> {
+    pub fn from_hex(value: &str) -> Result<Self, DigestParseError> {
         if value.len() != 64 {
-            return Err(DigestParseErrorV1::WrongLength(value.len()));
+            return Err(DigestParseError::WrongLength(value.len()));
         }
         let mut bytes = [0_u8; 32];
         for (index, pair) in value.as_bytes().chunks_exact(2).enumerate() {
-            let high = lower_hex_nibble(pair[0]).ok_or(DigestParseErrorV1::InvalidHex {
+            let high = lower_hex_nibble(pair[0]).ok_or(DigestParseError::InvalidHex {
                 index: index * 2,
                 byte: pair[0],
             })?;
-            let low = lower_hex_nibble(pair[1]).ok_or(DigestParseErrorV1::InvalidHex {
+            let low = lower_hex_nibble(pair[1]).ok_or(DigestParseError::InvalidHex {
                 index: index * 2 + 1,
                 byte: pair[1],
             })?;
@@ -81,13 +81,13 @@ fn lower_hex_nibble(byte: u8) -> Option<u8> {
     }
 }
 
-impl fmt::Display for DigestV1 {
+impl fmt::Display for Sha256Digest {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(&self.to_hex())
     }
 }
 
-impl Serialize for DigestV1 {
+impl Serialize for Sha256Digest {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
         S: Serializer,
@@ -96,7 +96,7 @@ impl Serialize for DigestV1 {
     }
 }
 
-impl<'de> Deserialize<'de> for DigestV1 {
+impl<'de> Deserialize<'de> for Sha256Digest {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
         D: Deserializer<'de>,
@@ -107,12 +107,12 @@ impl<'de> Deserialize<'de> for DigestV1 {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub enum DigestParseErrorV1 {
+pub enum DigestParseError {
     WrongLength(usize),
     InvalidHex { index: usize, byte: u8 },
 }
 
-impl fmt::Display for DigestParseErrorV1 {
+impl fmt::Display for DigestParseError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::WrongLength(actual) => write!(
@@ -127,11 +127,11 @@ impl fmt::Display for DigestParseErrorV1 {
     }
 }
 
-impl Error for DigestParseErrorV1 {}
+impl Error for DigestParseError {}
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, Ord, PartialEq, PartialOrd, Serialize)]
 #[serde(rename_all = "snake_case")]
-pub enum ArtifactOwnerV1 {
+pub enum ArtifactOwner {
     ZeroStack,
     FsZero,
     GraphZero,
@@ -141,7 +141,7 @@ pub enum ArtifactOwnerV1 {
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, Ord, PartialEq, PartialOrd, Serialize)]
 #[serde(rename_all = "snake_case")]
-pub enum ProfileKindV1 {
+pub enum ProfileKind {
     Platform,
     Runtime,
     Storage,
@@ -150,28 +150,28 @@ pub enum ProfileKindV1 {
 
 #[derive(Clone, Debug, Deserialize, Eq, Ord, PartialEq, PartialOrd, Serialize)]
 #[serde(deny_unknown_fields)]
-pub struct LinkedArtifactV1 {
+pub struct LinkedArtifact {
     pub artifact_id: String,
-    pub owner: ArtifactOwnerV1,
+    pub owner: ArtifactOwner,
     pub artifact_version: String,
     pub source_repository: String,
     pub source_revision: String,
-    pub artifact_digest: DigestV1,
-    pub contract_digest: DigestV1,
+    pub artifact_digest: Sha256Digest,
+    pub contract_digest: Sha256Digest,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, Ord, PartialEq, PartialOrd, Serialize)]
 #[serde(deny_unknown_fields)]
-pub struct LinkedProfileV1 {
-    pub profile_kind: ProfileKindV1,
+pub struct LinkedProfile {
+    pub profile_kind: ProfileKind,
     pub profile_id: String,
     pub profile_version: String,
-    pub profile_digest: DigestV1,
+    pub profile_digest: Sha256Digest,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
-pub struct TargetIdentityV1 {
+pub struct TargetIdentity {
     pub target_triple: String,
     pub architecture: String,
     pub operating_system: String,
@@ -180,59 +180,59 @@ pub struct TargetIdentityV1 {
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
-pub struct PlatformIdentityV1 {
+pub struct PlatformIdentity {
     pub profile_id: String,
     pub profile_version: String,
-    pub profile_digest: DigestV1,
+    pub profile_digest: Sha256Digest,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, Ord, PartialEq, PartialOrd, Serialize)]
 #[serde(deny_unknown_fields)]
-pub struct VerifierIdentityV1 {
+pub struct VerifierIdentity {
     pub verifier_id: String,
     pub verifier_version: String,
-    pub verifier_digest: DigestV1,
+    pub verifier_digest: Sha256Digest,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
-pub struct ReceiptSchemaIdentityV1 {
+pub struct ReceiptSchemaIdentity {
     pub schema_id: String,
     pub schema_version: String,
-    pub schema_digest: DigestV1,
+    pub schema_digest: Sha256Digest,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, Ord, PartialEq, PartialOrd, Serialize)]
 #[serde(deny_unknown_fields)]
-pub struct WorkerIdentityV1 {
+pub struct WorkerIdentity {
     pub engine: EngineIdentity,
-    pub artifact_digest: DigestV1,
-    pub worker_protocol_digest: DigestV1,
-    pub semantic_contract_digest: DigestV1,
-    pub operation_registry_digest: DigestV1,
-    pub capability_catalog_digest: DigestV1,
+    pub artifact_digest: Sha256Digest,
+    pub worker_protocol_digest: Sha256Digest,
+    pub semantic_contract_digest: Sha256Digest,
+    pub operation_registry_digest: Sha256Digest,
+    pub capability_catalog_digest: Sha256Digest,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
-pub struct AssemblyManifestV1 {
+pub struct AssemblyManifest {
     pub schema_version: u16,
     pub required_abi_contract_version: u16,
-    pub abi_contract_digest: DigestV1,
-    pub linked_artifacts: Vec<LinkedArtifactV1>,
-    pub linked_profiles: Vec<LinkedProfileV1>,
-    pub target: TargetIdentityV1,
-    pub platform: PlatformIdentityV1,
-    pub verifiers: Vec<VerifierIdentityV1>,
-    pub receipt_schema: ReceiptSchemaIdentityV1,
+    pub abi_contract_digest: Sha256Digest,
+    pub linked_artifacts: Vec<LinkedArtifact>,
+    pub linked_profiles: Vec<LinkedProfile>,
+    pub target: TargetIdentity,
+    pub platform: PlatformIdentity,
+    pub verifiers: Vec<VerifierIdentity>,
+    pub receipt_schema: ReceiptSchemaIdentity,
     pub runtime_generation: u64,
     pub assembly_epoch: u64,
-    pub workers: Vec<WorkerIdentityV1>,
-    pub aggregate_capability_catalog_digest: DigestV1,
+    pub workers: Vec<WorkerIdentity>,
+    pub aggregate_capability_catalog_digest: Sha256Digest,
 }
 
-impl AssemblyManifestV1 {
-    pub fn validate(&self) -> Result<(), AssemblyManifestErrorV1> {
+impl AssemblyManifest {
+    pub fn validate(&self) -> Result<(), AssemblyManifestError> {
         require_version(
             "schema_version",
             ASSEMBLY_MANIFEST_SCHEMA_VERSION,
@@ -243,9 +243,9 @@ impl AssemblyManifestV1 {
             ASSEMBLY_ABI_CONTRACT_VERSION,
             self.required_abi_contract_version,
         )?;
-        let expected_contract = assembly_abi_contract_digest_v1();
+        let expected_contract = assembly_abi_contract_digest();
         if self.abi_contract_digest != expected_contract {
-            return Err(AssemblyManifestErrorV1::ContractDigestMismatch {
+            return Err(AssemblyManifestError::ContractDigestMismatch {
                 expected: expected_contract,
                 actual: self.abi_contract_digest,
             });
@@ -324,20 +324,20 @@ impl AssemblyManifestV1 {
             require_string("verifier_version", &verifier.verifier_version)?;
         }
         if self.runtime_generation == 0 {
-            return Err(AssemblyManifestErrorV1::ZeroCounter("runtime_generation"));
+            return Err(AssemblyManifestError::ZeroCounter("runtime_generation"));
         }
         if self.assembly_epoch == 0 {
-            return Err(AssemblyManifestErrorV1::ZeroCounter("assembly_epoch"));
+            return Err(AssemblyManifestError::ZeroCounter("assembly_epoch"));
         }
 
         let platform_linked = self.linked_profiles.iter().any(|profile| {
-            profile.profile_kind == ProfileKindV1::Platform
+            profile.profile_kind == ProfileKind::Platform
                 && profile.profile_id == self.platform.profile_id
                 && profile.profile_version == self.platform.profile_version
                 && profile.profile_digest == self.platform.profile_digest
         });
         if !platform_linked {
-            return Err(AssemblyManifestErrorV1::UnlinkedIdentity("platform"));
+            return Err(AssemblyManifestError::UnlinkedIdentity("platform"));
         }
 
         let expected_engines = [
@@ -351,7 +351,7 @@ impl AssemblyManifestV1 {
             .map(|worker| worker.engine)
             .collect::<Vec<_>>();
         if actual_engines != expected_engines {
-            return Err(AssemblyManifestErrorV1::WorkerSetMismatch);
+            return Err(AssemblyManifestError::WorkerSetMismatch);
         }
         for worker in &self.workers {
             if !self
@@ -359,7 +359,7 @@ impl AssemblyManifestV1 {
                 .iter()
                 .any(|artifact| artifact.artifact_digest == worker.artifact_digest)
             {
-                return Err(AssemblyManifestErrorV1::UnlinkedWorkerArtifact(
+                return Err(AssemblyManifestError::UnlinkedWorkerArtifact(
                     worker.engine,
                 ));
             }
@@ -367,41 +367,41 @@ impl AssemblyManifestV1 {
         Ok(())
     }
 
-    pub fn canonical_bytes(&self) -> Result<Vec<u8>, AssemblyManifestErrorV1> {
+    pub fn canonical_bytes(&self) -> Result<Vec<u8>, AssemblyManifestError> {
         self.validate()?;
         let value = serde_json::to_value(self)
-            .map_err(|error| AssemblyManifestErrorV1::Json(error.to_string()))?;
+            .map_err(|error| AssemblyManifestError::Json(error.to_string()))?;
         Ok(canonical_json(&value).into_bytes())
     }
 
-    pub fn digest(&self) -> Result<DigestV1, AssemblyManifestErrorV1> {
+    pub fn digest(&self) -> Result<Sha256Digest, AssemblyManifestError> {
         let canonical = self.canonical_bytes()?;
         let mut domain_bound =
-            Vec::with_capacity(ASSEMBLY_MANIFEST_DOMAIN_V1.len() + canonical.len());
-        domain_bound.extend_from_slice(ASSEMBLY_MANIFEST_DOMAIN_V1);
+            Vec::with_capacity(ASSEMBLY_MANIFEST_DOMAIN.len() + canonical.len());
+        domain_bound.extend_from_slice(ASSEMBLY_MANIFEST_DOMAIN);
         domain_bound.extend_from_slice(&canonical);
-        Ok(DigestV1::from_bytes(sha256(&domain_bound)))
+        Ok(Sha256Digest::from_bytes(sha256(&domain_bound)))
     }
 
-    pub fn from_canonical_bytes(bytes: &[u8]) -> Result<Self, AssemblyManifestErrorV1> {
+    pub fn from_canonical_bytes(bytes: &[u8]) -> Result<Self, AssemblyManifestError> {
         if bytes.len() > MAX_ASSEMBLY_MANIFEST_BYTES {
-            return Err(AssemblyManifestErrorV1::ManifestTooLarge {
+            return Err(AssemblyManifestError::ManifestTooLarge {
                 actual: bytes.len(),
                 maximum: MAX_ASSEMBLY_MANIFEST_BYTES,
             });
         }
         let manifest: Self = serde_json::from_slice(bytes)
-            .map_err(|error| AssemblyManifestErrorV1::Json(error.to_string()))?;
+            .map_err(|error| AssemblyManifestError::Json(error.to_string()))?;
         manifest.validate()?;
         let canonical = manifest.canonical_bytes()?;
         if canonical != bytes {
-            return Err(AssemblyManifestErrorV1::NonCanonicalEncoding);
+            return Err(AssemblyManifestError::NonCanonicalEncoding);
         }
         Ok(manifest)
     }
 
-    pub fn expectation(&self) -> Result<AssemblyExpectationV1, AssemblyManifestErrorV1> {
-        Ok(AssemblyExpectationV1 {
+    pub fn expectation(&self) -> Result<AssemblyExpectation, AssemblyManifestError> {
+        Ok(AssemblyExpectation {
             required_schema_version: ASSEMBLY_MANIFEST_SCHEMA_VERSION,
             manifest_digest: self.digest()?,
             abi_contract_digest: self.abi_contract_digest,
@@ -421,25 +421,25 @@ impl AssemblyManifestV1 {
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
-pub struct AssemblyExpectationV1 {
+pub struct AssemblyExpectation {
     pub required_schema_version: u16,
-    pub manifest_digest: DigestV1,
-    pub abi_contract_digest: DigestV1,
-    pub linked_artifacts: Vec<LinkedArtifactV1>,
-    pub linked_profiles: Vec<LinkedProfileV1>,
-    pub target: TargetIdentityV1,
-    pub platform: PlatformIdentityV1,
-    pub verifiers: Vec<VerifierIdentityV1>,
-    pub receipt_schema: ReceiptSchemaIdentityV1,
+    pub manifest_digest: Sha256Digest,
+    pub abi_contract_digest: Sha256Digest,
+    pub linked_artifacts: Vec<LinkedArtifact>,
+    pub linked_profiles: Vec<LinkedProfile>,
+    pub target: TargetIdentity,
+    pub platform: PlatformIdentity,
+    pub verifiers: Vec<VerifierIdentity>,
+    pub receipt_schema: ReceiptSchemaIdentity,
     pub runtime_generation: u64,
     pub assembly_epoch: u64,
-    pub workers: Vec<WorkerIdentityV1>,
-    pub aggregate_capability_catalog_digest: DigestV1,
+    pub workers: Vec<WorkerIdentity>,
+    pub aggregate_capability_catalog_digest: Sha256Digest,
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
-pub enum AssemblyFailureCodeV1 {
+pub enum AssemblyFailureCode {
     InvalidManifest,
     UnsupportedRequiredVersion,
     AbiContractDigestMismatch,
@@ -459,8 +459,8 @@ pub enum AssemblyFailureCodeV1 {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub enum AssemblyPreDispatchErrorV1 {
-    InvalidManifest(AssemblyManifestErrorV1),
+pub enum AssemblyPreDispatchError {
+    InvalidManifest(AssemblyManifestError),
     UnsupportedRequiredVersion { supported: u16, actual: u16 },
     AbiContractDigestMismatch,
     LinkedArtifactMismatch,
@@ -478,34 +478,34 @@ pub enum AssemblyPreDispatchErrorV1 {
     ManifestDigestMismatch,
 }
 
-impl AssemblyPreDispatchErrorV1 {
-    pub const fn code(&self) -> AssemblyFailureCodeV1 {
+impl AssemblyPreDispatchError {
+    pub const fn code(&self) -> AssemblyFailureCode {
         match self {
-            Self::InvalidManifest(_) => AssemblyFailureCodeV1::InvalidManifest,
+            Self::InvalidManifest(_) => AssemblyFailureCode::InvalidManifest,
             Self::UnsupportedRequiredVersion { .. } => {
-                AssemblyFailureCodeV1::UnsupportedRequiredVersion
+                AssemblyFailureCode::UnsupportedRequiredVersion
             }
-            Self::AbiContractDigestMismatch => AssemblyFailureCodeV1::AbiContractDigestMismatch,
-            Self::LinkedArtifactMismatch => AssemblyFailureCodeV1::LinkedArtifactMismatch,
-            Self::LinkedProfileMismatch => AssemblyFailureCodeV1::LinkedProfileMismatch,
-            Self::TargetMismatch => AssemblyFailureCodeV1::TargetMismatch,
-            Self::PlatformMismatch => AssemblyFailureCodeV1::PlatformMismatch,
-            Self::VerifierMismatch => AssemblyFailureCodeV1::VerifierMismatch,
-            Self::ReceiptSchemaMismatch => AssemblyFailureCodeV1::ReceiptSchemaMismatch,
-            Self::RuntimeGenerationMismatch => AssemblyFailureCodeV1::RuntimeGenerationMismatch,
-            Self::AssemblyEpochMismatch => AssemblyFailureCodeV1::AssemblyEpochMismatch,
-            Self::WorkerSetMismatch => AssemblyFailureCodeV1::WorkerSetMismatch,
-            Self::WorkerDigestMismatch { .. } => AssemblyFailureCodeV1::WorkerDigestMismatch,
-            Self::WorkerIdentityMismatch { .. } => AssemblyFailureCodeV1::WorkerIdentityMismatch,
+            Self::AbiContractDigestMismatch => AssemblyFailureCode::AbiContractDigestMismatch,
+            Self::LinkedArtifactMismatch => AssemblyFailureCode::LinkedArtifactMismatch,
+            Self::LinkedProfileMismatch => AssemblyFailureCode::LinkedProfileMismatch,
+            Self::TargetMismatch => AssemblyFailureCode::TargetMismatch,
+            Self::PlatformMismatch => AssemblyFailureCode::PlatformMismatch,
+            Self::VerifierMismatch => AssemblyFailureCode::VerifierMismatch,
+            Self::ReceiptSchemaMismatch => AssemblyFailureCode::ReceiptSchemaMismatch,
+            Self::RuntimeGenerationMismatch => AssemblyFailureCode::RuntimeGenerationMismatch,
+            Self::AssemblyEpochMismatch => AssemblyFailureCode::AssemblyEpochMismatch,
+            Self::WorkerSetMismatch => AssemblyFailureCode::WorkerSetMismatch,
+            Self::WorkerDigestMismatch { .. } => AssemblyFailureCode::WorkerDigestMismatch,
+            Self::WorkerIdentityMismatch { .. } => AssemblyFailureCode::WorkerIdentityMismatch,
             Self::CapabilityCatalogDigestMismatch { .. } => {
-                AssemblyFailureCodeV1::CapabilityCatalogDigestMismatch
+                AssemblyFailureCode::CapabilityCatalogDigestMismatch
             }
-            Self::ManifestDigestMismatch => AssemblyFailureCodeV1::ManifestDigestMismatch,
+            Self::ManifestDigestMismatch => AssemblyFailureCode::ManifestDigestMismatch,
         }
     }
 }
 
-impl fmt::Display for AssemblyPreDispatchErrorV1 {
+impl fmt::Display for AssemblyPreDispatchError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
             f,
@@ -515,48 +515,48 @@ impl fmt::Display for AssemblyPreDispatchErrorV1 {
     }
 }
 
-impl Error for AssemblyPreDispatchErrorV1 {}
+impl Error for AssemblyPreDispatchError {}
 
 /// Validate every assembly-bound identity before an operation reaches a worker.
-pub fn validate_assembly_pre_dispatch_v1(
-    manifest: &AssemblyManifestV1,
-    expected: &AssemblyExpectationV1,
-) -> Result<(), AssemblyPreDispatchErrorV1> {
+pub fn validate_assembly_pre_dispatch(
+    manifest: &AssemblyManifest,
+    expected: &AssemblyExpectation,
+) -> Result<(), AssemblyPreDispatchError> {
     manifest
         .validate()
-        .map_err(AssemblyPreDispatchErrorV1::InvalidManifest)?;
+        .map_err(AssemblyPreDispatchError::InvalidManifest)?;
     if expected.required_schema_version != ASSEMBLY_MANIFEST_SCHEMA_VERSION {
-        return Err(AssemblyPreDispatchErrorV1::UnsupportedRequiredVersion {
+        return Err(AssemblyPreDispatchError::UnsupportedRequiredVersion {
             supported: ASSEMBLY_MANIFEST_SCHEMA_VERSION,
             actual: expected.required_schema_version,
         });
     }
     if manifest.abi_contract_digest != expected.abi_contract_digest {
-        return Err(AssemblyPreDispatchErrorV1::AbiContractDigestMismatch);
+        return Err(AssemblyPreDispatchError::AbiContractDigestMismatch);
     }
     if manifest.linked_artifacts != expected.linked_artifacts {
-        return Err(AssemblyPreDispatchErrorV1::LinkedArtifactMismatch);
+        return Err(AssemblyPreDispatchError::LinkedArtifactMismatch);
     }
     if manifest.linked_profiles != expected.linked_profiles {
-        return Err(AssemblyPreDispatchErrorV1::LinkedProfileMismatch);
+        return Err(AssemblyPreDispatchError::LinkedProfileMismatch);
     }
     if manifest.target != expected.target {
-        return Err(AssemblyPreDispatchErrorV1::TargetMismatch);
+        return Err(AssemblyPreDispatchError::TargetMismatch);
     }
     if manifest.platform != expected.platform {
-        return Err(AssemblyPreDispatchErrorV1::PlatformMismatch);
+        return Err(AssemblyPreDispatchError::PlatformMismatch);
     }
     if manifest.verifiers != expected.verifiers {
-        return Err(AssemblyPreDispatchErrorV1::VerifierMismatch);
+        return Err(AssemblyPreDispatchError::VerifierMismatch);
     }
     if manifest.receipt_schema != expected.receipt_schema {
-        return Err(AssemblyPreDispatchErrorV1::ReceiptSchemaMismatch);
+        return Err(AssemblyPreDispatchError::ReceiptSchemaMismatch);
     }
     if manifest.runtime_generation != expected.runtime_generation {
-        return Err(AssemblyPreDispatchErrorV1::RuntimeGenerationMismatch);
+        return Err(AssemblyPreDispatchError::RuntimeGenerationMismatch);
     }
     if manifest.assembly_epoch != expected.assembly_epoch {
-        return Err(AssemblyPreDispatchErrorV1::AssemblyEpochMismatch);
+        return Err(AssemblyPreDispatchError::AssemblyEpochMismatch);
     }
     if manifest.workers.len() != expected.workers.len()
         || manifest
@@ -565,23 +565,23 @@ pub fn validate_assembly_pre_dispatch_v1(
             .zip(&expected.workers)
             .any(|(actual, wanted)| actual.engine != wanted.engine)
     {
-        return Err(AssemblyPreDispatchErrorV1::WorkerSetMismatch);
+        return Err(AssemblyPreDispatchError::WorkerSetMismatch);
     }
     for (actual, wanted) in manifest.workers.iter().zip(&expected.workers) {
         if actual.artifact_digest != wanted.artifact_digest {
-            return Err(AssemblyPreDispatchErrorV1::WorkerDigestMismatch {
+            return Err(AssemblyPreDispatchError::WorkerDigestMismatch {
                 engine: actual.engine,
             });
         }
         if actual.capability_catalog_digest != wanted.capability_catalog_digest {
             return Err(
-                AssemblyPreDispatchErrorV1::CapabilityCatalogDigestMismatch {
+                AssemblyPreDispatchError::CapabilityCatalogDigestMismatch {
                     scope: actual.engine.as_str().to_owned(),
                 },
             );
         }
         if actual != wanted {
-            return Err(AssemblyPreDispatchErrorV1::WorkerIdentityMismatch {
+            return Err(AssemblyPreDispatchError::WorkerIdentityMismatch {
                 engine: actual.engine,
             });
         }
@@ -589,30 +589,30 @@ pub fn validate_assembly_pre_dispatch_v1(
     if manifest.aggregate_capability_catalog_digest != expected.aggregate_capability_catalog_digest
     {
         return Err(
-            AssemblyPreDispatchErrorV1::CapabilityCatalogDigestMismatch {
+            AssemblyPreDispatchError::CapabilityCatalogDigestMismatch {
                 scope: "aggregate".to_owned(),
             },
         );
     }
     let actual_digest = manifest
         .digest()
-        .map_err(AssemblyPreDispatchErrorV1::InvalidManifest)?;
+        .map_err(AssemblyPreDispatchError::InvalidManifest)?;
     if actual_digest != expected.manifest_digest {
-        return Err(AssemblyPreDispatchErrorV1::ManifestDigestMismatch);
+        return Err(AssemblyPreDispatchError::ManifestDigestMismatch);
     }
     Ok(())
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub enum AssemblyManifestErrorV1 {
+pub enum AssemblyManifestError {
     UnsupportedVersion {
         field: &'static str,
         supported: u16,
         actual: u16,
     },
     ContractDigestMismatch {
-        expected: DigestV1,
-        actual: DigestV1,
+        expected: Sha256Digest,
+        actual: Sha256Digest,
     },
     EmptyCollection(&'static str),
     TooManyItems {
@@ -644,7 +644,7 @@ pub enum AssemblyManifestErrorV1 {
     Json(String),
 }
 
-impl fmt::Display for AssemblyManifestErrorV1 {
+impl fmt::Display for AssemblyManifestError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::UnsupportedVersion {
@@ -699,17 +699,17 @@ impl fmt::Display for AssemblyManifestErrorV1 {
     }
 }
 
-impl Error for AssemblyManifestErrorV1 {}
+impl Error for AssemblyManifestError {}
 
 fn require_version(
     field: &'static str,
     supported: u16,
     actual: u16,
-) -> Result<(), AssemblyManifestErrorV1> {
+) -> Result<(), AssemblyManifestError> {
     if actual == supported {
         Ok(())
     } else {
-        Err(AssemblyManifestErrorV1::UnsupportedVersion {
+        Err(AssemblyManifestError::UnsupportedVersion {
             field,
             supported,
             actual,
@@ -717,12 +717,12 @@ fn require_version(
     }
 }
 
-fn require_items<T>(field: &'static str, values: &[T]) -> Result<(), AssemblyManifestErrorV1> {
+fn require_items<T>(field: &'static str, values: &[T]) -> Result<(), AssemblyManifestError> {
     if values.is_empty() {
-        return Err(AssemblyManifestErrorV1::EmptyCollection(field));
+        return Err(AssemblyManifestError::EmptyCollection(field));
     }
     if values.len() > MAX_ASSEMBLY_ITEMS {
-        return Err(AssemblyManifestErrorV1::TooManyItems {
+        return Err(AssemblyManifestError::TooManyItems {
             field,
             actual: values.len(),
             maximum: MAX_ASSEMBLY_ITEMS,
@@ -731,19 +731,19 @@ fn require_items<T>(field: &'static str, values: &[T]) -> Result<(), AssemblyMan
     Ok(())
 }
 
-fn require_string(field: &'static str, value: &str) -> Result<(), AssemblyManifestErrorV1> {
+fn require_string(field: &'static str, value: &str) -> Result<(), AssemblyManifestError> {
     if value.is_empty() {
-        return Err(AssemblyManifestErrorV1::EmptyString(field));
+        return Err(AssemblyManifestError::EmptyString(field));
     }
     if value.len() > MAX_ASSEMBLY_STRING_BYTES {
-        return Err(AssemblyManifestErrorV1::StringTooLong {
+        return Err(AssemblyManifestError::StringTooLong {
             field,
             actual: value.len(),
             maximum: MAX_ASSEMBLY_STRING_BYTES,
         });
     }
     if value.chars().any(char::is_control) {
-        return Err(AssemblyManifestErrorV1::ControlCharacter(field));
+        return Err(AssemblyManifestError::ControlCharacter(field));
     }
     Ok(())
 }
@@ -751,14 +751,14 @@ fn require_string(field: &'static str, value: &str) -> Result<(), AssemblyManife
 fn require_canonical_order(
     field: &'static str,
     identities: &[&str],
-) -> Result<(), AssemblyManifestErrorV1> {
+) -> Result<(), AssemblyManifestError> {
     for pair in identities.windows(2) {
         match pair[0].cmp(pair[1]) {
             std::cmp::Ordering::Greater => {
-                return Err(AssemblyManifestErrorV1::NonCanonicalOrder(field));
+                return Err(AssemblyManifestError::NonCanonicalOrder(field));
             }
             std::cmp::Ordering::Equal => {
-                return Err(AssemblyManifestErrorV1::DuplicateIdentity {
+                return Err(AssemblyManifestError::DuplicateIdentity {
                     field,
                     identity: pair[0].to_owned(),
                 });
@@ -769,8 +769,8 @@ fn require_canonical_order(
     Ok(())
 }
 
-/// Semantic schema hashed into every AssemblyManifestV1.
-pub fn assembly_abi_contract_manifest_v1() -> Value {
+/// Semantic schema hashed into every AssemblyManifest.
+pub fn assembly_abi_contract_manifest() -> Value {
     json!({
         "contract": "zerostack.assembly_abi",
         "contract_version": ASSEMBLY_ABI_CONTRACT_VERSION,
@@ -778,14 +778,14 @@ pub fn assembly_abi_contract_manifest_v1() -> Value {
         "digest": {"algorithm": "sha256", "domain": "zerostack.assembly_manifest.v1\u{0}"},
         "encoding": "rfc8259_json_sorted_object_keys_no_whitespace",
         "linked_contracts": {
-            "cwir_contract_version": CWIR_CONTRACT_VERSION_V1,
-            "cwir_contract_digest": cwir_contract_digest_v1(),
-            "effect_ir_contract_version": EFFECT_IR_CONTRACT_VERSION_V1,
-            "effect_ir_contract_digest": effect_ir_contract_digest_v1(),
-            "reasoning_contract_version": REASONING_CONTRACT_VERSION_V1,
-            "reasoning_contract_digest": reasoning_contract_digest_v1(),
-            "zbf_contract_version": ZBF_CONTRACT_VERSION_V1,
-            "zbf_contract_digest": zbf_contract_digest_v1()
+            "cwir_contract_version": CWIR_CONTRACT_VERSION,
+            "cwir_contract_digest": cwir_contract_digest(),
+            "effect_ir_contract_version": EFFECT_IR_CONTRACT_VERSION,
+            "effect_ir_contract_digest": effect_ir_contract_digest(),
+            "reasoning_contract_version": REASONING_CONTRACT_VERSION,
+            "reasoning_contract_digest": reasoning_contract_digest(),
+            "zbf_contract_version": ZBF_CONTRACT_VERSION,
+            "zbf_contract_digest": zbf_contract_digest()
         },
         "bounds": {
             "max_manifest_bytes": MAX_ASSEMBLY_MANIFEST_BYTES,
@@ -830,8 +830,8 @@ pub fn assembly_abi_contract_manifest_v1() -> Value {
     })
 }
 
-pub fn assembly_abi_contract_digest_v1() -> DigestV1 {
-    let canonical = canonical_json(&assembly_abi_contract_manifest_v1());
-    DigestV1::from_bytes(sha256(canonical.as_bytes()))
+pub fn assembly_abi_contract_digest() -> Sha256Digest {
+    let canonical = canonical_json(&assembly_abi_contract_manifest());
+    Sha256Digest::from_bytes(sha256(canonical.as_bytes()))
 }
 

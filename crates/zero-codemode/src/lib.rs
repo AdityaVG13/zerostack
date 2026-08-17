@@ -12,8 +12,8 @@ mod wrap;
 pub use cancellation::CancellationSignal;
 
 pub use decision_gate::{
-    DECISION_REQUIRE_METHOD, DECISION_SURFACE, DecisionGate, GateResolutionV1, GateRuleUsageV1,
-    GateUsageReportV1,
+    DECISION_REQUIRE_METHOD, DECISION_SURFACE, DecisionGate, GateResolution, GateRuleUsage,
+    GateUsageReport,
 };
 
 pub use edit_protocol::{

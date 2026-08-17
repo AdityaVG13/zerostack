@@ -10,7 +10,7 @@
     "lifetime": "harness-stdio"
   },
   "layers": {
-    "exact_tokens": "TokenZero WorkerTokenAccountingV1 with count_kind implied Exact (billed/raw/visible present). Only token.* surfaces emit this.",
+    "exact_tokens": "TokenZero WorkerTokenAccounting with count_kind implied Exact (billed/raw/visible present). Only token.* surfaces emit this.",
     "envelope_bytes": "result_finalization_receipt.v1 savingsBytes. Not tokens. visibleTokenCount is null until TokenZero certifies.",
     "call_fusion": "MCP zero_execute count. 1 vs N. Not tokens."
   },

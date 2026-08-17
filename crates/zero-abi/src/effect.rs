@@ -14,25 +14,25 @@ use std::{error::Error, fmt};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
-use crate::{ArtifactOwnerV1, CwirVerifierClassV1, DigestV1, EffectClass, canonical_json, sha256};
+use crate::{ArtifactOwner, CwirVerifierClass, Sha256Digest, EffectClass, canonical_json, sha256};
 
-pub const EFFECT_IR_CONTRACT_VERSION_V1: u16 = 1;
-pub const EFFECT_IR_ACTION_DOMAIN_V1: &[u8] = b"zerostack.effect_ir.action.v1\0";
-pub const EFFECT_IR_MAX_CANONICAL_BYTES_V1: usize = 1_048_576;
-pub const EFFECT_IR_MAX_OPERATIONS_V1: usize = 256;
-pub const EFFECT_IR_MAX_TARGETS_V1: usize = 512;
-pub const EFFECT_IR_MAX_PRECONDITIONS_V1: usize = 512;
-pub const EFFECT_IR_MAX_EXCEPTIONS_V1: usize = 512;
-pub const EFFECT_IR_MAX_VERIFICATION_STEPS_V1: usize = 128;
-pub const EFFECT_IR_MAX_CAPABILITIES_V1: usize = 512;
-pub const EFFECT_IR_MAX_INTENTS_V1: usize = 256;
-pub const EFFECT_IR_MAX_STRING_BYTES_V1: usize = 256;
-pub const EFFECT_IR_MAX_LITERAL_BYTES_V1: usize = 65_536;
-pub const EFFECT_IR_MAX_REFS_PER_OPERATION_V1: usize = 512;
+pub const EFFECT_IR_CONTRACT_VERSION: u16 = 1;
+pub const EFFECT_IR_ACTION_DOMAIN: &[u8] = b"zerostack.effect_ir.action.v1\0";
+pub const EFFECT_IR_MAX_CANONICAL_BYTES: usize = 1_048_576;
+pub const EFFECT_IR_MAX_OPERATIONS: usize = 256;
+pub const EFFECT_IR_MAX_TARGETS: usize = 512;
+pub const EFFECT_IR_MAX_PRECONDITIONS: usize = 512;
+pub const EFFECT_IR_MAX_EXCEPTIONS: usize = 512;
+pub const EFFECT_IR_MAX_VERIFICATION_STEPS: usize = 128;
+pub const EFFECT_IR_MAX_CAPABILITIES: usize = 512;
+pub const EFFECT_IR_MAX_INTENTS: usize = 256;
+pub const EFFECT_IR_MAX_STRING_BYTES: usize = 256;
+pub const EFFECT_IR_MAX_LITERAL_BYTES: usize = 65_536;
+pub const EFFECT_IR_MAX_REFS_PER_OPERATION: usize = 512;
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
-pub enum EffectIrFailureCodeV1 {
+pub enum EffectIrFailureCode {
     UnsupportedVersion,
     CanonicalPayloadTooLarge,
     NonCanonicalEncoding,
@@ -68,35 +68,35 @@ pub enum EffectIrFailureCodeV1 {
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
-pub struct EffectIrErrorV1 {
-    pub code: EffectIrFailureCodeV1,
+pub struct EffectIrError {
+    pub code: EffectIrFailureCode,
     pub detail: String,
 }
 
-impl EffectIrErrorV1 {
-    pub fn new(code: EffectIrFailureCodeV1, detail: impl Into<String>) -> Self {
+impl EffectIrError {
+    pub fn new(code: EffectIrFailureCode, detail: impl Into<String>) -> Self {
         Self {
             code,
             detail: detail.into(),
         }
     }
 
-    pub const fn failure_code(&self) -> EffectIrFailureCodeV1 {
+    pub const fn failure_code(&self) -> EffectIrFailureCode {
         self.code
     }
 }
 
-impl fmt::Display for EffectIrErrorV1 {
+impl fmt::Display for EffectIrError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{:?}: {}", self.code, self.detail)
     }
 }
 
-impl Error for EffectIrErrorV1 {}
+impl Error for EffectIrError {}
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, Ord, PartialEq, PartialOrd, Serialize)]
 #[serde(rename_all = "snake_case")]
-pub enum EffectRollbackV1 {
+pub enum EffectRollback {
     ReadOnly,
     SingleAtomic,
     Journaled,
@@ -107,14 +107,14 @@ pub enum EffectRollbackV1 {
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, Ord, PartialEq, PartialOrd, Serialize)]
 #[serde(deny_unknown_fields)]
-pub struct EffectTargetV1 {
-    pub owner: ArtifactOwnerV1,
-    pub target_digest: DigestV1,
-    pub required_snapshot: DigestV1,
+pub struct EffectTarget {
+    pub owner: ArtifactOwner,
+    pub target_digest: Sha256Digest,
+    pub required_snapshot: Sha256Digest,
 }
 
-impl EffectTargetV1 {
-    fn validate(self, base_state: DigestV1) -> Result<(), EffectIrErrorV1> {
+impl EffectTarget {
+    fn validate(self, base_state: Sha256Digest) -> Result<(), EffectIrError> {
         require_digest("target_digest", self.target_digest)?;
         require_digest("target.required_snapshot", self.required_snapshot)?;
         require_snapshot("target", self.required_snapshot, base_state)
@@ -123,14 +123,14 @@ impl EffectTargetV1 {
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, Ord, PartialEq, PartialOrd, Serialize)]
 #[serde(deny_unknown_fields)]
-pub struct EffectPredicateV1 {
-    pub predicate_digest: DigestV1,
-    pub scope_digest: DigestV1,
-    pub required_snapshot: DigestV1,
+pub struct EffectPredicate {
+    pub predicate_digest: Sha256Digest,
+    pub scope_digest: Sha256Digest,
+    pub required_snapshot: Sha256Digest,
 }
 
-impl EffectPredicateV1 {
-    fn validate(self, base_state: DigestV1) -> Result<(), EffectIrErrorV1> {
+impl EffectPredicate {
+    fn validate(self, base_state: Sha256Digest) -> Result<(), EffectIrError> {
         require_digest("predicate_digest", self.predicate_digest)?;
         require_digest("predicate.scope_digest", self.scope_digest)?;
         require_digest("predicate.required_snapshot", self.required_snapshot)?;
@@ -140,13 +140,13 @@ impl EffectPredicateV1 {
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, Ord, PartialEq, PartialOrd, Serialize)]
 #[serde(deny_unknown_fields)]
-pub struct EffectExceptionV1 {
-    pub target_digest: DigestV1,
-    pub exception_digest: DigestV1,
+pub struct EffectException {
+    pub target_digest: Sha256Digest,
+    pub exception_digest: Sha256Digest,
 }
 
-impl EffectExceptionV1 {
-    fn validate(self) -> Result<(), EffectIrErrorV1> {
+impl EffectException {
+    fn validate(self) -> Result<(), EffectIrError> {
         require_digest("exception.target_digest", self.target_digest)?;
         require_digest("exception.exception_digest", self.exception_digest)
     }
@@ -154,16 +154,16 @@ impl EffectExceptionV1 {
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, Ord, PartialEq, PartialOrd, Serialize)]
 #[serde(deny_unknown_fields)]
-pub struct EffectVerificationStepV1 {
-    pub verifier_digest: DigestV1,
-    pub predicate_digest: DigestV1,
-    pub environment_digest: DigestV1,
-    pub required_snapshot: DigestV1,
-    pub verifier_class: CwirVerifierClassV1,
+pub struct EffectVerificationStep {
+    pub verifier_digest: Sha256Digest,
+    pub predicate_digest: Sha256Digest,
+    pub environment_digest: Sha256Digest,
+    pub required_snapshot: Sha256Digest,
+    pub verifier_class: CwirVerifierClass,
 }
 
-impl EffectVerificationStepV1 {
-    fn validate(self, base_state: DigestV1) -> Result<(), EffectIrErrorV1> {
+impl EffectVerificationStep {
+    fn validate(self, base_state: Sha256Digest) -> Result<(), EffectIrError> {
         require_digest("verification.verifier_digest", self.verifier_digest)?;
         require_digest("verification.predicate_digest", self.predicate_digest)?;
         require_digest("verification.environment_digest", self.environment_digest)?;
@@ -174,15 +174,15 @@ impl EffectVerificationStepV1 {
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
-pub struct EffectVerificationPlanV1 {
-    steps: Vec<EffectVerificationStepV1>,
+pub struct EffectVerificationPlan {
+    steps: Vec<EffectVerificationStep>,
 }
 
-impl EffectVerificationPlanV1 {
-    pub fn new(steps: Vec<EffectVerificationStepV1>) -> Result<Self, EffectIrErrorV1> {
-        if steps.len() > EFFECT_IR_MAX_VERIFICATION_STEPS_V1 {
-            return Err(EffectIrErrorV1::new(
-                EffectIrFailureCodeV1::TooManyVerificationSteps,
+impl EffectVerificationPlan {
+    pub fn new(steps: Vec<EffectVerificationStep>) -> Result<Self, EffectIrError> {
+        if steps.len() > EFFECT_IR_MAX_VERIFICATION_STEPS {
+            return Err(EffectIrError::new(
+                EffectIrFailureCode::TooManyVerificationSteps,
                 format!("verification plan has {} steps", steps.len()),
             ));
         }
@@ -190,14 +190,14 @@ impl EffectVerificationPlanV1 {
         Ok(Self { steps })
     }
 
-    pub fn steps(&self) -> &[EffectVerificationStepV1] {
+    pub fn steps(&self) -> &[EffectVerificationStep] {
         &self.steps
     }
 
-    fn validate(&self, base_state: DigestV1) -> Result<(), EffectIrErrorV1> {
-        if self.steps.len() > EFFECT_IR_MAX_VERIFICATION_STEPS_V1 {
-            return Err(EffectIrErrorV1::new(
-                EffectIrFailureCodeV1::TooManyVerificationSteps,
+    fn validate(&self, base_state: Sha256Digest) -> Result<(), EffectIrError> {
+        if self.steps.len() > EFFECT_IR_MAX_VERIFICATION_STEPS {
+            return Err(EffectIrError::new(
+                EffectIrFailureCode::TooManyVerificationSteps,
                 format!("verification plan has {} steps", self.steps.len()),
             ));
         }
@@ -211,51 +211,51 @@ impl EffectVerificationPlanV1 {
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields, tag = "kind", rename_all = "snake_case")]
-pub enum TypedEffectOperationV1 {
+pub enum TypedEffectOperation {
     RecoverExact {
-        owner: ArtifactOwnerV1,
+        owner: ArtifactOwner,
         capability: String,
         generation: u64,
-        capability_contract_digest: DigestV1,
-        arguments_digest: DigestV1,
-        expected_output_digest: DigestV1,
+        capability_contract_digest: Sha256Digest,
+        arguments_digest: Sha256Digest,
+        expected_output_digest: Sha256Digest,
     },
     ReplaceExactFile {
-        target: DigestV1,
-        expected_before: DigestV1,
-        replacement: DigestV1,
+        target: Sha256Digest,
+        expected_before: Sha256Digest,
+        replacement: Sha256Digest,
     },
     CopyExact {
-        source: DigestV1,
-        target: DigestV1,
-        expected_source_digest: DigestV1,
+        source: Sha256Digest,
+        target: Sha256Digest,
+        expected_source_digest: Sha256Digest,
     },
     DeterministicTransform {
-        owner: ArtifactOwnerV1,
+        owner: ArtifactOwner,
         capability: String,
         generation: u64,
-        capability_contract_digest: DigestV1,
-        targets: Vec<DigestV1>,
-        arguments_digest: DigestV1,
-        exceptions: Vec<DigestV1>,
+        capability_contract_digest: Sha256Digest,
+        targets: Vec<Sha256Digest>,
+        arguments_digest: Sha256Digest,
+        exceptions: Vec<Sha256Digest>,
         effect_class: EffectClass,
     },
     InvokeCapability {
-        owner: ArtifactOwnerV1,
+        owner: ArtifactOwner,
         capability: String,
         generation: u64,
-        capability_contract_digest: DigestV1,
-        arguments_digest: DigestV1,
+        capability_contract_digest: Sha256Digest,
+        arguments_digest: Sha256Digest,
         effect_class: EffectClass,
     },
     ReturnLiteral {
         bytes: Vec<u8>,
-        payload_digest: DigestV1,
+        payload_digest: Sha256Digest,
     },
     RawFallback,
 }
 
-impl TypedEffectOperationV1 {
+impl TypedEffectOperation {
     pub const fn effect_class(&self) -> EffectClass {
         match self {
             Self::RecoverExact { .. } | Self::ReturnLiteral { .. } | Self::RawFallback => {
@@ -273,7 +273,7 @@ impl TypedEffectOperationV1 {
         matches!(self, Self::RawFallback)
     }
 
-    fn capability(&self) -> Option<(ArtifactOwnerV1, &str, u64, DigestV1, EffectClass)> {
+    fn capability(&self) -> Option<(ArtifactOwner, &str, u64, Sha256Digest, EffectClass)> {
         match self {
             Self::RecoverExact {
                 owner,
@@ -314,7 +314,7 @@ impl TypedEffectOperationV1 {
         }
     }
 
-    fn validate(&self) -> Result<(), EffectIrErrorV1> {
+    fn validate(&self) -> Result<(), EffectIrError> {
         match self {
             Self::RecoverExact {
                 capability,
@@ -370,18 +370,18 @@ impl TypedEffectOperationV1 {
                 validate_sorted_digest_set(
                     targets,
                     "transform targets",
-                    EFFECT_IR_MAX_REFS_PER_OPERATION_V1,
+                    EFFECT_IR_MAX_REFS_PER_OPERATION,
                 )?;
                 if targets.is_empty() {
-                    return Err(EffectIrErrorV1::new(
-                        EffectIrFailureCodeV1::InvalidOperation,
+                    return Err(EffectIrError::new(
+                        EffectIrFailureCode::InvalidOperation,
                         "deterministic transform requires at least one exact target",
                     ));
                 }
                 validate_sorted_digest_set(
                     exceptions,
                     "transform exceptions",
-                    EFFECT_IR_MAX_REFS_PER_OPERATION_V1,
+                    EFFECT_IR_MAX_REFS_PER_OPERATION,
                 )
             }
             Self::InvokeCapability {
@@ -403,16 +403,16 @@ impl TypedEffectOperationV1 {
                 bytes,
                 payload_digest,
             } => {
-                if bytes.len() > EFFECT_IR_MAX_LITERAL_BYTES_V1 {
-                    return Err(EffectIrErrorV1::new(
-                        EffectIrFailureCodeV1::LiteralTooLarge,
+                if bytes.len() > EFFECT_IR_MAX_LITERAL_BYTES {
+                    return Err(EffectIrError::new(
+                        EffectIrFailureCode::LiteralTooLarge,
                         format!("literal contains {} bytes", bytes.len()),
                     ));
                 }
-                let expected = DigestV1::from_bytes(sha256(bytes));
+                let expected = Sha256Digest::from_bytes(sha256(bytes));
                 if *payload_digest != expected {
-                    return Err(EffectIrErrorV1::new(
-                        EffectIrFailureCodeV1::LiteralDigestMismatch,
+                    return Err(EffectIrError::new(
+                        EffectIrFailureCode::LiteralDigestMismatch,
                         format!(
                             "literal digest {} does not match exact bytes {}",
                             payload_digest.to_hex(),
@@ -429,44 +429,44 @@ impl TypedEffectOperationV1 {
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
-pub struct EffectCapabilityBindingV1 {
-    pub owner: ArtifactOwnerV1,
+pub struct EffectCapabilityBinding {
+    pub owner: ArtifactOwner,
     pub capability: String,
     pub generation: u64,
-    pub contract_digest: DigestV1,
+    pub contract_digest: Sha256Digest,
     pub max_effect_class: EffectClass,
 }
 
-impl EffectCapabilityBindingV1 {
-    fn validate(&self) -> Result<(), EffectIrErrorV1> {
+impl EffectCapabilityBinding {
+    fn validate(&self) -> Result<(), EffectIrError> {
         validate_identity("capability binding", &self.capability)?;
         require_generation("capability generation", self.generation)?;
         require_digest("capability contract_digest", self.contract_digest)
     }
 
-    fn key(&self) -> (ArtifactOwnerV1, &str) {
+    fn key(&self) -> (ArtifactOwner, &str) {
         (self.owner, &self.capability)
     }
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
-pub struct EffectAdmissionV1 {
-    expected_snapshot: DigestV1,
+pub struct EffectAdmission {
+    expected_snapshot: Sha256Digest,
     allowed_intents: Vec<String>,
-    capabilities: Vec<EffectCapabilityBindingV1>,
+    capabilities: Vec<EffectCapabilityBinding>,
 }
 
-impl EffectAdmissionV1 {
+impl EffectAdmission {
     pub fn new(
-        expected_snapshot: DigestV1,
+        expected_snapshot: Sha256Digest,
         mut allowed_intents: Vec<String>,
-        mut capabilities: Vec<EffectCapabilityBindingV1>,
-    ) -> Result<Self, EffectIrErrorV1> {
+        mut capabilities: Vec<EffectCapabilityBinding>,
+    ) -> Result<Self, EffectIrError> {
         require_digest("admission expected_snapshot", expected_snapshot)?;
-        if allowed_intents.len() > EFFECT_IR_MAX_INTENTS_V1 {
-            return Err(EffectIrErrorV1::new(
-                EffectIrFailureCodeV1::TooManyIntents,
+        if allowed_intents.len() > EFFECT_IR_MAX_INTENTS {
+            return Err(EffectIrError::new(
+                EffectIrFailureCode::TooManyIntents,
                 format!("admission has {} intents", allowed_intents.len()),
             ));
         }
@@ -475,9 +475,9 @@ impl EffectAdmissionV1 {
         }
         allowed_intents.sort();
         reject_duplicates(&allowed_intents, "allowed intents")?;
-        if capabilities.len() > EFFECT_IR_MAX_CAPABILITIES_V1 {
-            return Err(EffectIrErrorV1::new(
-                EffectIrFailureCodeV1::TooManyCapabilities,
+        if capabilities.len() > EFFECT_IR_MAX_CAPABILITIES {
+            return Err(EffectIrError::new(
+                EffectIrFailureCode::TooManyCapabilities,
                 format!("admission has {} capabilities", capabilities.len()),
             ));
         }
@@ -489,8 +489,8 @@ impl EffectAdmissionV1 {
             .windows(2)
             .any(|pair| pair[0].key() == pair[1].key())
         {
-            return Err(EffectIrErrorV1::new(
-                EffectIrFailureCodeV1::DuplicateMember,
+            return Err(EffectIrError::new(
+                EffectIrFailureCode::DuplicateMember,
                 "admission contains duplicate owner/capability bindings",
             ));
         }
@@ -501,7 +501,7 @@ impl EffectAdmissionV1 {
         })
     }
 
-    pub const fn expected_snapshot(&self) -> DigestV1 {
+    pub const fn expected_snapshot(&self) -> Sha256Digest {
         self.expected_snapshot
     }
 
@@ -509,20 +509,20 @@ impl EffectAdmissionV1 {
         &self.allowed_intents
     }
 
-    pub fn capabilities(&self) -> &[EffectCapabilityBindingV1] {
+    pub fn capabilities(&self) -> &[EffectCapabilityBinding] {
         &self.capabilities
     }
 
-    fn validate(&self) -> Result<(), EffectIrErrorV1> {
+    fn validate(&self) -> Result<(), EffectIrError> {
         require_digest("admission expected_snapshot", self.expected_snapshot)?;
         validate_sorted_strings(
             &self.allowed_intents,
             "allowed intents",
-            EFFECT_IR_MAX_INTENTS_V1,
+            EFFECT_IR_MAX_INTENTS,
         )?;
-        if self.capabilities.len() > EFFECT_IR_MAX_CAPABILITIES_V1 {
-            return Err(EffectIrErrorV1::new(
-                EffectIrFailureCodeV1::TooManyCapabilities,
+        if self.capabilities.len() > EFFECT_IR_MAX_CAPABILITIES {
+            return Err(EffectIrError::new(
+                EffectIrFailureCode::TooManyCapabilities,
                 format!("admission has {} capabilities", self.capabilities.len()),
             ));
         }
@@ -531,14 +531,14 @@ impl EffectAdmissionV1 {
         }
         for pair in self.capabilities.windows(2) {
             if pair[0].key() == pair[1].key() {
-                return Err(EffectIrErrorV1::new(
-                    EffectIrFailureCodeV1::DuplicateMember,
+                return Err(EffectIrError::new(
+                    EffectIrFailureCode::DuplicateMember,
                     "admission contains duplicate owner/capability bindings",
                 ));
             }
             if pair[0].key() > pair[1].key() {
-                return Err(EffectIrErrorV1::new(
-                    EffectIrFailureCodeV1::NonCanonicalOrder,
+                return Err(EffectIrError::new(
+                    EffectIrFailureCode::NonCanonicalOrder,
                     "capability bindings are not sorted by owner and identity",
                 ));
             }
@@ -549,44 +549,44 @@ impl EffectAdmissionV1 {
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
-pub struct EffectProgramV1 {
+pub struct EffectProgram {
     contract_version: u16,
-    base_state: DigestV1,
+    base_state: Sha256Digest,
     intent: String,
-    targets: Vec<EffectTargetV1>,
-    preconditions: Vec<EffectPredicateV1>,
-    operations: Vec<TypedEffectOperationV1>,
-    exceptions: Vec<EffectExceptionV1>,
-    verification: EffectVerificationPlanV1,
-    rollback: EffectRollbackV1,
-    action_digest: DigestV1,
+    targets: Vec<EffectTarget>,
+    preconditions: Vec<EffectPredicate>,
+    operations: Vec<TypedEffectOperation>,
+    exceptions: Vec<EffectException>,
+    verification: EffectVerificationPlan,
+    rollback: EffectRollback,
+    action_digest: Sha256Digest,
 }
 
 #[derive(Serialize)]
-struct EffectProgramBodyV1<'a> {
+struct EffectProgramBody<'a> {
     contract_version: u16,
-    base_state: DigestV1,
+    base_state: Sha256Digest,
     intent: &'a str,
-    targets: &'a [EffectTargetV1],
-    preconditions: &'a [EffectPredicateV1],
-    operations: &'a [TypedEffectOperationV1],
-    exceptions: &'a [EffectExceptionV1],
-    verification: &'a EffectVerificationPlanV1,
-    rollback: EffectRollbackV1,
+    targets: &'a [EffectTarget],
+    preconditions: &'a [EffectPredicate],
+    operations: &'a [TypedEffectOperation],
+    exceptions: &'a [EffectException],
+    verification: &'a EffectVerificationPlan,
+    rollback: EffectRollback,
 }
 
-impl EffectProgramV1 {
+impl EffectProgram {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
-        base_state: DigestV1,
+        base_state: Sha256Digest,
         intent: impl Into<String>,
-        mut targets: Vec<EffectTargetV1>,
-        mut preconditions: Vec<EffectPredicateV1>,
-        operations: Vec<TypedEffectOperationV1>,
-        mut exceptions: Vec<EffectExceptionV1>,
-        verification: EffectVerificationPlanV1,
-        rollback: EffectRollbackV1,
-    ) -> Result<Self, EffectIrErrorV1> {
+        mut targets: Vec<EffectTarget>,
+        mut preconditions: Vec<EffectPredicate>,
+        operations: Vec<TypedEffectOperation>,
+        mut exceptions: Vec<EffectException>,
+        verification: EffectVerificationPlan,
+        rollback: EffectRollback,
+    ) -> Result<Self, EffectIrError> {
         targets.sort();
         reject_duplicates(&targets, "effect targets")?;
         preconditions.sort();
@@ -594,7 +594,7 @@ impl EffectProgramV1 {
         exceptions.sort();
         reject_duplicates(&exceptions, "effect exceptions")?;
         let mut program = Self {
-            contract_version: EFFECT_IR_CONTRACT_VERSION_V1,
+            contract_version: EFFECT_IR_CONTRACT_VERSION,
             base_state,
             intent: intent.into(),
             targets,
@@ -603,7 +603,7 @@ impl EffectProgramV1 {
             exceptions,
             verification,
             rollback,
-            action_digest: DigestV1::ZERO,
+            action_digest: Sha256Digest::ZERO,
         };
         program.validate_body()?;
         program.action_digest = program.expected_action_digest()?;
@@ -614,7 +614,7 @@ impl EffectProgramV1 {
         self.contract_version
     }
 
-    pub const fn base_state(&self) -> DigestV1 {
+    pub const fn base_state(&self) -> Sha256Digest {
         self.base_state
     }
 
@@ -622,58 +622,58 @@ impl EffectProgramV1 {
         &self.intent
     }
 
-    pub fn targets(&self) -> &[EffectTargetV1] {
+    pub fn targets(&self) -> &[EffectTarget] {
         &self.targets
     }
 
-    pub fn preconditions(&self) -> &[EffectPredicateV1] {
+    pub fn preconditions(&self) -> &[EffectPredicate] {
         &self.preconditions
     }
 
-    pub fn operations(&self) -> &[TypedEffectOperationV1] {
+    pub fn operations(&self) -> &[TypedEffectOperation] {
         &self.operations
     }
 
-    pub fn exceptions(&self) -> &[EffectExceptionV1] {
+    pub fn exceptions(&self) -> &[EffectException] {
         &self.exceptions
     }
 
-    pub const fn verification(&self) -> &EffectVerificationPlanV1 {
+    pub const fn verification(&self) -> &EffectVerificationPlan {
         &self.verification
     }
 
-    pub const fn rollback(&self) -> EffectRollbackV1 {
+    pub const fn rollback(&self) -> EffectRollback {
         self.rollback
     }
 
-    pub const fn action_digest(&self) -> DigestV1 {
+    pub const fn action_digest(&self) -> Sha256Digest {
         self.action_digest
     }
 
-    pub fn canonical_bytes(&self) -> Result<Vec<u8>, EffectIrErrorV1> {
+    pub fn canonical_bytes(&self) -> Result<Vec<u8>, EffectIrError> {
         self.validate()?;
         let value = serde_json::to_value(self).map_err(serialization_error)?;
         let bytes = canonical_json(&value).into_bytes();
-        if bytes.len() > EFFECT_IR_MAX_CANONICAL_BYTES_V1 {
-            return Err(EffectIrErrorV1::new(
-                EffectIrFailureCodeV1::CanonicalPayloadTooLarge,
+        if bytes.len() > EFFECT_IR_MAX_CANONICAL_BYTES {
+            return Err(EffectIrError::new(
+                EffectIrFailureCode::CanonicalPayloadTooLarge,
                 format!("effect program has {} canonical bytes", bytes.len()),
             ));
         }
         Ok(bytes)
     }
 
-    pub fn from_canonical_bytes(bytes: &[u8]) -> Result<Self, EffectIrErrorV1> {
-        if bytes.len() > EFFECT_IR_MAX_CANONICAL_BYTES_V1 {
-            return Err(EffectIrErrorV1::new(
-                EffectIrFailureCodeV1::CanonicalPayloadTooLarge,
+    pub fn from_canonical_bytes(bytes: &[u8]) -> Result<Self, EffectIrError> {
+        if bytes.len() > EFFECT_IR_MAX_CANONICAL_BYTES {
+            return Err(EffectIrError::new(
+                EffectIrFailureCode::CanonicalPayloadTooLarge,
                 format!("effect program has {} canonical bytes", bytes.len()),
             ));
         }
         let value: Value = serde_json::from_slice(bytes).map_err(serialization_error)?;
         if canonical_json(&value).as_bytes() != bytes {
-            return Err(EffectIrErrorV1::new(
-                EffectIrFailureCodeV1::NonCanonicalEncoding,
+            return Err(EffectIrError::new(
+                EffectIrFailureCode::NonCanonicalEncoding,
                 "effect program bytes are not exact canonical JSON",
             ));
         }
@@ -682,12 +682,12 @@ impl EffectProgramV1 {
         Ok(program)
     }
 
-    pub fn validate(&self) -> Result<(), EffectIrErrorV1> {
+    pub fn validate(&self) -> Result<(), EffectIrError> {
         self.validate_body()?;
         let expected = self.expected_action_digest()?;
         if self.action_digest != expected {
-            return Err(EffectIrErrorV1::new(
-                EffectIrFailureCodeV1::ActionDigestMismatch,
+            return Err(EffectIrError::new(
+                EffectIrFailureCode::ActionDigestMismatch,
                 format!(
                     "action digest {} does not match canonical body {}",
                     self.action_digest.to_hex(),
@@ -698,7 +698,7 @@ impl EffectProgramV1 {
         Ok(())
     }
 
-    pub fn validate_against(&self, admission: &EffectAdmissionV1) -> Result<(), EffectIrErrorV1> {
+    pub fn validate_against(&self, admission: &EffectAdmission) -> Result<(), EffectIrError> {
         self.validate()?;
         admission.validate()?;
         require_snapshot("program base", self.base_state, admission.expected_snapshot)?;
@@ -707,8 +707,8 @@ impl EffectProgramV1 {
             .binary_search(&self.intent)
             .is_err()
         {
-            return Err(EffectIrErrorV1::new(
-                EffectIrFailureCodeV1::UnlistedIntent,
+            return Err(EffectIrError::new(
+                EffectIrFailureCode::UnlistedIntent,
                 format!("intent {} is not admitted", self.intent),
             ));
         }
@@ -724,14 +724,14 @@ impl EffectProgramV1 {
                 .ok()
                 .map(|index| &admission.capabilities[index])
                 .ok_or_else(|| {
-                    EffectIrErrorV1::new(
-                        EffectIrFailureCodeV1::UnlistedCapability,
+                    EffectIrError::new(
+                        EffectIrFailureCode::UnlistedCapability,
                         format!("capability {owner:?}/{capability} is not admitted"),
                     )
                 })?;
             if generation != binding.generation {
-                return Err(EffectIrErrorV1::new(
-                    EffectIrFailureCodeV1::CapabilityGenerationMismatch,
+                return Err(EffectIrError::new(
+                    EffectIrFailureCode::CapabilityGenerationMismatch,
                     format!(
                         "capability {capability} generation {generation} does not match {}",
                         binding.generation
@@ -739,14 +739,14 @@ impl EffectProgramV1 {
                 ));
             }
             if contract_digest != binding.contract_digest {
-                return Err(EffectIrErrorV1::new(
-                    EffectIrFailureCodeV1::CapabilityContractMismatch,
+                return Err(EffectIrError::new(
+                    EffectIrFailureCode::CapabilityContractMismatch,
                     format!("capability {capability} contract digest does not match admission"),
                 ));
             }
             if effect_class_rank(effect_class) > effect_class_rank(binding.max_effect_class) {
-                return Err(EffectIrErrorV1::new(
-                    EffectIrFailureCodeV1::CapabilityEffectClassExceeded,
+                return Err(EffectIrError::new(
+                    EffectIrFailureCode::CapabilityEffectClassExceeded,
                     format!("capability {capability} exceeds its admitted effect class"),
                 ));
             }
@@ -754,8 +754,8 @@ impl EffectProgramV1 {
         Ok(())
     }
 
-    fn body(&self) -> EffectProgramBodyV1<'_> {
-        EffectProgramBodyV1 {
+    fn body(&self) -> EffectProgramBody<'_> {
+        EffectProgramBody {
             contract_version: self.contract_version,
             base_state: self.base_state,
             intent: &self.intent,
@@ -768,14 +768,14 @@ impl EffectProgramV1 {
         }
     }
 
-    fn expected_action_digest(&self) -> Result<DigestV1, EffectIrErrorV1> {
-        digest_body(EFFECT_IR_ACTION_DOMAIN_V1, &self.body())
+    fn expected_action_digest(&self) -> Result<Sha256Digest, EffectIrError> {
+        digest_body(EFFECT_IR_ACTION_DOMAIN, &self.body())
     }
 
-    fn validate_body(&self) -> Result<(), EffectIrErrorV1> {
-        if self.contract_version != EFFECT_IR_CONTRACT_VERSION_V1 {
-            return Err(EffectIrErrorV1::new(
-                EffectIrFailureCodeV1::UnsupportedVersion,
+    fn validate_body(&self) -> Result<(), EffectIrError> {
+        if self.contract_version != EFFECT_IR_CONTRACT_VERSION {
+            return Err(EffectIrError::new(
+                EffectIrFailureCode::UnsupportedVersion,
                 format!("unsupported Effect IR version {}", self.contract_version),
             ));
         }
@@ -784,20 +784,20 @@ impl EffectProgramV1 {
         validate_set(
             &self.targets,
             "effect targets",
-            EFFECT_IR_MAX_TARGETS_V1,
-            EffectIrFailureCodeV1::TooManyTargets,
+            EFFECT_IR_MAX_TARGETS,
+            EffectIrFailureCode::TooManyTargets,
         )?;
         validate_set(
             &self.preconditions,
             "effect preconditions",
-            EFFECT_IR_MAX_PRECONDITIONS_V1,
-            EffectIrFailureCodeV1::TooManyPreconditions,
+            EFFECT_IR_MAX_PRECONDITIONS,
+            EffectIrFailureCode::TooManyPreconditions,
         )?;
         validate_set(
             &self.exceptions,
             "effect exceptions",
-            EFFECT_IR_MAX_EXCEPTIONS_V1,
-            EffectIrFailureCodeV1::TooManyExceptions,
+            EFFECT_IR_MAX_EXCEPTIONS,
+            EffectIrFailureCode::TooManyExceptions,
         )?;
         for target in &self.targets {
             target.validate(self.base_state)?;
@@ -809,14 +809,14 @@ impl EffectProgramV1 {
             exception.validate()?;
         }
         if self.operations.is_empty() {
-            return Err(EffectIrErrorV1::new(
-                EffectIrFailureCodeV1::InvalidOperation,
+            return Err(EffectIrError::new(
+                EffectIrFailureCode::InvalidOperation,
                 "effect program has no operations",
             ));
         }
-        if self.operations.len() > EFFECT_IR_MAX_OPERATIONS_V1 {
-            return Err(EffectIrErrorV1::new(
-                EffectIrFailureCodeV1::TooManyOperations,
+        if self.operations.len() > EFFECT_IR_MAX_OPERATIONS {
+            return Err(EffectIrError::new(
+                EffectIrFailureCode::TooManyOperations,
                 format!("effect program has {} operations", self.operations.len()),
             ));
         }
@@ -828,15 +828,15 @@ impl EffectProgramV1 {
         self.validate_rollback()
     }
 
-    fn validate_relationships(&self) -> Result<(), EffectIrErrorV1> {
-        let mut target_ids: Vec<DigestV1> = self
+    fn validate_relationships(&self) -> Result<(), EffectIrError> {
+        let mut target_ids: Vec<Sha256Digest> = self
             .targets
             .iter()
             .map(|target| target.target_digest)
             .collect();
         target_ids.sort();
         reject_duplicates(&target_ids, "effect target identities")?;
-        let mut exception_ids: Vec<DigestV1> = self
+        let mut exception_ids: Vec<Sha256Digest> = self
             .exceptions
             .iter()
             .map(|exception| exception.exception_digest)
@@ -845,8 +845,8 @@ impl EffectProgramV1 {
         reject_duplicates(&exception_ids, "effect exception identities")?;
         for exception in &self.exceptions {
             if target_ids.binary_search(&exception.target_digest).is_err() {
-                return Err(EffectIrErrorV1::new(
-                    EffectIrFailureCodeV1::MissingTarget,
+                return Err(EffectIrError::new(
+                    EffectIrFailureCode::MissingTarget,
                     format!(
                         "exception target {} is absent from the effect target set",
                         exception.target_digest.to_hex()
@@ -856,14 +856,14 @@ impl EffectProgramV1 {
         }
         for operation in &self.operations {
             match operation {
-                TypedEffectOperationV1::ReplaceExactFile { target, .. } => {
+                TypedEffectOperation::ReplaceExactFile { target, .. } => {
                     require_member(&target_ids, *target, "replace target")?;
                 }
-                TypedEffectOperationV1::CopyExact { source, target, .. } => {
+                TypedEffectOperation::CopyExact { source, target, .. } => {
                     require_member(&target_ids, *source, "copy source")?;
                     require_member(&target_ids, *target, "copy target")?;
                 }
-                TypedEffectOperationV1::DeterministicTransform {
+                TypedEffectOperation::DeterministicTransform {
                     targets,
                     exceptions,
                     ..
@@ -873,8 +873,8 @@ impl EffectProgramV1 {
                     }
                     for exception in exceptions {
                         if exception_ids.binary_search(exception).is_err() {
-                            return Err(EffectIrErrorV1::new(
-                                EffectIrFailureCodeV1::MissingException,
+                            return Err(EffectIrError::new(
+                                EffectIrFailureCode::MissingException,
                                 format!(
                                     "transform exception {} is absent from the exception set",
                                     exception.to_hex()
@@ -889,7 +889,7 @@ impl EffectProgramV1 {
         Ok(())
     }
 
-    fn validate_rollback(&self) -> Result<(), EffectIrErrorV1> {
+    fn validate_rollback(&self) -> Result<(), EffectIrError> {
         let raw_count = self
             .operations
             .iter()
@@ -897,28 +897,28 @@ impl EffectProgramV1 {
             .count();
         if raw_count > 0 {
             if self.operations.len() != 1
-                || self.rollback != EffectRollbackV1::RawFallback
+                || self.rollback != EffectRollback::RawFallback
                 || !self.targets.is_empty()
                 || !self.preconditions.is_empty()
                 || !self.exceptions.is_empty()
                 || !self.verification.steps.is_empty()
             {
-                return Err(EffectIrErrorV1::new(
-                    EffectIrFailureCodeV1::RawFallbackMixed,
+                return Err(EffectIrError::new(
+                    EffectIrFailureCode::RawFallbackMixed,
                     "raw fallback must be the sole operation with no typed action metadata",
                 ));
             }
             return Ok(());
         }
-        if self.rollback == EffectRollbackV1::RawFallback {
-            return Err(EffectIrErrorV1::new(
-                EffectIrFailureCodeV1::RawFallbackMixed,
+        if self.rollback == EffectRollback::RawFallback {
+            return Err(EffectIrError::new(
+                EffectIrFailureCode::RawFallbackMixed,
                 "raw_fallback rollback requires the raw fallback operation",
             ));
         }
         if self.verification.steps.is_empty() {
-            return Err(EffectIrErrorV1::new(
-                EffectIrFailureCodeV1::VerificationRequired,
+            return Err(EffectIrError::new(
+                EffectIrFailureCode::VerificationRequired,
                 "typed effect programs require at least one verification step",
             ));
         }
@@ -929,8 +929,8 @@ impl EffectProgramV1 {
             .max()
             .unwrap_or(0);
         if rollback_rank(self.rollback) < max_effect {
-            return Err(EffectIrErrorV1::new(
-                EffectIrFailureCodeV1::RollbackTooWeak,
+            return Err(EffectIrError::new(
+                EffectIrFailureCode::RollbackTooWeak,
                 format!(
                     "rollback {:?} is weaker than operation effect rank {max_effect}",
                     self.rollback
@@ -942,9 +942,9 @@ impl EffectProgramV1 {
             .iter()
             .filter(|operation| effect_class_rank(operation.effect_class()) > 0)
             .count();
-        if self.rollback == EffectRollbackV1::SingleAtomic && mutating_count != 1 {
-            return Err(EffectIrErrorV1::new(
-                EffectIrFailureCodeV1::RollbackTooWeak,
+        if self.rollback == EffectRollback::SingleAtomic && mutating_count != 1 {
+            return Err(EffectIrError::new(
+                EffectIrFailureCode::RollbackTooWeak,
                 "single_atomic rollback requires exactly one mutating operation",
             ));
         }
@@ -952,10 +952,10 @@ impl EffectProgramV1 {
     }
 }
 
-pub fn effect_ir_contract_manifest_v1() -> Value {
+pub fn effect_ir_contract_manifest() -> Value {
     json!({
         "contract": "zerostack.effect_ir",
-        "contract_version": EFFECT_IR_CONTRACT_VERSION_V1,
+        "contract_version": EFFECT_IR_CONTRACT_VERSION,
         "encoding": "rfc8259_json_sorted_object_keys_no_whitespace",
         "action_domain": "zerostack.effect_ir.action.v1\u{0}",
         "program_fields": [
@@ -1005,17 +1005,17 @@ pub fn effect_ir_contract_manifest_v1() -> Value {
         ],
         "authority_values": ["zero_stack", "fs_zero", "graph_zero", "token_zero", "pi_zero_stack"],
         "bounds": {
-            "max_canonical_bytes": EFFECT_IR_MAX_CANONICAL_BYTES_V1,
-            "max_operations": EFFECT_IR_MAX_OPERATIONS_V1,
-            "max_targets": EFFECT_IR_MAX_TARGETS_V1,
-            "max_preconditions": EFFECT_IR_MAX_PRECONDITIONS_V1,
-            "max_exceptions": EFFECT_IR_MAX_EXCEPTIONS_V1,
-            "max_verification_steps": EFFECT_IR_MAX_VERIFICATION_STEPS_V1,
-            "max_capabilities": EFFECT_IR_MAX_CAPABILITIES_V1,
-            "max_intents": EFFECT_IR_MAX_INTENTS_V1,
-            "max_string_bytes": EFFECT_IR_MAX_STRING_BYTES_V1,
-            "max_literal_bytes": EFFECT_IR_MAX_LITERAL_BYTES_V1,
-            "max_refs_per_operation": EFFECT_IR_MAX_REFS_PER_OPERATION_V1
+            "max_canonical_bytes": EFFECT_IR_MAX_CANONICAL_BYTES,
+            "max_operations": EFFECT_IR_MAX_OPERATIONS,
+            "max_targets": EFFECT_IR_MAX_TARGETS,
+            "max_preconditions": EFFECT_IR_MAX_PRECONDITIONS,
+            "max_exceptions": EFFECT_IR_MAX_EXCEPTIONS,
+            "max_verification_steps": EFFECT_IR_MAX_VERIFICATION_STEPS,
+            "max_capabilities": EFFECT_IR_MAX_CAPABILITIES,
+            "max_intents": EFFECT_IR_MAX_INTENTS,
+            "max_string_bytes": EFFECT_IR_MAX_STRING_BYTES,
+            "max_literal_bytes": EFFECT_IR_MAX_LITERAL_BYTES,
+            "max_refs_per_operation": EFFECT_IR_MAX_REFS_PER_OPERATION
         },
         "invariants": [
             "action_identity_excludes_only_action_digest",
@@ -1044,37 +1044,37 @@ pub fn effect_ir_contract_manifest_v1() -> Value {
     })
 }
 
-pub fn effect_ir_contract_digest_v1() -> DigestV1 {
-    DigestV1::from_bytes(sha256(
-        canonical_json(&effect_ir_contract_manifest_v1()).as_bytes(),
+pub fn effect_ir_contract_digest() -> Sha256Digest {
+    Sha256Digest::from_bytes(sha256(
+        canonical_json(&effect_ir_contract_manifest()).as_bytes(),
     ))
 }
 
-fn digest_body<T: Serialize>(domain: &[u8], value: &T) -> Result<DigestV1, EffectIrErrorV1> {
+fn digest_body<T: Serialize>(domain: &[u8], value: &T) -> Result<Sha256Digest, EffectIrError> {
     let value = serde_json::to_value(value).map_err(serialization_error)?;
     let canonical = canonical_json(&value);
     let mut bytes = Vec::with_capacity(domain.len() + canonical.len());
     bytes.extend_from_slice(domain);
     bytes.extend_from_slice(canonical.as_bytes());
-    Ok(DigestV1::from_bytes(sha256(&bytes)))
+    Ok(Sha256Digest::from_bytes(sha256(&bytes)))
 }
 
-fn serialization_error(error: serde_json::Error) -> EffectIrErrorV1 {
-    EffectIrErrorV1::new(
-        EffectIrFailureCodeV1::SerializationFailure,
+fn serialization_error(error: serde_json::Error) -> EffectIrError {
+    EffectIrError::new(
+        EffectIrFailureCode::SerializationFailure,
         error.to_string(),
     )
 }
 
-fn validate_identity(label: &str, value: &str) -> Result<(), EffectIrErrorV1> {
+fn validate_identity(label: &str, value: &str) -> Result<(), EffectIrError> {
     if value.is_empty()
-        || value.len() > EFFECT_IR_MAX_STRING_BYTES_V1
+        || value.len() > EFFECT_IR_MAX_STRING_BYTES
         || !value.bytes().all(|byte| {
             byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'/' | b':' | b'_' | b'-')
         })
     {
-        Err(EffectIrErrorV1::new(
-            EffectIrFailureCodeV1::InvalidIdentity,
+        Err(EffectIrError::new(
+            EffectIrFailureCode::InvalidIdentity,
             format!("{label} is empty, too long, or contains a non-canonical byte"),
         ))
     } else {
@@ -1082,10 +1082,10 @@ fn validate_identity(label: &str, value: &str) -> Result<(), EffectIrErrorV1> {
     }
 }
 
-fn require_digest(label: &str, digest: DigestV1) -> Result<(), EffectIrErrorV1> {
-    if digest == DigestV1::ZERO {
-        Err(EffectIrErrorV1::new(
-            EffectIrFailureCodeV1::ZeroDigest,
+fn require_digest(label: &str, digest: Sha256Digest) -> Result<(), EffectIrError> {
+    if digest == Sha256Digest::ZERO {
+        Err(EffectIrError::new(
+            EffectIrFailureCode::ZeroDigest,
             format!("{label} must not be zero"),
         ))
     } else {
@@ -1093,10 +1093,10 @@ fn require_digest(label: &str, digest: DigestV1) -> Result<(), EffectIrErrorV1> 
     }
 }
 
-fn require_generation(label: &str, generation: u64) -> Result<(), EffectIrErrorV1> {
+fn require_generation(label: &str, generation: u64) -> Result<(), EffectIrError> {
     if generation == 0 {
-        Err(EffectIrErrorV1::new(
-            EffectIrFailureCodeV1::ZeroGeneration,
+        Err(EffectIrError::new(
+            EffectIrFailureCode::ZeroGeneration,
             format!("{label} must not be zero"),
         ))
     } else {
@@ -1106,14 +1106,14 @@ fn require_generation(label: &str, generation: u64) -> Result<(), EffectIrErrorV
 
 fn require_snapshot(
     label: &str,
-    actual: DigestV1,
-    expected: DigestV1,
-) -> Result<(), EffectIrErrorV1> {
+    actual: Sha256Digest,
+    expected: Sha256Digest,
+) -> Result<(), EffectIrError> {
     if actual == expected {
         Ok(())
     } else {
-        Err(EffectIrErrorV1::new(
-            EffectIrFailureCodeV1::StaleBaseState,
+        Err(EffectIrError::new(
+            EffectIrFailureCode::StaleBaseState,
             format!(
                 "{label} snapshot {} does not match current {}",
                 actual.to_hex(),
@@ -1123,11 +1123,11 @@ fn require_snapshot(
     }
 }
 
-fn reject_duplicates<T: Eq>(values: &[T], label: &str) -> Result<(), EffectIrErrorV1> {
+fn reject_duplicates<T: Eq>(values: &[T], label: &str) -> Result<(), EffectIrError> {
     for left in 0..values.len() {
         if values[left + 1..].contains(&values[left]) {
-            return Err(EffectIrErrorV1::new(
-                EffectIrFailureCodeV1::DuplicateMember,
+            return Err(EffectIrError::new(
+                EffectIrFailureCode::DuplicateMember,
                 format!("{label} contains a duplicate member"),
             ));
         }
@@ -1139,24 +1139,24 @@ fn validate_set<T: Ord>(
     values: &[T],
     label: &str,
     max: usize,
-    too_many_code: EffectIrFailureCodeV1,
-) -> Result<(), EffectIrErrorV1> {
+    too_many_code: EffectIrFailureCode,
+) -> Result<(), EffectIrError> {
     if values.len() > max {
-        return Err(EffectIrErrorV1::new(
+        return Err(EffectIrError::new(
             too_many_code,
             format!("{label} contains {} members", values.len()),
         ));
     }
     for pair in values.windows(2) {
         if pair[0] == pair[1] {
-            return Err(EffectIrErrorV1::new(
-                EffectIrFailureCodeV1::DuplicateMember,
+            return Err(EffectIrError::new(
+                EffectIrFailureCode::DuplicateMember,
                 format!("{label} contains a duplicate member"),
             ));
         }
         if pair[0] > pair[1] {
-            return Err(EffectIrErrorV1::new(
-                EffectIrFailureCodeV1::NonCanonicalOrder,
+            return Err(EffectIrError::new(
+                EffectIrFailureCode::NonCanonicalOrder,
                 format!("{label} is not strictly sorted"),
             ));
         }
@@ -1165,11 +1165,11 @@ fn validate_set<T: Ord>(
 }
 
 fn validate_sorted_digest_set(
-    values: &[DigestV1],
+    values: &[Sha256Digest],
     label: &str,
     max: usize,
-) -> Result<(), EffectIrErrorV1> {
-    validate_set(values, label, max, EffectIrFailureCodeV1::InvalidOperation)?;
+) -> Result<(), EffectIrError> {
+    validate_set(values, label, max, EffectIrFailureCode::InvalidOperation)?;
     for digest in values {
         require_digest(label, *digest)?;
     }
@@ -1180,8 +1180,8 @@ fn validate_sorted_strings(
     values: &[String],
     label: &str,
     max: usize,
-) -> Result<(), EffectIrErrorV1> {
-    validate_set(values, label, max, EffectIrFailureCodeV1::TooManyIntents)?;
+) -> Result<(), EffectIrError> {
+    validate_set(values, label, max, EffectIrFailureCode::TooManyIntents)?;
     for value in values {
         validate_identity(label, value)?;
     }
@@ -1189,15 +1189,15 @@ fn validate_sorted_strings(
 }
 
 fn require_member(
-    sorted: &[DigestV1],
-    value: DigestV1,
+    sorted: &[Sha256Digest],
+    value: Sha256Digest,
     label: &str,
-) -> Result<(), EffectIrErrorV1> {
+) -> Result<(), EffectIrError> {
     if sorted.binary_search(&value).is_ok() {
         Ok(())
     } else {
-        Err(EffectIrErrorV1::new(
-            EffectIrFailureCodeV1::MissingTarget,
+        Err(EffectIrError::new(
+            EffectIrFailureCode::MissingTarget,
             format!("{label} {} is absent from the target set", value.to_hex()),
         ))
     }
@@ -1212,14 +1212,14 @@ const fn effect_class_rank(effect_class: EffectClass) -> u8 {
     }
 }
 
-const fn rollback_rank(rollback: EffectRollbackV1) -> u8 {
+const fn rollback_rank(rollback: EffectRollback) -> u8 {
     match rollback {
-        EffectRollbackV1::ReadOnly => 0,
-        EffectRollbackV1::SingleAtomic => 1,
-        EffectRollbackV1::Journaled => 2,
-        EffectRollbackV1::WorkspaceClone => 3,
-        EffectRollbackV1::ExternalTransaction => 4,
-        EffectRollbackV1::RawFallback => 0,
+        EffectRollback::ReadOnly => 0,
+        EffectRollback::SingleAtomic => 1,
+        EffectRollback::Journaled => 2,
+        EffectRollback::WorkspaceClone => 3,
+        EffectRollback::ExternalTransaction => 4,
+        EffectRollback::RawFallback => 0,
     }
 }
 

@@ -11,53 +11,53 @@ use std::{error::Error, fmt};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use zero_abi::{
-    DigestV1, NativeStatePolicyV1, ReasoningContractV1, canonical_json,
-    reasoning_contract_digest_v1, sha256,
+    Sha256Digest, NativeStatePolicy, ReasoningContract, canonical_json,
+    reasoning_contract_digest, sha256,
 };
 use zero_cert::{CompletenessWitness, Query, VerifiedEvidence};
-use zero_store::RecoveryOutcomeV1;
+use zero_store::RecoveryOutcome;
 
 use crate::{
-    quality::{QualityAdmissionRecordV1, QualitySelectionV1, quality_envelope_contract_digest_v1},
-    recovery::{RecoveryUnknownDecisionV1, dcr_contract_digest_v1},
-    semantic_cut::{ReasoningSafepointV1, ReasoningStateStatusV1},
+    quality::{QualityAdmissionRecord, QualitySelection, quality_envelope_contract_digest},
+    recovery::{RecoveryUnknownDecision, dcr_contract_digest},
+    semantic_cut::{ReasoningSafepoint, ReasoningStateStatus},
     transaction::{
-        RestorationScopeV1, TransactionDispositionV1, TransactionReceiptV1,
-        transaction_contract_digest_v1,
+        RestorationScope, TransactionDisposition, TransactionReceipt,
+        transaction_contract_digest,
     },
     two_phase::{FailureCode, WorkerEnvelope},
 };
 
-pub const DEOPTIMIZATION_CONTRACT_VERSION_V1: u16 = 1;
-pub const BASELINE_SAFEPOINT_SCHEMA_VERSION_V1: &str = "zerostack.baseline_safepoint.v1";
-pub const BASELINE_RESTORATION_SCHEMA_VERSION_V1: &str = "zerostack.baseline_restoration.v1";
-pub const BASELINE_EXECUTION_SCHEMA_VERSION_V1: &str = "zerostack.baseline_execution.v1";
-pub const DEOPTIMIZATION_PLAN_SCHEMA_VERSION_V1: &str = "zerostack.deoptimization_plan.v1";
-pub const DEOPTIMIZATION_RESUME_SCHEMA_SHA256_V1: &str =
+pub const DEOPTIMIZATION_CONTRACT_VERSION: u16 = 1;
+pub const BASELINE_SAFEPOINT_SCHEMA_VERSION: &str = "zerostack.baseline_safepoint.v1";
+pub const BASELINE_RESTORATION_SCHEMA_VERSION: &str = "zerostack.baseline_restoration.v1";
+pub const BASELINE_EXECUTION_SCHEMA_VERSION: &str = "zerostack.baseline_execution.v1";
+pub const DEOPTIMIZATION_PLAN_SCHEMA_VERSION: &str = "zerostack.deoptimization_plan.v1";
+pub const DEOPTIMIZATION_RESUME_SCHEMA_SHA256: &str =
     "984eeed082d5a1d190f644072e21b4821c5649f19f240e057dfbb6ff9554e8ba";
-pub const DEOPTIMIZATION_EXECUTION_SCHEMA_SHA256_V1: &str =
+pub const DEOPTIMIZATION_EXECUTION_SCHEMA_SHA256: &str =
     "71c51182f265ae08a46f1530778619071a9dddd9d001cc6cb974345fcb450639";
-pub const DEOPTIMIZATION_PLAN_SCHEMA_SHA256_V1: &str =
+pub const DEOPTIMIZATION_PLAN_SCHEMA_SHA256: &str =
     "667e8ca57b3702882dfb7504b80e13a2de5e6e911e58c8e0d67004e3438da203";
-pub const DEOPTIMIZATION_MAX_CANONICAL_BYTES_V1: usize = 1_048_576;
+pub const DEOPTIMIZATION_MAX_CANONICAL_BYTES: usize = 1_048_576;
 
-const SAFEPOINT_DOMAIN_V1: &[u8] = b"zerostack.deoptimization.safepoint_claim.v1\0";
-const SAFEPOINT_CERTIFICATE_DOMAIN_V1: &[u8] =
+const SAFEPOINT_DOMAIN: &[u8] = b"zerostack.deoptimization.safepoint_claim.v1\0";
+const SAFEPOINT_CERTIFICATE_DOMAIN: &[u8] =
     b"zerostack.deoptimization.safepoint_certificate.v1\0";
-const REASONING_ENTRY_DOMAIN_V1: &[u8] = b"zerostack.deoptimization.reasoning_entry.v1\0";
-const PLAN_DOMAIN_V1: &[u8] = b"zerostack.deoptimization.plan.v1\0";
-const RESTORATION_CLAIM_DOMAIN_V1: &[u8] = b"zerostack.deoptimization.restoration_claim.v1\0";
-const RESUME_PERMIT_DOMAIN_V1: &[u8] = b"zerostack.deoptimization.resume_permit.v1\0";
-const INVOCATION_DOMAIN_V1: &[u8] = b"zerostack.deoptimization.baseline_invocation.v1\0";
-const EXECUTION_CLAIM_DOMAIN_V1: &[u8] = b"zerostack.deoptimization.baseline_execution_claim.v1\0";
-const EXECUTION_RECEIPT_DOMAIN_V1: &[u8] =
+const REASONING_ENTRY_DOMAIN: &[u8] = b"zerostack.deoptimization.reasoning_entry.v1\0";
+const PLAN_DOMAIN: &[u8] = b"zerostack.deoptimization.plan.v1\0";
+const RESTORATION_CLAIM_DOMAIN: &[u8] = b"zerostack.deoptimization.restoration_claim.v1\0";
+const RESUME_PERMIT_DOMAIN: &[u8] = b"zerostack.deoptimization.resume_permit.v1\0";
+const INVOCATION_DOMAIN: &[u8] = b"zerostack.deoptimization.baseline_invocation.v1\0";
+const EXECUTION_CLAIM_DOMAIN: &[u8] = b"zerostack.deoptimization.baseline_execution_claim.v1\0";
+const EXECUTION_RECEIPT_DOMAIN: &[u8] =
     b"zerostack.deoptimization.baseline_execution_receipt.v1\0";
-const VERIFIER_DOMAIN_V1: &[u8] = b"zerostack.deoptimization.verifier_identity.v1\0";
-const CONTRACT_DOMAIN_V1: &[u8] = b"zerostack.deoptimization.contract.v1\0";
+const VERIFIER_DOMAIN: &[u8] = b"zerostack.deoptimization.verifier_identity.v1\0";
+const CONTRACT_DOMAIN: &[u8] = b"zerostack.deoptimization.contract.v1\0";
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
-pub struct RaccWorkV1 {
+pub struct RaccWork {
     pub logical_input_tokens: u64,
     pub uncached_input_tokens: u64,
     pub cached_input_tokens: u64,
@@ -70,14 +70,14 @@ pub struct RaccWorkV1 {
     pub peak_memory_bytes: u64,
 }
 
-impl RaccWorkV1 {
-    fn validate_limit(&self, label: &'static str) -> Result<(), DeoptimizationErrorV1> {
+impl RaccWork {
+    fn validate_limit(&self, label: &'static str) -> Result<(), DeoptimizationError> {
         let observed_input = self
             .uncached_input_tokens
             .checked_add(self.cached_input_tokens)
             .ok_or_else(|| {
                 deopt_error(
-                    DeoptimizationFailureCodeV1::InvalidResourceReserve,
+                    DeoptimizationFailureCode::InvalidResourceReserve,
                     format!("{label} input-token reserve overflows"),
                 )
             })?;
@@ -87,7 +87,7 @@ impl RaccWorkV1 {
             || self.peak_memory_bytes == 0
         {
             return Err(deopt_error(
-                DeoptimizationFailureCodeV1::InvalidResourceReserve,
+                DeoptimizationFailureCode::InvalidResourceReserve,
                 format!(
                     "{label} must conserve input tokens and reserve positive fallback work, latency, and peak memory"
                 ),
@@ -96,13 +96,13 @@ impl RaccWorkV1 {
         Ok(())
     }
 
-    fn validate_usage(&self) -> Result<(), DeoptimizationErrorV1> {
+    fn validate_usage(&self) -> Result<(), DeoptimizationError> {
         let observed_input = self
             .uncached_input_tokens
             .checked_add(self.cached_input_tokens)
             .ok_or_else(|| {
                 deopt_error(
-                    DeoptimizationFailureCodeV1::InvalidResourceUsage,
+                    DeoptimizationFailureCode::InvalidResourceUsage,
                     "input-token usage overflows",
                 )
             })?;
@@ -111,7 +111,7 @@ impl RaccWorkV1 {
             || self.latency_micros == 0
         {
             return Err(deopt_error(
-                DeoptimizationFailureCodeV1::InvalidResourceUsage,
+                DeoptimizationFailureCode::InvalidResourceUsage,
                 "deoptimization usage must conserve input tokens and charge fallback work and latency",
             ));
         }
@@ -134,7 +134,7 @@ impl RaccWorkV1 {
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
-pub struct RouteUsageV1 {
+pub struct RouteUsage {
     pub fuel: u64,
     pub elapsed_ms: u64,
     pub io_bytes: u64,
@@ -143,22 +143,22 @@ pub struct RouteUsageV1 {
     pub processes: u32,
     pub risk_units: u64,
     pub worker_steps: u64,
-    pub work: RaccWorkV1,
+    pub work: RaccWork,
 }
 
-impl RouteUsageV1 {
-    fn validate(&self) -> Result<(), DeoptimizationErrorV1> {
+impl RouteUsage {
+    fn validate(&self) -> Result<(), DeoptimizationError> {
         self.work.validate_usage()?;
         if self.elapsed_ms == 0 || self.memory_bytes == 0 || self.worker_steps == 0 {
             return Err(deopt_error(
-                DeoptimizationFailureCodeV1::InvalidResourceUsage,
+                DeoptimizationFailureCode::InvalidResourceUsage,
                 "route usage must charge elapsed time, memory, and worker steps",
             ));
         }
         Ok(())
     }
 
-    fn within(&self, envelope: &WorkerEnvelope, work_limit: &RaccWorkV1) -> bool {
+    fn within(&self, envelope: &WorkerEnvelope, work_limit: &RaccWork) -> bool {
         self.fuel <= envelope.fuel
             && self.elapsed_ms <= envelope.deadline_ms
             && self.io_bytes <= envelope.io_bytes
@@ -173,15 +173,15 @@ impl RouteUsageV1 {
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
-pub struct FallbackReserveV1 {
+pub struct FallbackReserve {
     pub deoptimization_envelope: WorkerEnvelope,
     pub raw_baseline_envelope: WorkerEnvelope,
-    pub deoptimization_work_limit: RaccWorkV1,
-    pub raw_baseline_work_limit: RaccWorkV1,
+    pub deoptimization_work_limit: RaccWork,
+    pub raw_baseline_work_limit: RaccWork,
 }
 
-impl FallbackReserveV1 {
-    pub fn validate(&self) -> Result<(), DeoptimizationErrorV1> {
+impl FallbackReserve {
+    pub fn validate(&self) -> Result<(), DeoptimizationError> {
         validate_envelope("deoptimization", &self.deoptimization_envelope)?;
         validate_envelope("raw baseline", &self.raw_baseline_envelope)?;
         self.deoptimization_work_limit
@@ -195,7 +195,7 @@ impl FallbackReserveV1 {
 fn validate_envelope(
     label: &'static str,
     envelope: &WorkerEnvelope,
-) -> Result<(), DeoptimizationErrorV1> {
+) -> Result<(), DeoptimizationError> {
     if envelope.fuel == 0
         || envelope.deadline_ms == 0
         || envelope.io_bytes == 0
@@ -205,7 +205,7 @@ fn validate_envelope(
         || envelope.worker_steps == 0
     {
         return Err(deopt_error(
-            DeoptimizationFailureCodeV1::InvalidResourceReserve,
+            DeoptimizationFailureCode::InvalidResourceReserve,
             format!("{label} runtime envelope is not fully reserved"),
         ));
     }
@@ -214,23 +214,23 @@ fn validate_envelope(
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case", tag = "entry_kind")]
-pub enum BaselineReasoningEntryV1 {
+pub enum BaselineReasoningEntry {
     ExactNativeContinuation {
-        opaque_state_digest: DigestV1,
-        parent_response_digest: DigestV1,
-        session_identity_digest: DigestV1,
+        opaque_state_digest: Sha256Digest,
+        parent_response_digest: Sha256Digest,
+        session_identity_digest: Sha256Digest,
     },
     CanonicalCleanStart {
-        clean_start_identity_digest: DigestV1,
+        clean_start_identity_digest: Sha256Digest,
     },
 }
 
-impl BaselineReasoningEntryV1 {
+impl BaselineReasoningEntry {
     fn validate(
         &self,
-        contract: &ReasoningContractV1,
-        safepoint: &ReasoningSafepointV1,
-    ) -> Result<(), DeoptimizationErrorV1> {
+        contract: &ReasoningContract,
+        safepoint: &ReasoningSafepoint,
+    ) -> Result<(), DeoptimizationError> {
         match self {
             Self::ExactNativeContinuation {
                 opaque_state_digest,
@@ -247,12 +247,12 @@ impl BaselineReasoningEntryV1 {
                 )?;
                 if !matches!(
                     contract.native_state_policy(),
-                    NativeStatePolicyV1::ExactRequired | NativeStatePolicyV1::ExactIfAvailable
-                ) || safepoint.reasoning_state_status() != ReasoningStateStatusV1::ExactPreserved
+                    NativeStatePolicy::ExactRequired | NativeStatePolicy::ExactIfAvailable
+                ) || safepoint.reasoning_state_status() != ReasoningStateStatus::ExactPreserved
                     || safepoint.opaque_reasoning_state_digest() != *opaque_state_digest.as_bytes()
                 {
                     return Err(deopt_error(
-                        DeoptimizationFailureCodeV1::ReasoningEntryMismatch,
+                        DeoptimizationFailureCode::ReasoningEntryMismatch,
                         "native continuation does not match the frozen contract and safepoint",
                     ));
                 }
@@ -264,14 +264,14 @@ impl BaselineReasoningEntryV1 {
                     "clean-start baseline entry",
                     &[*clean_start_identity_digest],
                 )?;
-                if contract.native_state_policy() != NativeStatePolicyV1::CleanRestart
+                if contract.native_state_policy() != NativeStatePolicy::CleanRestart
                     || safepoint.reasoning_state_status()
-                        != ReasoningStateStatusV1::ExactCleanRestart
+                        != ReasoningStateStatus::ExactCleanRestart
                     || safepoint.opaque_reasoning_state_digest()
                         != *clean_start_identity_digest.as_bytes()
                 {
                     return Err(deopt_error(
-                        DeoptimizationFailureCodeV1::ReasoningEntryMismatch,
+                        DeoptimizationFailureCode::ReasoningEntryMismatch,
                         "clean-start identity does not match the frozen baseline contract",
                     ));
                 }
@@ -280,70 +280,70 @@ impl BaselineReasoningEntryV1 {
         Ok(())
     }
 
-    pub fn digest(&self) -> Result<DigestV1, DeoptimizationErrorV1> {
+    pub fn digest(&self) -> Result<Sha256Digest, DeoptimizationError> {
         Ok(domain_digest(
-            REASONING_ENTRY_DOMAIN_V1,
+            REASONING_ENTRY_DOMAIN,
             &canonical_bytes(self)?,
         ))
     }
 }
 
 /// Full frozen baseline state. This claim is data until exact verified bytes
-/// mint `BaselineSafepointEvidenceV1` before candidate execution.
+/// mint `BaselineSafepointEvidence` before candidate execution.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
-pub struct BaselineSafepointClaimV1 {
+pub struct BaselineSafepointClaim {
     schema_version: String,
-    project_snapshot_root: DigestV1,
-    working_tree_scope_digest: DigestV1,
-    external_state_inventory_digest: DigestV1,
-    comparison_identity_digest: DigestV1,
-    raw_baseline_identity_digest: DigestV1,
-    raw_baseline_input_digest: DigestV1,
-    raw_decision_view_digest: DigestV1,
-    assembly_contract_digest: DigestV1,
-    raw_worker_contract_digest: DigestV1,
-    effect_schema_digest: DigestV1,
-    baseline_reasoning_contract: ReasoningContractV1,
-    baseline_reasoning_contract_digest: DigestV1,
-    reasoning_safepoint: ReasoningSafepointV1,
-    reasoning_entry: BaselineReasoningEntryV1,
-    sampler_randomness_identity_digest: DigestV1,
-    baseline_verifier_identity_digest: DigestV1,
-    reserve: FallbackReserveV1,
-    transaction_route_digest: DigestV1,
-    restoration_route_digest: DigestV1,
-    capture_receipt_head_digest: DigestV1,
+    project_snapshot_root: Sha256Digest,
+    working_tree_scope_digest: Sha256Digest,
+    external_state_inventory_digest: Sha256Digest,
+    comparison_identity_digest: Sha256Digest,
+    raw_baseline_identity_digest: Sha256Digest,
+    raw_baseline_input_digest: Sha256Digest,
+    raw_decision_view_digest: Sha256Digest,
+    assembly_contract_digest: Sha256Digest,
+    raw_worker_contract_digest: Sha256Digest,
+    effect_schema_digest: Sha256Digest,
+    baseline_reasoning_contract: ReasoningContract,
+    baseline_reasoning_contract_digest: Sha256Digest,
+    reasoning_safepoint: ReasoningSafepoint,
+    reasoning_entry: BaselineReasoningEntry,
+    sampler_randomness_identity_digest: Sha256Digest,
+    baseline_verifier_identity_digest: Sha256Digest,
+    reserve: FallbackReserve,
+    transaction_route_digest: Sha256Digest,
+    restoration_route_digest: Sha256Digest,
+    capture_receipt_head_digest: Sha256Digest,
 }
 
-impl BaselineSafepointClaimV1 {
+impl BaselineSafepointClaim {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
-        project_snapshot_root: DigestV1,
-        working_tree_scope_digest: DigestV1,
-        external_state_inventory_digest: DigestV1,
-        comparison_identity_digest: DigestV1,
-        raw_baseline_identity_digest: DigestV1,
-        raw_baseline_input_digest: DigestV1,
-        raw_decision_view_digest: DigestV1,
-        assembly_contract_digest: DigestV1,
-        raw_worker_contract_digest: DigestV1,
-        effect_schema_digest: DigestV1,
-        baseline_reasoning_contract: ReasoningContractV1,
-        reasoning_safepoint: ReasoningSafepointV1,
-        reasoning_entry: BaselineReasoningEntryV1,
-        sampler_randomness_identity_digest: DigestV1,
-        baseline_verifier_identity_digest: DigestV1,
-        reserve: FallbackReserveV1,
-        transaction_route_digest: DigestV1,
-        restoration_route_digest: DigestV1,
-        capture_receipt_head_digest: DigestV1,
-    ) -> Result<Self, DeoptimizationErrorV1> {
+        project_snapshot_root: Sha256Digest,
+        working_tree_scope_digest: Sha256Digest,
+        external_state_inventory_digest: Sha256Digest,
+        comparison_identity_digest: Sha256Digest,
+        raw_baseline_identity_digest: Sha256Digest,
+        raw_baseline_input_digest: Sha256Digest,
+        raw_decision_view_digest: Sha256Digest,
+        assembly_contract_digest: Sha256Digest,
+        raw_worker_contract_digest: Sha256Digest,
+        effect_schema_digest: Sha256Digest,
+        baseline_reasoning_contract: ReasoningContract,
+        reasoning_safepoint: ReasoningSafepoint,
+        reasoning_entry: BaselineReasoningEntry,
+        sampler_randomness_identity_digest: Sha256Digest,
+        baseline_verifier_identity_digest: Sha256Digest,
+        reserve: FallbackReserve,
+        transaction_route_digest: Sha256Digest,
+        restoration_route_digest: Sha256Digest,
+        capture_receipt_head_digest: Sha256Digest,
+    ) -> Result<Self, DeoptimizationError> {
         let baseline_reasoning_contract_digest = baseline_reasoning_contract
             .identity_digest()
             .map_err(|error| reasoning_error(error.to_string()))?;
         let claim = Self {
-            schema_version: BASELINE_SAFEPOINT_SCHEMA_VERSION_V1.into(),
+            schema_version: BASELINE_SAFEPOINT_SCHEMA_VERSION.into(),
             project_snapshot_root,
             working_tree_scope_digest,
             external_state_inventory_digest,
@@ -369,10 +369,10 @@ impl BaselineSafepointClaimV1 {
         Ok(claim)
     }
 
-    pub fn validate(&self) -> Result<(), DeoptimizationErrorV1> {
-        if self.schema_version != BASELINE_SAFEPOINT_SCHEMA_VERSION_V1 {
+    pub fn validate(&self) -> Result<(), DeoptimizationError> {
+        if self.schema_version != BASELINE_SAFEPOINT_SCHEMA_VERSION {
             return Err(deopt_error(
-                DeoptimizationFailureCodeV1::SchemaVersionMismatch,
+                DeoptimizationFailureCode::SchemaVersionMismatch,
                 "baseline safepoint schema version is not v1",
             ));
         }
@@ -419,7 +419,7 @@ impl BaselineSafepointClaimV1 {
                 != *self.capture_receipt_head_digest.as_bytes()
         {
             return Err(deopt_error(
-                DeoptimizationFailureCodeV1::SafepointBindingMismatch,
+                DeoptimizationFailureCode::SafepointBindingMismatch,
                 "project, model, reasoning contract, or receipt head differs at safepoint",
             ));
         }
@@ -427,19 +427,19 @@ impl BaselineSafepointClaimV1 {
             .validate(&self.baseline_reasoning_contract, &self.reasoning_safepoint)
     }
 
-    pub fn canonical_bytes(&self) -> Result<Vec<u8>, DeoptimizationErrorV1> {
+    pub fn canonical_bytes(&self) -> Result<Vec<u8>, DeoptimizationError> {
         self.validate()?;
         canonical_bytes(self)
     }
 
-    pub fn from_canonical_bytes(bytes: &[u8]) -> Result<Self, DeoptimizationErrorV1> {
+    pub fn from_canonical_bytes(bytes: &[u8]) -> Result<Self, DeoptimizationError> {
         let claim: Self = decode_canonical(bytes)?;
         claim.validate()?;
         Ok(claim)
     }
 
-    pub fn digest(&self) -> Result<DigestV1, DeoptimizationErrorV1> {
-        Ok(domain_digest(SAFEPOINT_DOMAIN_V1, &self.canonical_bytes()?))
+    pub fn digest(&self) -> Result<Sha256Digest, DeoptimizationError> {
+        Ok(domain_digest(SAFEPOINT_DOMAIN, &self.canonical_bytes()?))
     }
 }
 
@@ -447,42 +447,42 @@ impl BaselineSafepointClaimV1 {
 /// candidate plan through the frozen receipt-head binding.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
-pub struct BaselineSafepointEvidenceV1 {
+pub struct BaselineSafepointEvidence {
     contract_version: u16,
-    claim: BaselineSafepointClaimV1,
-    claim_digest: DigestV1,
-    evidence_digest: DigestV1,
-    verifier_identity_digest: DigestV1,
-    certificate_digest: DigestV1,
+    claim: BaselineSafepointClaim,
+    claim_digest: Sha256Digest,
+    evidence_digest: Sha256Digest,
+    verifier_identity_digest: Sha256Digest,
+    certificate_digest: Sha256Digest,
 }
 
-impl BaselineSafepointEvidenceV1 {
+impl BaselineSafepointEvidence {
     pub fn verify_owner_scoped(
-        claim: BaselineSafepointClaimV1,
+        claim: BaselineSafepointClaim,
         evidence: &VerifiedEvidence<'_, '_>,
-    ) -> Result<Self, DeoptimizationErrorV1> {
+    ) -> Result<Self, DeoptimizationError> {
         claim.validate()?;
         verify_exact_successful_payload(&claim.canonical_bytes()?, evidence)?;
-        let verifier_identity_digest = deoptimization_verifier_identity_v1(evidence);
+        let verifier_identity_digest = deoptimization_verifier_identity(evidence);
         if verifier_identity_digest != claim.baseline_verifier_identity_digest {
             return Err(deopt_error(
-                DeoptimizationFailureCodeV1::VerifierIdentityMismatch,
+                DeoptimizationFailureCode::VerifierIdentityMismatch,
                 "safepoint verifier differs from the frozen verifier route",
             ));
         }
         let claim_digest = claim.digest()?;
         let evidence_digest = verified_evidence_digest(evidence)?;
         let certificate_digest = digest_value(
-            SAFEPOINT_CERTIFICATE_DOMAIN_V1,
+            SAFEPOINT_CERTIFICATE_DOMAIN,
             &json!({
                 "claim_digest": claim_digest,
-                "contract_version": DEOPTIMIZATION_CONTRACT_VERSION_V1,
+                "contract_version": DEOPTIMIZATION_CONTRACT_VERSION,
                 "evidence_digest": evidence_digest,
                 "verifier_identity_digest": verifier_identity_digest,
             }),
         );
         Ok(Self {
-            contract_version: DEOPTIMIZATION_CONTRACT_VERSION_V1,
+            contract_version: DEOPTIMIZATION_CONTRACT_VERSION,
             claim,
             claim_digest,
             evidence_digest,
@@ -491,10 +491,10 @@ impl BaselineSafepointEvidenceV1 {
         })
     }
 
-    pub fn validate(&self) -> Result<(), DeoptimizationErrorV1> {
-        if self.contract_version != DEOPTIMIZATION_CONTRACT_VERSION_V1 {
+    pub fn validate(&self) -> Result<(), DeoptimizationError> {
+        if self.contract_version != DEOPTIMIZATION_CONTRACT_VERSION {
             return Err(deopt_error(
-                DeoptimizationFailureCodeV1::SchemaVersionMismatch,
+                DeoptimizationFailureCode::SchemaVersionMismatch,
                 "safepoint certificate contract version is not v1",
             ));
         }
@@ -508,7 +508,7 @@ impl BaselineSafepointEvidenceV1 {
             ],
         )?;
         let expected = digest_value(
-            SAFEPOINT_CERTIFICATE_DOMAIN_V1,
+            SAFEPOINT_CERTIFICATE_DOMAIN,
             &json!({
                 "claim_digest": self.claim_digest,
                 "contract_version": self.contract_version,
@@ -521,15 +521,15 @@ impl BaselineSafepointEvidenceV1 {
             || expected != self.certificate_digest
         {
             return Err(deopt_error(
-                DeoptimizationFailureCodeV1::CertificateDigestMismatch,
+                DeoptimizationFailureCode::CertificateDigestMismatch,
                 "safepoint certificate does not bind its claim and proof",
             ));
         }
         Ok(())
     }
 
-    pub fn record(&self) -> BaselineSafepointCertificateRecordV1 {
-        BaselineSafepointCertificateRecordV1 {
+    pub fn record(&self) -> BaselineSafepointCertificateRecord {
+        BaselineSafepointCertificateRecord {
             contract_version: self.contract_version,
             claim: self.claim.clone(),
             claim_digest: self.claim_digest,
@@ -539,28 +539,28 @@ impl BaselineSafepointEvidenceV1 {
         }
     }
 
-    pub const fn claim(&self) -> &BaselineSafepointClaimV1 {
+    pub const fn claim(&self) -> &BaselineSafepointClaim {
         &self.claim
     }
-    pub const fn certificate_digest(&self) -> DigestV1 {
+    pub const fn certificate_digest(&self) -> Sha256Digest {
         self.certificate_digest
     }
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
-pub struct BaselineSafepointCertificateRecordV1 {
+pub struct BaselineSafepointCertificateRecord {
     pub contract_version: u16,
-    pub claim: BaselineSafepointClaimV1,
-    pub claim_digest: DigestV1,
-    pub evidence_digest: DigestV1,
-    pub verifier_identity_digest: DigestV1,
-    pub certificate_digest: DigestV1,
+    pub claim: BaselineSafepointClaim,
+    pub claim_digest: Sha256Digest,
+    pub evidence_digest: Sha256Digest,
+    pub verifier_identity_digest: Sha256Digest,
+    pub certificate_digest: Sha256Digest,
 }
 
-impl BaselineSafepointCertificateRecordV1 {
-    pub fn validate(&self) -> Result<(), DeoptimizationErrorV1> {
-        BaselineSafepointEvidenceV1 {
+impl BaselineSafepointCertificateRecord {
+    pub fn validate(&self) -> Result<(), DeoptimizationError> {
+        BaselineSafepointEvidence {
             contract_version: self.contract_version,
             claim: self.claim.clone(),
             claim_digest: self.claim_digest,
@@ -571,7 +571,7 @@ impl BaselineSafepointCertificateRecordV1 {
         .validate()
     }
 
-    pub fn canonical_bytes(&self) -> Result<Vec<u8>, DeoptimizationErrorV1> {
+    pub fn canonical_bytes(&self) -> Result<Vec<u8>, DeoptimizationError> {
         self.validate()?;
         canonical_bytes(self)
     }
@@ -579,40 +579,40 @@ impl BaselineSafepointCertificateRecordV1 {
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case", tag = "trigger_kind")]
-pub enum DeoptimizationTriggerV1 {
+pub enum DeoptimizationTrigger {
     RecoveryUnknown {
-        problem_digest: DigestV1,
-        decision_digest: DigestV1,
+        problem_digest: Sha256Digest,
+        decision_digest: Sha256Digest,
     },
     QualityBaselineSelection {
-        quality_admission_digest: DigestV1,
+        quality_admission_digest: Sha256Digest,
     },
     FailClosed {
         failure_code: FailureCode,
-        failure_receipt_digest: DigestV1,
+        failure_receipt_digest: Sha256Digest,
     },
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
-pub struct DeoptimizationPlanClaimV1 {
+pub struct DeoptimizationPlanClaim {
     schema_version: String,
-    safepoint_certificate_digest: DigestV1,
-    trigger: DeoptimizationTriggerV1,
-    candidate_action_digest: DigestV1,
-    candidate_state_digest: DigestV1,
-    candidate_closure_manifest_digest: DigestV1,
-    prior_work_receipt_digest: DigestV1,
-    kernel_binding_digest: DigestV1,
-    kernel_admission_digest: DigestV1,
-    plan_digest: DigestV1,
+    safepoint_certificate_digest: Sha256Digest,
+    trigger: DeoptimizationTrigger,
+    candidate_action_digest: Sha256Digest,
+    candidate_state_digest: Sha256Digest,
+    candidate_closure_manifest_digest: Sha256Digest,
+    prior_work_receipt_digest: Sha256Digest,
+    kernel_binding_digest: Sha256Digest,
+    kernel_admission_digest: Sha256Digest,
+    plan_digest: Sha256Digest,
 }
 
-impl DeoptimizationPlanClaimV1 {
-    pub fn validate(&self) -> Result<(), DeoptimizationErrorV1> {
-        if self.schema_version != DEOPTIMIZATION_PLAN_SCHEMA_VERSION_V1 {
+impl DeoptimizationPlanClaim {
+    pub fn validate(&self) -> Result<(), DeoptimizationError> {
+        if self.schema_version != DEOPTIMIZATION_PLAN_SCHEMA_VERSION {
             return Err(deopt_error(
-                DeoptimizationFailureCodeV1::SchemaVersionMismatch,
+                DeoptimizationFailureCode::SchemaVersionMismatch,
                 "deoptimization plan claim schema version is not v1",
             ));
         }
@@ -630,12 +630,12 @@ impl DeoptimizationPlanClaimV1 {
             ],
         )?;
         let expected = digest_value(
-            PLAN_DOMAIN_V1,
+            PLAN_DOMAIN,
             &json!({
                 "candidate_action_digest": self.candidate_action_digest,
                 "candidate_closure_manifest_digest": self.candidate_closure_manifest_digest,
                 "candidate_state_digest": self.candidate_state_digest,
-                "contract_version": DEOPTIMIZATION_CONTRACT_VERSION_V1,
+                "contract_version": DEOPTIMIZATION_CONTRACT_VERSION,
                 "kernel_admission_digest": self.kernel_admission_digest,
                 "kernel_binding_digest": self.kernel_binding_digest,
                 "prior_work_receipt_digest": self.prior_work_receipt_digest,
@@ -645,19 +645,19 @@ impl DeoptimizationPlanClaimV1 {
         );
         if expected != self.plan_digest {
             return Err(deopt_error(
-                DeoptimizationFailureCodeV1::PlanDigestMismatch,
+                DeoptimizationFailureCode::PlanDigestMismatch,
                 "deoptimization plan claim does not replay",
             ));
         }
         Ok(())
     }
 
-    pub fn canonical_bytes(&self) -> Result<Vec<u8>, DeoptimizationErrorV1> {
+    pub fn canonical_bytes(&self) -> Result<Vec<u8>, DeoptimizationError> {
         self.validate()?;
         canonical_bytes(self)
     }
 
-    pub fn from_canonical_bytes(bytes: &[u8]) -> Result<Self, DeoptimizationErrorV1> {
+    pub fn from_canonical_bytes(bytes: &[u8]) -> Result<Self, DeoptimizationError> {
         let claim: Self = decode_canonical(bytes)?;
         claim.validate()?;
         Ok(claim)
@@ -666,42 +666,42 @@ impl DeoptimizationPlanClaimV1 {
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
-pub struct DeoptimizationPlanV1 {
+pub struct DeoptimizationPlan {
     contract_version: u16,
-    safepoint: BaselineSafepointEvidenceV1,
-    trigger: DeoptimizationTriggerV1,
-    candidate_action_digest: DigestV1,
-    candidate_state_digest: DigestV1,
-    candidate_closure_manifest_digest: DigestV1,
-    prior_work_receipt_digest: DigestV1,
-    kernel_binding_digest: DigestV1,
-    kernel_admission_digest: DigestV1,
-    plan_digest: DigestV1,
+    safepoint: BaselineSafepointEvidence,
+    trigger: DeoptimizationTrigger,
+    candidate_action_digest: Sha256Digest,
+    candidate_state_digest: Sha256Digest,
+    candidate_closure_manifest_digest: Sha256Digest,
+    prior_work_receipt_digest: Sha256Digest,
+    kernel_binding_digest: Sha256Digest,
+    kernel_admission_digest: Sha256Digest,
+    plan_digest: Sha256Digest,
 }
 
-impl DeoptimizationPlanV1 {
+impl DeoptimizationPlan {
     #[allow(clippy::too_many_arguments)]
     pub fn for_recovery_unknown(
-        safepoint: BaselineSafepointEvidenceV1,
-        unknown: &RecoveryUnknownDecisionV1,
-        candidate_action_digest: DigestV1,
-        candidate_state_digest: DigestV1,
-        candidate_closure_manifest_digest: DigestV1,
-        prior_work_receipt_digest: DigestV1,
-        kernel_binding_digest: DigestV1,
-        kernel_admission_digest: DigestV1,
-    ) -> Result<Self, DeoptimizationErrorV1> {
+        safepoint: BaselineSafepointEvidence,
+        unknown: &RecoveryUnknownDecision,
+        candidate_action_digest: Sha256Digest,
+        candidate_state_digest: Sha256Digest,
+        candidate_closure_manifest_digest: Sha256Digest,
+        prior_work_receipt_digest: Sha256Digest,
+        kernel_binding_digest: Sha256Digest,
+        kernel_admission_digest: Sha256Digest,
+    ) -> Result<Self, DeoptimizationError> {
         if !unknown.raw_baseline_required()
             || unknown.fallback_safepoint() != safepoint.certificate_digest()
         {
             return Err(deopt_error(
-                DeoptimizationFailureCodeV1::TriggerMismatch,
+                DeoptimizationFailureCode::TriggerMismatch,
                 "DCR Unknown does not require this frozen safepoint",
             ));
         }
         Self::new(
             safepoint,
-            DeoptimizationTriggerV1::RecoveryUnknown {
+            DeoptimizationTrigger::RecoveryUnknown {
                 problem_digest: unknown.problem_digest(),
                 decision_digest: unknown.decision_digest(),
             },
@@ -716,33 +716,33 @@ impl DeoptimizationPlanV1 {
 
     #[allow(clippy::too_many_arguments)]
     pub fn for_quality_fallback(
-        safepoint: BaselineSafepointEvidenceV1,
-        admission: &QualityAdmissionRecordV1,
-        candidate_action_digest: DigestV1,
-        candidate_state_digest: DigestV1,
-        candidate_closure_manifest_digest: DigestV1,
-        prior_work_receipt_digest: DigestV1,
-        kernel_binding_digest: DigestV1,
-        kernel_admission_digest: DigestV1,
-    ) -> Result<Self, DeoptimizationErrorV1> {
+        safepoint: BaselineSafepointEvidence,
+        admission: &QualityAdmissionRecord,
+        candidate_action_digest: Sha256Digest,
+        candidate_state_digest: Sha256Digest,
+        candidate_closure_manifest_digest: Sha256Digest,
+        prior_work_receipt_digest: Sha256Digest,
+        kernel_binding_digest: Sha256Digest,
+        kernel_admission_digest: Sha256Digest,
+    ) -> Result<Self, DeoptimizationError> {
         admission.validate().map_err(|error| {
             deopt_error(
-                DeoptimizationFailureCodeV1::TriggerMismatch,
+                DeoptimizationFailureCode::TriggerMismatch,
                 format!("quality admission is invalid: {error}"),
             )
         })?;
-        if admission.selection != QualitySelectionV1::FrozenBaseline
+        if admission.selection != QualitySelection::FrozenBaseline
             || admission.raw_baseline_identity_digest
                 != safepoint.claim.raw_baseline_identity_digest
         {
             return Err(deopt_error(
-                DeoptimizationFailureCodeV1::TriggerMismatch,
+                DeoptimizationFailureCode::TriggerMismatch,
                 "quality admission does not select the frozen safepoint baseline",
             ));
         }
         Self::new(
             safepoint,
-            DeoptimizationTriggerV1::QualityBaselineSelection {
+            DeoptimizationTrigger::QualityBaselineSelection {
                 quality_admission_digest: admission.admission_digest,
             },
             candidate_action_digest,
@@ -756,20 +756,20 @@ impl DeoptimizationPlanV1 {
 
     #[allow(clippy::too_many_arguments)]
     pub fn for_fail_closed(
-        safepoint: BaselineSafepointEvidenceV1,
+        safepoint: BaselineSafepointEvidence,
         failure_code: FailureCode,
-        failure_receipt_digest: DigestV1,
-        candidate_action_digest: DigestV1,
-        candidate_state_digest: DigestV1,
-        candidate_closure_manifest_digest: DigestV1,
-        prior_work_receipt_digest: DigestV1,
-        kernel_binding_digest: DigestV1,
-        kernel_admission_digest: DigestV1,
-    ) -> Result<Self, DeoptimizationErrorV1> {
+        failure_receipt_digest: Sha256Digest,
+        candidate_action_digest: Sha256Digest,
+        candidate_state_digest: Sha256Digest,
+        candidate_closure_manifest_digest: Sha256Digest,
+        prior_work_receipt_digest: Sha256Digest,
+        kernel_binding_digest: Sha256Digest,
+        kernel_admission_digest: Sha256Digest,
+    ) -> Result<Self, DeoptimizationError> {
         require_nonzero("failure receipt", &[failure_receipt_digest])?;
         Self::new(
             safepoint,
-            DeoptimizationTriggerV1::FailClosed {
+            DeoptimizationTrigger::FailClosed {
                 failure_code,
                 failure_receipt_digest,
             },
@@ -784,15 +784,15 @@ impl DeoptimizationPlanV1 {
 
     #[allow(clippy::too_many_arguments)]
     fn new(
-        safepoint: BaselineSafepointEvidenceV1,
-        trigger: DeoptimizationTriggerV1,
-        candidate_action_digest: DigestV1,
-        candidate_state_digest: DigestV1,
-        candidate_closure_manifest_digest: DigestV1,
-        prior_work_receipt_digest: DigestV1,
-        kernel_binding_digest: DigestV1,
-        kernel_admission_digest: DigestV1,
-    ) -> Result<Self, DeoptimizationErrorV1> {
+        safepoint: BaselineSafepointEvidence,
+        trigger: DeoptimizationTrigger,
+        candidate_action_digest: Sha256Digest,
+        candidate_state_digest: Sha256Digest,
+        candidate_closure_manifest_digest: Sha256Digest,
+        prior_work_receipt_digest: Sha256Digest,
+        kernel_binding_digest: Sha256Digest,
+        kernel_admission_digest: Sha256Digest,
+    ) -> Result<Self, DeoptimizationError> {
         safepoint.validate()?;
         require_nonzero(
             "deoptimization plan",
@@ -806,7 +806,7 @@ impl DeoptimizationPlanV1 {
             ],
         )?;
         let mut plan = Self {
-            contract_version: DEOPTIMIZATION_CONTRACT_VERSION_V1,
+            contract_version: DEOPTIMIZATION_CONTRACT_VERSION,
             safepoint,
             trigger,
             candidate_action_digest,
@@ -815,17 +815,17 @@ impl DeoptimizationPlanV1 {
             prior_work_receipt_digest,
             kernel_binding_digest,
             kernel_admission_digest,
-            plan_digest: DigestV1::ZERO,
+            plan_digest: Sha256Digest::ZERO,
         };
         plan.plan_digest = plan.expected_digest()?;
         plan.validate()?;
         Ok(plan)
     }
 
-    pub fn validate(&self) -> Result<(), DeoptimizationErrorV1> {
-        if self.contract_version != DEOPTIMIZATION_CONTRACT_VERSION_V1 {
+    pub fn validate(&self) -> Result<(), DeoptimizationError> {
+        if self.contract_version != DEOPTIMIZATION_CONTRACT_VERSION {
             return Err(deopt_error(
-                DeoptimizationFailureCodeV1::SchemaVersionMismatch,
+                DeoptimizationFailureCode::SchemaVersionMismatch,
                 "deoptimization plan contract version is not v1",
             ));
         }
@@ -843,16 +843,16 @@ impl DeoptimizationPlanV1 {
         )?;
         if self.expected_digest()? != self.plan_digest {
             return Err(deopt_error(
-                DeoptimizationFailureCodeV1::PlanDigestMismatch,
+                DeoptimizationFailureCode::PlanDigestMismatch,
                 "deoptimization plan digest does not bind its trigger and candidate attempt",
             ));
         }
         Ok(())
     }
 
-    fn expected_digest(&self) -> Result<DigestV1, DeoptimizationErrorV1> {
+    fn expected_digest(&self) -> Result<Sha256Digest, DeoptimizationError> {
         Ok(digest_value(
-            PLAN_DOMAIN_V1,
+            PLAN_DOMAIN,
             &json!({
                 "candidate_action_digest": self.candidate_action_digest,
                 "candidate_closure_manifest_digest": self.candidate_closure_manifest_digest,
@@ -867,8 +867,8 @@ impl DeoptimizationPlanV1 {
         ))
     }
 
-    pub fn record(&self) -> DeoptimizationPlanRecordV1 {
-        DeoptimizationPlanRecordV1 {
+    pub fn record(&self) -> DeoptimizationPlanRecord {
+        DeoptimizationPlanRecord {
             contract_version: self.contract_version,
             safepoint: self.safepoint.record(),
             trigger: self.trigger.clone(),
@@ -882,9 +882,9 @@ impl DeoptimizationPlanV1 {
         }
     }
 
-    pub fn claim(&self) -> DeoptimizationPlanClaimV1 {
-        DeoptimizationPlanClaimV1 {
-            schema_version: DEOPTIMIZATION_PLAN_SCHEMA_VERSION_V1.into(),
+    pub fn claim(&self) -> DeoptimizationPlanClaim {
+        DeoptimizationPlanClaim {
+            schema_version: DEOPTIMIZATION_PLAN_SCHEMA_VERSION.into(),
             safepoint_certificate_digest: self.safepoint.certificate_digest,
             trigger: self.trigger.clone(),
             candidate_action_digest: self.candidate_action_digest,
@@ -897,32 +897,32 @@ impl DeoptimizationPlanV1 {
         }
     }
 
-    pub const fn plan_digest(&self) -> DigestV1 {
+    pub const fn plan_digest(&self) -> Sha256Digest {
         self.plan_digest
     }
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
-pub struct DeoptimizationPlanRecordV1 {
+pub struct DeoptimizationPlanRecord {
     pub contract_version: u16,
-    pub safepoint: BaselineSafepointCertificateRecordV1,
-    pub trigger: DeoptimizationTriggerV1,
-    pub candidate_action_digest: DigestV1,
-    pub candidate_state_digest: DigestV1,
-    pub candidate_closure_manifest_digest: DigestV1,
-    pub prior_work_receipt_digest: DigestV1,
-    pub kernel_binding_digest: DigestV1,
-    pub kernel_admission_digest: DigestV1,
-    pub plan_digest: DigestV1,
+    pub safepoint: BaselineSafepointCertificateRecord,
+    pub trigger: DeoptimizationTrigger,
+    pub candidate_action_digest: Sha256Digest,
+    pub candidate_state_digest: Sha256Digest,
+    pub candidate_closure_manifest_digest: Sha256Digest,
+    pub prior_work_receipt_digest: Sha256Digest,
+    pub kernel_binding_digest: Sha256Digest,
+    pub kernel_admission_digest: Sha256Digest,
+    pub plan_digest: Sha256Digest,
 }
 
-impl DeoptimizationPlanRecordV1 {
-    pub fn validate(&self) -> Result<(), DeoptimizationErrorV1> {
+impl DeoptimizationPlanRecord {
+    pub fn validate(&self) -> Result<(), DeoptimizationError> {
         self.safepoint.validate()?;
         self.claim().validate()?;
         let expected = digest_value(
-            PLAN_DOMAIN_V1,
+            PLAN_DOMAIN,
             &json!({
                 "candidate_action_digest": self.candidate_action_digest,
                 "candidate_closure_manifest_digest": self.candidate_closure_manifest_digest,
@@ -935,20 +935,20 @@ impl DeoptimizationPlanRecordV1 {
                 "trigger": self.trigger,
             }),
         );
-        if self.contract_version != DEOPTIMIZATION_CONTRACT_VERSION_V1
+        if self.contract_version != DEOPTIMIZATION_CONTRACT_VERSION
             || expected != self.plan_digest
         {
             return Err(deopt_error(
-                DeoptimizationFailureCodeV1::PlanDigestMismatch,
+                DeoptimizationFailureCode::PlanDigestMismatch,
                 "deoptimization plan record does not replay",
             ));
         }
         Ok(())
     }
 
-    pub fn claim(&self) -> DeoptimizationPlanClaimV1 {
-        DeoptimizationPlanClaimV1 {
-            schema_version: DEOPTIMIZATION_PLAN_SCHEMA_VERSION_V1.into(),
+    pub fn claim(&self) -> DeoptimizationPlanClaim {
+        DeoptimizationPlanClaim {
+            schema_version: DEOPTIMIZATION_PLAN_SCHEMA_VERSION.into(),
             safepoint_certificate_digest: self.safepoint.certificate_digest,
             trigger: self.trigger.clone(),
             candidate_action_digest: self.candidate_action_digest,
@@ -964,41 +964,41 @@ impl DeoptimizationPlanRecordV1 {
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
-pub struct BaselineRestorationClaimV1 {
+pub struct BaselineRestorationClaim {
     schema_version: String,
-    plan_digest: DigestV1,
-    safepoint_certificate_digest: DigestV1,
-    transaction_receipt_digest: DigestV1,
-    restored_project_root: DigestV1,
-    restored_external_inventory_digest: DigestV1,
-    restored_reasoning_contract_digest: DigestV1,
-    restored_fixed_model_digest: DigestV1,
-    restored_reasoning_entry_digest: DigestV1,
-    raw_baseline_identity_digest: DigestV1,
-    raw_baseline_input_digest: DigestV1,
-    raw_decision_view_digest: DigestV1,
-    candidate_overlay_disposition_digest: DigestV1,
-    visible_buffer_disposition_digest: DigestV1,
-    prior_receipt_head_digest: DigestV1,
-    successor_receipt_head_digest: DigestV1,
-    restoration_verifier_identity_digest: DigestV1,
-    deoptimization_usage: RouteUsageV1,
+    plan_digest: Sha256Digest,
+    safepoint_certificate_digest: Sha256Digest,
+    transaction_receipt_digest: Sha256Digest,
+    restored_project_root: Sha256Digest,
+    restored_external_inventory_digest: Sha256Digest,
+    restored_reasoning_contract_digest: Sha256Digest,
+    restored_fixed_model_digest: Sha256Digest,
+    restored_reasoning_entry_digest: Sha256Digest,
+    raw_baseline_identity_digest: Sha256Digest,
+    raw_baseline_input_digest: Sha256Digest,
+    raw_decision_view_digest: Sha256Digest,
+    candidate_overlay_disposition_digest: Sha256Digest,
+    visible_buffer_disposition_digest: Sha256Digest,
+    prior_receipt_head_digest: Sha256Digest,
+    successor_receipt_head_digest: Sha256Digest,
+    restoration_verifier_identity_digest: Sha256Digest,
+    deoptimization_usage: RouteUsage,
 }
 
-impl BaselineRestorationClaimV1 {
+impl BaselineRestorationClaim {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
-        plan: &DeoptimizationPlanV1,
-        transaction_receipt_digest: DigestV1,
-        candidate_overlay_disposition_digest: DigestV1,
-        visible_buffer_disposition_digest: DigestV1,
-        successor_receipt_head_digest: DigestV1,
-        restoration_verifier_identity_digest: DigestV1,
-        deoptimization_usage: RouteUsageV1,
-    ) -> Result<Self, DeoptimizationErrorV1> {
+        plan: &DeoptimizationPlan,
+        transaction_receipt_digest: Sha256Digest,
+        candidate_overlay_disposition_digest: Sha256Digest,
+        visible_buffer_disposition_digest: Sha256Digest,
+        successor_receipt_head_digest: Sha256Digest,
+        restoration_verifier_identity_digest: Sha256Digest,
+        deoptimization_usage: RouteUsage,
+    ) -> Result<Self, DeoptimizationError> {
         let safepoint = plan.safepoint.claim();
         let claim = Self {
-            schema_version: BASELINE_RESTORATION_SCHEMA_VERSION_V1.into(),
+            schema_version: BASELINE_RESTORATION_SCHEMA_VERSION.into(),
             plan_digest: plan.plan_digest,
             safepoint_certificate_digest: plan.safepoint.certificate_digest,
             transaction_receipt_digest,
@@ -1021,10 +1021,10 @@ impl BaselineRestorationClaimV1 {
         Ok(claim)
     }
 
-    pub fn validate(&self) -> Result<(), DeoptimizationErrorV1> {
-        if self.schema_version != BASELINE_RESTORATION_SCHEMA_VERSION_V1 {
+    pub fn validate(&self) -> Result<(), DeoptimizationError> {
+        if self.schema_version != BASELINE_RESTORATION_SCHEMA_VERSION {
             return Err(deopt_error(
-                DeoptimizationFailureCodeV1::SchemaVersionMismatch,
+                DeoptimizationFailureCode::SchemaVersionMismatch,
                 "baseline restoration schema version is not v1",
             ));
         }
@@ -1051,27 +1051,27 @@ impl BaselineRestorationClaimV1 {
         )?;
         if self.successor_receipt_head_digest == self.prior_receipt_head_digest {
             return Err(deopt_error(
-                DeoptimizationFailureCodeV1::ReceiptChainMismatch,
+                DeoptimizationFailureCode::ReceiptChainMismatch,
                 "restoration must advance the receipt head",
             ));
         }
         self.deoptimization_usage.validate()
     }
 
-    pub fn canonical_bytes(&self) -> Result<Vec<u8>, DeoptimizationErrorV1> {
+    pub fn canonical_bytes(&self) -> Result<Vec<u8>, DeoptimizationError> {
         self.validate()?;
         canonical_bytes(self)
     }
 
-    pub fn from_canonical_bytes(bytes: &[u8]) -> Result<Self, DeoptimizationErrorV1> {
+    pub fn from_canonical_bytes(bytes: &[u8]) -> Result<Self, DeoptimizationError> {
         let claim: Self = decode_canonical(bytes)?;
         claim.validate()?;
         Ok(claim)
     }
 
-    pub fn digest(&self) -> Result<DigestV1, DeoptimizationErrorV1> {
+    pub fn digest(&self) -> Result<Sha256Digest, DeoptimizationError> {
         Ok(domain_digest(
-            RESTORATION_CLAIM_DOMAIN_V1,
+            RESTORATION_CLAIM_DOMAIN,
             &self.canonical_bytes()?,
         ))
     }
@@ -1079,51 +1079,51 @@ impl BaselineRestorationClaimV1 {
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
-pub struct RestoredTransactionRecordV1 {
-    pub receipt_digest: DigestV1,
-    pub action_digest: DigestV1,
-    pub closure_manifest_digest: DigestV1,
-    pub baseline_state: DigestV1,
-    pub candidate_state: DigestV1,
-    pub external_inventory_digest: DigestV1,
+pub struct RestoredTransactionRecord {
+    pub receipt_digest: Sha256Digest,
+    pub action_digest: Sha256Digest,
+    pub closure_manifest_digest: Sha256Digest,
+    pub baseline_state: Sha256Digest,
+    pub candidate_state: Sha256Digest,
+    pub external_inventory_digest: Sha256Digest,
     pub resource_count: u16,
     pub external_resource_count: u16,
-    pub recovery_outcome: RecoveryOutcomeV1,
+    pub recovery_outcome: RecoveryOutcome,
 }
 
 /// Opaque restoration authority. It can mint one frozen baseline invocation,
 /// but it cannot enter G8 or claim baseline execution or publication.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
-pub struct BaselineResumePermitV1 {
+pub struct BaselineResumePermit {
     contract_version: u16,
-    plan: DeoptimizationPlanV1,
-    restoration_claim: BaselineRestorationClaimV1,
-    restored_transaction: RestoredTransactionRecordV1,
-    restoration_claim_digest: DigestV1,
-    evidence_digest: DigestV1,
-    verifier_identity_digest: DigestV1,
-    permit_digest: DigestV1,
+    plan: DeoptimizationPlan,
+    restoration_claim: BaselineRestorationClaim,
+    restored_transaction: RestoredTransactionRecord,
+    restoration_claim_digest: Sha256Digest,
+    evidence_digest: Sha256Digest,
+    verifier_identity_digest: Sha256Digest,
+    permit_digest: Sha256Digest,
 }
 
-impl BaselineResumePermitV1 {
+impl BaselineResumePermit {
     pub fn verify_restoration(
-        plan: DeoptimizationPlanV1,
-        transaction: TransactionReceiptV1,
-        restoration_claim: BaselineRestorationClaimV1,
+        plan: DeoptimizationPlan,
+        transaction: TransactionReceipt,
+        restoration_claim: BaselineRestorationClaim,
         evidence: &VerifiedEvidence<'_, '_>,
-    ) -> Result<Self, DeoptimizationErrorV1> {
+    ) -> Result<Self, DeoptimizationError> {
         plan.validate()?;
         restoration_claim.validate()?;
         transaction.canonical_bytes().map_err(|error| {
             deopt_error(
-                DeoptimizationFailureCodeV1::TransactionMismatch,
+                DeoptimizationFailureCode::TransactionMismatch,
                 format!("transaction receipt is invalid: {error}"),
             )
         })?;
         let safepoint = plan.safepoint.claim();
-        if transaction.disposition() != TransactionDispositionV1::BaselineRootRecovered
-            || transaction.restoration_scope() != RestorationScopeV1::DeclaredEffectClosure
+        if transaction.disposition() != TransactionDisposition::BaselineRootRecovered
+            || transaction.restoration_scope() != RestorationScope::DeclaredEffectClosure
             || transaction.external_restoration_debt_count() != 0
             || transaction.baseline_state() != safepoint.project_snapshot_root
             || transaction.observed_root() != safepoint.project_snapshot_root
@@ -1134,7 +1134,7 @@ impl BaselineResumePermitV1 {
             || transaction.receipt_digest() != restoration_claim.transaction_receipt_digest
         {
             return Err(deopt_error(
-                DeoptimizationFailureCodeV1::TransactionMismatch,
+                DeoptimizationFailureCode::TransactionMismatch,
                 "transaction did not restore the complete frozen effect closure",
             ));
         }
@@ -1156,7 +1156,7 @@ impl BaselineResumePermitV1 {
             || restoration_claim.prior_receipt_head_digest != safepoint.capture_receipt_head_digest
         {
             return Err(deopt_error(
-                DeoptimizationFailureCodeV1::RestorationMismatch,
+                DeoptimizationFailureCode::RestorationMismatch,
                 "restoration proof differs from the frozen safepoint",
             ));
         }
@@ -1165,19 +1165,19 @@ impl BaselineResumePermitV1 {
             &safepoint.reserve.deoptimization_work_limit,
         ) {
             return Err(deopt_error(
-                DeoptimizationFailureCodeV1::ResourceReserveExceeded,
+                DeoptimizationFailureCode::ResourceReserveExceeded,
                 "deoptimization work exceeds the frozen fallback reserve",
             ));
         }
         verify_exact_successful_payload(&restoration_claim.canonical_bytes()?, evidence)?;
-        let verifier_identity_digest = deoptimization_verifier_identity_v1(evidence);
+        let verifier_identity_digest = deoptimization_verifier_identity(evidence);
         if verifier_identity_digest != restoration_claim.restoration_verifier_identity_digest {
             return Err(deopt_error(
-                DeoptimizationFailureCodeV1::VerifierIdentityMismatch,
+                DeoptimizationFailureCode::VerifierIdentityMismatch,
                 "restoration verifier differs from the claim route",
             ));
         }
-        let restored_transaction = RestoredTransactionRecordV1 {
+        let restored_transaction = RestoredTransactionRecord {
             receipt_digest: transaction.receipt_digest(),
             action_digest: transaction.action_digest(),
             closure_manifest_digest: transaction.closure_manifest_digest(),
@@ -1198,7 +1198,7 @@ impl BaselineResumePermitV1 {
             verifier_identity_digest,
         );
         let permit = Self {
-            contract_version: DEOPTIMIZATION_CONTRACT_VERSION_V1,
+            contract_version: DEOPTIMIZATION_CONTRACT_VERSION,
             plan,
             restoration_claim,
             restored_transaction,
@@ -1211,10 +1211,10 @@ impl BaselineResumePermitV1 {
         Ok(permit)
     }
 
-    pub fn validate(&self) -> Result<(), DeoptimizationErrorV1> {
-        if self.contract_version != DEOPTIMIZATION_CONTRACT_VERSION_V1 {
+    pub fn validate(&self) -> Result<(), DeoptimizationError> {
+        if self.contract_version != DEOPTIMIZATION_CONTRACT_VERSION {
             return Err(deopt_error(
-                DeoptimizationFailureCodeV1::SchemaVersionMismatch,
+                DeoptimizationFailureCode::SchemaVersionMismatch,
                 "baseline resume permit contract version is not v1",
             ));
         }
@@ -1251,20 +1251,20 @@ impl BaselineResumePermitV1 {
             ) != self.permit_digest
         {
             return Err(deopt_error(
-                DeoptimizationFailureCodeV1::CertificateDigestMismatch,
+                DeoptimizationFailureCode::CertificateDigestMismatch,
                 "baseline resume permit does not replay against its route evidence",
             ));
         }
         Ok(())
     }
 
-    pub fn into_invocation(self) -> Result<FrozenBaselineInvocationV1, DeoptimizationErrorV1> {
+    pub fn into_invocation(self) -> Result<FrozenBaselineInvocation, DeoptimizationError> {
         self.validate()?;
         let resume_record = self.record();
         let safepoint = self.plan.safepoint.claim();
-        let mut invocation = FrozenBaselineInvocationV1 {
+        let mut invocation = FrozenBaselineInvocation {
             resume_record,
-            contract_version: DEOPTIMIZATION_CONTRACT_VERSION_V1,
+            contract_version: DEOPTIMIZATION_CONTRACT_VERSION,
             resume_permit_digest: self.permit_digest,
             predecessor_receipt_head_digest: self.restoration_claim.successor_receipt_head_digest,
             transaction_receipt_digest: self.restored_transaction.receipt_digest,
@@ -1283,15 +1283,15 @@ impl BaselineResumePermitV1 {
             baseline_verifier_identity_digest: safepoint.baseline_verifier_identity_digest,
             raw_baseline_envelope: safepoint.reserve.raw_baseline_envelope,
             raw_baseline_work_limit: safepoint.reserve.raw_baseline_work_limit,
-            invocation_digest: DigestV1::ZERO,
+            invocation_digest: Sha256Digest::ZERO,
         };
         invocation.invocation_digest = invocation.expected_digest()?;
         invocation.validate()?;
         Ok(invocation)
     }
 
-    pub fn record(&self) -> BaselineResumeReceiptRecordV1 {
-        BaselineResumeReceiptRecordV1 {
+    pub fn record(&self) -> BaselineResumeReceiptRecord {
+        BaselineResumeReceiptRecord {
             contract_version: self.contract_version,
             plan: self.plan.record(),
             restoration_claim: self.restoration_claim.clone(),
@@ -1303,32 +1303,32 @@ impl BaselineResumePermitV1 {
         }
     }
 
-    pub const fn permit_digest(&self) -> DigestV1 {
+    pub const fn permit_digest(&self) -> Sha256Digest {
         self.permit_digest
     }
-    pub const fn restored_transaction(&self) -> &RestoredTransactionRecordV1 {
+    pub const fn restored_transaction(&self) -> &RestoredTransactionRecord {
         &self.restored_transaction
     }
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
-pub struct BaselineResumeReceiptRecordV1 {
+pub struct BaselineResumeReceiptRecord {
     pub contract_version: u16,
-    pub plan: DeoptimizationPlanRecordV1,
-    pub restoration_claim: BaselineRestorationClaimV1,
-    pub restored_transaction: RestoredTransactionRecordV1,
-    pub restoration_claim_digest: DigestV1,
-    pub evidence_digest: DigestV1,
-    pub verifier_identity_digest: DigestV1,
-    pub permit_digest: DigestV1,
+    pub plan: DeoptimizationPlanRecord,
+    pub restoration_claim: BaselineRestorationClaim,
+    pub restored_transaction: RestoredTransactionRecord,
+    pub restoration_claim_digest: Sha256Digest,
+    pub evidence_digest: Sha256Digest,
+    pub verifier_identity_digest: Sha256Digest,
+    pub permit_digest: Sha256Digest,
 }
 
-impl BaselineResumeReceiptRecordV1 {
-    pub fn validate(&self) -> Result<(), DeoptimizationErrorV1> {
+impl BaselineResumeReceiptRecord {
+    pub fn validate(&self) -> Result<(), DeoptimizationError> {
         self.plan.validate()?;
         self.restoration_claim.validate()?;
-        if self.contract_version != DEOPTIMIZATION_CONTRACT_VERSION_V1
+        if self.contract_version != DEOPTIMIZATION_CONTRACT_VERSION
             || self.restoration_claim.plan_digest != self.plan.plan_digest
             || self.restoration_claim.safepoint_certificate_digest
                 != self.plan.safepoint.certificate_digest
@@ -1354,19 +1354,19 @@ impl BaselineResumeReceiptRecordV1 {
             ) != self.permit_digest
         {
             return Err(deopt_error(
-                DeoptimizationFailureCodeV1::CertificateDigestMismatch,
+                DeoptimizationFailureCode::CertificateDigestMismatch,
                 "baseline resume record does not replay",
             ));
         }
         Ok(())
     }
 
-    pub fn canonical_bytes(&self) -> Result<Vec<u8>, DeoptimizationErrorV1> {
+    pub fn canonical_bytes(&self) -> Result<Vec<u8>, DeoptimizationError> {
         self.validate()?;
         canonical_bytes(self)
     }
 
-    pub fn from_canonical_bytes(bytes: &[u8]) -> Result<Self, DeoptimizationErrorV1> {
+    pub fn from_canonical_bytes(bytes: &[u8]) -> Result<Self, DeoptimizationError> {
         let record: Self = decode_canonical(bytes)?;
         record.validate()?;
         Ok(record)
@@ -1375,35 +1375,35 @@ impl BaselineResumeReceiptRecordV1 {
 
 #[derive(Debug, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
-pub struct FrozenBaselineInvocationV1 {
-    resume_record: BaselineResumeReceiptRecordV1,
+pub struct FrozenBaselineInvocation {
+    resume_record: BaselineResumeReceiptRecord,
     contract_version: u16,
-    resume_permit_digest: DigestV1,
-    predecessor_receipt_head_digest: DigestV1,
-    transaction_receipt_digest: DigestV1,
-    project_snapshot_root: DigestV1,
-    raw_baseline_identity_digest: DigestV1,
-    raw_baseline_input_digest: DigestV1,
-    raw_decision_view_digest: DigestV1,
-    comparison_identity_digest: DigestV1,
-    assembly_contract_digest: DigestV1,
-    raw_worker_contract_digest: DigestV1,
-    effect_schema_digest: DigestV1,
-    baseline_reasoning_contract: ReasoningContractV1,
-    baseline_reasoning_contract_digest: DigestV1,
-    reasoning_entry: BaselineReasoningEntryV1,
-    sampler_randomness_identity_digest: DigestV1,
-    baseline_verifier_identity_digest: DigestV1,
+    resume_permit_digest: Sha256Digest,
+    predecessor_receipt_head_digest: Sha256Digest,
+    transaction_receipt_digest: Sha256Digest,
+    project_snapshot_root: Sha256Digest,
+    raw_baseline_identity_digest: Sha256Digest,
+    raw_baseline_input_digest: Sha256Digest,
+    raw_decision_view_digest: Sha256Digest,
+    comparison_identity_digest: Sha256Digest,
+    assembly_contract_digest: Sha256Digest,
+    raw_worker_contract_digest: Sha256Digest,
+    effect_schema_digest: Sha256Digest,
+    baseline_reasoning_contract: ReasoningContract,
+    baseline_reasoning_contract_digest: Sha256Digest,
+    reasoning_entry: BaselineReasoningEntry,
+    sampler_randomness_identity_digest: Sha256Digest,
+    baseline_verifier_identity_digest: Sha256Digest,
     raw_baseline_envelope: WorkerEnvelope,
-    raw_baseline_work_limit: RaccWorkV1,
-    invocation_digest: DigestV1,
+    raw_baseline_work_limit: RaccWork,
+    invocation_digest: Sha256Digest,
 }
 
-impl FrozenBaselineInvocationV1 {
-    pub fn validate(&self) -> Result<(), DeoptimizationErrorV1> {
-        if self.contract_version != DEOPTIMIZATION_CONTRACT_VERSION_V1 {
+impl FrozenBaselineInvocation {
+    pub fn validate(&self) -> Result<(), DeoptimizationError> {
+        if self.contract_version != DEOPTIMIZATION_CONTRACT_VERSION {
             return Err(deopt_error(
-                DeoptimizationFailureCodeV1::SchemaVersionMismatch,
+                DeoptimizationFailureCode::SchemaVersionMismatch,
                 "frozen baseline invocation contract version is not v1",
             ));
         }
@@ -1418,7 +1418,7 @@ impl FrozenBaselineInvocationV1 {
                 != self.predecessor_receipt_head_digest
         {
             return Err(deopt_error(
-                DeoptimizationFailureCodeV1::SafepointBindingMismatch,
+                DeoptimizationFailureCode::SafepointBindingMismatch,
                 "baseline invocation differs from the verified resume route",
             ));
         }
@@ -1457,16 +1457,16 @@ impl FrozenBaselineInvocationV1 {
                 != self.invocation_digest
         {
             return Err(deopt_error(
-                DeoptimizationFailureCodeV1::CertificateDigestMismatch,
+                DeoptimizationFailureCode::CertificateDigestMismatch,
                 "frozen baseline invocation does not bind its exact contract",
             ));
         }
         Ok(())
     }
 
-    fn expected_digest(&self) -> Result<DigestV1, DeoptimizationErrorV1> {
+    fn expected_digest(&self) -> Result<Sha256Digest, DeoptimizationError> {
         Ok(digest_value(
-            INVOCATION_DOMAIN_V1,
+            INVOCATION_DOMAIN,
             &json!({
                 "assembly_contract_digest": self.assembly_contract_digest,
                 "baseline_reasoning_contract": self.baseline_reasoning_contract,
@@ -1491,31 +1491,31 @@ impl FrozenBaselineInvocationV1 {
         ))
     }
 
-    pub const fn invocation_digest(&self) -> DigestV1 {
+    pub const fn invocation_digest(&self) -> Sha256Digest {
         self.invocation_digest
     }
-    pub const fn raw_baseline_identity_digest(&self) -> DigestV1 {
+    pub const fn raw_baseline_identity_digest(&self) -> Sha256Digest {
         self.raw_baseline_identity_digest
     }
-    pub const fn project_snapshot_root(&self) -> DigestV1 {
+    pub const fn project_snapshot_root(&self) -> Sha256Digest {
         self.project_snapshot_root
     }
 }
 
 fn baseline_invocation_digest_from_resume_record(
-    record: &BaselineResumeReceiptRecordV1,
-) -> Result<DigestV1, DeoptimizationErrorV1> {
+    record: &BaselineResumeReceiptRecord,
+) -> Result<Sha256Digest, DeoptimizationError> {
     record.validate()?;
     let safepoint = &record.plan.safepoint.claim;
     Ok(digest_value(
-        INVOCATION_DOMAIN_V1,
+        INVOCATION_DOMAIN,
         &json!({
             "assembly_contract_digest": safepoint.assembly_contract_digest,
             "baseline_reasoning_contract": safepoint.baseline_reasoning_contract,
             "baseline_reasoning_contract_digest": safepoint.baseline_reasoning_contract_digest,
             "baseline_verifier_identity_digest": safepoint.baseline_verifier_identity_digest,
             "comparison_identity_digest": safepoint.comparison_identity_digest,
-            "contract_version": DEOPTIMIZATION_CONTRACT_VERSION_V1,
+            "contract_version": DEOPTIMIZATION_CONTRACT_VERSION,
             "effect_schema_digest": safepoint.effect_schema_digest,
             "predecessor_receipt_head_digest": record.restoration_claim.successor_receipt_head_digest,
             "project_snapshot_root": safepoint.project_snapshot_root,
@@ -1534,16 +1534,16 @@ fn baseline_invocation_digest_from_resume_record(
 }
 
 fn resume_permit_digest(
-    plan_digest: DigestV1,
-    restoration_claim_digest: DigestV1,
-    transaction_receipt_digest: DigestV1,
-    evidence_digest: DigestV1,
-    verifier_identity_digest: DigestV1,
-) -> DigestV1 {
+    plan_digest: Sha256Digest,
+    restoration_claim_digest: Sha256Digest,
+    transaction_receipt_digest: Sha256Digest,
+    evidence_digest: Sha256Digest,
+    verifier_identity_digest: Sha256Digest,
+) -> Sha256Digest {
     digest_value(
-        RESUME_PERMIT_DOMAIN_V1,
+        RESUME_PERMIT_DOMAIN,
         &json!({
-            "contract_version": DEOPTIMIZATION_CONTRACT_VERSION_V1,
+            "contract_version": DEOPTIMIZATION_CONTRACT_VERSION,
             "evidence_digest": evidence_digest,
             "plan_digest": plan_digest,
             "restoration_claim_digest": restoration_claim_digest,
@@ -1553,10 +1553,10 @@ fn resume_permit_digest(
     )
 }
 
-pub fn deoptimization_verifier_identity_v1(evidence: &VerifiedEvidence<'_, '_>) -> DigestV1 {
+pub fn deoptimization_verifier_identity(evidence: &VerifiedEvidence<'_, '_>) -> Sha256Digest {
     let provenance = evidence.provenance();
     digest_value(
-        VERIFIER_DOMAIN_V1,
+        VERIFIER_DOMAIN,
         &json!({
             "index_id": provenance.index_id,
             "index_version": provenance.index_version,
@@ -1571,20 +1571,20 @@ pub fn deoptimization_verifier_identity_v1(evidence: &VerifiedEvidence<'_, '_>) 
 fn verify_exact_successful_payload(
     expected: &[u8],
     evidence: &VerifiedEvidence<'_, '_>,
-) -> Result<(), DeoptimizationErrorV1> {
+) -> Result<(), DeoptimizationError> {
     match (evidence.query(), &evidence.certificate().completeness) {
         (Query::BuildReceipt { .. }, CompletenessWitness::BuildReceipt { exit_code: 0, .. })
         | (Query::TestTrace { .. }, CompletenessWitness::TestTrace { exit_code: 0, .. }) => {}
         _ => {
             return Err(deopt_error(
-                DeoptimizationFailureCodeV1::UnsupportedEvidenceClass,
+                DeoptimizationFailureCode::UnsupportedEvidenceClass,
                 "deoptimization requires a successful verified build or test trace",
             ));
         }
     }
     if evidence.payload() != expected {
         return Err(deopt_error(
-            DeoptimizationFailureCodeV1::EvidencePayloadMismatch,
+            DeoptimizationFailureCode::EvidencePayloadMismatch,
             "verified evidence payload differs from the exact canonical claim",
         ));
     }
@@ -1593,8 +1593,8 @@ fn verify_exact_successful_payload(
 
 fn verified_evidence_digest(
     evidence: &VerifiedEvidence<'_, '_>,
-) -> Result<DigestV1, DeoptimizationErrorV1> {
-    Ok(DigestV1::from_bytes(
+) -> Result<Sha256Digest, DeoptimizationError> {
+    Ok(Sha256Digest::from_bytes(
         evidence
             .certificate()
             .canonical_digest()
@@ -1602,18 +1602,18 @@ fn verified_evidence_digest(
     ))
 }
 
-pub fn deoptimization_contract_manifest_v1() -> Value {
+pub fn deoptimization_contract_manifest() -> Value {
     json!({
         "baseline_entry_modes": ["exact_native_continuation", "canonical_clean_start"],
         "baseline_invocation_authority": "linear_resume_permit_to_invocation_then_verified_execution_receipt",
         "canonical_encoding": "sorted_key_json_no_whitespace",
-        "contract_version": DEOPTIMIZATION_CONTRACT_VERSION_V1,
+        "contract_version": DEOPTIMIZATION_CONTRACT_VERSION,
         "deoptimization_triggers": ["recovery_unknown", "quality_baseline_selection", "fail_closed"],
         "linked_contracts": {
-            "dominance_complete_recovery": dcr_contract_digest_v1(),
-            "quality_envelope": quality_envelope_contract_digest_v1(),
-            "reasoning_contract": reasoning_contract_digest_v1(),
-            "transaction": transaction_contract_digest_v1(),
+            "dominance_complete_recovery": dcr_contract_digest(),
+            "quality_envelope": quality_envelope_contract_digest(),
+            "reasoning_contract": reasoning_contract_digest(),
+            "transaction": transaction_contract_digest(),
         },
         "exact_restoration_requirements": [
             "validated_transaction_receipt",
@@ -1636,70 +1636,70 @@ pub fn deoptimization_contract_manifest_v1() -> Value {
             "resume_permit_to_baseline_execution_or_publication_claim",
             "resume_permit_directly_to_g8_fallback_closure",
         ],
-        "max_canonical_bytes": DEOPTIMIZATION_MAX_CANONICAL_BYTES_V1,
+        "max_canonical_bytes": DEOPTIMIZATION_MAX_CANONICAL_BYTES,
         "proof_carrier": "zero_cert::VerifiedEvidence_successful_build_or_test_exact_claim_payload",
-        "published_execution_schema_sha256": DEOPTIMIZATION_EXECUTION_SCHEMA_SHA256_V1,
-        "published_plan_schema_sha256": DEOPTIMIZATION_PLAN_SCHEMA_SHA256_V1,
-        "published_resume_schema_sha256": DEOPTIMIZATION_RESUME_SCHEMA_SHA256_V1,
+        "published_execution_schema_sha256": DEOPTIMIZATION_EXECUTION_SCHEMA_SHA256,
+        "published_plan_schema_sha256": DEOPTIMIZATION_PLAN_SCHEMA_SHA256,
+        "published_resume_schema_sha256": DEOPTIMIZATION_RESUME_SCHEMA_SHA256,
         "resource_arithmetic": "integer_native_coordinates_no_scalar_laundering",
     })
 }
 
-pub fn deoptimization_contract_digest_v1() -> DigestV1 {
-    digest_value(CONTRACT_DOMAIN_V1, &deoptimization_contract_manifest_v1())
+pub fn deoptimization_contract_digest() -> Sha256Digest {
+    digest_value(CONTRACT_DOMAIN, &deoptimization_contract_manifest())
 }
 
-fn canonical_bytes<T: Serialize + ?Sized>(value: &T) -> Result<Vec<u8>, DeoptimizationErrorV1> {
+fn canonical_bytes<T: Serialize + ?Sized>(value: &T) -> Result<Vec<u8>, DeoptimizationError> {
     let value = serde_json::to_value(value).map_err(|error| json_error(error.to_string()))?;
     let bytes = canonical_json(&value).into_bytes();
-    if bytes.len() > DEOPTIMIZATION_MAX_CANONICAL_BYTES_V1 {
+    if bytes.len() > DEOPTIMIZATION_MAX_CANONICAL_BYTES {
         return Err(deopt_error(
-            DeoptimizationFailureCodeV1::CanonicalPayloadTooLarge,
+            DeoptimizationFailureCode::CanonicalPayloadTooLarge,
             "deoptimization payload exceeds its canonical byte bound",
         ));
     }
     Ok(bytes)
 }
 
-fn decode_canonical<T>(bytes: &[u8]) -> Result<T, DeoptimizationErrorV1>
+fn decode_canonical<T>(bytes: &[u8]) -> Result<T, DeoptimizationError>
 where
     T: for<'de> Deserialize<'de> + Serialize,
 {
-    if bytes.len() > DEOPTIMIZATION_MAX_CANONICAL_BYTES_V1 {
+    if bytes.len() > DEOPTIMIZATION_MAX_CANONICAL_BYTES {
         return Err(deopt_error(
-            DeoptimizationFailureCodeV1::CanonicalPayloadTooLarge,
+            DeoptimizationFailureCode::CanonicalPayloadTooLarge,
             "deoptimization payload exceeds its canonical byte bound",
         ));
     }
     let value = serde_json::from_slice(bytes).map_err(|error| json_error(error.to_string()))?;
     if canonical_bytes(&value)? != bytes {
         return Err(deopt_error(
-            DeoptimizationFailureCodeV1::NonCanonicalEncoding,
+            DeoptimizationFailureCode::NonCanonicalEncoding,
             "deoptimization bytes are not canonical sorted-key JSON",
         ));
     }
     Ok(value)
 }
 
-fn digest_value(domain: &[u8], value: &Value) -> DigestV1 {
+fn digest_value(domain: &[u8], value: &Value) -> Sha256Digest {
     let canonical = canonical_json(value);
     let mut bytes = Vec::with_capacity(domain.len() + canonical.len());
     bytes.extend_from_slice(domain);
     bytes.extend_from_slice(canonical.as_bytes());
-    DigestV1::from_bytes(sha256(&bytes))
+    Sha256Digest::from_bytes(sha256(&bytes))
 }
 
-fn domain_digest(domain: &[u8], bytes: &[u8]) -> DigestV1 {
+fn domain_digest(domain: &[u8], bytes: &[u8]) -> Sha256Digest {
     let mut value = Vec::with_capacity(domain.len() + bytes.len());
     value.extend_from_slice(domain);
     value.extend_from_slice(bytes);
-    DigestV1::from_bytes(sha256(&value))
+    Sha256Digest::from_bytes(sha256(&value))
 }
 
-fn require_nonzero(label: &'static str, values: &[DigestV1]) -> Result<(), DeoptimizationErrorV1> {
-    if values.contains(&DigestV1::ZERO) {
+fn require_nonzero(label: &'static str, values: &[Sha256Digest]) -> Result<(), DeoptimizationError> {
+    if values.contains(&Sha256Digest::ZERO) {
         Err(deopt_error(
-            DeoptimizationFailureCodeV1::ZeroDigest,
+            DeoptimizationFailureCode::ZeroDigest,
             format!("{label} contains a zero digest"),
         ))
     } else {
@@ -1709,46 +1709,46 @@ fn require_nonzero(label: &'static str, values: &[DigestV1]) -> Result<(), Deopt
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
-pub struct BaselineExecutionClaimV1 {
+pub struct BaselineExecutionClaim {
     schema_version: String,
-    invocation_digest: DigestV1,
-    resume_permit_digest: DigestV1,
-    transaction_receipt_digest: DigestV1,
-    project_snapshot_root: DigestV1,
-    raw_baseline_identity_digest: DigestV1,
-    raw_baseline_input_digest: DigestV1,
-    raw_decision_view_digest: DigestV1,
-    baseline_reasoning_contract_digest: DigestV1,
-    reasoning_entry_digest: DigestV1,
-    predecessor_receipt_head_digest: DigestV1,
-    output_digest: DigestV1,
-    effects_digest: DigestV1,
-    baseline_action_digest: DigestV1,
-    baseline_acceptance_digest: DigestV1,
-    baseline_successor_root: DigestV1,
-    baseline_transaction_receipt_digest: DigestV1,
-    raw_baseline_usage: RouteUsageV1,
-    successor_receipt_head_digest: DigestV1,
-    execution_verifier_identity_digest: DigestV1,
+    invocation_digest: Sha256Digest,
+    resume_permit_digest: Sha256Digest,
+    transaction_receipt_digest: Sha256Digest,
+    project_snapshot_root: Sha256Digest,
+    raw_baseline_identity_digest: Sha256Digest,
+    raw_baseline_input_digest: Sha256Digest,
+    raw_decision_view_digest: Sha256Digest,
+    baseline_reasoning_contract_digest: Sha256Digest,
+    reasoning_entry_digest: Sha256Digest,
+    predecessor_receipt_head_digest: Sha256Digest,
+    output_digest: Sha256Digest,
+    effects_digest: Sha256Digest,
+    baseline_action_digest: Sha256Digest,
+    baseline_acceptance_digest: Sha256Digest,
+    baseline_successor_root: Sha256Digest,
+    baseline_transaction_receipt_digest: Sha256Digest,
+    raw_baseline_usage: RouteUsage,
+    successor_receipt_head_digest: Sha256Digest,
+    execution_verifier_identity_digest: Sha256Digest,
 }
 
-impl BaselineExecutionClaimV1 {
+impl BaselineExecutionClaim {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
-        invocation: &FrozenBaselineInvocationV1,
-        output_digest: DigestV1,
-        effects_digest: DigestV1,
-        baseline_action_digest: DigestV1,
-        baseline_acceptance_digest: DigestV1,
-        baseline_successor_root: DigestV1,
-        baseline_transaction_receipt_digest: DigestV1,
-        raw_baseline_usage: RouteUsageV1,
-        successor_receipt_head_digest: DigestV1,
-        execution_verifier_identity_digest: DigestV1,
-    ) -> Result<Self, DeoptimizationErrorV1> {
+        invocation: &FrozenBaselineInvocation,
+        output_digest: Sha256Digest,
+        effects_digest: Sha256Digest,
+        baseline_action_digest: Sha256Digest,
+        baseline_acceptance_digest: Sha256Digest,
+        baseline_successor_root: Sha256Digest,
+        baseline_transaction_receipt_digest: Sha256Digest,
+        raw_baseline_usage: RouteUsage,
+        successor_receipt_head_digest: Sha256Digest,
+        execution_verifier_identity_digest: Sha256Digest,
+    ) -> Result<Self, DeoptimizationError> {
         invocation.validate()?;
         let claim = Self {
-            schema_version: BASELINE_EXECUTION_SCHEMA_VERSION_V1.into(),
+            schema_version: BASELINE_EXECUTION_SCHEMA_VERSION.into(),
             invocation_digest: invocation.invocation_digest,
             resume_permit_digest: invocation.resume_permit_digest,
             transaction_receipt_digest: invocation.transaction_receipt_digest,
@@ -1775,17 +1775,17 @@ impl BaselineExecutionClaimV1 {
             &invocation.raw_baseline_work_limit,
         ) {
             return Err(deopt_error(
-                DeoptimizationFailureCodeV1::ResourceReserveExceeded,
+                DeoptimizationFailureCode::ResourceReserveExceeded,
                 "raw baseline execution exceeds its frozen reserve",
             ));
         }
         Ok(claim)
     }
 
-    pub fn validate(&self) -> Result<(), DeoptimizationErrorV1> {
-        if self.schema_version != BASELINE_EXECUTION_SCHEMA_VERSION_V1 {
+    pub fn validate(&self) -> Result<(), DeoptimizationError> {
+        if self.schema_version != BASELINE_EXECUTION_SCHEMA_VERSION {
             return Err(deopt_error(
-                DeoptimizationFailureCodeV1::SchemaVersionMismatch,
+                DeoptimizationFailureCode::SchemaVersionMismatch,
                 "baseline execution claim schema version is not v1",
             ));
         }
@@ -1815,27 +1815,27 @@ impl BaselineExecutionClaimV1 {
         self.raw_baseline_usage.validate()?;
         if self.successor_receipt_head_digest == self.predecessor_receipt_head_digest {
             return Err(deopt_error(
-                DeoptimizationFailureCodeV1::ReceiptChainMismatch,
+                DeoptimizationFailureCode::ReceiptChainMismatch,
                 "baseline execution did not advance the receipt chain",
             ));
         }
         Ok(())
     }
 
-    pub fn canonical_bytes(&self) -> Result<Vec<u8>, DeoptimizationErrorV1> {
+    pub fn canonical_bytes(&self) -> Result<Vec<u8>, DeoptimizationError> {
         self.validate()?;
         canonical_bytes(self)
     }
 
-    pub fn from_canonical_bytes(bytes: &[u8]) -> Result<Self, DeoptimizationErrorV1> {
+    pub fn from_canonical_bytes(bytes: &[u8]) -> Result<Self, DeoptimizationError> {
         let claim: Self = decode_canonical(bytes)?;
         claim.validate()?;
         Ok(claim)
     }
 
-    pub fn digest(&self) -> Result<DigestV1, DeoptimizationErrorV1> {
+    pub fn digest(&self) -> Result<Sha256Digest, DeoptimizationError> {
         Ok(domain_digest(
-            EXECUTION_CLAIM_DOMAIN_V1,
+            EXECUTION_CLAIM_DOMAIN,
             &self.canonical_bytes()?,
         ))
     }
@@ -1844,22 +1844,22 @@ impl BaselineExecutionClaimV1 {
 /// Opaque proof that the exact frozen raw baseline completed successfully.
 /// It authorizes G8 fallback closure, not publication or native durability alone.
 #[derive(Debug)]
-pub struct BaselineExecutionReceiptV1 {
-    resume_record: BaselineResumeReceiptRecordV1,
-    invocation_digest: DigestV1,
-    execution_claim: BaselineExecutionClaimV1,
-    execution_claim_digest: DigestV1,
-    evidence_digest: DigestV1,
-    verifier_identity_digest: DigestV1,
-    receipt_digest: DigestV1,
+pub struct BaselineExecutionReceipt {
+    resume_record: BaselineResumeReceiptRecord,
+    invocation_digest: Sha256Digest,
+    execution_claim: BaselineExecutionClaim,
+    execution_claim_digest: Sha256Digest,
+    evidence_digest: Sha256Digest,
+    verifier_identity_digest: Sha256Digest,
+    receipt_digest: Sha256Digest,
 }
 
-impl BaselineExecutionReceiptV1 {
+impl BaselineExecutionReceipt {
     pub fn verify_execution(
-        invocation: FrozenBaselineInvocationV1,
-        execution_claim: BaselineExecutionClaimV1,
+        invocation: FrozenBaselineInvocation,
+        execution_claim: BaselineExecutionClaim,
         evidence: &VerifiedEvidence<'_, '_>,
-    ) -> Result<Self, DeoptimizationErrorV1> {
+    ) -> Result<Self, DeoptimizationError> {
         invocation.validate()?;
         execution_claim.validate()?;
         if execution_claim.invocation_digest != invocation.invocation_digest
@@ -1877,7 +1877,7 @@ impl BaselineExecutionReceiptV1 {
                 != invocation.predecessor_receipt_head_digest
         {
             return Err(deopt_error(
-                DeoptimizationFailureCodeV1::BaselineExecutionMismatch,
+                DeoptimizationFailureCode::BaselineExecutionMismatch,
                 "baseline execution differs from the frozen invocation",
             ));
         }
@@ -1886,15 +1886,15 @@ impl BaselineExecutionReceiptV1 {
             &invocation.raw_baseline_work_limit,
         ) {
             return Err(deopt_error(
-                DeoptimizationFailureCodeV1::ResourceReserveExceeded,
+                DeoptimizationFailureCode::ResourceReserveExceeded,
                 "raw baseline execution exceeds its frozen reserve",
             ));
         }
         verify_exact_successful_payload(&execution_claim.canonical_bytes()?, evidence)?;
-        let verifier_identity_digest = deoptimization_verifier_identity_v1(evidence);
+        let verifier_identity_digest = deoptimization_verifier_identity(evidence);
         if verifier_identity_digest != execution_claim.execution_verifier_identity_digest {
             return Err(deopt_error(
-                DeoptimizationFailureCodeV1::VerifierIdentityMismatch,
+                DeoptimizationFailureCode::VerifierIdentityMismatch,
                 "baseline execution verifier differs from the claim route",
             ));
         }
@@ -1921,13 +1921,13 @@ impl BaselineExecutionReceiptV1 {
         Ok(receipt)
     }
 
-    pub fn validate(&self) -> Result<(), DeoptimizationErrorV1> {
+    pub fn validate(&self) -> Result<(), DeoptimizationError> {
         self.record().validate()
     }
 
-    pub fn record(&self) -> BaselineExecutionReceiptRecordV1 {
-        BaselineExecutionReceiptRecordV1 {
-            contract_version: DEOPTIMIZATION_CONTRACT_VERSION_V1,
+    pub fn record(&self) -> BaselineExecutionReceiptRecord {
+        BaselineExecutionReceiptRecord {
+            contract_version: DEOPTIMIZATION_CONTRACT_VERSION,
             resume_record: self.resume_record.clone(),
             invocation_digest: self.invocation_digest,
             execution_claim: self.execution_claim.clone(),
@@ -1938,15 +1938,15 @@ impl BaselineExecutionReceiptV1 {
         }
     }
 
-    pub const fn receipt_digest(&self) -> DigestV1 {
+    pub const fn receipt_digest(&self) -> Sha256Digest {
         self.receipt_digest
     }
 
-    pub const fn restored_transaction(&self) -> &RestoredTransactionRecordV1 {
+    pub const fn restored_transaction(&self) -> &RestoredTransactionRecord {
         &self.resume_record.restored_transaction
     }
 
-    pub const fn project_snapshot_root(&self) -> DigestV1 {
+    pub const fn project_snapshot_root(&self) -> Sha256Digest {
         self.resume_record
             .plan
             .safepoint
@@ -1954,50 +1954,50 @@ impl BaselineExecutionReceiptV1 {
             .project_snapshot_root
     }
 
-    pub const fn baseline_successor_root(&self) -> DigestV1 {
+    pub const fn baseline_successor_root(&self) -> Sha256Digest {
         self.execution_claim.baseline_successor_root
     }
 
-    pub const fn baseline_transaction_receipt_digest(&self) -> DigestV1 {
+    pub const fn baseline_transaction_receipt_digest(&self) -> Sha256Digest {
         self.execution_claim.baseline_transaction_receipt_digest
     }
 
-    pub const fn baseline_action_digest(&self) -> DigestV1 {
+    pub const fn baseline_action_digest(&self) -> Sha256Digest {
         self.execution_claim.baseline_action_digest
     }
 
-    pub const fn baseline_acceptance_digest(&self) -> DigestV1 {
+    pub const fn baseline_acceptance_digest(&self) -> Sha256Digest {
         self.execution_claim.baseline_acceptance_digest
     }
 
-    pub const fn kernel_binding_digest(&self) -> DigestV1 {
+    pub const fn kernel_binding_digest(&self) -> Sha256Digest {
         self.resume_record.plan.kernel_binding_digest
     }
 
-    pub const fn kernel_admission_digest(&self) -> DigestV1 {
+    pub const fn kernel_admission_digest(&self) -> Sha256Digest {
         self.resume_record.plan.kernel_admission_digest
     }
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
-pub struct BaselineExecutionReceiptRecordV1 {
+pub struct BaselineExecutionReceiptRecord {
     pub contract_version: u16,
-    pub resume_record: BaselineResumeReceiptRecordV1,
-    pub invocation_digest: DigestV1,
-    pub execution_claim: BaselineExecutionClaimV1,
-    pub execution_claim_digest: DigestV1,
-    pub evidence_digest: DigestV1,
-    pub verifier_identity_digest: DigestV1,
-    pub receipt_digest: DigestV1,
+    pub resume_record: BaselineResumeReceiptRecord,
+    pub invocation_digest: Sha256Digest,
+    pub execution_claim: BaselineExecutionClaim,
+    pub execution_claim_digest: Sha256Digest,
+    pub evidence_digest: Sha256Digest,
+    pub verifier_identity_digest: Sha256Digest,
+    pub receipt_digest: Sha256Digest,
 }
 
-impl BaselineExecutionReceiptRecordV1 {
-    pub fn validate(&self) -> Result<(), DeoptimizationErrorV1> {
+impl BaselineExecutionReceiptRecord {
+    pub fn validate(&self) -> Result<(), DeoptimizationError> {
         self.resume_record.validate()?;
         self.execution_claim.validate()?;
         let safepoint = &self.resume_record.plan.safepoint.claim;
-        if self.contract_version != DEOPTIMIZATION_CONTRACT_VERSION_V1
+        if self.contract_version != DEOPTIMIZATION_CONTRACT_VERSION
             || baseline_invocation_digest_from_resume_record(&self.resume_record)?
                 != self.invocation_digest
             || self.execution_claim.resume_permit_digest != self.resume_record.permit_digest
@@ -2029,19 +2029,19 @@ impl BaselineExecutionReceiptRecordV1 {
             ) != self.receipt_digest
         {
             return Err(deopt_error(
-                DeoptimizationFailureCodeV1::CertificateDigestMismatch,
+                DeoptimizationFailureCode::CertificateDigestMismatch,
                 "baseline execution receipt record does not replay",
             ));
         }
         Ok(())
     }
 
-    pub fn canonical_bytes(&self) -> Result<Vec<u8>, DeoptimizationErrorV1> {
+    pub fn canonical_bytes(&self) -> Result<Vec<u8>, DeoptimizationError> {
         self.validate()?;
         canonical_bytes(self)
     }
 
-    pub fn from_canonical_bytes(bytes: &[u8]) -> Result<Self, DeoptimizationErrorV1> {
+    pub fn from_canonical_bytes(bytes: &[u8]) -> Result<Self, DeoptimizationError> {
         let record: Self = decode_canonical(bytes)?;
         record.validate()?;
         Ok(record)
@@ -2049,14 +2049,14 @@ impl BaselineExecutionReceiptRecordV1 {
 }
 
 fn baseline_execution_receipt_digest(
-    resume_permit_digest: DigestV1,
-    invocation_digest: DigestV1,
-    execution_claim_digest: DigestV1,
-    evidence_digest: DigestV1,
-    verifier_identity_digest: DigestV1,
-) -> DigestV1 {
+    resume_permit_digest: Sha256Digest,
+    invocation_digest: Sha256Digest,
+    execution_claim_digest: Sha256Digest,
+    evidence_digest: Sha256Digest,
+    verifier_identity_digest: Sha256Digest,
+) -> Sha256Digest {
     digest_value(
-        EXECUTION_RECEIPT_DOMAIN_V1,
+        EXECUTION_RECEIPT_DOMAIN,
         &json!({
             "evidence_digest": evidence_digest,
             "execution_claim_digest": execution_claim_digest,
@@ -2069,7 +2069,7 @@ fn baseline_execution_receipt_digest(
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
-pub enum DeoptimizationFailureCodeV1 {
+pub enum DeoptimizationFailureCode {
     SchemaVersionMismatch,
     ZeroDigest,
     InvalidResourceReserve,
@@ -2094,13 +2094,13 @@ pub enum DeoptimizationFailureCodeV1 {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct DeoptimizationErrorV1 {
-    code: DeoptimizationFailureCodeV1,
+pub struct DeoptimizationError {
+    code: DeoptimizationFailureCode,
     detail: String,
 }
 
-impl DeoptimizationErrorV1 {
-    pub const fn failure_code(&self) -> DeoptimizationFailureCodeV1 {
+impl DeoptimizationError {
+    pub const fn failure_code(&self) -> DeoptimizationFailureCode {
         self.code
     }
     pub fn detail(&self) -> &str {
@@ -2108,7 +2108,7 @@ impl DeoptimizationErrorV1 {
     }
 }
 
-impl fmt::Display for DeoptimizationErrorV1 {
+impl fmt::Display for DeoptimizationError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
             formatter,
@@ -2118,23 +2118,23 @@ impl fmt::Display for DeoptimizationErrorV1 {
     }
 }
 
-impl Error for DeoptimizationErrorV1 {}
+impl Error for DeoptimizationError {}
 
 fn deopt_error(
-    code: DeoptimizationFailureCodeV1,
+    code: DeoptimizationFailureCode,
     detail: impl Into<String>,
-) -> DeoptimizationErrorV1 {
-    DeoptimizationErrorV1 {
+) -> DeoptimizationError {
+    DeoptimizationError {
         code,
         detail: detail.into(),
     }
 }
 
-fn reasoning_error(detail: String) -> DeoptimizationErrorV1 {
-    deopt_error(DeoptimizationFailureCodeV1::ReasoningContract, detail)
+fn reasoning_error(detail: String) -> DeoptimizationError {
+    deopt_error(DeoptimizationFailureCode::ReasoningContract, detail)
 }
 
-fn json_error(detail: String) -> DeoptimizationErrorV1 {
-    deopt_error(DeoptimizationFailureCodeV1::Json, detail)
+fn json_error(detail: String) -> DeoptimizationError {
+    deopt_error(DeoptimizationFailureCode::Json, detail)
 }
 

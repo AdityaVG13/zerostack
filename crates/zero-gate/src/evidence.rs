@@ -21,7 +21,7 @@
 //!   closure, matched step counts, lifecycle closure, and applied GC.
 //!
 //! Only then is the per-engine [`ProgramProof`] constructed, and only then is
-//! the [`AggregateProgramReceiptV1`] built and verified. The aggregate
+//! the [`AggregateProgramReceipt`] built and verified. The aggregate
 //! `program_digest` is *derived* from the three real engine proof digests —
 //! this module never synthesizes a fixed success digest, and there is no
 //! fixture fallback: if any engine or class is missing, partial, stale, or
@@ -32,11 +32,11 @@ use serde_json::Value;
 use std::collections::BTreeMap;
 use std::fmt;
 use std::path::{Path, PathBuf};
-use zero_abi::{ArtifactOwnerV1, DigestV1, canonical_json, sha256, sha256_hex};
+use zero_abi::{ArtifactOwner, Sha256Digest, canonical_json, sha256, sha256_hex};
 
 use crate::aggregate::{
-    AggregateProgramErrorV1, AggregateProgramReceiptV1, AggregateSourceHeadV1, EngineEvidenceV1,
-    EvidenceSlotV1,
+    AggregateProgramError, AggregateProgramReceipt, AggregateSourceHead, EngineEvidence,
+    EvidenceSlot,
 };
 use crate::program::{ProgramAssemblyError, ProgramProof, ProgramReports};
 
@@ -53,7 +53,7 @@ const PROGRAM_EVIDENCE_PROGRAM_DOMAIN: &[u8] = b"zerostack.aggregate_program.pro
 
 /// Distinct evidence classes an engine must contribute, in canonical order.
 #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
-pub enum EvidenceClassV1 {
+pub enum EvidenceClass {
     Planner,
     Worker,
     Mcp,
@@ -61,7 +61,7 @@ pub enum EvidenceClassV1 {
     Gc,
 }
 
-impl EvidenceClassV1 {
+impl EvidenceClass {
     pub const ALL: [Self; 5] = [
         Self::Planner,
         Self::Worker,
@@ -91,13 +91,13 @@ impl EvidenceClassV1 {
         }
     }
 
-    pub const fn aggregate_class(self) -> crate::aggregate::AggregateEvidenceClassV1 {
+    pub const fn aggregate_class(self) -> crate::aggregate::AggregateEvidenceClass {
         match self {
-            Self::Planner => crate::aggregate::AggregateEvidenceClassV1::Planner,
-            Self::Worker => crate::aggregate::AggregateEvidenceClassV1::Worker,
-            Self::Mcp => crate::aggregate::AggregateEvidenceClassV1::Mcp,
-            Self::Lifecycle => crate::aggregate::AggregateEvidenceClassV1::Lifecycle,
-            Self::Gc => crate::aggregate::AggregateEvidenceClassV1::Gc,
+            Self::Planner => crate::aggregate::AggregateEvidenceClass::Planner,
+            Self::Worker => crate::aggregate::AggregateEvidenceClass::Worker,
+            Self::Mcp => crate::aggregate::AggregateEvidenceClass::Mcp,
+            Self::Lifecycle => crate::aggregate::AggregateEvidenceClass::Lifecycle,
+            Self::Gc => crate::aggregate::AggregateEvidenceClass::Gc,
         }
     }
 }
@@ -105,13 +105,13 @@ impl EvidenceClassV1 {
 /// The three engines a Program aggregate requires, in canonical order.
 #[derive(Clone, Copy, Debug, Deserialize, Eq, Ord, PartialEq, PartialOrd, Serialize)]
 #[serde(rename_all = "snake_case")]
-pub enum EngineIdV1 {
+pub enum EngineId {
     FsZero,
     GraphZero,
     TokenZero,
 }
 
-impl EngineIdV1 {
+impl EngineId {
     pub const ALL: [Self; 3] = [Self::FsZero, Self::GraphZero, Self::TokenZero];
 
     pub const fn key(self) -> &'static str {
@@ -131,11 +131,11 @@ impl EngineIdV1 {
         }
     }
 
-    pub const fn owner(self) -> ArtifactOwnerV1 {
+    pub const fn owner(self) -> ArtifactOwner {
         match self {
-            Self::FsZero => ArtifactOwnerV1::FsZero,
-            Self::GraphZero => ArtifactOwnerV1::GraphZero,
-            Self::TokenZero => ArtifactOwnerV1::TokenZero,
+            Self::FsZero => ArtifactOwner::FsZero,
+            Self::GraphZero => ArtifactOwner::GraphZero,
+            Self::TokenZero => ArtifactOwner::TokenZero,
         }
     }
 
@@ -153,7 +153,7 @@ impl EngineIdV1 {
 /// file per evidence class.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
-pub struct EngineEvidenceSourceV1 {
+pub struct EngineEvidenceSource {
     /// Exact repository head of this engine's source at collection time.
     pub head: String,
     /// Evidence artifact file per class (canonical class keys only).
@@ -164,7 +164,7 @@ pub struct EngineEvidenceSourceV1 {
 /// the assembly manifest digest to bind, and one evidence source per engine.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
-pub struct ProgramEvidenceManifestV1 {
+pub struct ProgramEvidenceManifest {
     pub version: u16,
     /// Exact explicit source repository head the harness was checked out at.
     pub source_head: String,
@@ -173,42 +173,42 @@ pub struct ProgramEvidenceManifestV1 {
     /// Assembly manifest digest bound into the aggregate receipt (64 hex).
     pub assembly_manifest_digest: String,
     /// Exactly {fz, gz, tz} evidence sources.
-    pub engines: BTreeMap<String, EngineEvidenceSourceV1>,
+    pub engines: BTreeMap<String, EngineEvidenceSource>,
 }
 
-impl ProgramEvidenceManifestV1 {
+impl ProgramEvidenceManifest {
     /// Decodes a canonical JSON manifest. Encoding is checked; the manifest is
     /// this assembler's sealed input and must be canonical like every receipt.
-    pub fn from_canonical_bytes(bytes: &[u8]) -> Result<Self, ProgramEvidenceErrorV1> {
+    pub fn from_canonical_bytes(bytes: &[u8]) -> Result<Self, ProgramEvidenceError> {
         if bytes.len() > PROGRAM_EVIDENCE_MAX_MANIFEST_BYTES {
             return Err(evidence_error(
-                ProgramEvidenceFailureV1::ManifestJson,
+                ProgramEvidenceFailure::ManifestJson,
                 "evidence manifest exceeds its byte bound",
             ));
         }
         let value: Value = serde_json::from_slice(bytes).map_err(|error| {
-            evidence_error(ProgramEvidenceFailureV1::ManifestJson, error.to_string())
+            evidence_error(ProgramEvidenceFailure::ManifestJson, error.to_string())
         })?;
         if canonical_json(&value).as_bytes() != bytes {
             return Err(evidence_error(
-                ProgramEvidenceFailureV1::NonCanonicalManifest,
+                ProgramEvidenceFailure::NonCanonicalManifest,
                 "evidence manifest bytes are not canonical sorted-key JSON",
             ));
         }
         serde_json::from_value(value).map_err(|error| {
-            evidence_error(ProgramEvidenceFailureV1::ManifestJson, error.to_string())
+            evidence_error(ProgramEvidenceFailure::ManifestJson, error.to_string())
         })
     }
 
     /// Canonical JSON bytes of the manifest (used by the CLI and tests).
-    pub fn canonical_bytes(&self) -> Result<Vec<u8>, ProgramEvidenceErrorV1> {
+    pub fn canonical_bytes(&self) -> Result<Vec<u8>, ProgramEvidenceError> {
         let value = serde_json::to_value(self).map_err(|error| {
-            evidence_error(ProgramEvidenceFailureV1::ManifestJson, error.to_string())
+            evidence_error(ProgramEvidenceFailure::ManifestJson, error.to_string())
         })?;
         let canonical = canonical_json(&value);
         if canonical.len() > PROGRAM_EVIDENCE_MAX_MANIFEST_BYTES {
             return Err(evidence_error(
-                ProgramEvidenceFailureV1::ManifestJson,
+                ProgramEvidenceFailure::ManifestJson,
                 "evidence manifest exceeds its byte bound",
             ));
         }
@@ -221,7 +221,7 @@ impl ProgramEvidenceManifestV1 {
 /// manifest before the embedded report may contribute.
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
-pub struct ProgramEvidenceArtifactV1 {
+pub struct ProgramEvidenceArtifact {
     /// Exact contract label of the evidence class (e.g.
     /// `zerostack.program.planner.v1`).
     pub contract: String,
@@ -243,7 +243,7 @@ pub struct ProgramEvidenceArtifactV1 {
 /// Why Program evidence cannot be aggregated. Assembly fails closed: the first
 /// violated invariant determines the error.
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub enum ProgramEvidenceFailureV1 {
+pub enum ProgramEvidenceFailure {
     ManifestVersionMismatch,
     InvalidHead,
     InvalidAssemblyManifestDigest,
@@ -262,17 +262,17 @@ pub enum ProgramEvidenceFailureV1 {
     ArtifactDigestMismatch,
     MalformedReport,
     ProgramAssembly(ProgramAssemblyError),
-    Aggregate(AggregateProgramErrorV1),
+    Aggregate(AggregateProgramError),
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct ProgramEvidenceErrorV1 {
-    code: ProgramEvidenceFailureV1,
+pub struct ProgramEvidenceError {
+    code: ProgramEvidenceFailure,
     detail: String,
 }
 
-impl ProgramEvidenceErrorV1 {
-    pub const fn failure_code(&self) -> &ProgramEvidenceFailureV1 {
+impl ProgramEvidenceError {
+    pub const fn failure_code(&self) -> &ProgramEvidenceFailure {
         &self.code
     }
     pub fn detail(&self) -> &str {
@@ -281,11 +281,11 @@ impl ProgramEvidenceErrorV1 {
 
     /// Constructs an artifact I/O failure (used by the CLI's loader).
     pub fn io(detail: impl Into<String>) -> Self {
-        evidence_error(ProgramEvidenceFailureV1::ArtifactIo, detail)
+        evidence_error(ProgramEvidenceFailure::ArtifactIo, detail)
     }
 }
 
-impl fmt::Display for ProgramEvidenceErrorV1 {
+impl fmt::Display for ProgramEvidenceError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
             formatter,
@@ -294,13 +294,13 @@ impl fmt::Display for ProgramEvidenceErrorV1 {
         )
     }
 }
-impl std::error::Error for ProgramEvidenceErrorV1 {}
+impl std::error::Error for ProgramEvidenceError {}
 
 fn evidence_error(
-    code: ProgramEvidenceFailureV1,
+    code: ProgramEvidenceFailure,
     detail: impl Into<String>,
-) -> ProgramEvidenceErrorV1 {
-    ProgramEvidenceErrorV1 {
+) -> ProgramEvidenceError {
+    ProgramEvidenceError {
         code,
         detail: detail.into(),
     }
@@ -326,12 +326,12 @@ fn valid_sha256(value: &str) -> bool {
 /// file bytes for a manifest path. Fails closed on any missing, partial,
 /// stale, or digest-mismatched input; the returned receipt is verified.
 pub fn assemble_program_evidence(
-    manifest: &ProgramEvidenceManifestV1,
-    load: impl Fn(&Path) -> Result<Vec<u8>, ProgramEvidenceErrorV1>,
-) -> Result<AggregateProgramReceiptV1, ProgramEvidenceErrorV1> {
+    manifest: &ProgramEvidenceManifest,
+    load: impl Fn(&Path) -> Result<Vec<u8>, ProgramEvidenceError>,
+) -> Result<AggregateProgramReceipt, ProgramEvidenceError> {
     if manifest.version != PROGRAM_EVIDENCE_SCHEMA_VERSION {
         return Err(evidence_error(
-            ProgramEvidenceFailureV1::ManifestVersionMismatch,
+            ProgramEvidenceFailure::ManifestVersionMismatch,
             format!(
                 "evidence manifest version {} is not current ({})",
                 manifest.version, PROGRAM_EVIDENCE_SCHEMA_VERSION
@@ -340,68 +340,68 @@ pub fn assemble_program_evidence(
     }
     if !valid_head(&manifest.source_head) {
         return Err(evidence_error(
-            ProgramEvidenceFailureV1::InvalidHead,
+            ProgramEvidenceFailure::InvalidHead,
             "manifest source_head is not 40..=64 lowercase hex",
         ));
     }
     if !valid_head(&manifest.hub_head) {
         return Err(evidence_error(
-            ProgramEvidenceFailureV1::InvalidHead,
+            ProgramEvidenceFailure::InvalidHead,
             "manifest hub_head is not 40..=64 lowercase hex",
         ));
     }
     let assembly_manifest_digest =
-        DigestV1::from_hex(&manifest.assembly_manifest_digest).map_err(|_| {
+        Sha256Digest::from_hex(&manifest.assembly_manifest_digest).map_err(|_| {
             evidence_error(
-                ProgramEvidenceFailureV1::InvalidAssemblyManifestDigest,
+                ProgramEvidenceFailure::InvalidAssemblyManifestDigest,
                 "manifest assembly_manifest_digest is not 64 lowercase hex",
             )
         })?;
-    if assembly_manifest_digest == DigestV1::ZERO {
+    if assembly_manifest_digest == Sha256Digest::ZERO {
         return Err(evidence_error(
-            ProgramEvidenceFailureV1::InvalidAssemblyManifestDigest,
+            ProgramEvidenceFailure::InvalidAssemblyManifestDigest,
             "manifest assembly_manifest_digest is zero",
         ));
     }
 
     // Engine coverage: exactly {fz, gz, tz}, no more.
     for key in manifest.engines.keys() {
-        if EngineIdV1::parse(key).is_none() {
+        if EngineId::parse(key).is_none() {
             return Err(evidence_error(
-                ProgramEvidenceFailureV1::UnknownEngine,
+                ProgramEvidenceFailure::UnknownEngine,
                 format!("manifest names non-aggregate engine {key:?}"),
             ));
         }
     }
-    for engine in EngineIdV1::ALL {
+    for engine in EngineId::ALL {
         if !manifest.engines.contains_key(engine.key()) {
             return Err(evidence_error(
-                ProgramEvidenceFailureV1::MissingEngine,
+                ProgramEvidenceFailure::MissingEngine,
                 format!("required engine {:?} has no evidence source", engine.key()),
             ));
         }
     }
 
-    let mut source_repository_heads = vec![AggregateSourceHeadV1 {
+    let mut source_repository_heads = vec![AggregateSourceHead {
         repository: PROGRAM_EVIDENCE_HUB_REPOSITORY.into(),
         head: manifest.hub_head.clone(),
     }];
 
-    let mut engine_evidence = Vec::with_capacity(EngineIdV1::ALL.len());
-    let mut proofs = Vec::with_capacity(EngineIdV1::ALL.len());
+    let mut engine_evidence = Vec::with_capacity(EngineId::ALL.len());
+    let mut proofs = Vec::with_capacity(EngineId::ALL.len());
 
-    for engine in EngineIdV1::ALL {
+    for engine in EngineId::ALL {
         let source = &manifest.engines[engine.key()];
         if !valid_head(&source.head) {
             return Err(evidence_error(
-                ProgramEvidenceFailureV1::InvalidHead,
+                ProgramEvidenceFailure::InvalidHead,
                 format!(
                     "engine {:?} head is not 40..=64 lowercase hex",
                     engine.key()
                 ),
             ));
         }
-        source_repository_heads.push(AggregateSourceHeadV1 {
+        source_repository_heads.push(AggregateSourceHead {
             repository: engine.repository().into(),
             head: source.head.clone(),
         });
@@ -410,9 +410,9 @@ pub fn assemble_program_evidence(
         // loaded once, validated against its contract/digest/provenance, and
         // parsed into its class-shaped report.
         for key in source.files.keys() {
-            if !EvidenceClassV1::ALL.iter().any(|class| class.key() == key) {
+            if !EvidenceClass::ALL.iter().any(|class| class.key() == key) {
                 return Err(evidence_error(
-                    ProgramEvidenceFailureV1::UnknownEvidenceClass,
+                    ProgramEvidenceFailure::UnknownEvidenceClass,
                     format!(
                         "engine {:?} names unknown evidence class {key:?}",
                         engine.key()
@@ -421,10 +421,10 @@ pub fn assemble_program_evidence(
             }
         }
         let mut reports = ProgramReports::new();
-        for class in EvidenceClassV1::ALL {
+        for class in EvidenceClass::ALL {
             let Some(path) = source.files.get(class.key()) else {
                 return Err(evidence_error(
-                    ProgramEvidenceFailureV1::MissingEvidenceClass,
+                    ProgramEvidenceFailure::MissingEvidenceClass,
                     format!(
                         "engine {:?} has no {:?} evidence artifact",
                         engine.key(),
@@ -433,10 +433,10 @@ pub fn assemble_program_evidence(
                 ));
             };
             let bytes = load(path)?;
-            let artifact: ProgramEvidenceArtifactV1 =
+            let artifact: ProgramEvidenceArtifact =
                 serde_json::from_slice(&bytes).map_err(|error| {
                     evidence_error(
-                        ProgramEvidenceFailureV1::ArtifactJson,
+                        ProgramEvidenceFailure::ArtifactJson,
                         format!(
                             "engine {:?} {:?} artifact is not valid JSON: {error}",
                             engine.key(),
@@ -450,22 +450,22 @@ pub fn assemble_program_evidence(
 
         // Slots bind each class's validated self-digest into the aggregate;
         // they are taken before `assemble` consumes the reports.
-        let slots: Vec<EvidenceSlotV1> = EvidenceClassV1::ALL
+        let slots: Vec<EvidenceSlot> = EvidenceClass::ALL
             .iter()
-            .map(|class| EvidenceSlotV1 {
+            .map(|class| EvidenceSlot {
                 class: class.aggregate_class(),
-                evidence_digest: DigestV1::from_bytes(report_digest(*class, &reports)),
+                evidence_digest: Sha256Digest::from_bytes(report_digest(*class, &reports)),
             })
             .collect();
 
         let proof = reports.assemble().map_err(|error| {
             evidence_error(
-                ProgramEvidenceFailureV1::ProgramAssembly(error),
+                ProgramEvidenceFailure::ProgramAssembly(error),
                 format!("engine {:?} reports cannot assemble", engine.key()),
             )
         })?;
 
-        engine_evidence.push(EngineEvidenceV1 {
+        engine_evidence.push(EngineEvidence {
             engine: engine.owner(),
             slots,
         });
@@ -473,7 +473,7 @@ pub fn assemble_program_evidence(
     }
 
     let program_digest = derive_aggregate_program_digest(&proofs);
-    AggregateProgramReceiptV1::new(
+    AggregateProgramReceipt::new(
         program_digest,
         assembly_manifest_digest,
         source_repository_heads,
@@ -481,7 +481,7 @@ pub fn assemble_program_evidence(
     )
     .map_err(|error| {
         evidence_error(
-            ProgramEvidenceFailureV1::Aggregate(error.clone()),
+            ProgramEvidenceFailure::Aggregate(error.clone()),
             error.to_string(),
         )
     })
@@ -489,15 +489,15 @@ pub fn assemble_program_evidence(
 
 /// Validates one artifact against its contract, digest, and provenance.
 fn validate_artifact(
-    engine: EngineIdV1,
-    class: EvidenceClassV1,
-    artifact: &ProgramEvidenceArtifactV1,
+    engine: EngineId,
+    class: EvidenceClass,
+    artifact: &ProgramEvidenceArtifact,
     bytes: &[u8],
-    manifest: &ProgramEvidenceManifestV1,
-) -> Result<(), ProgramEvidenceErrorV1> {
+    manifest: &ProgramEvidenceManifest,
+) -> Result<(), ProgramEvidenceError> {
     if artifact.schema_version != PROGRAM_EVIDENCE_SCHEMA_VERSION {
         return Err(evidence_error(
-            ProgramEvidenceFailureV1::SchemaVersionMismatch,
+            ProgramEvidenceFailure::SchemaVersionMismatch,
             format!(
                 "engine {:?} {:?} artifact schema version {} is not current ({})",
                 engine.key(),
@@ -509,7 +509,7 @@ fn validate_artifact(
     }
     if artifact.contract != class.contract() {
         return Err(evidence_error(
-            ProgramEvidenceFailureV1::ContractMismatch,
+            ProgramEvidenceFailure::ContractMismatch,
             format!(
                 "engine {:?} {:?} artifact declares contract {:?}, expected {:?}",
                 engine.key(),
@@ -521,7 +521,7 @@ fn validate_artifact(
     }
     if artifact.source_head != manifest.source_head || artifact.hub_head != manifest.hub_head {
         return Err(evidence_error(
-            ProgramEvidenceFailureV1::StaleHead,
+            ProgramEvidenceFailure::StaleHead,
             format!(
                 "engine {:?} {:?} artifact provenance is stale or foreign: source {:?}/{:?}, hub {:?}/{:?}",
                 engine.key(),
@@ -538,7 +538,7 @@ fn validate_artifact(
         || artifact_digest(artifact) != artifact.artifact_sha256
     {
         return Err(evidence_error(
-            ProgramEvidenceFailureV1::ArtifactDigestMismatch,
+            ProgramEvidenceFailure::ArtifactDigestMismatch,
             format!(
                 "engine {:?} {:?} artifact digest does not match its exact bytes",
                 engine.key(),
@@ -548,13 +548,13 @@ fn validate_artifact(
     }
     let value = serde_json::to_value(artifact).map_err(|error| {
         evidence_error(
-            ProgramEvidenceFailureV1::ArtifactJson,
+            ProgramEvidenceFailure::ArtifactJson,
             format!("validated artifact cannot serialize: {error}"),
         )
     })?;
     if canonical_json(&value).as_bytes() != bytes {
         return Err(evidence_error(
-            ProgramEvidenceFailureV1::NonCanonicalArtifact,
+            ProgramEvidenceFailure::NonCanonicalArtifact,
             format!(
                 "engine {:?} {:?} artifact bytes are not canonical sorted-key JSON",
                 engine.key(),
@@ -568,7 +568,7 @@ fn validate_artifact(
 /// SHA-256 over the canonical JSON of the artifact with its own
 /// `artifact_sha256` field zeroed. The digest field cannot digest itself, so
 /// it is excluded the same way `receipt_head` is excluded from a receipt body.
-fn artifact_digest(artifact: &ProgramEvidenceArtifactV1) -> String {
+fn artifact_digest(artifact: &ProgramEvidenceArtifact) -> String {
     let mut value = serde_json::to_value(artifact).expect("artifact serializes");
     value["artifact_sha256"] = Value::String("0".repeat(64));
     sha256_hex(canonical_json(&value).as_bytes())
@@ -577,33 +577,33 @@ fn artifact_digest(artifact: &ProgramEvidenceArtifactV1) -> String {
 /// Parses one validated artifact's report into its class slot.
 fn attach_report(
     mut reports: ProgramReports,
-    engine: EngineIdV1,
-    class: EvidenceClassV1,
-    artifact: &ProgramEvidenceArtifactV1,
-) -> Result<ProgramReports, ProgramEvidenceErrorV1> {
+    engine: EngineId,
+    class: EvidenceClass,
+    artifact: &ProgramEvidenceArtifact,
+) -> Result<ProgramReports, ProgramEvidenceError> {
     reports = match class {
-        EvidenceClassV1::Planner => reports.planner(parse_report(engine, class, &artifact.report)?),
-        EvidenceClassV1::Worker => reports.worker(parse_report(engine, class, &artifact.report)?),
-        EvidenceClassV1::Mcp => reports.mcp(parse_report(engine, class, &artifact.report)?),
-        EvidenceClassV1::Lifecycle => {
+        EvidenceClass::Planner => reports.planner(parse_report(engine, class, &artifact.report)?),
+        EvidenceClass::Worker => reports.worker(parse_report(engine, class, &artifact.report)?),
+        EvidenceClass::Mcp => reports.mcp(parse_report(engine, class, &artifact.report)?),
+        EvidenceClass::Lifecycle => {
             reports.lifecycle(parse_report(engine, class, &artifact.report)?)
         }
-        EvidenceClassV1::Gc => reports.gc(parse_report(engine, class, &artifact.report)?),
+        EvidenceClass::Gc => reports.gc(parse_report(engine, class, &artifact.report)?),
     };
     Ok(reports)
 }
 
 fn parse_report<T>(
-    engine: EngineIdV1,
-    class: EvidenceClassV1,
+    engine: EngineId,
+    class: EvidenceClass,
     value: &Value,
-) -> Result<T, ProgramEvidenceErrorV1>
+) -> Result<T, ProgramEvidenceError>
 where
     T: for<'de> Deserialize<'de>,
 {
     serde_json::from_value::<T>(value.clone()).map_err(|error| {
         evidence_error(
-            ProgramEvidenceFailureV1::MalformedReport,
+            ProgramEvidenceFailure::MalformedReport,
             format!(
                 "engine {:?} {:?} report is not shaped like {:?}: {error}",
                 engine.key(),
@@ -615,33 +615,33 @@ where
 }
 
 /// The self-binding digest of one class's report, after validation.
-fn report_digest(class: EvidenceClassV1, reports: &ProgramReports) -> [u8; 32] {
+fn report_digest(class: EvidenceClass, reports: &ProgramReports) -> [u8; 32] {
     match class {
-        EvidenceClassV1::Planner => reports
+        EvidenceClass::Planner => reports
             .planner_report()
             .expect("validated planner report")
             .digest(),
-        EvidenceClassV1::Worker => reports
+        EvidenceClass::Worker => reports
             .worker_report()
             .expect("validated worker report")
             .digest(),
-        EvidenceClassV1::Mcp => reports.mcp_report().expect("validated mcp report").digest(),
-        EvidenceClassV1::Lifecycle => reports
+        EvidenceClass::Mcp => reports.mcp_report().expect("validated mcp report").digest(),
+        EvidenceClass::Lifecycle => reports
             .lifecycle_report()
             .expect("validated lifecycle report")
             .digest(),
-        EvidenceClassV1::Gc => reports.gc_report().expect("validated gc report").digest(),
+        EvidenceClass::Gc => reports.gc_report().expect("validated gc report").digest(),
     }
 }
 
 /// Derives the aggregate program digest from the three real engine proof
 /// digests, in canonical engine order. Never a fixed or synthesized value.
-fn derive_aggregate_program_digest(proofs: &[ProgramProof]) -> DigestV1 {
+fn derive_aggregate_program_digest(proofs: &[ProgramProof]) -> Sha256Digest {
     let mut bytes = Vec::with_capacity(PROGRAM_EVIDENCE_PROGRAM_DOMAIN.len() + 32 * proofs.len());
     bytes.extend_from_slice(PROGRAM_EVIDENCE_PROGRAM_DOMAIN);
     for proof in proofs {
         bytes.extend_from_slice(&proof.program_digest());
     }
-    DigestV1::from_bytes(sha256(&bytes))
+    Sha256Digest::from_bytes(sha256(&bytes))
 }
 

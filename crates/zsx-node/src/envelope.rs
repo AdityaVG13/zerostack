@@ -156,8 +156,8 @@ impl Envelope {
     /// `RedactionLeak` and the caller MUST NOT emit the returned value.
     pub fn to_value_redacted(
         &self,
-        redactor: &zero_abi::RedactorV1,
-    ) -> Result<serde_json::Value, zero_abi::SecretsErrorV1> {
+        redactor: &zero_abi::Redactor,
+    ) -> Result<serde_json::Value, zero_abi::SecretsError> {
         let redacted = redactor.redact(&self.to_value());
         redactor.check_no_leak(&redacted)?;
         Ok(redacted)

@@ -16,7 +16,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use std::collections::BTreeSet;
 use std::fmt;
-use zero_abi::{ArtifactOwnerV1, DigestV1, canonical_json, sha256};
+use zero_abi::{ArtifactOwner, Sha256Digest, canonical_json, sha256};
 
 pub const AGGREGATE_PROGRAM_SCHEMA_VERSION: u16 = 1;
 pub const AGGREGATE_PROGRAM_MAX_CANONICAL_BYTES: usize = 64 * 1024;
@@ -24,21 +24,21 @@ pub const AGGREGATE_PROGRAM_MAX_SOURCE_HEADS: usize = 64;
 pub const AGGREGATE_PROGRAM_MAX_REPOSITORY_BYTES: usize = 64;
 pub const AGGREGATE_PROGRAM_MIN_HEAD_BYTES: usize = 40;
 pub const AGGREGATE_PROGRAM_MAX_HEAD_BYTES: usize = 64;
-pub const AGGREGATE_PROGRAM_REQUIRED_ENGINES: [ArtifactOwnerV1; 3] = [
-    ArtifactOwnerV1::FsZero,
-    ArtifactOwnerV1::GraphZero,
-    ArtifactOwnerV1::TokenZero,
+pub const AGGREGATE_PROGRAM_REQUIRED_ENGINES: [ArtifactOwner; 3] = [
+    ArtifactOwner::FsZero,
+    ArtifactOwner::GraphZero,
+    ArtifactOwner::TokenZero,
 ];
-pub const AGGREGATE_PROGRAM_EVIDENCE_CLASSES: [AggregateEvidenceClassV1; 5] = [
-    AggregateEvidenceClassV1::Planner,
-    AggregateEvidenceClassV1::Worker,
-    AggregateEvidenceClassV1::Mcp,
-    AggregateEvidenceClassV1::Lifecycle,
-    AggregateEvidenceClassV1::Gc,
+pub const AGGREGATE_PROGRAM_EVIDENCE_CLASSES: [AggregateEvidenceClass; 5] = [
+    AggregateEvidenceClass::Planner,
+    AggregateEvidenceClass::Worker,
+    AggregateEvidenceClass::Mcp,
+    AggregateEvidenceClass::Lifecycle,
+    AggregateEvidenceClass::Gc,
 ];
 
-const AGGREGATE_PROGRAM_CONTRACT_DOMAIN_V1: &[u8] = b"zerostack.aggregate_program_receipt.v1\0";
-const AGGREGATE_PROGRAM_RECEIPT_DOMAIN_V1: &[u8] = b"zerostack.aggregate_program_receipt.head.v1\0";
+const AGGREGATE_PROGRAM_CONTRACT_DOMAIN: &[u8] = b"zerostack.aggregate_program_receipt.v1\0";
+const AGGREGATE_PROGRAM_RECEIPT_DOMAIN: &[u8] = b"zerostack.aggregate_program_receipt.head.v1\0";
 
 /// Distinct evidence classes an aggregate Program must carry per engine.
 ///
@@ -46,7 +46,7 @@ const AGGREGATE_PROGRAM_RECEIPT_DOMAIN_V1: &[u8] = b"zerostack.aggregate_program
 /// which surface contributed (or failed to contribute) evidence.
 #[derive(Clone, Copy, Debug, Deserialize, Eq, Ord, PartialEq, PartialOrd, Serialize)]
 #[serde(rename_all = "snake_case")]
-pub enum AggregateEvidenceClassV1 {
+pub enum AggregateEvidenceClass {
     Planner,
     Worker,
     Mcp,
@@ -54,7 +54,7 @@ pub enum AggregateEvidenceClassV1 {
     Gc,
 }
 
-impl AggregateEvidenceClassV1 {
+impl AggregateEvidenceClass {
     pub const ALL: [Self; 5] = AGGREGATE_PROGRAM_EVIDENCE_CLASSES;
 
     /// Stable canonical order index (also the required slot sort order).
@@ -75,7 +75,7 @@ impl AggregateEvidenceClassV1 {
 /// Program receipts can never disagree on what a source head is.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
-pub struct AggregateSourceHeadV1 {
+pub struct AggregateSourceHead {
     pub repository: String,
     pub head: String,
 }
@@ -86,48 +86,48 @@ pub struct AggregateSourceHeadV1 {
 /// substituted after sealing.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
-pub struct EvidenceSlotV1 {
-    pub class: AggregateEvidenceClassV1,
-    pub evidence_digest: DigestV1,
+pub struct EvidenceSlot {
+    pub class: AggregateEvidenceClass,
+    pub evidence_digest: Sha256Digest,
 }
 
 /// Per-engine evidence: exactly one slot per required class, in canonical order.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
-pub struct EngineEvidenceV1 {
-    pub engine: ArtifactOwnerV1,
-    pub slots: Vec<EvidenceSlotV1>,
+pub struct EngineEvidence {
+    pub engine: ArtifactOwner,
+    pub slots: Vec<EvidenceSlot>,
 }
 
 /// The aggregate Program receipt. Fields are public so fixtures can be decoded;
 /// `verify` is the sole authority over truthfulness.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
-pub struct AggregateProgramReceiptV1 {
+pub struct AggregateProgramReceipt {
     pub schema_version: u16,
-    pub program_digest: DigestV1,
-    pub assembly_manifest_digest: DigestV1,
-    pub source_repository_heads: Vec<AggregateSourceHeadV1>,
-    pub engines: Vec<EngineEvidenceV1>,
-    pub receipt_head: DigestV1,
+    pub program_digest: Sha256Digest,
+    pub assembly_manifest_digest: Sha256Digest,
+    pub source_repository_heads: Vec<AggregateSourceHead>,
+    pub engines: Vec<EngineEvidence>,
+    pub receipt_head: Sha256Digest,
 }
 
-impl AggregateProgramReceiptV1 {
+impl AggregateProgramReceipt {
     /// Builds a sealed receipt from validated engine evidence. `verify` runs
     /// first; `receipt_head` is computed canonically over every other field.
     pub fn new(
-        program_digest: DigestV1,
-        assembly_manifest_digest: DigestV1,
-        source_repository_heads: Vec<AggregateSourceHeadV1>,
-        engines: Vec<EngineEvidenceV1>,
-    ) -> Result<Self, AggregateProgramErrorV1> {
+        program_digest: Sha256Digest,
+        assembly_manifest_digest: Sha256Digest,
+        source_repository_heads: Vec<AggregateSourceHead>,
+        engines: Vec<EngineEvidence>,
+    ) -> Result<Self, AggregateProgramError> {
         let mut receipt = Self {
             schema_version: AGGREGATE_PROGRAM_SCHEMA_VERSION,
             program_digest,
             assembly_manifest_digest,
             source_repository_heads,
             engines,
-            receipt_head: DigestV1::ZERO,
+            receipt_head: Sha256Digest::ZERO,
         };
         receipt.receipt_head = receipt.compute_receipt_head()?;
         receipt.verify()?;
@@ -137,10 +137,10 @@ impl AggregateProgramReceiptV1 {
     /// Fail-closed verification. Returns `Ok(())` only when every required
     /// engine and every required evidence class is present, distinct,
     /// canonical, nonzero, and the receipt head matches the canonical body.
-    pub fn verify(&self) -> Result<(), AggregateProgramErrorV1> {
+    pub fn verify(&self) -> Result<(), AggregateProgramError> {
         if self.schema_version != AGGREGATE_PROGRAM_SCHEMA_VERSION {
             return Err(aggregate_error(
-                AggregateProgramFailureCodeV1::SchemaVersionMismatch,
+                AggregateProgramFailureCode::SchemaVersionMismatch,
                 format!(
                     "aggregate receipt schema version {} is not current ({})",
                     self.schema_version, AGGREGATE_PROGRAM_SCHEMA_VERSION
@@ -149,13 +149,13 @@ impl AggregateProgramReceiptV1 {
         }
         if is_zero(&self.program_digest) {
             return Err(aggregate_error(
-                AggregateProgramFailureCodeV1::ZeroDigest,
+                AggregateProgramFailureCode::ZeroDigest,
                 "aggregate receipt program_digest is zero",
             ));
         }
         if is_zero(&self.assembly_manifest_digest) {
             return Err(aggregate_error(
-                AggregateProgramFailureCodeV1::ZeroDigest,
+                AggregateProgramFailureCode::ZeroDigest,
                 "aggregate receipt assembly_manifest_digest is zero",
             ));
         }
@@ -166,7 +166,7 @@ impl AggregateProgramReceiptV1 {
         for engine in &self.engines {
             if !seen.insert(engine.engine) {
                 return Err(aggregate_error(
-                    AggregateProgramFailureCodeV1::DuplicateEngine,
+                    AggregateProgramFailureCode::DuplicateEngine,
                     format!("engine {:?} appears more than once", engine.engine),
                 ));
             }
@@ -174,7 +174,7 @@ impl AggregateProgramReceiptV1 {
         for engine in &seen {
             if !AGGREGATE_PROGRAM_REQUIRED_ENGINES.contains(engine) {
                 return Err(aggregate_error(
-                    AggregateProgramFailureCodeV1::UnknownEngine,
+                    AggregateProgramFailureCode::UnknownEngine,
                     format!("engine set contains non-aggregate engine {:?}", engine),
                 ));
             }
@@ -182,7 +182,7 @@ impl AggregateProgramReceiptV1 {
         for engine in AGGREGATE_PROGRAM_REQUIRED_ENGINES {
             if !seen.contains(&engine) {
                 return Err(aggregate_error(
-                    AggregateProgramFailureCodeV1::MissingEngine,
+                    AggregateProgramFailureCode::MissingEngine,
                     format!("required engine {:?} has no evidence", engine),
                 ));
             }
@@ -193,7 +193,7 @@ impl AggregateProgramReceiptV1 {
             .all(|pair| pair[0].engine < pair[1].engine)
         {
             return Err(aggregate_error(
-                AggregateProgramFailureCodeV1::NonCanonicalEncoding,
+                AggregateProgramFailureCode::NonCanonicalEncoding,
                 "engine evidence is not in canonical engine order",
             ));
         }
@@ -205,7 +205,7 @@ impl AggregateProgramReceiptV1 {
             for slot in &engine.slots {
                 if !seen_classes.insert(slot.class) {
                     return Err(aggregate_error(
-                        AggregateProgramFailureCodeV1::DuplicateEvidenceSlot,
+                        AggregateProgramFailureCode::DuplicateEvidenceSlot,
                         format!(
                             "engine {:?} repeats evidence class {:?}",
                             engine.engine, slot.class
@@ -214,7 +214,7 @@ impl AggregateProgramReceiptV1 {
                 }
                 if is_zero(&slot.evidence_digest) {
                     return Err(aggregate_error(
-                        AggregateProgramFailureCodeV1::ZeroDigest,
+                        AggregateProgramFailureCode::ZeroDigest,
                         format!(
                             "engine {:?} evidence class {:?} has a zero digest",
                             engine.engine, slot.class
@@ -224,7 +224,7 @@ impl AggregateProgramReceiptV1 {
             }
             if seen_classes.len() != AGGREGATE_PROGRAM_EVIDENCE_CLASSES.len() {
                 return Err(aggregate_error(
-                    AggregateProgramFailureCodeV1::MissingEvidenceClass,
+                    AggregateProgramFailureCode::MissingEvidenceClass,
                     format!(
                         "engine {:?} carries {} evidence slots, expected {}",
                         engine.engine,
@@ -236,7 +236,7 @@ impl AggregateProgramReceiptV1 {
             for (index, slot) in engine.slots.iter().enumerate() {
                 if slot.class.index() != index {
                     return Err(aggregate_error(
-                        AggregateProgramFailureCodeV1::NonCanonicalEncoding,
+                        AggregateProgramFailureCode::NonCanonicalEncoding,
                         format!(
                             "engine {:?} evidence slots are not in canonical class order",
                             engine.engine
@@ -248,7 +248,7 @@ impl AggregateProgramReceiptV1 {
 
         if self.receipt_head != self.compute_receipt_head()? {
             return Err(aggregate_error(
-                AggregateProgramFailureCodeV1::ReceiptHeadMismatch,
+                AggregateProgramFailureCode::ReceiptHeadMismatch,
                 "aggregate receipt head does not match its canonical body",
             ));
         }
@@ -256,16 +256,16 @@ impl AggregateProgramReceiptV1 {
     }
 
     /// Canonical JSON bytes of the full receipt, including `receipt_head`.
-    pub fn canonical_bytes(&self) -> Result<Vec<u8>, AggregateProgramErrorV1> {
+    pub fn canonical_bytes(&self) -> Result<Vec<u8>, AggregateProgramError> {
         canonical_value(self)
     }
 
     /// Decodes canonical JSON bytes. Encoding is checked; truthfulness is
     /// established by the caller through `verify`.
-    pub fn from_canonical_bytes(bytes: &[u8]) -> Result<Self, AggregateProgramErrorV1> {
+    pub fn from_canonical_bytes(bytes: &[u8]) -> Result<Self, AggregateProgramError> {
         if bytes.len() > AGGREGATE_PROGRAM_MAX_CANONICAL_BYTES {
             return Err(aggregate_error(
-                AggregateProgramFailureCodeV1::CanonicalPayloadTooLarge,
+                AggregateProgramFailureCode::CanonicalPayloadTooLarge,
                 "aggregate receipt canonical payload exceeds its byte bound",
             ));
         }
@@ -273,14 +273,14 @@ impl AggregateProgramReceiptV1 {
             serde_json::from_slice(bytes).map_err(|error| json_error(error.to_string()))?;
         if canonical_json(&value).as_bytes() != bytes {
             return Err(aggregate_error(
-                AggregateProgramFailureCodeV1::NonCanonicalEncoding,
+                AggregateProgramFailureCode::NonCanonicalEncoding,
                 "aggregate receipt bytes are not canonical sorted-key JSON",
             ));
         }
         serde_json::from_value(value).map_err(|error| json_error(error.to_string()))
     }
 
-    fn compute_receipt_head(&self) -> Result<DigestV1, AggregateProgramErrorV1> {
+    fn compute_receipt_head(&self) -> Result<Sha256Digest, AggregateProgramError> {
         let body = json!({
             "schema_version": self.schema_version,
             "program_digest": self.program_digest,
@@ -290,15 +290,15 @@ impl AggregateProgramReceiptV1 {
         });
         let canonical = canonical_json(&body);
         let mut bytes =
-            Vec::with_capacity(AGGREGATE_PROGRAM_RECEIPT_DOMAIN_V1.len() + canonical.len());
-        bytes.extend_from_slice(AGGREGATE_PROGRAM_RECEIPT_DOMAIN_V1);
+            Vec::with_capacity(AGGREGATE_PROGRAM_RECEIPT_DOMAIN.len() + canonical.len());
+        bytes.extend_from_slice(AGGREGATE_PROGRAM_RECEIPT_DOMAIN);
         bytes.extend_from_slice(canonical.as_bytes());
-        Ok(DigestV1::from_bytes(sha256(&bytes)))
+        Ok(Sha256Digest::from_bytes(sha256(&bytes)))
     }
 }
 
 /// Canonical contract manifest for the aggregate receipt schema.
-pub fn aggregate_program_contract_manifest_v1() -> Value {
+pub fn aggregate_program_contract_manifest() -> Value {
     json!({
         "artifact_profile": "zbf_1_portable_strict",
         "contract_version": AGGREGATE_PROGRAM_SCHEMA_VERSION,
@@ -329,19 +329,19 @@ pub fn aggregate_program_contract_manifest_v1() -> Value {
 }
 
 /// Digest of the aggregate receipt contract (domain-prefixed, canonical JSON).
-pub fn aggregate_program_contract_digest_v1() -> DigestV1 {
-    let canonical = canonical_json(&aggregate_program_contract_manifest_v1());
+pub fn aggregate_program_contract_digest() -> Sha256Digest {
+    let canonical = canonical_json(&aggregate_program_contract_manifest());
     let mut bytes =
-        Vec::with_capacity(AGGREGATE_PROGRAM_CONTRACT_DOMAIN_V1.len() + canonical.len());
-    bytes.extend_from_slice(AGGREGATE_PROGRAM_CONTRACT_DOMAIN_V1);
+        Vec::with_capacity(AGGREGATE_PROGRAM_CONTRACT_DOMAIN.len() + canonical.len());
+    bytes.extend_from_slice(AGGREGATE_PROGRAM_CONTRACT_DOMAIN);
     bytes.extend_from_slice(canonical.as_bytes());
-    DigestV1::from_bytes(sha256(&bytes))
+    Sha256Digest::from_bytes(sha256(&bytes))
 }
 
-fn validate_source_heads(heads: &[AggregateSourceHeadV1]) -> Result<(), AggregateProgramErrorV1> {
+fn validate_source_heads(heads: &[AggregateSourceHead]) -> Result<(), AggregateProgramError> {
     if heads.is_empty() || heads.len() > AGGREGATE_PROGRAM_MAX_SOURCE_HEADS {
         return Err(aggregate_error(
-            AggregateProgramFailureCodeV1::InvalidSourceIdentity,
+            AggregateProgramFailureCode::InvalidSourceIdentity,
             format!(
                 "source head count {} is outside the frozen bound (1..={})",
                 heads.len(),
@@ -362,13 +362,13 @@ fn validate_source_heads(heads: &[AggregateSourceHeadV1]) -> Result<(), Aggregat
             && source.head.bytes().all(|byte| byte.is_ascii_hexdigit());
         if !repository_valid || !head_valid {
             return Err(aggregate_error(
-                AggregateProgramFailureCodeV1::InvalidSourceIdentity,
+                AggregateProgramFailureCode::InvalidSourceIdentity,
                 "source repository or head does not match the frozen grammar",
             ));
         }
         if !unique.insert((source.repository.as_str(), source.head.as_str())) {
             return Err(aggregate_error(
-                AggregateProgramFailureCodeV1::InvalidSourceIdentity,
+                AggregateProgramFailureCode::InvalidSourceIdentity,
                 "source repository heads must be unique",
             ));
         }
@@ -378,7 +378,7 @@ fn validate_source_heads(heads: &[AggregateSourceHeadV1]) -> Result<(), Aggregat
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
-pub enum AggregateProgramFailureCodeV1 {
+pub enum AggregateProgramFailureCode {
     SchemaVersionMismatch,
     MissingEngine,
     UnknownEngine,
@@ -394,13 +394,13 @@ pub enum AggregateProgramFailureCodeV1 {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct AggregateProgramErrorV1 {
-    code: AggregateProgramFailureCodeV1,
+pub struct AggregateProgramError {
+    code: AggregateProgramFailureCode,
     detail: String,
 }
 
-impl AggregateProgramErrorV1 {
-    pub const fn failure_code(&self) -> AggregateProgramFailureCodeV1 {
+impl AggregateProgramError {
+    pub const fn failure_code(&self) -> AggregateProgramFailureCode {
         self.code
     }
     pub fn detail(&self) -> &str {
@@ -408,7 +408,7 @@ impl AggregateProgramErrorV1 {
     }
 }
 
-impl fmt::Display for AggregateProgramErrorV1 {
+impl fmt::Display for AggregateProgramError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
             formatter,
@@ -417,36 +417,36 @@ impl fmt::Display for AggregateProgramErrorV1 {
         )
     }
 }
-impl std::error::Error for AggregateProgramErrorV1 {}
+impl std::error::Error for AggregateProgramError {}
 
 fn aggregate_error(
-    code: AggregateProgramFailureCodeV1,
+    code: AggregateProgramFailureCode,
     detail: impl Into<String>,
-) -> AggregateProgramErrorV1 {
-    AggregateProgramErrorV1 {
+) -> AggregateProgramError {
+    AggregateProgramError {
         code,
         detail: detail.into(),
     }
 }
 
-fn json_error(detail: String) -> AggregateProgramErrorV1 {
-    aggregate_error(AggregateProgramFailureCodeV1::Json, detail)
+fn json_error(detail: String) -> AggregateProgramError {
+    aggregate_error(AggregateProgramFailureCode::Json, detail)
 }
 
-fn canonical_value<T: Serialize>(value: &T) -> Result<Vec<u8>, AggregateProgramErrorV1> {
+fn canonical_value<T: Serialize>(value: &T) -> Result<Vec<u8>, AggregateProgramError> {
     let serialized: Value =
         serde_json::to_value(value).map_err(|error| json_error(error.to_string()))?;
     let canonical = canonical_json(&serialized);
     if canonical.len() > AGGREGATE_PROGRAM_MAX_CANONICAL_BYTES {
         return Err(aggregate_error(
-            AggregateProgramFailureCodeV1::CanonicalPayloadTooLarge,
+            AggregateProgramFailureCode::CanonicalPayloadTooLarge,
             "aggregate receipt canonical payload exceeds its byte bound",
         ));
     }
     Ok(canonical.into_bytes())
 }
 
-fn is_zero(digest: &DigestV1) -> bool {
-    digest == &DigestV1::ZERO
+fn is_zero(digest: &Sha256Digest) -> bool {
+    digest == &Sha256Digest::ZERO
 }
 

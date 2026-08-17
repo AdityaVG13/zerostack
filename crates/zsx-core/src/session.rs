@@ -28,7 +28,7 @@ use zero_codemode::{ExecutionMetrics, Host, HostError};
 use crate::adapter::{AdapterBinding, DomainAdapter};
 use crate::connector::{
     AggregateExecutionContext, MAX_SESSION_APPROVAL_GRANTS, MAX_SESSION_APPROVAL_LIFETIME_MS,
-    MAX_SESSION_CONSUMED_APPROVALS, SessionApprovalGrantV1, ZsxAttemptJournalStatus, ZsxConnector,
+    MAX_SESSION_CONSUMED_APPROVALS, SessionApprovalGrant, ZsxAttemptJournalStatus, ZsxConnector,
     attempts_root_for, now_ms, reconcile_all_attempts, reconcile_request_attempts, registration,
 };
 use crate::verdict::{VerdictLoopEnvelope, VerdictLoopResult};
@@ -233,7 +233,7 @@ pub(crate) struct ZsxSettledExecution {
     pub verdict: Option<VerdictLoopResult>,
     pub backend_error: Option<HostError>,
     pub request_cancelled: bool,
-    pub policy_report: Option<zero_codemode::GateUsageReportV1>,
+    pub policy_report: Option<zero_codemode::GateUsageReport>,
 }
 
 impl ZsxSettledExecution {
@@ -272,7 +272,7 @@ pub struct ZsxExecuteEnvelope {
     /// Honest per-rule usage of the attached contingent policy over this
     /// execution: every rule with its match count and the explicit list of
     /// rules that never matched. `None` when no policy was attached.
-    pub policy_report: Option<zero_codemode::GateUsageReportV1>,
+    pub policy_report: Option<zero_codemode::GateUsageReport>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, serde::Serialize)]
@@ -307,13 +307,13 @@ enum ZsxCommand {
         request_id: u64,
         source: String,
         timeout: Duration,
-        approval_grants: Vec<SessionApprovalGrantV1>,
+        approval_grants: Vec<SessionApprovalGrant>,
         verdict_envelope: Option<VerdictLoopEnvelope>,
         /// One-shot contingent policy installed on the host decision gate
         /// for exactly this execution (continuation resume; ordinary
         /// execute requests with an attached policy). The gate is
         /// restored to the policy-less fail-closed state after settle.
-        contingent_policy: Option<zero_abi::ContingentPolicyV1>,
+        contingent_policy: Option<zero_abi::ContingentPolicy>,
         /// The policy usage report rides the outcome on success AND backend
         /// failure alike: a policy that never matched an observation is
         /// honest bookkeeping even when the plan aborted.
@@ -323,9 +323,9 @@ enum ZsxCommand {
                     Value,
                     ZsxExecutionMetrics,
                     Option<VerdictLoopResult>,
-                    Option<zero_codemode::GateUsageReportV1>,
+                    Option<zero_codemode::GateUsageReport>,
                 ),
-                (HostError, Option<zero_codemode::GateUsageReportV1>),
+                (HostError, Option<zero_codemode::GateUsageReport>),
             >,
         >,
     },
@@ -343,7 +343,7 @@ enum ZsxCommand {
         reply: SyncSender<Result<zero_ledger::DominanceReceipt, String>>,
     },
     Q99Report {
-        reply: SyncSender<Result<crate::residency::SessionQ99ReportV1, String>>,
+        reply: SyncSender<Result<crate::residency::SessionQ99Report, String>>,
     },
 }
 
@@ -440,7 +440,7 @@ impl ZsxExecutor {
         request_id: u64,
         source: &str,
         timeout: Duration,
-        approval_grants: Vec<SessionApprovalGrantV1>,
+        approval_grants: Vec<SessionApprovalGrant>,
         verdict_envelope: Option<VerdictLoopEnvelope>,
     ) -> Result<(Value, ZsxExecutionMetrics, Option<VerdictLoopResult>), HostError> {
         // A cancel_request that arrived before this request started must
@@ -597,17 +597,17 @@ impl ZsxExecutor {
         request_id: u64,
         source: &str,
         timeout: Duration,
-        approval_grants: Vec<SessionApprovalGrantV1>,
+        approval_grants: Vec<SessionApprovalGrant>,
         verdict_envelope: Option<VerdictLoopEnvelope>,
-        policy: &zero_abi::ContingentPolicyV1,
+        policy: &zero_abi::ContingentPolicy,
     ) -> Result<
         (
             Value,
             ZsxExecutionMetrics,
             Option<VerdictLoopResult>,
-            Option<zero_codemode::GateUsageReportV1>,
+            Option<zero_codemode::GateUsageReport>,
         ),
-        (HostError, Option<zero_codemode::GateUsageReportV1>),
+        (HostError, Option<zero_codemode::GateUsageReport>),
     > {
         policy.validate().map_err(|error| {
             (
@@ -846,7 +846,7 @@ pub struct ZsxSession {
     /// Durable continuation registry  journaled under the session
     /// state root; shared with no worker state, since persist and resume
     /// are facade operations.
-    continuations: Arc<Mutex<crate::continuation::ContinuationRegistryV1>>,
+    continuations: Arc<Mutex<crate::continuation::ContinuationRegistry>>,
     /// Worker-visible generation. `begin_replacement` and whole-session
     /// `cancel` store the next value before any Replace is enqueued so a
     /// FIFO-ahead Execute cannot dispatch under the retired generation.
@@ -977,7 +977,7 @@ impl ZsxSession {
         let root_text = root.to_string_lossy().into_owned();
         let state_root_text = state_root.to_string_lossy().into_owned();
         let continuations = Arc::new(Mutex::new(
-            crate::continuation::ContinuationRegistryV1::open(&state_root).map_err(|error| {
+            crate::continuation::ContinuationRegistry::open(&state_root).map_err(|error| {
                 ZsxSessionError::new(
                     ZsxSessionFailureCode::Internal,
                     initial_generation,
@@ -1102,7 +1102,7 @@ impl ZsxSession {
         request_id: u64,
         source: impl Into<String>,
         timeout: Duration,
-        approval_grants: Vec<SessionApprovalGrantV1>,
+        approval_grants: Vec<SessionApprovalGrant>,
     ) -> Result<ZsxExecutionResult, ZsxSessionError> {
         self.execute_internal(
             generation,
@@ -1133,7 +1133,7 @@ impl ZsxSession {
         request_id: u64,
         source: impl Into<String>,
         timeout: Duration,
-        ledger: crate::envelope::SessionEnvelopeContextV1,
+        ledger: crate::envelope::SessionEnvelopeContext,
     ) -> Result<ZsxExecuteEnvelope, ZsxSessionError> {
         self.execute_with_approvals_envelope(generation, request_id, source, timeout, Vec::new(), ledger)
     }
@@ -1148,8 +1148,8 @@ impl ZsxSession {
         request_id: u64,
         source: impl Into<String>,
         timeout: Duration,
-        approval_grants: Vec<SessionApprovalGrantV1>,
-        ledger: crate::envelope::SessionEnvelopeContextV1,
+        approval_grants: Vec<SessionApprovalGrant>,
+        ledger: crate::envelope::SessionEnvelopeContext,
     ) -> Result<ZsxExecuteEnvelope, ZsxSessionError> {
         ledger.validate().map_err(|detail| {
             ZsxSessionError::new(
@@ -1215,9 +1215,9 @@ impl ZsxSession {
         generation: u64,
         request_id: u64,
         source: impl Into<String>,
-        policy: &zero_abi::ContingentPolicyV1,
+        policy: &zero_abi::ContingentPolicy,
         timeout: Duration,
-        ledger: crate::envelope::SessionEnvelopeContextV1,
+        ledger: crate::envelope::SessionEnvelopeContext,
     ) -> Result<ZsxExecuteEnvelope, ZsxSessionError> {
         self.execute_with_approvals_and_policy_envelope(
             generation,
@@ -1244,10 +1244,10 @@ impl ZsxSession {
         generation: u64,
         request_id: u64,
         source: impl Into<String>,
-        policy: &zero_abi::ContingentPolicyV1,
+        policy: &zero_abi::ContingentPolicy,
         timeout: Duration,
-        approval_grants: Vec<SessionApprovalGrantV1>,
-        ledger: crate::envelope::SessionEnvelopeContextV1,
+        approval_grants: Vec<SessionApprovalGrant>,
+        ledger: crate::envelope::SessionEnvelopeContext,
     ) -> Result<ZsxExecuteEnvelope, ZsxSessionError> {
         ledger.validate().map_err(|detail| {
             ZsxSessionError::new(
@@ -1316,7 +1316,7 @@ impl ZsxSession {
         request_id: u64,
         settled: ZsxSettledExecution,
         project_root: String,
-        ledger: &crate::envelope::SessionEnvelopeContextV1,
+        ledger: &crate::envelope::SessionEnvelopeContext,
     ) -> Result<ZsxExecuteEnvelope, ZsxSessionError> {
         let legacy_error = settled.legacy_error(generation, request_id);
         let envelope = match &settled.backend_error {
@@ -1413,9 +1413,9 @@ impl ZsxSession {
         request_id: u64,
         source: impl Into<String>,
         timeout: Duration,
-        approval_grants: Vec<SessionApprovalGrantV1>,
+        approval_grants: Vec<SessionApprovalGrant>,
         verdict_envelope: Option<VerdictLoopEnvelope>,
-        contingent_policy: Option<zero_abi::ContingentPolicyV1>,
+        contingent_policy: Option<zero_abi::ContingentPolicy>,
     ) -> Result<ZsxSettledExecution, ZsxSessionError> {
         let (reply_tx, reply_rx) = mpsc::sync_channel(1);
         let approval_ids = self.admit_execution(generation, request_id, &approval_grants)?;
@@ -1501,7 +1501,7 @@ impl ZsxSession {
         request_id: u64,
         source: impl Into<String>,
         timeout: Duration,
-        approval_grants: Vec<SessionApprovalGrantV1>,
+        approval_grants: Vec<SessionApprovalGrant>,
         verdict_envelope: Option<VerdictLoopEnvelope>,
     ) -> Result<(ZsxExecutionResult, Option<VerdictLoopResult>), ZsxSessionError> {
         let settled = self.execute_settled(
@@ -1527,7 +1527,7 @@ impl ZsxSession {
     ///
     /// This is the manual recovery/read API for native addon resume: it maps
     /// every journal of the request through the zero-store recovery law
-    /// (`recover_attempt_v1`) and returns the terminal status of each. A
+    /// (`recover_attempt`) and returns the terminal status of each. A
     /// Prepared journal is classified `SafeToRetry` (dispatch never crossed),
     /// a DispatchCrossed journal without authoritative evidence is classified
     /// `Indeterminate`, and terminal journals are returned unchanged. This
@@ -1592,10 +1592,10 @@ impl ZsxSession {
         &self,
         generation: u64,
         request_id: u64,
-        decision: &zero_abi::DecisionRequiredV1,
+        decision: &zero_abi::DecisionRequired,
         source: impl Into<String>,
         ttl: Duration,
-    ) -> Result<crate::continuation::ContinuationReceiptV1, ZsxSessionError> {
+    ) -> Result<crate::continuation::ContinuationReceipt, ZsxSessionError> {
         let (project_root, active_generation) = {
             let state = self.lock_state(Some(request_id))?;
             (state.root.clone(), state.generation)
@@ -1612,7 +1612,7 @@ impl ZsxSession {
         }
         let expires_at_unix_ms =
             now_ms().saturating_add(u64::try_from(ttl.as_millis()).unwrap_or(u64::MAX));
-        let request = crate::continuation::ContinuationPersistRequestV1 {
+        let request = crate::continuation::ContinuationPersistRequest {
             generation,
             request_id,
             decision: decision.clone(),
@@ -1654,8 +1654,8 @@ impl ZsxSession {
         handle: &str,
         decision: &str,
         timeout: Duration,
-        approval_grants: Vec<SessionApprovalGrantV1>,
-        ledger: crate::envelope::SessionEnvelopeContextV1,
+        approval_grants: Vec<SessionApprovalGrant>,
+        ledger: crate::envelope::SessionEnvelopeContext,
     ) -> Result<ZsxExecuteEnvelope, ZsxSessionError> {
         ledger.validate().map_err(|detail| {
             ZsxSessionError::new(
@@ -1858,7 +1858,7 @@ impl ZsxSession {
     /// estimate, and a rejected closure surfaces as this error instead of a
     /// silent omission. The prewarm execution finalizes one window, so a
     /// report is available immediately after build.
-    pub fn q99_report(&self) -> Result<crate::residency::SessionQ99ReportV1, ZsxSessionError> {
+    pub fn q99_report(&self) -> Result<crate::residency::SessionQ99Report, ZsxSessionError> {
         let generation = {
             let state = self.lock_state(None)?;
             if state.worker_stopped {
@@ -2073,7 +2073,7 @@ impl ZsxSession {
         &self,
         generation: u64,
         request_id: u64,
-        approval_grants: &[SessionApprovalGrantV1],
+        approval_grants: &[SessionApprovalGrant],
     ) -> Result<Vec<String>, ZsxSessionError> {
         let mut state = self.lock_state(Some(request_id))?;
         if generation != state.generation {
@@ -2119,18 +2119,18 @@ impl ZsxSession {
         request_id: u64,
         source: String,
         timeout: Duration,
-        approval_grants: Vec<SessionApprovalGrantV1>,
+        approval_grants: Vec<SessionApprovalGrant>,
         verdict_envelope: Option<VerdictLoopEnvelope>,
-        contingent_policy: Option<zero_abi::ContingentPolicyV1>,
+        contingent_policy: Option<zero_abi::ContingentPolicy>,
         reply_tx: SyncSender<
             Result<
                 (
                     Value,
                     ZsxExecutionMetrics,
                     Option<VerdictLoopResult>,
-                    Option<zero_codemode::GateUsageReportV1>,
+                    Option<zero_codemode::GateUsageReport>,
                 ),
-                (HostError, Option<zero_codemode::GateUsageReportV1>),
+                (HostError, Option<zero_codemode::GateUsageReport>),
             >,
         >,
         approval_ids: &[String],
@@ -2431,9 +2431,9 @@ fn replaced_generation_error(
             Value,
             ZsxExecutionMetrics,
             Option<VerdictLoopResult>,
-            Option<zero_codemode::GateUsageReportV1>,
+            Option<zero_codemode::GateUsageReport>,
         ),
-        (HostError, Option<zero_codemode::GateUsageReportV1>),
+        (HostError, Option<zero_codemode::GateUsageReport>),
     >,
 ) -> ZsxSessionError {
     match backend_result {
@@ -2659,7 +2659,7 @@ fn validate_session_approvals(
     state: &ZsxSessionState,
     generation: u64,
     request_id: u64,
-    grants: &[SessionApprovalGrantV1],
+    grants: &[SessionApprovalGrant],
 ) -> Result<Vec<String>, ZsxSessionError> {
     let invalid = |detail: String| {
         ZsxSessionError::new(

@@ -13,7 +13,7 @@
 | # | Surface | Live anchor (path:symbol) | Authority | Falsifier / stop |
 |---|---|---|---|---|
 | V6-01 | Lowering | `crates/zsx-core/src/lower.rs:lower_fs_plan:402`, `lower_token_expand:353`, `lower_compound_search_scope:703`, `lower_fs_world:427` | Canonical surface->domain lowering; typed dispatch. `lower.rs:1` no process-backed copy | Any un-lowered op reaching adapter => FAIL |
-| V6-02 | Dispatch | `crates/zsx-core/src/connector.rs:prepare_mutation_journal:408`, `cross_mutation_journal:506`, `mark_dispatch_crossed_v1:507`; `lib.rs:4` aggregate connector; `session.rs:474` dispatch_idle | One dispatch per mutation attempt; journal crossed before adapter | Dispatch without cross => journal unrecoverable -> stop |
+| V6-02 | Dispatch | `crates/zsx-core/src/connector.rs:prepare_mutation_journal:408`, `cross_mutation_journal:506`, `mark_dispatch_crossed:507`; `lib.rs:4` aggregate connector; `session.rs:474` dispatch_idle | One dispatch per mutation attempt; journal crossed before adapter | Dispatch without cross => journal unrecoverable -> stop |
 | V6-03 | Approval grants | `crates/zero-abi/src/raw_worker.rs:ApprovalGrant:253`, `validate_approval_grant:288`, `ApprovalMetadata:381` | Additive grant consumed before action; absent valid for non-approval | Forged hex digest => InvalidHex deny |
 | V6-04 | Machine permits | `crates/zerostack-machine-permit/src/lib.rs:MachinePermit:371`, `MachinePermitHeartbeat:84`, `try_create:583` | Machine-local liveness under tmp; heartbeat reclaims stale | Busy/Fatal => deny; Dead reclaimable else deny |
 | V6-05 | Mutation journaling | `crates/zsx-core/src/connector.rs:MutationJournal:269`, `prepare_mutation_journal_unique:408`, `succeed:527`, `indeterminate:551`, `reconcile:629`; `zero-store/src/durable_journal.rs:ContinuationCartridgeRecord:729` | Durable prepare->cross->succeed/indeterminate; post-cross never redispatches | Missing dispatch_entry_digest => never crossed error |
@@ -21,9 +21,9 @@
 | V6-07 | Decision escape | `crates/zero-gate/src/lib.rs:DecisionGate::RawFallback`, `session.rs:execute_envelope` escape | Unknown/Unsafe never aliases Safe; ambiguous => escape | False-safe => kill |
 | V6-08 | execute result envelopes | `crates/zero-abi/src/zero_execute.rs:ZeroExecuteResult`, `session.rs:dispatch_metrics:538` | Typed result with receipt/ledger/residency/Q99 | ZeroDigest mismatch => rollback |
 | V6-09 | Cancellation | `crates/zsx-core/src/session.rs:cancel_request`, `CancellationSignal:362` | Checked before dispatch; flag shared | Not observed => audit fail |
-| V6-10 | Continuation scope | `crates/zero-abi/src/continuation.rs:ContinuationHandleV1:130`, `ContinuationRootsV1:90`, `validate_against:229`; `durable_journal.rs:ContinuationCartridgeRecord:729` | 8 roots + state Bound->Committed | Forged/CrossProject/Revoked => reject |
+| V6-10 | Continuation scope | `crates/zero-abi/src/continuation.rs:ContinuationHandle:130`, `ContinuationRoots:90`, `validate_against:229`; `durable_journal.rs:ContinuationCartridgeRecord:729` | 8 roots + state Bound->Committed | Forged/CrossProject/Revoked => reject |
 | V6-11 | Resource/verdict metering | `crates/zero-ledger/src/lib.rs:TokenLedger`, `charging_maps.rs:200`, `zsx-core/src/verdict.rs:reserve_dispatch:165`, `zero-gauge/src/bounds.rs:237` | Finite budgets; ledger complete | BudgetOverflow => fail-closed |
-| V6-12 | Residency / Q99 | `crates/zero-gate/src/residency.rs:ResidencyPlanV1:398`, `q99.rs:Q99_CACHE_SCHEMA:19`, `CausalCacheDecisionV1:472` | Residency validates root; Q99 needs 9 coords | IncompleteCoordinateSet => not certified |
+| V6-12 | Residency / Q99 | `crates/zero-gate/src/residency.rs:ResidencyPlan:398`, `q99.rs:Q99_CACHE_SCHEMA:19`, `CausalCacheDecision:472` | Residency validates root; Q99 needs 9 coords | IncompleteCoordinateSet => not certified |
 | V6-13 | Explicit external read | `crates/zsx-core/src/fszero.rs` + `fszero_tests.rs:285`, FSZERO_SCRATCH_DIR | Explicit path O(file) without indexing | Absolute without explicit path => invalid_path |
 | V6-14 | Process topology | `crates/zero-process/src/lib.rs:VerifiedChild`, `zero-codemode/src/worker.rs:12` | No daemon; idle wait before shutdown | Orphan child => NoOrphanProcess fail |
 | V6-15 | Native fallback | `crates/zsx-core/src/help.rs:6`, handoff Direct-vs-Kernel, bead `zerostack-pvwg` | C_Z = min(C_direct,C_kernel) | Removing native while zero rejects => bug |
@@ -38,7 +38,7 @@ Each row: Exists? No. Falsifier revokes claim. Bead = future work; no cross-repo
 
 | Surface | Bead | Paths/symbols (proposed) | Falsifier |
 |---|---|---|---|
-| V7 certificate + trivalent verdict | `zerostack-fhcj` | `zero-cert/src/trace_export.rs:EventClassV1`, `zero-abi/src/identity.rs:equivalent_claim_permitted:384` | Unsafe issuing authority => W7-T01 fail |
+| V7 certificate + trivalent verdict | `zerostack-fhcj` | `zero-cert/src/trace_export.rs:EventClass`, `zero-abi/src/identity.rs:equivalent_claim_permitted:384` | Unsafe issuing authority => W7-T01 fail |
 | ProofIR checker | `zerostack-7inx` | `proofir/ -> Checker::check(): Safe/Unsafe/Unknown` | Checker != denotation => stop |
 | Savings-provenance | `zerostack-nld8` | `zero-ledger/src/charging_maps.rs` + `zero-gate/src/quality.rs:683` | Missing segment label => no saving claim |
 
@@ -46,8 +46,8 @@ Each row: Exists? No. Falsifier revokes claim. Bead = future work; no cross-repo
 
 | Surface | Bead | Paths/symbols | Falsifier |
 |---|---|---|---|
-| ProjectImage(r) manifest | `zerostack-zksb` | `zero-store/src/cas.rs:is_full_lower_hex`, `residency.rs:ResidencyPlanV1` | Nonce mismatch W8-T3 => fail |
-| Q99 action guard | `zerostack-zksb`/`zerostack-4lfp` | `q99.rs:validate:174`, `ResidencyThresholdCheckerV1:486` | L1 hit as L2 truth => fail |
+| ProjectImage(r) manifest | `zerostack-zksb` | `zero-store/src/cas.rs:is_full_lower_hex`, `residency.rs:ResidencyPlan` | Nonce mismatch W8-T3 => fail |
+| Q99 action guard | `zerostack-zksb`/`zerostack-4lfp` | `q99.rs:validate:174`, `ResidencyThresholdChecker:486` | L1 hit as L2 truth => fail |
 | Precommit warm-swap | `zerostack-4lfp` | `session.rs:prepare_image->publish` | Warm not before publish => fail |
 
 ### W9-E handles / demand / Snap-to-File

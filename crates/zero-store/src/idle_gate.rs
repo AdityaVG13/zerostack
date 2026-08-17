@@ -5,43 +5,43 @@
 //! of <= 0.1% CPU and <= 500 MB resident memory. This module is the
 //! mechanism that makes that budget a *release gate*:
 //!
-//! - [`IdleWindowEvidenceV1`] is the sealed evidence artifact: a window of
+//! - [`IdleWindowEvidence`] is the sealed evidence artifact: a window of
 //!   in-process samples (cumulative user/sys CPU nanoseconds and RSS bytes,
 //!   all host-clock readouts -- no child processes are spawned to measure)
 //!   plus a counter of background-activity events observed during the
 //!   window. Its `digest()` is content-derived over the canonical window
 //!   bytes, so evidence can be anchored externally.
-//! - [`evaluate_idle_release_gate_v1`] refuses *without evidence*:
-//!   `None` evidence is a loud [`IdleGateErrorV1::RequiresEvidence`] -- the
+//! - [`evaluate_idle_release_gate`] refuses *without evidence*:
+//!   `None` evidence is a loud [`IdleGateError::RequiresEvidence`] -- the
 //!   gate never passes on prose. With evidence it compares the observed
-//!   window maximums against [`IdleBudgetsV1`] (default 0.1% CPU fraction,
-//!   500 MB RSS) and returns a sealed [`IdleGateReceiptV1`]; budget
+//!   window maximums against [`IdleBudgets`] (default 0.1% CPU fraction,
+//!   500 MB RSS) and returns a sealed [`IdleGateReceipt`]; budget
 //!   breaches are fail-loud refusals carried inside the receipt
-//!   ([`IdleGateRefusalV1`]), never silent truncation or clamping.
+//!   ([`IdleGateRefusal`]), never silent truncation or clamping.
 //! - Background activity observed during the idle window refuses the gate
-//!   ([`IdleGateRefusalReasonV1::BackgroundActivityDetected`]): the daemonless
+//!   ([`IdleGateRefusalReason::BackgroundActivityDetected`]): the daemonless
 //!   law is enforced by evidence, not by promise.
-//! - [`IdleSamplerV1`] is the in-process sampling seam; the host adapter for
+//! - [`IdleSampler`] is the in-process sampling seam; the host adapter for
 //!   the sidecar (zsx-node) is residual hub wiring -- the crate proves the
 //!   gate with a real `getrusage`-backed sampler in tests.
 //!
-//! The contract manifest [`idle_gate_contract_v1`] freezes these semantics
+//! The contract manifest [`idle_gate_contract`] freezes these semantics
 //! (budgets, no-evidence refusal, no background work, no spawn-per-call).
 
 use serde::{Deserialize, Serialize};
 
-use zero_abi::{DigestV1, canonical_json};
+use zero_abi::{Sha256Digest, canonical_json};
 
 /// Schema version of the idle-gate artifacts.
-pub const IDLE_GATE_SCHEMA_VERSION_V1: u16 = 1;
+pub const IDLE_GATE_SCHEMA_VERSION: u16 = 1;
 /// Domain tag bound into every idle-gate evidence digest.
-pub const IDLE_GATE_DOMAIN_V1: &[u8] = b"zerostack.idle-gate.v1\0";
+pub const IDLE_GATE_DOMAIN: &[u8] = b"zerostack.idle-gate.v1\0";
 /// Default idle CPU budget: 0.1% expressed in parts per billion (1e-3).
-pub const DEFAULT_IDLE_MAX_CPU_FRACTION_PPB_V1: u64 = 1_000_000;
+pub const DEFAULT_IDLE_MAX_CPU_FRACTION_PPB: u64 = 1_000_000;
 /// Default idle RSS budget: 500 MB.
-pub const DEFAULT_IDLE_MAX_RSS_BYTES_V1: u64 = 500 * 1024 * 1024;
+pub const DEFAULT_IDLE_MAX_RSS_BYTES: u64 = 500 * 1024 * 1024;
 /// ABI tag carried by idle-gate artifacts.
-pub const IDLE_GATE_ABI_VERSION_V1: &str = "v6-r14";
+pub const IDLE_GATE_ABI_VERSION: &str = "v6-r14";
 
 /// One in-process measurement readout. CPU fields are cumulative since
 /// process start (getrusage semantics); the window fraction is derived from
@@ -49,7 +49,7 @@ pub const IDLE_GATE_ABI_VERSION_V1: &str = "v6-r14";
 /// CPU time spent before the window.
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
-pub struct IdleSampleV1 {
+pub struct IdleSample {
     /// Cumulative wall time of the sampled process at readout, ns.
     pub elapsed_wall_ns: u64,
     /// Cumulative user CPU time of the sampled process at readout, ns.
@@ -62,7 +62,7 @@ pub struct IdleSampleV1 {
     pub sampled_at_unix_ns: u64,
 }
 
-impl IdleSampleV1 {
+impl IdleSample {
     pub fn new(
         elapsed_wall_ns: u64,
         cpu_user_ns: u64,
@@ -89,29 +89,29 @@ impl IdleSampleV1 {
 /// nonzero count refuses the release gate (daemonless law).
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
-pub struct IdleWindowEvidenceV1 {
+pub struct IdleWindowEvidence {
     pub schema_version: u16,
     pub window_start_unix_ns: u64,
     pub window_end_unix_ns: u64,
-    pub samples: Vec<IdleSampleV1>,
+    pub samples: Vec<IdleSample>,
     pub background_activity_events: u64,
     pub abi_version: String,
 }
 
-impl IdleWindowEvidenceV1 {
+impl IdleWindowEvidence {
     pub fn new(
         window_start_unix_ns: u64,
         window_end_unix_ns: u64,
-        samples: Vec<IdleSampleV1>,
+        samples: Vec<IdleSample>,
         background_activity_events: u64,
-    ) -> Result<Self, IdleGateErrorV1> {
+    ) -> Result<Self, IdleGateError> {
         let evidence = Self {
-            schema_version: IDLE_GATE_SCHEMA_VERSION_V1,
+            schema_version: IDLE_GATE_SCHEMA_VERSION,
             window_start_unix_ns,
             window_end_unix_ns,
             samples,
             background_activity_events,
-            abi_version: IDLE_GATE_ABI_VERSION_V1.to_owned(),
+            abi_version: IDLE_GATE_ABI_VERSION.to_owned(),
         };
         evidence.validate()?;
         Ok(evidence)
@@ -119,35 +119,35 @@ impl IdleWindowEvidenceV1 {
 
     /// Structural validation. Sample readouts must be monotonic and the
     /// window bounds must match the first/last sample readouts.
-    pub fn validate(&self) -> Result<(), IdleGateErrorV1> {
-        if self.schema_version != IDLE_GATE_SCHEMA_VERSION_V1 {
-            return Err(IdleGateErrorV1::InvalidEvidence(
+    pub fn validate(&self) -> Result<(), IdleGateError> {
+        if self.schema_version != IDLE_GATE_SCHEMA_VERSION {
+            return Err(IdleGateError::InvalidEvidence(
                 "idle evidence schema version is not supported".to_owned(),
             ));
         }
-        if self.abi_version != IDLE_GATE_ABI_VERSION_V1 {
-            return Err(IdleGateErrorV1::InvalidEvidence(
+        if self.abi_version != IDLE_GATE_ABI_VERSION {
+            return Err(IdleGateError::InvalidEvidence(
                 "idle evidence ABI version is not supported".to_owned(),
             ));
         }
         if self.samples.is_empty() {
-            return Err(IdleGateErrorV1::InvalidEvidence(
+            return Err(IdleGateError::InvalidEvidence(
                 "an idle window needs at least a start and an end sample".to_owned(),
             ));
         }
         if self.window_end_unix_ns < self.window_start_unix_ns {
-            return Err(IdleGateErrorV1::InvalidEvidence(
+            return Err(IdleGateError::InvalidEvidence(
                 "window end precedes window start".to_owned(),
             ));
         }
-        let mut previous: Option<&IdleSampleV1> = None;
+        let mut previous: Option<&IdleSample> = None;
         for sample in &self.samples {
             if let Some(previous) = previous {
                 if sample.sampled_at_unix_ns < previous.sampled_at_unix_ns
                     || sample.elapsed_wall_ns < previous.elapsed_wall_ns
                     || sample.cumulative_cpu_ns() < previous.cumulative_cpu_ns()
                 {
-                    return Err(IdleGateErrorV1::InvalidEvidence(
+                    return Err(IdleGateError::InvalidEvidence(
                         "sample readouts must be monotonic".to_owned(),
                     ));
                 }
@@ -159,7 +159,7 @@ impl IdleWindowEvidenceV1 {
         if first.sampled_at_unix_ns != self.window_start_unix_ns
             || last.sampled_at_unix_ns != self.window_end_unix_ns
         {
-            return Err(IdleGateErrorV1::InvalidEvidence(
+            return Err(IdleGateError::InvalidEvidence(
                 "window bounds must equal the first and last sample readouts".to_owned(),
             ));
         }
@@ -197,10 +197,10 @@ impl IdleWindowEvidenceV1 {
             .unwrap_or(0)
     }
 
-    pub fn canonical_bytes(&self) -> Result<Vec<u8>, IdleGateErrorV1> {
+    pub fn canonical_bytes(&self) -> Result<Vec<u8>, IdleGateError> {
         self.validate()?;
         let value = serde_json::to_value(self).map_err(|error| {
-            IdleGateErrorV1::InvalidEvidence(format!("evidence is not JSON-serializable: {error}"))
+            IdleGateError::InvalidEvidence(format!("evidence is not JSON-serializable: {error}"))
         })?;
         Ok(canonical_json(&value).into_bytes())
     }
@@ -208,11 +208,11 @@ impl IdleWindowEvidenceV1 {
     /// Content-derived evidence digest over the domain-tagged canonical
     /// window bytes. Same window, same digest; tampering any field changes
     /// the digest.
-    pub fn digest(&self) -> Result<DigestV1, IdleGateErrorV1> {
-        let mut tagged = Vec::with_capacity(IDLE_GATE_DOMAIN_V1.len() + 128);
-        tagged.extend_from_slice(IDLE_GATE_DOMAIN_V1);
+    pub fn digest(&self) -> Result<Sha256Digest, IdleGateError> {
+        let mut tagged = Vec::with_capacity(IDLE_GATE_DOMAIN.len() + 128);
+        tagged.extend_from_slice(IDLE_GATE_DOMAIN);
         tagged.extend_from_slice(&self.canonical_bytes()?);
-        Ok(DigestV1::from_bytes(zero_abi::sha256(&tagged)))
+        Ok(Sha256Digest::from_bytes(zero_abi::sha256(&tagged)))
     }
 }
 
@@ -220,30 +220,30 @@ impl IdleWindowEvidenceV1 {
 /// targets: <= 0.1% CPU and <= 500 MB RSS while idle.
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
-pub struct IdleBudgetsV1 {
+pub struct IdleBudgets {
     /// Maximum idle CPU fraction, parts per billion (0.1% = 1_000_000).
     pub max_cpu_fraction_ppb: u64,
     /// Maximum idle RSS, bytes.
     pub max_rss_bytes: u64,
 }
 
-impl Default for IdleBudgetsV1 {
+impl Default for IdleBudgets {
     fn default() -> Self {
         Self {
-            max_cpu_fraction_ppb: DEFAULT_IDLE_MAX_CPU_FRACTION_PPB_V1,
-            max_rss_bytes: DEFAULT_IDLE_MAX_RSS_BYTES_V1,
+            max_cpu_fraction_ppb: DEFAULT_IDLE_MAX_CPU_FRACTION_PPB,
+            max_rss_bytes: DEFAULT_IDLE_MAX_RSS_BYTES,
         }
     }
 }
 
-impl IdleBudgetsV1 {
-    pub fn new(max_cpu_fraction_ppb: u64, max_rss_bytes: u64) -> Result<Self, IdleGateErrorV1> {
+impl IdleBudgets {
+    pub fn new(max_cpu_fraction_ppb: u64, max_rss_bytes: u64) -> Result<Self, IdleGateError> {
         let budgets = Self {
             max_cpu_fraction_ppb,
             max_rss_bytes,
         };
         if budgets.max_cpu_fraction_ppb == 0 || budgets.max_rss_bytes == 0 {
-            return Err(IdleGateErrorV1::InvalidEvidence(
+            return Err(IdleGateError::InvalidEvidence(
                 "idle budgets must be nonzero".to_owned(),
             ));
         }
@@ -256,8 +256,8 @@ impl IdleBudgetsV1 {
 /// silent clamp or truncation.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
-pub struct IdleGateRefusalV1 {
-    pub reason: IdleGateRefusalReasonV1,
+pub struct IdleGateRefusal {
+    pub reason: IdleGateRefusalReason,
     pub observed: u64,
     pub budget: u64,
     pub detail: String,
@@ -265,7 +265,7 @@ pub struct IdleGateRefusalV1 {
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
-pub enum IdleGateRefusalReasonV1 {
+pub enum IdleGateRefusalReason {
     /// Observed CPU fraction exceeded the budget (ppb).
     CpuBudgetViolation,
     /// Observed RSS exceeded the budget (bytes).
@@ -278,40 +278,40 @@ pub enum IdleGateRefusalReasonV1 {
 /// always carries a refusal; the receipt digest anchors the whole decision.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
-pub struct IdleGateReceiptV1 {
+pub struct IdleGateReceipt {
     pub schema_version: u16,
     pub admitted: bool,
-    pub refusal: Option<IdleGateRefusalV1>,
+    pub refusal: Option<IdleGateRefusal>,
     pub samples: usize,
     pub window_wall_ns: u64,
     pub observed_max_cpu_fraction_ppb: u64,
     pub observed_max_rss_bytes: u64,
-    pub budgets: IdleBudgetsV1,
-    pub evidence_digest: DigestV1,
+    pub budgets: IdleBudgets,
+    pub evidence_digest: Sha256Digest,
     pub abi_version: String,
 }
 
-impl IdleGateReceiptV1 {
-    pub fn canonical_bytes(&self) -> Result<Vec<u8>, IdleGateErrorV1> {
+impl IdleGateReceipt {
+    pub fn canonical_bytes(&self) -> Result<Vec<u8>, IdleGateError> {
         let value = serde_json::to_value(self).map_err(|error| {
-            IdleGateErrorV1::Evaluation(format!("receipt is not JSON-serializable: {error}"))
+            IdleGateError::Evaluation(format!("receipt is not JSON-serializable: {error}"))
         })?;
         Ok(canonical_json(&value).into_bytes())
     }
 
-    pub fn digest(&self) -> Result<DigestV1, IdleGateErrorV1> {
-        let mut tagged = Vec::with_capacity(IDLE_GATE_DOMAIN_V1.len() + 128);
-        tagged.extend_from_slice(IDLE_GATE_DOMAIN_V1);
+    pub fn digest(&self) -> Result<Sha256Digest, IdleGateError> {
+        let mut tagged = Vec::with_capacity(IDLE_GATE_DOMAIN.len() + 128);
+        tagged.extend_from_slice(IDLE_GATE_DOMAIN);
         tagged.extend_from_slice(&self.canonical_bytes()?);
-        Ok(DigestV1::from_bytes(zero_abi::sha256(&tagged)))
+        Ok(Sha256Digest::from_bytes(zero_abi::sha256(&tagged)))
     }
 }
 
 /// Loud, fail-closed errors for the release gate. Structural problems
 /// (missing evidence, malformed windows) are errors; budget breaches are
-/// sealed refusals inside an [`IdleGateReceiptV1`].
+/// sealed refusals inside an [`IdleGateReceipt`].
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub enum IdleGateErrorV1 {
+pub enum IdleGateError {
     /// The gate was evaluated without evidence. The release gate fails
     /// without evidence -- always.
     RequiresEvidence,
@@ -321,48 +321,48 @@ pub enum IdleGateErrorV1 {
     Evaluation(String),
 }
 
-impl std::fmt::Display for IdleGateErrorV1 {
+impl std::fmt::Display for IdleGateError {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            IdleGateErrorV1::RequiresEvidence => {
+            IdleGateError::RequiresEvidence => {
                 write!(formatter, "release gate requires idle-window evidence")
             }
-            IdleGateErrorV1::InvalidEvidence(detail) => {
+            IdleGateError::InvalidEvidence(detail) => {
                 write!(formatter, "invalid idle evidence: {detail}")
             }
-            IdleGateErrorV1::Evaluation(detail) => {
+            IdleGateError::Evaluation(detail) => {
                 write!(formatter, "idle gate evaluation failed: {detail}")
             }
         }
     }
 }
 
-impl std::error::Error for IdleGateErrorV1 {}
+impl std::error::Error for IdleGateError {}
 
 /// Evaluate the idle release gate against sealed window evidence.
 ///
-/// - `None` evidence is [`IdleGateErrorV1::RequiresEvidence`] -- the gate
+/// - `None` evidence is [`IdleGateError::RequiresEvidence`] -- the gate
 ///   never passes on prose.
 /// - A nonzero background-activity count refuses
-///   ([`IdleGateRefusalReasonV1::BackgroundActivityDetected`]).
+///   ([`IdleGateRefusalReason::BackgroundActivityDetected`]).
 /// - Observed window maximums above the budgets refuse with the observed
 ///   and budget values in the sealed receipt. Breaches are never clamped,
 ///   truncated, or silently ignored.
 /// - Within budget the receipt admits with counts and the evidence digest.
-pub fn evaluate_idle_release_gate_v1(
-    evidence: Option<&IdleWindowEvidenceV1>,
-    budgets: IdleBudgetsV1,
-) -> Result<IdleGateReceiptV1, IdleGateErrorV1> {
+pub fn evaluate_idle_release_gate(
+    evidence: Option<&IdleWindowEvidence>,
+    budgets: IdleBudgets,
+) -> Result<IdleGateReceipt, IdleGateError> {
     let Some(evidence) = evidence else {
-        return Err(IdleGateErrorV1::RequiresEvidence);
+        return Err(IdleGateError::RequiresEvidence);
     };
     evidence.validate()?;
     let evidence_digest = evidence.digest()?;
     let observed_cpu = evidence.observed_max_cpu_fraction_ppb();
     let observed_rss = evidence.observed_max_rss_bytes();
     let refusal = if evidence.background_activity_events > 0 {
-        Some(IdleGateRefusalV1 {
-            reason: IdleGateRefusalReasonV1::BackgroundActivityDetected,
+        Some(IdleGateRefusal {
+            reason: IdleGateRefusalReason::BackgroundActivityDetected,
             observed: evidence.background_activity_events,
             budget: 0,
             detail: format!(
@@ -371,8 +371,8 @@ pub fn evaluate_idle_release_gate_v1(
             ),
         })
     } else if observed_cpu > budgets.max_cpu_fraction_ppb {
-        Some(IdleGateRefusalV1 {
-            reason: IdleGateRefusalReasonV1::CpuBudgetViolation,
+        Some(IdleGateRefusal {
+            reason: IdleGateRefusalReason::CpuBudgetViolation,
             observed: observed_cpu,
             budget: budgets.max_cpu_fraction_ppb,
             detail: format!(
@@ -381,8 +381,8 @@ pub fn evaluate_idle_release_gate_v1(
             ),
         })
     } else if observed_rss > budgets.max_rss_bytes {
-        Some(IdleGateRefusalV1 {
-            reason: IdleGateRefusalReasonV1::RssBudgetViolation,
+        Some(IdleGateRefusal {
+            reason: IdleGateRefusalReason::RssBudgetViolation,
             observed: observed_rss,
             budget: budgets.max_rss_bytes,
             detail: format!(
@@ -393,8 +393,8 @@ pub fn evaluate_idle_release_gate_v1(
     } else {
         None
     };
-    let receipt = IdleGateReceiptV1 {
-        schema_version: IDLE_GATE_SCHEMA_VERSION_V1,
+    let receipt = IdleGateReceipt {
+        schema_version: IDLE_GATE_SCHEMA_VERSION,
         admitted: refusal.is_none(),
         refusal,
         samples: evidence.samples.len(),
@@ -403,7 +403,7 @@ pub fn evaluate_idle_release_gate_v1(
         observed_max_rss_bytes: observed_rss,
         budgets,
         evidence_digest,
-        abi_version: IDLE_GATE_ABI_VERSION_V1.to_owned(),
+        abi_version: IDLE_GATE_ABI_VERSION.to_owned(),
     };
     let _ = receipt.digest()?;
     Ok(receipt)
@@ -413,17 +413,17 @@ pub fn evaluate_idle_release_gate_v1(
 /// (zsx-node) is residual hub wiring; the crate tests a real
 /// `getrusage`-backed sampler. Samplers must not spawn processes or start
 /// background work -- the measurement itself must be invisible.
-pub trait IdleSamplerV1 {
-    fn sample(&mut self) -> Result<IdleSampleV1, IdleGateErrorV1>;
+pub trait IdleSampler {
+    fn sample(&mut self) -> Result<IdleSample, IdleGateError>;
 }
 
 /// Measure an idle window by sampling at the start, middle, and end of
 /// `window_ns`, sleeping between readouts (no spinning, no background work).
 /// Returns sealed window evidence ready for the release gate.
-pub fn measure_idle_window_v1<S: IdleSamplerV1>(
+pub fn measure_idle_window<S: IdleSampler>(
     sampler: &mut S,
     window_ns: u64,
-) -> Result<IdleWindowEvidenceV1, IdleGateErrorV1> {
+) -> Result<IdleWindowEvidence, IdleGateError> {
     let first = sampler.sample()?;
     let half = window_ns / 2;
     std::thread::sleep(std::time::Duration::from_nanos(half));
@@ -433,7 +433,7 @@ pub fn measure_idle_window_v1<S: IdleSamplerV1>(
     // The window bounds are the sample readouts themselves: the start bound
     // is the first readout and the end bound the last readout, so the
     // evidence is self-consistent by construction.
-    IdleWindowEvidenceV1::new(
+    IdleWindowEvidence::new(
         first.sampled_at_unix_ns,
         last.sampled_at_unix_ns,
         vec![first, middle, last],
@@ -442,9 +442,9 @@ pub fn measure_idle_window_v1<S: IdleSamplerV1>(
 }
 
 /// The frozen contract manifest for the idle release gate (ZS-OPS-006).
-pub fn idle_gate_contract_v1() -> serde_json::Value {
+pub fn idle_gate_contract() -> serde_json::Value {
     serde_json::json!({
-        "schema_version": IDLE_GATE_SCHEMA_VERSION_V1,
+        "schema_version": IDLE_GATE_SCHEMA_VERSION,
         "domain": "zerostack.idle-gate.v1",
         "budgets": {
             "max_cpu_fraction": "0.1% (1_000_000 ppb)",
@@ -460,7 +460,7 @@ pub fn idle_gate_contract_v1() -> serde_json::Value {
             "no_spawn_per_call": true,
             "no_background_work_while_idle": true,
         },
-        "abi_version": IDLE_GATE_ABI_VERSION_V1,
+        "abi_version": IDLE_GATE_ABI_VERSION,
     })
 }
 

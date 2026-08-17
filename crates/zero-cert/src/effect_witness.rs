@@ -1,6 +1,6 @@
 //! Verifier-owned Effect IR acceptance and structured witness carriers.
 //!
-//! `EffectAcceptedV1` has private fields and no deserializer or public
+//! `EffectAccepted` has private fields and no deserializer or public
 //! constructor. The only constructor consumes `VerifiedEvidence`, so raw JSON,
 //! booleans, and prose cannot mint accepted authority.
 
@@ -8,21 +8,21 @@ use std::{error::Error, fmt};
 
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
-use zero_abi::{CwirVerifierClassV1, DigestV1, EffectProgramV1, canonical_json, sha256};
+use zero_abi::{CwirVerifierClass, Sha256Digest, EffectProgram, canonical_json, sha256};
 
 use crate::{CompletenessWitness, Query, VerifiedEvidence};
 
-pub const EFFECT_WITNESS_CONTRACT_VERSION_V1: u16 = 1;
-pub const EFFECT_WITNESS_DOMAIN_V1: &[u8] = b"zerostack.effect_witness.v1\0";
-pub const EFFECT_ACCEPTED_DOMAIN_V1: &[u8] = b"zerostack.effect_verification.accepted.v1\0";
-pub const EFFECT_EVIDENCE_REF_DOMAIN_V1: &[u8] = b"zerostack.effect_witness.evidence_ref.v1\0";
-pub const EFFECT_WITNESS_MAX_CANONICAL_BYTES_V1: usize = 262_144;
-pub const EFFECT_WITNESS_MAX_EVIDENCE_REFS_V1: usize = 512;
-pub const EFFECT_WITNESS_MAX_EXPANSIONS_V1: usize = 512;
+pub const EFFECT_WITNESS_CONTRACT_VERSION: u16 = 1;
+pub const EFFECT_WITNESS_DOMAIN: &[u8] = b"zerostack.effect_witness.v1\0";
+pub const EFFECT_ACCEPTED_DOMAIN: &[u8] = b"zerostack.effect_verification.accepted.v1\0";
+pub const EFFECT_EVIDENCE_REF_DOMAIN: &[u8] = b"zerostack.effect_witness.evidence_ref.v1\0";
+pub const EFFECT_WITNESS_MAX_CANONICAL_BYTES: usize = 262_144;
+pub const EFFECT_WITNESS_MAX_EVIDENCE_REFS: usize = 512;
+pub const EFFECT_WITNESS_MAX_EXPANSIONS: usize = 512;
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
-pub enum EffectWitnessFailureCodeV1 {
+pub enum EffectWitnessFailureCode {
     UnsupportedVersion,
     SerializationFailure,
     NonCanonicalEncoding,
@@ -45,35 +45,35 @@ pub enum EffectWitnessFailureCodeV1 {
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
-pub struct EffectWitnessErrorV1 {
-    pub code: EffectWitnessFailureCodeV1,
+pub struct EffectWitnessError {
+    pub code: EffectWitnessFailureCode,
     pub detail: String,
 }
 
-impl EffectWitnessErrorV1 {
-    pub fn new(code: EffectWitnessFailureCodeV1, detail: impl Into<String>) -> Self {
+impl EffectWitnessError {
+    pub fn new(code: EffectWitnessFailureCode, detail: impl Into<String>) -> Self {
         Self {
             code,
             detail: detail.into(),
         }
     }
 
-    pub const fn failure_code(&self) -> EffectWitnessFailureCodeV1 {
+    pub const fn failure_code(&self) -> EffectWitnessFailureCode {
         self.code
     }
 }
 
-impl fmt::Display for EffectWitnessErrorV1 {
+impl fmt::Display for EffectWitnessError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{:?}: {}", self.code, self.detail)
     }
 }
 
-impl Error for EffectWitnessErrorV1 {}
+impl Error for EffectWitnessError {}
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
-pub enum EffectWitnessKindV1 {
+pub enum EffectWitnessKind {
     PredicateMismatch,
     ArtifactMismatch,
     StaleState,
@@ -85,7 +85,7 @@ pub enum EffectWitnessKindV1 {
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
-pub enum EffectLocalizationClassV1 {
+pub enum EffectLocalizationClass {
     Global,
     Predicate,
     Operation,
@@ -95,18 +95,18 @@ pub enum EffectLocalizationClassV1 {
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
-pub struct EffectLocalizationV1 {
-    class: EffectLocalizationClassV1,
+pub struct EffectLocalization {
+    class: EffectLocalizationClass,
     operation_index: Option<u32>,
-    target_digest: Option<DigestV1>,
+    target_digest: Option<Sha256Digest>,
     byte_start: Option<u64>,
     byte_len: Option<u64>,
 }
 
-impl EffectLocalizationV1 {
+impl EffectLocalization {
     pub const fn global() -> Self {
         Self {
-            class: EffectLocalizationClassV1::Global,
+            class: EffectLocalizationClass::Global,
             operation_index: None,
             target_digest: None,
             byte_start: None,
@@ -116,7 +116,7 @@ impl EffectLocalizationV1 {
 
     pub const fn predicate() -> Self {
         Self {
-            class: EffectLocalizationClassV1::Predicate,
+            class: EffectLocalizationClass::Predicate,
             operation_index: None,
             target_digest: None,
             byte_start: None,
@@ -126,7 +126,7 @@ impl EffectLocalizationV1 {
 
     pub const fn operation(operation_index: u32) -> Self {
         Self {
-            class: EffectLocalizationClassV1::Operation,
+            class: EffectLocalizationClass::Operation,
             operation_index: Some(operation_index),
             target_digest: None,
             byte_start: None,
@@ -134,10 +134,10 @@ impl EffectLocalizationV1 {
         }
     }
 
-    pub fn target(target_digest: DigestV1) -> Result<Self, EffectWitnessErrorV1> {
+    pub fn target(target_digest: Sha256Digest) -> Result<Self, EffectWitnessError> {
         require_digest("localization target", target_digest)?;
         Ok(Self {
-            class: EffectLocalizationClassV1::Target,
+            class: EffectLocalizationClass::Target,
             operation_index: None,
             target_digest: Some(target_digest),
             byte_start: None,
@@ -146,19 +146,19 @@ impl EffectLocalizationV1 {
     }
 
     pub fn byte_range(
-        target_digest: DigestV1,
+        target_digest: Sha256Digest,
         byte_start: u64,
         byte_len: u64,
-    ) -> Result<Self, EffectWitnessErrorV1> {
+    ) -> Result<Self, EffectWitnessError> {
         require_digest("localization target", target_digest)?;
         if byte_len == 0 || byte_start.checked_add(byte_len).is_none() {
-            return Err(EffectWitnessErrorV1::new(
-                EffectWitnessFailureCodeV1::RangeOverflow,
+            return Err(EffectWitnessError::new(
+                EffectWitnessFailureCode::RangeOverflow,
                 "byte localization is empty or overflows u64",
             ));
         }
         Ok(Self {
-            class: EffectLocalizationClassV1::ByteRange,
+            class: EffectLocalizationClass::ByteRange,
             operation_index: None,
             target_digest: Some(target_digest),
             byte_start: Some(byte_start),
@@ -166,7 +166,7 @@ impl EffectLocalizationV1 {
         })
     }
 
-    pub const fn class(&self) -> EffectLocalizationClassV1 {
+    pub const fn class(&self) -> EffectLocalizationClass {
         self.class
     }
 
@@ -174,7 +174,7 @@ impl EffectLocalizationV1 {
         self.operation_index
     }
 
-    pub const fn target_digest(&self) -> Option<DigestV1> {
+    pub const fn target_digest(&self) -> Option<Sha256Digest> {
         self.target_digest
     }
 
@@ -185,27 +185,27 @@ impl EffectLocalizationV1 {
         }
     }
 
-    fn validate(self) -> Result<(), EffectWitnessErrorV1> {
+    fn validate(self) -> Result<(), EffectWitnessError> {
         let valid = match self.class {
-            EffectLocalizationClassV1::Global | EffectLocalizationClassV1::Predicate => {
+            EffectLocalizationClass::Global | EffectLocalizationClass::Predicate => {
                 self.operation_index.is_none()
                     && self.target_digest.is_none()
                     && self.byte_start.is_none()
                     && self.byte_len.is_none()
             }
-            EffectLocalizationClassV1::Operation => {
+            EffectLocalizationClass::Operation => {
                 self.operation_index.is_some()
                     && self.target_digest.is_none()
                     && self.byte_start.is_none()
                     && self.byte_len.is_none()
             }
-            EffectLocalizationClassV1::Target => {
+            EffectLocalizationClass::Target => {
                 self.operation_index.is_none()
                     && self.target_digest.is_some()
                     && self.byte_start.is_none()
                     && self.byte_len.is_none()
             }
-            EffectLocalizationClassV1::ByteRange => {
+            EffectLocalizationClass::ByteRange => {
                 self.operation_index.is_none()
                     && self.target_digest.is_some()
                     && self.byte_start.is_some()
@@ -213,8 +213,8 @@ impl EffectLocalizationV1 {
             }
         };
         if !valid {
-            return Err(EffectWitnessErrorV1::new(
-                EffectWitnessFailureCodeV1::InvalidLocalization,
+            return Err(EffectWitnessError::new(
+                EffectWitnessFailureCode::InvalidLocalization,
                 "localization fields do not match the declared class",
             ));
         }
@@ -224,8 +224,8 @@ impl EffectLocalizationV1 {
         if let (Some(start), Some(len)) = (self.byte_start, self.byte_len)
             && (len == 0 || start.checked_add(len).is_none())
         {
-            return Err(EffectWitnessErrorV1::new(
-                EffectWitnessFailureCodeV1::RangeOverflow,
+            return Err(EffectWitnessError::new(
+                EffectWitnessFailureCode::RangeOverflow,
                 "byte localization is empty or overflows u64",
             ));
         }
@@ -235,111 +235,111 @@ impl EffectLocalizationV1 {
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
-pub struct EffectWitnessV1 {
+pub struct EffectWitness {
     contract_version: u16,
-    cwir_semantic_digest: DigestV1,
-    action_digest: DigestV1,
-    obligation_id: DigestV1,
-    kind: EffectWitnessKindV1,
-    expected_predicate_digest: DigestV1,
-    observed_evidence_digest: DigestV1,
-    state_snapshot: DigestV1,
-    localization: EffectLocalizationV1,
-    exact_evidence_refs: Vec<DigestV1>,
-    expansion_handles: Vec<DigestV1>,
-    verifier_digest: DigestV1,
-    witness_digest: DigestV1,
+    cwir_semantic_digest: Sha256Digest,
+    action_digest: Sha256Digest,
+    obligation_id: Sha256Digest,
+    kind: EffectWitnessKind,
+    expected_predicate_digest: Sha256Digest,
+    observed_evidence_digest: Sha256Digest,
+    state_snapshot: Sha256Digest,
+    localization: EffectLocalization,
+    exact_evidence_refs: Vec<Sha256Digest>,
+    expansion_handles: Vec<Sha256Digest>,
+    verifier_digest: Sha256Digest,
+    witness_digest: Sha256Digest,
 }
 
 #[derive(Serialize)]
-struct EffectWitnessBodyV1<'a> {
+struct EffectWitnessBody<'a> {
     contract_version: u16,
-    cwir_semantic_digest: DigestV1,
-    action_digest: DigestV1,
-    obligation_id: DigestV1,
-    kind: EffectWitnessKindV1,
-    expected_predicate_digest: DigestV1,
-    observed_evidence_digest: DigestV1,
-    state_snapshot: DigestV1,
-    localization: EffectLocalizationV1,
-    exact_evidence_refs: &'a [DigestV1],
-    expansion_handles: &'a [DigestV1],
-    verifier_digest: DigestV1,
+    cwir_semantic_digest: Sha256Digest,
+    action_digest: Sha256Digest,
+    obligation_id: Sha256Digest,
+    kind: EffectWitnessKind,
+    expected_predicate_digest: Sha256Digest,
+    observed_evidence_digest: Sha256Digest,
+    state_snapshot: Sha256Digest,
+    localization: EffectLocalization,
+    exact_evidence_refs: &'a [Sha256Digest],
+    expansion_handles: &'a [Sha256Digest],
+    verifier_digest: Sha256Digest,
 }
 
-impl EffectWitnessV1 {
-    pub const fn cwir_semantic_digest(&self) -> DigestV1 {
+impl EffectWitness {
+    pub const fn cwir_semantic_digest(&self) -> Sha256Digest {
         self.cwir_semantic_digest
     }
 
-    pub const fn action_digest(&self) -> DigestV1 {
+    pub const fn action_digest(&self) -> Sha256Digest {
         self.action_digest
     }
 
-    pub const fn obligation_id(&self) -> DigestV1 {
+    pub const fn obligation_id(&self) -> Sha256Digest {
         self.obligation_id
     }
 
-    pub const fn kind(&self) -> EffectWitnessKindV1 {
+    pub const fn kind(&self) -> EffectWitnessKind {
         self.kind
     }
 
-    pub const fn expected_predicate_digest(&self) -> DigestV1 {
+    pub const fn expected_predicate_digest(&self) -> Sha256Digest {
         self.expected_predicate_digest
     }
 
-    pub const fn observed_evidence_digest(&self) -> DigestV1 {
+    pub const fn observed_evidence_digest(&self) -> Sha256Digest {
         self.observed_evidence_digest
     }
 
-    pub const fn state_snapshot(&self) -> DigestV1 {
+    pub const fn state_snapshot(&self) -> Sha256Digest {
         self.state_snapshot
     }
 
-    pub const fn localization(&self) -> EffectLocalizationV1 {
+    pub const fn localization(&self) -> EffectLocalization {
         self.localization
     }
 
-    pub fn exact_evidence_refs(&self) -> &[DigestV1] {
+    pub fn exact_evidence_refs(&self) -> &[Sha256Digest] {
         &self.exact_evidence_refs
     }
 
-    pub fn expansion_handles(&self) -> &[DigestV1] {
+    pub fn expansion_handles(&self) -> &[Sha256Digest] {
         &self.expansion_handles
     }
 
-    pub const fn verifier_digest(&self) -> DigestV1 {
+    pub const fn verifier_digest(&self) -> Sha256Digest {
         self.verifier_digest
     }
 
-    pub const fn witness_digest(&self) -> DigestV1 {
+    pub const fn witness_digest(&self) -> Sha256Digest {
         self.witness_digest
     }
 
-    pub fn canonical_bytes(&self) -> Result<Vec<u8>, EffectWitnessErrorV1> {
+    pub fn canonical_bytes(&self) -> Result<Vec<u8>, EffectWitnessError> {
         self.validate()?;
         let value = serde_json::to_value(self).map_err(serialization_error)?;
         let bytes = canonical_json(&value).into_bytes();
-        if bytes.len() > EFFECT_WITNESS_MAX_CANONICAL_BYTES_V1 {
-            return Err(EffectWitnessErrorV1::new(
-                EffectWitnessFailureCodeV1::CanonicalPayloadTooLarge,
+        if bytes.len() > EFFECT_WITNESS_MAX_CANONICAL_BYTES {
+            return Err(EffectWitnessError::new(
+                EffectWitnessFailureCode::CanonicalPayloadTooLarge,
                 format!("witness has {} canonical bytes", bytes.len()),
             ));
         }
         Ok(bytes)
     }
 
-    pub fn from_canonical_bytes(bytes: &[u8]) -> Result<Self, EffectWitnessErrorV1> {
-        if bytes.len() > EFFECT_WITNESS_MAX_CANONICAL_BYTES_V1 {
-            return Err(EffectWitnessErrorV1::new(
-                EffectWitnessFailureCodeV1::CanonicalPayloadTooLarge,
+    pub fn from_canonical_bytes(bytes: &[u8]) -> Result<Self, EffectWitnessError> {
+        if bytes.len() > EFFECT_WITNESS_MAX_CANONICAL_BYTES {
+            return Err(EffectWitnessError::new(
+                EffectWitnessFailureCode::CanonicalPayloadTooLarge,
                 format!("witness has {} canonical bytes", bytes.len()),
             ));
         }
         let value: Value = serde_json::from_slice(bytes).map_err(serialization_error)?;
         if canonical_json(&value).as_bytes() != bytes {
-            return Err(EffectWitnessErrorV1::new(
-                EffectWitnessFailureCodeV1::NonCanonicalEncoding,
+            return Err(EffectWitnessError::new(
+                EffectWitnessFailureCode::NonCanonicalEncoding,
                 "witness bytes are not exact canonical JSON",
             ));
         }
@@ -348,10 +348,10 @@ impl EffectWitnessV1 {
         Ok(witness)
     }
 
-    pub fn validate(&self) -> Result<(), EffectWitnessErrorV1> {
-        if self.contract_version != EFFECT_WITNESS_CONTRACT_VERSION_V1 {
-            return Err(EffectWitnessErrorV1::new(
-                EffectWitnessFailureCodeV1::UnsupportedVersion,
+    pub fn validate(&self) -> Result<(), EffectWitnessError> {
+        if self.contract_version != EFFECT_WITNESS_CONTRACT_VERSION {
+            return Err(EffectWitnessError::new(
+                EffectWitnessFailureCode::UnsupportedVersion,
                 format!(
                     "unsupported effect witness version {}",
                     self.contract_version
@@ -373,19 +373,19 @@ impl EffectWitnessV1 {
         validate_sorted_set(
             &self.exact_evidence_refs,
             "exact_evidence_refs",
-            EFFECT_WITNESS_MAX_EVIDENCE_REFS_V1,
-            EffectWitnessFailureCodeV1::TooManyEvidenceRefs,
+            EFFECT_WITNESS_MAX_EVIDENCE_REFS,
+            EffectWitnessFailureCode::TooManyEvidenceRefs,
         )?;
         validate_sorted_set(
             &self.expansion_handles,
             "expansion_handles",
-            EFFECT_WITNESS_MAX_EXPANSIONS_V1,
-            EffectWitnessFailureCodeV1::TooManyExpansions,
+            EFFECT_WITNESS_MAX_EXPANSIONS,
+            EffectWitnessFailureCode::TooManyExpansions,
         )?;
-        let expected = digest_body(EFFECT_WITNESS_DOMAIN_V1, &self.body())?;
+        let expected = digest_body(EFFECT_WITNESS_DOMAIN, &self.body())?;
         if self.witness_digest != expected {
-            return Err(EffectWitnessErrorV1::new(
-                EffectWitnessFailureCodeV1::WitnessDigestMismatch,
+            return Err(EffectWitnessError::new(
+                EffectWitnessFailureCode::WitnessDigestMismatch,
                 format!(
                     "witness digest {} does not match canonical body {}",
                     self.witness_digest.to_hex(),
@@ -396,8 +396,8 @@ impl EffectWitnessV1 {
         Ok(())
     }
 
-    fn body(&self) -> EffectWitnessBodyV1<'_> {
-        EffectWitnessBodyV1 {
+    fn body(&self) -> EffectWitnessBody<'_> {
+        EffectWitnessBody {
             contract_version: self.contract_version,
             cwir_semantic_digest: self.cwir_semantic_digest,
             action_digest: self.action_digest,
@@ -416,86 +416,86 @@ impl EffectWitnessV1 {
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
-pub struct EffectAcceptedV1 {
+pub struct EffectAccepted {
     contract_version: u16,
-    cwir_semantic_digest: DigestV1,
-    action_digest: DigestV1,
-    obligation_id: DigestV1,
-    predicate_digest: DigestV1,
-    state_snapshot: DigestV1,
-    evidence_digest: DigestV1,
-    verifier_digest: DigestV1,
-    verifier_class: CwirVerifierClassV1,
-    acceptance_digest: DigestV1,
+    cwir_semantic_digest: Sha256Digest,
+    action_digest: Sha256Digest,
+    obligation_id: Sha256Digest,
+    predicate_digest: Sha256Digest,
+    state_snapshot: Sha256Digest,
+    evidence_digest: Sha256Digest,
+    verifier_digest: Sha256Digest,
+    verifier_class: CwirVerifierClass,
+    acceptance_digest: Sha256Digest,
 }
 
 #[derive(Serialize)]
-struct EffectAcceptedBodyV1 {
+struct EffectAcceptedBody {
     contract_version: u16,
-    cwir_semantic_digest: DigestV1,
-    action_digest: DigestV1,
-    obligation_id: DigestV1,
-    predicate_digest: DigestV1,
-    state_snapshot: DigestV1,
-    evidence_digest: DigestV1,
-    verifier_digest: DigestV1,
-    verifier_class: CwirVerifierClassV1,
+    cwir_semantic_digest: Sha256Digest,
+    action_digest: Sha256Digest,
+    obligation_id: Sha256Digest,
+    predicate_digest: Sha256Digest,
+    state_snapshot: Sha256Digest,
+    evidence_digest: Sha256Digest,
+    verifier_digest: Sha256Digest,
+    verifier_class: CwirVerifierClass,
 }
 
-impl EffectAcceptedV1 {
-    pub const fn cwir_semantic_digest(&self) -> DigestV1 {
+impl EffectAccepted {
+    pub const fn cwir_semantic_digest(&self) -> Sha256Digest {
         self.cwir_semantic_digest
     }
 
-    pub const fn action_digest(&self) -> DigestV1 {
+    pub const fn action_digest(&self) -> Sha256Digest {
         self.action_digest
     }
 
-    pub const fn obligation_id(&self) -> DigestV1 {
+    pub const fn obligation_id(&self) -> Sha256Digest {
         self.obligation_id
     }
 
-    pub const fn predicate_digest(&self) -> DigestV1 {
+    pub const fn predicate_digest(&self) -> Sha256Digest {
         self.predicate_digest
     }
 
-    pub const fn state_snapshot(&self) -> DigestV1 {
+    pub const fn state_snapshot(&self) -> Sha256Digest {
         self.state_snapshot
     }
 
-    pub const fn evidence_digest(&self) -> DigestV1 {
+    pub const fn evidence_digest(&self) -> Sha256Digest {
         self.evidence_digest
     }
 
-    pub const fn verifier_digest(&self) -> DigestV1 {
+    pub const fn verifier_digest(&self) -> Sha256Digest {
         self.verifier_digest
     }
 
-    pub const fn verifier_class(&self) -> CwirVerifierClassV1 {
+    pub const fn verifier_class(&self) -> CwirVerifierClass {
         self.verifier_class
     }
 
-    pub const fn acceptance_digest(&self) -> DigestV1 {
+    pub const fn acceptance_digest(&self) -> Sha256Digest {
         self.acceptance_digest
     }
 
-    pub fn canonical_bytes(&self) -> Result<Vec<u8>, EffectWitnessErrorV1> {
+    pub fn canonical_bytes(&self) -> Result<Vec<u8>, EffectWitnessError> {
         self.validate()?;
         let value = serde_json::to_value(self).map_err(serialization_error)?;
         let bytes = canonical_json(&value).into_bytes();
-        if bytes.len() > EFFECT_WITNESS_MAX_CANONICAL_BYTES_V1 {
-            return Err(EffectWitnessErrorV1::new(
-                EffectWitnessFailureCodeV1::CanonicalPayloadTooLarge,
+        if bytes.len() > EFFECT_WITNESS_MAX_CANONICAL_BYTES {
+            return Err(EffectWitnessError::new(
+                EffectWitnessFailureCode::CanonicalPayloadTooLarge,
                 format!("acceptance has {} canonical bytes", bytes.len()),
             ));
         }
         Ok(bytes)
     }
 
-    pub fn validate(&self) -> Result<(), EffectWitnessErrorV1> {
-        if self.contract_version != EFFECT_WITNESS_CONTRACT_VERSION_V1 {
-            return Err(EffectWitnessErrorV1::new(
-                EffectWitnessFailureCodeV1::UnsupportedVersion,
+    pub fn validate(&self) -> Result<(), EffectWitnessError> {
+        if self.contract_version != EFFECT_WITNESS_CONTRACT_VERSION {
+            return Err(EffectWitnessError::new(
+                EffectWitnessFailureCode::UnsupportedVersion,
                 format!(
                     "unsupported effect acceptance version {}",
                     self.contract_version
@@ -513,18 +513,18 @@ impl EffectAcceptedV1 {
         ] {
             require_digest(label, digest)?;
         }
-        let expected = digest_body(EFFECT_ACCEPTED_DOMAIN_V1, &self.body())?;
+        let expected = digest_body(EFFECT_ACCEPTED_DOMAIN, &self.body())?;
         if self.acceptance_digest != expected {
-            return Err(EffectWitnessErrorV1::new(
-                EffectWitnessFailureCodeV1::AcceptanceDigestMismatch,
+            return Err(EffectWitnessError::new(
+                EffectWitnessFailureCode::AcceptanceDigestMismatch,
                 "acceptance digest does not match canonical body",
             ));
         }
         Ok(())
     }
 
-    fn body(&self) -> EffectAcceptedBodyV1 {
-        EffectAcceptedBodyV1 {
+    fn body(&self) -> EffectAcceptedBody {
+        EffectAcceptedBody {
             contract_version: self.contract_version,
             cwir_semantic_digest: self.cwir_semantic_digest,
             action_digest: self.action_digest,
@@ -540,28 +540,28 @@ impl EffectAcceptedV1 {
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
-pub enum EffectVerificationOutcomeV1 {
-    Accepted(EffectAcceptedV1),
-    Rejected(EffectWitnessV1),
-    Incomplete(EffectWitnessV1),
+pub enum EffectVerificationOutcome {
+    Accepted(EffectAccepted),
+    Rejected(EffectWitness),
+    Incomplete(EffectWitness),
 }
 
 #[allow(clippy::too_many_arguments)]
-pub fn accept_effect_verification_v1(
-    cwir_semantic_digest: DigestV1,
-    program: &EffectProgramV1,
-    obligation_id: DigestV1,
-    predicate_digest: DigestV1,
-    state_snapshot: DigestV1,
-    verifier_digest: DigestV1,
+pub fn accept_effect_verification(
+    cwir_semantic_digest: Sha256Digest,
+    program: &EffectProgram,
+    obligation_id: Sha256Digest,
+    predicate_digest: Sha256Digest,
+    state_snapshot: Sha256Digest,
+    verifier_digest: Sha256Digest,
     evidence: &VerifiedEvidence<'_, '_>,
-) -> Result<EffectVerificationOutcomeV1, EffectWitnessErrorV1> {
+) -> Result<EffectVerificationOutcome, EffectWitnessError> {
     let verifier_class =
         validate_program_binding(program, state_snapshot, predicate_digest, verifier_digest)?;
     validate_evidence_snapshot(state_snapshot, evidence)?;
     let evidence_digest = verified_evidence_digest(evidence)?;
-    let mut accepted = EffectAcceptedV1 {
-        contract_version: EFFECT_WITNESS_CONTRACT_VERSION_V1,
+    let mut accepted = EffectAccepted {
+        contract_version: EFFECT_WITNESS_CONTRACT_VERSION,
         cwir_semantic_digest,
         action_digest: program.action_digest(),
         obligation_id,
@@ -570,26 +570,26 @@ pub fn accept_effect_verification_v1(
         evidence_digest,
         verifier_digest,
         verifier_class,
-        acceptance_digest: DigestV1::ZERO,
+        acceptance_digest: Sha256Digest::ZERO,
     };
     accepted.validate_body_digests()?;
-    accepted.acceptance_digest = digest_body(EFFECT_ACCEPTED_DOMAIN_V1, &accepted.body())?;
-    Ok(EffectVerificationOutcomeV1::Accepted(accepted))
+    accepted.acceptance_digest = digest_body(EFFECT_ACCEPTED_DOMAIN, &accepted.body())?;
+    Ok(EffectVerificationOutcome::Accepted(accepted))
 }
 
 #[allow(clippy::too_many_arguments)]
-pub fn reject_effect_verification_v1(
-    cwir_semantic_digest: DigestV1,
-    program: &EffectProgramV1,
-    obligation_id: DigestV1,
-    kind: EffectWitnessKindV1,
-    expected_predicate_digest: DigestV1,
-    state_snapshot: DigestV1,
-    localization: EffectLocalizationV1,
-    mut expansion_handles: Vec<DigestV1>,
-    verifier_digest: DigestV1,
+pub fn reject_effect_verification(
+    cwir_semantic_digest: Sha256Digest,
+    program: &EffectProgram,
+    obligation_id: Sha256Digest,
+    kind: EffectWitnessKind,
+    expected_predicate_digest: Sha256Digest,
+    state_snapshot: Sha256Digest,
+    localization: EffectLocalization,
+    mut expansion_handles: Vec<Sha256Digest>,
+    verifier_digest: Sha256Digest,
     evidence: &VerifiedEvidence<'_, '_>,
-) -> Result<EffectVerificationOutcomeV1, EffectWitnessErrorV1> {
+) -> Result<EffectVerificationOutcome, EffectWitnessError> {
     let witness = build_witness(
         cwir_semantic_digest,
         program,
@@ -602,22 +602,22 @@ pub fn reject_effect_verification_v1(
         verifier_digest,
         evidence,
     )?;
-    Ok(EffectVerificationOutcomeV1::Rejected(witness))
+    Ok(EffectVerificationOutcome::Rejected(witness))
 }
 
 #[allow(clippy::too_many_arguments)]
-pub fn incomplete_effect_verification_v1(
-    cwir_semantic_digest: DigestV1,
-    program: &EffectProgramV1,
-    obligation_id: DigestV1,
-    kind: EffectWitnessKindV1,
-    expected_predicate_digest: DigestV1,
-    state_snapshot: DigestV1,
-    localization: EffectLocalizationV1,
-    mut expansion_handles: Vec<DigestV1>,
-    verifier_digest: DigestV1,
+pub fn incomplete_effect_verification(
+    cwir_semantic_digest: Sha256Digest,
+    program: &EffectProgram,
+    obligation_id: Sha256Digest,
+    kind: EffectWitnessKind,
+    expected_predicate_digest: Sha256Digest,
+    state_snapshot: Sha256Digest,
+    localization: EffectLocalization,
+    mut expansion_handles: Vec<Sha256Digest>,
+    verifier_digest: Sha256Digest,
     evidence: &VerifiedEvidence<'_, '_>,
-) -> Result<EffectVerificationOutcomeV1, EffectWitnessErrorV1> {
+) -> Result<EffectVerificationOutcome, EffectWitnessError> {
     let witness = build_witness(
         cwir_semantic_digest,
         program,
@@ -630,22 +630,22 @@ pub fn incomplete_effect_verification_v1(
         verifier_digest,
         evidence,
     )?;
-    Ok(EffectVerificationOutcomeV1::Incomplete(witness))
+    Ok(EffectVerificationOutcome::Incomplete(witness))
 }
 
 #[allow(clippy::too_many_arguments)]
 fn build_witness(
-    cwir_semantic_digest: DigestV1,
-    program: &EffectProgramV1,
-    obligation_id: DigestV1,
-    kind: EffectWitnessKindV1,
-    expected_predicate_digest: DigestV1,
-    state_snapshot: DigestV1,
-    localization: EffectLocalizationV1,
-    expansion_handles: &mut [DigestV1],
-    verifier_digest: DigestV1,
+    cwir_semantic_digest: Sha256Digest,
+    program: &EffectProgram,
+    obligation_id: Sha256Digest,
+    kind: EffectWitnessKind,
+    expected_predicate_digest: Sha256Digest,
+    state_snapshot: Sha256Digest,
+    localization: EffectLocalization,
+    expansion_handles: &mut [Sha256Digest],
+    verifier_digest: Sha256Digest,
     evidence: &VerifiedEvidence<'_, '_>,
-) -> Result<EffectWitnessV1, EffectWitnessErrorV1> {
+) -> Result<EffectWitness, EffectWitnessError> {
     validate_program_binding(
         program,
         state_snapshot,
@@ -657,16 +657,16 @@ fn build_witness(
     validate_localization_against(program, localization)?;
     expansion_handles.sort();
     reject_duplicates(expansion_handles, "expansion handles")?;
-    if expansion_handles.len() > EFFECT_WITNESS_MAX_EXPANSIONS_V1 {
-        return Err(EffectWitnessErrorV1::new(
-            EffectWitnessFailureCodeV1::TooManyExpansions,
+    if expansion_handles.len() > EFFECT_WITNESS_MAX_EXPANSIONS {
+        return Err(EffectWitnessError::new(
+            EffectWitnessFailureCode::TooManyExpansions,
             format!("witness has {} expansion handles", expansion_handles.len()),
         ));
     }
     let observed_evidence_digest = verified_evidence_digest(evidence)?;
     let exact_evidence_refs = exact_evidence_refs(evidence)?;
-    let mut witness = EffectWitnessV1 {
-        contract_version: EFFECT_WITNESS_CONTRACT_VERSION_V1,
+    let mut witness = EffectWitness {
+        contract_version: EFFECT_WITNESS_CONTRACT_VERSION,
         cwir_semantic_digest,
         action_digest: program.action_digest(),
         obligation_id,
@@ -678,29 +678,29 @@ fn build_witness(
         exact_evidence_refs,
         expansion_handles: expansion_handles.to_vec(),
         verifier_digest,
-        witness_digest: DigestV1::ZERO,
+        witness_digest: Sha256Digest::ZERO,
     };
     witness.validate_body_digests()?;
-    witness.witness_digest = digest_body(EFFECT_WITNESS_DOMAIN_V1, &witness.body())?;
+    witness.witness_digest = digest_body(EFFECT_WITNESS_DOMAIN, &witness.body())?;
     witness.validate()?;
     Ok(witness)
 }
 
 fn validate_program_binding(
-    program: &EffectProgramV1,
-    state_snapshot: DigestV1,
-    predicate_digest: DigestV1,
-    verifier_digest: DigestV1,
-) -> Result<CwirVerifierClassV1, EffectWitnessErrorV1> {
+    program: &EffectProgram,
+    state_snapshot: Sha256Digest,
+    predicate_digest: Sha256Digest,
+    verifier_digest: Sha256Digest,
+) -> Result<CwirVerifierClass, EffectWitnessError> {
     program.validate().map_err(|error| {
-        EffectWitnessErrorV1::new(
-            EffectWitnessFailureCodeV1::InvalidEffectProgram,
+        EffectWitnessError::new(
+            EffectWitnessFailureCode::InvalidEffectProgram,
             error.to_string(),
         )
     })?;
     if program.base_state() != state_snapshot {
-        return Err(EffectWitnessErrorV1::new(
-            EffectWitnessFailureCodeV1::EffectStateMismatch,
+        return Err(EffectWitnessError::new(
+            EffectWitnessFailureCode::EffectStateMismatch,
             format!(
                 "effect base {} does not match verification state {}",
                 program.base_state().to_hex(),
@@ -716,16 +716,16 @@ fn validate_program_binding(
         .iter()
         .any(|step| step.predicate_digest == predicate_digest)
     {
-        return Err(EffectWitnessErrorV1::new(
-            EffectWitnessFailureCodeV1::PredicateNotInPlan,
+        return Err(EffectWitnessError::new(
+            EffectWitnessFailureCode::PredicateNotInPlan,
             "predicate is absent from the effect verification plan",
         ));
     }
     let Some(step) = program.verification().steps().iter().find(|step| {
         step.predicate_digest == predicate_digest && step.verifier_digest == verifier_digest
     }) else {
-        return Err(EffectWitnessErrorV1::new(
-            EffectWitnessFailureCodeV1::VerificationBindingMismatch,
+        return Err(EffectWitnessError::new(
+            EffectWitnessFailureCode::VerificationBindingMismatch,
             "verifier and predicate are not paired in the effect verification plan",
         ));
     };
@@ -733,31 +733,31 @@ fn validate_program_binding(
 }
 
 fn validate_localization_against(
-    program: &EffectProgramV1,
-    localization: EffectLocalizationV1,
-) -> Result<(), EffectWitnessErrorV1> {
+    program: &EffectProgram,
+    localization: EffectLocalization,
+) -> Result<(), EffectWitnessError> {
     match localization.class() {
-        EffectLocalizationClassV1::Global | EffectLocalizationClassV1::Predicate => Ok(()),
-        EffectLocalizationClassV1::Operation => {
+        EffectLocalizationClass::Global | EffectLocalizationClass::Predicate => Ok(()),
+        EffectLocalizationClass::Operation => {
             let Some(index) = localization.operation_index().map(|value| value as usize) else {
-                return Err(EffectWitnessErrorV1::new(
-                    EffectWitnessFailureCodeV1::InvalidLocalization,
+                return Err(EffectWitnessError::new(
+                    EffectWitnessFailureCode::InvalidLocalization,
                     "operation localization is missing its index",
                 ));
             };
             if index < program.operations().len() {
                 Ok(())
             } else {
-                Err(EffectWitnessErrorV1::new(
-                    EffectWitnessFailureCodeV1::InvalidLocalization,
+                Err(EffectWitnessError::new(
+                    EffectWitnessFailureCode::InvalidLocalization,
                     format!("operation index {index} is outside the effect program"),
                 ))
             }
         }
-        EffectLocalizationClassV1::Target | EffectLocalizationClassV1::ByteRange => {
+        EffectLocalizationClass::Target | EffectLocalizationClass::ByteRange => {
             let Some(target) = localization.target_digest() else {
-                return Err(EffectWitnessErrorV1::new(
-                    EffectWitnessFailureCodeV1::InvalidLocalization,
+                return Err(EffectWitnessError::new(
+                    EffectWitnessFailureCode::InvalidLocalization,
                     "target localization is missing its target digest",
                 ));
             };
@@ -768,8 +768,8 @@ fn validate_localization_against(
             {
                 Ok(())
             } else {
-                Err(EffectWitnessErrorV1::new(
-                    EffectWitnessFailureCodeV1::InvalidLocalization,
+                Err(EffectWitnessError::new(
+                    EffectWitnessFailureCode::InvalidLocalization,
                     format!(
                         "localized target {} is absent from the effect program",
                         target.to_hex()
@@ -780,8 +780,8 @@ fn validate_localization_against(
     }
 }
 
-impl EffectAcceptedV1 {
-    fn validate_body_digests(&self) -> Result<(), EffectWitnessErrorV1> {
+impl EffectAccepted {
+    fn validate_body_digests(&self) -> Result<(), EffectWitnessError> {
         for (label, digest) in [
             ("cwir_semantic_digest", self.cwir_semantic_digest),
             ("action_digest", self.action_digest),
@@ -797,8 +797,8 @@ impl EffectAcceptedV1 {
     }
 }
 
-impl EffectWitnessV1 {
-    fn validate_body_digests(&self) -> Result<(), EffectWitnessErrorV1> {
+impl EffectWitness {
+    fn validate_body_digests(&self) -> Result<(), EffectWitnessError> {
         for (label, digest) in [
             ("cwir_semantic_digest", self.cwir_semantic_digest),
             ("action_digest", self.action_digest),
@@ -814,10 +814,10 @@ impl EffectWitnessV1 {
     }
 }
 
-pub fn effect_witness_contract_manifest_v1() -> Value {
+pub fn effect_witness_contract_manifest() -> Value {
     json!({
         "contract": "zerostack.effect_witness",
-        "contract_version": EFFECT_WITNESS_CONTRACT_VERSION_V1,
+        "contract_version": EFFECT_WITNESS_CONTRACT_VERSION,
         "encoding": "rfc8259_json_sorted_object_keys_no_whitespace",
         "domains": {
             "witness": "zerostack.effect_witness.v1\u{0}",
@@ -852,9 +852,9 @@ pub fn effect_witness_contract_manifest_v1() -> Value {
             "acceptance_digest_mismatch"
         ],
         "bounds": {
-            "max_canonical_bytes": EFFECT_WITNESS_MAX_CANONICAL_BYTES_V1,
-            "max_evidence_refs": EFFECT_WITNESS_MAX_EVIDENCE_REFS_V1,
-            "max_expansions": EFFECT_WITNESS_MAX_EXPANSIONS_V1
+            "max_canonical_bytes": EFFECT_WITNESS_MAX_CANONICAL_BYTES,
+            "max_evidence_refs": EFFECT_WITNESS_MAX_EVIDENCE_REFS,
+            "max_expansions": EFFECT_WITNESS_MAX_EXPANSIONS
         },
         "invariants": [
             "accepted_outcomes_require_verified_evidence",
@@ -866,34 +866,34 @@ pub fn effect_witness_contract_manifest_v1() -> Value {
     })
 }
 
-pub fn effect_witness_contract_digest_v1() -> DigestV1 {
-    DigestV1::from_bytes(sha256(
-        canonical_json(&effect_witness_contract_manifest_v1()).as_bytes(),
+pub fn effect_witness_contract_digest() -> Sha256Digest {
+    Sha256Digest::from_bytes(sha256(
+        canonical_json(&effect_witness_contract_manifest()).as_bytes(),
     ))
 }
 
 fn verified_evidence_digest(
     evidence: &VerifiedEvidence<'_, '_>,
-) -> Result<DigestV1, EffectWitnessErrorV1> {
+) -> Result<Sha256Digest, EffectWitnessError> {
     evidence
         .certificate()
         .canonical_digest()
-        .map(DigestV1::from_bytes)
+        .map(Sha256Digest::from_bytes)
         .map_err(serialization_error)
 }
 
 fn exact_evidence_refs(
     evidence: &VerifiedEvidence<'_, '_>,
-) -> Result<Vec<DigestV1>, EffectWitnessErrorV1> {
-    if evidence.spans().len() > EFFECT_WITNESS_MAX_EVIDENCE_REFS_V1 {
-        return Err(EffectWitnessErrorV1::new(
-            EffectWitnessFailureCodeV1::TooManyEvidenceRefs,
+) -> Result<Vec<Sha256Digest>, EffectWitnessError> {
+    if evidence.spans().len() > EFFECT_WITNESS_MAX_EVIDENCE_REFS {
+        return Err(EffectWitnessError::new(
+            EffectWitnessFailureCode::TooManyEvidenceRefs,
             format!("verified evidence has {} span refs", evidence.spans().len()),
         ));
     }
     let mut refs = Vec::with_capacity(evidence.spans().len());
     for span in evidence.spans() {
-        refs.push(digest_body(EFFECT_EVIDENCE_REF_DOMAIN_V1, span)?);
+        refs.push(digest_body(EFFECT_EVIDENCE_REF_DOMAIN, span)?);
     }
     refs.sort();
     reject_duplicates(&refs, "exact evidence refs")?;
@@ -901,36 +901,36 @@ fn exact_evidence_refs(
 }
 
 fn validate_evidence_snapshot(
-    expected: DigestV1,
+    expected: Sha256Digest,
     evidence: &VerifiedEvidence<'_, '_>,
-) -> Result<(), EffectWitnessErrorV1> {
+) -> Result<(), EffectWitnessError> {
     if let Some(observed) = evidence_snapshot(evidence) {
         require_snapshot(observed, expected)?;
     }
     Ok(())
 }
 
-fn evidence_snapshot(evidence: &VerifiedEvidence<'_, '_>) -> Option<DigestV1> {
+fn evidence_snapshot(evidence: &VerifiedEvidence<'_, '_>) -> Option<Sha256Digest> {
     match evidence.query() {
         Query::ExactSearchDomain { snapshot_id, .. } | Query::Aggregate { snapshot_id, .. } => {
-            Some(DigestV1::from_bytes(*snapshot_id))
+            Some(Sha256Digest::from_bytes(*snapshot_id))
         }
         _ => match &evidence.certificate().completeness {
             CompletenessWitness::ExactSearchDomain { snapshot_id, .. }
             | CompletenessWitness::Aggregate { snapshot_id, .. } => {
-                Some(DigestV1::from_bytes(*snapshot_id))
+                Some(Sha256Digest::from_bytes(*snapshot_id))
             }
             _ => None,
         },
     }
 }
 
-fn require_snapshot(actual: DigestV1, expected: DigestV1) -> Result<(), EffectWitnessErrorV1> {
+fn require_snapshot(actual: Sha256Digest, expected: Sha256Digest) -> Result<(), EffectWitnessError> {
     if actual == expected {
         Ok(())
     } else {
-        Err(EffectWitnessErrorV1::new(
-            EffectWitnessFailureCodeV1::StaleEvidence,
+        Err(EffectWitnessError::new(
+            EffectWitnessFailureCode::StaleEvidence,
             format!(
                 "evidence snapshot {} does not match effect state {}",
                 actual.to_hex(),
@@ -940,10 +940,10 @@ fn require_snapshot(actual: DigestV1, expected: DigestV1) -> Result<(), EffectWi
     }
 }
 
-fn require_digest(label: &str, digest: DigestV1) -> Result<(), EffectWitnessErrorV1> {
-    if digest == DigestV1::ZERO {
-        Err(EffectWitnessErrorV1::new(
-            EffectWitnessFailureCodeV1::ZeroDigest,
+fn require_digest(label: &str, digest: Sha256Digest) -> Result<(), EffectWitnessError> {
+    if digest == Sha256Digest::ZERO {
+        Err(EffectWitnessError::new(
+            EffectWitnessFailureCode::ZeroDigest,
             format!("{label} must not be zero"),
         ))
     } else {
@@ -952,13 +952,13 @@ fn require_digest(label: &str, digest: DigestV1) -> Result<(), EffectWitnessErro
 }
 
 fn validate_sorted_set(
-    values: &[DigestV1],
+    values: &[Sha256Digest],
     label: &str,
     max: usize,
-    too_many: EffectWitnessFailureCodeV1,
-) -> Result<(), EffectWitnessErrorV1> {
+    too_many: EffectWitnessFailureCode,
+) -> Result<(), EffectWitnessError> {
     if values.len() > max {
-        return Err(EffectWitnessErrorV1::new(
+        return Err(EffectWitnessError::new(
             too_many,
             format!("{label} contains {} members", values.len()),
         ));
@@ -968,14 +968,14 @@ fn validate_sorted_set(
     }
     for pair in values.windows(2) {
         if pair[0] == pair[1] {
-            return Err(EffectWitnessErrorV1::new(
-                EffectWitnessFailureCodeV1::DuplicateMember,
+            return Err(EffectWitnessError::new(
+                EffectWitnessFailureCode::DuplicateMember,
                 format!("{label} contains a duplicate member"),
             ));
         }
         if pair[0] > pair[1] {
-            return Err(EffectWitnessErrorV1::new(
-                EffectWitnessFailureCodeV1::NonCanonicalOrder,
+            return Err(EffectWitnessError::new(
+                EffectWitnessFailureCode::NonCanonicalOrder,
                 format!("{label} is not strictly sorted"),
             ));
         }
@@ -983,11 +983,11 @@ fn validate_sorted_set(
     Ok(())
 }
 
-fn reject_duplicates<T: Eq>(values: &[T], label: &str) -> Result<(), EffectWitnessErrorV1> {
+fn reject_duplicates<T: Eq>(values: &[T], label: &str) -> Result<(), EffectWitnessError> {
     for left in 0..values.len() {
         if values[left + 1..].contains(&values[left]) {
-            return Err(EffectWitnessErrorV1::new(
-                EffectWitnessFailureCodeV1::DuplicateMember,
+            return Err(EffectWitnessError::new(
+                EffectWitnessFailureCode::DuplicateMember,
                 format!("{label} contains a duplicate member"),
             ));
         }
@@ -995,18 +995,18 @@ fn reject_duplicates<T: Eq>(values: &[T], label: &str) -> Result<(), EffectWitne
     Ok(())
 }
 
-fn digest_body<T: Serialize>(domain: &[u8], value: &T) -> Result<DigestV1, EffectWitnessErrorV1> {
+fn digest_body<T: Serialize>(domain: &[u8], value: &T) -> Result<Sha256Digest, EffectWitnessError> {
     let value = serde_json::to_value(value).map_err(serialization_error)?;
     let canonical = canonical_json(&value);
     let mut bytes = Vec::with_capacity(domain.len() + canonical.len());
     bytes.extend_from_slice(domain);
     bytes.extend_from_slice(canonical.as_bytes());
-    Ok(DigestV1::from_bytes(sha256(&bytes)))
+    Ok(Sha256Digest::from_bytes(sha256(&bytes)))
 }
 
-fn serialization_error(error: serde_json::Error) -> EffectWitnessErrorV1 {
-    EffectWitnessErrorV1::new(
-        EffectWitnessFailureCodeV1::SerializationFailure,
+fn serialization_error(error: serde_json::Error) -> EffectWitnessError {
+    EffectWitnessError::new(
+        EffectWitnessFailureCode::SerializationFailure,
         error.to_string(),
     )
 }

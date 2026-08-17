@@ -17,9 +17,9 @@ use std::{
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use zero_abi::{
-    DigestV1, canonical_json,
+    Sha256Digest, canonical_json,
     robust_snap::{
-        ProtectedEffectSet, ProtectedEffectV1, ROBUST_SNAP_MAX_ASSUMPTION_BYTES,
+        ProtectedEffectSet, ProtectedEffect, ROBUST_SNAP_MAX_ASSUMPTION_BYTES,
         ROBUST_SNAP_MAX_ASSUMPTIONS, ROBUST_SNAP_MAX_EFFECTS, ROBUST_SNAP_MAX_WORLDS,
         ROBUST_SNAP_MODEL_VERSION, WorldFiberDescriptor,
     },
@@ -27,42 +27,42 @@ use zero_abi::{
 };
 use zero_cert::{CompletenessWitness, Query, VerifiedEvidence};
 
-pub const DCR_CONTRACT_VERSION_V1: u16 = 1;
-pub const DCR_SCHEMA_VERSION_V1: &str = "racc-r-dcr-certificate/v1";
-pub const DCR_PROBLEM_SCHEMA_VERSION_V1: &str = "zerostack.dcr.problem.v1";
-pub const DCR_SCHEMA_SHA256_V1: &str =
+pub const DCR_CONTRACT_VERSION: u16 = 1;
+pub const DCR_SCHEMA_VERSION: &str = "racc-r-dcr-certificate/v1";
+pub const DCR_PROBLEM_SCHEMA_VERSION: &str = "zerostack.dcr.problem.v1";
+pub const DCR_SCHEMA_SHA256: &str =
     "bd41d160b90dfd153cce4bf6154d5b8d5e2b65b63d5b4f60ab421b43485db160";
-pub const DCR_MAX_WORLDS_V1: usize = ROBUST_SNAP_MAX_WORLDS;
-pub const DCR_MAX_HYPERGRAPH_STATES_V1: usize = 65_536;
-pub const DCR_MAX_QUERIES_V1: usize = 32;
-pub const DCR_MAX_OUTCOMES_PER_QUERY_V1: usize = 16;
-pub const DCR_MAX_QUERY_TRACE_V1: usize = 32;
-pub const DCR_MAX_CANONICAL_BYTES_V1: usize = 1_048_576;
-pub const DCR_MAX_DP_STATES_V1: usize = 65_536;
+pub const DCR_MAX_WORLDS: usize = ROBUST_SNAP_MAX_WORLDS;
+pub const DCR_MAX_HYPERGRAPH_STATES: usize = 65_536;
+pub const DCR_MAX_QUERIES: usize = 32;
+pub const DCR_MAX_OUTCOMES_PER_QUERY: usize = 16;
+pub const DCR_MAX_QUERY_TRACE: usize = 32;
+pub const DCR_MAX_CANONICAL_BYTES: usize = 1_048_576;
+pub const DCR_MAX_DP_STATES: usize = 65_536;
 
-const PROBLEM_DOMAIN_V1: &[u8] = b"zerostack.dcr.problem.v1\0";
-const FIBER_DOMAIN_V1: &[u8] = b"zerostack.dcr.world_fiber.v1\0";
-const SURFACE_DOMAIN_V1: &[u8] = b"zerostack.dcr.accessible_surface.v1\0";
-const EFFECT_CLASS_DOMAIN_V1: &[u8] = b"zerostack.dcr.common_effect_class.v1\0";
-const HYPEREDGE_DOMAIN_V1: &[u8] = b"zerostack.dcr.conflict_hyperedge.v1\0";
-const CLAIM_DOMAIN_V1: &[u8] = b"zerostack.dcr.claim.v1\0";
-const COMPLETE_DOMAIN_V1: &[u8] = b"zerostack.dcr.complete_certificate.v1\0";
-const CONFLICT_DOMAIN_V1: &[u8] = b"zerostack.dcr.conflict_decision.v1\0";
-const UNKNOWN_DOMAIN_V1: &[u8] = b"zerostack.dcr.unknown_decision.v1\0";
-const VERIFIER_DOMAIN_V1: &[u8] = b"zerostack.dcr.verifier_identity.v1\0";
-const OBSERVATION_DOMAIN_V1: &[u8] = b"zerostack.dcr.query_observation.v1\0";
-const CONTRACT_DOMAIN_V1: &[u8] = b"zerostack.dcr.contract.v1\0";
+const PROBLEM_DOMAIN: &[u8] = b"zerostack.dcr.problem.v1\0";
+const FIBER_DOMAIN: &[u8] = b"zerostack.dcr.world_fiber.v1\0";
+const SURFACE_DOMAIN: &[u8] = b"zerostack.dcr.accessible_surface.v1\0";
+const EFFECT_CLASS_DOMAIN: &[u8] = b"zerostack.dcr.common_effect_class.v1\0";
+const HYPEREDGE_DOMAIN: &[u8] = b"zerostack.dcr.conflict_hyperedge.v1\0";
+const CLAIM_DOMAIN: &[u8] = b"zerostack.dcr.claim.v1\0";
+const COMPLETE_DOMAIN: &[u8] = b"zerostack.dcr.complete_certificate.v1\0";
+const CONFLICT_DOMAIN: &[u8] = b"zerostack.dcr.conflict_decision.v1\0";
+const UNKNOWN_DOMAIN: &[u8] = b"zerostack.dcr.unknown_decision.v1\0";
+const VERIFIER_DOMAIN: &[u8] = b"zerostack.dcr.verifier_identity.v1\0";
+const OBSERVATION_DOMAIN: &[u8] = b"zerostack.dcr.query_observation.v1\0";
+const CONTRACT_DOMAIN: &[u8] = b"zerostack.dcr.contract.v1\0";
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
-pub enum SourceFiberStatusV1 {
+pub enum SourceFiberStatus {
     Exact,
     SoundOverapproximation,
     Unknown,
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
-pub enum DcrFiberStatusV1 {
+pub enum DcrFiberStatus {
     #[serde(rename = "exact")]
     Exact,
     #[serde(rename = "sound-overapproximation")]
@@ -75,72 +75,72 @@ pub enum DcrFiberStatusV1 {
 
 #[derive(Clone, Debug, Deserialize, Eq, Ord, PartialEq, PartialOrd, Serialize)]
 #[serde(deny_unknown_fields)]
-pub struct WorldRecoveryBudgetV1 {
-    pub world_id: DigestV1,
+pub struct WorldRecoveryBudget {
+    pub world_id: Sha256Digest,
     pub probability_weight: u64,
     pub raw_baseline_cost_units: u64,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, Ord, PartialEq, PartialOrd, Serialize)]
 #[serde(deny_unknown_fields)]
-pub struct RecoveryQueryOutcomeV1 {
-    pub outcome_digest: DigestV1,
-    pub worlds: Vec<DigestV1>,
+pub struct RecoveryQueryOutcome {
+    pub outcome_digest: Sha256Digest,
+    pub worlds: Vec<Sha256Digest>,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, Ord, PartialEq, PartialOrd, Serialize)]
 #[serde(deny_unknown_fields)]
-pub struct RecoveryQueryV1 {
-    pub query_digest: DigestV1,
+pub struct RecoveryQuery {
+    pub query_digest: Sha256Digest,
     pub native_cost_units: u64,
-    pub evidence_route_digest: DigestV1,
-    pub outcomes: Vec<RecoveryQueryOutcomeV1>,
+    pub evidence_route_digest: Sha256Digest,
+    pub outcomes: Vec<RecoveryQueryOutcome>,
 }
 
 /// Canonical finite DCR problem. It is data, not authority. The controller only
 /// accepts its exact bytes through successful `zero-cert` build/test evidence.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
-pub struct DominanceRecoveryProblemV1 {
+pub struct DominanceRecoveryProblem {
     schema_version: String,
-    project_root: DigestV1,
-    task_identity: DigestV1,
+    project_root: Sha256Digest,
+    task_identity: Sha256Digest,
     fiber: WorldFiberDescriptor,
-    fiber_status: SourceFiberStatusV1,
-    baseline_identity: DigestV1,
-    reasoning_contract_digest: DigestV1,
-    decision_view_digest: DigestV1,
+    fiber_status: SourceFiberStatus,
+    baseline_identity: Sha256Digest,
+    reasoning_contract_digest: Sha256Digest,
+    decision_view_digest: Sha256Digest,
     protected_effects: Vec<ProtectedEffectSet>,
-    accessible_effect_surface: Vec<ProtectedEffectV1>,
-    world_budgets: Vec<WorldRecoveryBudgetV1>,
-    queries: Vec<RecoveryQueryV1>,
-    coverage_certificate: DigestV1,
-    recovery_query_trace: Vec<DigestV1>,
-    verifier_route: DigestV1,
-    fallback_safepoint: DigestV1,
+    accessible_effect_surface: Vec<ProtectedEffect>,
+    world_budgets: Vec<WorldRecoveryBudget>,
+    queries: Vec<RecoveryQuery>,
+    coverage_certificate: Sha256Digest,
+    recovery_query_trace: Vec<Sha256Digest>,
+    verifier_route: Sha256Digest,
+    fallback_safepoint: Sha256Digest,
 }
 
-impl DominanceRecoveryProblemV1 {
+impl DominanceRecoveryProblem {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
-        project_root: DigestV1,
-        task_identity: DigestV1,
+        project_root: Sha256Digest,
+        task_identity: Sha256Digest,
         fiber: WorldFiberDescriptor,
-        fiber_status: SourceFiberStatusV1,
-        baseline_identity: DigestV1,
-        reasoning_contract_digest: DigestV1,
-        decision_view_digest: DigestV1,
+        fiber_status: SourceFiberStatus,
+        baseline_identity: Sha256Digest,
+        reasoning_contract_digest: Sha256Digest,
+        decision_view_digest: Sha256Digest,
         protected_effects: Vec<ProtectedEffectSet>,
-        accessible_effect_surface: Vec<ProtectedEffectV1>,
-        world_budgets: Vec<WorldRecoveryBudgetV1>,
-        queries: Vec<RecoveryQueryV1>,
-        coverage_certificate: DigestV1,
-        recovery_query_trace: Vec<DigestV1>,
-        verifier_route: DigestV1,
-        fallback_safepoint: DigestV1,
-    ) -> Result<Self, DcrErrorV1> {
+        accessible_effect_surface: Vec<ProtectedEffect>,
+        world_budgets: Vec<WorldRecoveryBudget>,
+        queries: Vec<RecoveryQuery>,
+        coverage_certificate: Sha256Digest,
+        recovery_query_trace: Vec<Sha256Digest>,
+        verifier_route: Sha256Digest,
+        fallback_safepoint: Sha256Digest,
+    ) -> Result<Self, DcrError> {
         let problem = Self {
-            schema_version: DCR_PROBLEM_SCHEMA_VERSION_V1.into(),
+            schema_version: DCR_PROBLEM_SCHEMA_VERSION.into(),
             project_root,
             task_identity,
             fiber,
@@ -161,10 +161,10 @@ impl DominanceRecoveryProblemV1 {
         Ok(problem)
     }
 
-    pub fn validate(&self) -> Result<(), DcrErrorV1> {
-        if self.schema_version != DCR_PROBLEM_SCHEMA_VERSION_V1 {
+    pub fn validate(&self) -> Result<(), DcrError> {
+        if self.schema_version != DCR_PROBLEM_SCHEMA_VERSION {
             return Err(dcr_error(
-                DcrFailureCodeV1::SchemaVersionMismatch,
+                DcrFailureCode::SchemaVersionMismatch,
                 "DCR problem schema version is not v1",
             ));
         }
@@ -186,19 +186,19 @@ impl DominanceRecoveryProblemV1 {
         )?;
         if self.fiber.model_version != ROBUST_SNAP_MODEL_VERSION {
             return Err(dcr_error(
-                DcrFailureCodeV1::UnsupportedFiber,
+                DcrFailureCode::UnsupportedFiber,
                 "world fiber does not use the frozen finite Robust Snap model",
             ));
         }
         if self.fiber.task_fingerprint != self.task_identity {
             return Err(dcr_error(
-                DcrFailureCodeV1::IdentityMismatch,
+                DcrFailureCode::IdentityMismatch,
                 "world fiber task fingerprint differs from the DCR task identity",
             ));
         }
-        if self.fiber.worlds.is_empty() || self.fiber.worlds.len() > DCR_MAX_WORLDS_V1 {
+        if self.fiber.worlds.is_empty() || self.fiber.worlds.len() > DCR_MAX_WORLDS {
             return Err(dcr_error(
-                DcrFailureCodeV1::BoundExceeded,
+                DcrFailureCode::BoundExceeded,
                 "world fiber is empty or exceeds the exact finite DCR bound",
             ));
         }
@@ -210,7 +210,7 @@ impl DominanceRecoveryProblemV1 {
             })
         {
             return Err(dcr_error(
-                DcrFailureCodeV1::UnsupportedFiber,
+                DcrFailureCode::UnsupportedFiber,
                 "world-fiber assumptions are empty or exceed Robust Snap bounds",
             ));
         }
@@ -218,7 +218,7 @@ impl DominanceRecoveryProblemV1 {
 
         if self.protected_effects.len() != self.fiber.worlds.len() {
             return Err(dcr_error(
-                DcrFailureCodeV1::IncompleteCoverage,
+                DcrFailureCode::IncompleteCoverage,
                 "every possible world must have one protected effect set",
             ));
         }
@@ -230,14 +230,14 @@ impl DominanceRecoveryProblemV1 {
         require_strict_order("protected_effects", &protected_worlds)?;
         if protected_worlds != self.fiber.worlds {
             return Err(dcr_error(
-                DcrFailureCodeV1::IncompleteCoverage,
+                DcrFailureCode::IncompleteCoverage,
                 "protected effect sets do not cover the complete world fiber",
             ));
         }
         for entry in &self.protected_effects {
             if entry.effects.is_empty() || entry.effects.len() > ROBUST_SNAP_MAX_EFFECTS {
                 return Err(dcr_error(
-                    DcrFailureCodeV1::IncompleteCoverage,
+                    DcrFailureCode::IncompleteCoverage,
                     "each world needs a bounded nonempty baseline-dominant effect set",
                 ));
             }
@@ -245,7 +245,7 @@ impl DominanceRecoveryProblemV1 {
         }
         if self.accessible_effect_surface.len() > ROBUST_SNAP_MAX_EFFECTS {
             return Err(dcr_error(
-                DcrFailureCodeV1::BoundExceeded,
+                DcrFailureCode::BoundExceeded,
                 "model-accessible effect surface exceeds the Robust Snap effect bound",
             ));
         }
@@ -253,7 +253,7 @@ impl DominanceRecoveryProblemV1 {
 
         if self.world_budgets.len() != self.fiber.worlds.len() {
             return Err(dcr_error(
-                DcrFailureCodeV1::InvalidCostModel,
+                DcrFailureCode::InvalidCostModel,
                 "world probability and raw-baseline cost records must cover the fiber",
             ));
         }
@@ -270,14 +270,14 @@ impl DominanceRecoveryProblemV1 {
                 .any(|entry| entry.probability_weight == 0 || entry.raw_baseline_cost_units == 0)
         {
             return Err(dcr_error(
-                DcrFailureCodeV1::InvalidCostModel,
+                DcrFailureCode::InvalidCostModel,
                 "world weights and fully charged raw-baseline costs must be positive",
             ));
         }
 
-        if self.queries.len() > DCR_MAX_QUERIES_V1 {
+        if self.queries.len() > DCR_MAX_QUERIES {
             return Err(dcr_error(
-                DcrFailureCodeV1::BoundExceeded,
+                DcrFailureCode::BoundExceeded,
                 "recovery query set exceeds its finite bound",
             ));
         }
@@ -290,8 +290,8 @@ impl DominanceRecoveryProblemV1 {
         for query in &self.queries {
             self.validate_query(query)?;
         }
-        if self.recovery_query_trace.len() > DCR_MAX_QUERY_TRACE_V1
-            || self.recovery_query_trace.contains(&DigestV1::ZERO)
+        if self.recovery_query_trace.len() > DCR_MAX_QUERY_TRACE
+            || self.recovery_query_trace.contains(&Sha256Digest::ZERO)
             || self
                 .recovery_query_trace
                 .iter()
@@ -300,24 +300,24 @@ impl DominanceRecoveryProblemV1 {
                 != self.recovery_query_trace.len()
         {
             return Err(dcr_error(
-                DcrFailureCodeV1::InvalidQueryTrace,
+                DcrFailureCode::InvalidQueryTrace,
                 "query trace is too long, zero-valued, or repeats an observation",
             ));
         }
         Ok(())
     }
 
-    fn validate_query(&self, query: &RecoveryQueryV1) -> Result<(), DcrErrorV1> {
+    fn validate_query(&self, query: &RecoveryQuery) -> Result<(), DcrError> {
         require_nonzero(
             "recovery query",
             &[query.query_digest, query.evidence_route_digest],
         )?;
         if query.native_cost_units == 0
             || query.outcomes.len() < 2
-            || query.outcomes.len() > DCR_MAX_OUTCOMES_PER_QUERY_V1
+            || query.outcomes.len() > DCR_MAX_OUTCOMES_PER_QUERY
         {
             return Err(dcr_error(
-                DcrFailureCodeV1::InvalidQuery,
+                DcrFailureCode::InvalidQuery,
                 "query needs a positive native cost and a bounded discriminating partition",
             ));
         }
@@ -330,9 +330,9 @@ impl DominanceRecoveryProblemV1 {
         let expected = self.fiber.worlds.iter().copied().collect::<BTreeSet<_>>();
         let mut observed = BTreeSet::new();
         for outcome in &query.outcomes {
-            if outcome.outcome_digest == DigestV1::ZERO || outcome.worlds.is_empty() {
+            if outcome.outcome_digest == Sha256Digest::ZERO || outcome.worlds.is_empty() {
                 return Err(dcr_error(
-                    DcrFailureCodeV1::InvalidQuery,
+                    DcrFailureCode::InvalidQuery,
                     "query outcomes require nonzero identities and nonempty world cells",
                 ));
             }
@@ -340,7 +340,7 @@ impl DominanceRecoveryProblemV1 {
             for world in &outcome.worlds {
                 if !expected.contains(world) || !observed.insert(*world) {
                     return Err(dcr_error(
-                        DcrFailureCodeV1::InvalidQuery,
+                        DcrFailureCode::InvalidQuery,
                         "query outcomes must be a disjoint partition of the world fiber",
                     ));
                 }
@@ -348,38 +348,38 @@ impl DominanceRecoveryProblemV1 {
         }
         if observed != expected {
             return Err(dcr_error(
-                DcrFailureCodeV1::InvalidQuery,
+                DcrFailureCode::InvalidQuery,
                 "query outcomes drop possible worlds",
             ));
         }
         Ok(())
     }
 
-    pub fn canonical_bytes(&self) -> Result<Vec<u8>, DcrErrorV1> {
+    pub fn canonical_bytes(&self) -> Result<Vec<u8>, DcrError> {
         self.validate()?;
         canonical_bytes(self)
     }
 
-    pub fn from_canonical_bytes(bytes: &[u8]) -> Result<Self, DcrErrorV1> {
+    pub fn from_canonical_bytes(bytes: &[u8]) -> Result<Self, DcrError> {
         let problem: Self = decode_canonical(bytes)?;
         problem.validate()?;
         Ok(problem)
     }
 
-    pub fn digest(&self) -> Result<DigestV1, DcrErrorV1> {
-        Ok(domain_digest(PROBLEM_DOMAIN_V1, &self.canonical_bytes()?))
+    pub fn digest(&self) -> Result<Sha256Digest, DcrError> {
+        Ok(domain_digest(PROBLEM_DOMAIN, &self.canonical_bytes()?))
     }
 
-    pub fn world_fiber_digest(&self) -> Result<DigestV1, DcrErrorV1> {
+    pub fn world_fiber_digest(&self) -> Result<Sha256Digest, DcrError> {
         Ok(domain_digest(
-            FIBER_DOMAIN_V1,
+            FIBER_DOMAIN,
             &canonical_bytes(&self.fiber)?,
         ))
     }
 
-    pub fn accessible_effect_surface_digest(&self) -> Result<DigestV1, DcrErrorV1> {
+    pub fn accessible_effect_surface_digest(&self) -> Result<Sha256Digest, DcrError> {
         Ok(domain_digest(
-            SURFACE_DOMAIN_V1,
+            SURFACE_DOMAIN,
             &canonical_bytes(&self.accessible_effect_surface)?,
         ))
     }
@@ -389,15 +389,15 @@ impl DominanceRecoveryProblemV1 {
     #[allow(clippy::too_many_arguments)]
     pub fn condition_on(
         &self,
-        query_digest: DigestV1,
-        outcome_digest: DigestV1,
-        observation_receipt: DigestV1,
-        decision_view_digest: DigestV1,
-        accessible_effect_surface: Vec<ProtectedEffectV1>,
-        coverage_certificate: DigestV1,
-        verifier_route: DigestV1,
-        fallback_safepoint: DigestV1,
-    ) -> Result<Self, DcrErrorV1> {
+        query_digest: Sha256Digest,
+        outcome_digest: Sha256Digest,
+        observation_receipt: Sha256Digest,
+        decision_view_digest: Sha256Digest,
+        accessible_effect_surface: Vec<ProtectedEffect>,
+        coverage_certificate: Sha256Digest,
+        verifier_route: Sha256Digest,
+        fallback_safepoint: Sha256Digest,
+    ) -> Result<Self, DcrError> {
         require_nonzero(
             "conditioned recovery identity",
             &[
@@ -414,14 +414,14 @@ impl DominanceRecoveryProblemV1 {
             .queries
             .iter()
             .find(|query| query.query_digest == query_digest)
-            .ok_or_else(|| dcr_error(DcrFailureCodeV1::InvalidQuery, "query is not admissible"))?;
+            .ok_or_else(|| dcr_error(DcrFailureCode::InvalidQuery, "query is not admissible"))?;
         let outcome = query
             .outcomes
             .iter()
             .find(|outcome| outcome.outcome_digest == outcome_digest)
             .ok_or_else(|| {
                 dcr_error(
-                    DcrFailureCodeV1::InvalidQuery,
+                    DcrFailureCode::InvalidQuery,
                     "observation is not an outcome of the selected query",
                 )
             })?;
@@ -454,7 +454,7 @@ impl DominanceRecoveryProblemV1 {
         conditioned.verifier_route = verifier_route;
         conditioned.fallback_safepoint = fallback_safepoint;
         let observation_digest = digest_value(
-            OBSERVATION_DOMAIN_V1,
+            OBSERVATION_DOMAIN,
             &json!({
                 "evidence_route_digest": query.evidence_route_digest,
                 "observation_receipt": observation_receipt,
@@ -470,7 +470,7 @@ impl DominanceRecoveryProblemV1 {
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
-pub struct ExactRecoveryCostV1 {
+pub struct ExactRecoveryCost {
     #[serde(with = "u128_decimal")]
     numerator: u128,
     #[serde(with = "u128_decimal")]
@@ -496,7 +496,7 @@ mod u128_decimal {
     }
 }
 
-impl ExactRecoveryCostV1 {
+impl ExactRecoveryCost {
     pub const fn numerator(self) -> u128 {
         self.numerator
     }
@@ -507,16 +507,16 @@ impl ExactRecoveryCostV1 {
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
-pub struct ConflictHyperedgeV1 {
-    worlds: Vec<DigestV1>,
-    hyperedge_digest: DigestV1,
+pub struct ConflictHyperedge {
+    worlds: Vec<Sha256Digest>,
+    hyperedge_digest: Sha256Digest,
 }
 
-impl ConflictHyperedgeV1 {
-    pub fn worlds(&self) -> &[DigestV1] {
+impl ConflictHyperedge {
+    pub fn worlds(&self) -> &[Sha256Digest] {
         &self.worlds
     }
-    pub const fn digest(&self) -> DigestV1 {
+    pub const fn digest(&self) -> Sha256Digest {
         self.hyperedge_digest
     }
 }
@@ -525,47 +525,47 @@ impl ConflictHyperedgeV1 {
 /// deserializing it does not create execution authority.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
-pub struct DominanceCompleteRecoveryClaimV1 {
+pub struct DominanceCompleteRecoveryClaim {
     schema_version: String,
-    project_root: DigestV1,
-    task_identity: DigestV1,
-    world_fiber_digest: DigestV1,
-    fiber_status: DcrFiberStatusV1,
-    baseline_identity: DigestV1,
-    reasoning_contract_digest: DigestV1,
-    decision_view_digest: DigestV1,
-    accessible_effect_surface_digest: DigestV1,
-    common_baseline_dominant_effect_class: DigestV1,
-    coverage_certificate: DigestV1,
-    conflict_hyperedges: Vec<DigestV1>,
-    recovery_query_trace: Vec<DigestV1>,
-    verifier_route: DigestV1,
-    fallback_safepoint: DigestV1,
+    project_root: Sha256Digest,
+    task_identity: Sha256Digest,
+    world_fiber_digest: Sha256Digest,
+    fiber_status: DcrFiberStatus,
+    baseline_identity: Sha256Digest,
+    reasoning_contract_digest: Sha256Digest,
+    decision_view_digest: Sha256Digest,
+    accessible_effect_surface_digest: Sha256Digest,
+    common_baseline_dominant_effect_class: Sha256Digest,
+    coverage_certificate: Sha256Digest,
+    conflict_hyperedges: Vec<Sha256Digest>,
+    recovery_query_trace: Vec<Sha256Digest>,
+    verifier_route: Sha256Digest,
+    fallback_safepoint: Sha256Digest,
 }
 
-impl DominanceCompleteRecoveryClaimV1 {
+impl DominanceCompleteRecoveryClaim {
     fn from_complete(
-        problem: &DominanceRecoveryProblemV1,
-        common_effects: &[ProtectedEffectV1],
-    ) -> Result<Self, DcrErrorV1> {
+        problem: &DominanceRecoveryProblem,
+        common_effects: &[ProtectedEffect],
+    ) -> Result<Self, DcrError> {
         if common_effects.is_empty() {
             return Err(dcr_error(
-                DcrFailureCodeV1::NotDominanceComplete,
+                DcrFailureCode::NotDominanceComplete,
                 "a Complete claim requires a nonempty common accessible effect class",
             ));
         }
         let fiber_status = match problem.fiber_status {
-            SourceFiberStatusV1::Exact => DcrFiberStatusV1::Exact,
-            SourceFiberStatusV1::SoundOverapproximation => DcrFiberStatusV1::SoundOverapproximation,
-            SourceFiberStatusV1::Unknown => {
+            SourceFiberStatus::Exact => DcrFiberStatus::Exact,
+            SourceFiberStatus::SoundOverapproximation => DcrFiberStatus::SoundOverapproximation,
+            SourceFiberStatus::Unknown => {
                 return Err(dcr_error(
-                    DcrFailureCodeV1::UnknownFiberCannotComplete,
+                    DcrFailureCode::UnknownFiberCannotComplete,
                     "an unknown fiber cannot mint strict DCR authority",
                 ));
             }
         };
         let claim = Self {
-            schema_version: DCR_SCHEMA_VERSION_V1.into(),
+            schema_version: DCR_SCHEMA_VERSION.into(),
             project_root: problem.project_root,
             task_identity: problem.task_identity,
             world_fiber_digest: problem.world_fiber_digest()?,
@@ -575,7 +575,7 @@ impl DominanceCompleteRecoveryClaimV1 {
             decision_view_digest: problem.decision_view_digest,
             accessible_effect_surface_digest: problem.accessible_effect_surface_digest()?,
             common_baseline_dominant_effect_class: domain_digest(
-                EFFECT_CLASS_DOMAIN_V1,
+                EFFECT_CLASS_DOMAIN,
                 &canonical_bytes(common_effects)?,
             ),
             coverage_certificate: problem.coverage_certificate,
@@ -588,19 +588,19 @@ impl DominanceCompleteRecoveryClaimV1 {
         Ok(claim)
     }
 
-    pub fn validate(&self) -> Result<(), DcrErrorV1> {
-        if self.schema_version != DCR_SCHEMA_VERSION_V1 {
+    pub fn validate(&self) -> Result<(), DcrError> {
+        if self.schema_version != DCR_SCHEMA_VERSION {
             return Err(dcr_error(
-                DcrFailureCodeV1::SchemaVersionMismatch,
+                DcrFailureCode::SchemaVersionMismatch,
                 "DCR certificate claim schema version is not v1",
             ));
         }
         if !matches!(
             self.fiber_status,
-            DcrFiberStatusV1::Exact | DcrFiberStatusV1::SoundOverapproximation
+            DcrFiberStatus::Exact | DcrFiberStatus::SoundOverapproximation
         ) {
             return Err(dcr_error(
-                DcrFailureCodeV1::UnknownFiberCannotComplete,
+                DcrFailureCode::UnknownFiberCannotComplete,
                 "Conflict and Unknown records cannot be replayed as Complete",
             ));
         }
@@ -622,40 +622,40 @@ impl DominanceCompleteRecoveryClaimV1 {
         )?;
         if !self.conflict_hyperedges.is_empty() {
             return Err(dcr_error(
-                DcrFailureCodeV1::NotDominanceComplete,
+                DcrFailureCode::NotDominanceComplete,
                 "Complete claim cannot carry unresolved conflict hyperedges",
             ));
         }
-        if self.recovery_query_trace.len() > DCR_MAX_QUERY_TRACE_V1
-            || self.recovery_query_trace.contains(&DigestV1::ZERO)
+        if self.recovery_query_trace.len() > DCR_MAX_QUERY_TRACE
+            || self.recovery_query_trace.contains(&Sha256Digest::ZERO)
         {
             return Err(dcr_error(
-                DcrFailureCodeV1::InvalidQueryTrace,
+                DcrFailureCode::InvalidQueryTrace,
                 "complete claim query trace is invalid",
             ));
         }
         Ok(())
     }
 
-    pub fn canonical_bytes(&self) -> Result<Vec<u8>, DcrErrorV1> {
+    pub fn canonical_bytes(&self) -> Result<Vec<u8>, DcrError> {
         self.validate()?;
         canonical_bytes(self)
     }
 
-    pub fn from_canonical_bytes(bytes: &[u8]) -> Result<Self, DcrErrorV1> {
+    pub fn from_canonical_bytes(bytes: &[u8]) -> Result<Self, DcrError> {
         let claim: Self = decode_canonical(bytes)?;
         claim.validate()?;
         Ok(claim)
     }
 
-    pub fn digest(&self) -> Result<DigestV1, DcrErrorV1> {
-        Ok(domain_digest(CLAIM_DOMAIN_V1, &self.canonical_bytes()?))
+    pub fn digest(&self) -> Result<Sha256Digest, DcrError> {
+        Ok(domain_digest(CLAIM_DOMAIN, &self.canonical_bytes()?))
     }
 
-    pub const fn common_effect_class_digest(&self) -> DigestV1 {
+    pub const fn common_effect_class_digest(&self) -> Sha256Digest {
         self.common_baseline_dominant_effect_class
     }
-    pub const fn verifier_route(&self) -> DigestV1 {
+    pub const fn verifier_route(&self) -> Sha256Digest {
         self.verifier_route
     }
 }
@@ -664,25 +664,25 @@ impl DominanceCompleteRecoveryClaimV1 {
 /// problem bytes can create this value.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
-pub struct DominanceCompleteRecoveryCertificateV1 {
+pub struct DominanceCompleteRecoveryCertificate {
     contract_version: u16,
-    problem: DominanceRecoveryProblemV1,
-    claim: DominanceCompleteRecoveryClaimV1,
-    common_effects: Vec<ProtectedEffectV1>,
-    problem_digest: DigestV1,
-    evidence_digest: DigestV1,
-    verifier_identity_digest: DigestV1,
-    certificate_digest: DigestV1,
+    problem: DominanceRecoveryProblem,
+    claim: DominanceCompleteRecoveryClaim,
+    common_effects: Vec<ProtectedEffect>,
+    problem_digest: Sha256Digest,
+    evidence_digest: Sha256Digest,
+    verifier_identity_digest: Sha256Digest,
+    certificate_digest: Sha256Digest,
 }
 
-impl DominanceCompleteRecoveryCertificateV1 {
+impl DominanceCompleteRecoveryCertificate {
     fn mint(
-        problem: DominanceRecoveryProblemV1,
-        common_effects: Vec<ProtectedEffectV1>,
-        evidence_digest: DigestV1,
-        verifier_identity_digest: DigestV1,
-    ) -> Result<Self, DcrErrorV1> {
-        let claim = DominanceCompleteRecoveryClaimV1::from_complete(&problem, &common_effects)?;
+        problem: DominanceRecoveryProblem,
+        common_effects: Vec<ProtectedEffect>,
+        evidence_digest: Sha256Digest,
+        verifier_identity_digest: Sha256Digest,
+    ) -> Result<Self, DcrError> {
+        let claim = DominanceCompleteRecoveryClaim::from_complete(&problem, &common_effects)?;
         let problem_digest = problem.digest()?;
         let certificate_digest = complete_certificate_digest(
             problem_digest,
@@ -692,7 +692,7 @@ impl DominanceCompleteRecoveryCertificateV1 {
             &common_effects,
         )?;
         let certificate = Self {
-            contract_version: DCR_CONTRACT_VERSION_V1,
+            contract_version: DCR_CONTRACT_VERSION,
             problem,
             claim,
             common_effects,
@@ -705,10 +705,10 @@ impl DominanceCompleteRecoveryCertificateV1 {
         Ok(certificate)
     }
 
-    pub fn validate(&self) -> Result<(), DcrErrorV1> {
-        if self.contract_version != DCR_CONTRACT_VERSION_V1 {
+    pub fn validate(&self) -> Result<(), DcrError> {
+        if self.contract_version != DCR_CONTRACT_VERSION {
             return Err(dcr_error(
-                DcrFailureCodeV1::SchemaVersionMismatch,
+                DcrFailureCode::SchemaVersionMismatch,
                 "DCR certificate contract version is not v1",
             ));
         }
@@ -721,7 +721,7 @@ impl DominanceCompleteRecoveryCertificateV1 {
         if self.problem.verifier_route != self.verifier_identity_digest
             || self.problem.digest()? != self.problem_digest
             || self.claim
-                != DominanceCompleteRecoveryClaimV1::from_complete(
+                != DominanceCompleteRecoveryClaim::from_complete(
                     &self.problem,
                     &self.common_effects,
                 )?
@@ -735,15 +735,15 @@ impl DominanceCompleteRecoveryCertificateV1 {
             )? != self.certificate_digest
         {
             return Err(dcr_error(
-                DcrFailureCodeV1::CertificateDigestMismatch,
+                DcrFailureCode::CertificateDigestMismatch,
                 "DCR certificate does not replay against its problem, claim, and proof binding",
             ));
         }
         Ok(())
     }
 
-    pub fn record(&self) -> DominanceCompleteRecoveryCertificateRecordV1 {
-        DominanceCompleteRecoveryCertificateRecordV1 {
+    pub fn record(&self) -> DominanceCompleteRecoveryCertificateRecord {
+        DominanceCompleteRecoveryCertificateRecord {
             contract_version: self.contract_version,
             problem: self.problem.clone(),
             claim: self.claim.clone(),
@@ -755,13 +755,13 @@ impl DominanceCompleteRecoveryCertificateV1 {
         }
     }
 
-    pub const fn claim(&self) -> &DominanceCompleteRecoveryClaimV1 {
+    pub const fn claim(&self) -> &DominanceCompleteRecoveryClaim {
         &self.claim
     }
-    pub fn common_effects(&self) -> &[ProtectedEffectV1] {
+    pub fn common_effects(&self) -> &[ProtectedEffect] {
         &self.common_effects
     }
-    pub const fn certificate_digest(&self) -> DigestV1 {
+    pub const fn certificate_digest(&self) -> Sha256Digest {
         self.certificate_digest
     }
 }
@@ -769,20 +769,20 @@ impl DominanceCompleteRecoveryCertificateV1 {
 /// Replay-validatable receipt form. It cannot authorize execution.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
-pub struct DominanceCompleteRecoveryCertificateRecordV1 {
+pub struct DominanceCompleteRecoveryCertificateRecord {
     pub contract_version: u16,
-    pub problem: DominanceRecoveryProblemV1,
-    pub claim: DominanceCompleteRecoveryClaimV1,
-    pub common_effects: Vec<ProtectedEffectV1>,
-    pub problem_digest: DigestV1,
-    pub evidence_digest: DigestV1,
-    pub verifier_identity_digest: DigestV1,
-    pub certificate_digest: DigestV1,
+    pub problem: DominanceRecoveryProblem,
+    pub claim: DominanceCompleteRecoveryClaim,
+    pub common_effects: Vec<ProtectedEffect>,
+    pub problem_digest: Sha256Digest,
+    pub evidence_digest: Sha256Digest,
+    pub verifier_identity_digest: Sha256Digest,
+    pub certificate_digest: Sha256Digest,
 }
 
-impl DominanceCompleteRecoveryCertificateRecordV1 {
-    pub fn validate(&self) -> Result<(), DcrErrorV1> {
-        DominanceCompleteRecoveryCertificateV1 {
+impl DominanceCompleteRecoveryCertificateRecord {
+    pub fn validate(&self) -> Result<(), DcrError> {
+        DominanceCompleteRecoveryCertificate {
             contract_version: self.contract_version,
             problem: self.problem.clone(),
             claim: self.claim.clone(),
@@ -795,12 +795,12 @@ impl DominanceCompleteRecoveryCertificateRecordV1 {
         .validate()
     }
 
-    pub fn canonical_bytes(&self) -> Result<Vec<u8>, DcrErrorV1> {
+    pub fn canonical_bytes(&self) -> Result<Vec<u8>, DcrError> {
         self.validate()?;
         canonical_bytes(self)
     }
 
-    pub fn from_canonical_bytes(bytes: &[u8]) -> Result<Self, DcrErrorV1> {
+    pub fn from_canonical_bytes(bytes: &[u8]) -> Result<Self, DcrError> {
         let record: Self = decode_canonical(bytes)?;
         record.validate()?;
         Ok(record)
@@ -809,38 +809,38 @@ impl DominanceCompleteRecoveryCertificateRecordV1 {
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
-pub struct RecoveryConflictDecisionV1 {
-    problem_digest: DigestV1,
-    selected_query: RecoveryQueryV1,
-    admissible_queries: Vec<DigestV1>,
-    conflict_hyperedges: Vec<ConflictHyperedgeV1>,
-    optimal_expected_cost: ExactRecoveryCostV1,
-    raw_baseline_expected_cost: ExactRecoveryCostV1,
-    fallback_safepoint: DigestV1,
-    decision_digest: DigestV1,
+pub struct RecoveryConflictDecision {
+    problem_digest: Sha256Digest,
+    selected_query: RecoveryQuery,
+    admissible_queries: Vec<Sha256Digest>,
+    conflict_hyperedges: Vec<ConflictHyperedge>,
+    optimal_expected_cost: ExactRecoveryCost,
+    raw_baseline_expected_cost: ExactRecoveryCost,
+    fallback_safepoint: Sha256Digest,
+    decision_digest: Sha256Digest,
 }
 
-impl RecoveryConflictDecisionV1 {
-    pub const fn selected_query(&self) -> &RecoveryQueryV1 {
+impl RecoveryConflictDecision {
+    pub const fn selected_query(&self) -> &RecoveryQuery {
         &self.selected_query
     }
-    pub fn conflict_hyperedges(&self) -> &[ConflictHyperedgeV1] {
+    pub fn conflict_hyperedges(&self) -> &[ConflictHyperedge] {
         &self.conflict_hyperedges
     }
-    pub const fn optimal_expected_cost(&self) -> ExactRecoveryCostV1 {
+    pub const fn optimal_expected_cost(&self) -> ExactRecoveryCost {
         self.optimal_expected_cost
     }
-    pub const fn raw_baseline_expected_cost(&self) -> ExactRecoveryCostV1 {
+    pub const fn raw_baseline_expected_cost(&self) -> ExactRecoveryCost {
         self.raw_baseline_expected_cost
     }
-    pub const fn decision_digest(&self) -> DigestV1 {
+    pub const fn decision_digest(&self) -> Sha256Digest {
         self.decision_digest
     }
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
-pub enum RecoveryUnknownReasonV1 {
+pub enum RecoveryUnknownReason {
     FiberUnknown,
     NoSoundQuery,
     RawBaselineCheaperOrEqual,
@@ -850,33 +850,33 @@ pub enum RecoveryUnknownReasonV1 {
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
-pub struct RecoveryUnknownDecisionV1 {
-    problem_digest: DigestV1,
-    reason: RecoveryUnknownReasonV1,
+pub struct RecoveryUnknownDecision {
+    problem_digest: Sha256Digest,
+    reason: RecoveryUnknownReason,
     raw_baseline_required: bool,
-    conflict_hyperedges: Vec<ConflictHyperedgeV1>,
-    raw_baseline_expected_cost: Option<ExactRecoveryCostV1>,
-    fallback_safepoint: DigestV1,
-    decision_digest: DigestV1,
+    conflict_hyperedges: Vec<ConflictHyperedge>,
+    raw_baseline_expected_cost: Option<ExactRecoveryCost>,
+    fallback_safepoint: Sha256Digest,
+    decision_digest: Sha256Digest,
 }
 
-impl RecoveryUnknownDecisionV1 {
-    pub const fn problem_digest(&self) -> DigestV1 {
+impl RecoveryUnknownDecision {
+    pub const fn problem_digest(&self) -> Sha256Digest {
         self.problem_digest
     }
-    pub const fn reason(&self) -> RecoveryUnknownReasonV1 {
+    pub const fn reason(&self) -> RecoveryUnknownReason {
         self.reason
     }
     pub const fn raw_baseline_required(&self) -> bool {
         self.raw_baseline_required
     }
-    pub fn conflict_hyperedges(&self) -> &[ConflictHyperedgeV1] {
+    pub fn conflict_hyperedges(&self) -> &[ConflictHyperedge] {
         &self.conflict_hyperedges
     }
-    pub const fn fallback_safepoint(&self) -> DigestV1 {
+    pub const fn fallback_safepoint(&self) -> Sha256Digest {
         self.fallback_safepoint
     }
-    pub const fn decision_digest(&self) -> DigestV1 {
+    pub const fn decision_digest(&self) -> Sha256Digest {
         self.decision_digest
     }
 }
@@ -884,40 +884,40 @@ impl RecoveryUnknownDecisionV1 {
 #[allow(clippy::large_enum_variant)]
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case", tag = "status", content = "decision")]
-pub enum RecoveryDecisionV1 {
-    Complete(DominanceCompleteRecoveryCertificateV1),
-    Conflict(RecoveryConflictDecisionV1),
-    Unknown(RecoveryUnknownDecisionV1),
+pub enum RecoveryDecision {
+    Complete(DominanceCompleteRecoveryCertificate),
+    Conflict(RecoveryConflictDecision),
+    Unknown(RecoveryUnknownDecision),
 }
 
 /// Automatic DCR trigger. `Conflict` requires the selected exact query before an
 /// irreversible effect. `Unknown` always requires frozen raw-baseline fallback.
-pub fn dominance_complete_recover_v1(
-    problem: DominanceRecoveryProblemV1,
+pub fn dominance_complete_recover(
+    problem: DominanceRecoveryProblem,
     evidence: &VerifiedEvidence<'_, '_>,
-) -> Result<RecoveryDecisionV1, DcrErrorV1> {
+) -> Result<RecoveryDecision, DcrError> {
     problem.validate()?;
     verify_problem_evidence(&problem, evidence)?;
     let problem_digest = problem.digest()?;
-    let evidence_digest = DigestV1::from_bytes(
+    let evidence_digest = Sha256Digest::from_bytes(
         evidence
             .certificate()
             .canonical_digest()
             .map_err(|error| json_error(error.to_string()))?,
     );
-    let verifier_identity_digest = dcr_verifier_identity_v1(evidence);
+    let verifier_identity_digest = dcr_verifier_identity(evidence);
     if verifier_identity_digest != problem.verifier_route {
         return Err(dcr_error(
-            DcrFailureCodeV1::VerifierIdentityMismatch,
+            DcrFailureCode::VerifierIdentityMismatch,
             "verified evidence route differs from the DCR problem route",
         ));
     }
 
-    if problem.fiber_status == SourceFiberStatusV1::Unknown {
-        return Ok(RecoveryDecisionV1::Unknown(unknown_decision(
+    if problem.fiber_status == SourceFiberStatus::Unknown {
+        return Ok(RecoveryDecision::Unknown(unknown_decision(
             &problem,
             problem_digest,
-            RecoveryUnknownReasonV1::FiberUnknown,
+            RecoveryUnknownReason::FiberUnknown,
             Vec::new(),
             baseline_cost(&problem, full_mask(&problem)).ok(),
         )?));
@@ -927,8 +927,8 @@ pub fn dominance_complete_recover_v1(
     let effect_masks = accessible_world_effect_masks(&problem);
     let common = common_effects(&problem, root)?;
     if !common.is_empty() {
-        return Ok(RecoveryDecisionV1::Complete(
-            DominanceCompleteRecoveryCertificateV1::mint(
+        return Ok(RecoveryDecision::Complete(
+            DominanceCompleteRecoveryCertificate::mint(
                 problem,
                 common,
                 evidence_digest,
@@ -940,19 +940,19 @@ pub fn dominance_complete_recover_v1(
     let raw_cost = match baseline_cost(&problem, root) {
         Ok(cost) => cost,
         Err(DpFailure::Overflow) => {
-            return Ok(RecoveryDecisionV1::Unknown(unknown_decision(
+            return Ok(RecoveryDecision::Unknown(unknown_decision(
                 &problem,
                 problem_digest,
-                RecoveryUnknownReasonV1::CostArithmeticOverflow,
+                RecoveryUnknownReason::CostArithmeticOverflow,
                 Vec::new(),
                 None,
             )?));
         }
         Err(DpFailure::StateBound) => {
-            return Ok(RecoveryDecisionV1::Unknown(unknown_decision(
+            return Ok(RecoveryDecision::Unknown(unknown_decision(
                 &problem,
                 problem_digest,
-                RecoveryUnknownReasonV1::AnalysisBoundExceeded,
+                RecoveryUnknownReason::AnalysisBoundExceeded,
                 Vec::new(),
                 None,
             )?));
@@ -960,11 +960,11 @@ pub fn dominance_complete_recover_v1(
     };
     let hyperedges = match conflict_hyperedges(&problem, problem_digest, &effect_masks) {
         Ok(hyperedges) => hyperedges,
-        Err(error) if error.failure_code() == DcrFailureCodeV1::AnalysisBoundExceeded => {
-            return Ok(RecoveryDecisionV1::Unknown(unknown_decision(
+        Err(error) if error.failure_code() == DcrFailureCode::AnalysisBoundExceeded => {
+            return Ok(RecoveryDecision::Unknown(unknown_decision(
                 &problem,
                 problem_digest,
-                RecoveryUnknownReasonV1::AnalysisBoundExceeded,
+                RecoveryUnknownReason::AnalysisBoundExceeded,
                 Vec::new(),
                 Some(raw_cost),
             )?));
@@ -978,10 +978,10 @@ pub fn dominance_complete_recover_v1(
         .map(|query| query.query_digest)
         .collect::<Vec<_>>();
     if admissible_queries.is_empty() {
-        return Ok(RecoveryDecisionV1::Unknown(unknown_decision(
+        return Ok(RecoveryDecision::Unknown(unknown_decision(
             &problem,
             problem_digest,
-            RecoveryUnknownReasonV1::NoSoundQuery,
+            RecoveryUnknownReason::NoSoundQuery,
             hyperedges,
             Some(raw_cost),
         )?));
@@ -991,29 +991,29 @@ pub fn dominance_complete_recover_v1(
     let root_plan = match solve(&problem, &effect_masks, root, &mut memo) {
         Ok(plan) => plan,
         Err(DpFailure::StateBound) => {
-            return Ok(RecoveryDecisionV1::Unknown(unknown_decision(
+            return Ok(RecoveryDecision::Unknown(unknown_decision(
                 &problem,
                 problem_digest,
-                RecoveryUnknownReasonV1::AnalysisBoundExceeded,
+                RecoveryUnknownReason::AnalysisBoundExceeded,
                 hyperedges,
                 Some(raw_cost),
             )?));
         }
         Err(DpFailure::Overflow) => {
-            return Ok(RecoveryDecisionV1::Unknown(unknown_decision(
+            return Ok(RecoveryDecision::Unknown(unknown_decision(
                 &problem,
                 problem_digest,
-                RecoveryUnknownReasonV1::CostArithmeticOverflow,
+                RecoveryUnknownReason::CostArithmeticOverflow,
                 hyperedges,
                 Some(raw_cost),
             )?));
         }
     };
     let DpChoice::Query(index) = root_plan.choice else {
-        return Ok(RecoveryDecisionV1::Unknown(unknown_decision(
+        return Ok(RecoveryDecision::Unknown(unknown_decision(
             &problem,
             problem_digest,
-            RecoveryUnknownReasonV1::RawBaselineCheaperOrEqual,
+            RecoveryUnknownReason::RawBaselineCheaperOrEqual,
             hyperedges,
             Some(raw_cost),
         )?));
@@ -1022,7 +1022,7 @@ pub fn dominance_complete_recover_v1(
     let optimal_expected_cost = root_plan.cost.into_public();
     let raw_baseline_expected_cost = raw_cost.into_public();
     let decision_digest = digest_value(
-        CONFLICT_DOMAIN_V1,
+        CONFLICT_DOMAIN,
         &json!({
             "admissible_queries": admissible_queries,
             "conflict_hyperedges": hyperedges,
@@ -1033,7 +1033,7 @@ pub fn dominance_complete_recover_v1(
             "selected_query": selected_query,
         }),
     );
-    Ok(RecoveryDecisionV1::Conflict(RecoveryConflictDecisionV1 {
+    Ok(RecoveryDecision::Conflict(RecoveryConflictDecision {
         problem_digest,
         selected_query,
         admissible_queries,
@@ -1046,32 +1046,32 @@ pub fn dominance_complete_recover_v1(
 }
 
 fn verify_problem_evidence(
-    problem: &DominanceRecoveryProblemV1,
+    problem: &DominanceRecoveryProblem,
     evidence: &VerifiedEvidence<'_, '_>,
-) -> Result<(), DcrErrorV1> {
+) -> Result<(), DcrError> {
     match (evidence.query(), &evidence.certificate().completeness) {
         (Query::BuildReceipt { .. }, CompletenessWitness::BuildReceipt { exit_code: 0, .. })
         | (Query::TestTrace { .. }, CompletenessWitness::TestTrace { exit_code: 0, .. }) => {}
         _ => {
             return Err(dcr_error(
-                DcrFailureCodeV1::UnsupportedEvidenceClass,
+                DcrFailureCode::UnsupportedEvidenceClass,
                 "DCR requires a successful verified build receipt or test trace",
             ));
         }
     }
     if evidence.payload() != problem.canonical_bytes()? {
         return Err(dcr_error(
-            DcrFailureCodeV1::EvidencePayloadMismatch,
+            DcrFailureCode::EvidencePayloadMismatch,
             "verified evidence payload is not the exact canonical DCR problem",
         ));
     }
     Ok(())
 }
 
-pub fn dcr_verifier_identity_v1(evidence: &VerifiedEvidence<'_, '_>) -> DigestV1 {
+pub fn dcr_verifier_identity(evidence: &VerifiedEvidence<'_, '_>) -> Sha256Digest {
     let provenance = evidence.provenance();
     digest_value(
-        VERIFIER_DOMAIN_V1,
+        VERIFIER_DOMAIN,
         &json!({
             "index_id": provenance.index_id,
             "index_version": provenance.index_version,
@@ -1083,11 +1083,11 @@ pub fn dcr_verifier_identity_v1(evidence: &VerifiedEvidence<'_, '_>) -> DigestV1
     )
 }
 
-fn full_mask(problem: &DominanceRecoveryProblemV1) -> u64 {
+fn full_mask(problem: &DominanceRecoveryProblem) -> u64 {
     (1_u64 << problem.fiber.worlds.len()) - 1
 }
 
-fn accessible_world_effect_masks(problem: &DominanceRecoveryProblemV1) -> Vec<u64> {
+fn accessible_world_effect_masks(problem: &DominanceRecoveryProblem) -> Vec<u64> {
     problem
         .protected_effects
         .iter()
@@ -1120,9 +1120,9 @@ fn common_effect_bits(effect_masks: &[u64], world_mask: u64, effect_count: usize
 }
 
 fn common_effects(
-    problem: &DominanceRecoveryProblemV1,
+    problem: &DominanceRecoveryProblem,
     mask: u64,
-) -> Result<Vec<ProtectedEffectV1>, DcrErrorV1> {
+) -> Result<Vec<ProtectedEffect>, DcrError> {
     let effect_masks = accessible_world_effect_masks(problem);
     let bits = common_effect_bits(&effect_masks, mask, problem.accessible_effect_surface.len());
     Ok(problem
@@ -1135,18 +1135,18 @@ fn common_effects(
 }
 
 fn conflict_hyperedges(
-    problem: &DominanceRecoveryProblemV1,
-    problem_digest: DigestV1,
+    problem: &DominanceRecoveryProblem,
+    problem_digest: Sha256Digest,
     effect_masks: &[u64],
-) -> Result<Vec<ConflictHyperedgeV1>, DcrErrorV1> {
+) -> Result<Vec<ConflictHyperedge>, DcrError> {
     let full = full_mask(problem);
     let mut explored = 0_usize;
     let mut minimal_masks = Vec::new();
     for mask in 1..=full {
         explored = explored.saturating_add(1);
-        if explored > DCR_MAX_HYPERGRAPH_STATES_V1 {
+        if explored > DCR_MAX_HYPERGRAPH_STATES {
             return Err(dcr_error(
-                DcrFailureCodeV1::AnalysisBoundExceeded,
+                DcrFailureCode::AnalysisBoundExceeded,
                 "exact minimal-hyperedge enumeration exceeded its state bound",
             ));
         }
@@ -1185,13 +1185,13 @@ fn conflict_hyperedges(
                 .map(|(_, world)| *world)
                 .collect::<Vec<_>>();
             let hyperedge_digest = digest_value(
-                HYPEREDGE_DOMAIN_V1,
+                HYPEREDGE_DOMAIN,
                 &json!({
                     "problem_digest": problem_digest,
                     "worlds": worlds,
                 }),
             );
-            Ok(ConflictHyperedgeV1 {
+            Ok(ConflictHyperedge {
                 worlds,
                 hyperedge_digest,
             })
@@ -1275,8 +1275,8 @@ impl Rational {
         Ok(left.cmp(&right))
     }
 
-    const fn into_public(self) -> ExactRecoveryCostV1 {
-        ExactRecoveryCostV1 {
+    const fn into_public(self) -> ExactRecoveryCost {
+        ExactRecoveryCost {
             numerator: self.numerator,
             denominator: self.denominator,
         }
@@ -1312,7 +1312,7 @@ enum DpFailure {
 }
 
 fn solve(
-    problem: &DominanceRecoveryProblemV1,
+    problem: &DominanceRecoveryProblem,
     effect_masks: &[u64],
     mask: u64,
     memo: &mut BTreeMap<u64, DpNode>,
@@ -1320,7 +1320,7 @@ fn solve(
     if let Some(node) = memo.get(&mask) {
         return Ok(*node);
     }
-    if memo.len() >= DCR_MAX_DP_STATES_V1 {
+    if memo.len() >= DCR_MAX_DP_STATES {
         return Err(DpFailure::StateBound);
     }
     if common_effect_bits(effect_masks, mask, problem.accessible_effect_surface.len()) != 0 {
@@ -1363,9 +1363,9 @@ fn solve(
 }
 
 fn query_children(
-    problem: &DominanceRecoveryProblemV1,
+    problem: &DominanceRecoveryProblem,
     mask: u64,
-    query: &RecoveryQueryV1,
+    query: &RecoveryQuery,
 ) -> Vec<u64> {
     query
         .outcomes
@@ -1383,7 +1383,7 @@ fn query_children(
         .collect()
 }
 
-fn mask_weight(problem: &DominanceRecoveryProblemV1, mask: u64) -> Result<u128, DpFailure> {
+fn mask_weight(problem: &DominanceRecoveryProblem, mask: u64) -> Result<u128, DpFailure> {
     problem
         .world_budgets
         .iter()
@@ -1395,7 +1395,7 @@ fn mask_weight(problem: &DominanceRecoveryProblemV1, mask: u64) -> Result<u128, 
         })
 }
 
-fn baseline_cost(problem: &DominanceRecoveryProblemV1, mask: u64) -> Result<Rational, DpFailure> {
+fn baseline_cost(problem: &DominanceRecoveryProblem, mask: u64) -> Result<Rational, DpFailure> {
     let numerator = problem
         .world_budgets
         .iter()
@@ -1411,15 +1411,15 @@ fn baseline_cost(problem: &DominanceRecoveryProblemV1, mask: u64) -> Result<Rati
 }
 
 fn unknown_decision(
-    problem: &DominanceRecoveryProblemV1,
-    problem_digest: DigestV1,
-    reason: RecoveryUnknownReasonV1,
-    conflict_hyperedges: Vec<ConflictHyperedgeV1>,
+    problem: &DominanceRecoveryProblem,
+    problem_digest: Sha256Digest,
+    reason: RecoveryUnknownReason,
+    conflict_hyperedges: Vec<ConflictHyperedge>,
     raw_baseline_expected_cost: Option<Rational>,
-) -> Result<RecoveryUnknownDecisionV1, DcrErrorV1> {
+) -> Result<RecoveryUnknownDecision, DcrError> {
     let raw_baseline_expected_cost = raw_baseline_expected_cost.map(Rational::into_public);
     let decision_digest = digest_value(
-        UNKNOWN_DOMAIN_V1,
+        UNKNOWN_DOMAIN,
         &json!({
             "conflict_hyperedges": conflict_hyperedges,
             "fallback_safepoint": problem.fallback_safepoint,
@@ -1429,7 +1429,7 @@ fn unknown_decision(
             "reason": reason,
         }),
     );
-    Ok(RecoveryUnknownDecisionV1 {
+    Ok(RecoveryUnknownDecision {
         problem_digest,
         reason,
         raw_baseline_required: true,
@@ -1441,18 +1441,18 @@ fn unknown_decision(
 }
 
 fn complete_certificate_digest(
-    problem_digest: DigestV1,
-    claim_digest: DigestV1,
-    evidence_digest: DigestV1,
-    verifier_identity_digest: DigestV1,
-    common_effects: &[ProtectedEffectV1],
-) -> Result<DigestV1, DcrErrorV1> {
+    problem_digest: Sha256Digest,
+    claim_digest: Sha256Digest,
+    evidence_digest: Sha256Digest,
+    verifier_identity_digest: Sha256Digest,
+    common_effects: &[ProtectedEffect],
+) -> Result<Sha256Digest, DcrError> {
     Ok(digest_value(
-        COMPLETE_DOMAIN_V1,
+        COMPLETE_DOMAIN,
         &json!({
             "claim_digest": claim_digest,
             "common_effects": common_effects,
-            "contract_version": DCR_CONTRACT_VERSION_V1,
+            "contract_version": DCR_CONTRACT_VERSION,
             "evidence_digest": evidence_digest,
             "problem_digest": problem_digest,
             "verifier_identity_digest": verifier_identity_digest,
@@ -1460,27 +1460,27 @@ fn complete_certificate_digest(
     ))
 }
 
-pub fn dcr_contract_manifest_v1() -> Value {
+pub fn dcr_contract_manifest() -> Value {
     json!({
         "canonical_encoding": "sorted_key_json_no_whitespace",
         "complete_authority": "opaque_verified_problem_plus_exact_finite_intersection",
         "conflict_hypergraph": "all_minimal_empty_intersections_over_accessible_baseline_dominant_effects",
-        "contract_version": DCR_CONTRACT_VERSION_V1,
+        "contract_version": DCR_CONTRACT_VERSION,
         "decision_outcomes": ["complete", "conflict", "unknown"],
         "dp": {
             "arithmetic": "checked_exact_reduced_u128_rational",
             "cost_encoding": "unsigned_decimal_strings",
             "objective": "minimum_expected_native_cost_with_fully_charged_raw_baseline_terminal",
-            "state_bound": DCR_MAX_DP_STATES_V1,
+            "state_bound": DCR_MAX_DP_STATES,
             "tie_policy": "prefer_raw_baseline_then_lexicographically_first_query",
         },
         "finite_bounds": {
-            "canonical_bytes": DCR_MAX_CANONICAL_BYTES_V1,
-            "hypergraph_states": DCR_MAX_HYPERGRAPH_STATES_V1,
-            "outcomes_per_query": DCR_MAX_OUTCOMES_PER_QUERY_V1,
-            "queries": DCR_MAX_QUERIES_V1,
-            "query_trace": DCR_MAX_QUERY_TRACE_V1,
-            "worlds": DCR_MAX_WORLDS_V1,
+            "canonical_bytes": DCR_MAX_CANONICAL_BYTES,
+            "hypergraph_states": DCR_MAX_HYPERGRAPH_STATES,
+            "outcomes_per_query": DCR_MAX_OUTCOMES_PER_QUERY,
+            "queries": DCR_MAX_QUERIES,
+            "query_trace": DCR_MAX_QUERY_TRACE,
+            "worlds": DCR_MAX_WORLDS,
         },
         "fiber_policy": {
             "exact": "eligible_for_complete",
@@ -1489,66 +1489,66 @@ pub fn dcr_contract_manifest_v1() -> Value {
             "underapproximation": "not_representable",
         },
         "proof_carrier": "zero_cert::VerifiedEvidence_successful_build_or_test_exact_problem_payload",
-        "published_schema_sha256": DCR_SCHEMA_SHA256_V1,
-        "schema_version": DCR_SCHEMA_VERSION_V1,
+        "published_schema_sha256": DCR_SCHEMA_SHA256,
+        "schema_version": DCR_SCHEMA_VERSION,
     })
 }
 
-pub fn dcr_contract_digest_v1() -> DigestV1 {
-    digest_value(CONTRACT_DOMAIN_V1, &dcr_contract_manifest_v1())
+pub fn dcr_contract_digest() -> Sha256Digest {
+    digest_value(CONTRACT_DOMAIN, &dcr_contract_manifest())
 }
 
-fn canonical_bytes<T: Serialize + ?Sized>(value: &T) -> Result<Vec<u8>, DcrErrorV1> {
+fn canonical_bytes<T: Serialize + ?Sized>(value: &T) -> Result<Vec<u8>, DcrError> {
     let value = serde_json::to_value(value).map_err(|error| json_error(error.to_string()))?;
     let bytes = canonical_json(&value).into_bytes();
-    if bytes.len() > DCR_MAX_CANONICAL_BYTES_V1 {
+    if bytes.len() > DCR_MAX_CANONICAL_BYTES {
         return Err(dcr_error(
-            DcrFailureCodeV1::CanonicalPayloadTooLarge,
+            DcrFailureCode::CanonicalPayloadTooLarge,
             "DCR canonical payload exceeds its byte bound",
         ));
     }
     Ok(bytes)
 }
 
-fn decode_canonical<T>(bytes: &[u8]) -> Result<T, DcrErrorV1>
+fn decode_canonical<T>(bytes: &[u8]) -> Result<T, DcrError>
 where
     T: for<'de> Deserialize<'de> + Serialize,
 {
-    if bytes.len() > DCR_MAX_CANONICAL_BYTES_V1 {
+    if bytes.len() > DCR_MAX_CANONICAL_BYTES {
         return Err(dcr_error(
-            DcrFailureCodeV1::CanonicalPayloadTooLarge,
+            DcrFailureCode::CanonicalPayloadTooLarge,
             "DCR canonical payload exceeds its byte bound",
         ));
     }
     let decoded = serde_json::from_slice(bytes).map_err(|error| json_error(error.to_string()))?;
     if canonical_bytes(&decoded)? != bytes {
         return Err(dcr_error(
-            DcrFailureCodeV1::NonCanonicalEncoding,
+            DcrFailureCode::NonCanonicalEncoding,
             "DCR bytes are not canonical sorted-key JSON",
         ));
     }
     Ok(decoded)
 }
 
-fn digest_value(domain: &[u8], value: &Value) -> DigestV1 {
+fn digest_value(domain: &[u8], value: &Value) -> Sha256Digest {
     let canonical = canonical_json(value);
     let mut bytes = Vec::with_capacity(domain.len() + canonical.len());
     bytes.extend_from_slice(domain);
     bytes.extend_from_slice(canonical.as_bytes());
-    DigestV1::from_bytes(sha256(&bytes))
+    Sha256Digest::from_bytes(sha256(&bytes))
 }
 
-fn domain_digest(domain: &[u8], bytes: &[u8]) -> DigestV1 {
+fn domain_digest(domain: &[u8], bytes: &[u8]) -> Sha256Digest {
     let mut bound = Vec::with_capacity(domain.len() + bytes.len());
     bound.extend_from_slice(domain);
     bound.extend_from_slice(bytes);
-    DigestV1::from_bytes(sha256(&bound))
+    Sha256Digest::from_bytes(sha256(&bound))
 }
 
-fn require_nonzero(label: &'static str, values: &[DigestV1]) -> Result<(), DcrErrorV1> {
-    if values.contains(&DigestV1::ZERO) {
+fn require_nonzero(label: &'static str, values: &[Sha256Digest]) -> Result<(), DcrError> {
+    if values.contains(&Sha256Digest::ZERO) {
         Err(dcr_error(
-            DcrFailureCodeV1::ZeroDigest,
+            DcrFailureCode::ZeroDigest,
             format!("{label} contains a zero digest"),
         ))
     } else {
@@ -1556,10 +1556,10 @@ fn require_nonzero(label: &'static str, values: &[DigestV1]) -> Result<(), DcrEr
     }
 }
 
-fn require_strict_order<T: Ord>(label: &'static str, values: &[T]) -> Result<(), DcrErrorV1> {
+fn require_strict_order<T: Ord>(label: &'static str, values: &[T]) -> Result<(), DcrError> {
     if values.windows(2).any(|pair| pair[0] >= pair[1]) {
         Err(dcr_error(
-            DcrFailureCodeV1::NonCanonicalOrder,
+            DcrFailureCode::NonCanonicalOrder,
             format!("{label} must be unique and strictly sorted"),
         ))
     } else {
@@ -1569,7 +1569,7 @@ fn require_strict_order<T: Ord>(label: &'static str, values: &[T]) -> Result<(),
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
-pub enum DcrFailureCodeV1 {
+pub enum DcrFailureCode {
     SchemaVersionMismatch,
     UnsupportedFiber,
     IdentityMismatch,
@@ -1593,13 +1593,13 @@ pub enum DcrFailureCodeV1 {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct DcrErrorV1 {
-    code: DcrFailureCodeV1,
+pub struct DcrError {
+    code: DcrFailureCode,
     detail: String,
 }
 
-impl DcrErrorV1 {
-    pub const fn failure_code(&self) -> DcrFailureCodeV1 {
+impl DcrError {
+    pub const fn failure_code(&self) -> DcrFailureCode {
         self.code
     }
     pub fn detail(&self) -> &str {
@@ -1607,22 +1607,22 @@ impl DcrErrorV1 {
     }
 }
 
-impl fmt::Display for DcrErrorV1 {
+impl fmt::Display for DcrError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(formatter, "DCR failed ({:?}): {}", self.code, self.detail)
     }
 }
 
-impl Error for DcrErrorV1 {}
+impl Error for DcrError {}
 
-fn dcr_error(code: DcrFailureCodeV1, detail: impl Into<String>) -> DcrErrorV1 {
-    DcrErrorV1 {
+fn dcr_error(code: DcrFailureCode, detail: impl Into<String>) -> DcrError {
+    DcrError {
         code,
         detail: detail.into(),
     }
 }
 
-fn json_error(detail: String) -> DcrErrorV1 {
-    dcr_error(DcrFailureCodeV1::Json, detail)
+fn json_error(detail: String) -> DcrError {
+    dcr_error(DcrFailureCode::Json, detail)
 }
 

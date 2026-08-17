@@ -1,10 +1,10 @@
 //! Out-of-process malicious-worker fixture (ZS-OPS-005 / V6-R14).
 //!
 //! Spawned by `tests/unit/zero-cert/worker_trust.rs` through
-//! `CARGO_BIN_EXE_forge_worker`. Reads one JSON `ForgeSpecV1` line from
-//! stdin and prints the forged `WorkerEnvelopeV1` canonical JSON line to
+//! `CARGO_BIN_EXE_forge_worker`. Reads one JSON `ForgeSpec` line from
+//! stdin and prints the forged `WorkerTrustEnvelope` canonical JSON line to
 //! stdout. The parent feeds the envelope bytes to
-//! `WorkerTrustBoundaryV1::admit` exactly as it would receive output from a
+//! `WorkerTrustBoundary::admit` exactly as it would receive output from a
 //! remote producer -- the boundary never sees the in-process construction,
 //! which is the point of the out-of-process fixture.
 //!
@@ -22,9 +22,9 @@ use std::io::Read;
 use serde::{Deserialize, Serialize};
 
 use zero_cert::worker_trust::{
-    TrustContextV1, WorkerEnvelopeV1, WorkerFrameV1, WorkerIdentityClaimV1, WorkerTraceV1,
+    TrustContext, WorkerTrustEnvelope, WorkerFrame, WorkerIdentityClaim, WorkerTrustTrace,
 };
-use zero_abi::{DigestV1, canonical_json};
+use zero_abi::{Sha256Digest, canonical_json};
 
 const PINNED_ENGINE: &str = "fixture-engine";
 const PINNED_ARTIFACT: u8 = 0xAA;
@@ -32,34 +32,34 @@ const PINNED_PROTOCOL: u8 = 0xBB;
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
-pub struct ForgeSpecV1 {
+pub struct ForgeSpec {
     pub kind: String,
     pub seq: u64,
 }
 
-fn digest(byte: u8) -> DigestV1 {
-    DigestV1::from_bytes([byte; 32])
+fn digest(byte: u8) -> Sha256Digest {
+    Sha256Digest::from_bytes([byte; 32])
 }
 
-fn honest_identity() -> WorkerIdentityClaimV1 {
-    WorkerIdentityClaimV1 {
+fn honest_identity() -> WorkerIdentityClaim {
+    WorkerIdentityClaim {
         engine: PINNED_ENGINE.to_owned(),
         artifact_digest: digest(PINNED_ARTIFACT),
         protocol_digest: digest(PINNED_PROTOCOL),
     }
 }
 
-fn honest_frame(payload: &[u8]) -> WorkerFrameV1 {
-    WorkerFrameV1 {
+fn honest_frame(payload: &[u8]) -> WorkerFrame {
+    WorkerFrame {
         frame_index: 0,
         opcode: "op".to_owned(),
         payload: payload.to_vec(),
-        payload_digest: DigestV1::from_bytes(zero_abi::sha256(payload)),
+        payload_digest: Sha256Digest::from_bytes(zero_abi::sha256(payload)),
     }
 }
 
-fn honest_trace() -> WorkerTraceV1 {
-    WorkerTraceV1 {
+fn honest_trace() -> WorkerTrustTrace {
+    WorkerTrustTrace {
         trace_index: 0,
         stage: "execute".to_owned(),
         tokens: 10,
@@ -67,9 +67,9 @@ fn honest_trace() -> WorkerTraceV1 {
     }
 }
 
-fn build(spec: &ForgeSpecV1) -> WorkerEnvelopeV1 {
+fn build(spec: &ForgeSpec) -> WorkerTrustEnvelope {
     match spec.kind.as_str() {
-        "honest" => WorkerEnvelopeV1::new(
+        "honest" => WorkerTrustEnvelope::new(
             spec.seq,
             honest_identity(),
             vec![honest_frame(b"honest payload")],
@@ -78,13 +78,13 @@ fn build(spec: &ForgeSpecV1) -> WorkerEnvelopeV1 {
         .expect("honest envelope"),
         "forged_frame" => {
             // Declared digest does not match the payload bytes.
-            let frame = WorkerFrameV1 {
+            let frame = WorkerFrame {
                 frame_index: 0,
                 opcode: "op".to_owned(),
                 payload: b"forged payload".to_vec(),
                 payload_digest: digest(0xEE),
             };
-            WorkerEnvelopeV1::new(
+            WorkerTrustEnvelope::new(
                 spec.seq,
                 honest_identity(),
                 vec![frame],
@@ -94,7 +94,7 @@ fn build(spec: &ForgeSpecV1) -> WorkerEnvelopeV1 {
         }
         "replayed_frame" => {
             let frame = honest_frame(b"payload");
-            WorkerEnvelopeV1::new(
+            WorkerTrustEnvelope::new(
                 spec.seq,
                 honest_identity(),
                 vec![frame.clone(), frame],
@@ -103,13 +103,13 @@ fn build(spec: &ForgeSpecV1) -> WorkerEnvelopeV1 {
             .expect("replayed-frame envelope")
         }
         "forged_trace" => {
-            let trace = WorkerTraceV1 {
+            let trace = WorkerTrustTrace {
                 trace_index: 0,
                 stage: String::new(),
                 tokens: 5,
-                root: DigestV1::ZERO,
+                root: Sha256Digest::ZERO,
             };
-            WorkerEnvelopeV1::new(
+            WorkerTrustEnvelope::new(
                 spec.seq,
                 honest_identity(),
                 vec![honest_frame(b"payload")],
@@ -118,12 +118,12 @@ fn build(spec: &ForgeSpecV1) -> WorkerEnvelopeV1 {
             .expect("forged-trace envelope")
         }
         "stolen_identity" => {
-            let identity = WorkerIdentityClaimV1 {
+            let identity = WorkerIdentityClaim {
                 engine: PINNED_ENGINE.to_owned(),
                 artifact_digest: digest(0x99), // not the pinned artifact
                 protocol_digest: digest(PINNED_PROTOCOL),
             };
-            WorkerEnvelopeV1::new(
+            WorkerTrustEnvelope::new(
                 spec.seq,
                 identity,
                 vec![honest_frame(b"payload")],
@@ -131,7 +131,7 @@ fn build(spec: &ForgeSpecV1) -> WorkerEnvelopeV1 {
             )
             .expect("stolen-identity envelope")
         }
-        "replay_envelope" => WorkerEnvelopeV1::new(
+        "replay_envelope" => WorkerTrustEnvelope::new(
             spec.seq,
             honest_identity(),
             vec![honest_frame(b"payload")],
@@ -147,8 +147,8 @@ fn main() {
     std::io::stdin()
         .read_to_string(&mut input)
         .expect("read forge spec");
-    let spec: ForgeSpecV1 =
-        serde_json::from_str(input.trim()).expect("forge spec must be JSON ForgeSpecV1");
+    let spec: ForgeSpec =
+        serde_json::from_str(input.trim()).expect("forge spec must be JSON ForgeSpec");
     let envelope = build(&spec);
     let json = serde_json::to_value(&envelope).expect("envelope serializable");
     println!("{}", canonical_json(&json));
@@ -156,8 +156,8 @@ fn main() {
 
 /// The pinned context the fixture binaries build against; the parent uses
 /// the same values so the honest envelope passes and forgeries are refused.
-pub fn fixture_trust_context() -> TrustContextV1 {
-    TrustContextV1::new(
+pub fn fixture_trust_context() -> TrustContext {
+    TrustContext::new(
         PINNED_ENGINE,
         digest(PINNED_ARTIFACT),
         digest(PINNED_PROTOCOL),

@@ -5,7 +5,7 @@
 //! deliberately absent: repository, assembly, index, and closure identities are
 //! the only freshness authority.
 
-use crate::{DigestV1, canonical_json, sha256};
+use crate::{Sha256Digest, canonical_json, sha256};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use std::collections::{BTreeMap, BTreeSet};
@@ -21,7 +21,7 @@ pub const FRESHNESS_MAX_WITNESSES: usize = 4_096;
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, Ord, PartialEq, PartialOrd, Serialize)]
 #[serde(rename_all = "snake_case")]
-pub enum ProducerDomainV1 {
+pub enum ProducerDomain {
     Source,
     FilesystemIndex,
     GraphIndex,
@@ -30,16 +30,16 @@ pub enum ProducerDomainV1 {
 
 #[derive(Clone, Debug, Deserialize, Eq, Ord, PartialEq, PartialOrd, Serialize)]
 #[serde(deny_unknown_fields)]
-pub struct FreshnessHeadV1 {
+pub struct FreshnessHead {
     pub repository: String,
     pub head: String,
 }
 
-impl FreshnessHeadV1 {
+impl FreshnessHead {
     pub fn new(
         repository: impl Into<String>,
         head: impl Into<String>,
-    ) -> Result<Self, FreshnessErrorV1> {
+    ) -> Result<Self, FreshnessError> {
         let value = Self {
             repository: repository.into(),
             head: head.into(),
@@ -52,7 +52,7 @@ impl FreshnessHeadV1 {
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, Ord, PartialEq, PartialOrd, Serialize)]
 #[serde(rename_all = "snake_case")]
-pub enum DependencyEdgeKindV1 {
+pub enum DependencyEdgeKind {
     Reads,
     Derives,
     Invalidates,
@@ -60,18 +60,18 @@ pub enum DependencyEdgeKindV1 {
 
 #[derive(Clone, Debug, Deserialize, Eq, Ord, PartialEq, PartialOrd, Serialize)]
 #[serde(deny_unknown_fields)]
-pub struct DependencyEdgeV1 {
+pub struct DependencyEdge {
     pub producer: String,
     pub consumer: String,
-    pub kind: DependencyEdgeKindV1,
+    pub kind: DependencyEdgeKind,
 }
 
-impl DependencyEdgeV1 {
+impl DependencyEdge {
     pub fn new(
         producer: impl Into<String>,
         consumer: impl Into<String>,
-        kind: DependencyEdgeKindV1,
-    ) -> Result<Self, FreshnessErrorV1> {
+        kind: DependencyEdgeKind,
+    ) -> Result<Self, FreshnessError> {
         let value = Self {
             producer: producer.into(),
             consumer: consumer.into(),
@@ -81,12 +81,12 @@ impl DependencyEdgeV1 {
         Ok(value)
     }
 
-    fn validate(&self) -> Result<(), FreshnessErrorV1> {
+    fn validate(&self) -> Result<(), FreshnessError> {
         validate_identity("edge producer", &self.producer)?;
         validate_identity("edge consumer", &self.consumer)?;
         if self.producer == self.consumer {
-            return Err(FreshnessErrorV1::new(
-                FreshnessFailureCodeV1::InvalidIdentity,
+            return Err(FreshnessError::new(
+                FreshnessFailureCode::InvalidIdentity,
                 "dependency edge cannot be a self edge",
             ));
         }
@@ -96,7 +96,7 @@ impl DependencyEdgeV1 {
 
 #[derive(Clone, Debug, Deserialize, Eq, Ord, PartialEq, PartialOrd, Serialize)]
 #[serde(deny_unknown_fields)]
-pub struct EssentialDependencyWitnessV1 {
+pub struct EssentialDependencyWitness {
     pub path: Vec<String>,
 }
 
@@ -104,36 +104,36 @@ pub struct EssentialDependencyWitnessV1 {
 #[serde(deny_unknown_fields)]
 pub struct EssentialDependencyCertificate {
     pub schema_version: u16,
-    pub dependency: DependencyEdgeV1,
-    pub witness: EssentialDependencyWitnessV1,
-    pub certificate_digest: DigestV1,
+    pub dependency: DependencyEdge,
+    pub witness: EssentialDependencyWitness,
+    pub certificate_digest: Sha256Digest,
 }
 
 impl EssentialDependencyCertificate {
-    pub fn new(dependency: DependencyEdgeV1, path: Vec<String>) -> Result<Self, FreshnessErrorV1> {
+    pub fn new(dependency: DependencyEdge, path: Vec<String>) -> Result<Self, FreshnessError> {
         let mut value = Self {
             schema_version: FRESHNESS_CONTRACT_VERSION,
             dependency,
-            witness: EssentialDependencyWitnessV1 { path },
-            certificate_digest: DigestV1::ZERO,
+            witness: EssentialDependencyWitness { path },
+            certificate_digest: Sha256Digest::ZERO,
         };
         value.validate_payload()?;
         value.certificate_digest = value.expected_digest();
         Ok(value)
     }
 
-    fn expected_digest(&self) -> DigestV1 {
+    fn expected_digest(&self) -> Sha256Digest {
         digest_json(
             &json!({"schema_version": self.schema_version, "dependency": self.dependency, "witness": self.witness}),
         )
     }
 
-    fn validate_payload(&self) -> Result<(), FreshnessErrorV1> {
+    fn validate_payload(&self) -> Result<(), FreshnessError> {
         validate_version(self.schema_version)?;
         self.dependency.validate()?;
         if !(2..=FRESHNESS_MAX_NODES).contains(&self.witness.path.len()) {
-            return Err(FreshnessErrorV1::new(
-                FreshnessFailureCodeV1::MissingProofScope,
+            return Err(FreshnessError::new(
+                FreshnessFailureCode::MissingProofScope,
                 "essential dependency witness path must contain 2..=4096 nodes",
             ));
         }
@@ -143,15 +143,15 @@ impl EssentialDependencyCertificate {
         if self.witness.path.first() != Some(&self.dependency.producer)
             || self.witness.path.last() != Some(&self.dependency.consumer)
         {
-            return Err(FreshnessErrorV1::new(
-                FreshnessFailureCodeV1::MissingProofScope,
+            return Err(FreshnessError::new(
+                FreshnessFailureCode::MissingProofScope,
                 "essential dependency witness endpoints do not match its edge",
             ));
         }
         Ok(())
     }
 
-    pub fn validate(&self) -> Result<(), FreshnessErrorV1> {
+    pub fn validate(&self) -> Result<(), FreshnessError> {
         self.validate_payload()?;
         require_digest(self.certificate_digest, self.expected_digest())
     }
@@ -162,24 +162,24 @@ impl EssentialDependencyCertificate {
 pub struct CertifiedInfluenceClosure {
     pub schema_version: u16,
     pub model_version: String,
-    pub assembly_manifest_digest: DigestV1,
-    pub source_repository_heads: Vec<FreshnessHeadV1>,
-    pub producer_domains: Vec<ProducerDomainV1>,
+    pub assembly_manifest_digest: Sha256Digest,
+    pub source_repository_heads: Vec<FreshnessHead>,
+    pub producer_domains: Vec<ProducerDomain>,
     pub influence_scope: Vec<String>,
-    pub edges: Vec<DependencyEdgeV1>,
+    pub edges: Vec<DependencyEdge>,
     pub essential_dependencies: Vec<EssentialDependencyCertificate>,
-    pub certificate_digest: DigestV1,
+    pub certificate_digest: Sha256Digest,
 }
 
 impl CertifiedInfluenceClosure {
     pub fn new(
-        assembly_manifest_digest: DigestV1,
-        mut source_repository_heads: Vec<FreshnessHeadV1>,
-        mut producer_domains: Vec<ProducerDomainV1>,
+        assembly_manifest_digest: Sha256Digest,
+        mut source_repository_heads: Vec<FreshnessHead>,
+        mut producer_domains: Vec<ProducerDomain>,
         mut influence_scope: Vec<String>,
-        mut edges: Vec<DependencyEdgeV1>,
+        mut edges: Vec<DependencyEdge>,
         mut essential_dependencies: Vec<EssentialDependencyCertificate>,
-    ) -> Result<Self, FreshnessErrorV1> {
+    ) -> Result<Self, FreshnessError> {
         sort_unique(&mut source_repository_heads, "source repository head")?;
         sort_unique(&mut producer_domains, "producer domain")?;
         sort_unique(&mut influence_scope, "influence scope node")?;
@@ -197,14 +197,14 @@ impl CertifiedInfluenceClosure {
             influence_scope,
             edges,
             essential_dependencies,
-            certificate_digest: DigestV1::ZERO,
+            certificate_digest: Sha256Digest::ZERO,
         };
         value.validate_payload()?;
         value.certificate_digest = value.expected_digest();
         Ok(value)
     }
 
-    fn expected_digest(&self) -> DigestV1 {
+    fn expected_digest(&self) -> Sha256Digest {
         digest_json(&json!({
             "schema_version": self.schema_version,
             "model_version": self.model_version,
@@ -217,17 +217,17 @@ impl CertifiedInfluenceClosure {
         }))
     }
 
-    fn validate_payload(&self) -> Result<(), FreshnessErrorV1> {
+    fn validate_payload(&self) -> Result<(), FreshnessError> {
         validate_version(self.schema_version)?;
         if self.model_version != FRESHNESS_MODEL_VERSION {
-            return Err(FreshnessErrorV1::new(
-                FreshnessFailureCodeV1::ModelVersionMismatch,
+            return Err(FreshnessError::new(
+                FreshnessFailureCode::ModelVersionMismatch,
                 "unsupported freshness model version",
             ));
         }
-        if self.assembly_manifest_digest == DigestV1::ZERO {
-            return Err(FreshnessErrorV1::new(
-                FreshnessFailureCodeV1::AssemblyMismatch,
+        if self.assembly_manifest_digest == Sha256Digest::ZERO {
+            return Err(FreshnessError::new(
+                FreshnessFailureCode::AssemblyMismatch,
                 "assembly manifest digest cannot be zero",
             ));
         }
@@ -235,8 +235,8 @@ impl CertifiedInfluenceClosure {
             || self.producer_domains.is_empty()
             || self.influence_scope.is_empty()
         {
-            return Err(FreshnessErrorV1::new(
-                FreshnessFailureCodeV1::MissingProofScope,
+            return Err(FreshnessError::new(
+                FreshnessFailureCode::MissingProofScope,
                 "source heads, producer domains, and influence scope cannot be empty",
             ));
         }
@@ -245,8 +245,8 @@ impl CertifiedInfluenceClosure {
             || self.edges.len() > FRESHNESS_MAX_EDGES
             || self.essential_dependencies.len() > FRESHNESS_MAX_WITNESSES
         {
-            return Err(FreshnessErrorV1::new(
-                FreshnessFailureCodeV1::ContractLimitExceeded,
+            return Err(FreshnessError::new(
+                FreshnessFailureCode::ContractLimitExceeded,
                 "freshness closure exceeds a frozen limit",
             ));
         }
@@ -263,8 +263,8 @@ impl CertifiedInfluenceClosure {
             .windows(2)
             .any(|pair| pair[0].repository == pair[1].repository)
         {
-            return Err(FreshnessErrorV1::new(
-                FreshnessFailureCodeV1::DuplicateIdentity,
+            return Err(FreshnessError::new(
+                FreshnessFailureCode::DuplicateIdentity,
                 "source repository identity appears with more than one head",
             ));
         }
@@ -273,8 +273,8 @@ impl CertifiedInfluenceClosure {
             .windows(2)
             .any(|pair| pair[0].dependency == pair[1].dependency)
         {
-            return Err(FreshnessErrorV1::new(
-                FreshnessFailureCodeV1::DuplicateIdentity,
+            return Err(FreshnessError::new(
+                FreshnessFailureCode::DuplicateIdentity,
                 "essential dependency has more than one certificate",
             ));
         }
@@ -289,18 +289,18 @@ impl CertifiedInfluenceClosure {
         for edge in &self.edges {
             edge.validate()?;
             if !scope.contains(edge.producer.as_str()) || !scope.contains(edge.consumer.as_str()) {
-                return Err(FreshnessErrorV1::new(
-                    FreshnessFailureCodeV1::MissingProofScope,
+                return Err(FreshnessError::new(
+                    FreshnessFailureCode::MissingProofScope,
                     "dependency edge endpoint is outside influence scope",
                 ));
             }
         }
-        let edges: BTreeSet<&DependencyEdgeV1> = self.edges.iter().collect();
+        let edges: BTreeSet<&DependencyEdge> = self.edges.iter().collect();
         for certificate in &self.essential_dependencies {
             certificate.validate()?;
             if !edges.contains(&certificate.dependency) {
-                return Err(FreshnessErrorV1::new(
-                    FreshnessFailureCodeV1::MissingEdge,
+                return Err(FreshnessError::new(
+                    FreshnessFailureCode::MissingEdge,
                     "essential dependency is absent from the certified edge set",
                 ));
             }
@@ -310,8 +310,8 @@ impl CertifiedInfluenceClosure {
                     .iter()
                     .any(|edge| edge.producer == pair[0] && edge.consumer == pair[1])
                 {
-                    return Err(FreshnessErrorV1::new(
-                        FreshnessFailureCodeV1::MissingEdge,
+                    return Err(FreshnessError::new(
+                        FreshnessFailureCode::MissingEdge,
                         "essential dependency witness traverses an uncertified edge",
                     ));
                 }
@@ -320,26 +320,26 @@ impl CertifiedInfluenceClosure {
         Ok(())
     }
 
-    pub fn validate(&self) -> Result<(), FreshnessErrorV1> {
+    pub fn validate(&self) -> Result<(), FreshnessError> {
         self.validate_payload()?;
         require_digest(self.certificate_digest, self.expected_digest())
     }
 
-    pub fn canonical_bytes(&self) -> Result<Vec<u8>, FreshnessErrorV1> {
+    pub fn canonical_bytes(&self) -> Result<Vec<u8>, FreshnessError> {
         self.validate()?;
         let value = serde_json::to_value(self).map_err(serialization_error)?;
         Ok(canonical_json(&value).into_bytes())
     }
 }
 
-pub fn influence_closure_v1(
-    assembly_manifest_digest: DigestV1,
-    source_repository_heads: Vec<FreshnessHeadV1>,
-    producer_domains: Vec<ProducerDomainV1>,
+pub fn influence_closure(
+    assembly_manifest_digest: Sha256Digest,
+    source_repository_heads: Vec<FreshnessHead>,
+    producer_domains: Vec<ProducerDomain>,
     influence_scope: Vec<String>,
-    edges: Vec<DependencyEdgeV1>,
+    edges: Vec<DependencyEdge>,
     essential_dependencies: Vec<EssentialDependencyCertificate>,
-) -> Result<CertifiedInfluenceClosure, FreshnessErrorV1> {
+) -> Result<CertifiedInfluenceClosure, FreshnessError> {
     CertifiedInfluenceClosure::new(
         assembly_manifest_digest,
         source_repository_heads,
@@ -358,8 +358,8 @@ pub struct IndexedThroughCertificate {
     pub index_id: String,
     pub index_generation: u64,
     pub influence: CertifiedInfluenceClosure,
-    pub replay_identity: DigestV1,
-    pub certificate_digest: DigestV1,
+    pub replay_identity: Sha256Digest,
+    pub certificate_digest: Sha256Digest,
 }
 
 impl IndexedThroughCertificate {
@@ -367,15 +367,15 @@ impl IndexedThroughCertificate {
         index_id: impl Into<String>,
         index_generation: u64,
         influence: CertifiedInfluenceClosure,
-    ) -> Result<Self, FreshnessErrorV1> {
+    ) -> Result<Self, FreshnessError> {
         let mut value = Self {
             schema_version: FRESHNESS_CONTRACT_VERSION,
             model_version: FRESHNESS_MODEL_VERSION.into(),
             index_id: index_id.into(),
             index_generation,
             influence,
-            replay_identity: DigestV1::ZERO,
-            certificate_digest: DigestV1::ZERO,
+            replay_identity: Sha256Digest::ZERO,
+            certificate_digest: Sha256Digest::ZERO,
         };
         value.validate_payload()?;
         value.replay_identity = value.expected_replay_identity();
@@ -383,23 +383,23 @@ impl IndexedThroughCertificate {
         Ok(value)
     }
 
-    fn expected_replay_identity(&self) -> DigestV1 {
+    fn expected_replay_identity(&self) -> Sha256Digest {
         digest_json(
             &json!({"domain": "zerostack.freshness.replay.v1", "index_id": self.index_id, "index_generation": self.index_generation, "influence_digest": self.influence.certificate_digest}),
         )
     }
 
-    fn expected_digest(&self) -> DigestV1 {
+    fn expected_digest(&self) -> Sha256Digest {
         digest_json(
             &json!({"schema_version": self.schema_version, "model_version": self.model_version, "index_id": self.index_id, "index_generation": self.index_generation, "influence": self.influence, "replay_identity": self.replay_identity}),
         )
     }
 
-    fn validate_payload(&self) -> Result<(), FreshnessErrorV1> {
+    fn validate_payload(&self) -> Result<(), FreshnessError> {
         validate_version(self.schema_version)?;
         if self.model_version != FRESHNESS_MODEL_VERSION {
-            return Err(FreshnessErrorV1::new(
-                FreshnessFailureCodeV1::ModelVersionMismatch,
+            return Err(FreshnessError::new(
+                FreshnessFailureCode::ModelVersionMismatch,
                 "unsupported indexed-through model version",
             ));
         }
@@ -407,18 +407,18 @@ impl IndexedThroughCertificate {
         self.influence.validate()
     }
 
-    pub fn validate(&self) -> Result<(), FreshnessErrorV1> {
+    pub fn validate(&self) -> Result<(), FreshnessError> {
         self.validate_payload()?;
         if self.replay_identity != self.expected_replay_identity() {
-            return Err(FreshnessErrorV1::new(
-                FreshnessFailureCodeV1::ReplayIdentityMismatch,
+            return Err(FreshnessError::new(
+                FreshnessFailureCode::ReplayIdentityMismatch,
                 "indexed-through replay identity mismatch",
             ));
         }
         require_digest(self.certificate_digest, self.expected_digest())
     }
 
-    pub fn canonical_bytes(&self) -> Result<Vec<u8>, FreshnessErrorV1> {
+    pub fn canonical_bytes(&self) -> Result<Vec<u8>, FreshnessError> {
         self.validate()?;
         let value = serde_json::to_value(self).map_err(serialization_error)?;
         Ok(canonical_json(&value).into_bytes())
@@ -427,7 +427,7 @@ impl IndexedThroughCertificate {
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
-pub enum FreshnessStatusV1 {
+pub enum FreshnessStatus {
     Fresh,
     IndexBehind,
     Unknown,
@@ -435,7 +435,7 @@ pub enum FreshnessStatusV1 {
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
-pub enum FreshnessFailureCodeV1 {
+pub enum FreshnessFailureCode {
     UnsupportedSchemaVersion,
     ModelVersionMismatch,
     InvalidIdentity,
@@ -456,20 +456,20 @@ pub enum FreshnessFailureCodeV1 {
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
-pub struct FreshnessDecisionV1 {
+pub struct FreshnessDecision {
     pub schema_version: u16,
-    pub status: FreshnessStatusV1,
+    pub status: FreshnessStatus,
     pub trusted: bool,
-    pub failure_code: Option<FreshnessFailureCodeV1>,
+    pub failure_code: Option<FreshnessFailureCode>,
     pub detail: String,
-    pub indexed_certificate_digest: Option<DigestV1>,
+    pub indexed_certificate_digest: Option<Sha256Digest>,
 }
 
-impl FreshnessDecisionV1 {
+impl FreshnessDecision {
     fn fresh(indexed: &IndexedThroughCertificate) -> Self {
         Self {
             schema_version: FRESHNESS_CONTRACT_VERSION,
-            status: FreshnessStatusV1::Fresh,
+            status: FreshnessStatus::Fresh,
             trusted: true,
             failure_code: None,
             detail: "exact assembly, source heads, influence scope, and frontier certified".into(),
@@ -477,8 +477,8 @@ impl FreshnessDecisionV1 {
         }
     }
     fn rejected(
-        status: FreshnessStatusV1,
-        failure_code: FreshnessFailureCodeV1,
+        status: FreshnessStatus,
+        failure_code: FreshnessFailureCode,
         detail: impl Into<String>,
     ) -> Self {
         Self {
@@ -492,30 +492,30 @@ impl FreshnessDecisionV1 {
     }
 }
 
-pub fn decide_freshness_v1(
+pub fn decide_freshness(
     required: &CertifiedInfluenceClosure,
     indexed: &IndexedThroughCertificate,
     minimum_generation: u64,
-) -> FreshnessDecisionV1 {
+) -> FreshnessDecision {
     if let Err(error) = required.validate() {
-        return FreshnessDecisionV1::rejected(
-            FreshnessStatusV1::Unknown,
+        return FreshnessDecision::rejected(
+            FreshnessStatus::Unknown,
             error.code,
             format!("required closure is invalid: {}", error.detail),
         );
     }
     if let Err(error) = indexed.validate() {
-        return FreshnessDecisionV1::rejected(
-            FreshnessStatusV1::Unknown,
+        return FreshnessDecision::rejected(
+            FreshnessStatus::Unknown,
             error.code,
             format!("indexed certificate is invalid: {}", error.detail),
         );
     }
     let actual = &indexed.influence;
     if actual.assembly_manifest_digest != required.assembly_manifest_digest {
-        return FreshnessDecisionV1::rejected(
-            FreshnessStatusV1::Unknown,
-            FreshnessFailureCodeV1::AssemblyMismatch,
+        return FreshnessDecision::rejected(
+            FreshnessStatus::Unknown,
+            FreshnessFailureCode::AssemblyMismatch,
             "assembly manifest identity differs",
         );
     }
@@ -525,31 +525,31 @@ pub fn decide_freshness_v1(
     ) {
         HeadComparison::Exact => {}
         HeadComparison::Missing => {
-            return FreshnessDecisionV1::rejected(
-                FreshnessStatusV1::IndexBehind,
-                FreshnessFailureCodeV1::MissingProofScope,
+            return FreshnessDecision::rejected(
+                FreshnessStatus::IndexBehind,
+                FreshnessFailureCode::MissingProofScope,
                 "indexed proof omits a required repository head",
             );
         }
         HeadComparison::Changed => {
-            return FreshnessDecisionV1::rejected(
-                FreshnessStatusV1::IndexBehind,
-                FreshnessFailureCodeV1::SourceHeadMismatch,
+            return FreshnessDecision::rejected(
+                FreshnessStatus::IndexBehind,
+                FreshnessFailureCode::SourceHeadMismatch,
                 "indexed proof was collected for a different source head",
             );
         }
         HeadComparison::Extra => {
-            return FreshnessDecisionV1::rejected(
-                FreshnessStatusV1::Unknown,
-                FreshnessFailureCodeV1::IncomparableScope,
+            return FreshnessDecision::rejected(
+                FreshnessStatus::Unknown,
+                FreshnessFailureCode::IncomparableScope,
                 "indexed proof has incomparable repository scope",
             );
         }
     }
     if indexed.index_generation < minimum_generation {
-        return FreshnessDecisionV1::rejected(
-            FreshnessStatusV1::IndexBehind,
-            FreshnessFailureCodeV1::GenerationRollback,
+        return FreshnessDecision::rejected(
+            FreshnessStatus::IndexBehind,
+            FreshnessFailureCode::GenerationRollback,
             "index generation is below the required generation",
         );
     }
@@ -577,10 +577,10 @@ pub fn decide_freshness_v1(
             "essential dependency witness",
         );
     }
-    FreshnessDecisionV1::fresh(indexed)
+    FreshnessDecision::fresh(indexed)
 }
 
-pub fn freshness_contract_manifest_v1() -> Value {
+pub fn freshness_contract_manifest() -> Value {
     json!({
         "contract_version": FRESHNESS_CONTRACT_VERSION,
         "model_version": FRESHNESS_MODEL_VERSION,
@@ -593,89 +593,89 @@ pub fn freshness_contract_manifest_v1() -> Value {
     })
 }
 
-pub fn freshness_contract_digest_v1() -> DigestV1 {
-    digest_json(&freshness_contract_manifest_v1())
+pub fn freshness_contract_digest() -> Sha256Digest {
+    digest_json(&freshness_contract_manifest())
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct FreshnessErrorV1 {
-    pub code: FreshnessFailureCodeV1,
+pub struct FreshnessError {
+    pub code: FreshnessFailureCode,
     pub detail: String,
 }
-impl FreshnessErrorV1 {
-    pub fn new(code: FreshnessFailureCodeV1, detail: impl Into<String>) -> Self {
+impl FreshnessError {
+    pub fn new(code: FreshnessFailureCode, detail: impl Into<String>) -> Self {
         Self {
             code,
             detail: detail.into(),
         }
     }
 }
-impl fmt::Display for FreshnessErrorV1 {
+impl fmt::Display for FreshnessError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{:?}: {}", self.code, self.detail)
     }
 }
-impl Error for FreshnessErrorV1 {}
+impl Error for FreshnessError {}
 
-fn validate_version(version: u16) -> Result<(), FreshnessErrorV1> {
+fn validate_version(version: u16) -> Result<(), FreshnessError> {
     if version == FRESHNESS_CONTRACT_VERSION {
         Ok(())
     } else {
-        Err(FreshnessErrorV1::new(
-            FreshnessFailureCodeV1::UnsupportedSchemaVersion,
+        Err(FreshnessError::new(
+            FreshnessFailureCode::UnsupportedSchemaVersion,
             format!("unsupported schema version {version}"),
         ))
     }
 }
-fn validate_identity(label: &str, value: &str) -> Result<(), FreshnessErrorV1> {
+fn validate_identity(label: &str, value: &str) -> Result<(), FreshnessError> {
     if value.is_empty()
         || value.len() > 256
         || !value.bytes().all(|byte| {
             byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'/' | b':' | b'_' | b'-')
         })
     {
-        Err(FreshnessErrorV1::new(
-            FreshnessFailureCodeV1::InvalidIdentity,
+        Err(FreshnessError::new(
+            FreshnessFailureCode::InvalidIdentity,
             format!("{label} is empty, too long, or contains a non-canonical byte"),
         ))
     } else {
         Ok(())
     }
 }
-fn digest_json(value: &Value) -> DigestV1 {
-    DigestV1::from_bytes(sha256(canonical_json(value).as_bytes()))
+fn digest_json(value: &Value) -> Sha256Digest {
+    Sha256Digest::from_bytes(sha256(canonical_json(value).as_bytes()))
 }
-fn require_digest(actual: DigestV1, expected: DigestV1) -> Result<(), FreshnessErrorV1> {
+fn require_digest(actual: Sha256Digest, expected: Sha256Digest) -> Result<(), FreshnessError> {
     if actual == expected {
         Ok(())
     } else {
-        Err(FreshnessErrorV1::new(
-            FreshnessFailureCodeV1::CertificateDigestMismatch,
+        Err(FreshnessError::new(
+            FreshnessFailureCode::CertificateDigestMismatch,
             "certificate digest does not match canonical payload bytes",
         ))
     }
 }
-fn serialization_error(error: serde_json::Error) -> FreshnessErrorV1 {
-    FreshnessErrorV1::new(
-        FreshnessFailureCodeV1::SerializationFailure,
+fn serialization_error(error: serde_json::Error) -> FreshnessError {
+    FreshnessError::new(
+        FreshnessFailureCode::SerializationFailure,
         error.to_string(),
     )
 }
-fn sort_unique<T: Ord>(values: &mut [T], label: &str) -> Result<(), FreshnessErrorV1> {
+fn sort_unique<T: Ord>(values: &mut [T], label: &str) -> Result<(), FreshnessError> {
     values.sort();
     if values.windows(2).any(|pair| pair[0] == pair[1]) {
-        Err(FreshnessErrorV1::new(
-            FreshnessFailureCodeV1::DuplicateIdentity,
+        Err(FreshnessError::new(
+            FreshnessFailureCode::DuplicateIdentity,
             format!("duplicate {label}"),
         ))
     } else {
         Ok(())
     }
 }
-fn require_strict_order<T: Ord>(values: &[T], label: &str) -> Result<(), FreshnessErrorV1> {
+fn require_strict_order<T: Ord>(values: &[T], label: &str) -> Result<(), FreshnessError> {
     if values.windows(2).any(|pair| pair[0] >= pair[1]) {
-        Err(FreshnessErrorV1::new(
-            FreshnessFailureCodeV1::NonCanonicalOrder,
+        Err(FreshnessError::new(
+            FreshnessFailureCode::NonCanonicalOrder,
             format!("{label} must be strictly sorted and unique"),
         ))
     } else {
@@ -690,7 +690,7 @@ enum HeadComparison {
     Changed,
     Extra,
 }
-fn compare_heads(required: &[FreshnessHeadV1], actual: &[FreshnessHeadV1]) -> HeadComparison {
+fn compare_heads(required: &[FreshnessHead], actual: &[FreshnessHead]) -> HeadComparison {
     let required: BTreeMap<&str, &str> = required
         .iter()
         .map(|head| (head.repository.as_str(), head.head.as_str()))
@@ -715,29 +715,29 @@ fn compare_heads(required: &[FreshnessHeadV1], actual: &[FreshnessHeadV1]) -> He
         HeadComparison::Extra
     }
 }
-fn compare_sets<T: Ord>(required: &[T], actual: &[T], label: &str) -> FreshnessDecisionV1 {
+fn compare_sets<T: Ord>(required: &[T], actual: &[T], label: &str) -> FreshnessDecision {
     let required: BTreeSet<&T> = required.iter().collect();
     let actual: BTreeSet<&T> = actual.iter().collect();
     if required.is_subset(&actual) {
-        FreshnessDecisionV1::rejected(
-            FreshnessStatusV1::Unknown,
-            FreshnessFailureCodeV1::ScopeInflation,
+        FreshnessDecision::rejected(
+            FreshnessStatus::Unknown,
+            FreshnessFailureCode::ScopeInflation,
             format!("indexed proof claims unrequested {label} scope"),
         )
     } else if actual.is_subset(&required) {
-        FreshnessDecisionV1::rejected(
-            FreshnessStatusV1::IndexBehind,
+        FreshnessDecision::rejected(
+            FreshnessStatus::IndexBehind,
             if label == "dependency edge" {
-                FreshnessFailureCodeV1::MissingEdge
+                FreshnessFailureCode::MissingEdge
             } else {
-                FreshnessFailureCodeV1::MissingProofScope
+                FreshnessFailureCode::MissingProofScope
             },
             format!("indexed proof omits required {label} scope"),
         )
     } else {
-        FreshnessDecisionV1::rejected(
-            FreshnessStatusV1::Unknown,
-            FreshnessFailureCodeV1::IncomparableScope,
+        FreshnessDecision::rejected(
+            FreshnessStatus::Unknown,
+            FreshnessFailureCode::IncomparableScope,
             format!("indexed and required {label} scopes are incomparable"),
         )
     }

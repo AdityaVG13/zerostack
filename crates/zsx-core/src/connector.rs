@@ -18,7 +18,7 @@
 //! journal before adapter admission: the Prepared entry is durable before the
 //! dispatch is admitted, DispatchCrossed is persisted immediately before the
 //! adapter call, and an ambiguous adapter failure is resolved Indeterminate.
-//! Recovery (`recover_attempt_v1`, exposed through the session reconciliation
+//! Recovery (`recover_attempt`, exposed through the session reconciliation
 //! API) maps a Prepared journal to SafeToRetry and never redispatchable; no
 //! recovery path can call an adapter.
 //!
@@ -36,11 +36,11 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
-use zero_abi::WorkerTokenAccountingV1;
+use zero_abi::WorkerTokenAccounting;
 use zero_abi::raw_worker::{ApprovalGrant as WorkerApprovalGrant, EngineIdentity};
 use zero_abi::{
-    ApprovalState, CallRequest, CapabilityDescriptor, DigestV1, EffectClass, GlobalRegistration,
-    TelemetryRequestV1, WorkerRequestFrame, WorkerResponseFrame, WorkerTrace, canonical_json,
+    ApprovalState, CallRequest, CapabilityDescriptor, Sha256Digest, EffectClass, GlobalRegistration,
+    TelemetryRequest, WorkerRequestFrame, WorkerResponseFrame, WorkerTrace, canonical_json,
     encode_frame, sha256, validate_response_frame,
 };
 use zero_codemode::CancellationSignal;
@@ -48,7 +48,7 @@ use zero_codemode::{
     Connector, ConnectorCompletion, ConnectorError, DispatchContext, HostError,
     MAX_INFLIGHT_CONNECTOR_CALLS,
 };
-use zero_gate::residency::LayerValidityLedgerV1;
+use zero_gate::residency::LayerValidityLedger;
 use zero_ledger::{LedgerConfig, ResourceGauge, TokenCharge, TokenizerIdentity};
 use zero_machine_permit::{
     MachinePermit, MachinePermitHeartbeat, PERMIT_HEARTBEAT_INTERVAL, PermitOwnerMetadata,
@@ -56,21 +56,21 @@ use zero_machine_permit::{
 };
 use zero_ref::{ZeroRef, ZeroScheme};
 use zero_store::{
-    AttemptBindingV1, AttemptJournalPathsV1, AttemptRecoveryReceiptV1, AttemptStateV1,
-    DurableProfileIdV1, SharedCas, atomic_write_file, current_reachability_snapshot, gc_project_id,
-    mark_dispatch_crossed_v1, mark_indeterminate_v1, mark_succeeded_v1, prepare_attempt_v1,
-    publish_reachability_snapshot, read_current_attempt_v1, recover_attempt_v1,
+    AttemptBinding, AttemptJournalPaths, AttemptRecoveryReceipt, AttemptState,
+    DurableProfileId, SharedCas, atomic_write_file, current_reachability_snapshot, gc_project_id,
+    mark_dispatch_crossed, mark_indeterminate, mark_succeeded, prepare_attempt,
+    publish_reachability_snapshot, read_current_attempt, recover_attempt,
 };
 
 use crate::adapter::{AdapterCall, DomainAdapter};
 use crate::lower::{METHODS, lower};
-use crate::residency::{SessionQ99ReportV1, SessionResidencyGate, tier_of_engine};
+use crate::residency::{SessionQ99Report, SessionResidencyGate, tier_of_engine};
 use crate::verdict::{VerdictLoopEnvelope, VerdictLoopResult, VerdictMeter};
 
 /// One approval grant consumed by the native session.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
-pub struct SessionApprovalGrantV1 {
+pub struct SessionApprovalGrant {
     pub schema: String,
     pub grant_id: String,
     pub engine: EngineIdentity,
@@ -122,14 +122,14 @@ pub fn harness_fs_write_grants(
     generation: u64,
     request_id: u64,
     count: usize,
-) -> Vec<SessionApprovalGrantV1> {
+) -> Vec<SessionApprovalGrant> {
     let count = count.min(MAX_SESSION_APPROVAL_GRANTS);
     if count == 0 {
         return Vec::new();
     }
     let now = now_ms();
     (0..count)
-        .map(|index| SessionApprovalGrantV1 {
+        .map(|index| SessionApprovalGrant {
             schema: SESSION_APPROVAL_SCHEMA.into(),
             grant_id: format!("harness-fs-write-{request_id}-{index}"),
             engine: EngineIdentity::FsZero,
@@ -252,7 +252,7 @@ pub(crate) const ATTEMPT_MANIFEST_SCHEMA: &str = "zerostack.zsx.attempt_manifest
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
-pub(crate) struct AttemptManifestV1 {
+pub(crate) struct AttemptManifest {
     pub schema: String,
     pub session_id: String,
     pub generation: u64,
@@ -267,9 +267,9 @@ pub(crate) struct AttemptManifestV1 {
 /// through the dispatch boundary and terminal resolution.
 #[derive(Clone, Debug)]
 struct MutationJournal {
-    paths: AttemptJournalPathsV1,
-    prepared_entry_digest: DigestV1,
-    dispatch_entry_digest: Option<DigestV1>,
+    paths: AttemptJournalPaths,
+    prepared_entry_digest: Sha256Digest,
+    dispatch_entry_digest: Option<Sha256Digest>,
 }
 
 /// Read-only snapshot of one reconciled mutation attempt journal, returned by
@@ -289,16 +289,16 @@ pub struct ZsxAttemptJournalStatus {
     /// Journaled effect class from the attempt manifest, when present.
     pub effect_class: Option<EffectClass>,
     /// Terminal attempt state after reconciliation.
-    pub state: AttemptStateV1,
-    /// Durable recovery receipt produced by `recover_attempt_v1`.
-    pub recovery: AttemptRecoveryReceiptV1,
+    pub state: AttemptState,
+    /// Durable recovery receipt produced by `recover_attempt`.
+    pub recovery: AttemptRecoveryReceipt,
     /// Journal directory holding the immutable `attempt-<sequence>.json` chain.
     pub journal_directory: PathBuf,
 }
 
 /// Deterministic SHA-256 identity over canonical JSON.
-fn attempt_digest(value: &Value) -> DigestV1 {
-    DigestV1::from_bytes(sha256(canonical_json(value).as_bytes()))
+fn attempt_digest(value: &Value) -> Sha256Digest {
+    Sha256Digest::from_bytes(sha256(canonical_json(value).as_bytes()))
 }
 
 /// Classify one canonical domain operation as a journaled mutation.
@@ -455,7 +455,7 @@ fn prepare_mutation_journal(
     })?;
     // create_dir_all follows a TOCTOU swap to a planted symlink-to-dir.
     refuse_planted_journal_symlinks(&state.attempts_root, journal_dir)?;
-    let manifest = AttemptManifestV1 {
+    let manifest = AttemptManifest {
         schema: ATTEMPT_MANIFEST_SCHEMA.into(),
         session_id: state.session_id.clone(),
         generation: execution.generation,
@@ -471,8 +471,8 @@ fn prepare_mutation_journal(
     atomic_write_file(&journal_dir.join("manifest.json"), &manifest_bytes).map_err(|error| {
         ConnectorError::new(format!("cannot persist mutation attempt manifest: {error}"))
     })?;
-    let binding = AttemptBindingV1::new(
-        DigestV1::from_bytes(sha256(request.request_id.as_bytes())),
+    let binding = AttemptBinding::new(
+        Sha256Digest::from_bytes(sha256(request.request_id.as_bytes())),
         attempt_digest(&json!({
             "engine": engine.as_str(),
             "operation": request.op,
@@ -483,12 +483,12 @@ fn prepare_mutation_journal(
             "session": execution_session_ref(&state.session_id, execution),
             "cell": execution_cell_ref(&state.session_id, execution),
         })),
-        DurableProfileIdV1::PortableStrict,
-        DigestV1::from_bytes(sha256(state.session_id.as_bytes())),
+        DurableProfileId::PortableStrict,
+        Sha256Digest::from_bytes(sha256(state.session_id.as_bytes())),
     );
-    let paths = AttemptJournalPathsV1::new(journal_dir)
+    let paths = AttemptJournalPaths::new(journal_dir)
         .map_err(|error| ConnectorError::new(error.to_string()))?;
-    let prepared = prepare_attempt_v1(&paths, binding.clone())
+    let prepared = prepare_attempt(&paths, binding.clone())
         .map_err(|error| ConnectorError::new(error.to_string()))?;
     let prepared_entry_digest = prepared
         .digest()
@@ -504,7 +504,7 @@ fn prepare_mutation_journal(
 /// failure here means the effect never ran and the journal remains Prepared
 /// (recoverable only as SafeToRetry).
 fn cross_mutation_journal(journal: &mut MutationJournal) -> Result<(), ConnectorError> {
-    let crossed = mark_dispatch_crossed_v1(
+    let crossed = mark_dispatch_crossed(
         &journal.paths,
         journal.prepared_entry_digest,
         SystemTime::now()
@@ -526,12 +526,12 @@ fn cross_mutation_journal(journal: &mut MutationJournal) -> Result<(), Connector
 /// Persist authoritative completion evidence for a crossed mutation.
 fn succeed_mutation_journal(
     journal: &MutationJournal,
-    receipt_digest: DigestV1,
+    receipt_digest: Sha256Digest,
 ) -> Result<(), ConnectorError> {
     let dispatch_entry_digest = journal
         .dispatch_entry_digest
         .ok_or_else(|| ConnectorError::new("mutation attempt never crossed dispatch"))?;
-    mark_succeeded_v1(
+    mark_succeeded(
         &journal.paths,
         dispatch_entry_digest,
         receipt_digest,
@@ -552,7 +552,7 @@ fn indeterminate_mutation_journal(journal: &MutationJournal) -> Result<(), Conne
     let dispatch_entry_digest = journal
         .dispatch_entry_digest
         .ok_or_else(|| ConnectorError::new("mutation attempt never crossed dispatch"))?;
-    mark_indeterminate_v1(&journal.paths, dispatch_entry_digest)
+    mark_indeterminate(&journal.paths, dispatch_entry_digest)
         .map_err(|error| ConnectorError::new(error.to_string()))?;
     Ok(())
 }
@@ -585,7 +585,7 @@ fn fail_indeterminate(journal: Option<&MutationJournal>, error: ConnectorError) 
 ///   total, so `check_accounting_complete` passes on live counters.
 fn charge_resource_gauge(
     state: &ZsxState,
-    accounting: &WorkerTokenAccountingV1,
+    accounting: &WorkerTokenAccounting,
 ) -> Result<(), ConnectorError> {
     use zero_abi::WorkerTokenCountKind;
     if accounting.count_kind != WorkerTokenCountKind::Exact {
@@ -642,7 +642,7 @@ pub(crate) fn reconcile_request_attempts(
     let generation_dir = attempts_root.join(format!("g{generation}"));
     let request_dir = generation_dir.join(format!("r{request_id}"));
     // 4js1 leftover (orwr): read_dir follows a planted attempts/gN/rN
-    // directory symlink and then recover_attempt_v1 writes SafeToRetry into
+    // directory symlink and then recover_attempt writes SafeToRetry into
     // the victim's real journals. Inspect each component so an intermediate
     // gN symlink is not followed before it is seen.
     if path_is_symlink(attempts_root)
@@ -660,7 +660,7 @@ pub(crate) fn reconcile_request_attempts(
     for entry in entries {
         let entry = entry.map_err(|error| format!("cannot read attempt journal entry: {error}"))?;
         // DirEntry::file_type does not follow. Path::is_dir would treat a
-        // planted symlink-to-dir as a journal and recover_attempt_v1 would
+        // planted symlink-to-dir as a journal and recover_attempt would
         // write SafeToRetry into the target (zerostack-recon-journal-symlink-4js1).
         let file_type = entry
             .file_type()
@@ -680,12 +680,12 @@ pub(crate) fn reconcile_request_attempts(
                     .unwrap_or_default()
                     .to_owned()
             });
-        let paths = AttemptJournalPathsV1::new(&journal_dir).map_err(|error| error.to_string())?;
-        let Some(current) = read_current_attempt_v1(&paths).map_err(|error| error.to_string())?
+        let paths = AttemptJournalPaths::new(&journal_dir).map_err(|error| error.to_string())?;
+        let Some(current) = read_current_attempt(&paths).map_err(|error| error.to_string())?
         else {
             continue;
         };
-        let recovery = recover_attempt_v1(&paths, &current.binding, None)
+        let recovery = recover_attempt(&paths, &current.binding, None)
             .map_err(|error| error.to_string())?;
         statuses.push(ZsxAttemptJournalStatus {
             generation,
@@ -780,9 +780,9 @@ pub(crate) fn reconcile_all_attempts(
     Ok(statuses)
 }
 
-fn read_attempt_manifest(journal_dir: &Path) -> Option<AttemptManifestV1> {
+fn read_attempt_manifest(journal_dir: &Path) -> Option<AttemptManifest> {
     let bytes = std::fs::read(journal_dir.join("manifest.json")).ok()?;
-    serde_json::from_slice::<AttemptManifestV1>(&bytes).ok()
+    serde_json::from_slice::<AttemptManifest>(&bytes).ok()
 }
 
 struct ZsxDispatch {
@@ -823,9 +823,9 @@ pub(crate) struct ZsxState {
     /// Session-lifetime layer-validity ledger consulted on every verified
     /// CAS read, so an L3/CAS loss in a later request preserves the L2
     /// validity an earlier request published (ZS-CACHE-001/013).
-    layer_validity: Mutex<LayerValidityLedgerV1>,
+    layer_validity: Mutex<LayerValidityLedger>,
     /// Last finalized Q99 report for the session, or its rejection detail.
-    residency_report: Mutex<Option<Result<SessionQ99ReportV1, String>>>,
+    residency_report: Mutex<Option<Result<SessionQ99Report, String>>>,
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -836,7 +836,7 @@ pub(crate) struct EngineDispatchMetrics {
 
 #[derive(Default)]
 struct ActiveApprovals {
-    grants: Vec<SessionApprovalGrantV1>,
+    grants: Vec<SessionApprovalGrant>,
 }
 
 pub(crate) struct ZsxConnector {
@@ -896,7 +896,7 @@ impl ZsxConnector {
             verdict_meter: Mutex::new(None),
             resource_gauge: Mutex::new(None),
             residency_gate: Mutex::new(None),
-            layer_validity: Mutex::new(LayerValidityLedgerV1::new()),
+            layer_validity: Mutex::new(LayerValidityLedger::new()),
             residency_report: Mutex::new(None),
         });
         let (dispatch_sender, dispatch_receiver) = mpsc::sync_channel(MAX_INFLIGHT_CONNECTOR_CALLS);
@@ -1122,7 +1122,7 @@ impl ZsxConnector {
     /// The last finalized Q99 report, or its rejection detail. Fails when no
     /// execution has finalized a report yet (impossible after the session
     /// prewarm, which installs and finalizes one window).
-    pub(crate) fn residency_report(&self) -> Result<SessionQ99ReportV1, ConnectorError> {
+    pub(crate) fn residency_report(&self) -> Result<SessionQ99Report, ConnectorError> {
         let report = self
             .state
             .residency_report
@@ -1147,7 +1147,7 @@ impl ZsxConnector {
 
     pub(crate) fn install_approvals(
         &self,
-        grants: Vec<SessionApprovalGrantV1>,
+        grants: Vec<SessionApprovalGrant>,
     ) -> Result<(), HostError> {
         let mut active = self
             .approvals
@@ -1173,7 +1173,7 @@ impl ZsxConnector {
         engine: EngineIdentity,
         operation: &str,
         worker_request_id: &str,
-    ) -> Result<Option<(WorkerApprovalGrant, SessionApprovalGrantV1)>, ConnectorError> {
+    ) -> Result<Option<(WorkerApprovalGrant, SessionApprovalGrant)>, ConnectorError> {
         let mut active = self
             .approvals
             .lock()
@@ -1205,7 +1205,7 @@ impl ZsxConnector {
         )))
     }
 
-    fn restore_approval(&self, grant: SessionApprovalGrantV1) -> Result<(), ConnectorError> {
+    fn restore_approval(&self, grant: SessionApprovalGrant) -> Result<(), ConnectorError> {
         let mut active = self
             .approvals
             .lock()
@@ -1374,7 +1374,7 @@ impl Connector for ZsxConnector {
             // session resource ledger mints charges on real work, not just
             // verdict-loop runs (W2). Engine stage timelines stay off; they
             // are only paid for when a verdict envelope is installed.
-            telemetry_request: Some(TelemetryRequestV1 {
+            telemetry_request: Some(TelemetryRequest {
                 engine_stage_timeline: metered,
                 worker_token_accounting: true,
             }),
@@ -1661,10 +1661,10 @@ fn normalize_aggregate_result_value(
     operation: &str,
     value: Value,
 ) -> Result<Value, ConnectorError> {
-    if engine != EngineIdentity::TokenZero || operation != zero_abi::TOKEN_JOB_OPERATION_V1 {
+    if engine != EngineIdentity::TokenZero || operation != zero_abi::TOKEN_JOB_OPERATION {
         return Ok(value);
     }
-    let result: zero_abi::TokenJobPollResultV1 = serde_json::from_value(value)
+    let result: zero_abi::TokenJobPollResult = serde_json::from_value(value)
         .map_err(|error| ConnectorError::new(format!("invalid token.job result: {error}")))?;
     result
         .validate()
@@ -1743,7 +1743,7 @@ fn retain_reachability(
                 // entry previously published L2-valid keeps its validity and
                 // is marked needs-refetch (never rediscovered); an entry
                 // never L2-valid fails closed as undiscovered loss.
-                let object_root = DigestV1::from_hex(&parsed.hash).map_err(|parse_error| {
+                let object_root = Sha256Digest::from_hex(&parsed.hash).map_err(|parse_error| {
                     ConnectorError::new(format!(
                         "adapter ref {reference:?} has an invalid object digest: {parse_error}"
                     ))
@@ -1765,7 +1765,7 @@ fn retain_reachability(
         };
         // Publish the L2 validity of the verified copy: identity proven by
         // content verification, never rediscovery (ZS-CACHE-001/013).
-        let object_root = DigestV1::from_hex(&parsed.hash).map_err(|error| {
+        let object_root = Sha256Digest::from_hex(&parsed.hash).map_err(|error| {
             ConnectorError::new(format!(
                 "adapter ref {reference:?} has an invalid object digest: {error}"
             ))

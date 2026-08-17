@@ -13,14 +13,14 @@ use serde_json::Value;
 use crate::{canonical_json, sha256_hex};
 
 /// Wire schema identifier for this shared cache-entry contract.
-pub const CACHE_ENTRY_SCHEMA_V1: &str = "cache-entry/v1";
+pub const CACHE_ENTRY_SCHEMA: &str = "cache-entry/v1";
 
 /// A non-empty content-addressed root used by a cache key or value.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(transparent)]
-pub struct CacheRootV1(String);
+pub struct CacheRoot(String);
 
-impl CacheRootV1 {
+impl CacheRoot {
     /// Construct a root. Empty roots are never valid cache evidence.
     pub fn new(root: impl Into<String>) -> Result<Self, CacheEntryError> {
         let root = root.into();
@@ -37,12 +37,12 @@ impl CacheRootV1 {
 
 /// Operator identity is versioned independently of its parameter payload.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct OperatorIdentityV1 {
+pub struct OperatorIdentity {
     id: String,
     version: String,
 }
 
-impl OperatorIdentityV1 {
+impl OperatorIdentity {
     pub fn new(id: impl Into<String>, version: impl Into<String>) -> Result<Self, CacheEntryError> {
         let id = id.into();
         let version = version.into();
@@ -64,15 +64,15 @@ impl OperatorIdentityV1 {
 /// checked_roots covers every root whose absence makes a negative result
 /// complete; proof_root identifies the durable witness itself.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct CompletenessWitnessV1 {
-    proof_root: CacheRootV1,
-    checked_roots: Vec<CacheRootV1>,
+pub struct CacheCompletenessWitness {
+    proof_root: CacheRoot,
+    checked_roots: Vec<CacheRoot>,
 }
 
-impl CompletenessWitnessV1 {
+impl CacheCompletenessWitness {
     pub fn new(
-        proof_root: CacheRootV1,
-        checked_roots: Vec<CacheRootV1>,
+        proof_root: CacheRoot,
+        checked_roots: Vec<CacheRoot>,
     ) -> Result<Self, CacheEntryError> {
         let mut witness = Self {
             proof_root,
@@ -82,11 +82,11 @@ impl CompletenessWitnessV1 {
         Ok(witness)
     }
 
-    pub fn proof_root(&self) -> &CacheRootV1 {
+    pub fn proof_root(&self) -> &CacheRoot {
         &self.proof_root
     }
 
-    pub fn checked_roots(&self) -> &[CacheRootV1] {
+    pub fn checked_roots(&self) -> &[CacheRoot] {
         &self.checked_roots
     }
 
@@ -99,15 +99,15 @@ impl CompletenessWitnessV1 {
 
 /// Optional durable receipt from an independent verifier.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct VerifierReceiptV1 {
+pub struct VerifierReceipt {
     verifier: String,
-    receipt_root: CacheRootV1,
+    receipt_root: CacheRoot,
 }
 
-impl VerifierReceiptV1 {
+impl VerifierReceipt {
     pub fn new(
         verifier: impl Into<String>,
-        receipt_root: CacheRootV1,
+        receipt_root: CacheRoot,
     ) -> Result<Self, CacheEntryError> {
         let verifier = verifier.into();
         require_nonempty("verifier", &verifier)?;
@@ -122,7 +122,7 @@ impl VerifierReceiptV1 {
         &self.verifier
     }
 
-    pub fn receipt_root(&self) -> &CacheRootV1 {
+    pub fn receipt_root(&self) -> &CacheRoot {
         &self.receipt_root
     }
 }
@@ -130,30 +130,30 @@ impl VerifierReceiptV1 {
 /// Complete cache key. scope_roots is empty for a positive hit and non-empty
 /// for a negative/no-matches entry.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-pub struct CacheKeyV1 {
-    operator: OperatorIdentityV1,
+pub struct CacheKey {
+    operator: OperatorIdentity,
     canonical_parameters: Value,
-    minimum_dependency_roots: Vec<CacheRootV1>,
-    environment_roots: Vec<CacheRootV1>,
-    toolchain_roots: Vec<CacheRootV1>,
-    completeness_witness: CompletenessWitnessV1,
+    minimum_dependency_roots: Vec<CacheRoot>,
+    environment_roots: Vec<CacheRoot>,
+    toolchain_roots: Vec<CacheRoot>,
+    completeness_witness: CacheCompletenessWitness,
     #[serde(default)]
-    scope_roots: Vec<CacheRootV1>,
+    scope_roots: Vec<CacheRoot>,
 }
 
 #[derive(Debug, Deserialize)]
 struct CacheKeyWire {
-    operator: OperatorIdentityV1,
+    operator: OperatorIdentity,
     canonical_parameters: Value,
-    minimum_dependency_roots: Vec<CacheRootV1>,
-    environment_roots: Vec<CacheRootV1>,
-    toolchain_roots: Vec<CacheRootV1>,
-    completeness_witness: CompletenessWitnessV1,
+    minimum_dependency_roots: Vec<CacheRoot>,
+    environment_roots: Vec<CacheRoot>,
+    toolchain_roots: Vec<CacheRoot>,
+    completeness_witness: CacheCompletenessWitness,
     #[serde(default)]
-    scope_roots: Vec<CacheRootV1>,
+    scope_roots: Vec<CacheRoot>,
 }
 
-impl<'de> Deserialize<'de> for CacheKeyV1 {
+impl<'de> Deserialize<'de> for CacheKey {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
         D: Deserializer<'de>,
@@ -172,15 +172,15 @@ impl<'de> Deserialize<'de> for CacheKeyV1 {
     }
 }
 
-impl CacheKeyV1 {
+impl CacheKey {
     /// Construct a positive-result key with no anti-dependency scope roots.
     pub fn new(
-        operator: OperatorIdentityV1,
+        operator: OperatorIdentity,
         canonical_parameters: Value,
-        minimum_dependency_roots: Vec<CacheRootV1>,
-        environment_roots: Vec<CacheRootV1>,
-        toolchain_roots: Vec<CacheRootV1>,
-        completeness_witness: CompletenessWitnessV1,
+        minimum_dependency_roots: Vec<CacheRoot>,
+        environment_roots: Vec<CacheRoot>,
+        toolchain_roots: Vec<CacheRoot>,
+        completeness_witness: CacheCompletenessWitness,
     ) -> Result<Self, CacheEntryError> {
         Self::build(
             operator,
@@ -196,13 +196,13 @@ impl CacheKeyV1 {
     /// Construct a negative-result key. Scope roots are anti-dependencies: any
     /// change to one invalidates the no-matches answer.
     pub fn with_scope_roots(
-        operator: OperatorIdentityV1,
+        operator: OperatorIdentity,
         canonical_parameters: Value,
-        minimum_dependency_roots: Vec<CacheRootV1>,
-        environment_roots: Vec<CacheRootV1>,
-        toolchain_roots: Vec<CacheRootV1>,
-        completeness_witness: CompletenessWitnessV1,
-        scope_roots: Vec<CacheRootV1>,
+        minimum_dependency_roots: Vec<CacheRoot>,
+        environment_roots: Vec<CacheRoot>,
+        toolchain_roots: Vec<CacheRoot>,
+        completeness_witness: CacheCompletenessWitness,
+        scope_roots: Vec<CacheRoot>,
     ) -> Result<Self, CacheEntryError> {
         if scope_roots.is_empty() {
             return Err(CacheEntryError::EmptyField("negative scope roots"));
@@ -219,13 +219,13 @@ impl CacheKeyV1 {
     }
 
     fn build(
-        operator: OperatorIdentityV1,
+        operator: OperatorIdentity,
         canonical_parameters: Value,
-        mut minimum_dependency_roots: Vec<CacheRootV1>,
-        mut environment_roots: Vec<CacheRootV1>,
-        mut toolchain_roots: Vec<CacheRootV1>,
-        mut completeness_witness: CompletenessWitnessV1,
-        mut scope_roots: Vec<CacheRootV1>,
+        mut minimum_dependency_roots: Vec<CacheRoot>,
+        mut environment_roots: Vec<CacheRoot>,
+        mut toolchain_roots: Vec<CacheRoot>,
+        mut completeness_witness: CacheCompletenessWitness,
+        mut scope_roots: Vec<CacheRoot>,
     ) -> Result<Self, CacheEntryError> {
         validate_operator(&operator)?;
         normalize_roots(&mut minimum_dependency_roots);
@@ -258,7 +258,7 @@ impl CacheKeyV1 {
         })
     }
 
-    pub fn operator(&self) -> &OperatorIdentityV1 {
+    pub fn operator(&self) -> &OperatorIdentity {
         &self.operator
     }
 
@@ -266,23 +266,23 @@ impl CacheKeyV1 {
         &self.canonical_parameters
     }
 
-    pub fn minimum_dependency_roots(&self) -> &[CacheRootV1] {
+    pub fn minimum_dependency_roots(&self) -> &[CacheRoot] {
         &self.minimum_dependency_roots
     }
 
-    pub fn environment_roots(&self) -> &[CacheRootV1] {
+    pub fn environment_roots(&self) -> &[CacheRoot] {
         &self.environment_roots
     }
 
-    pub fn toolchain_roots(&self) -> &[CacheRootV1] {
+    pub fn toolchain_roots(&self) -> &[CacheRoot] {
         &self.toolchain_roots
     }
 
-    pub fn completeness_witness(&self) -> &CompletenessWitnessV1 {
+    pub fn completeness_witness(&self) -> &CacheCompletenessWitness {
         &self.completeness_witness
     }
 
-    pub fn scope_roots(&self) -> &[CacheRootV1] {
+    pub fn scope_roots(&self) -> &[CacheRoot] {
         &self.scope_roots
     }
 
@@ -314,31 +314,31 @@ impl CacheKeyV1 {
 /// Cache value: either an output root or a certified no-matches answer.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
-pub enum CacheValueV1 {
+pub enum CacheValue {
     Hit {
-        output_root: CacheRootV1,
+        output_root: CacheRoot,
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        verifier_receipt: Option<VerifierReceiptV1>,
+        verifier_receipt: Option<VerifierReceipt>,
     },
     NoMatches,
 }
 
 /// One validated cache entry shared by GraphZero and FSZero.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-pub struct CacheEntryV1 {
+pub struct CacheEntry {
     schema: String,
-    key: CacheKeyV1,
-    value: CacheValueV1,
+    key: CacheKey,
+    value: CacheValue,
 }
 
 #[derive(Debug, Deserialize)]
 struct CacheEntryWire {
     schema: String,
-    key: CacheKeyV1,
-    value: CacheValueV1,
+    key: CacheKey,
+    value: CacheValue,
 }
 
-impl<'de> Deserialize<'de> for CacheEntryV1 {
+impl<'de> Deserialize<'de> for CacheEntry {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
         D: Deserializer<'de>,
@@ -354,17 +354,17 @@ impl<'de> Deserialize<'de> for CacheEntryV1 {
     }
 }
 
-impl CacheEntryV1 {
+impl CacheEntry {
     /// Build a positive hit. A scope-bearing key is reserved for no-matches.
     pub fn positive(
-        key: CacheKeyV1,
-        output_root: CacheRootV1,
-        verifier_receipt: Option<VerifierReceiptV1>,
+        key: CacheKey,
+        output_root: CacheRoot,
+        verifier_receipt: Option<VerifierReceipt>,
     ) -> Result<Self, CacheEntryError> {
         let entry = Self {
-            schema: CACHE_ENTRY_SCHEMA_V1.to_owned(),
+            schema: CACHE_ENTRY_SCHEMA.to_owned(),
             key,
-            value: CacheValueV1::Hit {
+            value: CacheValue::Hit {
                 output_root,
                 verifier_receipt,
             },
@@ -375,11 +375,11 @@ impl CacheEntryV1 {
 
     /// Build a certified negative/no-matches entry. Its key must carry scope
     /// roots covered by the completeness witness.
-    pub fn negative(key: CacheKeyV1) -> Result<Self, CacheEntryError> {
+    pub fn negative(key: CacheKey) -> Result<Self, CacheEntryError> {
         let entry = Self {
-            schema: CACHE_ENTRY_SCHEMA_V1.to_owned(),
+            schema: CACHE_ENTRY_SCHEMA.to_owned(),
             key,
-            value: CacheValueV1::NoMatches,
+            value: CacheValue::NoMatches,
         };
         entry.validate()?;
         Ok(entry)
@@ -389,11 +389,11 @@ impl CacheEntryV1 {
         &self.schema
     }
 
-    pub fn key(&self) -> &CacheKeyV1 {
+    pub fn key(&self) -> &CacheKey {
         &self.key
     }
 
-    pub fn value(&self) -> &CacheValueV1 {
+    pub fn value(&self) -> &CacheValue {
         &self.value
     }
 
@@ -402,12 +402,12 @@ impl CacheEntryV1 {
     }
 
     fn validate(&self) -> Result<(), CacheEntryError> {
-        if self.schema != CACHE_ENTRY_SCHEMA_V1 {
+        if self.schema != CACHE_ENTRY_SCHEMA {
             return Err(CacheEntryError::UnsupportedSchema(self.schema.clone()));
         }
         self.key.validate()?;
         match &self.value {
-            CacheValueV1::Hit {
+            CacheValue::Hit {
                 output_root,
                 verifier_receipt,
             } => {
@@ -420,7 +420,7 @@ impl CacheEntryV1 {
                     validate_root("verifier receipt root", &receipt.receipt_root)?;
                 }
             }
-            CacheValueV1::NoMatches => {
+            CacheValue::NoMatches => {
                 if self.key.scope_roots.is_empty() {
                     return Err(CacheEntryError::MissingScopeRoots);
                 }
@@ -466,7 +466,7 @@ fn require_nonempty(field: &'static str, value: &str) -> Result<(), CacheEntryEr
     }
 }
 
-fn validate_root(field: &str, root: &CacheRootV1) -> Result<(), CacheEntryError> {
+fn validate_root(field: &str, root: &CacheRoot) -> Result<(), CacheEntryError> {
     if root.0.is_empty() {
         Err(CacheEntryError::InvalidRoot(field.to_owned()))
     } else {
@@ -474,19 +474,19 @@ fn validate_root(field: &str, root: &CacheRootV1) -> Result<(), CacheEntryError>
     }
 }
 
-fn validate_roots(field: &str, roots: &[CacheRootV1]) -> Result<(), CacheEntryError> {
+fn validate_roots(field: &str, roots: &[CacheRoot]) -> Result<(), CacheEntryError> {
     for root in roots {
         validate_root(field, root)?;
     }
     Ok(())
 }
 
-fn validate_operator(operator: &OperatorIdentityV1) -> Result<(), CacheEntryError> {
+fn validate_operator(operator: &OperatorIdentity) -> Result<(), CacheEntryError> {
     require_nonempty("operator id", &operator.id)?;
     require_nonempty("operator version", &operator.version)
 }
 
-fn normalize_roots(roots: &mut Vec<CacheRootV1>) {
+fn normalize_roots(roots: &mut Vec<CacheRoot>) {
     roots.sort();
     roots.dedup();
 }

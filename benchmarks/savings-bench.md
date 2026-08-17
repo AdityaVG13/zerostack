@@ -13,7 +13,7 @@ This is the citation set for the next ZeroStack bench iteration. Three layers. D
 | **Envelope bytes** | `result_finalization_receipt.v1` `savingsBytes` | Any spilled `zero_execute` |
 | **Call fusion** | 1 MCP call vs N | Every fused surface |
 
-FS adapters emit `input_token_cost: 0` and no `WorkerTokenAccountingV1`. That is not "free." It is **uncertified**. Spill receipts say `visibleTokenCountStatus: requires_tokenzero_certification`.
+FS adapters emit `input_token_cost: 0` and no `WorkerTokenAccounting`. That is not "free." It is **uncertified**. Spill receipts say `visibleTokenCountStatus: requires_tokenzero_certification`.
 
 Do not call `savingsBytes` a token saving. Do not call `recovery_tokens` billed.
 

@@ -13,32 +13,32 @@ use std::{collections::BTreeMap, error::Error, fmt};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
-use crate::{ArtifactOwnerV1, DigestV1, canonical_json, sha256};
+use crate::{ArtifactOwner, Sha256Digest, canonical_json, sha256};
 
-pub const CWIR_CONTRACT_VERSION_V1: u16 = 1;
-pub const CWIR_MODEL_VERSION_V1: u16 = 1;
-pub const CWIR_SEMANTIC_DOMAIN_V1: &[u8] = b"zerostack.cwir.semantic.v1\0";
-pub const CWIR_TASK_DOMAIN_V1: &[u8] = b"zerostack.cwir.task.v1\0";
-pub const CWIR_NODE_DOMAIN_V1: &[u8] = b"zerostack.cwir.node.v1\0";
-pub const CWIR_EDGE_DOMAIN_V1: &[u8] = b"zerostack.cwir.edge.v1\0";
-pub const CWIR_OBLIGATION_DOMAIN_V1: &[u8] = b"zerostack.cwir.obligation.v1\0";
-pub const CWIR_EXPANSION_DOMAIN_V1: &[u8] = b"zerostack.cwir.expansion.v1\0";
-pub const CWIR_MAX_CANONICAL_BYTES_V1: usize = 1_048_576;
-pub const CWIR_MAX_NODES_V1: usize = 4_096;
-pub const CWIR_MAX_EDGES_V1: usize = 8_192;
-pub const CWIR_MAX_OBLIGATIONS_V1: usize = 1_024;
-pub const CWIR_MAX_EXPANSIONS_V1: usize = 1_024;
-pub const CWIR_MAX_REFS_PER_ITEM_V1: usize = 1_024;
-pub const CWIR_MAX_EFFECTS_V1: usize = 1_024;
-pub const CWIR_MAX_CAPABILITIES_V1: usize = 1_024;
-pub const CWIR_MAX_IDENTITY_BYTES_V1: usize = 256;
-pub const CWIR_MAX_EXPANSION_INPUT_BYTES_V1: u64 = 1_048_576;
-pub const CWIR_MAX_EXPANSION_OUTPUT_BYTES_V1: u64 = 16_777_216;
-pub const CWIR_MAX_EXPANSION_WORK_UNITS_V1: u64 = 1_000_000_000;
+pub const CWIR_CONTRACT_VERSION: u16 = 1;
+pub const CWIR_MODEL_VERSION: u16 = 1;
+pub const CWIR_SEMANTIC_DOMAIN: &[u8] = b"zerostack.cwir.semantic.v1\0";
+pub const CWIR_TASK_DOMAIN: &[u8] = b"zerostack.cwir.task.v1\0";
+pub const CWIR_NODE_DOMAIN: &[u8] = b"zerostack.cwir.node.v1\0";
+pub const CWIR_EDGE_DOMAIN: &[u8] = b"zerostack.cwir.edge.v1\0";
+pub const CWIR_OBLIGATION_DOMAIN: &[u8] = b"zerostack.cwir.obligation.v1\0";
+pub const CWIR_EXPANSION_DOMAIN: &[u8] = b"zerostack.cwir.expansion.v1\0";
+pub const CWIR_MAX_CANONICAL_BYTES: usize = 1_048_576;
+pub const CWIR_MAX_NODES: usize = 4_096;
+pub const CWIR_MAX_EDGES: usize = 8_192;
+pub const CWIR_MAX_OBLIGATIONS: usize = 1_024;
+pub const CWIR_MAX_EXPANSIONS: usize = 1_024;
+pub const CWIR_MAX_REFS_PER_ITEM: usize = 1_024;
+pub const CWIR_MAX_EFFECTS: usize = 1_024;
+pub const CWIR_MAX_CAPABILITIES: usize = 1_024;
+pub const CWIR_MAX_IDENTITY_BYTES: usize = 256;
+pub const CWIR_MAX_EXPANSION_INPUT_BYTES: u64 = 1_048_576;
+pub const CWIR_MAX_EXPANSION_OUTPUT_BYTES: u64 = 16_777_216;
+pub const CWIR_MAX_EXPANSION_WORK_UNITS: u64 = 1_000_000_000;
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
-pub enum CwirFailureCodeV1 {
+pub enum CwirFailureCode {
     UnsupportedVersion,
     CanonicalPayloadTooLarge,
     NonCanonicalEncoding,
@@ -72,35 +72,35 @@ pub enum CwirFailureCodeV1 {
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
-pub struct CwirErrorV1 {
-    pub code: CwirFailureCodeV1,
+pub struct CwirError {
+    pub code: CwirFailureCode,
     pub detail: String,
 }
 
-impl CwirErrorV1 {
-    pub fn new(code: CwirFailureCodeV1, detail: impl Into<String>) -> Self {
+impl CwirError {
+    pub fn new(code: CwirFailureCode, detail: impl Into<String>) -> Self {
         Self {
             code,
             detail: detail.into(),
         }
     }
 
-    pub const fn failure_code(&self) -> CwirFailureCodeV1 {
+    pub const fn failure_code(&self) -> CwirFailureCode {
         self.code
     }
 }
 
-impl fmt::Display for CwirErrorV1 {
+impl fmt::Display for CwirError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{:?}: {}", self.code, self.detail)
     }
 }
 
-impl Error for CwirErrorV1 {}
+impl Error for CwirError {}
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, Ord, PartialEq, PartialOrd, Serialize)]
 #[serde(rename_all = "snake_case")]
-pub enum CwirNodeKindV1 {
+pub enum CwirNodeKind {
     Contract,
     State,
     Evidence,
@@ -116,7 +116,7 @@ pub enum CwirNodeKindV1 {
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, Ord, PartialEq, PartialOrd, Serialize)]
 #[serde(rename_all = "snake_case")]
-pub enum CwirSoundnessV1 {
+pub enum CwirSoundness {
     Exact,
     SoundRestricted,
     EmpiricalIncomplete,
@@ -126,7 +126,7 @@ pub enum CwirSoundnessV1 {
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, Ord, PartialEq, PartialOrd, Serialize)]
 #[serde(rename_all = "snake_case")]
-pub enum CwirCoverageV1 {
+pub enum CwirCoverage {
     Complete,
     ScopedComplete,
     Partial,
@@ -136,7 +136,7 @@ pub enum CwirCoverageV1 {
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, Ord, PartialEq, PartialOrd, Serialize)]
 #[serde(rename_all = "snake_case")]
-pub enum CwirFreshnessV1 {
+pub enum CwirFreshness {
     Current,
     Stale,
     Conflict,
@@ -145,7 +145,7 @@ pub enum CwirFreshnessV1 {
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, Ord, PartialEq, PartialOrd, Serialize)]
 #[serde(rename_all = "snake_case")]
-pub enum CwirDeterminismV1 {
+pub enum CwirDeterminism {
     Deterministic,
     Conditional,
     External,
@@ -154,32 +154,32 @@ pub enum CwirDeterminismV1 {
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, Ord, PartialEq, PartialOrd, Serialize)]
 #[serde(deny_unknown_fields)]
-pub struct CwirEpistemicProductV1 {
-    pub authority: ArtifactOwnerV1,
-    pub soundness: CwirSoundnessV1,
-    pub coverage: CwirCoverageV1,
-    pub freshness: CwirFreshnessV1,
-    pub determinism: CwirDeterminismV1,
+pub struct CwirEpistemicProduct {
+    pub authority: ArtifactOwner,
+    pub soundness: CwirSoundness,
+    pub coverage: CwirCoverage,
+    pub freshness: CwirFreshness,
+    pub determinism: CwirDeterminism,
 }
 
-impl CwirEpistemicProductV1 {
-    fn validate(self) -> Result<(), CwirErrorV1> {
-        if self.soundness == CwirSoundnessV1::Exact
+impl CwirEpistemicProduct {
+    fn validate(self) -> Result<(), CwirError> {
+        if self.soundness == CwirSoundness::Exact
             && matches!(
                 self.coverage,
-                CwirCoverageV1::Partial | CwirCoverageV1::ObservedOnly | CwirCoverageV1::Unknown
+                CwirCoverage::Partial | CwirCoverage::ObservedOnly | CwirCoverage::Unknown
             )
         {
-            return Err(CwirErrorV1::new(
-                CwirFailureCodeV1::InvalidEpistemicProduct,
+            return Err(CwirError::new(
+                CwirFailureCode::InvalidEpistemicProduct,
                 "exact soundness requires complete or scoped-complete coverage",
             ));
         }
-        if self.soundness == CwirSoundnessV1::Exact
-            && self.determinism == CwirDeterminismV1::Unknown
+        if self.soundness == CwirSoundness::Exact
+            && self.determinism == CwirDeterminism::Unknown
         {
-            return Err(CwirErrorV1::new(
-                CwirFailureCodeV1::InvalidEpistemicProduct,
+            return Err(CwirError::new(
+                CwirFailureCode::InvalidEpistemicProduct,
                 "exact soundness cannot have unknown determinism",
             ));
         }
@@ -189,30 +189,30 @@ impl CwirEpistemicProductV1 {
 
 #[derive(Clone, Debug, Deserialize, Eq, Ord, PartialEq, PartialOrd, Serialize)]
 #[serde(deny_unknown_fields)]
-pub struct CwirTaskContractV1 {
-    pub id: DigestV1,
+pub struct CwirTaskContract {
+    pub id: Sha256Digest,
     pub task_kind: String,
-    pub specification_digest: DigestV1,
-    pub required_snapshot: DigestV1,
+    pub specification_digest: Sha256Digest,
+    pub required_snapshot: Sha256Digest,
 }
 
 #[derive(Serialize)]
-struct TaskBodyV1<'a> {
+struct TaskBody<'a> {
     contract_version: u16,
     model_version: u16,
     task_kind: &'a str,
-    specification_digest: DigestV1,
-    required_snapshot: DigestV1,
+    specification_digest: Sha256Digest,
+    required_snapshot: Sha256Digest,
 }
 
-impl CwirTaskContractV1 {
+impl CwirTaskContract {
     pub fn new(
         task_kind: impl Into<String>,
-        specification_digest: DigestV1,
-        required_snapshot: DigestV1,
-    ) -> Result<Self, CwirErrorV1> {
+        specification_digest: Sha256Digest,
+        required_snapshot: Sha256Digest,
+    ) -> Result<Self, CwirError> {
         let mut task = Self {
-            id: DigestV1::ZERO,
+            id: Sha256Digest::ZERO,
             task_kind: task_kind.into(),
             specification_digest,
             required_snapshot,
@@ -222,27 +222,27 @@ impl CwirTaskContractV1 {
         Ok(task)
     }
 
-    fn body(&self) -> TaskBodyV1<'_> {
-        TaskBodyV1 {
-            contract_version: CWIR_CONTRACT_VERSION_V1,
-            model_version: CWIR_MODEL_VERSION_V1,
+    fn body(&self) -> TaskBody<'_> {
+        TaskBody {
+            contract_version: CWIR_CONTRACT_VERSION,
+            model_version: CWIR_MODEL_VERSION,
             task_kind: &self.task_kind,
             specification_digest: self.specification_digest,
             required_snapshot: self.required_snapshot,
         }
     }
 
-    fn expected_id(&self) -> Result<DigestV1, CwirErrorV1> {
-        digest_body(CWIR_TASK_DOMAIN_V1, &self.body())
+    fn expected_id(&self) -> Result<Sha256Digest, CwirError> {
+        digest_body(CWIR_TASK_DOMAIN, &self.body())
     }
 
-    fn validate_body(&self) -> Result<(), CwirErrorV1> {
+    fn validate_body(&self) -> Result<(), CwirError> {
         validate_identity("task_kind", &self.task_kind)?;
         validate_digest("specification_digest", self.specification_digest)?;
         validate_digest("required_snapshot", self.required_snapshot)
     }
 
-    fn validate(&self) -> Result<(), CwirErrorV1> {
+    fn validate(&self) -> Result<(), CwirError> {
         self.validate_body()?;
         require_id("task", self.id, self.expected_id()?)
     }
@@ -250,17 +250,17 @@ impl CwirTaskContractV1 {
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, Ord, PartialEq, PartialOrd, Serialize)]
 #[serde(deny_unknown_fields)]
-pub struct CwirStateAnchorV1 {
-    pub project_root: DigestV1,
-    pub fs_snapshot: DigestV1,
-    pub graph_indexed_through: DigestV1,
-    pub toolchain: DigestV1,
-    pub runtime_manifest: DigestV1,
-    pub capability_surface: DigestV1,
+pub struct CwirStateAnchor {
+    pub project_root: Sha256Digest,
+    pub fs_snapshot: Sha256Digest,
+    pub graph_indexed_through: Sha256Digest,
+    pub toolchain: Sha256Digest,
+    pub runtime_manifest: Sha256Digest,
+    pub capability_surface: Sha256Digest,
 }
 
-impl CwirStateAnchorV1 {
-    fn validate(self) -> Result<(), CwirErrorV1> {
+impl CwirStateAnchor {
+    fn validate(self) -> Result<(), CwirError> {
         for (label, digest) in [
             ("project_root", self.project_root),
             ("fs_snapshot", self.fs_snapshot),
@@ -277,40 +277,40 @@ impl CwirStateAnchorV1 {
 
 #[derive(Clone, Debug, Deserialize, Eq, Ord, PartialEq, PartialOrd, Serialize)]
 #[serde(deny_unknown_fields)]
-pub struct CwirNodeV1 {
-    pub id: DigestV1,
-    pub kind: CwirNodeKindV1,
-    pub payload_digest: DigestV1,
-    pub required_snapshot: Option<DigestV1>,
+pub struct CwirNode {
+    pub id: Sha256Digest,
+    pub kind: CwirNodeKind,
+    pub payload_digest: Sha256Digest,
+    pub required_snapshot: Option<Sha256Digest>,
     pub active: bool,
-    pub epistemic: CwirEpistemicProductV1,
-    pub provenance: Vec<DigestV1>,
+    pub epistemic: CwirEpistemicProduct,
+    pub provenance: Vec<Sha256Digest>,
 }
 
 #[derive(Serialize)]
-struct NodeBodyV1<'a> {
+struct NodeBody<'a> {
     contract_version: u16,
     model_version: u16,
-    kind: CwirNodeKindV1,
-    payload_digest: DigestV1,
-    required_snapshot: Option<DigestV1>,
+    kind: CwirNodeKind,
+    payload_digest: Sha256Digest,
+    required_snapshot: Option<Sha256Digest>,
     active: bool,
-    epistemic: CwirEpistemicProductV1,
-    provenance: &'a [DigestV1],
+    epistemic: CwirEpistemicProduct,
+    provenance: &'a [Sha256Digest],
 }
 
-impl CwirNodeV1 {
+impl CwirNode {
     pub fn new(
-        kind: CwirNodeKindV1,
-        payload_digest: DigestV1,
-        required_snapshot: Option<DigestV1>,
+        kind: CwirNodeKind,
+        payload_digest: Sha256Digest,
+        required_snapshot: Option<Sha256Digest>,
         active: bool,
-        epistemic: CwirEpistemicProductV1,
-        mut provenance: Vec<DigestV1>,
-    ) -> Result<Self, CwirErrorV1> {
+        epistemic: CwirEpistemicProduct,
+        mut provenance: Vec<Sha256Digest>,
+    ) -> Result<Self, CwirError> {
         normalize_unique(&mut provenance, "node provenance")?;
         let mut node = Self {
-            id: DigestV1::ZERO,
+            id: Sha256Digest::ZERO,
             kind,
             payload_digest,
             required_snapshot,
@@ -323,10 +323,10 @@ impl CwirNodeV1 {
         Ok(node)
     }
 
-    fn body(&self) -> NodeBodyV1<'_> {
-        NodeBodyV1 {
-            contract_version: CWIR_CONTRACT_VERSION_V1,
-            model_version: CWIR_MODEL_VERSION_V1,
+    fn body(&self) -> NodeBody<'_> {
+        NodeBody {
+            contract_version: CWIR_CONTRACT_VERSION,
+            model_version: CWIR_MODEL_VERSION,
             kind: self.kind,
             payload_digest: self.payload_digest,
             required_snapshot: self.required_snapshot,
@@ -336,11 +336,11 @@ impl CwirNodeV1 {
         }
     }
 
-    fn expected_id(&self) -> Result<DigestV1, CwirErrorV1> {
-        digest_body(CWIR_NODE_DOMAIN_V1, &self.body())
+    fn expected_id(&self) -> Result<Sha256Digest, CwirError> {
+        digest_body(CWIR_NODE_DOMAIN, &self.body())
     }
 
-    fn validate_body(&self) -> Result<(), CwirErrorV1> {
+    fn validate_body(&self) -> Result<(), CwirError> {
         validate_digest("node payload_digest", self.payload_digest)?;
         if let Some(snapshot) = self.required_snapshot {
             validate_digest("node required_snapshot", snapshot)?;
@@ -349,12 +349,12 @@ impl CwirNodeV1 {
         validate_sorted_unique(
             &self.provenance,
             "node provenance",
-            CWIR_MAX_REFS_PER_ITEM_V1,
+            CWIR_MAX_REFS_PER_ITEM,
         )?;
         validate_digest_slice("node provenance", &self.provenance)
     }
 
-    fn validate(&self) -> Result<(), CwirErrorV1> {
+    fn validate(&self) -> Result<(), CwirError> {
         self.validate_body()?;
         require_id("node", self.id, self.expected_id()?)
     }
@@ -362,7 +362,7 @@ impl CwirNodeV1 {
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, Ord, PartialEq, PartialOrd, Serialize)]
 #[serde(rename_all = "snake_case")]
-pub enum CwirEdgeKindV1 {
+pub enum CwirEdgeKind {
     Supports,
     Derives,
     Contradicts,
@@ -373,34 +373,34 @@ pub enum CwirEdgeKindV1 {
 
 #[derive(Clone, Debug, Deserialize, Eq, Ord, PartialEq, PartialOrd, Serialize)]
 #[serde(deny_unknown_fields)]
-pub struct CwirHyperEdgeV1 {
-    pub id: DigestV1,
-    pub relation: CwirEdgeKindV1,
-    pub sources: Vec<DigestV1>,
-    pub target: DigestV1,
-    pub proof_node: Option<DigestV1>,
+pub struct CwirHyperEdge {
+    pub id: Sha256Digest,
+    pub relation: CwirEdgeKind,
+    pub sources: Vec<Sha256Digest>,
+    pub target: Sha256Digest,
+    pub proof_node: Option<Sha256Digest>,
 }
 
 #[derive(Serialize)]
-struct EdgeBodyV1<'a> {
+struct EdgeBody<'a> {
     contract_version: u16,
     model_version: u16,
-    relation: CwirEdgeKindV1,
-    sources: &'a [DigestV1],
-    target: DigestV1,
-    proof_node: Option<DigestV1>,
+    relation: CwirEdgeKind,
+    sources: &'a [Sha256Digest],
+    target: Sha256Digest,
+    proof_node: Option<Sha256Digest>,
 }
 
-impl CwirHyperEdgeV1 {
+impl CwirHyperEdge {
     pub fn new(
-        relation: CwirEdgeKindV1,
-        mut sources: Vec<DigestV1>,
-        target: DigestV1,
-        proof_node: Option<DigestV1>,
-    ) -> Result<Self, CwirErrorV1> {
+        relation: CwirEdgeKind,
+        mut sources: Vec<Sha256Digest>,
+        target: Sha256Digest,
+        proof_node: Option<Sha256Digest>,
+    ) -> Result<Self, CwirError> {
         normalize_unique(&mut sources, "hyperedge sources")?;
         let mut edge = Self {
-            id: DigestV1::ZERO,
+            id: Sha256Digest::ZERO,
             relation,
             sources,
             target,
@@ -411,10 +411,10 @@ impl CwirHyperEdgeV1 {
         Ok(edge)
     }
 
-    fn body(&self) -> EdgeBodyV1<'_> {
-        EdgeBodyV1 {
-            contract_version: CWIR_CONTRACT_VERSION_V1,
-            model_version: CWIR_MODEL_VERSION_V1,
+    fn body(&self) -> EdgeBody<'_> {
+        EdgeBody {
+            contract_version: CWIR_CONTRACT_VERSION,
+            model_version: CWIR_MODEL_VERSION,
             relation: self.relation,
             sources: &self.sources,
             target: self.target,
@@ -422,21 +422,21 @@ impl CwirHyperEdgeV1 {
         }
     }
 
-    fn expected_id(&self) -> Result<DigestV1, CwirErrorV1> {
-        digest_body(CWIR_EDGE_DOMAIN_V1, &self.body())
+    fn expected_id(&self) -> Result<Sha256Digest, CwirError> {
+        digest_body(CWIR_EDGE_DOMAIN, &self.body())
     }
 
-    fn validate_body(&self) -> Result<(), CwirErrorV1> {
+    fn validate_body(&self) -> Result<(), CwirError> {
         if self.sources.is_empty() {
-            return Err(CwirErrorV1::new(
-                CwirFailureCodeV1::InvalidHyperedge,
+            return Err(CwirError::new(
+                CwirFailureCode::InvalidHyperedge,
                 "hyperedge sources must not be empty",
             ));
         }
         validate_sorted_unique(
             &self.sources,
             "hyperedge sources",
-            CWIR_MAX_REFS_PER_ITEM_V1,
+            CWIR_MAX_REFS_PER_ITEM,
         )?;
         validate_digest_slice("hyperedge sources", &self.sources)?;
         validate_digest("hyperedge target", self.target)?;
@@ -446,7 +446,7 @@ impl CwirHyperEdgeV1 {
         Ok(())
     }
 
-    fn validate(&self) -> Result<(), CwirErrorV1> {
+    fn validate(&self) -> Result<(), CwirError> {
         self.validate_body()?;
         require_id("hyperedge", self.id, self.expected_id()?)
     }
@@ -454,7 +454,7 @@ impl CwirHyperEdgeV1 {
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, Ord, PartialEq, PartialOrd, Serialize)]
 #[serde(rename_all = "snake_case")]
-pub enum CwirObligationKindV1 {
+pub enum CwirObligationKind {
     Decision,
     Execution,
     Verification,
@@ -463,7 +463,7 @@ pub enum CwirObligationKindV1 {
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, Ord, PartialEq, PartialOrd, Serialize)]
 #[serde(rename_all = "snake_case")]
-pub enum CwirObligationStatusV1 {
+pub enum CwirObligationStatus {
     Open,
     InProgress,
     Discharged,
@@ -472,7 +472,7 @@ pub enum CwirObligationStatusV1 {
     Waived,
 }
 
-impl CwirObligationStatusV1 {
+impl CwirObligationStatus {
     const fn is_terminal(self) -> bool {
         matches!(
             self,
@@ -483,40 +483,40 @@ impl CwirObligationStatusV1 {
 
 #[derive(Clone, Debug, Deserialize, Eq, Ord, PartialEq, PartialOrd, Serialize)]
 #[serde(deny_unknown_fields)]
-pub struct CwirObligationV1 {
-    pub id: DigestV1,
-    pub kind: CwirObligationKindV1,
+pub struct CwirObligation {
+    pub id: Sha256Digest,
+    pub kind: CwirObligationKind,
     pub advisory: bool,
-    pub status: CwirObligationStatusV1,
-    pub required_snapshot: DigestV1,
-    pub dependencies: Vec<DigestV1>,
-    pub resolution_evidence: Option<DigestV1>,
+    pub status: CwirObligationStatus,
+    pub required_snapshot: Sha256Digest,
+    pub dependencies: Vec<Sha256Digest>,
+    pub resolution_evidence: Option<Sha256Digest>,
 }
 
 #[derive(Serialize)]
-struct ObligationBodyV1<'a> {
+struct ObligationBody<'a> {
     contract_version: u16,
     model_version: u16,
-    kind: CwirObligationKindV1,
+    kind: CwirObligationKind,
     advisory: bool,
-    status: CwirObligationStatusV1,
-    required_snapshot: DigestV1,
-    dependencies: &'a [DigestV1],
-    resolution_evidence: Option<DigestV1>,
+    status: CwirObligationStatus,
+    required_snapshot: Sha256Digest,
+    dependencies: &'a [Sha256Digest],
+    resolution_evidence: Option<Sha256Digest>,
 }
 
-impl CwirObligationV1 {
+impl CwirObligation {
     pub fn new_open(
-        kind: CwirObligationKindV1,
+        kind: CwirObligationKind,
         advisory: bool,
-        required_snapshot: DigestV1,
-        mut dependencies: Vec<DigestV1>,
-    ) -> Result<Self, CwirErrorV1> {
+        required_snapshot: Sha256Digest,
+        mut dependencies: Vec<Sha256Digest>,
+    ) -> Result<Self, CwirError> {
         normalize_unique(&mut dependencies, "obligation dependencies")?;
         Self::from_parts(
             kind,
             advisory,
-            CwirObligationStatusV1::Open,
+            CwirObligationStatus::Open,
             required_snapshot,
             dependencies,
             None,
@@ -524,15 +524,15 @@ impl CwirObligationV1 {
     }
 
     fn from_parts(
-        kind: CwirObligationKindV1,
+        kind: CwirObligationKind,
         advisory: bool,
-        status: CwirObligationStatusV1,
-        required_snapshot: DigestV1,
-        dependencies: Vec<DigestV1>,
-        resolution_evidence: Option<DigestV1>,
-    ) -> Result<Self, CwirErrorV1> {
+        status: CwirObligationStatus,
+        required_snapshot: Sha256Digest,
+        dependencies: Vec<Sha256Digest>,
+        resolution_evidence: Option<Sha256Digest>,
+    ) -> Result<Self, CwirError> {
         let mut obligation = Self {
-            id: DigestV1::ZERO,
+            id: Sha256Digest::ZERO,
             kind,
             advisory,
             status,
@@ -547,44 +547,44 @@ impl CwirObligationV1 {
 
     pub fn transition(
         &self,
-        next: CwirObligationStatusV1,
-        resolution_evidence: Option<DigestV1>,
-    ) -> Result<Self, CwirErrorV1> {
+        next: CwirObligationStatus,
+        resolution_evidence: Option<Sha256Digest>,
+    ) -> Result<Self, CwirError> {
         self.validate()?;
         let allowed = matches!(
             (self.status, next),
             (
-                CwirObligationStatusV1::Open,
-                CwirObligationStatusV1::InProgress
+                CwirObligationStatus::Open,
+                CwirObligationStatus::InProgress
             ) | (
-                CwirObligationStatusV1::Open,
-                CwirObligationStatusV1::Discharged
-            ) | (CwirObligationStatusV1::Open, CwirObligationStatusV1::Failed)
+                CwirObligationStatus::Open,
+                CwirObligationStatus::Discharged
+            ) | (CwirObligationStatus::Open, CwirObligationStatus::Failed)
                 | (
-                    CwirObligationStatusV1::Open,
-                    CwirObligationStatusV1::Blocked
+                    CwirObligationStatus::Open,
+                    CwirObligationStatus::Blocked
                 )
-                | (CwirObligationStatusV1::Open, CwirObligationStatusV1::Waived)
+                | (CwirObligationStatus::Open, CwirObligationStatus::Waived)
                 | (
-                    CwirObligationStatusV1::InProgress,
-                    CwirObligationStatusV1::Discharged
-                )
-                | (
-                    CwirObligationStatusV1::InProgress,
-                    CwirObligationStatusV1::Failed
+                    CwirObligationStatus::InProgress,
+                    CwirObligationStatus::Discharged
                 )
                 | (
-                    CwirObligationStatusV1::InProgress,
-                    CwirObligationStatusV1::Blocked
+                    CwirObligationStatus::InProgress,
+                    CwirObligationStatus::Failed
                 )
                 | (
-                    CwirObligationStatusV1::InProgress,
-                    CwirObligationStatusV1::Waived
+                    CwirObligationStatus::InProgress,
+                    CwirObligationStatus::Blocked
+                )
+                | (
+                    CwirObligationStatus::InProgress,
+                    CwirObligationStatus::Waived
                 )
         );
         if !allowed {
-            return Err(CwirErrorV1::new(
-                CwirFailureCodeV1::InvalidObligationTransition,
+            return Err(CwirError::new(
+                CwirFailureCode::InvalidObligationTransition,
                 format!(
                     "obligation cannot transition from {:?} to {next:?}",
                     self.status
@@ -601,10 +601,10 @@ impl CwirObligationV1 {
         )
     }
 
-    fn body(&self) -> ObligationBodyV1<'_> {
-        ObligationBodyV1 {
-            contract_version: CWIR_CONTRACT_VERSION_V1,
-            model_version: CWIR_MODEL_VERSION_V1,
+    fn body(&self) -> ObligationBody<'_> {
+        ObligationBody {
+            contract_version: CWIR_CONTRACT_VERSION,
+            model_version: CWIR_MODEL_VERSION,
             kind: self.kind,
             advisory: self.advisory,
             status: self.status,
@@ -614,27 +614,27 @@ impl CwirObligationV1 {
         }
     }
 
-    fn expected_id(&self) -> Result<DigestV1, CwirErrorV1> {
-        digest_body(CWIR_OBLIGATION_DOMAIN_V1, &self.body())
+    fn expected_id(&self) -> Result<Sha256Digest, CwirError> {
+        digest_body(CWIR_OBLIGATION_DOMAIN, &self.body())
     }
 
-    fn validate_body(&self) -> Result<(), CwirErrorV1> {
+    fn validate_body(&self) -> Result<(), CwirError> {
         validate_digest("obligation required_snapshot", self.required_snapshot)?;
         validate_sorted_unique(
             &self.dependencies,
             "obligation dependencies",
-            CWIR_MAX_REFS_PER_ITEM_V1,
+            CWIR_MAX_REFS_PER_ITEM,
         )?;
         validate_digest_slice("obligation dependencies", &self.dependencies)?;
-        if self.status == CwirObligationStatusV1::Waived && !self.advisory {
-            return Err(CwirErrorV1::new(
-                CwirFailureCodeV1::IllegalWaiver,
+        if self.status == CwirObligationStatus::Waived && !self.advisory {
+            return Err(CwirError::new(
+                CwirFailureCode::IllegalWaiver,
                 "a non-advisory obligation cannot be waived",
             ));
         }
         if self.status.is_terminal() != self.resolution_evidence.is_some() {
-            return Err(CwirErrorV1::new(
-                CwirFailureCodeV1::InvalidObligationStatus,
+            return Err(CwirError::new(
+                CwirFailureCode::InvalidObligationStatus,
                 "terminal obligations require resolution evidence and non-terminal obligations forbid it",
             ));
         }
@@ -644,7 +644,7 @@ impl CwirObligationV1 {
         Ok(())
     }
 
-    fn validate(&self) -> Result<(), CwirErrorV1> {
+    fn validate(&self) -> Result<(), CwirError> {
         self.validate_body()?;
         require_id("obligation", self.id, self.expected_id()?)
     }
@@ -652,16 +652,16 @@ impl CwirObligationV1 {
 
 #[derive(Clone, Debug, Deserialize, Eq, Ord, PartialEq, PartialOrd, Serialize)]
 #[serde(deny_unknown_fields)]
-pub struct CwirEffectSpaceV1 {
-    pub effects: Vec<DigestV1>,
-    pub capabilities: Vec<DigestV1>,
+pub struct CwirEffectSpace {
+    pub effects: Vec<Sha256Digest>,
+    pub capabilities: Vec<Sha256Digest>,
 }
 
-impl CwirEffectSpaceV1 {
+impl CwirEffectSpace {
     pub fn new(
-        mut effects: Vec<DigestV1>,
-        mut capabilities: Vec<DigestV1>,
-    ) -> Result<Self, CwirErrorV1> {
+        mut effects: Vec<Sha256Digest>,
+        mut capabilities: Vec<Sha256Digest>,
+    ) -> Result<Self, CwirError> {
         normalize_unique(&mut effects, "effect identities")?;
         normalize_unique(&mut capabilities, "capability identities")?;
         let result = Self {
@@ -672,27 +672,27 @@ impl CwirEffectSpaceV1 {
         Ok(result)
     }
 
-    fn validate(&self) -> Result<(), CwirErrorV1> {
-        if self.effects.len() > CWIR_MAX_EFFECTS_V1 {
-            return Err(CwirErrorV1::new(
-                CwirFailureCodeV1::TooManyEffects,
+    fn validate(&self) -> Result<(), CwirError> {
+        if self.effects.len() > CWIR_MAX_EFFECTS {
+            return Err(CwirError::new(
+                CwirFailureCode::TooManyEffects,
                 format!("effect space contains {} effects", self.effects.len()),
             ));
         }
-        if self.capabilities.len() > CWIR_MAX_CAPABILITIES_V1 {
-            return Err(CwirErrorV1::new(
-                CwirFailureCodeV1::TooManyCapabilities,
+        if self.capabilities.len() > CWIR_MAX_CAPABILITIES {
+            return Err(CwirError::new(
+                CwirFailureCode::TooManyCapabilities,
                 format!(
                     "effect space contains {} capabilities",
                     self.capabilities.len()
                 ),
             ));
         }
-        validate_sorted_unique(&self.effects, "effect identities", CWIR_MAX_EFFECTS_V1)?;
+        validate_sorted_unique(&self.effects, "effect identities", CWIR_MAX_EFFECTS)?;
         validate_sorted_unique(
             &self.capabilities,
             "capability identities",
-            CWIR_MAX_CAPABILITIES_V1,
+            CWIR_MAX_CAPABILITIES,
         )?;
         validate_digest_slice("effect identities", &self.effects)?;
         validate_digest_slice("capability identities", &self.capabilities)
@@ -701,7 +701,7 @@ impl CwirEffectSpaceV1 {
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, Ord, PartialEq, PartialOrd, Serialize)]
 #[serde(rename_all = "snake_case")]
-pub enum CwirVerifierClassV1 {
+pub enum CwirVerifierClass {
     ExactChecker,
     SoundRestricted,
     EmpiricalIncomplete,
@@ -709,15 +709,15 @@ pub enum CwirVerifierClassV1 {
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, Ord, PartialEq, PartialOrd, Serialize)]
 #[serde(deny_unknown_fields)]
-pub struct CwirVerificationContractV1 {
-    pub verifier_digest: DigestV1,
-    pub predicate_digest: DigestV1,
-    pub scope_digest: DigestV1,
-    pub class: CwirVerifierClassV1,
+pub struct CwirVerificationContract {
+    pub verifier_digest: Sha256Digest,
+    pub predicate_digest: Sha256Digest,
+    pub scope_digest: Sha256Digest,
+    pub class: CwirVerifierClass,
 }
 
-impl CwirVerificationContractV1 {
-    fn validate(self) -> Result<(), CwirErrorV1> {
+impl CwirVerificationContract {
+    fn validate(self) -> Result<(), CwirError> {
         validate_digest("verification verifier_digest", self.verifier_digest)?;
         validate_digest("verification predicate_digest", self.predicate_digest)?;
         validate_digest("verification scope_digest", self.scope_digest)
@@ -726,26 +726,26 @@ impl CwirVerificationContractV1 {
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, Ord, PartialEq, PartialOrd, Serialize)]
 #[serde(deny_unknown_fields)]
-pub struct CwirExpansionCostV1 {
+pub struct CwirExpansionCost {
     pub max_input_bytes: u64,
     pub max_output_bytes: u64,
     pub max_work_units: u64,
 }
 
-impl CwirExpansionCostV1 {
-    fn validate(self) -> Result<(), CwirErrorV1> {
+impl CwirExpansionCost {
+    fn validate(self) -> Result<(), CwirError> {
         if self.max_input_bytes == 0 || self.max_output_bytes == 0 || self.max_work_units == 0 {
-            return Err(CwirErrorV1::new(
-                CwirFailureCodeV1::ExpansionIncomplete,
+            return Err(CwirError::new(
+                CwirFailureCode::ExpansionIncomplete,
                 "expansion cost bounds must all be nonzero",
             ));
         }
-        if self.max_input_bytes > CWIR_MAX_EXPANSION_INPUT_BYTES_V1
-            || self.max_output_bytes > CWIR_MAX_EXPANSION_OUTPUT_BYTES_V1
-            || self.max_work_units > CWIR_MAX_EXPANSION_WORK_UNITS_V1
+        if self.max_input_bytes > CWIR_MAX_EXPANSION_INPUT_BYTES
+            || self.max_output_bytes > CWIR_MAX_EXPANSION_OUTPUT_BYTES
+            || self.max_work_units > CWIR_MAX_EXPANSION_WORK_UNITS
         {
-            return Err(CwirErrorV1::new(
-                CwirFailureCodeV1::ExpansionLimitExceeded,
+            return Err(CwirError::new(
+                CwirFailureCode::ExpansionLimitExceeded,
                 "expansion cost exceeds the CWIR v1 contract bound",
             ));
         }
@@ -755,36 +755,36 @@ impl CwirExpansionCostV1 {
 
 #[derive(Clone, Debug, Deserialize, Eq, Ord, PartialEq, PartialOrd, Serialize)]
 #[serde(deny_unknown_fields)]
-pub struct CwirExpansionV1 {
-    pub id: DigestV1,
-    pub owner: ArtifactOwnerV1,
+pub struct CwirExpansion {
+    pub id: Sha256Digest,
+    pub owner: ArtifactOwner,
     pub capability: String,
-    pub arguments_digest: DigestV1,
-    pub required_snapshot: DigestV1,
-    pub cost: CwirExpansionCostV1,
+    pub arguments_digest: Sha256Digest,
+    pub required_snapshot: Sha256Digest,
+    pub cost: CwirExpansionCost,
 }
 
 #[derive(Serialize)]
-struct ExpansionBodyV1<'a> {
+struct ExpansionBody<'a> {
     contract_version: u16,
     model_version: u16,
-    owner: ArtifactOwnerV1,
+    owner: ArtifactOwner,
     capability: &'a str,
-    arguments_digest: DigestV1,
-    required_snapshot: DigestV1,
-    cost: CwirExpansionCostV1,
+    arguments_digest: Sha256Digest,
+    required_snapshot: Sha256Digest,
+    cost: CwirExpansionCost,
 }
 
-impl CwirExpansionV1 {
+impl CwirExpansion {
     pub fn new(
-        owner: ArtifactOwnerV1,
+        owner: ArtifactOwner,
         capability: impl Into<String>,
-        arguments_digest: DigestV1,
-        required_snapshot: DigestV1,
-        cost: CwirExpansionCostV1,
-    ) -> Result<Self, CwirErrorV1> {
+        arguments_digest: Sha256Digest,
+        required_snapshot: Sha256Digest,
+        cost: CwirExpansionCost,
+    ) -> Result<Self, CwirError> {
         let mut expansion = Self {
-            id: DigestV1::ZERO,
+            id: Sha256Digest::ZERO,
             owner,
             capability: capability.into(),
             arguments_digest,
@@ -796,10 +796,10 @@ impl CwirExpansionV1 {
         Ok(expansion)
     }
 
-    fn body(&self) -> ExpansionBodyV1<'_> {
-        ExpansionBodyV1 {
-            contract_version: CWIR_CONTRACT_VERSION_V1,
-            model_version: CWIR_MODEL_VERSION_V1,
+    fn body(&self) -> ExpansionBody<'_> {
+        ExpansionBody {
+            contract_version: CWIR_CONTRACT_VERSION,
+            model_version: CWIR_MODEL_VERSION,
             owner: self.owner,
             capability: &self.capability,
             arguments_digest: self.arguments_digest,
@@ -808,18 +808,18 @@ impl CwirExpansionV1 {
         }
     }
 
-    fn expected_id(&self) -> Result<DigestV1, CwirErrorV1> {
-        digest_body(CWIR_EXPANSION_DOMAIN_V1, &self.body())
+    fn expected_id(&self) -> Result<Sha256Digest, CwirError> {
+        digest_body(CWIR_EXPANSION_DOMAIN, &self.body())
     }
 
-    fn validate_body(&self) -> Result<(), CwirErrorV1> {
+    fn validate_body(&self) -> Result<(), CwirError> {
         validate_identity("expansion capability", &self.capability)?;
         validate_digest("expansion arguments_digest", self.arguments_digest)?;
         validate_digest("expansion required_snapshot", self.required_snapshot)?;
         self.cost.validate()
     }
 
-    fn validate(&self) -> Result<(), CwirErrorV1> {
+    fn validate(&self) -> Result<(), CwirError> {
         self.validate_body()?;
         require_id("expansion", self.id, self.expected_id()?)
     }
@@ -827,53 +827,53 @@ impl CwirExpansionV1 {
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
-pub struct CausalWorkIrV1 {
+pub struct CausalWorkIr {
     contract_version: u16,
     model_version: u16,
-    task: CwirTaskContractV1,
-    state: CwirStateAnchorV1,
-    nodes: Vec<CwirNodeV1>,
-    edges: Vec<CwirHyperEdgeV1>,
-    obligations: Vec<CwirObligationV1>,
-    effect_space: CwirEffectSpaceV1,
-    verification: CwirVerificationContractV1,
-    expansions: Vec<CwirExpansionV1>,
-    semantic_digest: DigestV1,
+    task: CwirTaskContract,
+    state: CwirStateAnchor,
+    nodes: Vec<CwirNode>,
+    edges: Vec<CwirHyperEdge>,
+    obligations: Vec<CwirObligation>,
+    effect_space: CwirEffectSpace,
+    verification: CwirVerificationContract,
+    expansions: Vec<CwirExpansion>,
+    semantic_digest: Sha256Digest,
 }
 
 #[derive(Serialize)]
-struct CwirSemanticBodyV1<'a> {
+struct CwirSemanticBody<'a> {
     contract_version: u16,
     model_version: u16,
-    task: &'a CwirTaskContractV1,
-    state: CwirStateAnchorV1,
-    nodes: &'a [CwirNodeV1],
-    edges: &'a [CwirHyperEdgeV1],
-    obligations: &'a [CwirObligationV1],
-    effect_space: &'a CwirEffectSpaceV1,
-    verification: CwirVerificationContractV1,
-    expansions: &'a [CwirExpansionV1],
+    task: &'a CwirTaskContract,
+    state: CwirStateAnchor,
+    nodes: &'a [CwirNode],
+    edges: &'a [CwirHyperEdge],
+    obligations: &'a [CwirObligation],
+    effect_space: &'a CwirEffectSpace,
+    verification: CwirVerificationContract,
+    expansions: &'a [CwirExpansion],
 }
 
-impl CausalWorkIrV1 {
+impl CausalWorkIr {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
-        task: CwirTaskContractV1,
-        state: CwirStateAnchorV1,
-        mut nodes: Vec<CwirNodeV1>,
-        mut edges: Vec<CwirHyperEdgeV1>,
-        mut obligations: Vec<CwirObligationV1>,
-        effect_space: CwirEffectSpaceV1,
-        verification: CwirVerificationContractV1,
-        mut expansions: Vec<CwirExpansionV1>,
-    ) -> Result<Self, CwirErrorV1> {
+        task: CwirTaskContract,
+        state: CwirStateAnchor,
+        mut nodes: Vec<CwirNode>,
+        mut edges: Vec<CwirHyperEdge>,
+        mut obligations: Vec<CwirObligation>,
+        effect_space: CwirEffectSpace,
+        verification: CwirVerificationContract,
+        mut expansions: Vec<CwirExpansion>,
+    ) -> Result<Self, CwirError> {
         normalize_by_id(&mut nodes, |item| item.id, "nodes")?;
         normalize_by_id(&mut edges, |item| item.id, "hyperedges")?;
         normalize_by_id(&mut obligations, |item| item.id, "obligations")?;
         normalize_by_id(&mut expansions, |item| item.id, "expansions")?;
         let mut cwir = Self {
-            contract_version: CWIR_CONTRACT_VERSION_V1,
-            model_version: CWIR_MODEL_VERSION_V1,
+            contract_version: CWIR_CONTRACT_VERSION,
+            model_version: CWIR_MODEL_VERSION,
             task,
             state,
             nodes,
@@ -882,7 +882,7 @@ impl CausalWorkIrV1 {
             effect_space,
             verification,
             expansions,
-            semantic_digest: DigestV1::ZERO,
+            semantic_digest: Sha256Digest::ZERO,
         };
         cwir.validate_body()?;
         cwir.semantic_digest = cwir.expected_semantic_digest()?;
@@ -897,66 +897,66 @@ impl CausalWorkIrV1 {
         self.model_version
     }
 
-    pub const fn task(&self) -> &CwirTaskContractV1 {
+    pub const fn task(&self) -> &CwirTaskContract {
         &self.task
     }
 
-    pub const fn state(&self) -> &CwirStateAnchorV1 {
+    pub const fn state(&self) -> &CwirStateAnchor {
         &self.state
     }
 
-    pub fn nodes(&self) -> &[CwirNodeV1] {
+    pub fn nodes(&self) -> &[CwirNode] {
         &self.nodes
     }
 
-    pub fn edges(&self) -> &[CwirHyperEdgeV1] {
+    pub fn edges(&self) -> &[CwirHyperEdge] {
         &self.edges
     }
 
-    pub fn obligations(&self) -> &[CwirObligationV1] {
+    pub fn obligations(&self) -> &[CwirObligation] {
         &self.obligations
     }
 
-    pub const fn effect_space(&self) -> &CwirEffectSpaceV1 {
+    pub const fn effect_space(&self) -> &CwirEffectSpace {
         &self.effect_space
     }
 
-    pub const fn verification(&self) -> &CwirVerificationContractV1 {
+    pub const fn verification(&self) -> &CwirVerificationContract {
         &self.verification
     }
 
-    pub fn expansions(&self) -> &[CwirExpansionV1] {
+    pub fn expansions(&self) -> &[CwirExpansion] {
         &self.expansions
     }
 
-    pub const fn semantic_digest(&self) -> DigestV1 {
+    pub const fn semantic_digest(&self) -> Sha256Digest {
         self.semantic_digest
     }
 
-    pub fn canonical_bytes(&self) -> Result<Vec<u8>, CwirErrorV1> {
+    pub fn canonical_bytes(&self) -> Result<Vec<u8>, CwirError> {
         self.validate()?;
         let value = serde_json::to_value(self).map_err(serialization_error)?;
         let bytes = canonical_json(&value).into_bytes();
-        if bytes.len() > CWIR_MAX_CANONICAL_BYTES_V1 {
-            return Err(CwirErrorV1::new(
-                CwirFailureCodeV1::CanonicalPayloadTooLarge,
+        if bytes.len() > CWIR_MAX_CANONICAL_BYTES {
+            return Err(CwirError::new(
+                CwirFailureCode::CanonicalPayloadTooLarge,
                 format!("CWIR payload is {} bytes", bytes.len()),
             ));
         }
         Ok(bytes)
     }
 
-    pub fn from_canonical_bytes(bytes: &[u8]) -> Result<Self, CwirErrorV1> {
-        if bytes.len() > CWIR_MAX_CANONICAL_BYTES_V1 {
-            return Err(CwirErrorV1::new(
-                CwirFailureCodeV1::CanonicalPayloadTooLarge,
+    pub fn from_canonical_bytes(bytes: &[u8]) -> Result<Self, CwirError> {
+        if bytes.len() > CWIR_MAX_CANONICAL_BYTES {
+            return Err(CwirError::new(
+                CwirFailureCode::CanonicalPayloadTooLarge,
                 format!("CWIR payload is {} bytes", bytes.len()),
             ));
         }
         let value: Value = serde_json::from_slice(bytes).map_err(serialization_error)?;
         if canonical_json(&value).as_bytes() != bytes {
-            return Err(CwirErrorV1::new(
-                CwirFailureCodeV1::NonCanonicalEncoding,
+            return Err(CwirError::new(
+                CwirFailureCode::NonCanonicalEncoding,
                 "CWIR bytes are not exact sorted-key JSON without whitespace",
             ));
         }
@@ -965,12 +965,12 @@ impl CausalWorkIrV1 {
         Ok(cwir)
     }
 
-    pub fn validate(&self) -> Result<(), CwirErrorV1> {
+    pub fn validate(&self) -> Result<(), CwirError> {
         self.validate_body()?;
         let expected = self.expected_semantic_digest()?;
         if self.semantic_digest != expected {
-            return Err(CwirErrorV1::new(
-                CwirFailureCodeV1::SemanticDigestMismatch,
+            return Err(CwirError::new(
+                CwirFailureCode::SemanticDigestMismatch,
                 format!(
                     "semantic digest {} does not match canonical body {}",
                     self.semantic_digest.to_hex(),
@@ -981,8 +981,8 @@ impl CausalWorkIrV1 {
         Ok(())
     }
 
-    fn body(&self) -> CwirSemanticBodyV1<'_> {
-        CwirSemanticBodyV1 {
+    fn body(&self) -> CwirSemanticBody<'_> {
+        CwirSemanticBody {
             contract_version: self.contract_version,
             model_version: self.model_version,
             task: &self.task,
@@ -996,51 +996,51 @@ impl CausalWorkIrV1 {
         }
     }
 
-    fn expected_semantic_digest(&self) -> Result<DigestV1, CwirErrorV1> {
-        digest_body(CWIR_SEMANTIC_DOMAIN_V1, &self.body())
+    fn expected_semantic_digest(&self) -> Result<Sha256Digest, CwirError> {
+        digest_body(CWIR_SEMANTIC_DOMAIN, &self.body())
     }
 
-    fn validate_body(&self) -> Result<(), CwirErrorV1> {
-        if self.contract_version != CWIR_CONTRACT_VERSION_V1
-            || self.model_version != CWIR_MODEL_VERSION_V1
+    fn validate_body(&self) -> Result<(), CwirError> {
+        if self.contract_version != CWIR_CONTRACT_VERSION
+            || self.model_version != CWIR_MODEL_VERSION
         {
-            return Err(CwirErrorV1::new(
-                CwirFailureCodeV1::UnsupportedVersion,
+            return Err(CwirError::new(
+                CwirFailureCode::UnsupportedVersion,
                 format!(
                     "unsupported CWIR contract/model version {}/{}",
                     self.contract_version, self.model_version
                 ),
             ));
         }
-        if self.nodes.len() > CWIR_MAX_NODES_V1 {
-            return Err(CwirErrorV1::new(
-                CwirFailureCodeV1::TooManyNodes,
+        if self.nodes.len() > CWIR_MAX_NODES {
+            return Err(CwirError::new(
+                CwirFailureCode::TooManyNodes,
                 "node bound exceeded",
             ));
         }
-        if self.edges.len() > CWIR_MAX_EDGES_V1 {
-            return Err(CwirErrorV1::new(
-                CwirFailureCodeV1::TooManyEdges,
+        if self.edges.len() > CWIR_MAX_EDGES {
+            return Err(CwirError::new(
+                CwirFailureCode::TooManyEdges,
                 "edge bound exceeded",
             ));
         }
-        if self.obligations.len() > CWIR_MAX_OBLIGATIONS_V1 {
-            return Err(CwirErrorV1::new(
-                CwirFailureCodeV1::TooManyObligations,
+        if self.obligations.len() > CWIR_MAX_OBLIGATIONS {
+            return Err(CwirError::new(
+                CwirFailureCode::TooManyObligations,
                 "obligation bound exceeded",
             ));
         }
-        if self.expansions.len() > CWIR_MAX_EXPANSIONS_V1 {
-            return Err(CwirErrorV1::new(
-                CwirFailureCodeV1::TooManyExpansions,
+        if self.expansions.len() > CWIR_MAX_EXPANSIONS {
+            return Err(CwirError::new(
+                CwirFailureCode::TooManyExpansions,
                 "expansion bound exceeded",
             ));
         }
         self.task.validate()?;
         self.state.validate()?;
         if self.task.required_snapshot != self.state.fs_snapshot {
-            return Err(CwirErrorV1::new(
-                CwirFailureCodeV1::SnapshotMismatch,
+            return Err(CwirError::new(
+                CwirFailureCode::SnapshotMismatch,
                 "task required_snapshot does not match the CWIR state anchor",
             ));
         }
@@ -1060,26 +1060,26 @@ impl CausalWorkIrV1 {
             for provenance in &node.provenance {
                 require_reference(&node_map, *provenance, "node provenance")?;
             }
-            if node.kind == CwirNodeKindV1::Evidence && node.active {
-                if node.epistemic.freshness != CwirFreshnessV1::Current {
-                    return Err(CwirErrorV1::new(
-                        CwirFailureCodeV1::StaleFact,
+            if node.kind == CwirNodeKind::Evidence && node.active {
+                if node.epistemic.freshness != CwirFreshness::Current {
+                    return Err(CwirError::new(
+                        CwirFailureCode::StaleFact,
                         format!("active evidence node {} is not current", node.id.to_hex()),
                     ));
                 }
                 if node.required_snapshot != Some(self.state.fs_snapshot) {
-                    return Err(CwirErrorV1::new(
-                        CwirFailureCodeV1::SnapshotMismatch,
+                    return Err(CwirError::new(
+                        CwirFailureCode::SnapshotMismatch,
                         format!(
                             "active evidence node {} is not bound to the state snapshot",
                             node.id.to_hex()
                         ),
                     ));
                 }
-                if node.epistemic.soundness == CwirSoundnessV1::Exact && node.provenance.is_empty()
+                if node.epistemic.soundness == CwirSoundness::Exact && node.provenance.is_empty()
                 {
-                    return Err(CwirErrorV1::new(
-                        CwirFailureCodeV1::MissingProvenance,
+                    return Err(CwirError::new(
+                        CwirFailureCode::MissingProvenance,
                         format!("exact evidence node {} has no provenance", node.id.to_hex()),
                     ));
                 }
@@ -1102,8 +1102,8 @@ impl CausalWorkIrV1 {
             obligation.validate()?;
             obligation_map.insert(obligation.id, ());
             if obligation.required_snapshot != self.state.fs_snapshot {
-                return Err(CwirErrorV1::new(
-                    CwirFailureCodeV1::SnapshotMismatch,
+                return Err(CwirError::new(
+                    CwirFailureCode::SnapshotMismatch,
                     format!(
                         "obligation {} is not bound to the state snapshot",
                         obligation.id.to_hex()
@@ -1114,8 +1114,8 @@ impl CausalWorkIrV1 {
         for obligation in &self.obligations {
             for dependency in &obligation.dependencies {
                 if !obligation_map.contains_key(dependency) {
-                    return Err(CwirErrorV1::new(
-                        CwirFailureCodeV1::DanglingReference,
+                    return Err(CwirError::new(
+                        CwirFailureCode::DanglingReference,
                         format!(
                             "obligation dependency {} does not resolve",
                             dependency.to_hex()
@@ -1131,8 +1131,8 @@ impl CausalWorkIrV1 {
         for expansion in &self.expansions {
             expansion.validate()?;
             if expansion.required_snapshot != self.state.fs_snapshot {
-                return Err(CwirErrorV1::new(
-                    CwirFailureCodeV1::SnapshotMismatch,
+                return Err(CwirError::new(
+                    CwirFailureCode::SnapshotMismatch,
                     format!(
                         "expansion {} is not bound to the state snapshot",
                         expansion.id.to_hex()
@@ -1144,11 +1144,11 @@ impl CausalWorkIrV1 {
     }
 }
 
-pub fn cwir_contract_manifest_v1() -> Value {
+pub fn cwir_contract_manifest() -> Value {
     json!({
         "contract": "zerostack.cwir",
-        "contract_version": CWIR_CONTRACT_VERSION_V1,
-        "model_version": CWIR_MODEL_VERSION_V1,
+        "contract_version": CWIR_CONTRACT_VERSION,
+        "model_version": CWIR_MODEL_VERSION,
         "encoding": "rfc8259_json_sorted_object_keys_no_whitespace",
         "domains": {
             "semantic": "zerostack.cwir.semantic.v1\u{0}",
@@ -1208,18 +1208,18 @@ pub fn cwir_contract_manifest_v1() -> Value {
             "invalid_resolution_evidence", "expansion_incomplete", "expansion_limit_exceeded"
         ],
         "bounds": {
-            "max_canonical_bytes": CWIR_MAX_CANONICAL_BYTES_V1,
-            "max_nodes": CWIR_MAX_NODES_V1,
-            "max_edges": CWIR_MAX_EDGES_V1,
-            "max_obligations": CWIR_MAX_OBLIGATIONS_V1,
-            "max_expansions": CWIR_MAX_EXPANSIONS_V1,
-            "max_references_per_item": CWIR_MAX_REFS_PER_ITEM_V1,
-            "max_effects": CWIR_MAX_EFFECTS_V1,
-            "max_capabilities": CWIR_MAX_CAPABILITIES_V1,
-            "max_identity_bytes": CWIR_MAX_IDENTITY_BYTES_V1,
-            "max_expansion_input_bytes": CWIR_MAX_EXPANSION_INPUT_BYTES_V1,
-            "max_expansion_output_bytes": CWIR_MAX_EXPANSION_OUTPUT_BYTES_V1,
-            "max_expansion_work_units": CWIR_MAX_EXPANSION_WORK_UNITS_V1
+            "max_canonical_bytes": CWIR_MAX_CANONICAL_BYTES,
+            "max_nodes": CWIR_MAX_NODES,
+            "max_edges": CWIR_MAX_EDGES,
+            "max_obligations": CWIR_MAX_OBLIGATIONS,
+            "max_expansions": CWIR_MAX_EXPANSIONS,
+            "max_references_per_item": CWIR_MAX_REFS_PER_ITEM,
+            "max_effects": CWIR_MAX_EFFECTS,
+            "max_capabilities": CWIR_MAX_CAPABILITIES,
+            "max_identity_bytes": CWIR_MAX_IDENTITY_BYTES,
+            "max_expansion_input_bytes": CWIR_MAX_EXPANSION_INPUT_BYTES,
+            "max_expansion_output_bytes": CWIR_MAX_EXPANSION_OUTPUT_BYTES,
+            "max_expansion_work_units": CWIR_MAX_EXPANSION_WORK_UNITS
         },
         "invariants": [
             "all semantic identities are content addressed",
@@ -1235,44 +1235,44 @@ pub fn cwir_contract_manifest_v1() -> Value {
         ]
     })
 }
-pub fn cwir_contract_digest_v1() -> DigestV1 {
-    DigestV1::from_bytes(sha256(
-        canonical_json(&cwir_contract_manifest_v1()).as_bytes(),
+pub fn cwir_contract_digest() -> Sha256Digest {
+    Sha256Digest::from_bytes(sha256(
+        canonical_json(&cwir_contract_manifest()).as_bytes(),
     ))
 }
 
-fn digest_body<T: Serialize>(domain: &[u8], value: &T) -> Result<DigestV1, CwirErrorV1> {
+fn digest_body<T: Serialize>(domain: &[u8], value: &T) -> Result<Sha256Digest, CwirError> {
     let value = serde_json::to_value(value).map_err(serialization_error)?;
     let canonical = canonical_json(&value);
     let mut bytes = Vec::with_capacity(domain.len() + canonical.len());
     bytes.extend_from_slice(domain);
     bytes.extend_from_slice(canonical.as_bytes());
-    Ok(DigestV1::from_bytes(sha256(&bytes)))
+    Ok(Sha256Digest::from_bytes(sha256(&bytes)))
 }
 
-fn serialization_error(error: serde_json::Error) -> CwirErrorV1 {
-    CwirErrorV1::new(CwirFailureCodeV1::SerializationFailure, error.to_string())
+fn serialization_error(error: serde_json::Error) -> CwirError {
+    CwirError::new(CwirFailureCode::SerializationFailure, error.to_string())
 }
 
-fn validate_identity(label: &str, value: &str) -> Result<(), CwirErrorV1> {
+fn validate_identity(label: &str, value: &str) -> Result<(), CwirError> {
     if value.is_empty()
-        || value.len() > CWIR_MAX_IDENTITY_BYTES_V1
+        || value.len() > CWIR_MAX_IDENTITY_BYTES
         || !value.bytes().all(|byte| {
             byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'/' | b':' | b'_' | b'-')
         })
     {
-        return Err(CwirErrorV1::new(
-            CwirFailureCodeV1::InvalidIdentity,
+        return Err(CwirError::new(
+            CwirFailureCode::InvalidIdentity,
             format!("{label} is empty, too long, or contains a non-canonical byte"),
         ));
     }
     Ok(())
 }
 
-fn validate_digest(label: &str, digest: DigestV1) -> Result<(), CwirErrorV1> {
-    if digest == DigestV1::ZERO {
-        Err(CwirErrorV1::new(
-            CwirFailureCodeV1::ZeroDigest,
+fn validate_digest(label: &str, digest: Sha256Digest) -> Result<(), CwirError> {
+    if digest == Sha256Digest::ZERO {
+        Err(CwirError::new(
+            CwirFailureCode::ZeroDigest,
             format!("{label} must not be the zero digest"),
         ))
     } else {
@@ -1280,19 +1280,19 @@ fn validate_digest(label: &str, digest: DigestV1) -> Result<(), CwirErrorV1> {
     }
 }
 
-fn validate_digest_slice(label: &str, values: &[DigestV1]) -> Result<(), CwirErrorV1> {
+fn validate_digest_slice(label: &str, values: &[Sha256Digest]) -> Result<(), CwirError> {
     for digest in values {
         validate_digest(label, *digest)?;
     }
     Ok(())
 }
 
-fn require_id(label: &str, actual: DigestV1, expected: DigestV1) -> Result<(), CwirErrorV1> {
+fn require_id(label: &str, actual: Sha256Digest, expected: Sha256Digest) -> Result<(), CwirError> {
     if actual == expected {
         Ok(())
     } else {
-        Err(CwirErrorV1::new(
-            CwirFailureCodeV1::IdentityMismatch,
+        Err(CwirError::new(
+            CwirFailureCode::IdentityMismatch,
             format!(
                 "{label} id {} does not match canonical body {}",
                 actual.to_hex(),
@@ -1302,11 +1302,11 @@ fn require_id(label: &str, actual: DigestV1, expected: DigestV1) -> Result<(), C
     }
 }
 
-fn normalize_unique<T: Ord>(values: &mut [T], label: &str) -> Result<(), CwirErrorV1> {
+fn normalize_unique<T: Ord>(values: &mut [T], label: &str) -> Result<(), CwirError> {
     values.sort();
     if values.windows(2).any(|pair| pair[0] == pair[1]) {
-        return Err(CwirErrorV1::new(
-            CwirFailureCodeV1::DuplicateIdentity,
+        return Err(CwirError::new(
+            CwirFailureCode::DuplicateIdentity,
             format!("{label} contains a duplicate member"),
         ));
     }
@@ -1317,10 +1317,10 @@ fn validate_sorted_unique<T: Ord>(
     values: &[T],
     label: &str,
     max: usize,
-) -> Result<(), CwirErrorV1> {
+) -> Result<(), CwirError> {
     if values.len() > max {
-        return Err(CwirErrorV1::new(
-            CwirFailureCodeV1::TooManyReferences,
+        return Err(CwirError::new(
+            CwirFailureCode::TooManyReferences,
             format!(
                 "{label} contains {} members, maximum is {max}",
                 values.len()
@@ -1329,14 +1329,14 @@ fn validate_sorted_unique<T: Ord>(
     }
     for pair in values.windows(2) {
         if pair[0] == pair[1] {
-            return Err(CwirErrorV1::new(
-                CwirFailureCodeV1::DuplicateIdentity,
+            return Err(CwirError::new(
+                CwirFailureCode::DuplicateIdentity,
                 format!("{label} contains a duplicate member"),
             ));
         }
         if pair[0] > pair[1] {
-            return Err(CwirErrorV1::new(
-                CwirFailureCodeV1::NonCanonicalOrder,
+            return Err(CwirError::new(
+                CwirFailureCode::NonCanonicalOrder,
                 format!("{label} is not strictly sorted"),
             ));
         }
@@ -1344,36 +1344,36 @@ fn validate_sorted_unique<T: Ord>(
     Ok(())
 }
 
-fn normalize_by_id<T, F>(values: &mut [T], id: F, label: &str) -> Result<(), CwirErrorV1>
+fn normalize_by_id<T, F>(values: &mut [T], id: F, label: &str) -> Result<(), CwirError>
 where
-    F: Fn(&T) -> DigestV1,
+    F: Fn(&T) -> Sha256Digest,
 {
     values.sort_by_key(&id);
     if values.windows(2).any(|pair| id(&pair[0]) == id(&pair[1])) {
-        return Err(CwirErrorV1::new(
-            CwirFailureCodeV1::DuplicateIdentity,
+        return Err(CwirError::new(
+            CwirFailureCode::DuplicateIdentity,
             format!("{label} contains a duplicate identity"),
         ));
     }
     Ok(())
 }
 
-fn validate_id_order<T, F>(values: &[T], id: F, label: &str) -> Result<(), CwirErrorV1>
+fn validate_id_order<T, F>(values: &[T], id: F, label: &str) -> Result<(), CwirError>
 where
-    F: Fn(&T) -> DigestV1,
+    F: Fn(&T) -> Sha256Digest,
 {
     for pair in values.windows(2) {
         let left = id(&pair[0]);
         let right = id(&pair[1]);
         if left == right {
-            return Err(CwirErrorV1::new(
-                CwirFailureCodeV1::DuplicateIdentity,
+            return Err(CwirError::new(
+                CwirFailureCode::DuplicateIdentity,
                 format!("{label} contains a duplicate identity"),
             ));
         }
         if left > right {
-            return Err(CwirErrorV1::new(
-                CwirFailureCodeV1::NonCanonicalOrder,
+            return Err(CwirError::new(
+                CwirFailureCode::NonCanonicalOrder,
                 format!("{label} is not sorted by identity"),
             ));
         }
@@ -1382,36 +1382,36 @@ where
 }
 
 fn require_reference(
-    nodes: &BTreeMap<DigestV1, CwirNodeKindV1>,
-    id: DigestV1,
+    nodes: &BTreeMap<Sha256Digest, CwirNodeKind>,
+    id: Sha256Digest,
     label: &str,
-) -> Result<(), CwirErrorV1> {
+) -> Result<(), CwirError> {
     if nodes.contains_key(&id) {
         Ok(())
     } else {
-        Err(CwirErrorV1::new(
-            CwirFailureCodeV1::DanglingReference,
+        Err(CwirError::new(
+            CwirFailureCode::DanglingReference,
             format!("{label} {} does not resolve", id.to_hex()),
         ))
     }
 }
 
 fn require_proof_node(
-    nodes: &BTreeMap<DigestV1, CwirNodeKindV1>,
-    id: DigestV1,
+    nodes: &BTreeMap<Sha256Digest, CwirNodeKind>,
+    id: Sha256Digest,
     label: &str,
-) -> Result<(), CwirErrorV1> {
+) -> Result<(), CwirError> {
     match nodes.get(&id) {
-        Some(CwirNodeKindV1::Witness | CwirNodeKindV1::Verification) => Ok(()),
-        Some(kind) => Err(CwirErrorV1::new(
-            CwirFailureCodeV1::InvalidResolutionEvidence,
+        Some(CwirNodeKind::Witness | CwirNodeKind::Verification) => Ok(()),
+        Some(kind) => Err(CwirError::new(
+            CwirFailureCode::InvalidResolutionEvidence,
             format!(
                 "{label} {} resolves to {kind:?}, not witness or verification",
                 id.to_hex()
             ),
         )),
-        None => Err(CwirErrorV1::new(
-            CwirFailureCodeV1::DanglingReference,
+        None => Err(CwirError::new(
+            CwirFailureCode::DanglingReference,
             format!("{label} {} does not resolve", id.to_hex()),
         )),
     }

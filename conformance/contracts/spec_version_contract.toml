@@ -116,8 +116,8 @@ notes = "Three-tier goldens (Tier1Raw/Tier2Canonical/Tier3Logical) plus insta of
 # ---------------------------------------------------------------------------
 [[roundtrip_corpus]]
 name = "zeroref-v1-parse-display"
-encoder = "zero_ref::ZeroRefV1 Display"
-decoder = "zero_ref::ZeroRefV1::parse"
+encoder = "zero_ref::ZeroRef Display"
+decoder = "zero_ref::ZeroRef::parse"
 fuzz_target = "UNPINNED"
 notes = "FromStr + Display-form serde present (F-REF-SERDE-FROMSTR)."
 
@@ -129,13 +129,13 @@ fuzz_target = "UNPINNED"
 
 [[roundtrip_corpus]]
 name = "zero-result-v1"
-encoder = "zero_abi::ZeroResultV1 serialize"
-decoder = "zero_abi::ZeroResultV1 deserialize"
+encoder = "zero_abi::ZeroResult serialize"
+decoder = "zero_abi::ZeroResult deserialize"
 fuzz_target = "UNPINNED"
 
 [[roundtrip_corpus]]
 name = "cache-entry-v1"
-encoder = "zero_abi::CacheEntryV1 canonical key JSON + sha256_hex"
+encoder = "zero_abi::CacheEntry canonical key JSON + sha256_hex"
 decoder = "constructor / deserializer completeness-witness check"
 fuzz_target = "UNPINNED"
 

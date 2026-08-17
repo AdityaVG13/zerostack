@@ -10,42 +10,42 @@ use std::{error::Error, fmt};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use zero_abi::{
-    ArtifactOwnerV1, CertifiedInfluenceClosure, DigestV1, RobustSnapCertificate, SnapLevel,
-    canonical_json, freshness_contract_digest_v1, robust_snap_contract_digest_v1, sha256,
+    ArtifactOwner, CertifiedInfluenceClosure, Sha256Digest, RobustSnapCertificate, SnapLevel,
+    canonical_json, freshness_contract_digest, robust_snap_contract_digest, sha256,
 };
 use zero_cert::VerifiedEvidence;
 
 use crate::q99::{
-    CausalCacheBindingV1, q99_contract_digest_v2, q99_verifier_identity_v1,
+    CausalCacheBinding, q99_invalidation_contract_digest, q99_verifier_identity,
     verified_evidence_digest, verify_exact_successful_payload,
 };
 
-pub const INVALIDATION_INTAKE_CONTRACT_VERSION_V1: u16 = 1;
-pub const ROBUST_SNAP_INTAKE_SCHEMA_VERSION_V1: &str = "zerostack.robust_snap.intake_claim.v1";
-pub const CAUSAL_ARTIFACT_SCHEMA_VERSION_V1: &str = "zerostack.causal_artifact.intake_claim.v1";
-pub const ROBUST_SNAP_INTAKE_SCHEMA_SHA256_V1: &str =
+pub const INVALIDATION_INTAKE_CONTRACT_VERSION: u16 = 1;
+pub const ROBUST_SNAP_INTAKE_SCHEMA_VERSION: &str = "zerostack.robust_snap.intake_claim.v1";
+pub const CAUSAL_ARTIFACT_SCHEMA_VERSION: &str = "zerostack.causal_artifact.intake_claim.v1";
+pub const ROBUST_SNAP_INTAKE_SCHEMA_SHA256: &str =
     "3a9a8056807e143daff4dd3713d73226ecb0ff36981e6307ea0eab744d4ff180";
-pub const CAUSAL_ARTIFACT_SCHEMA_SHA256_V1: &str =
+pub const CAUSAL_ARTIFACT_SCHEMA_SHA256: &str =
     "5a7939a88a545b0cf8a5abdd26412a24aa5b8ab381f2172fbfed7bc73a0d893f";
-pub const INVALIDATION_MAX_CANONICAL_BYTES_V1: usize = 1_048_576;
-pub const INVALIDATION_MAX_SUPPORT_ROOTS_V1: usize = 4_096;
+pub const INVALIDATION_MAX_CANONICAL_BYTES: usize = 1_048_576;
+pub const INVALIDATION_MAX_SUPPORT_ROOTS: usize = 4_096;
 
-const SNAP_CLAIM_DOMAIN_V1: &[u8] = b"zerostack.robust_snap.intake_claim.v1\0";
-const SNAP_RECORD_DOMAIN_V1: &[u8] = b"zerostack.robust_snap.intake_record.v1\0";
-const ARTIFACT_CLAIM_DOMAIN_V1: &[u8] = b"zerostack.causal_artifact.intake_claim.v1\0";
-const ARTIFACT_RECORD_DOMAIN_V1: &[u8] = b"zerostack.causal_artifact.intake_record.v1\0";
-const CACHE_BINDING_DOMAIN_V1: &[u8] = b"zerostack.causal_artifact.cache_binding.v1\0";
-const CONTRACT_DOMAIN_V1: &[u8] = b"zerostack.invalidation_intake.contract.v1\0";
+const SNAP_CLAIM_DOMAIN: &[u8] = b"zerostack.robust_snap.intake_claim.v1\0";
+const SNAP_RECORD_DOMAIN: &[u8] = b"zerostack.robust_snap.intake_record.v1\0";
+const ARTIFACT_CLAIM_DOMAIN: &[u8] = b"zerostack.causal_artifact.intake_claim.v1\0";
+const ARTIFACT_RECORD_DOMAIN: &[u8] = b"zerostack.causal_artifact.intake_record.v1\0";
+const CACHE_BINDING_DOMAIN: &[u8] = b"zerostack.causal_artifact.cache_binding.v1\0";
+const CONTRACT_DOMAIN: &[u8] = b"zerostack.invalidation_intake.contract.v1\0";
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
-pub enum SnapFiberRepresentationV1 {
+pub enum SnapFiberRepresentation {
     FiniteExact,
     ConservativeSuperset,
     Unknown,
 }
 
-impl SnapFiberRepresentationV1 {
+impl SnapFiberRepresentation {
     const fn is_complete(self) -> bool {
         matches!(self, Self::FiniteExact | Self::ConservativeSuperset)
     }
@@ -53,27 +53,27 @@ impl SnapFiberRepresentationV1 {
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
-pub struct RobustSnapIntakeClaimV1 {
+pub struct RobustSnapIntakeClaim {
     schema_version: String,
-    snap_certificate_digest: DigestV1,
-    fiber_representation: SnapFiberRepresentationV1,
-    fiber_completeness_receipt_digest: DigestV1,
-    protected_use_scope_digest: DigestV1,
-    dominance_scope_digest: DigestV1,
-    verifier_identity_digest: DigestV1,
+    snap_certificate_digest: Sha256Digest,
+    fiber_representation: SnapFiberRepresentation,
+    fiber_completeness_receipt_digest: Sha256Digest,
+    protected_use_scope_digest: Sha256Digest,
+    dominance_scope_digest: Sha256Digest,
+    verifier_identity_digest: Sha256Digest,
 }
 
-impl RobustSnapIntakeClaimV1 {
+impl RobustSnapIntakeClaim {
     pub fn new(
-        snap_certificate_digest: DigestV1,
-        fiber_representation: SnapFiberRepresentationV1,
-        fiber_completeness_receipt_digest: DigestV1,
-        protected_use_scope_digest: DigestV1,
-        dominance_scope_digest: DigestV1,
-        verifier_identity_digest: DigestV1,
-    ) -> Result<Self, InvalidationIntakeErrorV1> {
+        snap_certificate_digest: Sha256Digest,
+        fiber_representation: SnapFiberRepresentation,
+        fiber_completeness_receipt_digest: Sha256Digest,
+        protected_use_scope_digest: Sha256Digest,
+        dominance_scope_digest: Sha256Digest,
+        verifier_identity_digest: Sha256Digest,
+    ) -> Result<Self, InvalidationIntakeError> {
         let claim = Self {
-            schema_version: ROBUST_SNAP_INTAKE_SCHEMA_VERSION_V1.into(),
+            schema_version: ROBUST_SNAP_INTAKE_SCHEMA_VERSION.into(),
             snap_certificate_digest,
             fiber_representation,
             fiber_completeness_receipt_digest,
@@ -85,10 +85,10 @@ impl RobustSnapIntakeClaimV1 {
         Ok(claim)
     }
 
-    pub fn validate(&self) -> Result<(), InvalidationIntakeErrorV1> {
-        if self.schema_version != ROBUST_SNAP_INTAKE_SCHEMA_VERSION_V1 {
+    pub fn validate(&self) -> Result<(), InvalidationIntakeError> {
+        if self.schema_version != ROBUST_SNAP_INTAKE_SCHEMA_VERSION {
             return Err(intake_error(
-                InvalidationFailureCodeV1::SchemaVersionMismatch,
+                InvalidationFailureCode::SchemaVersionMismatch,
                 "Robust Snap intake schema version is not v1",
             ));
         }
@@ -104,14 +104,14 @@ impl RobustSnapIntakeClaimV1 {
         )
     }
 
-    pub fn canonical_bytes(&self) -> Result<Vec<u8>, InvalidationIntakeErrorV1> {
+    pub fn canonical_bytes(&self) -> Result<Vec<u8>, InvalidationIntakeError> {
         self.validate()?;
         canonical_bytes(self)
     }
 
-    pub fn digest(&self) -> Result<DigestV1, InvalidationIntakeErrorV1> {
+    pub fn digest(&self) -> Result<Sha256Digest, InvalidationIntakeError> {
         Ok(domain_digest(
-            SNAP_CLAIM_DOMAIN_V1,
+            SNAP_CLAIM_DOMAIN,
             &self.canonical_bytes()?,
         ))
     }
@@ -119,29 +119,29 @@ impl RobustSnapIntakeClaimV1 {
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
-pub enum RobustSnapIntakeDispositionV1 {
+pub enum RobustSnapIntakeDisposition {
     Complete,
     Unknown,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
-pub struct RobustSnapIntakeRecordV1 {
+pub struct RobustSnapIntakeRecord {
     pub contract_version: u16,
-    pub claim: RobustSnapIntakeClaimV1,
-    pub claim_digest: DigestV1,
+    pub claim: RobustSnapIntakeClaim,
+    pub claim_digest: Sha256Digest,
     pub snap_certificate: RobustSnapCertificate,
-    pub snap_certificate_bytes_digest: DigestV1,
-    pub evidence_digest: DigestV1,
-    pub disposition: RobustSnapIntakeDispositionV1,
-    pub authority_digest: DigestV1,
+    pub snap_certificate_bytes_digest: Sha256Digest,
+    pub evidence_digest: Sha256Digest,
+    pub disposition: RobustSnapIntakeDisposition,
+    pub authority_digest: Sha256Digest,
 }
 
-impl RobustSnapIntakeRecordV1 {
-    pub fn validate(&self) -> Result<(), InvalidationIntakeErrorV1> {
-        if self.contract_version != INVALIDATION_INTAKE_CONTRACT_VERSION_V1 {
+impl RobustSnapIntakeRecord {
+    pub fn validate(&self) -> Result<(), InvalidationIntakeError> {
+        if self.contract_version != INVALIDATION_INTAKE_CONTRACT_VERSION {
             return Err(intake_error(
-                InvalidationFailureCodeV1::SchemaVersionMismatch,
+                InvalidationFailureCode::SchemaVersionMismatch,
                 "Robust Snap intake contract version is not v1",
             ));
         }
@@ -149,14 +149,14 @@ impl RobustSnapIntakeRecordV1 {
         validate_snap_certificate(&self.snap_certificate)?;
         let snap_bytes = self.snap_certificate.canonical_bytes().map_err(|error| {
             intake_error(
-                InvalidationFailureCodeV1::InvalidRobustSnap,
+                InvalidationFailureCode::InvalidRobustSnap,
                 error.to_string(),
             )
         })?;
         let expected_disposition = if self.claim.fiber_representation.is_complete() {
-            RobustSnapIntakeDispositionV1::Complete
+            RobustSnapIntakeDisposition::Complete
         } else {
-            RobustSnapIntakeDispositionV1::Unknown
+            RobustSnapIntakeDisposition::Unknown
         };
         require_nonzero(
             "Robust Snap intake record",
@@ -170,16 +170,16 @@ impl RobustSnapIntakeRecordV1 {
             || self.expected_authority_digest()? != self.authority_digest
         {
             return Err(intake_error(
-                InvalidationFailureCodeV1::RecordDigestMismatch,
+                InvalidationFailureCode::RecordDigestMismatch,
                 "Robust Snap intake record does not replay",
             ));
         }
         Ok(())
     }
 
-    fn expected_authority_digest(&self) -> Result<DigestV1, InvalidationIntakeErrorV1> {
+    fn expected_authority_digest(&self) -> Result<Sha256Digest, InvalidationIntakeError> {
         digest_serialized(
-            SNAP_RECORD_DOMAIN_V1,
+            SNAP_RECORD_DOMAIN,
             &json!({
                 "claim_digest": self.claim_digest,
                 "contract_version": self.contract_version,
@@ -190,12 +190,12 @@ impl RobustSnapIntakeRecordV1 {
         )
     }
 
-    pub fn canonical_bytes(&self) -> Result<Vec<u8>, InvalidationIntakeErrorV1> {
+    pub fn canonical_bytes(&self) -> Result<Vec<u8>, InvalidationIntakeError> {
         self.validate()?;
         canonical_bytes(self)
     }
 
-    pub fn from_canonical_bytes(bytes: &[u8]) -> Result<Self, InvalidationIntakeErrorV1> {
+    pub fn from_canonical_bytes(bytes: &[u8]) -> Result<Self, InvalidationIntakeError> {
         let record: Self = decode_canonical(bytes)?;
         record.validate()?;
         Ok(record)
@@ -203,12 +203,12 @@ impl RobustSnapIntakeRecordV1 {
 }
 
 #[derive(Debug)]
-pub struct VerifiedRobustSnapAuthorityV1 {
-    record: RobustSnapIntakeRecordV1,
+pub struct VerifiedRobustSnapAuthority {
+    record: RobustSnapIntakeRecord,
 }
 
-impl VerifiedRobustSnapAuthorityV1 {
-    pub const fn record(&self) -> &RobustSnapIntakeRecordV1 {
+impl VerifiedRobustSnapAuthority {
+    pub const fn record(&self) -> &RobustSnapIntakeRecord {
         &self.record
     }
 
@@ -219,27 +219,27 @@ impl VerifiedRobustSnapAuthorityV1 {
 }
 
 #[derive(Debug)]
-pub enum RobustSnapIntakeDecisionV1 {
-    Complete(VerifiedRobustSnapAuthorityV1),
-    Unknown(RobustSnapIntakeRecordV1),
+pub enum RobustSnapIntakeDecision {
+    Complete(VerifiedRobustSnapAuthority),
+    Unknown(RobustSnapIntakeRecord),
 }
 
-pub fn verify_robust_snap_intake_v1(
-    claim: RobustSnapIntakeClaimV1,
+pub fn verify_robust_snap_intake(
+    claim: RobustSnapIntakeClaim,
     snap_certificate: RobustSnapCertificate,
     evidence: &VerifiedEvidence<'_, '_>,
-) -> Result<RobustSnapIntakeDecisionV1, InvalidationIntakeErrorV1> {
+) -> Result<RobustSnapIntakeDecision, InvalidationIntakeError> {
     claim.validate()?;
     validate_snap_certificate(&snap_certificate)?;
     if claim.snap_certificate_digest != snap_certificate.certificate_digest {
         return Err(intake_error(
-            InvalidationFailureCodeV1::BindingMismatch,
+            InvalidationFailureCode::BindingMismatch,
             "Robust Snap claim does not bind the supplied certificate",
         ));
     }
-    if q99_verifier_identity_v1(evidence) != claim.verifier_identity_digest {
+    if q99_verifier_identity(evidence) != claim.verifier_identity_digest {
         return Err(intake_error(
-            InvalidationFailureCodeV1::VerifierIdentityMismatch,
+            InvalidationFailureCode::VerifierIdentityMismatch,
             "Robust Snap verifier differs from its evidence route",
         ));
     }
@@ -247,17 +247,17 @@ pub fn verify_robust_snap_intake_v1(
     verify_exact_successful_payload(&envelope, evidence).map_err(map_q99_evidence_error)?;
     let snap_bytes = snap_certificate.canonical_bytes().map_err(|error| {
         intake_error(
-            InvalidationFailureCodeV1::InvalidRobustSnap,
+            InvalidationFailureCode::InvalidRobustSnap,
             error.to_string(),
         )
     })?;
     let disposition = if claim.fiber_representation.is_complete() {
-        RobustSnapIntakeDispositionV1::Complete
+        RobustSnapIntakeDisposition::Complete
     } else {
-        RobustSnapIntakeDispositionV1::Unknown
+        RobustSnapIntakeDisposition::Unknown
     };
-    let mut record = RobustSnapIntakeRecordV1 {
-        contract_version: INVALIDATION_INTAKE_CONTRACT_VERSION_V1,
+    let mut record = RobustSnapIntakeRecord {
+        contract_version: INVALIDATION_INTAKE_CONTRACT_VERSION,
         claim_digest: claim.digest()?,
         claim,
         snap_certificate,
@@ -267,24 +267,24 @@ pub fn verify_robust_snap_intake_v1(
         ),
         evidence_digest: verified_evidence_digest(evidence).map_err(map_q99_evidence_error)?,
         disposition,
-        authority_digest: DigestV1::ZERO,
+        authority_digest: Sha256Digest::ZERO,
     };
     record.authority_digest = record.expected_authority_digest()?;
     record.validate()?;
     Ok(match disposition {
-        RobustSnapIntakeDispositionV1::Complete => {
-            RobustSnapIntakeDecisionV1::Complete(VerifiedRobustSnapAuthorityV1 { record })
+        RobustSnapIntakeDisposition::Complete => {
+            RobustSnapIntakeDecision::Complete(VerifiedRobustSnapAuthority { record })
         }
-        RobustSnapIntakeDispositionV1::Unknown => RobustSnapIntakeDecisionV1::Unknown(record),
+        RobustSnapIntakeDisposition::Unknown => RobustSnapIntakeDecision::Unknown(record),
     })
 }
 
 fn validate_snap_certificate(
     certificate: &RobustSnapCertificate,
-) -> Result<(), InvalidationIntakeErrorV1> {
+) -> Result<(), InvalidationIntakeError> {
     certificate.validate().map_err(|error| {
         intake_error(
-            InvalidationFailureCodeV1::InvalidRobustSnap,
+            InvalidationFailureCode::InvalidRobustSnap,
             error.to_string(),
         )
     })?;
@@ -320,7 +320,7 @@ fn validate_snap_certificate(
     }
     if !matches!(certificate.snap_level, SnapLevel::S0 | SnapLevel::S1) {
         return Err(intake_error(
-            InvalidationFailureCodeV1::InvalidRobustSnap,
+            InvalidationFailureCode::InvalidRobustSnap,
             "Unknown Robust Snap level cannot enter proof-carrying intake",
         ));
     }
@@ -329,14 +329,14 @@ fn validate_snap_certificate(
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
-pub enum SupportCompletenessClassV1 {
+pub enum SupportCompletenessClass {
     Exact,
     SoundOverapproximation,
     Heuristic,
     Unknown,
 }
 
-impl SupportCompletenessClassV1 {
+impl SupportCompletenessClass {
     const fn authorizes_protected_support(self) -> bool {
         matches!(self, Self::Exact | Self::SoundOverapproximation)
     }
@@ -344,14 +344,14 @@ impl SupportCompletenessClassV1 {
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
-pub enum DerivationAuthorityV1 {
-    Witness { witness_digest: DigestV1 },
-    ReplayRecipe { recipe_digest: DigestV1 },
-    OpaqueWholeUnit { unit_root_digest: DigestV1 },
+pub enum DerivationAuthority {
+    Witness { witness_digest: Sha256Digest },
+    ReplayRecipe { recipe_digest: Sha256Digest },
+    OpaqueWholeUnit { unit_root_digest: Sha256Digest },
 }
 
-impl DerivationAuthorityV1 {
-    fn digest(&self) -> DigestV1 {
+impl DerivationAuthority {
+    fn digest(&self) -> Sha256Digest {
         match self {
             Self::Witness { witness_digest } => *witness_digest,
             Self::ReplayRecipe { recipe_digest } => *recipe_digest,
@@ -362,42 +362,42 @@ impl DerivationAuthorityV1 {
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
-pub struct CausalArtifactIntakeClaimV1 {
+pub struct CausalArtifactIntakeClaim {
     schema_version: String,
-    artifact_digest: DigestV1,
-    artifact_owner: ArtifactOwnerV1,
-    producer_identity_digest: DigestV1,
-    declared_support_roots: Vec<DigestV1>,
-    support_closure_digest: DigestV1,
-    support_class: SupportCompletenessClassV1,
-    derivation_authority: DerivationAuthorityV1,
-    invalidation_predicate_digest: DigestV1,
-    protected_use_scope_digest: DigestV1,
-    verifier_scope_digest: DigestV1,
-    validation_cost_profile_digest: DigestV1,
-    recovery_route_digest: DigestV1,
-    verifier_identity_digest: DigestV1,
+    artifact_digest: Sha256Digest,
+    artifact_owner: ArtifactOwner,
+    producer_identity_digest: Sha256Digest,
+    declared_support_roots: Vec<Sha256Digest>,
+    support_closure_digest: Sha256Digest,
+    support_class: SupportCompletenessClass,
+    derivation_authority: DerivationAuthority,
+    invalidation_predicate_digest: Sha256Digest,
+    protected_use_scope_digest: Sha256Digest,
+    verifier_scope_digest: Sha256Digest,
+    validation_cost_profile_digest: Sha256Digest,
+    recovery_route_digest: Sha256Digest,
+    verifier_identity_digest: Sha256Digest,
 }
 
-impl CausalArtifactIntakeClaimV1 {
+impl CausalArtifactIntakeClaim {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
-        artifact_digest: DigestV1,
-        artifact_owner: ArtifactOwnerV1,
-        producer_identity_digest: DigestV1,
-        declared_support_roots: Vec<DigestV1>,
-        support_closure_digest: DigestV1,
-        support_class: SupportCompletenessClassV1,
-        derivation_authority: DerivationAuthorityV1,
-        invalidation_predicate_digest: DigestV1,
-        protected_use_scope_digest: DigestV1,
-        verifier_scope_digest: DigestV1,
-        validation_cost_profile_digest: DigestV1,
-        recovery_route_digest: DigestV1,
-        verifier_identity_digest: DigestV1,
-    ) -> Result<Self, InvalidationIntakeErrorV1> {
+        artifact_digest: Sha256Digest,
+        artifact_owner: ArtifactOwner,
+        producer_identity_digest: Sha256Digest,
+        declared_support_roots: Vec<Sha256Digest>,
+        support_closure_digest: Sha256Digest,
+        support_class: SupportCompletenessClass,
+        derivation_authority: DerivationAuthority,
+        invalidation_predicate_digest: Sha256Digest,
+        protected_use_scope_digest: Sha256Digest,
+        verifier_scope_digest: Sha256Digest,
+        validation_cost_profile_digest: Sha256Digest,
+        recovery_route_digest: Sha256Digest,
+        verifier_identity_digest: Sha256Digest,
+    ) -> Result<Self, InvalidationIntakeError> {
         let claim = Self {
-            schema_version: CAUSAL_ARTIFACT_SCHEMA_VERSION_V1.into(),
+            schema_version: CAUSAL_ARTIFACT_SCHEMA_VERSION.into(),
             artifact_digest,
             artifact_owner,
             producer_identity_digest,
@@ -416,22 +416,22 @@ impl CausalArtifactIntakeClaimV1 {
         Ok(claim)
     }
 
-    pub fn validate(&self) -> Result<(), InvalidationIntakeErrorV1> {
-        if self.schema_version != CAUSAL_ARTIFACT_SCHEMA_VERSION_V1 {
+    pub fn validate(&self) -> Result<(), InvalidationIntakeError> {
+        if self.schema_version != CAUSAL_ARTIFACT_SCHEMA_VERSION {
             return Err(intake_error(
-                InvalidationFailureCodeV1::SchemaVersionMismatch,
+                InvalidationFailureCode::SchemaVersionMismatch,
                 "causal artifact intake schema version is not v1",
             ));
         }
         if self.declared_support_roots.is_empty()
-            || self.declared_support_roots.len() > INVALIDATION_MAX_SUPPORT_ROOTS_V1
+            || self.declared_support_roots.len() > INVALIDATION_MAX_SUPPORT_ROOTS
             || self
                 .declared_support_roots
                 .windows(2)
                 .any(|pair| pair[0] >= pair[1])
         {
             return Err(intake_error(
-                InvalidationFailureCodeV1::InvalidSupportRoots,
+                InvalidationFailureCode::InvalidSupportRoots,
                 "declared support roots must be nonempty, bounded, sorted, and unique",
             ));
         }
@@ -451,28 +451,28 @@ impl CausalArtifactIntakeClaimV1 {
             ],
         )?;
         require_nonzero("declared support root", &self.declared_support_roots)?;
-        if self.support_class == SupportCompletenessClassV1::Exact
+        if self.support_class == SupportCompletenessClass::Exact
             && matches!(
                 self.derivation_authority,
-                DerivationAuthorityV1::OpaqueWholeUnit { .. }
+                DerivationAuthority::OpaqueWholeUnit { .. }
             )
         {
             return Err(intake_error(
-                InvalidationFailureCodeV1::SupportClassMismatch,
+                InvalidationFailureCode::SupportClassMismatch,
                 "opaque whole-unit isolation is conservative, never exact support",
             ));
         }
         Ok(())
     }
 
-    pub fn canonical_bytes(&self) -> Result<Vec<u8>, InvalidationIntakeErrorV1> {
+    pub fn canonical_bytes(&self) -> Result<Vec<u8>, InvalidationIntakeError> {
         self.validate()?;
         canonical_bytes(self)
     }
 
-    pub fn digest(&self) -> Result<DigestV1, InvalidationIntakeErrorV1> {
+    pub fn digest(&self) -> Result<Sha256Digest, InvalidationIntakeError> {
         Ok(domain_digest(
-            ARTIFACT_CLAIM_DOMAIN_V1,
+            ARTIFACT_CLAIM_DOMAIN,
             &self.canonical_bytes()?,
         ))
     }
@@ -480,7 +480,7 @@ impl CausalArtifactIntakeClaimV1 {
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
-pub enum InvalidationIntakeDispositionV1 {
+pub enum InvalidationIntakeDisposition {
     ProtectedSupport,
     RetrievalOnly,
     Rejected,
@@ -488,35 +488,35 @@ pub enum InvalidationIntakeDispositionV1 {
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
-pub struct CausalArtifactIntakeRecordV1 {
+pub struct CausalArtifactIntakeRecord {
     pub contract_version: u16,
-    pub claim: CausalArtifactIntakeClaimV1,
-    pub claim_digest: DigestV1,
+    pub claim: CausalArtifactIntakeClaim,
+    pub claim_digest: Sha256Digest,
     pub support_closure: CertifiedInfluenceClosure,
-    pub support_closure_bytes_digest: DigestV1,
-    pub evidence_digest: DigestV1,
-    pub disposition: InvalidationIntakeDispositionV1,
-    pub authority_digest: DigestV1,
+    pub support_closure_bytes_digest: Sha256Digest,
+    pub evidence_digest: Sha256Digest,
+    pub disposition: InvalidationIntakeDisposition,
+    pub authority_digest: Sha256Digest,
 }
 
-impl CausalArtifactIntakeRecordV1 {
-    pub fn validate(&self) -> Result<(), InvalidationIntakeErrorV1> {
-        if self.contract_version != INVALIDATION_INTAKE_CONTRACT_VERSION_V1 {
+impl CausalArtifactIntakeRecord {
+    pub fn validate(&self) -> Result<(), InvalidationIntakeError> {
+        if self.contract_version != INVALIDATION_INTAKE_CONTRACT_VERSION {
             return Err(intake_error(
-                InvalidationFailureCodeV1::SchemaVersionMismatch,
+                InvalidationFailureCode::SchemaVersionMismatch,
                 "causal artifact intake contract version is not v1",
             ));
         }
         self.claim.validate()?;
         self.support_closure.validate().map_err(|error| {
             intake_error(
-                InvalidationFailureCodeV1::InvalidSupportClosure,
+                InvalidationFailureCode::InvalidSupportClosure,
                 error.to_string(),
             )
         })?;
         let closure_bytes = self.support_closure.canonical_bytes().map_err(|error| {
             intake_error(
-                InvalidationFailureCodeV1::InvalidSupportClosure,
+                InvalidationFailureCode::InvalidSupportClosure,
                 error.to_string(),
             )
         })?;
@@ -535,16 +535,16 @@ impl CausalArtifactIntakeRecordV1 {
             || self.expected_authority_digest()? != self.authority_digest
         {
             return Err(intake_error(
-                InvalidationFailureCodeV1::RecordDigestMismatch,
+                InvalidationFailureCode::RecordDigestMismatch,
                 "causal artifact intake record does not replay",
             ));
         }
         Ok(())
     }
 
-    fn expected_authority_digest(&self) -> Result<DigestV1, InvalidationIntakeErrorV1> {
+    fn expected_authority_digest(&self) -> Result<Sha256Digest, InvalidationIntakeError> {
         digest_serialized(
-            ARTIFACT_RECORD_DOMAIN_V1,
+            ARTIFACT_RECORD_DOMAIN,
             &json!({
                 "claim_digest": self.claim_digest,
                 "contract_version": self.contract_version,
@@ -555,12 +555,12 @@ impl CausalArtifactIntakeRecordV1 {
         )
     }
 
-    pub fn canonical_bytes(&self) -> Result<Vec<u8>, InvalidationIntakeErrorV1> {
+    pub fn canonical_bytes(&self) -> Result<Vec<u8>, InvalidationIntakeError> {
         self.validate()?;
         canonical_bytes(self)
     }
 
-    pub fn from_canonical_bytes(bytes: &[u8]) -> Result<Self, InvalidationIntakeErrorV1> {
+    pub fn from_canonical_bytes(bytes: &[u8]) -> Result<Self, InvalidationIntakeError> {
         let record: Self = decode_canonical(bytes)?;
         record.validate()?;
         Ok(record)
@@ -568,22 +568,22 @@ impl CausalArtifactIntakeRecordV1 {
 }
 
 #[derive(Debug)]
-pub struct ProofCarryingInvalidationAuthorityV1 {
-    record: CausalArtifactIntakeRecordV1,
+pub struct ProofCarryingInvalidationAuthority {
+    record: CausalArtifactIntakeRecord,
 }
 
-impl ProofCarryingInvalidationAuthorityV1 {
-    pub const fn record(&self) -> &CausalArtifactIntakeRecordV1 {
+impl ProofCarryingInvalidationAuthority {
+    pub const fn record(&self) -> &CausalArtifactIntakeRecord {
         &self.record
     }
 
     pub fn bind_cache(
         &self,
-        binding: &CausalCacheBindingV1,
-    ) -> Result<BoundCausalCacheInvalidationV1, InvalidationIntakeErrorV1> {
+        binding: &CausalCacheBinding,
+    ) -> Result<BoundCausalCacheInvalidation, InvalidationIntakeError> {
         binding.validate().map_err(|error| {
             intake_error(
-                InvalidationFailureCodeV1::BindingMismatch,
+                InvalidationFailureCode::BindingMismatch,
                 error.to_string(),
             )
         })?;
@@ -602,24 +602,24 @@ impl ProofCarryingInvalidationAuthorityV1 {
             || self.record.authority_digest != binding.invalidation_certificate_digest
         {
             return Err(intake_error(
-                InvalidationFailureCodeV1::BindingMismatch,
+                InvalidationFailureCode::BindingMismatch,
                 "causal artifact authority does not match the complete cache binding",
             ));
         }
-        Ok(BoundCausalCacheInvalidationV1 {
+        Ok(BoundCausalCacheInvalidation {
             binding_digest: binding.digest().map_err(|error| {
                 intake_error(
-                    InvalidationFailureCodeV1::BindingMismatch,
+                    InvalidationFailureCode::BindingMismatch,
                     error.to_string(),
                 )
             })?,
             invalidation_authority_digest: self.record.authority_digest,
             support_class: claim.support_class,
             bound_digest: domain_digest(
-                CACHE_BINDING_DOMAIN_V1,
+                CACHE_BINDING_DOMAIN,
                 canonical_json(&json!({
                     "binding_digest": binding.digest().map_err(|error| intake_error(
-                        InvalidationFailureCodeV1::BindingMismatch,
+                        InvalidationFailureCode::BindingMismatch,
                         error.to_string(),
                     ))?,
                     "invalidation_authority_digest": self.record.authority_digest,
@@ -632,26 +632,26 @@ impl ProofCarryingInvalidationAuthorityV1 {
 }
 
 #[derive(Debug)]
-pub struct BoundCausalCacheInvalidationV1 {
-    binding_digest: DigestV1,
-    invalidation_authority_digest: DigestV1,
-    support_class: SupportCompletenessClassV1,
-    bound_digest: DigestV1,
+pub struct BoundCausalCacheInvalidation {
+    binding_digest: Sha256Digest,
+    invalidation_authority_digest: Sha256Digest,
+    support_class: SupportCompletenessClass,
+    bound_digest: Sha256Digest,
 }
 
-impl BoundCausalCacheInvalidationV1 {
+impl BoundCausalCacheInvalidation {
     pub(crate) fn authorizes(
         &self,
-        binding: &CausalCacheBindingV1,
-    ) -> Result<bool, InvalidationIntakeErrorV1> {
+        binding: &CausalCacheBinding,
+    ) -> Result<bool, InvalidationIntakeError> {
         let binding_digest = binding.digest().map_err(|error| {
             intake_error(
-                InvalidationFailureCodeV1::BindingMismatch,
+                InvalidationFailureCode::BindingMismatch,
                 error.to_string(),
             )
         })?;
         let expected_bound = domain_digest(
-            CACHE_BINDING_DOMAIN_V1,
+            CACHE_BINDING_DOMAIN,
             canonical_json(&json!({
                 "binding_digest": binding_digest,
                 "invalidation_authority_digest": self.invalidation_authority_digest,
@@ -667,33 +667,33 @@ impl BoundCausalCacheInvalidationV1 {
 }
 
 #[derive(Debug)]
-pub enum InvalidationIntakeDecisionV1 {
-    ProtectedSupport(ProofCarryingInvalidationAuthorityV1),
-    RetrievalOnly(CausalArtifactIntakeRecordV1),
-    Rejected(CausalArtifactIntakeRecordV1),
+pub enum InvalidationIntakeDecision {
+    ProtectedSupport(ProofCarryingInvalidationAuthority),
+    RetrievalOnly(CausalArtifactIntakeRecord),
+    Rejected(CausalArtifactIntakeRecord),
 }
 
-pub fn verify_causal_artifact_intake_v1(
-    claim: CausalArtifactIntakeClaimV1,
+pub fn verify_causal_artifact_intake(
+    claim: CausalArtifactIntakeClaim,
     support_closure: CertifiedInfluenceClosure,
     evidence: &VerifiedEvidence<'_, '_>,
-) -> Result<InvalidationIntakeDecisionV1, InvalidationIntakeErrorV1> {
+) -> Result<InvalidationIntakeDecision, InvalidationIntakeError> {
     claim.validate()?;
     support_closure.validate().map_err(|error| {
         intake_error(
-            InvalidationFailureCodeV1::InvalidSupportClosure,
+            InvalidationFailureCode::InvalidSupportClosure,
             error.to_string(),
         )
     })?;
     if claim.support_closure_digest != support_closure.certificate_digest {
         return Err(intake_error(
-            InvalidationFailureCodeV1::BindingMismatch,
+            InvalidationFailureCode::BindingMismatch,
             "causal artifact claim does not bind the supplied support closure",
         ));
     }
-    if q99_verifier_identity_v1(evidence) != claim.verifier_identity_digest {
+    if q99_verifier_identity(evidence) != claim.verifier_identity_digest {
         return Err(intake_error(
-            InvalidationFailureCodeV1::VerifierIdentityMismatch,
+            InvalidationFailureCode::VerifierIdentityMismatch,
             "causal artifact verifier differs from its evidence route",
         ));
     }
@@ -701,13 +701,13 @@ pub fn verify_causal_artifact_intake_v1(
     verify_exact_successful_payload(&envelope, evidence).map_err(map_q99_evidence_error)?;
     let closure_bytes = support_closure.canonical_bytes().map_err(|error| {
         intake_error(
-            InvalidationFailureCodeV1::InvalidSupportClosure,
+            InvalidationFailureCode::InvalidSupportClosure,
             error.to_string(),
         )
     })?;
     let disposition = disposition_for_support(claim.support_class);
-    let mut record = CausalArtifactIntakeRecordV1 {
-        contract_version: INVALIDATION_INTAKE_CONTRACT_VERSION_V1,
+    let mut record = CausalArtifactIntakeRecord {
+        contract_version: INVALIDATION_INTAKE_CONTRACT_VERSION,
         claim_digest: claim.digest()?,
         claim,
         support_closure,
@@ -717,36 +717,36 @@ pub fn verify_causal_artifact_intake_v1(
         ),
         evidence_digest: verified_evidence_digest(evidence).map_err(map_q99_evidence_error)?,
         disposition,
-        authority_digest: DigestV1::ZERO,
+        authority_digest: Sha256Digest::ZERO,
     };
     record.authority_digest = record.expected_authority_digest()?;
     record.validate()?;
     Ok(match disposition {
-        InvalidationIntakeDispositionV1::ProtectedSupport => {
-            InvalidationIntakeDecisionV1::ProtectedSupport(ProofCarryingInvalidationAuthorityV1 {
+        InvalidationIntakeDisposition::ProtectedSupport => {
+            InvalidationIntakeDecision::ProtectedSupport(ProofCarryingInvalidationAuthority {
                 record,
             })
         }
-        InvalidationIntakeDispositionV1::RetrievalOnly => {
-            InvalidationIntakeDecisionV1::RetrievalOnly(record)
+        InvalidationIntakeDisposition::RetrievalOnly => {
+            InvalidationIntakeDecision::RetrievalOnly(record)
         }
-        InvalidationIntakeDispositionV1::Rejected => InvalidationIntakeDecisionV1::Rejected(record),
+        InvalidationIntakeDisposition::Rejected => InvalidationIntakeDecision::Rejected(record),
     })
 }
 
 const fn disposition_for_support(
-    support: SupportCompletenessClassV1,
-) -> InvalidationIntakeDispositionV1 {
+    support: SupportCompletenessClass,
+) -> InvalidationIntakeDisposition {
     match support {
-        SupportCompletenessClassV1::Exact | SupportCompletenessClassV1::SoundOverapproximation => {
-            InvalidationIntakeDispositionV1::ProtectedSupport
+        SupportCompletenessClass::Exact | SupportCompletenessClass::SoundOverapproximation => {
+            InvalidationIntakeDisposition::ProtectedSupport
         }
-        SupportCompletenessClassV1::Heuristic => InvalidationIntakeDispositionV1::RetrievalOnly,
-        SupportCompletenessClassV1::Unknown => InvalidationIntakeDispositionV1::Rejected,
+        SupportCompletenessClass::Heuristic => InvalidationIntakeDisposition::RetrievalOnly,
+        SupportCompletenessClass::Unknown => InvalidationIntakeDisposition::Rejected,
     }
 }
 
-pub fn invalidation_intake_contract_manifest_v1() -> Value {
+pub fn invalidation_intake_contract_manifest() -> Value {
     json!({
         "authority": "ZeroStack",
         "causal_artifact_fields": [
@@ -757,11 +757,11 @@ pub fn invalidation_intake_contract_manifest_v1() -> Value {
             "validation_cost_profile_digest",
             "recovery_route_digest", "verifier_identity_digest"
         ],
-        "contract_version": INVALIDATION_INTAKE_CONTRACT_VERSION_V1,
+        "contract_version": INVALIDATION_INTAKE_CONTRACT_VERSION,
         "linked_contracts": {
-            "freshness": freshness_contract_digest_v1(),
-            "q99": q99_contract_digest_v2(),
-            "robust_snap": robust_snap_contract_digest_v1(),
+            "freshness": freshness_contract_digest(),
+            "q99": q99_invalidation_contract_digest(),
+            "robust_snap": robust_snap_contract_digest(),
         },
         "negative_space": [
             "essential_edge_as_support_completeness",
@@ -774,60 +774,60 @@ pub fn invalidation_intake_contract_manifest_v1() -> Value {
             "snap_record_as_operational_execution_authority"
         ],
         "protected_support_classes": ["exact", "sound_overapproximation"],
-        "published_artifact_schema_sha256": CAUSAL_ARTIFACT_SCHEMA_SHA256_V1,
-        "published_snap_schema_sha256": ROBUST_SNAP_INTAKE_SCHEMA_SHA256_V1,
+        "published_artifact_schema_sha256": CAUSAL_ARTIFACT_SCHEMA_SHA256,
+        "published_snap_schema_sha256": ROBUST_SNAP_INTAKE_SCHEMA_SHA256,
         "snap_complete_representations": ["finite_exact", "conservative_superset"],
         "verifier_evidence": "successful_exact_payload_build_or_test_receipt",
     })
 }
 
-pub fn invalidation_intake_contract_digest_v1() -> DigestV1 {
+pub fn invalidation_intake_contract_digest() -> Sha256Digest {
     domain_digest(
-        CONTRACT_DOMAIN_V1,
-        canonical_json(&invalidation_intake_contract_manifest_v1()).as_bytes(),
+        CONTRACT_DOMAIN,
+        canonical_json(&invalidation_intake_contract_manifest()).as_bytes(),
     )
 }
 
 fn snap_envelope_bytes(
-    claim: &RobustSnapIntakeClaimV1,
+    claim: &RobustSnapIntakeClaim,
     certificate: &RobustSnapCertificate,
-) -> Result<Vec<u8>, InvalidationIntakeErrorV1> {
+) -> Result<Vec<u8>, InvalidationIntakeError> {
     canonical_bytes(&json!({"claim": claim, "snap_certificate": certificate}))
 }
 
 fn artifact_envelope_bytes(
-    claim: &CausalArtifactIntakeClaimV1,
+    claim: &CausalArtifactIntakeClaim,
     closure: &CertifiedInfluenceClosure,
-) -> Result<Vec<u8>, InvalidationIntakeErrorV1> {
+) -> Result<Vec<u8>, InvalidationIntakeError> {
     canonical_bytes(&json!({"claim": claim, "support_closure": closure}))
 }
 
-fn canonical_bytes<T: Serialize + ?Sized>(value: &T) -> Result<Vec<u8>, InvalidationIntakeErrorV1> {
+fn canonical_bytes<T: Serialize + ?Sized>(value: &T) -> Result<Vec<u8>, InvalidationIntakeError> {
     let value = serde_json::to_value(value).map_err(|error| json_error(error.to_string()))?;
     let bytes = canonical_json(&value).into_bytes();
-    if bytes.len() > INVALIDATION_MAX_CANONICAL_BYTES_V1 {
+    if bytes.len() > INVALIDATION_MAX_CANONICAL_BYTES {
         return Err(intake_error(
-            InvalidationFailureCodeV1::CanonicalPayloadTooLarge,
+            InvalidationFailureCode::CanonicalPayloadTooLarge,
             "invalidation intake canonical payload exceeds its byte bound",
         ));
     }
     Ok(bytes)
 }
 
-fn decode_canonical<T>(bytes: &[u8]) -> Result<T, InvalidationIntakeErrorV1>
+fn decode_canonical<T>(bytes: &[u8]) -> Result<T, InvalidationIntakeError>
 where
     T: for<'de> Deserialize<'de> + Serialize,
 {
-    if bytes.len() > INVALIDATION_MAX_CANONICAL_BYTES_V1 {
+    if bytes.len() > INVALIDATION_MAX_CANONICAL_BYTES {
         return Err(intake_error(
-            InvalidationFailureCodeV1::CanonicalPayloadTooLarge,
+            InvalidationFailureCode::CanonicalPayloadTooLarge,
             "invalidation intake canonical payload exceeds its byte bound",
         ));
     }
     let value = serde_json::from_slice(bytes).map_err(|error| json_error(error.to_string()))?;
     if canonical_bytes(&value)? != bytes {
         return Err(intake_error(
-            InvalidationFailureCodeV1::NonCanonicalEncoding,
+            InvalidationFailureCode::NonCanonicalEncoding,
             "invalidation intake bytes are not canonical sorted-key JSON",
         ));
     }
@@ -837,24 +837,24 @@ where
 fn digest_serialized<T: Serialize + ?Sized>(
     domain: &[u8],
     value: &T,
-) -> Result<DigestV1, InvalidationIntakeErrorV1> {
+) -> Result<Sha256Digest, InvalidationIntakeError> {
     Ok(domain_digest(domain, &canonical_bytes(value)?))
 }
 
-fn domain_digest(domain: &[u8], bytes: &[u8]) -> DigestV1 {
+fn domain_digest(domain: &[u8], bytes: &[u8]) -> Sha256Digest {
     let mut value = Vec::with_capacity(domain.len() + bytes.len());
     value.extend_from_slice(domain);
     value.extend_from_slice(bytes);
-    DigestV1::from_bytes(sha256(&value))
+    Sha256Digest::from_bytes(sha256(&value))
 }
 
 fn require_nonzero(
     label: &'static str,
-    values: &[DigestV1],
-) -> Result<(), InvalidationIntakeErrorV1> {
-    if values.contains(&DigestV1::ZERO) {
+    values: &[Sha256Digest],
+) -> Result<(), InvalidationIntakeError> {
+    if values.contains(&Sha256Digest::ZERO) {
         Err(intake_error(
-            InvalidationFailureCodeV1::ZeroDigest,
+            InvalidationFailureCode::ZeroDigest,
             format!("{label} contains a zero digest"),
         ))
     } else {
@@ -862,16 +862,16 @@ fn require_nonzero(
     }
 }
 
-fn map_q99_evidence_error(error: crate::q99::Q99ErrorV1) -> InvalidationIntakeErrorV1 {
+fn map_q99_evidence_error(error: crate::q99::Q99Error) -> InvalidationIntakeError {
     intake_error(
-        InvalidationFailureCodeV1::InvalidVerifierEvidence,
+        InvalidationFailureCode::InvalidVerifierEvidence,
         error.to_string(),
     )
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
-pub enum InvalidationFailureCodeV1 {
+pub enum InvalidationFailureCode {
     SchemaVersionMismatch,
     ZeroDigest,
     InvalidRobustSnap,
@@ -888,13 +888,13 @@ pub enum InvalidationFailureCodeV1 {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct InvalidationIntakeErrorV1 {
-    code: InvalidationFailureCodeV1,
+pub struct InvalidationIntakeError {
+    code: InvalidationFailureCode,
     detail: String,
 }
 
-impl InvalidationIntakeErrorV1 {
-    pub const fn failure_code(&self) -> InvalidationFailureCodeV1 {
+impl InvalidationIntakeError {
+    pub const fn failure_code(&self) -> InvalidationFailureCode {
         self.code
     }
     pub fn detail(&self) -> &str {
@@ -902,7 +902,7 @@ impl InvalidationIntakeErrorV1 {
     }
 }
 
-impl fmt::Display for InvalidationIntakeErrorV1 {
+impl fmt::Display for InvalidationIntakeError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
             formatter,
@@ -911,18 +911,18 @@ impl fmt::Display for InvalidationIntakeErrorV1 {
         )
     }
 }
-impl Error for InvalidationIntakeErrorV1 {}
+impl Error for InvalidationIntakeError {}
 
 fn intake_error(
-    code: InvalidationFailureCodeV1,
+    code: InvalidationFailureCode,
     detail: impl Into<String>,
-) -> InvalidationIntakeErrorV1 {
-    InvalidationIntakeErrorV1 {
+) -> InvalidationIntakeError {
+    InvalidationIntakeError {
         code,
         detail: detail.into(),
     }
 }
-fn json_error(detail: String) -> InvalidationIntakeErrorV1 {
-    intake_error(InvalidationFailureCodeV1::Json, detail)
+fn json_error(detail: String) -> InvalidationIntakeError {
+    intake_error(InvalidationFailureCode::Json, detail)
 }
 

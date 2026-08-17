@@ -1,6 +1,6 @@
 //! Session-merge WAL for engine recovery journals.
 //!
-//! [`DurableJournalV2`](crate::DurableJournalV2) is a single-transaction digest
+//! [`DurableJournal`](crate::DurableJournal) is a single-transaction digest
 //! 2PC with a 64 KiB record cap, fail-closed torn records, no foreign-writer
 //! merge, and fatal `sync_all`. Engines (TokenZero recovery, FS/GZ session
 //! journals) need the opposite:
@@ -24,7 +24,7 @@ use serde_json::json;
 
 use crate::fs_replace::{SyncPolicy, atomic_write_file_with_sync, tolerate_unsupported_sync};
 
-/// Hard cap per record. Larger than DurableJournalV2's 64 KiB so a recovery
+/// Hard cap per record. Larger than DurableJournal's 64 KiB so a recovery
 /// snapshot (megabytes) can live in one frame.
 pub const SESSION_WAL_MAX_RECORD_BYTES: u64 = 64 * 1024 * 1024;
 /// Default sealed-segment count before append asks the caller to compact.
@@ -33,8 +33,8 @@ pub const SESSION_WAL_DEFAULT_MAX_SEALED_SEGMENTS: usize = 4;
 pub const SESSION_WAL_MIN_SEGMENT_BYTES: u64 = 64 * 1024;
 /// Default replay budget across all segments.
 pub const SESSION_WAL_DEFAULT_MAX_REPLAY_BYTES: u64 = 256 * 1024 * 1024;
-/// Contract schema for [`session_wal_contract_v1`].
-pub const SESSION_WAL_SCHEMA_VERSION_V1: u16 = 1;
+/// Contract schema for [`session_wal_contract`].
+pub const SESSION_WAL_SCHEMA_VERSION: u16 = 1;
 
 const FRAME_OVERHEAD: u64 = 8;
 const WAL_SUFFIX: &str = ".wal";
@@ -261,9 +261,9 @@ impl SessionWal {
 }
 
 /// Machine-readable contract used by conformance generators.
-pub fn session_wal_contract_v1() -> serde_json::Value {
+pub fn session_wal_contract() -> serde_json::Value {
     json!({
-        "schema_version": SESSION_WAL_SCHEMA_VERSION_V1,
+        "schema_version": SESSION_WAL_SCHEMA_VERSION,
         "max_record_bytes": SESSION_WAL_MAX_RECORD_BYTES,
         "min_segment_bytes": SESSION_WAL_MIN_SEGMENT_BYTES,
         "default_max_sealed_segments": SESSION_WAL_DEFAULT_MAX_SEALED_SEGMENTS,

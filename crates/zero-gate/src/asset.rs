@@ -38,13 +38,13 @@ use std::{error::Error, fmt};
 
 use serde::{Deserialize, Serialize};
 
-pub const ASSET_CONTRACT_VERSION_V1: u16 = 1;
-pub const ASSET_ID_MAX_BYTES_V1: usize = 128;
-pub const ASSET_DIGEST_HEX_LEN_V1: usize = 64;
+pub const ASSET_CONTRACT_VERSION: u16 = 1;
+pub const ASSET_ID_MAX_BYTES: usize = 128;
+pub const ASSET_DIGEST_HEX_LEN: usize = 64;
 
 /// Fail-closed error for the verified capability subsystem.
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub enum AssetErrorV1 {
+pub enum AssetError {
     InvalidAsset(String),
     InvalidScope(String),
     InvalidPrecondition(String),
@@ -55,8 +55,8 @@ pub enum AssetErrorV1 {
     InvalidLedger(String),
     InvalidRevocation(String),
     InvalidTransition {
-        from: AssetStateV1,
-        to: AssetStateV1,
+        from: AssetState,
+        to: AssetState,
     },
     ScopeMismatch(String),
     ClampedBenefit {
@@ -65,7 +65,7 @@ pub enum AssetErrorV1 {
     },
 }
 
-impl fmt::Display for AssetErrorV1 {
+impl fmt::Display for AssetError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::InvalidAsset(detail) => write!(formatter, "invalid capability asset: {detail}"),
@@ -97,10 +97,10 @@ impl fmt::Display for AssetErrorV1 {
     }
 }
 
-impl Error for AssetErrorV1 {}
+impl Error for AssetError {}
 
 fn is_lower_hex_64(value: &str) -> bool {
-    value.len() == ASSET_DIGEST_HEX_LEN_V1
+    value.len() == ASSET_DIGEST_HEX_LEN
         && value
             .bytes()
             .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
@@ -110,16 +110,16 @@ fn is_lower_hex_64(value: &str) -> bool {
 /// input shape digest must both match (CAP-002).
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
-pub struct ScopeV1 {
+pub struct Scope {
     pub operation_class: String,
     pub input_shape_digest_hex: String,
 }
 
-impl ScopeV1 {
+impl Scope {
     pub fn new(
         operation_class: impl Into<String>,
         input_shape_digest_hex: impl Into<String>,
-    ) -> Result<Self, AssetErrorV1> {
+    ) -> Result<Self, AssetError> {
         let scope = Self {
             operation_class: operation_class.into(),
             input_shape_digest_hex: input_shape_digest_hex.into(),
@@ -128,16 +128,16 @@ impl ScopeV1 {
         Ok(scope)
     }
 
-    pub fn validate(&self) -> Result<(), AssetErrorV1> {
+    pub fn validate(&self) -> Result<(), AssetError> {
         if self.operation_class.is_empty() {
-            return Err(AssetErrorV1::InvalidScope(
+            return Err(AssetError::InvalidScope(
                 "operation_class must be nonempty".into(),
             ));
         }
         if !is_lower_hex_64(&self.input_shape_digest_hex) {
-            return Err(AssetErrorV1::InvalidScope(format!(
+            return Err(AssetError::InvalidScope(format!(
                 "input_shape_digest_hex must be {} lowercase hex characters",
-                ASSET_DIGEST_HEX_LEN_V1
+                ASSET_DIGEST_HEX_LEN
             )));
         }
         Ok(())
@@ -147,16 +147,16 @@ impl ScopeV1 {
 /// A precondition rooted at an exact project-root digest.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
-pub struct RootedPreconditionV1 {
+pub struct RootedPrecondition {
     pub name: String,
     pub root_digest_hex: String,
 }
 
-impl RootedPreconditionV1 {
+impl RootedPrecondition {
     pub fn new(
         name: impl Into<String>,
         root_digest_hex: impl Into<String>,
-    ) -> Result<Self, AssetErrorV1> {
+    ) -> Result<Self, AssetError> {
         let precondition = Self {
             name: name.into(),
             root_digest_hex: root_digest_hex.into(),
@@ -165,16 +165,16 @@ impl RootedPreconditionV1 {
         Ok(precondition)
     }
 
-    pub fn validate(&self) -> Result<(), AssetErrorV1> {
+    pub fn validate(&self) -> Result<(), AssetError> {
         if self.name.is_empty() {
-            return Err(AssetErrorV1::InvalidPrecondition(
+            return Err(AssetError::InvalidPrecondition(
                 "name must be nonempty".into(),
             ));
         }
         if !is_lower_hex_64(&self.root_digest_hex) {
-            return Err(AssetErrorV1::InvalidPrecondition(format!(
+            return Err(AssetError::InvalidPrecondition(format!(
                 "root_digest_hex must be {} lowercase hex characters",
-                ASSET_DIGEST_HEX_LEN_V1
+                ASSET_DIGEST_HEX_LEN
             )));
         }
         Ok(())
@@ -184,13 +184,13 @@ impl RootedPreconditionV1 {
 /// A dependency pin: the exact digest an asset was verified against.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
-pub struct DependencyPinV1 {
+pub struct DependencyPin {
     pub name: String,
     pub digest_hex: String,
 }
 
-impl DependencyPinV1 {
-    pub fn new(name: impl Into<String>, digest_hex: impl Into<String>) -> Result<Self, AssetErrorV1> {
+impl DependencyPin {
+    pub fn new(name: impl Into<String>, digest_hex: impl Into<String>) -> Result<Self, AssetError> {
         let pin = Self {
             name: name.into(),
             digest_hex: digest_hex.into(),
@@ -199,16 +199,16 @@ impl DependencyPinV1 {
         Ok(pin)
     }
 
-    pub fn validate(&self) -> Result<(), AssetErrorV1> {
+    pub fn validate(&self) -> Result<(), AssetError> {
         if self.name.is_empty() {
-            return Err(AssetErrorV1::InvalidDependency(
+            return Err(AssetError::InvalidDependency(
                 "name must be nonempty".into(),
             ));
         }
         if !is_lower_hex_64(&self.digest_hex) {
-            return Err(AssetErrorV1::InvalidDependency(format!(
+            return Err(AssetError::InvalidDependency(format!(
                 "digest_hex must be {} lowercase hex characters",
-                ASSET_DIGEST_HEX_LEN_V1
+                ASSET_DIGEST_HEX_LEN
             )));
         }
         Ok(())
@@ -218,13 +218,13 @@ impl DependencyPinV1 {
 /// Freshness: an asset is valid for `valid_epochs` from its capture epoch.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
-pub struct FreshnessPolicyV1 {
+pub struct FreshnessPolicy {
     pub valid_epochs: u64,
     pub captured_epoch: u64,
 }
 
-impl FreshnessPolicyV1 {
-    pub fn new(valid_epochs: u64, captured_epoch: u64) -> Result<Self, AssetErrorV1> {
+impl FreshnessPolicy {
+    pub fn new(valid_epochs: u64, captured_epoch: u64) -> Result<Self, AssetError> {
         let policy = Self {
             valid_epochs,
             captured_epoch,
@@ -233,9 +233,9 @@ impl FreshnessPolicyV1 {
         Ok(policy)
     }
 
-    pub fn validate(&self) -> Result<(), AssetErrorV1> {
+    pub fn validate(&self) -> Result<(), AssetError> {
         if self.valid_epochs == 0 {
-            return Err(AssetErrorV1::InvalidFreshness(
+            return Err(AssetError::InvalidFreshness(
                 "valid_epochs must be >= 1".into(),
             ));
         }
@@ -246,7 +246,7 @@ impl FreshnessPolicyV1 {
 /// Capture and maintenance cost (complete cost accounting, CAP-003).
 #[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
-pub struct CostV1 {
+pub struct Cost {
     pub capture_units: u64,
     pub maintenance_units_per_epoch: u64,
 }
@@ -255,7 +255,7 @@ pub struct CostV1 {
 /// assets may execute, and only after passing through `Shadow` (CAP-001).
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
-pub enum AssetStateV1 {
+pub enum AssetState {
     Captured,
     Shadow,
     Promoted,
@@ -268,8 +268,8 @@ pub enum AssetStateV1 {
 /// `Shadow`; `Revoked` is reachable from any state (revocation trigger), and
 /// `Demoted`/`Revoked`/`Expired` have no outgoing edges toward `Shadow` or
 /// `Promoted`.
-pub fn allowed_asset_transition(from: AssetStateV1, to: AssetStateV1) -> bool {
-    use AssetStateV1::*;
+pub fn allowed_asset_transition(from: AssetState, to: AssetState) -> bool {
+    use AssetState::*;
     match (from, to) {
         (Captured, Shadow) => true,
         (Shadow, Promoted) | (Shadow, Demoted) => true,
@@ -285,12 +285,12 @@ pub fn allowed_asset_transition(from: AssetStateV1, to: AssetStateV1) -> bool {
 /// state, and revocation reason.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
-pub struct CapabilityAssetV1 {
+pub struct CapabilityAsset {
     pub contract_version: u16,
     pub asset_id: String,
     pub project_id: String,
-    pub scope: ScopeV1,
-    pub preconditions: Vec<RootedPreconditionV1>,
+    pub scope: Scope,
+    pub preconditions: Vec<RootedPrecondition>,
     pub reads: Vec<String>,
     pub writes: Vec<String>,
     pub effects: Vec<String>,
@@ -298,14 +298,14 @@ pub struct CapabilityAssetV1 {
     pub verifier_id: String,
     pub successor_relation: String,
     pub rollback: String,
-    pub dependencies: Vec<DependencyPinV1>,
-    pub freshness: FreshnessPolicyV1,
-    pub capture_cost: CostV1,
-    pub state: AssetStateV1,
+    pub dependencies: Vec<DependencyPin>,
+    pub freshness: FreshnessPolicy,
+    pub capture_cost: Cost,
+    pub state: AssetState,
     pub revocation_reason: Option<String>,
 }
 
-impl CapabilityAssetV1 {
+impl CapabilityAsset {
     /// Construct a NEW asset. It is born `Captured` and is NEVER
     /// authoritative; no constructor produces `Promoted` without shadow
     /// evaluation.
@@ -313,8 +313,8 @@ impl CapabilityAssetV1 {
     pub fn captured(
         asset_id: impl Into<String>,
         project_id: impl Into<String>,
-        scope: ScopeV1,
-        preconditions: Vec<RootedPreconditionV1>,
+        scope: Scope,
+        preconditions: Vec<RootedPrecondition>,
         reads: Vec<String>,
         writes: Vec<String>,
         effects: Vec<String>,
@@ -322,12 +322,12 @@ impl CapabilityAssetV1 {
         verifier_id: impl Into<String>,
         successor_relation: impl Into<String>,
         rollback: impl Into<String>,
-        dependencies: Vec<DependencyPinV1>,
-        freshness: FreshnessPolicyV1,
-        capture_cost: CostV1,
-    ) -> Result<Self, AssetErrorV1> {
+        dependencies: Vec<DependencyPin>,
+        freshness: FreshnessPolicy,
+        capture_cost: Cost,
+    ) -> Result<Self, AssetError> {
         let asset = Self {
-            contract_version: ASSET_CONTRACT_VERSION_V1,
+            contract_version: ASSET_CONTRACT_VERSION,
             asset_id: asset_id.into(),
             project_id: project_id.into(),
             scope,
@@ -342,28 +342,28 @@ impl CapabilityAssetV1 {
             dependencies,
             freshness,
             capture_cost,
-            state: AssetStateV1::Captured,
+            state: AssetState::Captured,
             revocation_reason: None,
         };
         asset.validate()?;
         Ok(asset)
     }
 
-    pub fn validate(&self) -> Result<(), AssetErrorV1> {
-        if self.contract_version != ASSET_CONTRACT_VERSION_V1 {
-            return Err(AssetErrorV1::InvalidAsset(format!(
+    pub fn validate(&self) -> Result<(), AssetError> {
+        if self.contract_version != ASSET_CONTRACT_VERSION {
+            return Err(AssetError::InvalidAsset(format!(
                 "unsupported contract version {}",
                 self.contract_version
             )));
         }
-        if self.asset_id.is_empty() || self.asset_id.len() > ASSET_ID_MAX_BYTES_V1 {
-            return Err(AssetErrorV1::InvalidAsset(format!(
+        if self.asset_id.is_empty() || self.asset_id.len() > ASSET_ID_MAX_BYTES {
+            return Err(AssetError::InvalidAsset(format!(
                 "asset_id must be nonempty and at most {} bytes",
-                ASSET_ID_MAX_BYTES_V1
+                ASSET_ID_MAX_BYTES
             )));
         }
         if self.project_id.is_empty() {
-            return Err(AssetErrorV1::InvalidAsset(
+            return Err(AssetError::InvalidAsset(
                 "project_id must be nonempty (cross-project isolation key)".into(),
             ));
         }
@@ -372,7 +372,7 @@ impl CapabilityAssetV1 {
         for precondition in &self.preconditions {
             precondition.validate()?;
             if !precondition_names.insert(precondition.name.clone()) {
-                return Err(AssetErrorV1::InvalidAsset(format!(
+                return Err(AssetError::InvalidAsset(format!(
                     "duplicate precondition {}",
                     precondition.name
                 )));
@@ -380,28 +380,28 @@ impl CapabilityAssetV1 {
         }
         for list in [&self.reads, &self.writes, &self.effects] {
             if list.iter().any(|entry| entry.is_empty()) {
-                return Err(AssetErrorV1::InvalidAsset(
+                return Err(AssetError::InvalidAsset(
                     "reads/writes/effects entries must be nonempty".into(),
                 ));
             }
         }
         if self.postcondition.is_empty() {
-            return Err(AssetErrorV1::InvalidAsset(
+            return Err(AssetError::InvalidAsset(
                 "postcondition must be nonempty".into(),
             ));
         }
         if self.verifier_id.is_empty() {
-            return Err(AssetErrorV1::InvalidAsset(
+            return Err(AssetError::InvalidAsset(
                 "verifier_id must be nonempty".into(),
             ));
         }
         if self.successor_relation.is_empty() {
-            return Err(AssetErrorV1::InvalidAsset(
+            return Err(AssetError::InvalidAsset(
                 "successor_relation must be nonempty (successor-safety obligation)".into(),
             ));
         }
         if self.rollback.is_empty() {
-            return Err(AssetErrorV1::InvalidAsset(
+            return Err(AssetError::InvalidAsset(
                 "rollback must be nonempty (fallback/rollback path)".into(),
             ));
         }
@@ -409,7 +409,7 @@ impl CapabilityAssetV1 {
         for pin in &self.dependencies {
             pin.validate()?;
             if !dependency_names.insert(pin.name.clone()) {
-                return Err(AssetErrorV1::InvalidAsset(format!(
+                return Err(AssetError::InvalidAsset(format!(
                     "duplicate dependency pin {}",
                     pin.name
                 )));
@@ -419,50 +419,50 @@ impl CapabilityAssetV1 {
         Ok(())
     }
 
-    fn transition(&mut self, to: AssetStateV1) -> Result<(), AssetErrorV1> {
+    fn transition(&mut self, to: AssetState) -> Result<(), AssetError> {
         let from = self.state;
         if !allowed_asset_transition(from, to) {
-            return Err(AssetErrorV1::InvalidTransition { from, to });
+            return Err(AssetError::InvalidTransition { from, to });
         }
         self.state = to;
         Ok(())
     }
 
     /// Captured -> Shadow. Entering shadow evaluation.
-    pub fn enter_shadow(&mut self) -> Result<(), AssetErrorV1> {
-        self.transition(AssetStateV1::Shadow)
+    pub fn enter_shadow(&mut self) -> Result<(), AssetError> {
+        self.transition(AssetState::Shadow)
     }
 
     /// Shadow -> Promoted, only after a passing promotion decision. Still
     /// runs behind the baseline firewall and verifier gate (CAP-003).
-    pub fn promote(&mut self) -> Result<(), AssetErrorV1> {
-        self.transition(AssetStateV1::Promoted)
+    pub fn promote(&mut self) -> Result<(), AssetError> {
+        self.transition(AssetState::Promoted)
     }
 
     /// -> Demoted (syndrome, negative lifetime value, or decision).
-    pub fn demote(&mut self) -> Result<(), AssetErrorV1> {
-        self.transition(AssetStateV1::Demoted)
+    pub fn demote(&mut self) -> Result<(), AssetError> {
+        self.transition(AssetState::Demoted)
     }
 
     /// Promoted -> Expired (freshness lapse).
-    pub fn expire(&mut self) -> Result<(), AssetErrorV1> {
-        self.transition(AssetStateV1::Expired)
+    pub fn expire(&mut self) -> Result<(), AssetError> {
+        self.transition(AssetState::Expired)
     }
 
     /// Any state -> Revoked on a revocation trigger (CAP-005). The trigger
     /// and reason are recorded on the asset.
     pub fn revoke_for(
         &mut self,
-        trigger: &RevocationTriggerV1,
+        trigger: &RevocationTrigger,
         reason: impl Into<String>,
-    ) -> Result<(), AssetErrorV1> {
+    ) -> Result<(), AssetError> {
         let from = self.state;
-        if !allowed_asset_transition(from, AssetStateV1::Revoked) {
-            return Err(AssetErrorV1::InvalidRevocation(format!(
+        if !allowed_asset_transition(from, AssetState::Revoked) {
+            return Err(AssetError::InvalidRevocation(format!(
                 "cannot revoke from {from:?}"
             )));
         }
-        self.state = AssetStateV1::Revoked;
+        self.state = AssetState::Revoked;
         self.revocation_reason = Some(format!("{trigger}: {}", reason.into()));
         Ok(())
     }
@@ -471,14 +471,14 @@ impl CapabilityAssetV1 {
 /// Revocation triggers (CAP-005): dependency, contract, verifier, or epoch
 /// change.
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub enum RevocationTriggerV1 {
+pub enum RevocationTrigger {
     DependencyChange { name: String },
     ContractChange,
     VerifierChange,
     EpochChange,
 }
 
-impl fmt::Display for RevocationTriggerV1 {
+impl fmt::Display for RevocationTrigger {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::DependencyChange { name } => write!(formatter, "dependency_change:{name}"),
@@ -492,7 +492,7 @@ impl fmt::Display for RevocationTriggerV1 {
 /// Task matching result (CAP-002). Only `Matched` may execute, and only for
 /// a `Promoted` asset.
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub enum MatchOutcomeV1 {
+pub enum MatchOutcome {
     Matched,
     OutOfScope,
     CrossProject,
@@ -503,17 +503,17 @@ pub enum MatchOutcomeV1 {
 /// Exact task matching: project equality first (leakage kill), then exact
 /// scope equality, then dependency digests, then freshness.
 pub fn match_task(
-    asset: &CapabilityAssetV1,
-    task_scope: &ScopeV1,
+    asset: &CapabilityAsset,
+    task_scope: &Scope,
     project_id: &str,
     current_epoch: u64,
     current_dependency_digests: &[(String, String)],
-) -> MatchOutcomeV1 {
+) -> MatchOutcome {
     if asset.project_id != project_id {
-        return MatchOutcomeV1::CrossProject;
+        return MatchOutcome::CrossProject;
     }
     if &asset.scope != task_scope {
-        return MatchOutcomeV1::OutOfScope;
+        return MatchOutcome::OutOfScope;
     }
     for pin in &asset.dependencies {
         let current = current_dependency_digests
@@ -521,7 +521,7 @@ pub fn match_task(
             .find(|(name, _)| name == &pin.name);
         match current {
             Some((_, digest)) if digest == &pin.digest_hex => {}
-            _ => return MatchOutcomeV1::StaleDependency { name: pin.name.clone() },
+            _ => return MatchOutcome::StaleDependency { name: pin.name.clone() },
         }
     }
     if asset
@@ -530,16 +530,16 @@ pub fn match_task(
         .saturating_add(asset.freshness.valid_epochs)
         <= current_epoch
     {
-        return MatchOutcomeV1::ExpiredFreshness;
+        return MatchOutcome::ExpiredFreshness;
     }
-    MatchOutcomeV1::Matched
+    MatchOutcome::Matched
 }
 
 /// One shadow trial comparing the baseline outcome to the shadow outcome
 /// (CAP-003).
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
-pub struct ShadowTrialV1 {
+pub struct ShadowTrial {
     pub trial_id: String,
     pub asset_id: String,
     pub baseline_outcome_digest_hex: String,
@@ -549,7 +549,7 @@ pub struct ShadowTrialV1 {
     pub cost_units: u64,
 }
 
-impl ShadowTrialV1 {
+impl ShadowTrial {
     pub fn new(
         trial_id: impl Into<String>,
         asset_id: impl Into<String>,
@@ -558,7 +558,7 @@ impl ShadowTrialV1 {
         protected_regression: bool,
         strict_rescue: bool,
         cost_units: u64,
-    ) -> Result<Self, AssetErrorV1> {
+    ) -> Result<Self, AssetError> {
         let trial = Self {
             trial_id: trial_id.into(),
             asset_id: asset_id.into(),
@@ -572,18 +572,18 @@ impl ShadowTrialV1 {
         Ok(trial)
     }
 
-    pub fn validate(&self) -> Result<(), AssetErrorV1> {
+    pub fn validate(&self) -> Result<(), AssetError> {
         if self.trial_id.is_empty() || self.asset_id.is_empty() {
-            return Err(AssetErrorV1::InvalidTrial(
+            return Err(AssetError::InvalidTrial(
                 "trial_id and asset_id must be nonempty".into(),
             ));
         }
         if !is_lower_hex_64(&self.baseline_outcome_digest_hex)
             || !is_lower_hex_64(&self.shadow_outcome_digest_hex)
         {
-            return Err(AssetErrorV1::InvalidTrial(format!(
+            return Err(AssetError::InvalidTrial(format!(
                 "outcome digests must be {} lowercase hex characters",
-                ASSET_DIGEST_HEX_LEN_V1
+                ASSET_DIGEST_HEX_LEN
             )));
         }
         Ok(())
@@ -594,7 +594,7 @@ impl ShadowTrialV1 {
 /// maintenance so far, and all trial costs.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
-pub struct PromotionReportV1 {
+pub struct PromotionReport {
     pub trials_observed: u64,
     pub misses: u64,
     pub regressions: u64,
@@ -607,9 +607,9 @@ pub struct PromotionReportV1 {
 /// the runtime still routes execution behind the baseline firewall and the
 /// verifier gate.
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub enum PromotionDecisionV1 {
-    Promote { report: PromotionReportV1 },
-    Deny { report: PromotionReportV1, reasons: Vec<String> },
+pub enum PromotionDecision {
+    Promote { report: PromotionReport },
+    Deny { report: PromotionReport, reasons: Vec<String> },
 }
 
 /// Shadow-mode promotion (CAP-003). Denies on: no trials, insufficient
@@ -617,11 +617,11 @@ pub enum PromotionDecisionV1 {
 /// or any miss. One shadow trial counts as one observed epoch for
 /// maintenance accounting.
 pub fn evaluate_promotion(
-    asset: &CapabilityAssetV1,
-    trials: &[ShadowTrialV1],
+    asset: &CapabilityAsset,
+    trials: &[ShadowTrial],
     min_trials: u64,
-) -> PromotionDecisionV1 {
-    let observed: Vec<&ShadowTrialV1> = trials
+) -> PromotionDecision {
+    let observed: Vec<&ShadowTrial> = trials
         .iter()
         .filter(|trial| trial.asset_id == asset.asset_id)
         .collect();
@@ -642,7 +642,7 @@ pub fn evaluate_promotion(
         .capture_units
         .saturating_add(maintenance)
         .saturating_add(trial_cost);
-    let report = PromotionReportV1 {
+    let report = PromotionReport {
         trials_observed,
         misses,
         regressions,
@@ -667,9 +667,9 @@ pub fn evaluate_promotion(
     }
 
     if reasons.is_empty() {
-        PromotionDecisionV1::Promote { report }
+        PromotionDecision::Promote { report }
     } else {
-        PromotionDecisionV1::Deny { report, reasons }
+        PromotionDecision::Deny { report, reasons }
     }
 }
 
@@ -677,25 +677,25 @@ pub fn evaluate_promotion(
 /// `Matched`; every other combination adds cost and returns to baseline,
 /// never worsening a protected result.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum UseOutcomeV1 {
+pub enum UseOutcome {
     Executable,
     BaselineRequired { added_cost_units: u64 },
 }
 
-impl CapabilityAssetV1 {
+impl CapabilityAsset {
     /// The ONLY execution admission point. A non-`Promoted` asset (Captured,
     /// Shadow, Demoted, Revoked, Expired) always adds its standing cost and
     /// falls back to the baseline; it can never execute and can never worsen
     /// a protected result.
-    pub fn use_asset(&self, outcome: &MatchOutcomeV1) -> UseOutcomeV1 {
-        if self.state == AssetStateV1::Promoted && *outcome == MatchOutcomeV1::Matched {
-            UseOutcomeV1::Executable
+    pub fn use_asset(&self, outcome: &MatchOutcome) -> UseOutcome {
+        if self.state == AssetState::Promoted && *outcome == MatchOutcome::Matched {
+            UseOutcome::Executable
         } else {
             let added_cost_units = self
                 .capture_cost
                 .capture_units
                 .saturating_add(self.capture_cost.maintenance_units_per_epoch);
-            UseOutcomeV1::BaselineRequired { added_cost_units }
+            UseOutcome::BaselineRequired { added_cost_units }
         }
     }
 }
@@ -703,7 +703,7 @@ impl CapabilityAssetV1 {
 /// One recorded failure syndrome (CAP-004).
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
-pub struct SyndromeV1 {
+pub struct Syndrome {
     pub syndrome_id: String,
     pub asset_id: String,
     pub failure_class: String,
@@ -711,14 +711,14 @@ pub struct SyndromeV1 {
     pub detail: String,
 }
 
-impl SyndromeV1 {
+impl Syndrome {
     pub fn new(
         syndrome_id: impl Into<String>,
         asset_id: impl Into<String>,
         failure_class: impl Into<String>,
         observed_epoch: u64,
         detail: impl Into<String>,
-    ) -> Result<Self, AssetErrorV1> {
+    ) -> Result<Self, AssetError> {
         let syndrome = Self {
             syndrome_id: syndrome_id.into(),
             asset_id: asset_id.into(),
@@ -730,9 +730,9 @@ impl SyndromeV1 {
         Ok(syndrome)
     }
 
-    pub fn validate(&self) -> Result<(), AssetErrorV1> {
+    pub fn validate(&self) -> Result<(), AssetError> {
         if self.syndrome_id.is_empty() || self.asset_id.is_empty() || self.failure_class.is_empty() {
-            return Err(AssetErrorV1::InvalidSyndrome(
+            return Err(AssetError::InvalidSyndrome(
                 "syndrome_id, asset_id, and failure_class must be nonempty".into(),
             ));
         }
@@ -743,11 +743,11 @@ impl SyndromeV1 {
 /// Append-only failure syndrome store (CAP-004). There is no delete API.
 #[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
-pub struct SyndromeStoreV1 {
-    pub syndromes: Vec<SyndromeV1>,
+pub struct SyndromeStore {
+    pub syndromes: Vec<Syndrome>,
 }
 
-impl SyndromeStoreV1 {
+impl SyndromeStore {
     pub fn new() -> Self {
         Self {
             syndromes: Vec::new(),
@@ -756,14 +756,14 @@ impl SyndromeStoreV1 {
 
     /// Append one syndrome. Duplicate ids are rejected; nothing is ever
     /// removed.
-    pub fn record(&mut self, syndrome: SyndromeV1) -> Result<(), AssetErrorV1> {
+    pub fn record(&mut self, syndrome: Syndrome) -> Result<(), AssetError> {
         syndrome.validate()?;
         if self
             .syndromes
             .iter()
             .any(|existing| existing.syndrome_id == syndrome.syndrome_id)
         {
-            return Err(AssetErrorV1::InvalidSyndrome(format!(
+            return Err(AssetError::InvalidSyndrome(format!(
                 "duplicate syndrome {}",
                 syndrome.syndrome_id
             )));
@@ -773,7 +773,7 @@ impl SyndromeStoreV1 {
     }
 
     /// All syndromes recorded for one asset, in recorded order.
-    pub fn syndromes_for(&self, asset_id: &str) -> Vec<&SyndromeV1> {
+    pub fn syndromes_for(&self, asset_id: &str) -> Vec<&Syndrome> {
         self.syndromes
             .iter()
             .filter(|syndrome| syndrome.asset_id == asset_id)
@@ -784,11 +784,11 @@ impl SyndromeStoreV1 {
     /// `Shadow` (CAP-004: a syndrome on a promoted asset forces demotion).
     pub fn record_for(
         &mut self,
-        syndrome: SyndromeV1,
-        asset: &mut CapabilityAssetV1,
-    ) -> Result<(), AssetErrorV1> {
+        syndrome: Syndrome,
+        asset: &mut CapabilityAsset,
+    ) -> Result<(), AssetError> {
         self.record(syndrome)?;
-        if asset.state == AssetStateV1::Promoted || asset.state == AssetStateV1::Shadow {
+        if asset.state == AssetState::Promoted || asset.state == AssetState::Shadow {
             asset.demote()?;
         }
         Ok(())
@@ -799,18 +799,18 @@ impl SyndromeStoreV1 {
 /// may never exceed `actual baseline cost - certified minimum`.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
-pub struct CertifiedLowerBoundV1 {
-    pub scope: ScopeV1,
+pub struct CertifiedLowerBound {
+    pub scope: Scope,
     pub minimum_units: u64,
     pub certificate_digest_hex: String,
 }
 
-impl CertifiedLowerBoundV1 {
+impl CertifiedLowerBound {
     pub fn new(
-        scope: ScopeV1,
+        scope: Scope,
         minimum_units: u64,
         certificate_digest_hex: impl Into<String>,
-    ) -> Result<Self, AssetErrorV1> {
+    ) -> Result<Self, AssetError> {
         let bound = Self {
             scope,
             minimum_units,
@@ -820,12 +820,12 @@ impl CertifiedLowerBoundV1 {
         Ok(bound)
     }
 
-    pub fn validate(&self) -> Result<(), AssetErrorV1> {
+    pub fn validate(&self) -> Result<(), AssetError> {
         self.scope.validate()?;
         if !is_lower_hex_64(&self.certificate_digest_hex) {
-            return Err(AssetErrorV1::InvalidLedger(format!(
+            return Err(AssetError::InvalidLedger(format!(
                 "certificate_digest_hex must be {} lowercase hex characters",
-                ASSET_DIGEST_HEX_LEN_V1
+                ASSET_DIGEST_HEX_LEN
             )));
         }
         Ok(())
@@ -833,11 +833,11 @@ impl CertifiedLowerBoundV1 {
 }
 
 /// One ledger entry. Capture cost is recorded exactly once (via
-/// [`AssetValueLedgerV1::record_capture`]); epoch entries carry benefit and
+/// [`AssetValueLedger::record_capture`]); epoch entries carry benefit and
 /// maintenance only.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
-pub struct LedgerEntryV1 {
+pub struct LedgerEntry {
     pub asset_id: String,
     pub epoch: u64,
     pub benefit_units: u64,
@@ -848,18 +848,18 @@ pub struct LedgerEntryV1 {
 /// Capability asset lifetime-value ledger (METRIC-009/010).
 #[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
-pub struct AssetValueLedgerV1 {
-    pub entries: Vec<LedgerEntryV1>,
+pub struct AssetValueLedger {
+    pub entries: Vec<LedgerEntry>,
 }
 
-impl AssetValueLedgerV1 {
+impl AssetValueLedger {
     pub fn new() -> Self {
         Self { entries: Vec::new() }
     }
 
     /// Record the one-time capture cost at the capture epoch.
-    pub fn record_capture(&mut self, asset: &CapabilityAssetV1) -> Result<(), AssetErrorV1> {
-        self.entries.push(LedgerEntryV1 {
+    pub fn record_capture(&mut self, asset: &CapabilityAsset) -> Result<(), AssetError> {
+        self.entries.push(LedgerEntry {
             asset_id: asset.asset_id.clone(),
             epoch: asset.freshness.captured_epoch,
             benefit_units: 0,
@@ -876,20 +876,20 @@ impl AssetValueLedgerV1 {
     /// equal the asset's scope.
     pub fn record_benefit(
         &mut self,
-        asset: &CapabilityAssetV1,
+        asset: &CapabilityAsset,
         epoch: u64,
         claimed_benefit_units: u64,
         actual_baseline_cost_units: u64,
-        certified: &CertifiedLowerBoundV1,
-    ) -> Result<u64, AssetErrorV1> {
+        certified: &CertifiedLowerBound,
+    ) -> Result<u64, AssetError> {
         if certified.scope != asset.scope {
-            return Err(AssetErrorV1::ScopeMismatch(
+            return Err(AssetError::ScopeMismatch(
                 "certified lower bound scope must equal the asset scope".into(),
             ));
         }
         let allowed = actual_baseline_cost_units.saturating_sub(certified.minimum_units);
         let clamped = claimed_benefit_units.min(allowed);
-        self.entries.push(LedgerEntryV1 {
+        self.entries.push(LedgerEntry {
             asset_id: asset.asset_id.clone(),
             epoch,
             benefit_units: clamped,
@@ -897,7 +897,7 @@ impl AssetValueLedgerV1 {
             capture_units: 0,
         });
         if claimed_benefit_units > allowed {
-            Err(AssetErrorV1::ClampedBenefit {
+            Err(AssetError::ClampedBenefit {
                 claimed: claimed_benefit_units,
                 allowed,
             })
@@ -944,14 +944,14 @@ impl AssetValueLedgerV1 {
     /// ids actually transitioned.
     pub fn apply_retirement(
         &mut self,
-        assets: &mut Vec<CapabilityAssetV1>,
+        assets: &mut Vec<CapabilityAsset>,
         threshold_epochs: u64,
     ) -> Vec<String> {
         let retire = self.retire_negative(threshold_epochs);
         let mut retired = Vec::new();
         for asset in assets.iter_mut() {
             if retire.contains(&asset.asset_id)
-                && (asset.state == AssetStateV1::Promoted || asset.state == AssetStateV1::Shadow)
+                && (asset.state == AssetState::Promoted || asset.state == AssetState::Shadow)
                 && asset.demote().is_ok()
             {
                 retired.push(asset.asset_id.clone());
@@ -969,21 +969,21 @@ impl AssetValueLedgerV1 {
 /// This is the runtime wiring that promotes the W7 shadow-mode capability
 /// contract into the zero-store read path.
 #[derive(Clone, Debug)]
-pub struct CasCapabilityGateV1 {
-    asset: CapabilityAssetV1,
+pub struct CasCapabilityGate {
+    asset: CapabilityAsset,
     caller_project_id: String,
     current_epoch: u64,
 }
 
-impl CasCapabilityGateV1 {
+impl CasCapabilityGate {
     pub fn new(
-        asset: CapabilityAssetV1,
+        asset: CapabilityAsset,
         caller_project_id: impl Into<String>,
         current_epoch: u64,
-    ) -> Result<Self, AssetErrorV1> {
+    ) -> Result<Self, AssetError> {
         let caller_project_id = caller_project_id.into();
         if caller_project_id.is_empty() {
-            return Err(AssetErrorV1::InvalidAsset(
+            return Err(AssetError::InvalidAsset(
                 "caller project id must be nonempty (cross-project isolation key)".into(),
             ));
         }
@@ -994,7 +994,7 @@ impl CasCapabilityGateV1 {
         })
     }
 
-    pub fn asset(&self) -> &CapabilityAssetV1 {
+    pub fn asset(&self) -> &CapabilityAsset {
         &self.asset
     }
 
@@ -1007,7 +1007,7 @@ impl CasCapabilityGateV1 {
     }
 }
 
-impl zero_store::CasReadGate for CasCapabilityGateV1 {
+impl zero_store::CasReadGate for CasCapabilityGate {
     fn authorize_read(&self, sha256: &str) -> Result<(), zero_store::CasError> {
         // Project equality first (CAP-002 leakage kill): a caller may guess
         // another project's root hash, but the gate refuses before lookup.
@@ -1018,7 +1018,7 @@ impl zero_store::CasReadGate for CasCapabilityGateV1 {
             )));
         }
         // CAP-001: only a Promoted asset is authoritative for reads.
-        if self.asset.state != AssetStateV1::Promoted {
+        if self.asset.state != AssetState::Promoted {
             return Err(zero_store::CasError::PolicyDenied(format!(
                 "capability gate: asset state {:?} is not promoted",
                 self.asset.state

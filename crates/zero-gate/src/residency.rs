@@ -9,7 +9,7 @@
 //! layer accounting where a provider miss never becomes project amnesia.
 //!
 //! Fail-closed laws:
-//! - [`Q99WindowV1::report`] returns `unavailable` when the central change
+//! - [`Q99Window::report`] returns `unavailable` when the central change
 //!   mass exceeds 1% of the demanded mass in the window; impossibility is
 //!   reported, never averaged away.
 //! - The restoration threshold check fails closed when valid mass falls
@@ -27,9 +27,9 @@ use std::{error::Error, fmt};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use zero_abi::{DigestV1, canonical_json};
+use zero_abi::{Sha256Digest, canonical_json};
 
-pub const RESIDENCY_CONTRACT_VERSION_V1: u16 = 1;
+pub const RESIDENCY_CONTRACT_VERSION: u16 = 1;
 /// Q99 guarantee: at most 1% of demanded knowledge is recomputed.
 pub const Q99_RECOMPUTE_FRACTION_PPM: u64 = 10_000;
 /// Slack floor: resident valid mass must stay at or above 99% of demanded.
@@ -40,7 +40,7 @@ pub const Q99_CENTRAL_CHANGE_FRACTION_PPM: u64 = 10_000;
 
 /// Fail-closed error for the Q99 runtime.
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub enum ResidencyErrorV1 {
+pub enum ResidencyError {
     InvalidDemandLedger(String),
     InvalidPlan(String),
     PlanRejected(String),
@@ -51,7 +51,7 @@ pub enum ResidencyErrorV1 {
     L3LossUndiscovered(String),
 }
 
-impl fmt::Display for ResidencyErrorV1 {
+impl fmt::Display for ResidencyError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::InvalidDemandLedger(detail) => {
@@ -82,7 +82,7 @@ impl fmt::Display for ResidencyErrorV1 {
     }
 }
 
-impl Error for ResidencyErrorV1 {}
+impl Error for ResidencyError {}
 
 // ---------------------------------------------------------------------------
 // Demand-weight ledger (ZS-CACHE-010).
@@ -92,18 +92,18 @@ impl Error for ResidencyErrorV1 {}
 /// destroy L2 validity (project amnesia).
 #[derive(Clone, Copy, Debug, Deserialize, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize)]
 #[serde(rename_all = "snake_case")]
-pub enum CacheLayerTierV1 {
+pub enum CacheLayerTier {
     L1,
     L2,
     L3,
 }
 
-impl CacheLayerTierV1 {
+impl CacheLayerTier {
     pub fn as_str(self) -> &'static str {
         match self {
-            CacheLayerTierV1::L1 => "l1",
-            CacheLayerTierV1::L2 => "l2",
-            CacheLayerTierV1::L3 => "l3",
+            CacheLayerTier::L1 => "l1",
+            CacheLayerTier::L2 => "l2",
+            CacheLayerTier::L3 => "l3",
         }
     }
 }
@@ -112,20 +112,20 @@ impl CacheLayerTierV1 {
 /// window and tier attribution.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
-pub struct DemandWeightedObjectV1 {
-    pub object_root: DigestV1,
+pub struct DemandWeightedObject {
+    pub object_root: Sha256Digest,
     pub demand_weight: u64,
     pub window_id: String,
-    pub tier: CacheLayerTierV1,
+    pub tier: CacheLayerTier,
 }
 
-impl DemandWeightedObjectV1 {
+impl DemandWeightedObject {
     pub fn new(
-        object_root: DigestV1,
+        object_root: Sha256Digest,
         demand_weight: u64,
         window_id: impl Into<String>,
-        tier: CacheLayerTierV1,
-    ) -> Result<Self, ResidencyErrorV1> {
+        tier: CacheLayerTier,
+    ) -> Result<Self, ResidencyError> {
         let object = Self {
             object_root,
             demand_weight,
@@ -136,14 +136,14 @@ impl DemandWeightedObjectV1 {
         Ok(object)
     }
 
-    pub fn validate(&self) -> Result<(), ResidencyErrorV1> {
+    pub fn validate(&self) -> Result<(), ResidencyError> {
         if self.window_id.is_empty() {
-            return Err(ResidencyErrorV1::InvalidDemandLedger(
+            return Err(ResidencyError::InvalidDemandLedger(
                 "window_id must be nonempty".into(),
             ));
         }
         if self.demand_weight == 0 {
-            return Err(ResidencyErrorV1::InvalidDemandLedger(
+            return Err(ResidencyError::InvalidDemandLedger(
                 "demand_weight must be nonzero".into(),
             ));
         }
@@ -155,23 +155,23 @@ impl DemandWeightedObjectV1 {
 /// weights are absent or inconsistent with the window totals.
 #[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
-pub struct DemandWeightLedgerV1 {
-    pub objects: Vec<DemandWeightedObjectV1>,
+pub struct DemandWeightLedger {
+    pub objects: Vec<DemandWeightedObject>,
 }
 
-impl DemandWeightLedgerV1 {
-    pub fn new(objects: Vec<DemandWeightedObjectV1>) -> Result<Self, ResidencyErrorV1> {
+impl DemandWeightLedger {
+    pub fn new(objects: Vec<DemandWeightedObject>) -> Result<Self, ResidencyError> {
         let ledger = Self { objects };
         ledger.validate()?;
         Ok(ledger)
     }
 
-    pub fn validate(&self) -> Result<(), ResidencyErrorV1> {
+    pub fn validate(&self) -> Result<(), ResidencyError> {
         let mut seen = std::collections::BTreeSet::new();
         for object in &self.objects {
             object.validate()?;
             if !seen.insert((object.object_root, object.window_id.clone())) {
-                return Err(ResidencyErrorV1::InvalidDemandLedger(format!(
+                return Err(ResidencyError::InvalidDemandLedger(format!(
                     "duplicate demand declaration for object {} in window {}",
                     object.object_root, object.window_id
                 )));
@@ -189,7 +189,7 @@ impl DemandWeightLedgerV1 {
     }
 
     /// Demanded mass of one window at one tier.
-    pub fn tier_mass(&self, window_id: &str, tier: CacheLayerTierV1) -> u64 {
+    pub fn tier_mass(&self, window_id: &str, tier: CacheLayerTier) -> u64 {
         self.objects
             .iter()
             .filter(|object| object.window_id == window_id && object.tier == tier)
@@ -211,19 +211,19 @@ impl DemandWeightLedgerV1 {
 /// One observed demand event in the window.
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
-pub struct DemandObservationV1 {
+pub struct DemandObservation {
     pub demanded_mass: u64,
     pub hit: bool,
 }
 
-impl DemandObservationV1 {
-    pub fn new(demanded_mass: u64, hit: bool) -> Result<Self, ResidencyErrorV1> {
+impl DemandObservation {
+    pub fn new(demanded_mass: u64, hit: bool) -> Result<Self, ResidencyError> {
         let observation = Self {
             demanded_mass,
             hit,
         };
         if demanded_mass == 0 {
-            return Err(ResidencyErrorV1::InvalidDemandLedger(
+            return Err(ResidencyError::InvalidDemandLedger(
                 "demanded_mass must be nonzero".into(),
             ));
         }
@@ -235,7 +235,7 @@ impl DemandObservationV1 {
 /// reported as `unavailable` instead of averaged away.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
-pub struct Q99WindowReportV1 {
+pub struct Q99WindowReport {
     pub window_id: String,
     pub demanded_mass: u64,
     pub hit_mass: u64,
@@ -250,13 +250,13 @@ pub struct Q99WindowReportV1 {
 
 /// Sliding window of demand observations with Q99 accounting.
 #[derive(Clone, Debug)]
-pub struct Q99WindowV1 {
+pub struct Q99Window {
     window_id: String,
-    observations: Vec<DemandObservationV1>,
+    observations: Vec<DemandObservation>,
     initial_valid_mass: u64,
 }
 
-impl Q99WindowV1 {
+impl Q99Window {
     pub fn new(window_id: impl Into<String>, initial_valid_mass: u64) -> Self {
         Self {
             window_id: window_id.into(),
@@ -270,7 +270,7 @@ impl Q99WindowV1 {
     }
 
     /// Observe one demand event (hit or miss) with its demanded mass.
-    pub fn observe(&mut self, observation: DemandObservationV1) {
+    pub fn observe(&mut self, observation: DemandObservation) {
         self.observations.push(observation);
     }
 
@@ -338,9 +338,9 @@ impl Q99WindowV1 {
     }
 
     /// The report. `unavailable` is a first-class state, never an average.
-    pub fn report(&self, current_valid_mass: u64) -> Q99WindowReportV1 {
+    pub fn report(&self, current_valid_mass: u64) -> Q99WindowReport {
         let unavailable = self.q99_unavailable(current_valid_mass);
-        Q99WindowReportV1 {
+        Q99WindowReport {
             window_id: self.window_id.clone(),
             demanded_mass: self.demanded_mass(),
             hit_mass: self.hit_mass(),
@@ -359,7 +359,7 @@ impl Q99WindowV1 {
 /// One object in a residency plan, matching the canonical V6 schema object.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
-pub struct ResidencyPlanObjectV1 {
+pub struct ResidencyPlanObject {
     pub object_root: String,
     pub size_bytes: u64,
     pub demand_weight: u64,
@@ -367,14 +367,14 @@ pub struct ResidencyPlanObjectV1 {
     pub resident: bool,
 }
 
-impl ResidencyPlanObjectV1 {
+impl ResidencyPlanObject {
     pub fn new(
         object_root: impl Into<String>,
         size_bytes: u64,
         demand_weight: u64,
         valid: bool,
         resident: bool,
-    ) -> Result<Self, ResidencyErrorV1> {
+    ) -> Result<Self, ResidencyError> {
         let object = Self {
             object_root: object_root.into(),
             size_bytes,
@@ -383,7 +383,7 @@ impl ResidencyPlanObjectV1 {
             resident,
         };
         if object.object_root.is_empty() {
-            return Err(ResidencyErrorV1::InvalidPlan(
+            return Err(ResidencyError::InvalidPlan(
                 "object_root must be nonempty".into(),
             ));
         }
@@ -395,37 +395,37 @@ impl ResidencyPlanObjectV1 {
 /// Mirrors `causal_residency_plan_v6.schema.json` exactly.
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
-pub struct ResidencyPlanV1 {
+pub struct ResidencyPlan {
     pub tier: String,
     pub capacity_bytes: u64,
     pub threshold: f64,
     pub demand_window_root: String,
-    pub objects: Vec<ResidencyPlanObjectV1>,
+    pub objects: Vec<ResidencyPlanObject>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub optimizer: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub proposal_root: Option<String>,
 }
 
-impl ResidencyPlanV1 {
-    pub fn validate(&self) -> Result<(), ResidencyErrorV1> {
+impl ResidencyPlan {
+    pub fn validate(&self) -> Result<(), ResidencyError> {
         if self.tier.is_empty() {
-            return Err(ResidencyErrorV1::InvalidPlan("tier must be nonempty".into()));
+            return Err(ResidencyError::InvalidPlan("tier must be nonempty".into()));
         }
         if self.demand_window_root.is_empty() {
-            return Err(ResidencyErrorV1::InvalidPlan(
+            return Err(ResidencyError::InvalidPlan(
                 "demand_window_root must be nonempty".into(),
             ));
         }
         if !(0.0..=1.0).contains(&self.threshold) {
-            return Err(ResidencyErrorV1::InvalidPlan(
+            return Err(ResidencyError::InvalidPlan(
                 "threshold must be within [0, 1]".into(),
             ));
         }
         let mut seen = std::collections::BTreeSet::new();
         for object in &self.objects {
             if !seen.insert(object.object_root.clone()) {
-                return Err(ResidencyErrorV1::InvalidPlan(format!(
+                return Err(ResidencyError::InvalidPlan(format!(
                     "duplicate object {}",
                     object.object_root
                 )));
@@ -460,18 +460,18 @@ impl ResidencyPlanV1 {
     /// The optimizer's own root claim (the plan root) must equal the
     /// canonical digest of the plan's content when the optimizer supplied
     /// one; a mismatched proposal root fails closed.
-    pub fn proposal_root_matches(&self) -> Result<(), ResidencyErrorV1> {
+    pub fn proposal_root_matches(&self) -> Result<(), ResidencyError> {
         let Some(claimed) = self.proposal_root.as_deref() else {
             return Ok(());
         };
         let mut value = serde_json::to_value(self)
-            .map_err(|error| ResidencyErrorV1::InvalidPlan(error.to_string()))?;
+            .map_err(|error| ResidencyError::InvalidPlan(error.to_string()))?;
         value
             .as_object_mut()
             .map(|object| object.remove("proposal_root"));
         let digest = zero_abi::sha256_hex(canonical_json(&value).as_bytes());
         if digest != claimed {
-            return Err(ResidencyErrorV1::InvalidPlan(
+            return Err(ResidencyError::InvalidPlan(
                 "proposal_root does not match plan content".into(),
             ));
         }
@@ -483,17 +483,17 @@ impl ResidencyPlanV1 {
 /// checker authorizes. A plan just below the threshold fails, just above
 /// passes (adversarial pair).
 #[derive(Clone, Copy, Debug)]
-pub struct ResidencyThresholdCheckerV1;
+pub struct ResidencyThresholdChecker;
 
-impl ResidencyThresholdCheckerV1 {
+impl ResidencyThresholdChecker {
     /// Authorize a plan: resident valid weight must cover at least
     /// `threshold` of total demanded weight, and resident bytes must fit
     /// capacity. Both conditions must hold; anything else fails closed.
-    pub fn authorize(plan: &ResidencyPlanV1) -> Result<(), ResidencyErrorV1> {
+    pub fn authorize(plan: &ResidencyPlan) -> Result<(), ResidencyError> {
         plan.validate()?;
         plan.proposal_root_matches()?;
         if plan.resident_bytes() > plan.capacity_bytes {
-            return Err(ResidencyErrorV1::PlanRejected(format!(
+            return Err(ResidencyError::PlanRejected(format!(
                 "resident bytes {} exceed capacity {}",
                 plan.resident_bytes(),
                 plan.capacity_bytes
@@ -501,7 +501,7 @@ impl ResidencyThresholdCheckerV1 {
         }
         let demanded = plan.total_demand_weight();
         if demanded == 0 {
-            return Err(ResidencyErrorV1::PlanRejected(
+            return Err(ResidencyError::PlanRejected(
                 "plan declares no demanded weight".into(),
             ));
         }
@@ -509,7 +509,7 @@ impl ResidencyThresholdCheckerV1 {
         let covered = ppm_of(resident, demanded);
         let required_ppm = (plan.threshold * 1_000_000.0) as u64;
         if covered < required_ppm {
-            return Err(ResidencyErrorV1::PlanRejected(format!(
+            return Err(ResidencyError::PlanRejected(format!(
                 "resident valid weight {resident} covers {covered}ppm of demanded {demanded}, below required {required_ppm}ppm"
             )));
         }
@@ -524,15 +524,15 @@ impl ResidencyThresholdCheckerV1 {
 /// Eviction slack: `sigma = W_R - 0.99W`. An eviction that would push
 /// resident mass below 99% of demanded mass is rejected.
 #[derive(Clone, Copy, Debug)]
-pub struct EvictionSlackV1 {
+pub struct EvictionSlack {
     resident_mass: u64,
     demanded_mass: u64,
 }
 
-impl EvictionSlackV1 {
-    pub fn new(resident_mass: u64, demanded_mass: u64) -> Result<Self, ResidencyErrorV1> {
+impl EvictionSlack {
+    pub fn new(resident_mass: u64, demanded_mass: u64) -> Result<Self, ResidencyError> {
         if demanded_mass == 0 {
-            return Err(ResidencyErrorV1::InvalidDemandLedger(
+            return Err(ResidencyError::InvalidDemandLedger(
                 "demanded_mass must be nonzero".into(),
             ));
         }
@@ -552,11 +552,11 @@ impl EvictionSlackV1 {
 
     /// Guard one eviction decision: evicting `evict_weight` must keep
     /// resident mass at or above 99% of demanded mass.
-    pub fn guard_eviction(&self, evict_weight: u64) -> Result<(), ResidencyErrorV1> {
+    pub fn guard_eviction(&self, evict_weight: u64) -> Result<(), ResidencyError> {
         let floor = self.demanded_mass * 99 / 100;
         let after = self.resident_mass.saturating_sub(evict_weight);
         if after < floor {
-            return Err(ResidencyErrorV1::SlackExceeded {
+            return Err(ResidencyError::SlackExceeded {
                 resident_mass: self.resident_mass,
                 demanded_mass: self.demanded_mass,
                 slack: self.slack_ppm(),
@@ -575,8 +575,8 @@ impl EvictionSlackV1 {
 /// fetch/rematerialize, never rediscovery.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
-pub struct LayerValidityEntryV1 {
-    pub object_root: DigestV1,
+pub struct LayerValidityEntry {
+    pub object_root: Sha256Digest,
     pub l1_valid: bool,
     pub l2_valid: bool,
     pub l3_valid: bool,
@@ -585,8 +585,8 @@ pub struct LayerValidityEntryV1 {
     pub l2_needs_refetch: bool,
 }
 
-impl LayerValidityEntryV1 {
-    pub fn new(object_root: DigestV1) -> Self {
+impl LayerValidityEntry {
+    pub fn new(object_root: Sha256Digest) -> Self {
         Self {
             object_root,
             l1_valid: false,
@@ -596,9 +596,9 @@ impl LayerValidityEntryV1 {
         }
     }
 
-    pub fn validate(&self) -> Result<(), ResidencyErrorV1> {
+    pub fn validate(&self) -> Result<(), ResidencyError> {
         if self.l2_needs_refetch && !self.l2_valid {
-            return Err(ResidencyErrorV1::InvalidLayerLedger(
+            return Err(ResidencyError::InvalidLayerLedger(
                 "an L2 copy marked needs-refetch must be L2-valid (identity kept)".into(),
             ));
         }
@@ -610,27 +610,27 @@ impl LayerValidityEntryV1 {
 /// amnesia -- L2 validity records survive, marked for refetch, and tombstones
 /// never delete them.
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
-pub struct LayerValidityLedgerV1 {
-    entries: std::collections::BTreeMap<DigestV1, LayerValidityEntryV1>,
+pub struct LayerValidityLedger {
+    entries: std::collections::BTreeMap<Sha256Digest, LayerValidityEntry>,
 }
 
-impl LayerValidityLedgerV1 {
+impl LayerValidityLedger {
     pub fn new() -> Self {
         Self::default()
     }
 
-    pub fn entry(&self, object_root: DigestV1) -> Option<&LayerValidityEntryV1> {
+    pub fn entry(&self, object_root: Sha256Digest) -> Option<&LayerValidityEntry> {
         self.entries.get(&object_root)
     }
 
-    pub fn entries(&self) -> impl Iterator<Item = &LayerValidityEntryV1> {
+    pub fn entries(&self) -> impl Iterator<Item = &LayerValidityEntry> {
         self.entries.values()
     }
 
     /// Publish a verified L2 copy (identity proven by content, not
     /// rediscovery).
-    pub fn publish_l2(&mut self, object_root: DigestV1) -> Result<(), ResidencyErrorV1> {
-        let entry = self.entries.entry(object_root).or_insert_with(|| LayerValidityEntryV1::new(object_root));
+    pub fn publish_l2(&mut self, object_root: Sha256Digest) -> Result<(), ResidencyError> {
+        let entry = self.entries.entry(object_root).or_insert_with(|| LayerValidityEntry::new(object_root));
         entry.l2_valid = true;
         entry.l2_needs_refetch = false;
         entry.validate()
@@ -640,14 +640,14 @@ impl LayerValidityLedgerV1 {
     /// marked for refetch/rematerialization; the causal identity is never
     /// re-derived. An entry that was never L2-valid fails closed (there is
     /// nothing to preserve).
-    pub fn mark_l3_loss(&mut self, object_root: DigestV1) -> Result<(), ResidencyErrorV1> {
+    pub fn mark_l3_loss(&mut self, object_root: Sha256Digest) -> Result<(), ResidencyError> {
         let entry = self.entries.get_mut(&object_root).ok_or_else(|| {
-            ResidencyErrorV1::L3LossUndiscovered(
+            ResidencyError::L3LossUndiscovered(
                 "L3 loss declared for an entry with no L2 validity record".into(),
             )
         })?;
         if !entry.l2_valid {
-            return Err(ResidencyErrorV1::L3LossUndiscovered(format!(
+            return Err(ResidencyError::L3LossUndiscovered(format!(
                 "entry {} has no L2 validity to preserve",
                 entry.object_root
             )));
@@ -659,12 +659,12 @@ impl LayerValidityLedgerV1 {
 
     /// Complete a refetch: the L2 copy is byte-identical again; the causal
     /// identity was never re-derived.
-    pub fn complete_refetch(&mut self, object_root: DigestV1) -> Result<(), ResidencyErrorV1> {
+    pub fn complete_refetch(&mut self, object_root: Sha256Digest) -> Result<(), ResidencyError> {
         let entry = self.entries.get_mut(&object_root).ok_or_else(|| {
-            ResidencyErrorV1::InvalidLayerLedger("refetch for unknown entry".into())
+            ResidencyError::InvalidLayerLedger("refetch for unknown entry".into())
         })?;
         if !entry.l2_needs_refetch {
-            return Err(ResidencyErrorV1::InvalidLayerLedger(
+            return Err(ResidencyError::InvalidLayerLedger(
                 "refetch completed for an entry not marked needs-refetch".into(),
             ));
         }
@@ -675,9 +675,9 @@ impl LayerValidityLedgerV1 {
 
     /// Tombstone: the entry is evicted but its L2 validity record is NEVER
     /// deleted (no project amnesia); it remains for causal accounting.
-    pub fn tombstone(&mut self, object_root: DigestV1) -> Result<(), ResidencyErrorV1> {
+    pub fn tombstone(&mut self, object_root: Sha256Digest) -> Result<(), ResidencyError> {
         let entry = self.entries.get_mut(&object_root).ok_or_else(|| {
-            ResidencyErrorV1::InvalidLayerLedger("tombstone for unknown entry".into())
+            ResidencyError::InvalidLayerLedger("tombstone for unknown entry".into())
         })?;
         entry.l1_valid = false;
         entry.l2_valid = false;

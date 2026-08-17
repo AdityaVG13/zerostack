@@ -580,8 +580,8 @@ status = "partial"
 weight = 0.008196721311
 weight_units = 2
 evidence = ["crates/zsx-core/src/residency.rs"]
-retry_condition = "Retry only when FSZero/GraphZero adapters supply measured WorkerTokenAccountingV1 so L1/L2 Q99 windows are non-empty in production."
-notes = "Types + schema live. Hub empty-window test pins unavailable + no_demand_observations + no bare %. Residual: engine adapters still return no WorkerTokenAccountingV1 so L1/L2 stay empty in production."
+retry_condition = "Retry only when FSZero/GraphZero adapters supply measured WorkerTokenAccounting so L1/L2 Q99 windows are non-empty in production."
+notes = "Types + schema live. Hub empty-window test pins unavailable + no_demand_observations + no bare %. Residual: engine adapters still return no WorkerTokenAccounting so L1/L2 stay empty in production."
 
 [[feature]]
 id = "F-NODE-NATIVE-SESSION"

@@ -32,57 +32,57 @@ mod store_root;
 mod zbf;
 
 pub use attempt_journal::{
-    ATTEMPT_BINDING_SCHEMA_VERSION_V1, ATTEMPT_JOURNAL_MAX_ENTRIES_V1,
-    ATTEMPT_JOURNAL_MAX_RECORD_BYTES_V1, ATTEMPT_JOURNAL_SCHEMA_VERSION_V1,
-    ATTEMPT_RECEIPT_SCHEMA_VERSION_V1, AttemptAbortReasonV1, AttemptBindingV1, AttemptBoundaryV1,
-    AttemptEntryV1, AttemptEvidenceV1, AttemptFailureCodeV1, AttemptFaultPlanV1,
-    AttemptJournalErrorV1, AttemptJournalPathsV1, AttemptRecoveryOutcomeV1,
-    AttemptRecoveryReceiptV1, AttemptStateV1, abort_attempt_v1, abort_attempt_with_fault_v1,
-    attempt_journal_contract_v1, mark_dispatch_crossed_v1, mark_dispatch_crossed_with_fault_v1,
-    mark_failed_v1, mark_failed_with_fault_v1, mark_indeterminate_v1,
-    mark_indeterminate_with_fault_v1, mark_succeeded_v1, mark_succeeded_with_fault_v1,
-    prepare_attempt_v1, prepare_attempt_with_fault_v1, read_attempt_entry_v1,
-    read_current_attempt_v1, recover_attempt_v1, recover_attempt_with_fault_v1,
+    ATTEMPT_BINDING_SCHEMA_VERSION, ATTEMPT_JOURNAL_MAX_ENTRIES,
+    ATTEMPT_JOURNAL_MAX_RECORD_BYTES, ATTEMPT_JOURNAL_SCHEMA_VERSION,
+    ATTEMPT_RECEIPT_SCHEMA_VERSION, AttemptAbortReason, AttemptBinding, AttemptBoundary,
+    AttemptEntry, AttemptEvidence, AttemptFailureCode, AttemptFaultPlan,
+    AttemptJournalError, AttemptJournalPaths, AttemptRecoveryOutcome,
+    AttemptRecoveryReceipt, AttemptState, abort_attempt, abort_attempt_with_fault,
+    attempt_journal_contract, mark_dispatch_crossed, mark_dispatch_crossed_with_fault,
+    mark_failed, mark_failed_with_fault, mark_indeterminate,
+    mark_indeterminate_with_fault, mark_succeeded, mark_succeeded_with_fault,
+    prepare_attempt, prepare_attempt_with_fault, read_attempt_entry,
+    read_current_attempt, recover_attempt, recover_attempt_with_fault,
 };
 pub use cas::{
     CAS_LAYOUT, CAS_LAYOUT_VERSION, CAS_MAX_OBJECT_BYTES, CAS_QUARANTINE_DIR, CAS_TEMP_REAP_AGE,
     CasError, CasReadGate, PutOutcome, SharedCas,
 };
 pub use durable_journal::{
-    AbortReasonV1, BindingLeaseV1, ContinuationCartridgeV1, ContinuationCartridgeV2,
-    DURABLE_BINDING_SCHEMA_VERSION_V1, DURABLE_BINDING_SCHEMA_VERSION_V2,
-    DURABLE_JOURNAL_MAX_RECORD_BYTES_V1, DURABLE_JOURNAL_SCHEMA_VERSION_V2,
-    DURABLE_JOURNAL_SCHEMA_VERSION_V3, DURABLE_LEASE_SCHEMA_VERSION_V1,
-    DURABLE_RECEIPT_SCHEMA_VERSION_V1, DurableJournalV2, DurableJournalV3, FaultPlanV1,
-    JournalBindingLike, JournalBindingV1, JournalBindingV2, JournalBoundaryV1, JournalErrorV1,
-    JournalFailureCodeV1, JournalPathsV1, JournalRecordV1, JournalStateV1,
-    OwnerDeathReceiptV1, PublishedRootV1, RecoveryOutcomeV1, RecoveryReceiptV1,
-    RootPublicationReceipt, abort_journal_v1, abort_journal_v2, abort_journal_with_fault_v1,
-    abort_journal_with_fault_v2, commit_journal_v1, commit_journal_v2,
-    commit_journal_with_fault_v1, commit_journal_with_fault_v2, durable_journal_contract_v1,
-    initialize_published_root_v1, initialize_published_root_with_fault_v1, prepare_journal_v1,
-    prepare_journal_v2, prepare_journal_with_fault_v1, prepare_journal_with_fault_v2,
-    read_continuation_cartridge_v1, read_continuation_cartridge_v2, read_journal_record_v1,
-    read_journal_record_v2, read_published_root_v1, record_owner_death_v1,
-    record_owner_death_v2, record_owner_death_with_fault_v1, record_owner_death_with_fault_v2,
-    recover_journal_v1, recover_journal_v2, recover_journal_with_fault_v1,
-    recover_journal_with_fault_v2, verify_committed_binding_v2,
+    AbortReason, BindingLease, ContinuationCartridge, ContinuationLeaseCartridge,
+    DURABLE_BINDING_SCHEMA_VERSION, DURABLE_BINDING_SCHEMA_VERSION_V2,
+    DURABLE_JOURNAL_MAX_RECORD_BYTES, DURABLE_JOURNAL_SCHEMA_VERSION_V2,
+    DURABLE_JOURNAL_SCHEMA_VERSION_V3, DURABLE_LEASE_SCHEMA_VERSION,
+    DURABLE_RECEIPT_SCHEMA_VERSION, DurableJournal, DurableLeaseJournal, FaultPlan,
+    JournalBindingLike, JournalBinding, JournalLeaseBinding, JournalBoundary, JournalError,
+    JournalFailureCode, JournalPaths, JournalRecord, JournalState,
+    OwnerDeathReceipt, PublishedRoot, RecoveryOutcome, RecoveryReceipt,
+    RootPublicationReceipt, abort_journal, abort_lease_journal, abort_journal_with_fault,
+    abort_lease_journal_with_fault, commit_journal, commit_lease_journal,
+    commit_journal_with_fault, commit_lease_journal_with_fault, durable_journal_contract,
+    initialize_published_root, initialize_published_root_with_fault, prepare_journal,
+    prepare_lease_journal, prepare_journal_with_fault, prepare_lease_journal_with_fault,
+    read_continuation_cartridge, read_continuation_cartridge_v2, read_journal_record,
+    read_journal_record_v2, read_published_root, record_owner_death,
+    record_lease_owner_death, record_owner_death_with_fault, record_lease_owner_death_with_fault,
+    recover_journal, recover_lease_journal, recover_journal_with_fault,
+    recover_lease_journal_with_fault, verify_committed_binding_v2,
 };
 pub use fs_replace::{
     SyncPolicy, atomic_write_file, atomic_write_file_with_sync, replace_file, sync_unsupported,
     tolerate_unsupported_sync,
 };
 pub use idle_gate::{
-    DEFAULT_IDLE_MAX_CPU_FRACTION_PPB_V1, DEFAULT_IDLE_MAX_RSS_BYTES_V1, IDLE_GATE_ABI_VERSION_V1,
-    IDLE_GATE_DOMAIN_V1, IDLE_GATE_SCHEMA_VERSION_V1, IdleBudgetsV1, IdleGateErrorV1,
-    IdleGateReceiptV1, IdleGateRefusalReasonV1, IdleGateRefusalV1, IdleSampleV1, IdleSamplerV1,
-    IdleWindowEvidenceV1, evaluate_idle_release_gate_v1, idle_gate_contract_v1,
-    measure_idle_window_v1,
+    DEFAULT_IDLE_MAX_CPU_FRACTION_PPB, DEFAULT_IDLE_MAX_RSS_BYTES, IDLE_GATE_ABI_VERSION,
+    IDLE_GATE_DOMAIN, IDLE_GATE_SCHEMA_VERSION, IdleBudgets, IdleGateError,
+    IdleGateReceipt, IdleGateRefusalReason, IdleGateRefusal, IdleSample, IdleSampler,
+    IdleWindowEvidence, evaluate_idle_release_gate, idle_gate_contract,
+    measure_idle_window,
 };
 pub use snapshot::{
-    SNAPSHOT_ABI_VERSION_V1, SNAPSHOT_SCHEMA_VERSION_V1, SNAPSHOT_STALENESS_DOMAIN_V1,
-    SnapshotReadResolutionV1, SnapshotStalenessReceiptV1, SnapshotViewV1,
-    resolve_snapshot_read_v1, snapshot_isolation_contract_v1, take_root_snapshot_v1,
+    SNAPSHOT_ABI_VERSION, SNAPSHOT_SCHEMA_VERSION, SNAPSHOT_STALENESS_DOMAIN,
+    SnapshotReadResolution, SnapshotStalenessReceipt, SnapshotView,
+    resolve_snapshot_read, snapshot_isolation_contract, take_root_snapshot,
 };
 pub use gc::{
     BeforeUnlinkHook, DEFAULT_GC_REPORT_LIMIT, DryRunReport, GC_MAX_BLOB_HASHES,
@@ -90,7 +90,7 @@ pub use gc::{
     GC_MAX_PRODUCER_NAMESPACES, GC_MAX_RECORD_BYTES, GC_MAX_REPORT_OBJECTS, GC_MIN_GRACE_SECONDS,
     GC_RECORD_TYPE_DRY_RUN, GC_RECORD_TYPE_LEASE, GC_RECORD_TYPE_PIN, GC_RECORD_TYPE_REACHABILITY,
     GC_RECORD_TYPE_REPAIR, GC_RECORD_TYPE_SWEEP_PROGRESS, GC_REFS_FORMAT, GC_SCHEMA_VERSION,
-    GC_SCHEMA_VERSION_V1, GcCandidate, GcConfig, GcError, GcRunReceipt, GcRunState, GcVerdict,
+    GC_SCHEMA_VERSION_LEGACY, GcCandidate, GcConfig, GcError, GcRunReceipt, GcRunState, GcVerdict,
     LeaseOwner, LeaseRecord, PinRecord, ReachabilitySnapshot, RepairReceipt,
     current_reachability_snapshot, gc_contract_digest_hex, gc_contract_manifest,
     gc_repair_receipt_digest_hex, gc_report_digest_hex, project_id as gc_project_id,
@@ -103,30 +103,30 @@ pub use gc_lock::{
 };
 pub use metadata::ObservationMetadata;
 pub use migrations::{
-    MIGRATION_MARKER_DOMAIN_V1, MIGRATION_RECEIPT_DOMAIN_V1, MIGRATION_RECEIPT_SCHEMA_VERSION_V1,
-    MIGRATION_STEP_DOMAIN_V1, MigrationErrorV1, MigrationMarkerV1, MigrationReceiptV1,
-    MigrationStepOutcomeV1, MigrationStepV1, MigrationTransformV1, STORE_FORMAT_MAX_KNOWN_VERSION_V1,
-    STORE_FORMAT_SCHEMA_VERSION_V1, STORE_FORMAT_VERSION_CURRENT_V1, STORE_FORMAT_VERSION_FILENAME,
-    StoreFormatVersionV1, detect_store_format_version_v1, ensure_format_supported_v1,
-    production_migration_steps_v1, run_store_migrations_v1,
+    MIGRATION_MARKER_DOMAIN, MIGRATION_RECEIPT_DOMAIN, MIGRATION_RECEIPT_SCHEMA_VERSION,
+    MIGRATION_STEP_DOMAIN, MigrationError, MigrationMarker, MigrationReceipt,
+    MigrationStepOutcome, MigrationStep, MigrationTransform, STORE_FORMAT_MAX_KNOWN_VERSION,
+    STORE_FORMAT_SCHEMA_VERSION, STORE_FORMAT_VERSION_CURRENT, STORE_FORMAT_VERSION_FILENAME,
+    StoreFormatVersion, detect_store_format_version, ensure_format_supported,
+    production_migration_steps, run_store_migrations,
 };
 pub use scrub::{
-    SCRUB_MAX_OBJECT_BYTES_V1, SCRUB_MAX_OBJECTS_PER_PASS_V1, SCRUB_SCHEMA_VERSION_V1,
-    ScrubConfigV1, ScrubErrorV1, ScrubFindingKindV1, ScrubFindingV1, ScrubReceiptV1,
-    read_scrub_receipt_v1, run_scrub_v1,
+    SCRUB_MAX_OBJECT_BYTES, SCRUB_MAX_OBJECTS_PER_PASS, SCRUB_SCHEMA_VERSION,
+    ScrubConfig, ScrubError, ScrubFindingKind, ScrubFinding, ScrubReceipt,
+    read_scrub_receipt, run_scrub,
 };
 pub use session_wal::{
     AppendOutcome, FileIdentity, Replay, SESSION_WAL_DEFAULT_MAX_REPLAY_BYTES,
     SESSION_WAL_DEFAULT_MAX_SEALED_SEGMENTS, SESSION_WAL_MAX_RECORD_BYTES,
-    SESSION_WAL_MIN_SEGMENT_BYTES, SESSION_WAL_SCHEMA_VERSION_V1, SessionWal, SessionWalConfig,
-    SessionWalError, session_wal_contract_v1,
+    SESSION_WAL_MIN_SEGMENT_BYTES, SESSION_WAL_SCHEMA_VERSION, SessionWal, SessionWalConfig,
+    SessionWalError, session_wal_contract,
 };
 pub use zbf::{
-    DurableProfileIdV1, DurableProfileV1, ZBF_CONTAINER_FLAG_V1, ZBF_CONTRACT_VERSION_V1,
-    ZBF_HEADER_LEN_V1, ZBF_MAGIC_V1, ZBF_MAX_CHILDREN_V1, ZBF_MAX_DEPTH_V1,
-    ZBF_MAX_OBJECT_BYTES_V1, ZBF_SCHEMA_MAJOR_V1, ZBF_SCHEMA_MINOR_V1, ZbfArtifactKindV1,
-    ZbfErrorV1, ZbfFailureCodeV1, ZbfHeaderV1, ZbfObjectV1, ZbfPayloadV1, zbf_contract_digest_v1,
-    zbf_contract_manifest_v1,
+    DurableProfileId, DurableProfile, ZBF_CONTAINER_FLAG, ZBF_CONTRACT_VERSION,
+    ZBF_HEADER_LEN, ZBF_MAGIC, ZBF_MAX_CHILDREN, ZBF_MAX_DEPTH,
+    ZBF_MAX_OBJECT_BYTES, ZBF_SCHEMA_MAJOR, ZBF_SCHEMA_MINOR, ZbfArtifactKind,
+    ZbfError, ZbfFailureCode, ZbfHeader, ZbfObject, ZbfPayload, zbf_contract_digest,
+    zbf_contract_manifest,
 };
 
 pub use store_root::{

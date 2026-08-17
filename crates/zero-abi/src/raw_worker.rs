@@ -13,11 +13,11 @@ use serde_json::{Value, json};
 use crate::{
     assembly::{
         ASSEMBLY_ABI_CONTRACT_VERSION, ASSEMBLY_MANIFEST_SCHEMA_VERSION,
-        assembly_abi_contract_digest_v1,
+        assembly_abi_contract_digest,
     },
     digest::contract_digest_hex,
     robust_snap::{
-        ROBUST_SNAP_CONTRACT_VERSION, ROBUST_SNAP_MODEL_VERSION, robust_snap_contract_digest_v1,
+        ROBUST_SNAP_CONTRACT_VERSION, ROBUST_SNAP_MODEL_VERSION, robust_snap_contract_digest,
     },
 };
 
@@ -26,8 +26,8 @@ pub const RAW_WORKER_PROTOCOL_VERSION: &str = "zerostack.raw_worker";
 
 /// Default maximum encoded NDJSON frame, excluding the trailing newline.
 pub const DEFAULT_MAX_FRAME_BYTES: usize = 1_048_576;
-pub const ENGINE_TIMELINE_MAX_SPANS_V1: usize = 128;
-pub const TIMELINE_CLOSURE_TOLERANCE_NS_V1: u64 = 250_000;
+pub const ENGINE_TIMELINE_MAX_SPANS: usize = 128;
+pub const TIMELINE_CLOSURE_TOLERANCE_NS: u64 = 250_000;
 
 /// Closed identity set shared by all raw-worker protocol frames.
 /// Canonical writes use stable names. Aliases are deliberate legacy reads;
@@ -192,7 +192,7 @@ pub struct HandshakeAck {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct TelemetryRequestV1 {
+pub struct TelemetryRequest {
     pub engine_stage_timeline: bool,
     pub worker_token_accounting: bool,
 }
@@ -207,7 +207,7 @@ pub enum WorkerTokenCountKind {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct WorkerTokenAccountingV1 {
+pub struct WorkerTokenAccounting {
     pub tokenizer_id: String,
     /// Version digest of the tokenizer that produced this accounting
     /// (64 lowercase hex). Present for measured accounting; `None` when the
@@ -226,7 +226,7 @@ pub struct WorkerTokenAccountingV1 {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct EngineStageSpanV1 {
+pub struct EngineStageSpan {
     pub stage: String,
     pub start_ns: u64,
     pub duration_ns: u64,
@@ -234,9 +234,9 @@ pub struct EngineStageSpanV1 {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct EngineStageTimelineV1 {
+pub struct EngineStageTimeline {
     pub total_ns: u64,
-    pub spans: Vec<EngineStageSpanV1>,
+    pub spans: Vec<EngineStageSpan>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -254,7 +254,7 @@ pub struct CallRequest {
     /// Default-disabled transport telemetry request. Domain arguments never
     /// carry this bit, so disabled request bytes remain byte-identical.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub telemetry_request: Option<TelemetryRequestV1>,
+    pub telemetry_request: Option<TelemetryRequest>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -542,9 +542,9 @@ pub enum WorkerResponseFrame {
         request_id: String,
         result: WorkerResult,
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        engine_timeline: Option<EngineStageTimelineV1>,
+        engine_timeline: Option<EngineStageTimeline>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        worker_token_accounting: Option<WorkerTokenAccountingV1>,
+        worker_token_accounting: Option<WorkerTokenAccounting>,
     },
     Error {
         #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -553,9 +553,9 @@ pub enum WorkerResponseFrame {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         trace: Option<WorkerTrace>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        engine_timeline: Option<EngineStageTimelineV1>,
+        engine_timeline: Option<EngineStageTimeline>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        worker_token_accounting: Option<WorkerTokenAccountingV1>,
+        worker_token_accounting: Option<WorkerTokenAccounting>,
     },
     CancelAck {
         request_id: String,
@@ -696,17 +696,17 @@ fn validate_trace(trace: &WorkerTrace) -> Result<(), FrameCodecError> {
     require_hex_digest("trace.contract_digest", &trace.contract_digest)
 }
 
-pub fn validate_engine_stage_timeline_v1(
-    timeline: &EngineStageTimelineV1,
+pub fn validate_engine_stage_timeline(
+    timeline: &EngineStageTimeline,
 ) -> Result<(), FrameCodecError> {
     if timeline.total_ns == 0 || timeline.spans.is_empty() {
         return Err(FrameCodecError::InvalidContract(
             "engine timeline requires non-zero total_ns and at least one span".into(),
         ));
     }
-    if timeline.spans.len() > ENGINE_TIMELINE_MAX_SPANS_V1 {
+    if timeline.spans.len() > ENGINE_TIMELINE_MAX_SPANS {
         return Err(FrameCodecError::InvalidContract(format!(
-            "engine timeline has {} spans; maximum is {ENGINE_TIMELINE_MAX_SPANS_V1}",
+            "engine timeline has {} spans; maximum is {ENGINE_TIMELINE_MAX_SPANS}",
             timeline.spans.len()
         )));
     }
@@ -733,22 +733,22 @@ pub fn validate_engine_stage_timeline_v1(
             FrameCodecError::InvalidContract("engine timeline duration sum overflow".into())
         })?;
     }
-    if duration_sum.abs_diff(timeline.total_ns) > TIMELINE_CLOSURE_TOLERANCE_NS_V1
+    if duration_sum.abs_diff(timeline.total_ns) > TIMELINE_CLOSURE_TOLERANCE_NS
         || prior_end
             > timeline
                 .total_ns
-                .saturating_add(TIMELINE_CLOSURE_TOLERANCE_NS_V1)
+                .saturating_add(TIMELINE_CLOSURE_TOLERANCE_NS)
     {
         return Err(FrameCodecError::InvalidContract(format!(
-            "engine timeline does not close: total_ns={} duration_sum={} final_end_ns={} tolerance_ns={TIMELINE_CLOSURE_TOLERANCE_NS_V1}",
+            "engine timeline does not close: total_ns={} duration_sum={} final_end_ns={} tolerance_ns={TIMELINE_CLOSURE_TOLERANCE_NS}",
             timeline.total_ns, duration_sum, prior_end
         )));
     }
     Ok(())
 }
 
-pub fn validate_worker_token_accounting_v1(
-    accounting: &WorkerTokenAccountingV1,
+pub fn validate_worker_token_accounting(
+    accounting: &WorkerTokenAccounting,
 ) -> Result<(), FrameCodecError> {
     let tokenizer_id = accounting.tokenizer_id.trim();
     if tokenizer_id.is_empty() || tokenizer_id.len() > 256 {
@@ -801,10 +801,10 @@ pub fn validate_response_frame(frame: &WorkerResponseFrame) -> Result<(), FrameC
                 ));
             }
             if let Some(timeline) = engine_timeline {
-                validate_engine_stage_timeline_v1(timeline)?;
+                validate_engine_stage_timeline(timeline)?;
             }
             if let Some(accounting) = worker_token_accounting {
-                validate_worker_token_accounting_v1(accounting)?;
+                validate_worker_token_accounting(accounting)?;
             }
             Ok(())
         }
@@ -833,10 +833,10 @@ pub fn validate_response_frame(frame: &WorkerResponseFrame) -> Result<(), FrameC
                 }
             }
             if let Some(timeline) = engine_timeline {
-                validate_engine_stage_timeline_v1(timeline)?;
+                validate_engine_stage_timeline(timeline)?;
             }
             if let Some(accounting) = worker_token_accounting {
-                validate_worker_token_accounting_v1(accounting)?;
+                validate_worker_token_accounting(accounting)?;
             }
             Ok(())
         }
@@ -1042,7 +1042,7 @@ pub fn raw_worker_protocol_manifest() -> Value {
         deadline_unix_ms: Some(0),
         trace: manifest_trace(),
         approval_grant: None,
-        telemetry_request: Some(TelemetryRequestV1 {
+        telemetry_request: Some(TelemetryRequest {
             engine_stage_timeline: true,
             worker_token_accounting: true,
         }),
@@ -1087,15 +1087,15 @@ pub fn raw_worker_protocol_manifest() -> Value {
         revert: false,
         snapshots: false,
     };
-    let timeline = EngineStageTimelineV1 {
+    let timeline = EngineStageTimeline {
         total_ns: 1,
-        spans: vec![EngineStageSpanV1 {
+        spans: vec![EngineStageSpan {
             stage: String::new(),
             start_ns: 0,
             duration_ns: 1,
         }],
     };
-    let token_accounting = WorkerTokenAccountingV1 {
+    let token_accounting = WorkerTokenAccounting {
         tokenizer_id: String::new(),
         tokenizer_version_digest: None,
         count_kind: WorkerTokenCountKind::Exact,
@@ -1133,10 +1133,10 @@ pub fn raw_worker_protocol_manifest() -> Value {
         "linked_contracts": {
             "assembly_abi_contract_version": ASSEMBLY_ABI_CONTRACT_VERSION,
             "assembly_manifest_schema_version": ASSEMBLY_MANIFEST_SCHEMA_VERSION,
-            "assembly_abi_contract_digest": assembly_abi_contract_digest_v1(),
+            "assembly_abi_contract_digest": assembly_abi_contract_digest(),
                 "robust_snap_contract_version": ROBUST_SNAP_CONTRACT_VERSION,
                 "robust_snap_model_version": ROBUST_SNAP_MODEL_VERSION,
-                "robust_snap_contract_digest": robust_snap_contract_digest_v1(),
+                "robust_snap_contract_digest": robust_snap_contract_digest(),
         },
         "framing": "bounded_ndjson",
         "default_max_frame_bytes": DEFAULT_MAX_FRAME_BYTES,
@@ -1147,7 +1147,7 @@ pub fn raw_worker_protocol_manifest() -> Value {
         "capabilities": field_names(&capabilities),
         "limits": field_names(&ProtocolLimits::default()),
         "call": field_names(&call),
-        "telemetry_request": field_names(&TelemetryRequestV1 {
+        "telemetry_request": field_names(&TelemetryRequest {
             engine_stage_timeline: true,
             worker_token_accounting: true,
         }),

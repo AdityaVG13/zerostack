@@ -66,9 +66,9 @@ use tokenzero_engine::{
 };
 use tokenzero_recovery::RecoveryStore;
 use zero_abi::{
-    ApprovalMetadata, ApprovalState, CallRequest, EffectClass, EngineIdentity, EngineStageSpanV1,
-    EngineStageTimelineV1, RefOwnership, RevertMetadata, TOKEN_JOB_OPERATION_V1, WorkerResult,
-    WorkerResultMetadata, WorkerTokenAccountingV1, WorkerTokenCountKind,
+    ApprovalMetadata, ApprovalState, CallRequest, EffectClass, EngineIdentity, EngineStageSpan,
+    EngineStageTimeline, RefOwnership, RevertMetadata, TOKEN_JOB_OPERATION, WorkerResult,
+    WorkerResultMetadata, WorkerTokenAccounting, WorkerTokenCountKind,
 };
 use zero_ref::{ZeroFragment, ZeroRef, ZeroScheme};
 use zero_store::{Engine as StoreEngine, ResolvedStore, SharedCas};
@@ -272,7 +272,7 @@ impl TokenZeroAdapter {
         if !content_scan {
             collect_refs(&value, &mut refs);
         }
-        if request.op != TOKEN_JOB_OPERATION_V1 {
+        if request.op != TOKEN_JOB_OPERATION {
             for reference in &domain_refs {
                 if !refs.iter().any(|existing| existing == reference) {
                     refs.push(reference.clone());
@@ -306,9 +306,9 @@ impl TokenZeroAdapter {
         let engine_timeline = telemetry.is_some_and(|t| t.engine_stage_timeline).then(|| {
             let total_ns = elapsed.as_nanos().min(u128::from(u64::MAX)) as u64;
             let total_ns = total_ns.max(1);
-            EngineStageTimelineV1 {
+            EngineStageTimeline {
                 total_ns,
-                spans: vec![EngineStageSpanV1 {
+                spans: vec![EngineStageSpan {
                     stage: ENGINE_STAGE.into(),
                     start_ns: 0,
                     duration_ns: total_ns,
@@ -571,7 +571,7 @@ fn effect_class(op: &str) -> EffectClass {
 fn is_content_scan_op(op: &str) -> bool {
     matches!(
         op,
-        TOKEN_JOB_OPERATION_V1
+        TOKEN_JOB_OPERATION
             | "find"
             | "tz_find"
             | "zero.find"
@@ -647,8 +647,8 @@ fn worker_token_accounting(
     op: &str,
     args: &Value,
     value: &Value,
-) -> Result<WorkerTokenAccountingV1, String> {
-    let is_job = op == TOKEN_JOB_OPERATION_V1;
+) -> Result<WorkerTokenAccounting, String> {
+    let is_job = op == TOKEN_JOB_OPERATION;
     let is_background_shell =
         matches!(op, "shell" | "tz_shell" | "zero.shell") && args["background"] == true;
     let accounting_optional = is_job || is_background_shell;
@@ -685,7 +685,7 @@ fn worker_token_accounting(
         .map(|accounting| checked_u64_count("cached_tokens", accounting.cached_tokens))
         .transpose()?
         .unwrap_or(0);
-    let worker = WorkerTokenAccountingV1 {
+    let worker = WorkerTokenAccounting {
         // Conservative upper-bound accounting has no bound tokenizer
         // version; it is never charged into the resource ledger.
         tokenizer_version_digest: None,

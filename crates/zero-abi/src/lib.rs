@@ -43,39 +43,39 @@ pub mod zerokernel;
 pub mod zero_execute;
 
 pub use assembly::{
-    ASSEMBLY_ABI_CONTRACT_VERSION, ASSEMBLY_MANIFEST_DOMAIN_V1, ASSEMBLY_MANIFEST_SCHEMA_VERSION,
-    ArtifactOwnerV1, AssemblyExpectationV1, AssemblyFailureCodeV1, AssemblyManifestErrorV1,
-    AssemblyManifestV1, AssemblyPreDispatchErrorV1, DigestParseErrorV1, DigestV1, LinkedArtifactV1,
-    LinkedProfileV1, MAX_ASSEMBLY_ITEMS, MAX_ASSEMBLY_MANIFEST_BYTES, MAX_ASSEMBLY_STRING_BYTES,
-    PlatformIdentityV1, ProfileKindV1, ReceiptSchemaIdentityV1, TargetIdentityV1,
-    VerifierIdentityV1, WorkerIdentityV1, assembly_abi_contract_digest_v1,
-    assembly_abi_contract_manifest_v1, validate_assembly_pre_dispatch_v1,
+    ASSEMBLY_ABI_CONTRACT_VERSION, ASSEMBLY_MANIFEST_DOMAIN, ASSEMBLY_MANIFEST_SCHEMA_VERSION,
+    ArtifactOwner, AssemblyExpectation, AssemblyFailureCode, AssemblyManifestError,
+    AssemblyManifest, AssemblyPreDispatchError, DigestParseError, Sha256Digest, LinkedArtifact,
+    LinkedProfile, MAX_ASSEMBLY_ITEMS, MAX_ASSEMBLY_MANIFEST_BYTES, MAX_ASSEMBLY_STRING_BYTES,
+    PlatformIdentity, ProfileKind, ReceiptSchemaIdentity, TargetIdentity,
+    VerifierIdentity, WorkerIdentity, assembly_abi_contract_digest,
+    assembly_abi_contract_manifest, validate_assembly_pre_dispatch,
 };
 pub use cache_entry::{
-    CACHE_ENTRY_SCHEMA_V1, CacheEntryError, CacheEntryV1, CacheKeyV1, CacheRootV1, CacheValueV1,
-    CompletenessWitnessV1, OperatorIdentityV1, VerifierReceiptV1,
+    CACHE_ENTRY_SCHEMA, CacheEntryError, CacheEntry, CacheKey, CacheRoot, CacheValue,
+    CacheCompletenessWitness, OperatorIdentity, VerifierReceipt,
 };
 pub use capability::{
     CapabilityMismatch, CapabilitySchema, CasLayout, FragmentBehavior, FragmentPolicy,
     HashAlgorithm, HashCapability, LayoutVersion, SharedCapability, SharedCasCapability,
 };
 pub use cwir::{
-    CWIR_CONTRACT_VERSION_V1, CWIR_EDGE_DOMAIN_V1, CWIR_EXPANSION_DOMAIN_V1,
-    CWIR_MAX_CANONICAL_BYTES_V1, CWIR_MAX_CAPABILITIES_V1, CWIR_MAX_EDGES_V1, CWIR_MAX_EFFECTS_V1,
-    CWIR_MAX_EXPANSION_INPUT_BYTES_V1, CWIR_MAX_EXPANSION_OUTPUT_BYTES_V1,
-    CWIR_MAX_EXPANSION_WORK_UNITS_V1, CWIR_MAX_EXPANSIONS_V1, CWIR_MAX_IDENTITY_BYTES_V1,
-    CWIR_MAX_NODES_V1, CWIR_MAX_OBLIGATIONS_V1, CWIR_MAX_REFS_PER_ITEM_V1, CWIR_MODEL_VERSION_V1,
-    CWIR_NODE_DOMAIN_V1, CWIR_OBLIGATION_DOMAIN_V1, CWIR_SEMANTIC_DOMAIN_V1, CWIR_TASK_DOMAIN_V1,
-    CausalWorkIrV1, CwirCoverageV1, CwirDeterminismV1, CwirEdgeKindV1, CwirEffectSpaceV1,
-    CwirEpistemicProductV1, CwirErrorV1, CwirExpansionCostV1, CwirExpansionV1, CwirFailureCodeV1,
-    CwirFreshnessV1, CwirHyperEdgeV1, CwirNodeKindV1, CwirNodeV1, CwirObligationKindV1,
-    CwirObligationStatusV1, CwirObligationV1, CwirSoundnessV1, CwirStateAnchorV1,
-    CwirTaskContractV1, CwirVerificationContractV1, CwirVerifierClassV1, cwir_contract_digest_v1,
-    cwir_contract_manifest_v1,
+    CWIR_CONTRACT_VERSION, CWIR_EDGE_DOMAIN, CWIR_EXPANSION_DOMAIN,
+    CWIR_MAX_CANONICAL_BYTES, CWIR_MAX_CAPABILITIES, CWIR_MAX_EDGES, CWIR_MAX_EFFECTS,
+    CWIR_MAX_EXPANSION_INPUT_BYTES, CWIR_MAX_EXPANSION_OUTPUT_BYTES,
+    CWIR_MAX_EXPANSION_WORK_UNITS, CWIR_MAX_EXPANSIONS, CWIR_MAX_IDENTITY_BYTES,
+    CWIR_MAX_NODES, CWIR_MAX_OBLIGATIONS, CWIR_MAX_REFS_PER_ITEM, CWIR_MODEL_VERSION,
+    CWIR_NODE_DOMAIN, CWIR_OBLIGATION_DOMAIN, CWIR_SEMANTIC_DOMAIN, CWIR_TASK_DOMAIN,
+    CausalWorkIr, CwirCoverage, CwirDeterminism, CwirEdgeKind, CwirEffectSpace,
+    CwirEpistemicProduct, CwirError, CwirExpansionCost, CwirExpansion, CwirFailureCode,
+    CwirFreshness, CwirHyperEdge, CwirNodeKind, CwirNode, CwirObligationKind,
+    CwirObligationStatus, CwirObligation, CwirSoundness, CwirStateAnchor,
+    CwirTaskContract, CwirVerificationContract, CwirVerifierClass, cwir_contract_digest,
+    cwir_contract_manifest,
 };
 pub use decision::{
-    ContingentPolicyRuleV1, ContingentPolicyV1, DecisionErrorV1, DecisionRequiredV1,
-    ObservationClassV1, ObservedMatchV1, PolicyResolutionV1, SemanticDecisionPointV1,
+    ContingentPolicyRule, ContingentPolicy, DecisionError, DecisionRequired,
+    ObservationClass, ObservedMatch, PolicyResolution, SemanticDecisionPoint,
     verdict_permits_selection,
 };
 pub use decision_view::{
@@ -83,20 +83,20 @@ pub use decision_view::{
     DECISION_VIEW_SCHEMA_ID,
 };
 pub use continuation::{
-    ContinuationCompactRecordV1, ContinuationErrorV1, ContinuationHandleV1, ContinuationRootsV1,
-    CONTINUATION_CONTRACT_VERSION_V1,
+    ContinuationCompactRecord, ContinuationError, ContinuationHandle, ContinuationRoots,
+    CONTINUATION_CONTRACT_VERSION,
 };
 pub use digest::{contract_digest, contract_digest_hex, sha256, sha256_hex};
 pub use identity::{
-    CancellationSemanticsV1, CONTRACT_VERSION_V1, CoverageGradeV1, EventLogV1, EventRecordV1,
-    FallbackPolicyV1, HarnessContractV1, MessageOrderingV1,
-    IdentityErrorV1, MIGRATION_RECEIPT_MAX_CANONICAL_BYTES_V1, MIGRATION_RECEIPT_MAX_REASON_BYTES_V1,
-    ObjectClassV1, PayloadFormationReceiptV1, ProjectSuccessorCasV1,
-    ProtectedDimensionV1, ProtectedScopeObligationsV1, ROOTED_ABI_VERSION, ROOT_HASH_ALGORITHM,
-    RootedAbiMigrationReceiptV1, ScopeObligationV1, SerializationSchemeV1, SideEffectPolicyV1,
-    StructuredTaskContractV1,
-    SuccessorOutcomeV1,
-    SuccessorRecordV1, SuccessorUnchangedReasonV1, TaskBudgetV1, TranscriptPolicyV1,
+    CancellationSemantics, CONTRACT_VERSION, CoverageGrade, EventLog, EventRecord,
+    FallbackPolicy, HarnessContract, MessageOrdering,
+    IdentityKernelError, MIGRATION_RECEIPT_MAX_CANONICAL_BYTES, MIGRATION_RECEIPT_MAX_REASON_BYTES,
+    ObjectClass, PayloadFormationReceipt, ProjectSuccessorCas,
+    ProtectedDimension, ProtectedScopeObligations, ROOTED_ABI_VERSION, ROOT_HASH_ALGORITHM,
+    RootedAbiMigrationReceipt, ScopeObligation, SerializationScheme, SideEffectPolicy,
+    StructuredTaskContract,
+    SuccessorOutcome,
+    SuccessorRecord, SuccessorUnchangedReason, TaskBudget, TranscriptPolicy,
     canonical_object_bytes,
     event_log_genesis, object_root, root_preimage, verify_object_root,
 };
@@ -107,82 +107,82 @@ pub use dispatch::{
     PermitRequirement, RegistryEngine, SourceDiagnostic, SourceForm,
 };
 pub use effect::{
-    EFFECT_IR_ACTION_DOMAIN_V1, EFFECT_IR_CONTRACT_VERSION_V1, EFFECT_IR_MAX_CANONICAL_BYTES_V1,
-    EFFECT_IR_MAX_CAPABILITIES_V1, EFFECT_IR_MAX_EXCEPTIONS_V1, EFFECT_IR_MAX_INTENTS_V1,
-    EFFECT_IR_MAX_LITERAL_BYTES_V1, EFFECT_IR_MAX_OPERATIONS_V1, EFFECT_IR_MAX_PRECONDITIONS_V1,
-    EFFECT_IR_MAX_REFS_PER_OPERATION_V1, EFFECT_IR_MAX_STRING_BYTES_V1, EFFECT_IR_MAX_TARGETS_V1,
-    EFFECT_IR_MAX_VERIFICATION_STEPS_V1, EffectAdmissionV1, EffectCapabilityBindingV1,
-    EffectExceptionV1, EffectIrErrorV1, EffectIrFailureCodeV1, EffectPredicateV1, EffectProgramV1,
-    EffectRollbackV1, EffectTargetV1, EffectVerificationPlanV1, EffectVerificationStepV1,
-    TypedEffectOperationV1, effect_ir_contract_digest_v1, effect_ir_contract_manifest_v1,
+    EFFECT_IR_ACTION_DOMAIN, EFFECT_IR_CONTRACT_VERSION, EFFECT_IR_MAX_CANONICAL_BYTES,
+    EFFECT_IR_MAX_CAPABILITIES, EFFECT_IR_MAX_EXCEPTIONS, EFFECT_IR_MAX_INTENTS,
+    EFFECT_IR_MAX_LITERAL_BYTES, EFFECT_IR_MAX_OPERATIONS, EFFECT_IR_MAX_PRECONDITIONS,
+    EFFECT_IR_MAX_REFS_PER_OPERATION, EFFECT_IR_MAX_STRING_BYTES, EFFECT_IR_MAX_TARGETS,
+    EFFECT_IR_MAX_VERIFICATION_STEPS, EffectAdmission, EffectCapabilityBinding,
+    EffectException, EffectIrError, EffectIrFailureCode, EffectPredicate, EffectProgram,
+    EffectRollback, EffectTarget, EffectVerificationPlan, EffectVerificationStep,
+    TypedEffectOperation, effect_ir_contract_digest, effect_ir_contract_manifest,
 };
 pub use exec_dag::{
-    MAX_EXEC_DAG_DEPENDENCIES_PER_NODE, MAX_EXEC_DAG_NODES, ExecDagErrorV1, ExecDagV1,
-    ExecNodeKindV1, ExecNodeV1,
+    MAX_EXEC_DAG_DEPENDENCIES_PER_NODE, MAX_EXEC_DAG_NODES, ExecDagError, ExecDag,
+    ExecNodeKind, ExecNode,
 };
-pub use exec_stream::{ExecStreamEventV1, StepReceiptV1};
+pub use exec_stream::{ExecStreamEvent, StepReceipt};
 pub use exec_trace::{
-    ExecTraceErrorV1, ExecTraceRecordV1, ExecTraceV1, ProtectedDecisionViewV1,
-    TraceDivergenceV1, TraceEquivalenceV1, TraceOutcomeV1,
+    ExecTraceError, ExecTraceRecord, ExecTrace, ProtectedDecisionView,
+    TraceDivergence, TraceEquivalence, TraceOutcome,
 };
 pub use freshness::{
-    CertifiedInfluenceClosure, DependencyEdgeKindV1, DependencyEdgeV1,
-    EssentialDependencyCertificate, EssentialDependencyWitnessV1, FRESHNESS_CONTRACT_VERSION,
+    CertifiedInfluenceClosure, DependencyEdgeKind, DependencyEdge,
+    EssentialDependencyCertificate, EssentialDependencyWitness, FRESHNESS_CONTRACT_VERSION,
     FRESHNESS_MAX_EDGES, FRESHNESS_MAX_NODES, FRESHNESS_MAX_REPOSITORIES, FRESHNESS_MAX_WITNESSES,
-    FRESHNESS_MODEL_VERSION, FreshnessDecisionV1, FreshnessErrorV1, FreshnessFailureCodeV1,
-    FreshnessHeadV1, FreshnessStatusV1, IndexedThroughCertificate, ProducerDomainV1,
-    decide_freshness_v1, freshness_contract_digest_v1, freshness_contract_manifest_v1,
-    influence_closure_v1,
+    FRESHNESS_MODEL_VERSION, FreshnessDecision, FreshnessError, FreshnessFailureCode,
+    FreshnessHead, FreshnessStatus, IndexedThroughCertificate, ProducerDomain,
+    decide_freshness, freshness_contract_digest, freshness_contract_manifest,
+    influence_closure,
 };
 pub use job::{
-    TOKEN_JOB_ABI_VERSION_V1, TOKEN_JOB_DEFAULT_TAIL_BYTES_V1, TOKEN_JOB_DEFAULT_WAIT_MS_V1,
-    TOKEN_JOB_MAX_ID_BYTES_V1, TOKEN_JOB_MAX_TAIL_BYTES_V1, TOKEN_JOB_MAX_WAIT_MS_V1,
-    TOKEN_JOB_OPERATION_V1, TokenJobContractError, TokenJobPollRequestV1, TokenJobPollResultV1,
-    TokenJobStatusV1, token_job_contract_digest_v1, token_job_contract_manifest_v1,
+    TOKEN_JOB_ABI_VERSION, TOKEN_JOB_DEFAULT_TAIL_BYTES, TOKEN_JOB_DEFAULT_WAIT_MS,
+    TOKEN_JOB_MAX_ID_BYTES, TOKEN_JOB_MAX_TAIL_BYTES, TOKEN_JOB_MAX_WAIT_MS,
+    TOKEN_JOB_OPERATION, TokenJobContractError, TokenJobPollRequest, TokenJobPollResult,
+    TokenJobStatus, token_job_contract_digest, token_job_contract_manifest,
 };
 pub use raw_worker::{
     ApprovalMetadata, ApprovalState, CallRequest, CancelRequest, DEFAULT_MAX_FRAME_BYTES,
-    ENGINE_TIMELINE_MAX_SPANS_V1, EffectClass, EngineIdentity, EngineStageSpanV1,
-    EngineStageTimelineV1, FrameCodecError, HandshakeAck, HandshakeRequest, ProtocolLimits,
+    ENGINE_TIMELINE_MAX_SPANS, EffectClass, EngineIdentity, EngineStageSpan,
+    EngineStageTimeline, FrameCodecError, HandshakeAck, HandshakeRequest, ProtocolLimits,
     RAW_WORKER_PROTOCOL_VERSION, RefOwnership, RevertMetadata, ShutdownRequest, SnapshotIdentity,
-    TIMELINE_CLOSURE_TOLERANCE_NS_V1, TelemetryRequestV1, WORKER_ERROR_KINDS, WorkerBinding,
+    TIMELINE_CLOSURE_TOLERANCE_NS, TelemetryRequest, WORKER_ERROR_KINDS, WorkerBinding,
     WorkerCapabilities, WorkerError, WorkerRequestFrame, WorkerResponseFrame, WorkerResult,
     WorkerResultMetadata,
-    WorkerTokenAccountingV1, WorkerTokenCountKind, WorkerTrace, decode_request_frame,
+    WorkerTokenAccounting, WorkerTokenCountKind, WorkerTrace, decode_request_frame,
     canonical_worker_error_kind, is_rw10_forbidden_op, is_typed_worker_error_kind,
     RW10_FORBIDDEN_OPS,
     decode_response_frame, encode_frame, raw_worker_protocol_digest_hex,
-    raw_worker_protocol_manifest, validate_engine_stage_timeline_v1, validate_handshake_request,
-    validate_request_frame, validate_response_frame, validate_worker_token_accounting_v1,
+    raw_worker_protocol_manifest, validate_engine_stage_timeline, validate_handshake_request,
+    validate_request_frame, validate_response_frame, validate_worker_token_accounting,
 };
 pub use reasoning::{
-    NativeStatePolicyV1, REASONING_CONTRACT_MAX_CANONICAL_BYTES_V1,
-    REASONING_CONTRACT_MAX_EXTENSION_BYTES_V1, REASONING_CONTRACT_MAX_EXTENSION_DEPTH_V1,
-    REASONING_CONTRACT_MAX_EXTENSION_NODES_V1, REASONING_CONTRACT_MAX_ID_BYTES_V1,
-    REASONING_CONTRACT_MAX_STOP_SEQUENCES_V1, REASONING_CONTRACT_MAX_STOP_SEQUENCE_BYTES_V1,
-    REASONING_CONTRACT_MAX_TOOL_PERMISSIONS_V1, REASONING_CONTRACT_SCHEMA_VERSION_V1,
-    REASONING_CONTRACT_TEMPERATURE_PPM_MAX_V1, REASONING_CONTRACT_TOP_P_PPM_MAX_V1,
-    REASONING_CONTRACT_VERSION_V1, ReasoningContractErrorV1,
-    ReasoningContractFailureCodeV1, ReasoningContractV1, SamplingParamsV1, StoppingPolicyV1,
-    StrictReasoningAdmissionRecordV1, StrictReasoningAdmissionV1, ToolPermissionV1,
-    reasoning_contract_digest_v1, reasoning_contract_manifest_v1,
-    reasoning_contract_schema_digest_v1, reasoning_contract_schema_v1,
-    verify_strict_no_downshift_v1,
+    NativeStatePolicy, REASONING_CONTRACT_MAX_CANONICAL_BYTES,
+    REASONING_CONTRACT_MAX_EXTENSION_BYTES, REASONING_CONTRACT_MAX_EXTENSION_DEPTH,
+    REASONING_CONTRACT_MAX_EXTENSION_NODES, REASONING_CONTRACT_MAX_ID_BYTES,
+    REASONING_CONTRACT_MAX_STOP_SEQUENCES, REASONING_CONTRACT_MAX_STOP_SEQUENCE_BYTES,
+    REASONING_CONTRACT_MAX_TOOL_PERMISSIONS, REASONING_CONTRACT_SCHEMA_VERSION,
+    REASONING_CONTRACT_TEMPERATURE_PPM_MAX, REASONING_CONTRACT_TOP_P_PPM_MAX,
+    REASONING_CONTRACT_VERSION, ReasoningContractError,
+    ReasoningContractFailureCode, ReasoningContract, SamplingParams, StoppingPolicy,
+    StrictReasoningAdmissionRecord, StrictReasoningAdmission, ToolPermission,
+    reasoning_contract_digest, reasoning_contract_manifest,
+    reasoning_contract_schema_digest, reasoning_contract_schema,
+    verify_strict_no_downshift,
 };
 pub use result::{
     MAX_ACK_CHARS, MAX_PREVIEW_CHARS, ZERO_RESULT, ZeroResultAccessError, ZeroResultBuildError,
     ZeroResult, zero_result_from_engine_step, zero_result_to_wire,
 };
-pub use redaction::{EffectTraceV1, RedactionPolicyV1, RedactorV1, SecretsErrorV1};
+pub use redaction::{EffectTrace, RedactionPolicy, Redactor, SecretsError};
 pub use redaction::DEFAULT_REDACTION_TOKEN;
 pub use robust_snap::{
-    EvidenceDecisionTree, EvidenceLeafV1, EvidenceObservationV1, ProtectedEffectClassV1,
-    ProtectedEffectSet, ProtectedEffectV1, ROBUST_SNAP_CONTRACT_VERSION,
+    EvidenceDecisionTree, EvidenceLeaf, EvidenceObservation, ProtectedEffectClass,
+    ProtectedEffectSet, ProtectedEffect, ROBUST_SNAP_CONTRACT_VERSION,
     ROBUST_SNAP_MAX_ASSUMPTION_BYTES, ROBUST_SNAP_MAX_ASSUMPTIONS, ROBUST_SNAP_MAX_EFFECTS,
     ROBUST_SNAP_MAX_EVIDENCE_DEPTH, ROBUST_SNAP_MAX_LEAVES, ROBUST_SNAP_MAX_WORLDS,
-    ROBUST_SNAP_MODEL_VERSION, RobustSnapCertificate, RobustSnapErrorV1, RobustSnapFailureCodeV1,
-    SnapLevel, WorldFiberDescriptor, robust_snap_contract_digest_v1,
-    robust_snap_contract_manifest_v1, validate_heuristic_world_order,
+    ROBUST_SNAP_MODEL_VERSION, RobustSnapCertificate, RobustSnapError, RobustSnapFailureCode,
+    SnapLevel, WorldFiberDescriptor, robust_snap_contract_digest,
+    robust_snap_contract_manifest, validate_heuristic_world_order,
 };
 pub use schema::{
     canonical_json, canonical_schema_json, normalize_schema, schema_diff, schema_fingerprint_hex,
@@ -192,25 +192,25 @@ pub use surface::{
     CapabilityDescriptor, DomainAdapterRegistration, GlobalRegistration, RegistrationError,
     SURFACE_CONTRACT_VERSION, SurfaceContractError, SurfaceKind, SurfaceRegistration,
 };
-pub use telemetry::{TelemetryCounter, TelemetryOverflow, TelemetrySchema, ZeroTelemetryV1};
+pub use telemetry::{TelemetryCounter, TelemetryOverflow, TelemetrySchema, ZeroTelemetry};
 pub use verdict::{
-    PremiseV1, SafetyVerdictV1, VerdictBuildErrorV1, VERDICT_MAX_PREMISE_NAME_BYTES,
+    Premise, SafetyVerdict, VerdictBuildError, VERDICT_MAX_PREMISE_NAME_BYTES,
 };
 pub use zero_execute::{
-    AuditEventRangeV1, ContinuationStateV1, ZeroExecuteError, ZeroExecuteFields,
+    AuditEventRange, ContinuationState, ZeroExecuteError, ZeroExecuteFields,
     ZeroExecuteKind, ZeroExecuteResult, ZERO_EXECUTE_ABI_VERSION,
 };
 pub use zerokernel::{
-    ExactHandlesV1, FiniteBudgetV1, PreflightReportV1, ResourceLedgerV1, ReturnKindV1,
-    ReturnPolicyV1, RootBindingsV1, RootEvidenceV1, RootSnapshotV1, ZerokernelErrorV1,
-    ZerokernelExecuteRequestV1, ZerokernelExecuteResponseV1, ZerokernelResultKindV1,
-    ZEROKERNEL_ABI_VERSION_V1, ZERO_EXECUTE_V1_ABI_VERSION, MAX_CALLS_V1, MAX_CPU_MS_V1,
-    MAX_MEMORY_BYTES_V1, MAX_PREVIEW_CHARS_V1, MAX_WALL_MS_V1,
+    ExactHandles, FiniteBudget, PreflightReport, KernelResourceLedger, ReturnKind,
+    ReturnPolicy, RootBindings, RootEvidence, RootSnapshot, ZerokernelError,
+    ZerokernelExecuteRequest, ZerokernelExecuteResponse, ZerokernelResultKind,
+    ZEROKERNEL_ABI_VERSION, MAX_CALLS, MAX_CPU_MS,
+    MAX_MEMORY_BYTES, MAX_KERNEL_PREVIEW_CHARS, MAX_WALL_MS,
 };
 pub use zbf::{
-    DurableProfileIdV1, DurableProfileV1, ZBF_CONTAINER_FLAG_V1, ZBF_CONTRACT_VERSION_V1,
-    ZBF_HEADER_LEN_V1, ZBF_MAGIC_V1, ZBF_MAX_CHILDREN_V1, ZBF_MAX_DEPTH_V1,
-    ZBF_MAX_OBJECT_BYTES_V1, ZBF_SCHEMA_MAJOR_V1, ZBF_SCHEMA_MINOR_V1, ZbfArtifactKindV1,
-    ZbfErrorV1, ZbfFailureCodeV1, ZbfHeaderV1, ZbfObjectV1, ZbfPayloadV1, zbf_contract_digest_v1,
-    zbf_contract_manifest_v1,
+    DurableProfileId, DurableProfile, ZBF_CONTAINER_FLAG, ZBF_CONTRACT_VERSION,
+    ZBF_HEADER_LEN, ZBF_MAGIC, ZBF_MAX_CHILDREN, ZBF_MAX_DEPTH,
+    ZBF_MAX_OBJECT_BYTES, ZBF_SCHEMA_MAJOR, ZBF_SCHEMA_MINOR, ZbfArtifactKind,
+    ZbfError, ZbfFailureCode, ZbfHeader, ZbfObject, ZbfPayload, zbf_contract_digest,
+    zbf_contract_manifest,
 };

@@ -1,18 +1,18 @@
 //! Execution trace surface with equivalence comparison (V6-R15,
 //! ZS-EXEC-002/005).
 //!
-//! An [`ExecTraceV1`] is the deterministic, mode-independent record of one
+//! An [`ExecTrace`] is the deterministic, mode-independent record of one
 //! settled execution of a plan DAG: nodes in deterministic topological
 //! order, each with its outcome and the protected decision info the model
 //! saw at that node. Same plan digest + same input digest => equivalent
 //! trace; any divergence is reported loudly as a typed
-//! [`TraceDivergenceV1`] naming the first diverging record, field, and
+//! [`TraceDivergence`] naming the first diverging record, field, and
 //! expected/actual values -- never a silent boolean.
 
 use serde::{Deserialize, Serialize};
 
 use crate::digest::sha256_hex;
-use crate::exec_dag::ExecNodeKindV1;
+use crate::exec_dag::ExecNodeKind;
 use crate::schema::canonical_json;
 
 /// The protected decision info a model saw at one node (ZS-EXEC-002: model
@@ -21,7 +21,7 @@ use crate::schema::canonical_json;
 /// resolved alternative plus the policy rule that resolved it (None when
 /// uncovered -- which aborts execution before a trace is settled).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct ProtectedDecisionViewV1 {
+pub struct ProtectedDecisionView {
     /// The question posed at the decision point.
     pub question: String,
     /// The offered alternatives (non-empty).
@@ -34,35 +34,35 @@ pub struct ProtectedDecisionViewV1 {
     pub policy_rule_id: Option<String>,
 }
 
-impl ProtectedDecisionViewV1 {
+impl ProtectedDecisionView {
     /// Fail-closed validation: non-empty question, non-empty choices,
     /// observed and resolved values must be offered.
-    pub fn validate(&self) -> Result<(), ExecTraceErrorV1> {
+    pub fn validate(&self) -> Result<(), ExecTraceError> {
         if self.question.trim().is_empty() {
-            return Err(ExecTraceErrorV1::InvalidDecisionView(
+            return Err(ExecTraceError::InvalidDecisionView(
                 "empty question".into(),
             ));
         }
         if self.choices.is_empty() {
-            return Err(ExecTraceErrorV1::InvalidDecisionView(
+            return Err(ExecTraceError::InvalidDecisionView(
                 "empty choices".into(),
             ));
         }
         if !self.choices.iter().any(|c| c == &self.observed_value) {
-            return Err(ExecTraceErrorV1::InvalidDecisionView(format!(
+            return Err(ExecTraceError::InvalidDecisionView(format!(
                 "observed value {:?} not offered in choices",
                 self.observed_value
             )));
         }
         if !self.choices.iter().any(|c| c == &self.resolved_alternative) {
-            return Err(ExecTraceErrorV1::InvalidDecisionView(format!(
+            return Err(ExecTraceError::InvalidDecisionView(format!(
                 "resolved alternative {:?} not offered in choices",
                 self.resolved_alternative
             )));
         }
         if let Some(rule_id) = &self.policy_rule_id {
             if rule_id.trim().is_empty() {
-                return Err(ExecTraceErrorV1::InvalidDecisionView(
+                return Err(ExecTraceError::InvalidDecisionView(
                     "empty policy rule id".into(),
                 ));
             }
@@ -74,7 +74,7 @@ impl ProtectedDecisionViewV1 {
 /// Outcome of one traced node (settled executions only).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "PascalCase")]
-pub enum TraceOutcomeV1 {
+pub enum TraceOutcome {
     /// Node completed with a deterministic result digest.
     Completed { result_digest: String },
     /// Node failed with a typed failure code.
@@ -83,33 +83,33 @@ pub enum TraceOutcomeV1 {
 
 /// One record of a settled execution, in deterministic topological order.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct ExecTraceRecordV1 {
+pub struct ExecTraceRecord {
     /// Node id.
     pub node_id: String,
     /// Node kind (plain op or decision boundary).
-    pub kind: ExecNodeKindV1,
+    pub kind: ExecNodeKind,
     /// Node outcome.
-    pub outcome: TraceOutcomeV1,
+    pub outcome: TraceOutcome,
     /// Protected decision info the model saw at this node, if any.
-    pub protected_decision: Option<ProtectedDecisionViewV1>,
+    pub protected_decision: Option<ProtectedDecisionView>,
 }
 
 /// Deterministic execution trace of a plan DAG (ZS-EXEC-002/005).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct ExecTraceV1 {
+pub struct ExecTrace {
     /// Canonical digest of the executed plan (same plan => same digest).
     pub plan_digest: String,
     /// Digest of the execution inputs (same inputs => same digest).
     pub input_digest: String,
     /// Per-node records in deterministic topological order.
-    pub records: Vec<ExecTraceRecordV1>,
+    pub records: Vec<ExecTraceRecord>,
 }
 
-impl ExecTraceV1 {
+impl ExecTrace {
     /// New trace; records must already be in topological order (the
     /// executor guarantees this; `equivalence` compares order-sensitive).
-    pub fn new(plan_digest: impl Into<String>, input_digest: impl Into<String>, records: Vec<ExecTraceRecordV1>) -> Self {
-        ExecTraceV1 {
+    pub fn new(plan_digest: impl Into<String>, input_digest: impl Into<String>, records: Vec<ExecTraceRecord>) -> Self {
+        ExecTrace {
             plan_digest: plan_digest.into(),
             input_digest: input_digest.into(),
             records,
@@ -126,7 +126,7 @@ impl ExecTraceV1 {
     /// Equivalence comparison: same plan + same inputs => equivalent trace.
     /// Any difference is reported loudly as a typed first-divergence point
     /// (record index, node id, field, expected/actual), never silently.
-    pub fn equivalence(&self, other: &ExecTraceV1) -> TraceEquivalenceV1 {
+    pub fn equivalence(&self, other: &ExecTrace) -> TraceEquivalence {
         if self.plan_digest != other.plan_digest {
             return divergence(0, "", "plan_digest", &self.plan_digest, &other.plan_digest);
         }
@@ -212,7 +212,7 @@ impl ExecTraceV1 {
                 }
             }
         }
-        TraceEquivalenceV1 {
+        TraceEquivalence {
             equivalent: true,
             first_divergence: None,
         }
@@ -226,10 +226,10 @@ fn divergence(
     field: &str,
     expected: &impl Serialize,
     actual: &impl Serialize,
-) -> TraceEquivalenceV1 {
-    TraceEquivalenceV1 {
+) -> TraceEquivalence {
+    TraceEquivalence {
         equivalent: false,
-        first_divergence: Some(TraceDivergenceV1 {
+        first_divergence: Some(TraceDivergence {
             record_index,
             node_id: node_id.to_string(),
             field: field.to_string(),
@@ -241,7 +241,7 @@ fn divergence(
 
 /// The first divergence between two traces, pinpointed (ZS-EXEC-005).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct TraceDivergenceV1 {
+pub struct TraceDivergence {
     /// Index of the first diverging record (0 for root-level divergences).
     pub record_index: usize,
     /// Node id of the first diverging record ("" for root-level).
@@ -255,7 +255,7 @@ pub struct TraceDivergenceV1 {
     pub actual: String,
 }
 
-impl TraceDivergenceV1 {
+impl TraceDivergence {
     /// Loud human-readable description for logs.
     pub fn describe(&self) -> String {
         format!(
@@ -267,29 +267,29 @@ impl TraceDivergenceV1 {
 
 /// Result of an equivalence comparison: never a silent boolean.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct TraceEquivalenceV1 {
+pub struct TraceEquivalence {
     /// True only when plan digest, input digest, and every record match.
     pub equivalent: bool,
     /// The first divergence, when not equivalent.
-    pub first_divergence: Option<TraceDivergenceV1>,
+    pub first_divergence: Option<TraceDivergence>,
 }
 
 /// Fail-closed trace errors.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum ExecTraceErrorV1 {
+pub enum ExecTraceError {
     /// A protected decision view failed validation.
     InvalidDecisionView(String),
 }
 
-impl std::fmt::Display for ExecTraceErrorV1 {
+impl std::fmt::Display for ExecTraceError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            ExecTraceErrorV1::InvalidDecisionView(detail) => {
+            ExecTraceError::InvalidDecisionView(detail) => {
                 write!(f, "invalid protected decision view: {detail}")
             }
         }
     }
 }
 
-impl std::error::Error for ExecTraceErrorV1 {}
+impl std::error::Error for ExecTraceError {}
 

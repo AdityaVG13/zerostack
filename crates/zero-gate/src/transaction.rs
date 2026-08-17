@@ -15,31 +15,31 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use sha2::{Digest as _, Sha256};
 use zero_abi::{
-    canonical_json, ArtifactOwnerV1, DigestV1, EffectClass, EffectProgramV1, EffectRollbackV1,
-    TypedEffectOperationV1,
+    canonical_json, ArtifactOwner, Sha256Digest, EffectClass, EffectProgram, EffectRollback,
+    TypedEffectOperation,
 };
-use zero_cert::EffectAcceptedV1;
+use zero_cert::EffectAccepted;
 use zero_store::{
-    abort_journal_v1, commit_journal_v1, prepare_journal_v1, recover_journal_v1,
-    ContinuationCartridgeV1, DurableProfileIdV1, JournalBindingV1, JournalErrorV1,
-    JournalFailureCodeV1, JournalPathsV1, RecoveryOutcomeV1, RecoveryReceiptV1,
+    abort_journal, commit_journal, prepare_journal, recover_journal,
+    ContinuationCartridge, DurableProfileId, JournalBinding, JournalError,
+    JournalFailureCode, JournalPaths, RecoveryOutcome, RecoveryReceipt,
 };
 
-pub const TRANSACTION_CONTRACT_VERSION_V1: u16 = 1;
-pub const TRANSACTION_MAX_RESOURCES_V1: usize = 256;
-pub const TRANSACTION_MAX_CANONICAL_BYTES_V1: usize = 1_048_576;
+pub const TRANSACTION_CONTRACT_VERSION: u16 = 1;
+pub const TRANSACTION_MAX_RESOURCES: usize = 256;
+pub const TRANSACTION_MAX_CANONICAL_BYTES: usize = 1_048_576;
 
-const REQUEST_DOMAIN_V1: &[u8] = b"zerostack.effect_closure.request.v1\0";
-const TRANSACTION_ID_DOMAIN_V1: &[u8] = b"zerostack.effect_transaction.id.v1\0";
-const MANIFEST_DOMAIN_V1: &[u8] = b"zerostack.effect_closure.manifest.v1\0";
-const EXTERNAL_INVENTORY_DOMAIN_V1: &[u8] = b"zerostack.effect_closure.external_inventory.v1\0";
-const EXTERNAL_DEBT_DOMAIN_V1: &[u8] = b"zerostack.effect_closure.external_debt.v1\0";
-const JOURNAL_RECEIPT_DOMAIN_V1: &[u8] = b"zerostack.effect_transaction.receipt.v1\0";
-const CONTRACT_DOMAIN_V1: &[u8] = b"zerostack.transaction.contract.v1\0";
+const REQUEST_DOMAIN: &[u8] = b"zerostack.effect_closure.request.v1\0";
+const TRANSACTION_ID_DOMAIN: &[u8] = b"zerostack.effect_transaction.id.v1\0";
+const MANIFEST_DOMAIN: &[u8] = b"zerostack.effect_closure.manifest.v1\0";
+const EXTERNAL_INVENTORY_DOMAIN: &[u8] = b"zerostack.effect_closure.external_inventory.v1\0";
+const EXTERNAL_DEBT_DOMAIN: &[u8] = b"zerostack.effect_closure.external_debt.v1\0";
+const JOURNAL_RECEIPT_DOMAIN: &[u8] = b"zerostack.effect_transaction.receipt.v1\0";
+const CONTRACT_DOMAIN: &[u8] = b"zerostack.transaction.contract.v1\0";
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, Ord, PartialEq, PartialOrd, Serialize)]
 #[serde(rename_all = "snake_case")]
-pub enum TransactionResourceKindV1 {
+pub enum TransactionResourceKind {
     ProjectFilesystem,
     GraphIndex,
     Toolchain,
@@ -59,7 +59,7 @@ pub enum TransactionResourceKindV1 {
     OtherExternal,
 }
 
-impl TransactionResourceKindV1 {
+impl TransactionResourceKind {
     pub const fn is_external(self) -> bool {
         !matches!(
             self,
@@ -74,13 +74,13 @@ impl TransactionResourceKindV1 {
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, Ord, PartialEq, PartialOrd, Serialize)]
 #[serde(rename_all = "snake_case")]
-pub enum TransactionAccessV1 {
+pub enum TransactionAccess {
     Read,
     Write,
     ReadWrite,
 }
 
-impl TransactionAccessV1 {
+impl TransactionAccess {
     const fn writes(self) -> bool {
         matches!(self, Self::Write | Self::ReadWrite)
     }
@@ -88,7 +88,7 @@ impl TransactionAccessV1 {
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, Ord, PartialEq, PartialOrd, Serialize)]
 #[serde(rename_all = "snake_case")]
-pub enum ResourceIsolationModeV1 {
+pub enum ResourceIsolationMode {
     ImmutableSnapshot,
     RecordedReplay,
     Buffered,
@@ -100,7 +100,7 @@ pub enum ResourceIsolationModeV1 {
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, Ord, PartialEq, PartialOrd, Serialize)]
 #[serde(rename_all = "snake_case")]
-pub enum ResourceRestorationModeV1 {
+pub enum ResourceRestorationMode {
     NotNeeded,
     RecordedReplay,
     JournalRollback,
@@ -110,27 +110,27 @@ pub enum ResourceRestorationModeV1 {
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, Ord, PartialEq, PartialOrd, Serialize)]
 #[serde(deny_unknown_fields)]
-pub struct TransactionResourceRequirementV1 {
-    pub owner: ArtifactOwnerV1,
-    pub kind: TransactionResourceKindV1,
-    pub scope_digest: DigestV1,
-    pub baseline_state_digest: DigestV1,
-    pub access: TransactionAccessV1,
-    pub authority_digest: DigestV1,
+pub struct TransactionResourceRequirement {
+    pub owner: ArtifactOwner,
+    pub kind: TransactionResourceKind,
+    pub scope_digest: Sha256Digest,
+    pub baseline_state_digest: Sha256Digest,
+    pub access: TransactionAccess,
+    pub authority_digest: Sha256Digest,
 }
 
-impl TransactionResourceRequirementV1 {
-    fn key(self) -> (TransactionResourceKindV1, DigestV1) {
+impl TransactionResourceRequirement {
+    fn key(self) -> (TransactionResourceKind, Sha256Digest) {
         (self.kind, self.scope_digest)
     }
 
-    fn validate(self) -> Result<(), TransactionErrorV1> {
-        if self.scope_digest == DigestV1::ZERO
-            || self.baseline_state_digest == DigestV1::ZERO
-            || self.authority_digest == DigestV1::ZERO
+    fn validate(self) -> Result<(), TransactionError> {
+        if self.scope_digest == Sha256Digest::ZERO
+            || self.baseline_state_digest == Sha256Digest::ZERO
+            || self.authority_digest == Sha256Digest::ZERO
         {
-            return Err(TransactionErrorV1::new(
-                TransactionFailureCodeV1::InvalidResource,
+            return Err(TransactionError::new(
+                TransactionFailureCode::InvalidResource,
                 Some(self),
                 "resource scope, baseline state, and authority digests must be nonzero",
             ));
@@ -142,25 +142,25 @@ impl TransactionResourceRequirementV1 {
 /// Exact resource inventory required by the trusted controller for one effect.
 ///
 /// Fields are private and this type is not deserializable. Callers must derive
-/// it from a validated `EffectProgramV1` through `new`.
+/// it from a validated `EffectProgram` through `new`.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
-pub struct EffectClosureRequestV1 {
+pub struct EffectClosureRequest {
     contract_version: u16,
-    action_digest: DigestV1,
-    baseline_state: DigestV1,
-    rollback: EffectRollbackV1,
-    resources: Vec<TransactionResourceRequirementV1>,
+    action_digest: Sha256Digest,
+    baseline_state: Sha256Digest,
+    rollback: EffectRollback,
+    resources: Vec<TransactionResourceRequirement>,
 }
 
-impl EffectClosureRequestV1 {
+impl EffectClosureRequest {
     pub fn new(
-        program: &EffectProgramV1,
-        mut resources: Vec<TransactionResourceRequirementV1>,
-    ) -> Result<Self, TransactionErrorV1> {
+        program: &EffectProgram,
+        mut resources: Vec<TransactionResourceRequirement>,
+    ) -> Result<Self, TransactionError> {
         program.validate().map_err(|error| {
-            TransactionErrorV1::new(
-                TransactionFailureCodeV1::InvalidEffectProgram,
+            TransactionError::new(
+                TransactionFailureCode::InvalidEffectProgram,
                 None,
                 error.to_string(),
             )
@@ -168,7 +168,7 @@ impl EffectClosureRequestV1 {
         sort_and_validate_requirements(&mut resources)?;
         validate_program_resource_mapping(program, &resources)?;
         let request = Self {
-            contract_version: TRANSACTION_CONTRACT_VERSION_V1,
+            contract_version: TRANSACTION_CONTRACT_VERSION,
             action_digest: program.action_digest(),
             baseline_state: program.base_state(),
             rollback: program.rollback(),
@@ -178,39 +178,39 @@ impl EffectClosureRequestV1 {
         Ok(request)
     }
 
-    pub const fn action_digest(&self) -> DigestV1 {
+    pub const fn action_digest(&self) -> Sha256Digest {
         self.action_digest
     }
-    pub const fn baseline_state(&self) -> DigestV1 {
+    pub const fn baseline_state(&self) -> Sha256Digest {
         self.baseline_state
     }
-    pub const fn rollback(&self) -> EffectRollbackV1 {
+    pub const fn rollback(&self) -> EffectRollback {
         self.rollback
     }
-    pub fn resources(&self) -> &[TransactionResourceRequirementV1] {
+    pub fn resources(&self) -> &[TransactionResourceRequirement] {
         &self.resources
     }
 
-    pub fn canonical_bytes(&self) -> Result<Vec<u8>, TransactionErrorV1> {
+    pub fn canonical_bytes(&self) -> Result<Vec<u8>, TransactionError> {
         self.validate()?;
         canonical_serialize(self)
     }
 
-    pub fn digest(&self) -> Result<DigestV1, TransactionErrorV1> {
-        Ok(domain_digest(REQUEST_DOMAIN_V1, &self.canonical_bytes()?))
+    pub fn digest(&self) -> Result<Sha256Digest, TransactionError> {
+        Ok(domain_digest(REQUEST_DOMAIN, &self.canonical_bytes()?))
     }
 
-    fn validate(&self) -> Result<(), TransactionErrorV1> {
-        if self.contract_version != TRANSACTION_CONTRACT_VERSION_V1 {
-            return Err(TransactionErrorV1::new(
-                TransactionFailureCodeV1::SchemaVersionMismatch,
+    fn validate(&self) -> Result<(), TransactionError> {
+        if self.contract_version != TRANSACTION_CONTRACT_VERSION {
+            return Err(TransactionError::new(
+                TransactionFailureCode::SchemaVersionMismatch,
                 None,
                 "effect-closure request version is unsupported",
             ));
         }
-        if self.action_digest == DigestV1::ZERO || self.baseline_state == DigestV1::ZERO {
-            return Err(TransactionErrorV1::new(
-                TransactionFailureCodeV1::InvalidEffectProgram,
+        if self.action_digest == Sha256Digest::ZERO || self.baseline_state == Sha256Digest::ZERO {
+            return Err(TransactionError::new(
+                TransactionFailureCode::InvalidEffectProgram,
                 None,
                 "action and baseline digests must be nonzero",
             ));
@@ -221,60 +221,60 @@ impl EffectClosureRequestV1 {
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
-pub struct EffectResourceClosureV1 {
-    pub requirement: TransactionResourceRequirementV1,
-    pub isolation: ResourceIsolationModeV1,
-    pub restoration: ResourceRestorationModeV1,
+pub struct EffectResourceClosure {
+    pub requirement: TransactionResourceRequirement,
+    pub isolation: ResourceIsolationMode,
+    pub restoration: ResourceRestorationMode,
 }
 
-impl EffectResourceClosureV1 {
-    fn validate(self) -> Result<(), TransactionErrorV1> {
-        if self.isolation == ResourceIsolationModeV1::Unsupported
-            || self.restoration == ResourceRestorationModeV1::Unsupported
+impl EffectResourceClosure {
+    fn validate(self) -> Result<(), TransactionError> {
+        if self.isolation == ResourceIsolationMode::Unsupported
+            || self.restoration == ResourceRestorationMode::Unsupported
         {
-            return Err(TransactionErrorV1::new(
-                TransactionFailureCodeV1::UnsupportedIsolation,
+            return Err(TransactionError::new(
+                TransactionFailureCode::UnsupportedIsolation,
                 Some(self.requirement),
                 "unsupported isolation or restoration blocks speculation",
             ));
         }
         let access_ok = match self.requirement.access {
-            TransactionAccessV1::Read => {
-                !matches!(self.isolation, ResourceIsolationModeV1::DelayedUntilCommit)
+            TransactionAccess::Read => {
+                !matches!(self.isolation, ResourceIsolationMode::DelayedUntilCommit)
             }
-            TransactionAccessV1::Write | TransactionAccessV1::ReadWrite => !matches!(
+            TransactionAccess::Write | TransactionAccess::ReadWrite => !matches!(
                 self.isolation,
-                ResourceIsolationModeV1::ImmutableSnapshot
-                    | ResourceIsolationModeV1::RecordedReplay
+                ResourceIsolationMode::ImmutableSnapshot
+                    | ResourceIsolationMode::RecordedReplay
             ),
         };
         if !access_ok {
-            return Err(TransactionErrorV1::new(
-                TransactionFailureCodeV1::IsolationAccessMismatch,
+            return Err(TransactionError::new(
+                TransactionFailureCode::IsolationAccessMismatch,
                 Some(self.requirement),
                 "resource access is incompatible with its isolation mode",
             ));
         }
         let expected = match self.isolation {
-            ResourceIsolationModeV1::ImmutableSnapshot
-            | ResourceIsolationModeV1::Buffered
-            | ResourceIsolationModeV1::DelayedUntilCommit => ResourceRestorationModeV1::NotNeeded,
-            ResourceIsolationModeV1::RecordedReplay => ResourceRestorationModeV1::RecordedReplay,
-            ResourceIsolationModeV1::Journaled => ResourceRestorationModeV1::JournalRollback,
-            ResourceIsolationModeV1::Transactional => {
-                ResourceRestorationModeV1::TransactionRollback
+            ResourceIsolationMode::ImmutableSnapshot
+            | ResourceIsolationMode::Buffered
+            | ResourceIsolationMode::DelayedUntilCommit => ResourceRestorationMode::NotNeeded,
+            ResourceIsolationMode::RecordedReplay => ResourceRestorationMode::RecordedReplay,
+            ResourceIsolationMode::Journaled => ResourceRestorationMode::JournalRollback,
+            ResourceIsolationMode::Transactional => {
+                ResourceRestorationMode::TransactionRollback
             }
-            ResourceIsolationModeV1::Unsupported => {
-                return Err(TransactionErrorV1::new(
-                    TransactionFailureCodeV1::UnsupportedIsolation,
+            ResourceIsolationMode::Unsupported => {
+                return Err(TransactionError::new(
+                    TransactionFailureCode::UnsupportedIsolation,
                     Some(self.requirement),
                     "unsupported isolation or restoration blocks speculation",
                 ));
             }
         };
         if self.restoration != expected {
-            return Err(TransactionErrorV1::new(
-                TransactionFailureCodeV1::RestorationMismatch,
+            return Err(TransactionError::new(
+                TransactionFailureCode::RestorationMismatch,
                 Some(self.requirement),
                 format!(
                     "isolation {:?} requires restoration {:?}",
@@ -289,20 +289,20 @@ impl EffectResourceClosureV1 {
 /// Canonical declaration of isolation and restoration for every required resource.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
-pub struct EffectClosureManifestV1 {
+pub struct EffectClosureManifest {
     contract_version: u16,
-    request_digest: DigestV1,
-    resources: Vec<EffectResourceClosureV1>,
+    request_digest: Sha256Digest,
+    resources: Vec<EffectResourceClosure>,
 }
 
-impl EffectClosureManifestV1 {
+impl EffectClosureManifest {
     pub fn new(
-        request: &EffectClosureRequestV1,
-        mut resources: Vec<EffectResourceClosureV1>,
-    ) -> Result<Self, TransactionErrorV1> {
+        request: &EffectClosureRequest,
+        mut resources: Vec<EffectResourceClosure>,
+    ) -> Result<Self, TransactionError> {
         resources.sort_by_key(|entry| entry.requirement.key());
         let manifest = Self {
-            contract_version: TRANSACTION_CONTRACT_VERSION_V1,
+            contract_version: TRANSACTION_CONTRACT_VERSION,
             request_digest: request.digest()?,
             resources,
         };
@@ -310,27 +310,27 @@ impl EffectClosureManifestV1 {
         Ok(manifest)
     }
 
-    pub fn resources(&self) -> &[EffectResourceClosureV1] {
+    pub fn resources(&self) -> &[EffectResourceClosure] {
         &self.resources
     }
 
-    pub fn canonical_bytes(&self) -> Result<Vec<u8>, TransactionErrorV1> {
+    pub fn canonical_bytes(&self) -> Result<Vec<u8>, TransactionError> {
         self.validate_body()?;
         canonical_serialize(self)
     }
 
-    pub fn from_canonical_bytes(bytes: &[u8]) -> Result<Self, TransactionErrorV1> {
-        if bytes.len() > TRANSACTION_MAX_CANONICAL_BYTES_V1 {
-            return Err(TransactionErrorV1::new(
-                TransactionFailureCodeV1::CanonicalPayloadTooLarge,
+    pub fn from_canonical_bytes(bytes: &[u8]) -> Result<Self, TransactionError> {
+        if bytes.len() > TRANSACTION_MAX_CANONICAL_BYTES {
+            return Err(TransactionError::new(
+                TransactionFailureCode::CanonicalPayloadTooLarge,
                 None,
                 format!("effect-closure manifest has {} bytes", bytes.len()),
             ));
         }
         let value: Value = serde_json::from_slice(bytes).map_err(serialization_error)?;
         if canonical_json(&value).as_bytes() != bytes {
-            return Err(TransactionErrorV1::new(
-                TransactionFailureCodeV1::NonCanonicalEncoding,
+            return Err(TransactionError::new(
+                TransactionFailureCode::NonCanonicalEncoding,
                 None,
                 "effect-closure manifest is not exact canonical JSON",
             ));
@@ -340,35 +340,35 @@ impl EffectClosureManifestV1 {
         Ok(manifest)
     }
 
-    pub fn digest(&self) -> Result<DigestV1, TransactionErrorV1> {
-        Ok(domain_digest(MANIFEST_DOMAIN_V1, &self.canonical_bytes()?))
+    pub fn digest(&self) -> Result<Sha256Digest, TransactionError> {
+        Ok(domain_digest(MANIFEST_DOMAIN, &self.canonical_bytes()?))
     }
 
-    fn validate_body(&self) -> Result<(), TransactionErrorV1> {
-        if self.contract_version != TRANSACTION_CONTRACT_VERSION_V1 {
-            return Err(TransactionErrorV1::new(
-                TransactionFailureCodeV1::SchemaVersionMismatch,
+    fn validate_body(&self) -> Result<(), TransactionError> {
+        if self.contract_version != TRANSACTION_CONTRACT_VERSION {
+            return Err(TransactionError::new(
+                TransactionFailureCode::SchemaVersionMismatch,
                 None,
                 "effect-closure manifest version is unsupported",
             ));
         }
-        if self.request_digest == DigestV1::ZERO {
-            return Err(TransactionErrorV1::new(
-                TransactionFailureCodeV1::RequestMismatch,
+        if self.request_digest == Sha256Digest::ZERO {
+            return Err(TransactionError::new(
+                TransactionFailureCode::RequestMismatch,
                 None,
                 "effect-closure request digest is zero",
             ));
         }
         if self.resources.is_empty() {
-            return Err(TransactionErrorV1::new(
-                TransactionFailureCodeV1::EmptyResourceInventory,
+            return Err(TransactionError::new(
+                TransactionFailureCode::EmptyResourceInventory,
                 None,
                 "effect-closure inventory must be explicit and nonempty",
             ));
         }
-        if self.resources.len() > TRANSACTION_MAX_RESOURCES_V1 {
-            return Err(TransactionErrorV1::new(
-                TransactionFailureCodeV1::TooManyResources,
+        if self.resources.len() > TRANSACTION_MAX_RESOURCES {
+            return Err(TransactionError::new(
+                TransactionFailureCode::TooManyResources,
                 None,
                 format!(
                     "effect-closure inventory has {} resources",
@@ -381,8 +381,8 @@ impl EffectClosureManifestV1 {
             entry.requirement.validate()?;
             let key = entry.requirement.key();
             if previous.is_some_and(|prior| prior >= key) {
-                return Err(TransactionErrorV1::new(
-                    TransactionFailureCodeV1::NonCanonicalResourceInventory,
+                return Err(TransactionError::new(
+                    TransactionFailureCode::NonCanonicalResourceInventory,
                     Some(entry.requirement),
                     "resource closures must be strictly sorted without duplicate scopes",
                 ));
@@ -395,36 +395,36 @@ impl EffectClosureManifestV1 {
 
 /// Private capability proving that the exact requested inventory is effect-closed.
 #[derive(Debug)]
-pub struct ClosedEffectBoundaryV1 {
-    request_digest: DigestV1,
-    manifest_digest: DigestV1,
-    action_digest: DigestV1,
-    baseline_state: DigestV1,
-    rollback: EffectRollbackV1,
-    external_inventory_digest: DigestV1,
-    external_restoration_debt_digest: DigestV1,
+pub struct ClosedEffectBoundary {
+    request_digest: Sha256Digest,
+    manifest_digest: Sha256Digest,
+    action_digest: Sha256Digest,
+    baseline_state: Sha256Digest,
+    rollback: EffectRollback,
+    external_inventory_digest: Sha256Digest,
+    external_restoration_debt_digest: Sha256Digest,
     resource_count: u16,
     external_resource_count: u16,
     external_restoration_debt_count: u16,
 }
 
-impl ClosedEffectBoundaryV1 {
-    pub const fn request_digest(&self) -> DigestV1 {
+impl ClosedEffectBoundary {
+    pub const fn request_digest(&self) -> Sha256Digest {
         self.request_digest
     }
-    pub const fn manifest_digest(&self) -> DigestV1 {
+    pub const fn manifest_digest(&self) -> Sha256Digest {
         self.manifest_digest
     }
-    pub const fn action_digest(&self) -> DigestV1 {
+    pub const fn action_digest(&self) -> Sha256Digest {
         self.action_digest
     }
-    pub const fn baseline_state(&self) -> DigestV1 {
+    pub const fn baseline_state(&self) -> Sha256Digest {
         self.baseline_state
     }
-    pub const fn rollback(&self) -> EffectRollbackV1 {
+    pub const fn rollback(&self) -> EffectRollback {
         self.rollback
     }
-    pub const fn external_inventory_digest(&self) -> DigestV1 {
+    pub const fn external_inventory_digest(&self) -> Sha256Digest {
         self.external_inventory_digest
     }
     pub const fn resource_count(&self) -> u16 {
@@ -433,7 +433,7 @@ impl ClosedEffectBoundaryV1 {
     pub const fn external_resource_count(&self) -> u16 {
         self.external_resource_count
     }
-    pub const fn external_restoration_debt_digest(&self) -> DigestV1 {
+    pub const fn external_restoration_debt_digest(&self) -> Sha256Digest {
         self.external_restoration_debt_digest
     }
     pub const fn external_restoration_debt_count(&self) -> u16 {
@@ -441,15 +441,15 @@ impl ClosedEffectBoundaryV1 {
     }
 }
 
-pub fn validate_effect_closure_v1(
-    request: &EffectClosureRequestV1,
-    manifest: &EffectClosureManifestV1,
-) -> Result<ClosedEffectBoundaryV1, TransactionErrorV1> {
+pub fn validate_effect_closure(
+    request: &EffectClosureRequest,
+    manifest: &EffectClosureManifest,
+) -> Result<ClosedEffectBoundary, TransactionError> {
     request.validate()?;
     manifest.validate_body()?;
     if manifest.request_digest != request.digest()? {
-        return Err(TransactionErrorV1::new(
-            TransactionFailureCodeV1::RequestMismatch,
+        return Err(TransactionError::new(
+            TransactionFailureCode::RequestMismatch,
             None,
             "effect-closure manifest binds another request",
         ));
@@ -463,13 +463,13 @@ pub fn validate_effect_closure_v1(
             }
             (Some(required), Some(entry)) => {
                 let code = if required.key() < entry.requirement.key() {
-                    TransactionFailureCodeV1::MissingResource
+                    TransactionFailureCode::MissingResource
                 } else {
-                    TransactionFailureCodeV1::UnexpectedResource
+                    TransactionFailureCode::UnexpectedResource
                 };
-                return Err(TransactionErrorV1::new(
+                return Err(TransactionError::new(
                     code,
-                    Some(if code == TransactionFailureCodeV1::MissingResource {
+                    Some(if code == TransactionFailureCode::MissingResource {
                         *required
                     } else {
                         entry.requirement
@@ -478,15 +478,15 @@ pub fn validate_effect_closure_v1(
                 ));
             }
             (Some(required), None) => {
-                return Err(TransactionErrorV1::new(
-                    TransactionFailureCodeV1::MissingResource,
+                return Err(TransactionError::new(
+                    TransactionFailureCode::MissingResource,
                     Some(*required),
                     "effect-closure manifest omitted a required resource",
                 ));
             }
             (None, Some(entry)) => {
-                return Err(TransactionErrorV1::new(
-                    TransactionFailureCodeV1::UnexpectedResource,
+                return Err(TransactionError::new(
+                    TransactionFailureCode::UnexpectedResource,
                     Some(entry.requirement),
                     "effect-closure manifest added an unrequested resource",
                 ));
@@ -508,22 +508,22 @@ pub fn validate_effect_closure_v1(
             entry.requirement.access.writes()
                 && matches!(
                     entry.isolation,
-                    ResourceIsolationModeV1::Journaled | ResourceIsolationModeV1::Transactional
+                    ResourceIsolationMode::Journaled | ResourceIsolationMode::Transactional
                 )
         })
         .copied()
         .collect::<Vec<_>>();
     let external_bytes = canonical_serialize(&external)?;
     let external_debt_bytes = canonical_serialize(&external_debt)?;
-    Ok(ClosedEffectBoundaryV1 {
+    Ok(ClosedEffectBoundary {
         request_digest: request.digest()?,
         manifest_digest: manifest.digest()?,
         action_digest: request.action_digest,
         baseline_state: request.baseline_state,
         rollback: request.rollback,
-        external_inventory_digest: domain_digest(EXTERNAL_INVENTORY_DOMAIN_V1, &external_bytes),
+        external_inventory_digest: domain_digest(EXTERNAL_INVENTORY_DOMAIN, &external_bytes),
         external_restoration_debt_digest: domain_digest(
-            EXTERNAL_DEBT_DOMAIN_V1,
+            EXTERNAL_DEBT_DOMAIN,
             &external_debt_bytes,
         ),
         resource_count: request.resources.len() as u16,
@@ -533,37 +533,37 @@ pub fn validate_effect_closure_v1(
 }
 
 fn validate_rollback_coverage(
-    rollback: EffectRollbackV1,
-    resources: &[EffectResourceClosureV1],
-) -> Result<(), TransactionErrorV1> {
+    rollback: EffectRollback,
+    resources: &[EffectResourceClosure],
+) -> Result<(), TransactionError> {
     let writes = resources
         .iter()
         .filter(|entry| entry.requirement.access.writes())
         .collect::<Vec<_>>();
-    if rollback == EffectRollbackV1::RawFallback {
-        return Err(TransactionErrorV1::new(
-            TransactionFailureCodeV1::RawFallbackIsNotSpeculation,
+    if rollback == EffectRollback::RawFallback {
+        return Err(TransactionError::new(
+            TransactionFailureCode::RawFallbackIsNotSpeculation,
             None,
             "raw fallback is the frozen baseline, not a speculative transaction",
         ));
     }
-    if rollback == EffectRollbackV1::ReadOnly && !writes.is_empty() {
-        return Err(TransactionErrorV1::new(
-            TransactionFailureCodeV1::RollbackMismatch,
+    if rollback == EffectRollback::ReadOnly && !writes.is_empty() {
+        return Err(TransactionError::new(
+            TransactionFailureCode::RollbackMismatch,
             Some(writes[0].requirement),
             "read-only rollback cannot cover a write resource",
         ));
     }
-    if rollback != EffectRollbackV1::ReadOnly && writes.is_empty() {
-        return Err(TransactionErrorV1::new(
-            TransactionFailureCodeV1::RollbackMismatch,
+    if rollback != EffectRollback::ReadOnly && writes.is_empty() {
+        return Err(TransactionError::new(
+            TransactionFailureCode::RollbackMismatch,
             None,
             "mutating rollback class requires at least one write resource",
         ));
     }
-    if rollback == EffectRollbackV1::SingleAtomic && writes.len() != 1 {
-        return Err(TransactionErrorV1::new(
-            TransactionFailureCodeV1::RollbackMismatch,
+    if rollback == EffectRollback::SingleAtomic && writes.len() != 1 {
+        return Err(TransactionError::new(
+            TransactionFailureCode::RollbackMismatch,
             None,
             "single-atomic rollback requires exactly one isolated write resource",
         ));
@@ -571,28 +571,28 @@ fn validate_rollback_coverage(
     for entry in writes {
         let mode = entry.isolation;
         let compatible = match rollback {
-            EffectRollbackV1::ReadOnly | EffectRollbackV1::RawFallback => false,
-            EffectRollbackV1::SingleAtomic | EffectRollbackV1::Journaled => matches!(
+            EffectRollback::ReadOnly | EffectRollback::RawFallback => false,
+            EffectRollback::SingleAtomic | EffectRollback::Journaled => matches!(
                 mode,
-                ResourceIsolationModeV1::Buffered
-                    | ResourceIsolationModeV1::Journaled
-                    | ResourceIsolationModeV1::Transactional
-                    | ResourceIsolationModeV1::DelayedUntilCommit
+                ResourceIsolationMode::Buffered
+                    | ResourceIsolationMode::Journaled
+                    | ResourceIsolationMode::Transactional
+                    | ResourceIsolationMode::DelayedUntilCommit
             ),
-            EffectRollbackV1::WorkspaceClone => matches!(
+            EffectRollback::WorkspaceClone => matches!(
                 mode,
-                ResourceIsolationModeV1::Buffered | ResourceIsolationModeV1::DelayedUntilCommit
+                ResourceIsolationMode::Buffered | ResourceIsolationMode::DelayedUntilCommit
             ),
-            EffectRollbackV1::ExternalTransaction => matches!(
+            EffectRollback::ExternalTransaction => matches!(
                 mode,
-                ResourceIsolationModeV1::Buffered
-                    | ResourceIsolationModeV1::Transactional
-                    | ResourceIsolationModeV1::DelayedUntilCommit
+                ResourceIsolationMode::Buffered
+                    | ResourceIsolationMode::Transactional
+                    | ResourceIsolationMode::DelayedUntilCommit
             ),
         };
         if !compatible {
-            return Err(TransactionErrorV1::new(
-                TransactionFailureCodeV1::RollbackMismatch,
+            return Err(TransactionError::new(
+                TransactionFailureCode::RollbackMismatch,
                 Some(entry.requirement),
                 format!("rollback {rollback:?} cannot cover isolation {mode:?}"),
             ));
@@ -603,28 +603,28 @@ fn validate_rollback_coverage(
 
 /// Live linear handle for one prepared zero-store journal transaction.
 #[derive(Debug)]
-pub struct EffectTransactionV1 {
-    paths: JournalPathsV1,
-    binding: JournalBindingV1,
-    cartridge: ContinuationCartridgeV1,
-    closure: ClosureBindingV1,
+pub struct EffectTransaction {
+    paths: JournalPaths,
+    binding: JournalBinding,
+    cartridge: ContinuationCartridge,
+    closure: ClosureBinding,
 }
 
 #[derive(Clone, Copy, Debug)]
-struct ClosureBindingV1 {
-    request_digest: DigestV1,
-    manifest_digest: DigestV1,
-    action_digest: DigestV1,
-    baseline_state: DigestV1,
-    external_inventory_digest: DigestV1,
-    external_restoration_debt_digest: DigestV1,
+struct ClosureBinding {
+    request_digest: Sha256Digest,
+    manifest_digest: Sha256Digest,
+    action_digest: Sha256Digest,
+    baseline_state: Sha256Digest,
+    external_inventory_digest: Sha256Digest,
+    external_restoration_debt_digest: Sha256Digest,
     resource_count: u16,
     external_resource_count: u16,
     external_restoration_debt_count: u16,
 }
 
-impl ClosureBindingV1 {
-    fn from_closed(closed: &ClosedEffectBoundaryV1) -> Self {
+impl ClosureBinding {
+    fn from_closed(closed: &ClosedEffectBoundary) -> Self {
         Self {
             request_digest: closed.request_digest,
             manifest_digest: closed.manifest_digest,
@@ -639,21 +639,21 @@ impl ClosureBindingV1 {
     }
 }
 
-pub fn effect_journal_binding_v1(
-    closed: &ClosedEffectBoundaryV1,
-    assembly_manifest_digest: DigestV1,
-    durable_profile_id: DurableProfileIdV1,
-    candidate_root: DigestV1,
-    owner_identity_digest: DigestV1,
-) -> Result<JournalBindingV1, TransactionErrorV1> {
+pub fn effect_journal_binding(
+    closed: &ClosedEffectBoundary,
+    assembly_manifest_digest: Sha256Digest,
+    durable_profile_id: DurableProfileId,
+    candidate_root: Sha256Digest,
+    owner_identity_digest: Sha256Digest,
+) -> Result<JournalBinding, TransactionError> {
     for (label, digest) in [
         ("assembly manifest", assembly_manifest_digest),
         ("candidate root", candidate_root),
         ("owner identity", owner_identity_digest),
     ] {
-        if digest == DigestV1::ZERO {
-            return Err(TransactionErrorV1::new(
-                TransactionFailureCodeV1::JournalBindingMismatch,
+        if digest == Sha256Digest::ZERO {
+            return Err(TransactionError::new(
+                TransactionFailureCode::JournalBindingMismatch,
                 None,
                 format!("{label} digest is zero"),
             ));
@@ -666,7 +666,7 @@ pub fn effect_journal_binding_v1(
         candidate_root,
         owner_identity_digest,
     );
-    let binding = JournalBindingV1::new(
+    let binding = JournalBinding::new(
         transaction_id,
         assembly_manifest_digest,
         durable_profile_id,
@@ -679,12 +679,12 @@ pub fn effect_journal_binding_v1(
 }
 
 fn expected_transaction_id(
-    closed: &ClosedEffectBoundaryV1,
-    assembly_manifest_digest: DigestV1,
-    durable_profile_id: DurableProfileIdV1,
-    candidate_root: DigestV1,
-    owner_identity_digest: DigestV1,
-) -> DigestV1 {
+    closed: &ClosedEffectBoundary,
+    assembly_manifest_digest: Sha256Digest,
+    durable_profile_id: DurableProfileId,
+    candidate_root: Sha256Digest,
+    owner_identity_digest: Sha256Digest,
+) -> Sha256Digest {
     let mut bytes = Vec::with_capacity(32 * 6 + 2);
     bytes.extend_from_slice(closed.request_digest.as_bytes());
     bytes.extend_from_slice(closed.manifest_digest.as_bytes());
@@ -695,33 +695,33 @@ fn expected_transaction_id(
     bytes.extend_from_slice(profile);
     bytes.extend_from_slice(candidate_root.as_bytes());
     bytes.extend_from_slice(owner_identity_digest.as_bytes());
-    domain_digest(TRANSACTION_ID_DOMAIN_V1, &bytes)
+    domain_digest(TRANSACTION_ID_DOMAIN, &bytes)
 }
 
-pub fn begin_effect_transaction_v1(
-    paths: JournalPathsV1,
-    binding: JournalBindingV1,
-    closed: &ClosedEffectBoundaryV1,
-) -> Result<EffectTransactionV1, TransactionErrorV1> {
+pub fn begin_effect_transaction(
+    paths: JournalPaths,
+    binding: JournalBinding,
+    closed: &ClosedEffectBoundary,
+) -> Result<EffectTransaction, TransactionError> {
     validate_journal_binding(&binding, closed)?;
-    let cartridge = prepare_journal_v1(&paths, binding.clone()).map_err(journal_error)?;
-    Ok(EffectTransactionV1 {
+    let cartridge = prepare_journal(&paths, binding.clone()).map_err(journal_error)?;
+    Ok(EffectTransaction {
         paths,
         binding,
         cartridge,
-        closure: ClosureBindingV1::from_closed(closed),
+        closure: ClosureBinding::from_closed(closed),
     })
 }
 
-impl EffectTransactionV1 {
+impl EffectTransaction {
     /// Commits only after zero-cert has minted an acceptance for this exact action and baseline.
     pub fn commit(
         self,
-        acceptance: &EffectAcceptedV1,
-    ) -> Result<TransactionReceiptV1, TransactionErrorV1> {
+        acceptance: &EffectAccepted,
+    ) -> Result<TransactionReceipt, TransactionError> {
         let acceptance_digest = validate_acceptance(acceptance, self.closure)?;
-        let recovery = commit_journal_v1(&self.paths, &self.cartridge).map_err(journal_error)?;
-        TransactionReceiptV1::from_recovery(
+        let recovery = commit_journal(&self.paths, &self.cartridge).map_err(journal_error)?;
+        TransactionReceipt::from_recovery(
             &self.binding,
             self.closure,
             &recovery,
@@ -729,36 +729,36 @@ impl EffectTransactionV1 {
         )
     }
 
-    pub fn abort(self) -> Result<TransactionReceiptV1, TransactionErrorV1> {
-        let recovery = abort_journal_v1(&self.paths, &self.cartridge).map_err(journal_error)?;
-        TransactionReceiptV1::from_recovery(&self.binding, self.closure, &recovery, None)
+    pub fn abort(self) -> Result<TransactionReceipt, TransactionError> {
+        let recovery = abort_journal(&self.paths, &self.cartridge).map_err(journal_error)?;
+        TransactionReceipt::from_recovery(&self.binding, self.closure, &recovery, None)
     }
 }
 
 /// Recovers a prepared transaction. A new-root outcome requires the exact
 /// zero-cert acceptance to be revalidated; old-root recovery never claims one.
-pub fn recover_effect_transaction_v1(
-    paths: &JournalPathsV1,
-    binding: &JournalBindingV1,
-    closed: &ClosedEffectBoundaryV1,
-    acceptance: Option<&EffectAcceptedV1>,
-) -> Result<TransactionReceiptV1, TransactionErrorV1> {
+pub fn recover_effect_transaction(
+    paths: &JournalPaths,
+    binding: &JournalBinding,
+    closed: &ClosedEffectBoundary,
+    acceptance: Option<&EffectAccepted>,
+) -> Result<TransactionReceipt, TransactionError> {
     validate_journal_binding(binding, closed)?;
-    let closure = ClosureBindingV1::from_closed(closed);
+    let closure = ClosureBinding::from_closed(closed);
     let acceptance_digest = acceptance
         .map(|accepted| validate_acceptance(accepted, closure))
         .transpose()?;
-    let recovery = recover_journal_v1(paths, binding).map_err(journal_error)?;
-    TransactionReceiptV1::from_recovery(binding, closure, &recovery, acceptance_digest)
+    let recovery = recover_journal(paths, binding).map_err(journal_error)?;
+    TransactionReceipt::from_recovery(binding, closure, &recovery, acceptance_digest)
 }
 
 fn validate_acceptance(
-    acceptance: &EffectAcceptedV1,
-    closure: ClosureBindingV1,
-) -> Result<DigestV1, TransactionErrorV1> {
+    acceptance: &EffectAccepted,
+    closure: ClosureBinding,
+) -> Result<Sha256Digest, TransactionError> {
     acceptance.validate().map_err(|error| {
-        TransactionErrorV1::new(
-            TransactionFailureCodeV1::InvalidEffectAcceptance,
+        TransactionError::new(
+            TransactionFailureCode::InvalidEffectAcceptance,
             None,
             error.to_string(),
         )
@@ -766,8 +766,8 @@ fn validate_acceptance(
     if acceptance.action_digest() != closure.action_digest
         || acceptance.state_snapshot() != closure.baseline_state
     {
-        return Err(TransactionErrorV1::new(
-            TransactionFailureCodeV1::EffectAcceptanceMismatch,
+        return Err(TransactionError::new(
+            TransactionFailureCode::EffectAcceptanceMismatch,
             None,
             "effect acceptance binds another action or baseline snapshot",
         ));
@@ -776,13 +776,13 @@ fn validate_acceptance(
 }
 
 fn validate_journal_binding(
-    binding: &JournalBindingV1,
-    closed: &ClosedEffectBoundaryV1,
-) -> Result<(), TransactionErrorV1> {
+    binding: &JournalBinding,
+    closed: &ClosedEffectBoundary,
+) -> Result<(), TransactionError> {
     binding.validate().map_err(journal_error)?;
     if binding.old_root != closed.baseline_state {
-        return Err(TransactionErrorV1::new(
-            TransactionFailureCodeV1::BaselineMismatch,
+        return Err(TransactionError::new(
+            TransactionFailureCode::BaselineMismatch,
             None,
             "journal old root differs from the effect-closure baseline",
         ));
@@ -795,8 +795,8 @@ fn validate_journal_binding(
         binding.owner_identity_digest,
     );
     if binding.transaction_id != expected_id {
-        return Err(TransactionErrorV1::new(
-            TransactionFailureCodeV1::JournalBindingMismatch,
+        return Err(TransactionError::new(
+            TransactionFailureCode::JournalBindingMismatch,
             None,
             "journal transaction id does not bind the effect closure",
         ));
@@ -806,14 +806,14 @@ fn validate_journal_binding(
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
-pub enum TransactionDispositionV1 {
+pub enum TransactionDisposition {
     CandidateCommitted,
     BaselineRootRecovered,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
-pub enum RestorationScopeV1 {
+pub enum RestorationScope {
     NotApplicableCandidateCommit,
     DeclaredEffectClosure,
     ProjectJournalRootOnly,
@@ -823,85 +823,85 @@ pub enum RestorationScopeV1 {
 /// restoration outside the preregistered effect-closure inventory.
 #[derive(Debug, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
-pub struct TransactionReceiptV1 {
+pub struct TransactionReceipt {
     contract_version: u16,
-    disposition: TransactionDispositionV1,
-    restoration_scope: RestorationScopeV1,
-    request_digest: DigestV1,
-    closure_manifest_digest: DigestV1,
-    action_digest: DigestV1,
-    acceptance_digest: Option<DigestV1>,
-    baseline_state: DigestV1,
-    candidate_state: DigestV1,
-    external_inventory_digest: DigestV1,
-    external_restoration_debt_digest: DigestV1,
+    disposition: TransactionDisposition,
+    restoration_scope: RestorationScope,
+    request_digest: Sha256Digest,
+    closure_manifest_digest: Sha256Digest,
+    action_digest: Sha256Digest,
+    acceptance_digest: Option<Sha256Digest>,
+    baseline_state: Sha256Digest,
+    candidate_state: Sha256Digest,
+    external_inventory_digest: Sha256Digest,
+    external_restoration_debt_digest: Sha256Digest,
     resource_count: u16,
     external_resource_count: u16,
     external_restoration_debt_count: u16,
-    journal_binding_digest: DigestV1,
-    journal_recovery_digest: DigestV1,
-    recovery_outcome: RecoveryOutcomeV1,
-    observed_root: DigestV1,
-    receipt_digest: DigestV1,
+    journal_binding_digest: Sha256Digest,
+    journal_recovery_digest: Sha256Digest,
+    recovery_outcome: RecoveryOutcome,
+    observed_root: Sha256Digest,
+    receipt_digest: Sha256Digest,
 }
 
-impl TransactionReceiptV1 {
+impl TransactionReceipt {
     fn from_recovery(
-        binding: &JournalBindingV1,
-        closure: ClosureBindingV1,
-        recovery: &RecoveryReceiptV1,
-        acceptance_digest: Option<DigestV1>,
-    ) -> Result<Self, TransactionErrorV1> {
+        binding: &JournalBinding,
+        closure: ClosureBinding,
+        recovery: &RecoveryReceipt,
+        acceptance_digest: Option<Sha256Digest>,
+    ) -> Result<Self, TransactionError> {
         recovery.canonical_bytes().map_err(journal_error)?;
         let binding_digest = binding.digest().map_err(journal_error)?;
         if recovery.binding_digest != binding_digest {
-            return Err(TransactionErrorV1::new(
-                TransactionFailureCodeV1::JournalBindingMismatch,
+            return Err(TransactionError::new(
+                TransactionFailureCode::JournalBindingMismatch,
                 None,
                 "recovery receipt binds another durable journal",
             ));
         }
         let (disposition, restoration_scope, expected_root) = match recovery.outcome {
-            RecoveryOutcomeV1::NewRootCommitted | RecoveryOutcomeV1::AlreadyCommitted => (
-                TransactionDispositionV1::CandidateCommitted,
-                RestorationScopeV1::NotApplicableCandidateCommit,
+            RecoveryOutcome::NewRootCommitted | RecoveryOutcome::AlreadyCommitted => (
+                TransactionDisposition::CandidateCommitted,
+                RestorationScope::NotApplicableCandidateCommit,
                 binding.new_root,
             ),
-            RecoveryOutcomeV1::NotStartedOldRoot
-            | RecoveryOutcomeV1::OldRootAborted
-            | RecoveryOutcomeV1::AlreadyAborted => (
-                TransactionDispositionV1::BaselineRootRecovered,
+            RecoveryOutcome::NotStartedOldRoot
+            | RecoveryOutcome::OldRootAborted
+            | RecoveryOutcome::AlreadyAborted => (
+                TransactionDisposition::BaselineRootRecovered,
                 if closure.external_restoration_debt_count == 0 {
-                    RestorationScopeV1::DeclaredEffectClosure
+                    RestorationScope::DeclaredEffectClosure
                 } else {
-                    RestorationScopeV1::ProjectJournalRootOnly
+                    RestorationScope::ProjectJournalRootOnly
                 },
                 binding.old_root,
             ),
         };
-        if disposition == TransactionDispositionV1::CandidateCommitted
+        if disposition == TransactionDisposition::CandidateCommitted
             && acceptance_digest.is_none()
         {
-            return Err(TransactionErrorV1::new(
-                TransactionFailureCodeV1::MissingEffectAcceptance,
+            return Err(TransactionError::new(
+                TransactionFailureCode::MissingEffectAcceptance,
                 None,
                 "candidate commit recovery requires zero-cert effect acceptance",
             ));
         }
-        let acceptance_digest = if disposition == TransactionDispositionV1::CandidateCommitted {
+        let acceptance_digest = if disposition == TransactionDisposition::CandidateCommitted {
             acceptance_digest
         } else {
             None
         };
         if recovery.observed_root != expected_root || closure.baseline_state != binding.old_root {
-            return Err(TransactionErrorV1::new(
-                TransactionFailureCodeV1::JournalRootMismatch,
+            return Err(TransactionError::new(
+                TransactionFailureCode::JournalRootMismatch,
                 None,
                 "journal recovery outcome and observed root disagree",
             ));
         }
         let mut receipt = Self {
-            contract_version: TRANSACTION_CONTRACT_VERSION_V1,
+            contract_version: TRANSACTION_CONTRACT_VERSION,
             disposition,
             restoration_scope,
             request_digest: closure.request_digest,
@@ -919,34 +919,34 @@ impl TransactionReceiptV1 {
             journal_recovery_digest: recovery.digest().map_err(journal_error)?,
             recovery_outcome: recovery.outcome,
             observed_root: recovery.observed_root,
-            receipt_digest: DigestV1::ZERO,
+            receipt_digest: Sha256Digest::ZERO,
         };
         receipt.receipt_digest = receipt.expected_digest()?;
         Ok(receipt)
     }
 
-    pub const fn disposition(&self) -> TransactionDispositionV1 {
+    pub const fn disposition(&self) -> TransactionDisposition {
         self.disposition
     }
-    pub const fn action_digest(&self) -> DigestV1 {
+    pub const fn action_digest(&self) -> Sha256Digest {
         self.action_digest
     }
-    pub const fn baseline_state(&self) -> DigestV1 {
+    pub const fn baseline_state(&self) -> Sha256Digest {
         self.baseline_state
     }
-    pub const fn candidate_state(&self) -> DigestV1 {
+    pub const fn candidate_state(&self) -> Sha256Digest {
         self.candidate_state
     }
-    pub const fn acceptance_digest(&self) -> Option<DigestV1> {
+    pub const fn acceptance_digest(&self) -> Option<Sha256Digest> {
         self.acceptance_digest
     }
-    pub const fn restoration_scope(&self) -> RestorationScopeV1 {
+    pub const fn restoration_scope(&self) -> RestorationScope {
         self.restoration_scope
     }
-    pub const fn closure_manifest_digest(&self) -> DigestV1 {
+    pub const fn closure_manifest_digest(&self) -> Sha256Digest {
         self.closure_manifest_digest
     }
-    pub const fn external_inventory_digest(&self) -> DigestV1 {
+    pub const fn external_inventory_digest(&self) -> Sha256Digest {
         self.external_inventory_digest
     }
     pub const fn resource_count(&self) -> u16 {
@@ -955,26 +955,26 @@ impl TransactionReceiptV1 {
     pub const fn external_resource_count(&self) -> u16 {
         self.external_resource_count
     }
-    pub const fn external_restoration_debt_digest(&self) -> DigestV1 {
+    pub const fn external_restoration_debt_digest(&self) -> Sha256Digest {
         self.external_restoration_debt_digest
     }
     pub const fn external_restoration_debt_count(&self) -> u16 {
         self.external_restoration_debt_count
     }
-    pub const fn observed_root(&self) -> DigestV1 {
+    pub const fn observed_root(&self) -> Sha256Digest {
         self.observed_root
     }
-    pub const fn recovery_outcome(&self) -> RecoveryOutcomeV1 {
+    pub const fn recovery_outcome(&self) -> RecoveryOutcome {
         self.recovery_outcome
     }
-    pub const fn receipt_digest(&self) -> DigestV1 {
+    pub const fn receipt_digest(&self) -> Sha256Digest {
         self.receipt_digest
     }
 
-    pub fn canonical_bytes(&self) -> Result<Vec<u8>, TransactionErrorV1> {
+    pub fn canonical_bytes(&self) -> Result<Vec<u8>, TransactionError> {
         if self.receipt_digest != self.expected_digest()? {
-            return Err(TransactionErrorV1::new(
-                TransactionFailureCodeV1::ReceiptDigestMismatch,
+            return Err(TransactionError::new(
+                TransactionFailureCode::ReceiptDigestMismatch,
                 None,
                 "transaction receipt digest does not match its canonical body",
             ));
@@ -982,7 +982,7 @@ impl TransactionReceiptV1 {
         canonical_serialize(self)
     }
 
-    fn expected_digest(&self) -> Result<DigestV1, TransactionErrorV1> {
+    fn expected_digest(&self) -> Result<Sha256Digest, TransactionError> {
         let body = json!({
             "acceptance_digest": self.acceptance_digest,
             "action_digest": self.action_digest,
@@ -1004,14 +1004,14 @@ impl TransactionReceiptV1 {
             "restoration_scope": self.restoration_scope,
         });
         Ok(domain_digest(
-            JOURNAL_RECEIPT_DOMAIN_V1,
+            JOURNAL_RECEIPT_DOMAIN,
             canonical_json(&body).as_bytes(),
         ))
     }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum TransactionFailureCodeV1 {
+pub enum TransactionFailureCode {
     SchemaVersionMismatch,
     InvalidEffectProgram,
     InvalidResource,
@@ -1040,7 +1040,7 @@ pub enum TransactionFailureCodeV1 {
     JournalFailure,
 }
 
-impl TransactionFailureCodeV1 {
+impl TransactionFailureCode {
     pub const fn as_str(self) -> &'static str {
         match self {
             Self::SchemaVersionMismatch => "schema_version_mismatch",
@@ -1074,17 +1074,17 @@ impl TransactionFailureCodeV1 {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct TransactionErrorV1 {
-    pub code: TransactionFailureCodeV1,
-    pub resource: Option<TransactionResourceRequirementV1>,
-    pub journal_code: Option<JournalFailureCodeV1>,
+pub struct TransactionError {
+    pub code: TransactionFailureCode,
+    pub resource: Option<TransactionResourceRequirement>,
+    pub journal_code: Option<JournalFailureCode>,
     pub detail: String,
 }
 
-impl TransactionErrorV1 {
+impl TransactionError {
     fn new(
-        code: TransactionFailureCodeV1,
-        resource: Option<TransactionResourceRequirementV1>,
+        code: TransactionFailureCode,
+        resource: Option<TransactionResourceRequirement>,
         detail: impl Into<String>,
     ) -> Self {
         Self {
@@ -1095,44 +1095,44 @@ impl TransactionErrorV1 {
         }
     }
 
-    pub const fn failure_code(&self) -> TransactionFailureCodeV1 {
+    pub const fn failure_code(&self) -> TransactionFailureCode {
         self.code
     }
 }
 
-impl fmt::Display for TransactionErrorV1 {
+impl fmt::Display for TransactionError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(formatter, "{}: {}", self.code.as_str(), self.detail)
     }
 }
-impl std::error::Error for TransactionErrorV1 {}
+impl std::error::Error for TransactionError {}
 
 fn validate_program_resource_mapping(
-    program: &EffectProgramV1,
-    resources: &[TransactionResourceRequirementV1],
-) -> Result<(), TransactionErrorV1> {
+    program: &EffectProgram,
+    resources: &[TransactionResourceRequirement],
+) -> Result<(), TransactionError> {
     if let Some(resource) = resources.iter().find(|resource| {
-        resource.kind == TransactionResourceKindV1::ProjectFilesystem
+        resource.kind == TransactionResourceKind::ProjectFilesystem
             && resource.baseline_state_digest != program.base_state()
     }) {
-        return Err(TransactionErrorV1::new(
-            TransactionFailureCodeV1::BaselineMismatch,
+        return Err(TransactionError::new(
+            TransactionFailureCode::BaselineMismatch,
             Some(*resource),
             "project-filesystem resource baseline differs from the effect base state",
         ));
     }
-    let covers = |owner: ArtifactOwnerV1, writes: bool, project_filesystem: bool| {
+    let covers = |owner: ArtifactOwner, writes: bool, project_filesystem: bool| {
         resources.iter().any(|resource| {
             resource.owner == owner
                 && (!project_filesystem
-                    || resource.kind == TransactionResourceKindV1::ProjectFilesystem)
+                    || resource.kind == TransactionResourceKind::ProjectFilesystem)
                 && (!writes || resource.access.writes())
         })
     };
     for target in program.targets() {
         if !covers(target.owner, true, true) {
-            return Err(TransactionErrorV1::new(
-                TransactionFailureCodeV1::MissingOperationResource,
+            return Err(TransactionError::new(
+                TransactionFailureCode::MissingOperationResource,
                 None,
                 "effect target has no matching project-filesystem write resource",
             ));
@@ -1140,29 +1140,29 @@ fn validate_program_resource_mapping(
     }
     for operation in program.operations() {
         let owner_and_class = match operation {
-            TypedEffectOperationV1::RecoverExact { owner, .. } => {
+            TypedEffectOperation::RecoverExact { owner, .. } => {
                 Some((*owner, EffectClass::ReadOnly))
             }
-            TypedEffectOperationV1::DeterministicTransform {
+            TypedEffectOperation::DeterministicTransform {
                 owner,
                 effect_class,
                 ..
             }
-            | TypedEffectOperationV1::InvokeCapability {
+            | TypedEffectOperation::InvokeCapability {
                 owner,
                 effect_class,
                 ..
             } => Some((*owner, *effect_class)),
-            TypedEffectOperationV1::ReplaceExactFile { .. }
-            | TypedEffectOperationV1::CopyExact { .. }
-            | TypedEffectOperationV1::ReturnLiteral { .. }
-            | TypedEffectOperationV1::RawFallback => None,
+            TypedEffectOperation::ReplaceExactFile { .. }
+            | TypedEffectOperation::CopyExact { .. }
+            | TypedEffectOperation::ReturnLiteral { .. }
+            | TypedEffectOperation::RawFallback => None,
         };
         if let Some((owner, effect_class)) = owner_and_class {
             let writes = effect_class != EffectClass::ReadOnly;
             if !covers(owner, writes, false) {
-                return Err(TransactionErrorV1::new(
-                    TransactionFailureCodeV1::MissingOperationResource,
+                return Err(TransactionError::new(
+                    TransactionFailureCode::MissingOperationResource,
                     None,
                     "effect capability has no matching owned resource scope",
                 ));
@@ -1173,25 +1173,25 @@ fn validate_program_resource_mapping(
 }
 
 fn sort_and_validate_requirements(
-    resources: &mut [TransactionResourceRequirementV1],
-) -> Result<(), TransactionErrorV1> {
+    resources: &mut [TransactionResourceRequirement],
+) -> Result<(), TransactionError> {
     resources.sort_by_key(|resource| resource.key());
     validate_sorted_requirements(resources)
 }
 
 fn validate_sorted_requirements(
-    resources: &[TransactionResourceRequirementV1],
-) -> Result<(), TransactionErrorV1> {
+    resources: &[TransactionResourceRequirement],
+) -> Result<(), TransactionError> {
     if resources.is_empty() {
-        return Err(TransactionErrorV1::new(
-            TransactionFailureCodeV1::EmptyResourceInventory,
+        return Err(TransactionError::new(
+            TransactionFailureCode::EmptyResourceInventory,
             None,
             "effect-closure inventory must be explicit and nonempty",
         ));
     }
-    if resources.len() > TRANSACTION_MAX_RESOURCES_V1 {
-        return Err(TransactionErrorV1::new(
-            TransactionFailureCodeV1::TooManyResources,
+    if resources.len() > TRANSACTION_MAX_RESOURCES {
+        return Err(TransactionError::new(
+            TransactionFailureCode::TooManyResources,
             None,
             format!("effect-closure inventory has {} resources", resources.len()),
         ));
@@ -1201,8 +1201,8 @@ fn validate_sorted_requirements(
         resource.validate()?;
         let key = resource.key();
         if previous.is_some_and(|prior| prior >= key) {
-            return Err(TransactionErrorV1::new(
-                TransactionFailureCodeV1::NonCanonicalResourceInventory,
+            return Err(TransactionError::new(
+                TransactionFailureCode::NonCanonicalResourceInventory,
                 Some(*resource),
                 "resource requirements must have unique kind/scope keys",
             ));
@@ -1212,12 +1212,12 @@ fn validate_sorted_requirements(
     Ok(())
 }
 
-fn canonical_serialize<T: Serialize>(value: &T) -> Result<Vec<u8>, TransactionErrorV1> {
+fn canonical_serialize<T: Serialize>(value: &T) -> Result<Vec<u8>, TransactionError> {
     let value = serde_json::to_value(value).map_err(serialization_error)?;
     let bytes = canonical_json(&value).into_bytes();
-    if bytes.len() > TRANSACTION_MAX_CANONICAL_BYTES_V1 {
-        return Err(TransactionErrorV1::new(
-            TransactionFailureCodeV1::CanonicalPayloadTooLarge,
+    if bytes.len() > TRANSACTION_MAX_CANONICAL_BYTES {
+        return Err(TransactionError::new(
+            TransactionFailureCode::CanonicalPayloadTooLarge,
             None,
             format!(
                 "transaction contract value has {} canonical bytes",
@@ -1228,43 +1228,43 @@ fn canonical_serialize<T: Serialize>(value: &T) -> Result<Vec<u8>, TransactionEr
     Ok(bytes)
 }
 
-fn serialization_error(error: serde_json::Error) -> TransactionErrorV1 {
-    TransactionErrorV1::new(
-        TransactionFailureCodeV1::SerializationFailure,
+fn serialization_error(error: serde_json::Error) -> TransactionError {
+    TransactionError::new(
+        TransactionFailureCode::SerializationFailure,
         None,
         error.to_string(),
     )
 }
 
-fn journal_error(error: JournalErrorV1) -> TransactionErrorV1 {
-    TransactionErrorV1 {
-        code: TransactionFailureCodeV1::JournalFailure,
+fn journal_error(error: JournalError) -> TransactionError {
+    TransactionError {
+        code: TransactionFailureCode::JournalFailure,
         resource: None,
         journal_code: Some(error.code),
         detail: error.to_string(),
     }
 }
 
-fn domain_digest(domain: &[u8], bytes: &[u8]) -> DigestV1 {
+fn domain_digest(domain: &[u8], bytes: &[u8]) -> Sha256Digest {
     let mut hasher = Sha256::new();
     hasher.update(domain);
     hasher.update((bytes.len() as u64).to_be_bytes());
     hasher.update(bytes);
-    DigestV1::from_bytes(hasher.finalize().into())
+    Sha256Digest::from_bytes(hasher.finalize().into())
 }
 
-pub fn transaction_contract_v1() -> Value {
+pub fn transaction_contract() -> Value {
     json!({
         "canonical_encoding": "sorted_key_json",
-        "contract_version": TRANSACTION_CONTRACT_VERSION_V1,
+        "contract_version": TRANSACTION_CONTRACT_VERSION,
         "domains": {
-            "contract": String::from_utf8_lossy(CONTRACT_DOMAIN_V1),
-            "external_inventory": String::from_utf8_lossy(EXTERNAL_INVENTORY_DOMAIN_V1),
-            "external_restoration_debt": String::from_utf8_lossy(EXTERNAL_DEBT_DOMAIN_V1),
-            "journal_receipt": String::from_utf8_lossy(JOURNAL_RECEIPT_DOMAIN_V1),
-            "manifest": String::from_utf8_lossy(MANIFEST_DOMAIN_V1),
-            "request": String::from_utf8_lossy(REQUEST_DOMAIN_V1),
-            "transaction_id": String::from_utf8_lossy(TRANSACTION_ID_DOMAIN_V1),
+            "contract": String::from_utf8_lossy(CONTRACT_DOMAIN),
+            "external_inventory": String::from_utf8_lossy(EXTERNAL_INVENTORY_DOMAIN),
+            "external_restoration_debt": String::from_utf8_lossy(EXTERNAL_DEBT_DOMAIN),
+            "journal_receipt": String::from_utf8_lossy(JOURNAL_RECEIPT_DOMAIN),
+            "manifest": String::from_utf8_lossy(MANIFEST_DOMAIN),
+            "request": String::from_utf8_lossy(REQUEST_DOMAIN),
+            "transaction_id": String::from_utf8_lossy(TRANSACTION_ID_DOMAIN),
         },
         "effect_closure": {
             "access": ["read", "write", "read_write"],
@@ -1286,8 +1286,8 @@ pub fn transaction_contract_v1() -> Value {
             "unsupported_blocks_speculation": true,
         },
         "limits": {
-            "canonical_bytes": TRANSACTION_MAX_CANONICAL_BYTES_V1,
-            "resources": TRANSACTION_MAX_RESOURCES_V1,
+            "canonical_bytes": TRANSACTION_MAX_CANONICAL_BYTES,
+            "resources": TRANSACTION_MAX_RESOURCES,
         },
         "schemas": {
             "closure_manifest": ["contract_version", "request_digest", "resources"],
@@ -1343,10 +1343,10 @@ pub fn transaction_contract_v1() -> Value {
     })
 }
 
-pub fn transaction_contract_digest_v1() -> DigestV1 {
+pub fn transaction_contract_digest() -> Sha256Digest {
     domain_digest(
-        CONTRACT_DOMAIN_V1,
-        canonical_json(&transaction_contract_v1()).as_bytes(),
+        CONTRACT_DOMAIN,
+        canonical_json(&transaction_contract()).as_bytes(),
     )
 }
 

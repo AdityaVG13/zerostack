@@ -4,7 +4,7 @@ use std::collections::BTreeSet;
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use zero_abi::{WorkerTokenAccountingV1, WorkerTokenCountKind};
+use zero_abi::{WorkerTokenAccounting, WorkerTokenCountKind};
 
 pub const VERDICT_LOOP_RECEIPT_SCHEMA: &str = "zerostack.verdict_loop_receipt.v1";
 
@@ -69,7 +69,7 @@ impl VerdictDecision {
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
-pub struct VerdictLoopReceiptV1 {
+pub struct VerdictLoopReceipt {
     pub schema: String,
     pub logical_dispatches: u64,
     pub raw_worker_input_bytes: u64,
@@ -89,12 +89,12 @@ pub struct VerdictLoopReceiptV1 {
 #[serde(deny_unknown_fields)]
 pub struct VerdictLoopResult {
     pub decision: VerdictDecision,
-    pub receipt: VerdictLoopReceiptV1,
+    pub receipt: VerdictLoopReceipt,
 }
 
 pub(crate) struct VerdictMeter {
     envelope: VerdictLoopEnvelope,
-    receipt: VerdictLoopReceiptV1,
+    receipt: VerdictLoopReceipt,
     tokenizer_ids: BTreeSet<String>,
     count_kinds: BTreeSet<String>,
     failure: Option<String>,
@@ -105,7 +105,7 @@ impl VerdictMeter {
         envelope.validate()?;
         Ok(Self {
             envelope,
-            receipt: VerdictLoopReceiptV1 {
+            receipt: VerdictLoopReceipt {
                 schema: VERDICT_LOOP_RECEIPT_SCHEMA.into(),
                 logical_dispatches: 0,
                 raw_worker_input_bytes: 0,
@@ -182,7 +182,7 @@ impl VerdictMeter {
     pub(crate) fn record_response(
         &mut self,
         output_bytes: u64,
-        accounting: Option<&WorkerTokenAccountingV1>,
+        accounting: Option<&WorkerTokenAccounting>,
     ) -> Result<(), String> {
         let accounting = accounting
             .ok_or_else(|| self.sticky("verdict-loop dispatch omitted worker token accounting"))?;

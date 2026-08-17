@@ -22,7 +22,7 @@ use std::{error::Error, fmt};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use crate::verdict::SafetyVerdictV1;
+use crate::verdict::SafetyVerdict;
 
 pub const ZERO_EXECUTE_ABI_VERSION: &str = "zerostack.execute";
 
@@ -81,12 +81,12 @@ impl ZeroExecuteKind {
 /// Inclusive audit event range, schema-required on every envelope.
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
-pub struct AuditEventRangeV1 {
+pub struct AuditEventRange {
     pub start: u64,
     pub end: u64,
 }
 
-impl AuditEventRangeV1 {
+impl AuditEventRange {
     pub fn new(start: u64, end: u64) -> Result<Self, ZeroExecuteError> {
         let range = Self { start, end };
         range.validate()?;
@@ -163,7 +163,7 @@ pub struct ZeroExecuteResult {
     unknown_reasons: Vec<String>,
     #[serde(default)]
     no_mutation_receipt_root: Option<String>,
-    audit_event_range: AuditEventRangeV1,
+    audit_event_range: AuditEventRange,
 }
 
 impl ZeroExecuteResult {
@@ -171,7 +171,7 @@ impl ZeroExecuteResult {
         kind: ZeroExecuteKind,
         fields: ZeroExecuteFields,
         resource_ledger_root: impl Into<String>,
-        audit_event_range: AuditEventRangeV1,
+        audit_event_range: AuditEventRange,
     ) -> Self {
         Self {
             abi_version: ZERO_EXECUTE_ABI_VERSION.to_owned(),
@@ -200,12 +200,12 @@ impl ZeroExecuteResult {
     /// [`ZeroExecuteError::VerdictNotSafe`] -- removing a required premise
     /// can never produce `Completed`.
     pub fn completed(
-        verdict: SafetyVerdictV1,
+        verdict: SafetyVerdict,
         fields: ZeroExecuteFields,
         resource_ledger_root: impl Into<String>,
-        audit_event_range: AuditEventRangeV1,
+        audit_event_range: AuditEventRange,
     ) -> Result<Self, ZeroExecuteError> {
-        if verdict != SafetyVerdictV1::Safe {
+        if verdict != SafetyVerdict::Safe {
             return Err(ZeroExecuteError::VerdictNotSafe);
         }
         if fields.successor_root.is_none() {
@@ -234,7 +234,7 @@ impl ZeroExecuteResult {
     pub fn decision_required(
         fields: ZeroExecuteFields,
         resource_ledger_root: impl Into<String>,
-        audit_event_range: AuditEventRangeV1,
+        audit_event_range: AuditEventRange,
     ) -> Result<Self, ZeroExecuteError> {
         if fields.question.is_none() {
             return Err(ZeroExecuteError::MissingRequiredField("question"));
@@ -262,7 +262,7 @@ impl ZeroExecuteResult {
     pub fn evidence_expansion_required(
         fields: ZeroExecuteFields,
         resource_ledger_root: impl Into<String>,
-        audit_event_range: AuditEventRangeV1,
+        audit_event_range: AuditEventRange,
     ) -> Result<Self, ZeroExecuteError> {
         if fields.continuation_handle.is_none() {
             return Err(ZeroExecuteError::MissingRequiredField(
@@ -284,7 +284,7 @@ impl ZeroExecuteResult {
     pub fn verification_unknown(
         fields: ZeroExecuteFields,
         resource_ledger_root: impl Into<String>,
-        audit_event_range: AuditEventRangeV1,
+        audit_event_range: AuditEventRange,
     ) -> Result<Self, ZeroExecuteError> {
         if fields.unknown_reasons.is_empty() {
             return Err(ZeroExecuteError::EmptyUnknownReasons);
@@ -304,7 +304,7 @@ impl ZeroExecuteResult {
     pub fn baseline_fallback_required(
         fields: ZeroExecuteFields,
         resource_ledger_root: impl Into<String>,
-        audit_event_range: AuditEventRangeV1,
+        audit_event_range: AuditEventRange,
     ) -> Result<Self, ZeroExecuteError> {
         if fields.unknown_reasons.is_empty() {
             return Err(ZeroExecuteError::EmptyUnknownReasons);
@@ -324,7 +324,7 @@ impl ZeroExecuteResult {
     pub fn rejected_no_mutation(
         fields: ZeroExecuteFields,
         resource_ledger_root: impl Into<String>,
-        audit_event_range: AuditEventRangeV1,
+        audit_event_range: AuditEventRange,
     ) -> Result<Self, ZeroExecuteError> {
         if fields.no_mutation_receipt_root.is_none() {
             return Err(ZeroExecuteError::MissingRequiredField(
@@ -346,7 +346,7 @@ impl ZeroExecuteResult {
     pub fn cancelled(
         fields: ZeroExecuteFields,
         resource_ledger_root: impl Into<String>,
-        audit_event_range: AuditEventRangeV1,
+        audit_event_range: AuditEventRange,
     ) -> Result<Self, ZeroExecuteError> {
         if fields.successor_root.is_some() {
             return Err(ZeroExecuteError::ForbiddenRoot("successor_root"));
@@ -366,7 +366,7 @@ impl ZeroExecuteResult {
     pub fn failed_no_authority(
         fields: ZeroExecuteFields,
         resource_ledger_root: impl Into<String>,
-        audit_event_range: AuditEventRangeV1,
+        audit_event_range: AuditEventRange,
     ) -> Result<Self, ZeroExecuteError> {
         if fields.successor_root.is_some() {
             return Err(ZeroExecuteError::ForbiddenRoot("successor_root"));
@@ -385,11 +385,11 @@ impl ZeroExecuteResult {
     /// no-completion constructor path. `Safe` maps to `Completed` here only
     /// as the label of the completing kind -- never as permission to skip
     /// [`ZeroExecuteResult::completed`].
-    pub fn kind_for_verdict(verdict: &SafetyVerdictV1) -> ZeroExecuteKind {
+    pub fn kind_for_verdict(verdict: &SafetyVerdict) -> ZeroExecuteKind {
         match verdict {
-            SafetyVerdictV1::Safe => ZeroExecuteKind::Completed,
-            SafetyVerdictV1::Unsafe { .. } => ZeroExecuteKind::RejectedNoMutation,
-            SafetyVerdictV1::Unknown { .. } => ZeroExecuteKind::VerificationUnknown,
+            SafetyVerdict::Safe => ZeroExecuteKind::Completed,
+            SafetyVerdict::Unsafe { .. } => ZeroExecuteKind::RejectedNoMutation,
+            SafetyVerdict::Unknown { .. } => ZeroExecuteKind::VerificationUnknown,
         }
     }
 
@@ -400,17 +400,17 @@ impl ZeroExecuteResult {
     /// `Completed` is [`ZeroExecuteResult::completed`], which re-checks the
     /// verdict. This constructor therefore has no reachable `Completed` path.
     pub fn from_verdict_never_completed(
-        verdict: &SafetyVerdictV1,
+        verdict: &SafetyVerdict,
         fields: ZeroExecuteFields,
         resource_ledger_root: impl Into<String>,
-        audit_event_range: AuditEventRangeV1,
+        audit_event_range: AuditEventRange,
     ) -> Result<Self, ZeroExecuteError> {
         match verdict {
-            SafetyVerdictV1::Safe => Err(ZeroExecuteError::VerdictMustNotBeSafe),
-            SafetyVerdictV1::Unsafe { .. } => {
+            SafetyVerdict::Safe => Err(ZeroExecuteError::VerdictMustNotBeSafe),
+            SafetyVerdict::Unsafe { .. } => {
                 Self::rejected_no_mutation(fields, resource_ledger_root, audit_event_range)
             }
-            SafetyVerdictV1::Unknown { .. } => {
+            SafetyVerdict::Unknown { .. } => {
                 Self::verification_unknown(fields, resource_ledger_root, audit_event_range)
             }
         }
@@ -546,7 +546,7 @@ impl ZeroExecuteResult {
         self.no_mutation_receipt_root.as_deref()
     }
 
-    pub fn audit_event_range(&self) -> AuditEventRangeV1 {
+    pub fn audit_event_range(&self) -> AuditEventRange {
         self.audit_event_range
     }
 }
@@ -604,7 +604,7 @@ impl Error for ZeroExecuteError {}
 /// The 14-state D5 continuation machine.
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
-pub enum ContinuationStateV1 {
+pub enum ContinuationState {
     Bound,
     Snapshotted,
     Resolved,
@@ -621,7 +621,7 @@ pub enum ContinuationStateV1 {
     Cancelled,
 }
 
-impl ContinuationStateV1 {
+impl ContinuationState {
     /// Total allowed-transition predicate for the D5 continuation machine.
     ///
     /// Legal forward chain:
@@ -638,11 +638,11 @@ impl ContinuationStateV1 {
     /// states (`Committed`, `Restored`, `Rejected`, `Cancelled`) have no
     /// outgoing edges.
     pub fn allowed_transition(
-        from: ContinuationStateV1,
-        to: ContinuationStateV1,
+        from: ContinuationState,
+        to: ContinuationState,
         policy_supplied: bool,
     ) -> bool {
-        use ContinuationStateV1::{
+        use ContinuationState::{
             Authorized, Bound, Cancelled, Committed, DeltaSealed, Executing, Planned, Rejected,
             Resolved, Restored, Snapshotted, Unknown, Verifying, WaitingDecision,
         };
@@ -674,10 +674,10 @@ impl ContinuationStateV1 {
     pub fn is_terminal(self) -> bool {
         matches!(
             self,
-            ContinuationStateV1::Committed
-                | ContinuationStateV1::Restored
-                | ContinuationStateV1::Rejected
-                | ContinuationStateV1::Cancelled
+            ContinuationState::Committed
+                | ContinuationState::Restored
+                | ContinuationState::Rejected
+                | ContinuationState::Cancelled
         )
     }
 }

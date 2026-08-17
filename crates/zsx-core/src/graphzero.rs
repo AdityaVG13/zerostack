@@ -36,7 +36,7 @@ use std::time::{Duration, Instant};
 
 use graphzero_query::dispatcher::{AdapterKind, CancellationToken, EngineContext};
 use graphzero_query::operation_abi::Mutability;
-use graphzero_query::surface_handshake::v2::worker_revision;
+use graphzero_query::surface_handshake::raw_worker::worker_revision;
 use graphzero_query::{
     EmbeddedGraphZero, SEMANTIC_CONTRACT_VERSION, contract_digest_hex, private_worker_dispatch,
     resolve_operation,
@@ -332,7 +332,7 @@ impl DomainAdapter for GraphZeroAdapter {
 }
 
 /// Effect class for one canonical operation, mirroring the raw-worker-v2
-/// classification (`graphzero_query::surface_handshake::v2::effect_class_for_op`).
+/// classification (`graphzero_query::surface_handshake::raw_worker::effect_class_for_op`).
 fn effect_class_for_request(op: &str, args: &serde_json::Value) -> EffectClass {
     if op == "reserve" && args.get("action").and_then(serde_json::Value::as_str) == Some("list") {
         return EffectClass::ReadOnly;

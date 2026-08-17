@@ -11,29 +11,29 @@ use std::{collections::BTreeMap, error::Error, fmt};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
-use crate::{DigestV1, canonical_json, sha256};
+use crate::{Sha256Digest, canonical_json, sha256};
 
-pub const REASONING_CONTRACT_SCHEMA_VERSION_V1: &str = "racc-r-reasoning-contract/v1";
-pub const REASONING_CONTRACT_VERSION_V1: u16 = 1;
-pub const REASONING_CONTRACT_MAX_CANONICAL_BYTES_V1: usize = 32 * 1024;
-pub const REASONING_CONTRACT_MAX_EXTENSION_BYTES_V1: usize = 8 * 1024;
-pub const REASONING_CONTRACT_MAX_EXTENSION_NODES_V1: usize = 256;
-pub const REASONING_CONTRACT_MAX_EXTENSION_DEPTH_V1: usize = 16;
-pub const REASONING_CONTRACT_MAX_ID_BYTES_V1: usize = 128;
-pub const REASONING_CONTRACT_MAX_TOOL_PERMISSIONS_V1: usize = 256;
-pub const REASONING_CONTRACT_MAX_STOP_SEQUENCES_V1: usize = 64;
-pub const REASONING_CONTRACT_MAX_STOP_SEQUENCE_BYTES_V1: usize = 256;
-pub const REASONING_CONTRACT_TEMPERATURE_PPM_MAX_V1: u32 = 2_000_000;
-pub const REASONING_CONTRACT_TOP_P_PPM_MAX_V1: u32 = 1_000_000;
+pub const REASONING_CONTRACT_SCHEMA_VERSION: &str = "racc-r-reasoning-contract/v1";
+pub const REASONING_CONTRACT_VERSION: u16 = 1;
+pub const REASONING_CONTRACT_MAX_CANONICAL_BYTES: usize = 32 * 1024;
+pub const REASONING_CONTRACT_MAX_EXTENSION_BYTES: usize = 8 * 1024;
+pub const REASONING_CONTRACT_MAX_EXTENSION_NODES: usize = 256;
+pub const REASONING_CONTRACT_MAX_EXTENSION_DEPTH: usize = 16;
+pub const REASONING_CONTRACT_MAX_ID_BYTES: usize = 128;
+pub const REASONING_CONTRACT_MAX_TOOL_PERMISSIONS: usize = 256;
+pub const REASONING_CONTRACT_MAX_STOP_SEQUENCES: usize = 64;
+pub const REASONING_CONTRACT_MAX_STOP_SEQUENCE_BYTES: usize = 256;
+pub const REASONING_CONTRACT_TEMPERATURE_PPM_MAX: u32 = 2_000_000;
+pub const REASONING_CONTRACT_TOP_P_PPM_MAX: u32 = 1_000_000;
 
-const CONTRACT_DOMAIN_V1: &[u8] = b"zerostack.reasoning_contract.contract.v1\0";
-const INSTANCE_DOMAIN_V1: &[u8] = b"zerostack.reasoning_contract.instance.v1\0";
-const ADMISSION_DOMAIN_V1: &[u8] = b"zerostack.reasoning_contract.admission.v1\0";
-const SCHEMA_DOMAIN_V1: &[u8] = b"zerostack.reasoning_contract.schema.v1\0";
+const CONTRACT_DOMAIN: &[u8] = b"zerostack.reasoning_contract.contract.v1\0";
+const INSTANCE_DOMAIN: &[u8] = b"zerostack.reasoning_contract.instance.v1\0";
+const ADMISSION_DOMAIN: &[u8] = b"zerostack.reasoning_contract.admission.v1\0";
+const SCHEMA_DOMAIN: &[u8] = b"zerostack.reasoning_contract.schema.v1\0";
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "kebab-case")]
-pub enum NativeStatePolicyV1 {
+pub enum NativeStatePolicy {
     ExactRequired,
     ExactIfAvailable,
     CleanRestart,
@@ -43,12 +43,12 @@ pub enum NativeStatePolicyV1 {
 
 /// Explicit sampling parameters (CONTRACT-002). Integer parts-per-million
 /// encoding keeps canonical bytes exact -- no float canonicalization hazards.
-/// Absence of a [`ReasoningContractV1`] field means provider defaults are
+/// Absence of a [`ReasoningContract`] field means provider defaults are
 /// committed by `decoder_identity`; presence binds the override into the
 /// contract identity.
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
-pub struct SamplingParamsV1 {
+pub struct SamplingParams {
     /// Temperature in parts per million: `0` (greedy) ..= 2_000_000 (2.0).
     pub temperature_ppm: u32,
     /// Nucleus sampling cutoff in parts per million: `1_000_000` (1.0) means
@@ -58,12 +58,12 @@ pub struct SamplingParamsV1 {
     pub seed: Option<u64>,
 }
 
-impl SamplingParamsV1 {
+impl SamplingParams {
     pub fn new(
         temperature_ppm: u32,
         top_p_ppm: u32,
         seed: Option<u64>,
-    ) -> Result<Self, ReasoningContractErrorV1> {
+    ) -> Result<Self, ReasoningContractError> {
         let params = Self {
             temperature_ppm,
             top_p_ppm,
@@ -73,16 +73,16 @@ impl SamplingParamsV1 {
         Ok(params)
     }
 
-    pub fn validate(&self) -> Result<(), ReasoningContractErrorV1> {
-        if self.temperature_ppm > REASONING_CONTRACT_TEMPERATURE_PPM_MAX_V1 {
-            return Err(ReasoningContractErrorV1::new(
-                ReasoningContractFailureCodeV1::InvalidSamplingParams,
+    pub fn validate(&self) -> Result<(), ReasoningContractError> {
+        if self.temperature_ppm > REASONING_CONTRACT_TEMPERATURE_PPM_MAX {
+            return Err(ReasoningContractError::new(
+                ReasoningContractFailureCode::InvalidSamplingParams,
                 "temperature_ppm exceeds 2_000_000 (2.0)",
             ));
         }
-        if self.top_p_ppm == 0 || self.top_p_ppm > REASONING_CONTRACT_TOP_P_PPM_MAX_V1 {
-            return Err(ReasoningContractErrorV1::new(
-                ReasoningContractFailureCodeV1::InvalidSamplingParams,
+        if self.top_p_ppm == 0 || self.top_p_ppm > REASONING_CONTRACT_TOP_P_PPM_MAX {
+            return Err(ReasoningContractError::new(
+                ReasoningContractFailureCode::InvalidSamplingParams,
                 "top_p_ppm must be in 1..=1_000_000",
             ));
         }
@@ -94,16 +94,16 @@ impl SamplingParamsV1 {
 /// optional hard step ceiling.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
-pub struct StoppingPolicyV1 {
+pub struct StoppingPolicy {
     pub stop_sequences: Vec<String>,
     pub max_steps: Option<u32>,
 }
 
-impl StoppingPolicyV1 {
+impl StoppingPolicy {
     pub fn new(
         stop_sequences: Vec<String>,
         max_steps: Option<u32>,
-    ) -> Result<Self, ReasoningContractErrorV1> {
+    ) -> Result<Self, ReasoningContractError> {
         let policy = Self {
             stop_sequences,
             max_steps,
@@ -112,27 +112,27 @@ impl StoppingPolicyV1 {
         Ok(policy)
     }
 
-    pub fn validate(&self) -> Result<(), ReasoningContractErrorV1> {
-        if self.stop_sequences.len() > REASONING_CONTRACT_MAX_STOP_SEQUENCES_V1 {
-            return Err(ReasoningContractErrorV1::new(
-                ReasoningContractFailureCodeV1::InvalidStoppingPolicy,
+    pub fn validate(&self) -> Result<(), ReasoningContractError> {
+        if self.stop_sequences.len() > REASONING_CONTRACT_MAX_STOP_SEQUENCES {
+            return Err(ReasoningContractError::new(
+                ReasoningContractFailureCode::InvalidStoppingPolicy,
                 "stop_sequences exceeds the 64-sequence bound",
             ));
         }
         for sequence in &self.stop_sequences {
             if sequence.is_empty()
-                || sequence.len() > REASONING_CONTRACT_MAX_STOP_SEQUENCE_BYTES_V1
+                || sequence.len() > REASONING_CONTRACT_MAX_STOP_SEQUENCE_BYTES
                 || sequence.chars().any(char::is_control)
             {
-                return Err(ReasoningContractErrorV1::new(
-                    ReasoningContractFailureCodeV1::InvalidStoppingPolicy,
+                return Err(ReasoningContractError::new(
+                    ReasoningContractFailureCode::InvalidStoppingPolicy,
                     "stop sequences must be nonempty, bounded, and control-free",
                 ));
             }
         }
         if self.max_steps.is_some_and(|steps| steps == 0) {
-            return Err(ReasoningContractErrorV1::new(
-                ReasoningContractFailureCodeV1::InvalidStoppingPolicy,
+            return Err(ReasoningContractError::new(
+                ReasoningContractFailureCode::InvalidStoppingPolicy,
                 "max_steps must be nonzero when set",
             ));
         }
@@ -144,18 +144,18 @@ impl StoppingPolicyV1 {
 /// `tool_schema_digest` set-identity cannot express.
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
-pub struct ToolPermissionV1 {
+pub struct ToolPermission {
     pub read_only: bool,
     pub approval_required: bool,
     pub max_calls: Option<u32>,
 }
 
-impl ToolPermissionV1 {
+impl ToolPermission {
     pub fn new(
         read_only: bool,
         approval_required: bool,
         max_calls: Option<u32>,
-    ) -> Result<Self, ReasoningContractErrorV1> {
+    ) -> Result<Self, ReasoningContractError> {
         let permission = Self {
             read_only,
             approval_required,
@@ -165,10 +165,10 @@ impl ToolPermissionV1 {
         Ok(permission)
     }
 
-    pub fn validate(&self) -> Result<(), ReasoningContractErrorV1> {
+    pub fn validate(&self) -> Result<(), ReasoningContractError> {
         if self.max_calls.is_some_and(|calls| calls == 0) {
-            return Err(ReasoningContractErrorV1::new(
-                ReasoningContractFailureCodeV1::InvalidToolPermissions,
+            return Err(ReasoningContractError::new(
+                ReasoningContractFailureCode::InvalidToolPermissions,
                 "max_calls must be nonzero when set",
             ));
         }
@@ -178,20 +178,20 @@ impl ToolPermissionV1 {
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
-pub struct ReasoningContractV1 {
+pub struct ReasoningContract {
     schema_version: String,
-    model_identity: DigestV1,
-    backend_identity: DigestV1,
-    tokenizer_identity: DigestV1,
-    decoder_identity: DigestV1,
-    tool_schema_digest: DigestV1,
+    model_identity: Sha256Digest,
+    backend_identity: Sha256Digest,
+    tokenizer_identity: Sha256Digest,
+    decoder_identity: Sha256Digest,
+    tool_schema_digest: Sha256Digest,
     reasoning_mode: String,
     reasoning_effort: String,
     max_output_tokens: u32,
     reserved_reasoning_tokens: u32,
     reserved_visible_output_tokens: u32,
     reserved_recovery_tokens: u32,
-    native_state_policy: NativeStatePolicyV1,
+    native_state_policy: NativeStatePolicy,
     allow_effort_downshift: bool,
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     provider_extension: BTreeMap<String, Value>,
@@ -199,35 +199,35 @@ pub struct ReasoningContractV1 {
     // legitimate declared state meaning provider defaults; presence binds the
     // override into the contract identity and strict comparison.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    sampling_params: Option<SamplingParamsV1>,
+    sampling_params: Option<SamplingParams>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    stopping_policy: Option<StoppingPolicyV1>,
+    stopping_policy: Option<StoppingPolicy>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    system_prompt_root: Option<DigestV1>,
+    system_prompt_root: Option<Sha256Digest>,
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
-    tool_permissions: BTreeMap<String, ToolPermissionV1>,
+    tool_permissions: BTreeMap<String, ToolPermission>,
 }
 
-impl ReasoningContractV1 {
+impl ReasoningContract {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
-        model_identity: DigestV1,
-        backend_identity: DigestV1,
-        tokenizer_identity: DigestV1,
-        decoder_identity: DigestV1,
-        tool_schema_digest: DigestV1,
+        model_identity: Sha256Digest,
+        backend_identity: Sha256Digest,
+        tokenizer_identity: Sha256Digest,
+        decoder_identity: Sha256Digest,
+        tool_schema_digest: Sha256Digest,
         reasoning_mode: impl Into<String>,
         reasoning_effort: impl Into<String>,
         max_output_tokens: u32,
         reserved_reasoning_tokens: u32,
         reserved_visible_output_tokens: u32,
         reserved_recovery_tokens: u32,
-        native_state_policy: NativeStatePolicyV1,
+        native_state_policy: NativeStatePolicy,
         allow_effort_downshift: bool,
         provider_extension: BTreeMap<String, Value>,
-    ) -> Result<Self, ReasoningContractErrorV1> {
+    ) -> Result<Self, ReasoningContractError> {
         let contract = Self {
-            schema_version: REASONING_CONTRACT_SCHEMA_VERSION_V1.into(),
+            schema_version: REASONING_CONTRACT_SCHEMA_VERSION.into(),
             model_identity,
             backend_identity,
             tokenizer_identity,
@@ -257,16 +257,16 @@ impl ReasoningContractV1 {
     /// and strict paired comparison.
     pub fn with_invocation_bindings(
         mut self,
-        sampling_params: SamplingParamsV1,
-        stopping_policy: StoppingPolicyV1,
-        system_prompt_root: Option<DigestV1>,
-        tool_permissions: BTreeMap<String, ToolPermissionV1>,
-    ) -> Result<Self, ReasoningContractErrorV1> {
+        sampling_params: SamplingParams,
+        stopping_policy: StoppingPolicy,
+        system_prompt_root: Option<Sha256Digest>,
+        tool_permissions: BTreeMap<String, ToolPermission>,
+    ) -> Result<Self, ReasoningContractError> {
         sampling_params.validate()?;
         stopping_policy.validate()?;
-        if system_prompt_root.is_some_and(|root| root == DigestV1::ZERO) {
-            return Err(ReasoningContractErrorV1::new(
-                ReasoningContractFailureCodeV1::InvalidSystemPromptRoot,
+        if system_prompt_root.is_some_and(|root| root == Sha256Digest::ZERO) {
+            return Err(ReasoningContractError::new(
+                ReasoningContractFailureCode::InvalidSystemPromptRoot,
                 "system_prompt_root must be nonzero when set",
             ));
         }
@@ -279,10 +279,10 @@ impl ReasoningContractV1 {
         Ok(self)
     }
 
-    pub fn validate(&self) -> Result<(), ReasoningContractErrorV1> {
-        if self.schema_version != REASONING_CONTRACT_SCHEMA_VERSION_V1 {
-            return Err(ReasoningContractErrorV1::new(
-                ReasoningContractFailureCodeV1::SchemaVersionMismatch,
+    pub fn validate(&self) -> Result<(), ReasoningContractError> {
+        if self.schema_version != REASONING_CONTRACT_SCHEMA_VERSION {
+            return Err(ReasoningContractError::new(
+                ReasoningContractFailureCode::SchemaVersionMismatch,
                 "reasoning contract schema version is not v1",
             ));
         }
@@ -293,9 +293,9 @@ impl ReasoningContractV1 {
             ("decoder identity", self.decoder_identity),
             ("tool schema", self.tool_schema_digest),
         ] {
-            if digest == DigestV1::ZERO {
-                return Err(ReasoningContractErrorV1::new(
-                    ReasoningContractFailureCodeV1::MissingIdentity,
+            if digest == Sha256Digest::ZERO {
+                return Err(ReasoningContractError::new(
+                    ReasoningContractFailureCode::MissingIdentity,
                     format!("{label} digest is zero"),
                 ));
             }
@@ -305,8 +305,8 @@ impl ReasoningContractV1 {
         if self.max_output_tokens == 0
             || self.reserved_visible_output_tokens > self.max_output_tokens
         {
-            return Err(ReasoningContractErrorV1::new(
-                ReasoningContractFailureCodeV1::InvalidTokenReservation,
+            return Err(ReasoningContractError::new(
+                ReasoningContractFailureCode::InvalidTokenReservation,
                 "max output must be nonzero and cover the reserved visible output",
             ));
         }
@@ -320,59 +320,59 @@ impl ReasoningContractV1 {
         }
         if self
             .system_prompt_root
-            .is_some_and(|root| root == DigestV1::ZERO)
+            .is_some_and(|root| root == Sha256Digest::ZERO)
         {
-            return Err(ReasoningContractErrorV1::new(
-                ReasoningContractFailureCodeV1::InvalidSystemPromptRoot,
+            return Err(ReasoningContractError::new(
+                ReasoningContractFailureCode::InvalidSystemPromptRoot,
                 "system_prompt_root must be nonzero when set",
             ));
         }
-        if self.canonical_bytes_unchecked()?.len() > REASONING_CONTRACT_MAX_CANONICAL_BYTES_V1 {
-            return Err(ReasoningContractErrorV1::new(
-                ReasoningContractFailureCodeV1::CanonicalPayloadTooLarge,
+        if self.canonical_bytes_unchecked()?.len() > REASONING_CONTRACT_MAX_CANONICAL_BYTES {
+            return Err(ReasoningContractError::new(
+                ReasoningContractFailureCode::CanonicalPayloadTooLarge,
                 "reasoning contract exceeds its canonical byte bound",
             ));
         }
         Ok(())
     }
 
-    pub fn canonical_bytes(&self) -> Result<Vec<u8>, ReasoningContractErrorV1> {
+    pub fn canonical_bytes(&self) -> Result<Vec<u8>, ReasoningContractError> {
         self.validate()?;
         self.canonical_bytes_unchecked()
     }
 
-    fn canonical_bytes_unchecked(&self) -> Result<Vec<u8>, ReasoningContractErrorV1> {
+    fn canonical_bytes_unchecked(&self) -> Result<Vec<u8>, ReasoningContractError> {
         let value = serde_json::to_value(self).map_err(json_error)?;
         Ok(canonical_json(&value).into_bytes())
     }
 
-    pub fn from_canonical_bytes(bytes: &[u8]) -> Result<Self, ReasoningContractErrorV1> {
-        if bytes.len() > REASONING_CONTRACT_MAX_CANONICAL_BYTES_V1 {
-            return Err(ReasoningContractErrorV1::new(
-                ReasoningContractFailureCodeV1::CanonicalPayloadTooLarge,
+    pub fn from_canonical_bytes(bytes: &[u8]) -> Result<Self, ReasoningContractError> {
+        if bytes.len() > REASONING_CONTRACT_MAX_CANONICAL_BYTES {
+            return Err(ReasoningContractError::new(
+                ReasoningContractFailureCode::CanonicalPayloadTooLarge,
                 "reasoning contract exceeds its canonical byte bound",
             ));
         }
         let contract: Self = serde_json::from_slice(bytes).map_err(json_error)?;
         contract.validate()?;
         if contract.canonical_bytes_unchecked()? != bytes {
-            return Err(ReasoningContractErrorV1::new(
-                ReasoningContractFailureCodeV1::NonCanonicalEncoding,
+            return Err(ReasoningContractError::new(
+                ReasoningContractFailureCode::NonCanonicalEncoding,
                 "reasoning contract is not canonical sorted-key JSON",
             ));
         }
         Ok(contract)
     }
 
-    pub fn identity_digest(&self) -> Result<DigestV1, ReasoningContractErrorV1> {
-        Ok(domain_digest(INSTANCE_DOMAIN_V1, &self.canonical_bytes()?))
+    pub fn identity_digest(&self) -> Result<Sha256Digest, ReasoningContractError> {
+        Ok(domain_digest(INSTANCE_DOMAIN, &self.canonical_bytes()?))
     }
 
     pub fn admitted_input_ceiling(
         &self,
         context_capacity: u32,
         reserved_tool_tokens: u32,
-    ) -> Result<u32, ReasoningContractErrorV1> {
+    ) -> Result<u32, ReasoningContractError> {
         self.validate()?;
         context_capacity
             .checked_sub(self.reserved_reasoning_tokens)
@@ -380,8 +380,8 @@ impl ReasoningContractV1 {
             .and_then(|value| value.checked_sub(self.reserved_recovery_tokens))
             .and_then(|value| value.checked_sub(reserved_tool_tokens))
             .ok_or_else(|| {
-                ReasoningContractErrorV1::new(
-                    ReasoningContractFailureCodeV1::ContextCapacityExceeded,
+                ReasoningContractError::new(
+                    ReasoningContractFailureCode::ContextCapacityExceeded,
                     "reasoning, output, recovery, and tool reserves exceed context capacity",
                 )
             })
@@ -392,30 +392,30 @@ impl ReasoningContractV1 {
         context_capacity: u32,
         reserved_tool_tokens: u32,
         logical_input_tokens: u32,
-    ) -> Result<u32, ReasoningContractErrorV1> {
+    ) -> Result<u32, ReasoningContractError> {
         let ceiling = self.admitted_input_ceiling(context_capacity, reserved_tool_tokens)?;
         if logical_input_tokens > ceiling {
-            return Err(ReasoningContractErrorV1::new(
-                ReasoningContractFailureCodeV1::InputExceedsHeadroom,
+            return Err(ReasoningContractError::new(
+                ReasoningContractFailureCode::InputExceedsHeadroom,
                 "logical input consumes protected reasoning, output, tool, or recovery headroom",
             ));
         }
         Ok(ceiling - logical_input_tokens)
     }
 
-    pub const fn model_identity(&self) -> DigestV1 {
+    pub const fn model_identity(&self) -> Sha256Digest {
         self.model_identity
     }
-    pub const fn backend_identity(&self) -> DigestV1 {
+    pub const fn backend_identity(&self) -> Sha256Digest {
         self.backend_identity
     }
-    pub const fn tokenizer_identity(&self) -> DigestV1 {
+    pub const fn tokenizer_identity(&self) -> Sha256Digest {
         self.tokenizer_identity
     }
-    pub const fn decoder_identity(&self) -> DigestV1 {
+    pub const fn decoder_identity(&self) -> Sha256Digest {
         self.decoder_identity
     }
-    pub const fn tool_schema_digest(&self) -> DigestV1 {
+    pub const fn tool_schema_digest(&self) -> Sha256Digest {
         self.tool_schema_digest
     }
     pub fn reasoning_mode(&self) -> &str {
@@ -436,7 +436,7 @@ impl ReasoningContractV1 {
     pub const fn reserved_recovery_tokens(&self) -> u32 {
         self.reserved_recovery_tokens
     }
-    pub const fn native_state_policy(&self) -> NativeStatePolicyV1 {
+    pub const fn native_state_policy(&self) -> NativeStatePolicy {
         self.native_state_policy
     }
     pub const fn allow_effort_downshift(&self) -> bool {
@@ -445,16 +445,16 @@ impl ReasoningContractV1 {
     pub fn provider_extension(&self) -> &BTreeMap<String, Value> {
         &self.provider_extension
     }
-    pub const fn sampling_params(&self) -> Option<&SamplingParamsV1> {
+    pub const fn sampling_params(&self) -> Option<&SamplingParams> {
         self.sampling_params.as_ref()
     }
-    pub const fn stopping_policy(&self) -> Option<&StoppingPolicyV1> {
+    pub const fn stopping_policy(&self) -> Option<&StoppingPolicy> {
         self.stopping_policy.as_ref()
     }
-    pub const fn system_prompt_root(&self) -> Option<DigestV1> {
+    pub const fn system_prompt_root(&self) -> Option<Sha256Digest> {
         self.system_prompt_root
     }
-    pub fn tool_permissions(&self) -> &BTreeMap<String, ToolPermissionV1> {
+    pub fn tool_permissions(&self) -> &BTreeMap<String, ToolPermission> {
         &self.tool_permissions
     }
 }
@@ -462,39 +462,39 @@ impl ReasoningContractV1 {
 /// Opaque result of comparing two validated strict reasoning contracts.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
-pub struct StrictReasoningAdmissionV1 {
+pub struct StrictReasoningAdmission {
     contract_version: u16,
-    baseline_contract_digest: DigestV1,
-    candidate_contract_digest: DigestV1,
+    baseline_contract_digest: Sha256Digest,
+    candidate_contract_digest: Sha256Digest,
     same_comparison_class: bool,
     max_output_tokens_added: u32,
     reasoning_tokens_added: u32,
     visible_output_tokens_added: u32,
     recovery_tokens_added: u32,
-    admission_digest: DigestV1,
+    admission_digest: Sha256Digest,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
-pub struct StrictReasoningAdmissionRecordV1 {
+pub struct StrictReasoningAdmissionRecord {
     pub contract_version: u16,
-    pub baseline_contract_digest: DigestV1,
-    pub candidate_contract_digest: DigestV1,
+    pub baseline_contract_digest: Sha256Digest,
+    pub candidate_contract_digest: Sha256Digest,
     pub same_comparison_class: bool,
     pub max_output_tokens_added: u32,
     pub reasoning_tokens_added: u32,
     pub visible_output_tokens_added: u32,
     pub recovery_tokens_added: u32,
-    pub admission_digest: DigestV1,
+    pub admission_digest: Sha256Digest,
 }
 
-impl StrictReasoningAdmissionV1 {
+impl StrictReasoningAdmission {
     fn new(
-        baseline: &ReasoningContractV1,
-        candidate: &ReasoningContractV1,
-    ) -> Result<Self, ReasoningContractErrorV1> {
+        baseline: &ReasoningContract,
+        candidate: &ReasoningContract,
+    ) -> Result<Self, ReasoningContractError> {
         let mut admission = Self {
-            contract_version: REASONING_CONTRACT_VERSION_V1,
+            contract_version: REASONING_CONTRACT_VERSION,
             baseline_contract_digest: baseline.identity_digest()?,
             candidate_contract_digest: candidate.identity_digest()?,
             same_comparison_class: baseline == candidate,
@@ -505,13 +505,13 @@ impl StrictReasoningAdmissionV1 {
                 - baseline.reserved_visible_output_tokens,
             recovery_tokens_added: candidate.reserved_recovery_tokens
                 - baseline.reserved_recovery_tokens,
-            admission_digest: DigestV1::ZERO,
+            admission_digest: Sha256Digest::ZERO,
         };
         admission.admission_digest = admission.expected_digest();
         Ok(admission)
     }
 
-    fn expected_digest(&self) -> DigestV1 {
+    fn expected_digest(&self) -> Sha256Digest {
         admission_digest(
             self.contract_version,
             self.baseline_contract_digest,
@@ -526,7 +526,7 @@ impl StrictReasoningAdmissionV1 {
         )
     }
 
-    pub fn validate(&self) -> Result<(), ReasoningContractErrorV1> {
+    pub fn validate(&self) -> Result<(), ReasoningContractError> {
         validate_admission_shape(
             self.baseline_contract_digest,
             self.candidate_contract_digest,
@@ -547,8 +547,8 @@ impl StrictReasoningAdmissionV1 {
         )
     }
 
-    pub fn record(&self) -> StrictReasoningAdmissionRecordV1 {
-        StrictReasoningAdmissionRecordV1 {
+    pub fn record(&self) -> StrictReasoningAdmissionRecord {
+        StrictReasoningAdmissionRecord {
             contract_version: self.contract_version,
             baseline_contract_digest: self.baseline_contract_digest,
             candidate_contract_digest: self.candidate_contract_digest,
@@ -561,22 +561,22 @@ impl StrictReasoningAdmissionV1 {
         }
     }
 
-    pub const fn baseline_contract_digest(&self) -> DigestV1 {
+    pub const fn baseline_contract_digest(&self) -> Sha256Digest {
         self.baseline_contract_digest
     }
-    pub const fn candidate_contract_digest(&self) -> DigestV1 {
+    pub const fn candidate_contract_digest(&self) -> Sha256Digest {
         self.candidate_contract_digest
     }
     pub const fn same_comparison_class(&self) -> bool {
         self.same_comparison_class
     }
-    pub const fn digest(&self) -> DigestV1 {
+    pub const fn digest(&self) -> Sha256Digest {
         self.admission_digest
     }
 }
 
-impl StrictReasoningAdmissionRecordV1 {
-    pub fn validate(&self) -> Result<(), ReasoningContractErrorV1> {
+impl StrictReasoningAdmissionRecord {
+    pub fn validate(&self) -> Result<(), ReasoningContractError> {
         validate_admission_shape(
             self.baseline_contract_digest,
             self.candidate_contract_digest,
@@ -608,24 +608,24 @@ impl StrictReasoningAdmissionRecordV1 {
         )
     }
 
-    pub fn canonical_bytes(&self) -> Result<Vec<u8>, ReasoningContractErrorV1> {
+    pub fn canonical_bytes(&self) -> Result<Vec<u8>, ReasoningContractError> {
         self.validate()?;
         let value = serde_json::to_value(self).map_err(json_error)?;
         Ok(canonical_json(&value).into_bytes())
     }
 
-    pub fn from_canonical_bytes(bytes: &[u8]) -> Result<Self, ReasoningContractErrorV1> {
-        if bytes.len() > REASONING_CONTRACT_MAX_CANONICAL_BYTES_V1 {
-            return Err(ReasoningContractErrorV1::new(
-                ReasoningContractFailureCodeV1::CanonicalPayloadTooLarge,
+    pub fn from_canonical_bytes(bytes: &[u8]) -> Result<Self, ReasoningContractError> {
+        if bytes.len() > REASONING_CONTRACT_MAX_CANONICAL_BYTES {
+            return Err(ReasoningContractError::new(
+                ReasoningContractFailureCode::CanonicalPayloadTooLarge,
                 "strict reasoning admission exceeds its canonical byte bound",
             ));
         }
         let record: Self = serde_json::from_slice(bytes).map_err(json_error)?;
         record.validate()?;
         if record.canonical_bytes()? != bytes {
-            return Err(ReasoningContractErrorV1::new(
-                ReasoningContractFailureCodeV1::NonCanonicalEncoding,
+            return Err(ReasoningContractError::new(
+                ReasoningContractFailureCode::NonCanonicalEncoding,
                 "strict reasoning admission is not canonical sorted-key JSON",
             ));
         }
@@ -633,15 +633,15 @@ impl StrictReasoningAdmissionRecordV1 {
     }
 }
 
-pub fn verify_strict_no_downshift_v1(
-    baseline: &ReasoningContractV1,
-    candidate: &ReasoningContractV1,
-) -> Result<StrictReasoningAdmissionV1, ReasoningContractErrorV1> {
+pub fn verify_strict_no_downshift(
+    baseline: &ReasoningContract,
+    candidate: &ReasoningContract,
+) -> Result<StrictReasoningAdmission, ReasoningContractError> {
     baseline.validate()?;
     candidate.validate()?;
     if baseline.allow_effort_downshift || candidate.allow_effort_downshift {
-        return Err(ReasoningContractErrorV1::new(
-            ReasoningContractFailureCodeV1::EffortDownshiftAllowed,
+        return Err(ReasoningContractError::new(
+            ReasoningContractFailureCode::EffortDownshiftAllowed,
             "strict and amplify contracts must set allow_effort_downshift to false",
         ));
     }
@@ -651,89 +651,89 @@ pub fn verify_strict_no_downshift_v1(
         || baseline.decoder_identity != candidate.decoder_identity
         || baseline.tool_schema_digest != candidate.tool_schema_digest
     {
-        return Err(ReasoningContractErrorV1::new(
-            ReasoningContractFailureCodeV1::ComparisonIdentityMismatch,
+        return Err(ReasoningContractError::new(
+            ReasoningContractFailureCode::ComparisonIdentityMismatch,
             "model, backend, tokenizer, decoder, and tool schema must remain exact",
         ));
     }
     if baseline.reasoning_mode != candidate.reasoning_mode {
-        return Err(ReasoningContractErrorV1::new(
-            ReasoningContractFailureCodeV1::ReasoningModeMismatch,
+        return Err(ReasoningContractError::new(
+            ReasoningContractFailureCode::ReasoningModeMismatch,
             "strict reasoning mode changed without a cross-class theorem",
         ));
     }
     if baseline.reasoning_effort != candidate.reasoning_effort {
-        return Err(ReasoningContractErrorV1::new(
-            ReasoningContractFailureCodeV1::ReasoningEffortMismatch,
+        return Err(ReasoningContractError::new(
+            ReasoningContractFailureCode::ReasoningEffortMismatch,
             "strict reasoning effort changed without a cross-class theorem",
         ));
     }
     if baseline.native_state_policy != candidate.native_state_policy {
-        return Err(ReasoningContractErrorV1::new(
-            ReasoningContractFailureCodeV1::NativeStatePolicyMismatch,
+        return Err(ReasoningContractError::new(
+            ReasoningContractFailureCode::NativeStatePolicyMismatch,
             "native reasoning-state policy changed without a cross-class theorem",
         ));
     }
     if baseline.provider_extension != candidate.provider_extension {
-        return Err(ReasoningContractErrorV1::new(
-            ReasoningContractFailureCodeV1::ProviderExtensionMismatch,
+        return Err(ReasoningContractError::new(
+            ReasoningContractFailureCode::ProviderExtensionMismatch,
             "provider extension changed without a cross-class theorem",
         ));
     }
     // CONTRACT-002 invocation bindings: any mismatch reclassifies the pair,
     // exactly like the other comparison-identity fields.
     if baseline.sampling_params != candidate.sampling_params {
-        return Err(ReasoningContractErrorV1::new(
-            ReasoningContractFailureCodeV1::InvocationBindingMismatch,
+        return Err(ReasoningContractError::new(
+            ReasoningContractFailureCode::InvocationBindingMismatch,
             "sampling parameters changed without a cross-class theorem",
         ));
     }
     if baseline.stopping_policy != candidate.stopping_policy {
-        return Err(ReasoningContractErrorV1::new(
-            ReasoningContractFailureCodeV1::InvocationBindingMismatch,
+        return Err(ReasoningContractError::new(
+            ReasoningContractFailureCode::InvocationBindingMismatch,
             "stopping policy changed without a cross-class theorem",
         ));
     }
     if baseline.system_prompt_root != candidate.system_prompt_root {
-        return Err(ReasoningContractErrorV1::new(
-            ReasoningContractFailureCodeV1::InvocationBindingMismatch,
+        return Err(ReasoningContractError::new(
+            ReasoningContractFailureCode::InvocationBindingMismatch,
             "system prompt root changed without a cross-class theorem",
         ));
     }
     if baseline.tool_permissions != candidate.tool_permissions {
-        return Err(ReasoningContractErrorV1::new(
-            ReasoningContractFailureCodeV1::InvocationBindingMismatch,
+        return Err(ReasoningContractError::new(
+            ReasoningContractFailureCode::InvocationBindingMismatch,
             "per-tool permission set changed without a cross-class theorem",
         ));
     }
     if candidate.max_output_tokens < baseline.max_output_tokens {
         return Err(downshift(
-            ReasoningContractFailureCodeV1::OutputCeilingDownshift,
+            ReasoningContractFailureCode::OutputCeilingDownshift,
             "maximum output tokens",
         ));
     }
     if candidate.reserved_reasoning_tokens < baseline.reserved_reasoning_tokens {
         return Err(downshift(
-            ReasoningContractFailureCodeV1::ReasoningReserveDownshift,
+            ReasoningContractFailureCode::ReasoningReserveDownshift,
             "reserved reasoning tokens",
         ));
     }
     if candidate.reserved_visible_output_tokens < baseline.reserved_visible_output_tokens {
         return Err(downshift(
-            ReasoningContractFailureCodeV1::VisibleOutputReserveDownshift,
+            ReasoningContractFailureCode::VisibleOutputReserveDownshift,
             "reserved visible output tokens",
         ));
     }
     if candidate.reserved_recovery_tokens < baseline.reserved_recovery_tokens {
         return Err(downshift(
-            ReasoningContractFailureCodeV1::RecoveryReserveDownshift,
+            ReasoningContractFailureCode::RecoveryReserveDownshift,
             "reserved recovery tokens",
         ));
     }
-    StrictReasoningAdmissionV1::new(baseline, candidate)
+    StrictReasoningAdmission::new(baseline, candidate)
 }
 
-pub fn reasoning_contract_schema_v1() -> Value {
+pub fn reasoning_contract_schema() -> Value {
     json!({
         "$defs": {
             "digest": {"pattern": "^[0-9a-f]{64}$", "type": "string"},
@@ -788,7 +788,7 @@ pub fn reasoning_contract_schema_v1() -> Value {
             "reserved_recovery_tokens": {"minimum": 0, "type": "integer"},
             "reserved_visible_output_tokens": {"minimum": 0, "type": "integer"},
             "sampling_params": {"$ref": "#/$defs/sampling_params"},
-            "schema_version": {"const": REASONING_CONTRACT_SCHEMA_VERSION_V1},
+            "schema_version": {"const": REASONING_CONTRACT_SCHEMA_VERSION},
             "stopping_policy": {"$ref": "#/$defs/stopping_policy"},
             "system_prompt_root": {"$ref": "#/$defs/digest"},
             "tokenizer_identity": {"$ref": "#/$defs/digest"},
@@ -806,7 +806,7 @@ pub fn reasoning_contract_schema_v1() -> Value {
     })
 }
 
-pub fn reasoning_contract_manifest_v1() -> Value {
+pub fn reasoning_contract_manifest() -> Value {
     json!({
         "canonical_encoding": "rfc8259_json_sorted_object_keys_no_whitespace",
         "comparison_identity_fields": [
@@ -815,16 +815,16 @@ pub fn reasoning_contract_manifest_v1() -> Value {
             "provider_extension", "sampling_params", "stopping_policy", "system_prompt_root",
             "tool_permissions",
         ],
-        "contract_version": REASONING_CONTRACT_VERSION_V1,
+        "contract_version": REASONING_CONTRACT_VERSION,
         "headroom_order": ["reasoning", "visible_output", "tool", "recovery", "input"],
-        "max_canonical_bytes": REASONING_CONTRACT_MAX_CANONICAL_BYTES_V1,
+        "max_canonical_bytes": REASONING_CONTRACT_MAX_CANONICAL_BYTES,
         "name": "zerostack.reasoning_contract.v1",
         "negative_space": [
             "cache_eligibility_as_hit", "effort_downshift", "opaque_state_summary_as_exact",
             "reasoning_tokens_estimated_from_visible_output", "silent_output_ceiling_reduction",
             "silent_reserve_reduction", "token_reduction_as_quality",
         ],
-        "schema_digest": reasoning_contract_schema_digest_v1(),
+        "schema_digest": reasoning_contract_schema_digest(),
         "strict_exact_fields": [
             "model_identity", "backend_identity", "tokenizer_identity", "decoder_identity",
             "tool_schema_digest", "reasoning_mode", "reasoning_effort", "native_state_policy",
@@ -838,17 +838,17 @@ pub fn reasoning_contract_manifest_v1() -> Value {
     })
 }
 
-pub fn reasoning_contract_schema_digest_v1() -> DigestV1 {
+pub fn reasoning_contract_schema_digest() -> Sha256Digest {
     domain_digest(
-        SCHEMA_DOMAIN_V1,
-        canonical_json(&reasoning_contract_schema_v1()).as_bytes(),
+        SCHEMA_DOMAIN,
+        canonical_json(&reasoning_contract_schema()).as_bytes(),
     )
 }
 
-pub fn reasoning_contract_digest_v1() -> DigestV1 {
+pub fn reasoning_contract_digest() -> Sha256Digest {
     domain_digest(
-        CONTRACT_DOMAIN_V1,
-        canonical_json(&reasoning_contract_manifest_v1()).as_bytes(),
+        CONTRACT_DOMAIN,
+        canonical_json(&reasoning_contract_manifest()).as_bytes(),
     )
 }
 
@@ -862,13 +862,13 @@ struct AdmissionTokenAdditions {
 
 fn admission_digest(
     contract_version: u16,
-    baseline_contract_digest: DigestV1,
-    candidate_contract_digest: DigestV1,
+    baseline_contract_digest: Sha256Digest,
+    candidate_contract_digest: Sha256Digest,
     same_comparison_class: bool,
     added: AdmissionTokenAdditions,
-) -> DigestV1 {
+) -> Sha256Digest {
     domain_digest(
-        ADMISSION_DOMAIN_V1,
+        ADMISSION_DOMAIN,
         canonical_json(&json!({
             "baseline_contract_digest": baseline_contract_digest,
             "candidate_contract_digest": candidate_contract_digest,
@@ -884,11 +884,11 @@ fn admission_digest(
 }
 
 fn validate_admission_shape(
-    baseline_contract_digest: DigestV1,
-    candidate_contract_digest: DigestV1,
+    baseline_contract_digest: Sha256Digest,
+    candidate_contract_digest: Sha256Digest,
     same_comparison_class: bool,
     added: AdmissionTokenAdditions,
-) -> Result<(), ReasoningContractErrorV1> {
+) -> Result<(), ReasoningContractError> {
     let all_zero = added.max_output == 0
         && added.reasoning == 0
         && added.visible_output == 0
@@ -896,8 +896,8 @@ fn validate_admission_shape(
     if same_comparison_class != (baseline_contract_digest == candidate_contract_digest)
         || same_comparison_class != all_zero
     {
-        return Err(ReasoningContractErrorV1::new(
-            ReasoningContractFailureCodeV1::InvalidAdmission,
+        return Err(ReasoningContractError::new(
+            ReasoningContractFailureCode::InvalidAdmission,
             "comparison-class flag, contract identities, and reserve deltas are inconsistent",
         ));
     }
@@ -906,42 +906,42 @@ fn validate_admission_shape(
 
 fn validate_admission_fields(
     contract_version: u16,
-    baseline_contract_digest: DigestV1,
-    candidate_contract_digest: DigestV1,
-    admission_digest: DigestV1,
-    expected_digest: DigestV1,
-) -> Result<(), ReasoningContractErrorV1> {
-    if contract_version != REASONING_CONTRACT_VERSION_V1 {
-        return Err(ReasoningContractErrorV1::new(
-            ReasoningContractFailureCodeV1::SchemaVersionMismatch,
+    baseline_contract_digest: Sha256Digest,
+    candidate_contract_digest: Sha256Digest,
+    admission_digest: Sha256Digest,
+    expected_digest: Sha256Digest,
+) -> Result<(), ReasoningContractError> {
+    if contract_version != REASONING_CONTRACT_VERSION {
+        return Err(ReasoningContractError::new(
+            ReasoningContractFailureCode::SchemaVersionMismatch,
             "strict reasoning admission version is not v1",
         ));
     }
-    if baseline_contract_digest == DigestV1::ZERO
-        || candidate_contract_digest == DigestV1::ZERO
-        || admission_digest == DigestV1::ZERO
+    if baseline_contract_digest == Sha256Digest::ZERO
+        || candidate_contract_digest == Sha256Digest::ZERO
+        || admission_digest == Sha256Digest::ZERO
     {
-        return Err(ReasoningContractErrorV1::new(
-            ReasoningContractFailureCodeV1::MissingIdentity,
+        return Err(ReasoningContractError::new(
+            ReasoningContractFailureCode::MissingIdentity,
             "strict reasoning admission contains a zero digest",
         ));
     }
     if admission_digest != expected_digest {
-        return Err(ReasoningContractErrorV1::new(
-            ReasoningContractFailureCodeV1::AdmissionDigestMismatch,
+        return Err(ReasoningContractError::new(
+            ReasoningContractFailureCode::AdmissionDigestMismatch,
             "strict reasoning admission digest does not match its fields",
         ));
     }
     Ok(())
 }
 
-fn validate_id(label: &str, value: &str) -> Result<(), ReasoningContractErrorV1> {
+fn validate_id(label: &str, value: &str) -> Result<(), ReasoningContractError> {
     if value.trim().is_empty()
-        || value.len() > REASONING_CONTRACT_MAX_ID_BYTES_V1
+        || value.len() > REASONING_CONTRACT_MAX_ID_BYTES
         || value.chars().any(char::is_control)
     {
-        return Err(ReasoningContractErrorV1::new(
-            ReasoningContractFailureCodeV1::InvalidIdentifier,
+        return Err(ReasoningContractError::new(
+            ReasoningContractFailureCode::InvalidIdentifier,
             format!("{label} is empty, contains control characters, or exceeds its bound"),
         ));
     }
@@ -949,11 +949,11 @@ fn validate_id(label: &str, value: &str) -> Result<(), ReasoningContractErrorV1>
 }
 
 fn validate_tool_permissions(
-    permissions: &BTreeMap<String, ToolPermissionV1>,
-) -> Result<(), ReasoningContractErrorV1> {
-    if permissions.len() > REASONING_CONTRACT_MAX_TOOL_PERMISSIONS_V1 {
-        return Err(ReasoningContractErrorV1::new(
-            ReasoningContractFailureCodeV1::InvalidToolPermissions,
+    permissions: &BTreeMap<String, ToolPermission>,
+) -> Result<(), ReasoningContractError> {
+    if permissions.len() > REASONING_CONTRACT_MAX_TOOL_PERMISSIONS {
+        return Err(ReasoningContractError::new(
+            ReasoningContractFailureCode::InvalidToolPermissions,
             "tool_permissions exceeds the 256-tool bound",
         ));
     }
@@ -966,12 +966,12 @@ fn validate_tool_permissions(
 
 fn validate_provider_extension(
     extension: &BTreeMap<String, Value>,
-) -> Result<(), ReasoningContractErrorV1> {
+) -> Result<(), ReasoningContractError> {
     let value = serde_json::to_value(extension).map_err(json_error)?;
     let bytes = canonical_json(&value);
-    if bytes.len() > REASONING_CONTRACT_MAX_EXTENSION_BYTES_V1 {
-        return Err(ReasoningContractErrorV1::new(
-            ReasoningContractFailureCodeV1::ProviderExtensionTooLarge,
+    if bytes.len() > REASONING_CONTRACT_MAX_EXTENSION_BYTES {
+        return Err(ReasoningContractError::new(
+            ReasoningContractFailureCode::ProviderExtensionTooLarge,
             "provider extension exceeds its canonical byte bound",
         ));
     }
@@ -987,22 +987,22 @@ fn count_value_nodes(
     value: &Value,
     depth: usize,
     nodes: &mut usize,
-) -> Result<(), ReasoningContractErrorV1> {
-    if depth > REASONING_CONTRACT_MAX_EXTENSION_DEPTH_V1 {
-        return Err(ReasoningContractErrorV1::new(
-            ReasoningContractFailureCodeV1::ProviderExtensionTooLarge,
+) -> Result<(), ReasoningContractError> {
+    if depth > REASONING_CONTRACT_MAX_EXTENSION_DEPTH {
+        return Err(ReasoningContractError::new(
+            ReasoningContractFailureCode::ProviderExtensionTooLarge,
             "provider extension exceeds its depth bound",
         ));
     }
     *nodes = nodes.checked_add(1).ok_or_else(|| {
-        ReasoningContractErrorV1::new(
-            ReasoningContractFailureCodeV1::ProviderExtensionTooLarge,
+        ReasoningContractError::new(
+            ReasoningContractFailureCode::ProviderExtensionTooLarge,
             "provider extension node count overflowed",
         )
     })?;
-    if *nodes > REASONING_CONTRACT_MAX_EXTENSION_NODES_V1 {
-        return Err(ReasoningContractErrorV1::new(
-            ReasoningContractFailureCodeV1::ProviderExtensionTooLarge,
+    if *nodes > REASONING_CONTRACT_MAX_EXTENSION_NODES {
+        return Err(ReasoningContractError::new(
+            ReasoningContractFailureCode::ProviderExtensionTooLarge,
             "provider extension exceeds its node bound",
         ));
     }
@@ -1023,26 +1023,26 @@ fn count_value_nodes(
     Ok(())
 }
 
-fn domain_digest(domain: &[u8], payload: &[u8]) -> DigestV1 {
+fn domain_digest(domain: &[u8], payload: &[u8]) -> Sha256Digest {
     let mut bytes = Vec::with_capacity(domain.len() + payload.len());
     bytes.extend_from_slice(domain);
     bytes.extend_from_slice(payload);
-    DigestV1::from_bytes(sha256(&bytes))
+    Sha256Digest::from_bytes(sha256(&bytes))
 }
 
-fn json_error(error: serde_json::Error) -> ReasoningContractErrorV1 {
-    ReasoningContractErrorV1::new(
-        ReasoningContractFailureCodeV1::SerializationFailure,
+fn json_error(error: serde_json::Error) -> ReasoningContractError {
+    ReasoningContractError::new(
+        ReasoningContractFailureCode::SerializationFailure,
         format!("reasoning contract JSON error: {error}"),
     )
 }
 
-fn downshift(code: ReasoningContractFailureCodeV1, field: &str) -> ReasoningContractErrorV1 {
-    ReasoningContractErrorV1::new(code, format!("strict candidate lowered {field}"))
+fn downshift(code: ReasoningContractFailureCode, field: &str) -> ReasoningContractError {
+    ReasoningContractError::new(code, format!("strict candidate lowered {field}"))
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum ReasoningContractFailureCodeV1 {
+pub enum ReasoningContractFailureCode {
     SchemaVersionMismatch,
     MissingIdentity,
     InvalidIdentifier,
@@ -1073,29 +1073,29 @@ pub enum ReasoningContractFailureCodeV1 {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct ReasoningContractErrorV1 {
-    code: ReasoningContractFailureCodeV1,
+pub struct ReasoningContractError {
+    code: ReasoningContractFailureCode,
     detail: String,
 }
 
-impl ReasoningContractErrorV1 {
-    fn new(code: ReasoningContractFailureCodeV1, detail: impl Into<String>) -> Self {
+impl ReasoningContractError {
+    fn new(code: ReasoningContractFailureCode, detail: impl Into<String>) -> Self {
         Self {
             code,
             detail: detail.into(),
         }
     }
 
-    pub const fn failure_code(&self) -> ReasoningContractFailureCodeV1 {
+    pub const fn failure_code(&self) -> ReasoningContractFailureCode {
         self.code
     }
 }
 
-impl fmt::Display for ReasoningContractErrorV1 {
+impl fmt::Display for ReasoningContractError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(formatter, "{:?}: {}", self.code, self.detail)
     }
 }
 
-impl Error for ReasoningContractErrorV1 {}
+impl Error for ReasoningContractError {}
 

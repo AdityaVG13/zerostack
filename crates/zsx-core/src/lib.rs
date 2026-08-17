@@ -62,22 +62,22 @@ pub use adapter::{
     AdapterBinding, AdapterCall, AdapterContractError, AdapterError, AdapterResponse, DomainAdapter,
 };
 pub use connector::{
-    SessionApprovalGrantV1, fs_write_grant_count_for_plan, harness_fs_write_grants,
+    SessionApprovalGrant, fs_write_grant_count_for_plan, harness_fs_write_grants,
 };
 pub use connector::ZsxAttemptJournalStatus;
 pub use continuation::{
-    CONTINUATION_REGISTRY_SCHEMA_VERSION_V1, CONTINUATION_REGISTRY_WAL_SNAPSHOT,
-    ContinuationFrameV1, ContinuationKeyV1, ContinuationPersistRequestV1, ContinuationReceiptV1,
-    ContinuationRecordV1, ContinuationRegistryErrorV1, ContinuationRegistryV1,
-    ContinuationResumeBindingV1,
+    CONTINUATION_REGISTRY_SCHEMA_VERSION, CONTINUATION_REGISTRY_WAL_SNAPSHOT,
+    ContinuationFrame, ContinuationKey, ContinuationPersistRequest, ContinuationReceipt,
+    ContinuationRecord, ContinuationRegistryError, ContinuationRegistry,
+    ContinuationResumeBinding,
 };
 pub use lower::{METHODS, engine_for, lower};
 pub use dag_exec::{
-    DagExecErrorV1, DagExecutionOutcomeV1, DagExecutorV1, DagNodeOutcomeV1, ScheduleModeV1,
-    StreamErrorV1, StreamSinkV1,
+    DagExecError, DagExecutionOutcome, DagExecutor, DagNodeOutcome, ScheduleMode,
+    StreamError, StreamSink,
 };
 pub use envelope::{
-    ZSX_PROTOCOL, SessionEnvelopeContextV1, DecisionViewContextV1,
+    ZSX_PROTOCOL, SessionEnvelopeContext, DecisionViewContext,
     legacy_envelope_value, legacy_kind_code,
 };
 pub use session::{
@@ -87,18 +87,18 @@ pub use session::{
     ZsxSessionCancellation, ZsxSessionError, ZsxSessionFailureCode,
 };
 pub use verdict::{
-    VERDICT_LOOP_RECEIPT_SCHEMA, VerdictDecision, VerdictLoopEnvelope, VerdictLoopReceiptV1,
+    VERDICT_LOOP_RECEIPT_SCHEMA, VerdictDecision, VerdictLoopEnvelope, VerdictLoopReceipt,
     VerdictLoopResult,
 };
 /// Q99/residency gate (): session telemetry receipts measured by the
 /// zero-gate W4 contracts. The gate itself is internal to the connector;
 /// the report is the session's typed quality claim surface.
 pub use residency::{
-    SESSION_Q99_REPORT_SCHEMA, SessionQ99ReportV1, TierQ99ReportV1, tier_of_engine,
+    SESSION_Q99_REPORT_SCHEMA, SessionQ99Report, TierQ99Report, tier_of_engine,
 };
 /// Bound untrusted error text for typed zsx envelopes.
 pub use zero_codemode::{
-    finalize_visible_error, GateRuleUsageV1, GateUsageReportV1,
+    finalize_visible_error, GateRuleUsage, GateUsageReport,
 };
 
 use std::sync::atomic::{AtomicU64, Ordering};

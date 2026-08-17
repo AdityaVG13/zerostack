@@ -20,7 +20,7 @@
 //!   phase without evidence). Gamma = attributed / measured never exceeds 1
 //!   under valid data, and the honest full-coverage endpoint is Gamma = 1.
 //! - **Deterministic solving from measured receipts.** [`ChargingMapSet::solve`]
-//!   groups [`CausalWorkReceiptV1`] charges into phases through an explicit
+//!   groups [`CausalWorkReceipt`] charges into phases through an explicit
 //!   total [`PhasePolicy`]. A receipt that fails validation, an empty receipt
 //!   set, a work unit charged twice across receipts, or a policy that does
 //!   not cover every causal class is a loud refusal -- the solver never
@@ -33,7 +33,7 @@ use std::fmt;
 use serde::{Deserialize, Serialize, de};
 
 use crate::causal_work::{
-    CausalWorkClassV1, CausalWorkErrorV1, CausalWorkReceiptV1, CAUSAL_WORK_MAX_ID_BYTES,
+    CausalWorkClass, CausalWorkError, CausalWorkReceipt, CAUSAL_WORK_MAX_ID_BYTES,
 };
 use crate::resource_classes::{MeasurementSource, ResourceTotal};
 
@@ -306,7 +306,7 @@ impl ChargingMapSet {
     /// always yield the same maps.
     pub fn solve(
         policy: &PhasePolicy,
-        receipts: &[CausalWorkReceiptV1],
+        receipts: &[CausalWorkReceipt],
     ) -> Result<Self, ChargingMapError> {
         if receipts.is_empty() {
             return Err(ChargingMapError::EmptyReceiptSet);
@@ -365,24 +365,24 @@ pub struct ClosureReport {
 
 /// An explicit, total mapping from causal classes to charging phases.
 ///
-/// The policy must cover every [`CausalWorkClassV1`] exactly once, so the
+/// The policy must cover every [`CausalWorkClass`] exactly once, so the
 /// solver never has to guess where an unmapped class belongs.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct PhasePolicy {
-    assignments: BTreeMap<CausalWorkClassV1, ChargingPhase>,
+    assignments: BTreeMap<CausalWorkClass, ChargingPhase>,
 }
 
 impl PhasePolicy {
     /// Builds a total policy, refusing a class assigned twice or left
     /// unassigned.
-    pub fn new(assignments: &[(CausalWorkClassV1, ChargingPhase)]) -> Result<Self, ChargingMapError> {
+    pub fn new(assignments: &[(CausalWorkClass, ChargingPhase)]) -> Result<Self, ChargingMapError> {
         let mut map = BTreeMap::new();
         for (class, phase) in assignments {
             if map.insert(*class, *phase).is_some() {
                 return Err(ChargingMapError::PolicyConflict { class: *class });
             }
         }
-        for class in CausalWorkClassV1::ALL {
+        for class in CausalWorkClass::ALL {
             if !map.contains_key(&class) {
                 return Err(ChargingMapError::IncompletePolicy(class));
             }
@@ -391,7 +391,7 @@ impl PhasePolicy {
     }
 
     /// The phase a class is assigned to. Total, so always defined.
-    pub fn phase_for(&self, class: CausalWorkClassV1) -> ChargingPhase {
+    pub fn phase_for(&self, class: CausalWorkClass) -> ChargingPhase {
         self.assignments[&class]
     }
 }
@@ -446,14 +446,14 @@ pub enum ChargingMapError {
     /// The receipt set was empty: nothing measured, nothing to solve.
     EmptyReceiptSet,
     /// A receipt failed validation.
-    InvalidReceipt(CausalWorkErrorV1),
+    InvalidReceipt(CausalWorkError),
     /// A policy assigned one class to two phases.
     PolicyConflict {
         /// The conflicting class.
-        class: CausalWorkClassV1,
+        class: CausalWorkClass,
     },
     /// A policy left a causal class unassigned.
-    IncompletePolicy(CausalWorkClassV1),
+    IncompletePolicy(CausalWorkClass),
 }
 
 impl fmt::Display for ChargingMapError {

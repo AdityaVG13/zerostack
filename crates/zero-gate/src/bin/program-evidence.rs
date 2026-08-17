@@ -5,7 +5,7 @@
 //! artifact file per engine (fz/gz/tz) per evidence class (planner, codemode
 //! raw-worker, MCP, lifecycle, applied-GC). Every artifact is validated
 //! against its contract, digest, and provenance; the five separated reports
-//! are assembled per engine, and the verified `AggregateProgramReceiptV1` is
+//! are assembled per engine, and the verified `AggregateProgramReceipt` is
 //! written as canonical JSON. Missing, partial, stale, or digest-mismatched
 //! evidence fails the run closed — there is no fixture fallback and no
 //! synthesized success digest.
@@ -15,7 +15,7 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
-use zero_gate::{ProgramEvidenceManifestV1, assemble_program_evidence};
+use zero_gate::{ProgramEvidenceManifest, assemble_program_evidence};
 
 fn usage() -> String {
     "usage: zerostack-program-evidence --manifest <manifest.json> --out <receipt.json>".into()
@@ -44,9 +44,9 @@ fn parse_args() -> Result<(PathBuf, PathBuf), String> {
     Ok((manifest, out))
 }
 
-fn load(path: &Path) -> Result<Vec<u8>, zero_gate::ProgramEvidenceErrorV1> {
+fn load(path: &Path) -> Result<Vec<u8>, zero_gate::ProgramEvidenceError> {
     std::fs::read(path).map_err(|error| {
-        zero_gate::ProgramEvidenceErrorV1::io(format!("reading {}: {error}", path.display()))
+        zero_gate::ProgramEvidenceError::io(format!("reading {}: {error}", path.display()))
     })
 }
 
@@ -65,7 +65,7 @@ fn main() -> ExitCode {
             return ExitCode::from(1);
         }
     };
-    let manifest = match ProgramEvidenceManifestV1::from_canonical_bytes(&bytes) {
+    let manifest = match ProgramEvidenceManifest::from_canonical_bytes(&bytes) {
         Ok(manifest) => manifest,
         Err(error) => {
             eprintln!("{error}");

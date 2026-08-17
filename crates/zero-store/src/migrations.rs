@@ -6,81 +6,81 @@
 //! run applies an ordered, deterministic chain of steps
 //! (`v(n) -> v(n+1)`, transform function pointer -- no environment, no
 //! clocks), each persisted as an immutable marker before the format version
-//! advances, and emits a [`MigrationReceiptV1`] binding old/new format-state
+//! advances, and emits a [`MigrationReceipt`] binding old/new format-state
 //! roots, the transform digest, and the validation digest of the final state.
 //!
 //! Idempotency: a step whose marker already exists is not re-applied (crash
 //! between transform and version advance is recovered, not repeated), and a
 //! store already at the target version is a no-op. Today the production
 //! registry is empty (format v1 is current), so the only production outcome
-//! is [`MigrationErrorV1::SchemaVersionMismatch`] for future versions; the
+//! is [`MigrationError::SchemaVersionMismatch`] for future versions; the
 //! runner itself is exercised by fixture steps in the unit tests.
 
 use std::fs;
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
-use zero_abi::{DigestV1, canonical_json, sha256};
+use zero_abi::{Sha256Digest, canonical_json, sha256};
 
 use crate::fs_replace::atomic_write_file;
 use crate::gc::{gc_contract_digest_hex, gc_join};
 
 /// Schema version of the format-version record.
-pub const STORE_FORMAT_SCHEMA_VERSION_V1: u16 = 1;
+pub const STORE_FORMAT_SCHEMA_VERSION: u16 = 1;
 /// Current on-disk store format version.
-pub const STORE_FORMAT_VERSION_CURRENT_V1: u32 = 1;
+pub const STORE_FORMAT_VERSION_CURRENT: u32 = 1;
 /// Highest store format version the production registry knows. Any on-disk
 /// version above this is refused loudly.
-pub const STORE_FORMAT_MAX_KNOWN_VERSION_V1: u32 = 1;
+pub const STORE_FORMAT_MAX_KNOWN_VERSION: u32 = 1;
 /// Schema version of a migration receipt.
-pub const MIGRATION_RECEIPT_SCHEMA_VERSION_V1: u16 = 1;
+pub const MIGRATION_RECEIPT_SCHEMA_VERSION: u16 = 1;
 /// File name of the format-version record, relative to the store root.
 pub const STORE_FORMAT_VERSION_FILENAME: &str = "format_version";
 
-pub const FORMAT_VERSION_DOMAIN_V1: &[u8] = b"zerostack.store_format.version.v1\0";
-pub const MIGRATION_RECEIPT_DOMAIN_V1: &[u8] = b"zerostack.store_format.migration_receipt.v1\0";
-pub const MIGRATION_STEP_DOMAIN_V1: &[u8] = b"zerostack.store_format.migration_step.v1\0";
-pub const MIGRATION_MARKER_DOMAIN_V1: &[u8] = b"zerostack.store_format.migration_marker.v1\0";
+pub const FORMAT_VERSION_DOMAIN: &[u8] = b"zerostack.store_format.version.v1\0";
+pub const MIGRATION_RECEIPT_DOMAIN: &[u8] = b"zerostack.store_format.migration_receipt.v1\0";
+pub const MIGRATION_STEP_DOMAIN: &[u8] = b"zerostack.store_format.migration_step.v1\0";
+pub const MIGRATION_MARKER_DOMAIN: &[u8] = b"zerostack.store_format.migration_marker.v1\0";
 
 /// Explicit on-disk store-format version record.
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
-pub struct StoreFormatVersionV1 {
+pub struct StoreFormatVersion {
     pub schema_version: u16,
     pub format_version: u32,
 }
-impl StoreFormatVersionV1 {
+impl StoreFormatVersion {
     pub fn new(format_version: u32) -> Self {
         Self {
-            schema_version: STORE_FORMAT_SCHEMA_VERSION_V1,
+            schema_version: STORE_FORMAT_SCHEMA_VERSION,
             format_version,
         }
     }
-    pub fn validate(&self) -> Result<(), MigrationErrorV1> {
-        if self.schema_version != STORE_FORMAT_SCHEMA_VERSION_V1 {
-            return Err(MigrationErrorV1::UnsupportedRecordSchema(self.schema_version));
+    pub fn validate(&self) -> Result<(), MigrationError> {
+        if self.schema_version != STORE_FORMAT_SCHEMA_VERSION {
+            return Err(MigrationError::UnsupportedRecordSchema(self.schema_version));
         }
         if self.format_version == 0 {
-            return Err(MigrationErrorV1::TornOrNoncanonicalRecord(
+            return Err(MigrationError::TornOrNoncanonicalRecord(
                 "format version zero is reserved and never valid".into(),
             ));
         }
         Ok(())
     }
-    pub fn canonical_bytes(&self) -> Result<Vec<u8>, MigrationErrorV1> {
+    pub fn canonical_bytes(&self) -> Result<Vec<u8>, MigrationError> {
         self.validate()?;
         canonical_record_bytes(self)
     }
     /// Deterministic format-state root digest: the domain digest of the
     /// canonical version record, used as the migration receipt's old/new root.
-    pub fn state_digest(&self) -> Result<DigestV1, MigrationErrorV1> {
-        Ok(domain_digest(FORMAT_VERSION_DOMAIN_V1, &self.canonical_bytes()?))
+    pub fn state_digest(&self) -> Result<Sha256Digest, MigrationError> {
+        Ok(domain_digest(FORMAT_VERSION_DOMAIN, &self.canonical_bytes()?))
     }
 }
 
 /// Migration failure classes.
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub enum MigrationErrorV1 {
+pub enum MigrationError {
     Io(String),
     TornOrNoncanonicalRecord(String),
     /// The format-version record itself carries an unknown schema.
@@ -95,7 +95,7 @@ pub enum MigrationErrorV1 {
     TransformFailed(String),
     ReceiptConflict(String),
 }
-impl std::fmt::Display for MigrationErrorV1 {
+impl std::fmt::Display for MigrationError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Io(message) => write!(f, "io: {message}"),
@@ -121,35 +121,35 @@ impl std::fmt::Display for MigrationErrorV1 {
         }
     }
 }
-impl std::error::Error for MigrationErrorV1 {}
+impl std::error::Error for MigrationError {}
 
 /// Result of one applied migration step.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub struct MigrationStepOutcomeV1 {
+pub struct MigrationStepOutcome {
     /// Digest of the store state the transform produced, used as the
     /// validation digest of the step.
-    pub validation_digest: DigestV1,
+    pub validation_digest: Sha256Digest,
 }
 
 /// A deterministic `v(n) -> v(n+1)` store-format transform. The transform is
 /// a plain function pointer so a step sequence is reproducible by
 /// construction (no captured environment, no wall clock).
-pub type MigrationTransformV1 = fn(&Path) -> Result<MigrationStepOutcomeV1, MigrationErrorV1>;
+pub type MigrationTransform = fn(&Path) -> Result<MigrationStepOutcome, MigrationError>;
 
 /// One ordered migration step. `to_version` must be exactly `from_version + 1`.
 #[derive(Clone, Copy)]
-pub struct MigrationStepV1 {
+pub struct MigrationStep {
     pub from_version: u32,
     pub to_version: u32,
     pub transform_name: &'static str,
-    transform: MigrationTransformV1,
+    transform: MigrationTransform,
 }
-impl MigrationStepV1 {
+impl MigrationStep {
     pub fn new(
         from_version: u32,
         to_version: u32,
         transform_name: &'static str,
-        transform: MigrationTransformV1,
+        transform: MigrationTransform,
     ) -> Self {
         Self {
             from_version,
@@ -158,14 +158,14 @@ impl MigrationStepV1 {
             transform,
         }
     }
-    pub fn validate(&self) -> Result<(), MigrationErrorV1> {
+    pub fn validate(&self) -> Result<(), MigrationError> {
         if self.from_version == 0 || self.to_version != self.from_version + 1 {
-            return Err(MigrationErrorV1::InvalidStepChain(
+            return Err(MigrationError::InvalidStepChain(
                 "steps must advance exactly one version (v(n) -> v(n+1))".into(),
             ));
         }
         if self.transform_name.is_empty() {
-            return Err(MigrationErrorV1::InvalidStepChain(
+            return Err(MigrationError::InvalidStepChain(
                 "transform name must not be empty".into(),
             ));
         }
@@ -173,10 +173,10 @@ impl MigrationStepV1 {
     }
     /// Digest of this step's descriptor, aggregated into the receipt's
     /// transform digest.
-    pub fn descriptor_digest(&self) -> Result<DigestV1, MigrationErrorV1> {
+    pub fn descriptor_digest(&self) -> Result<Sha256Digest, MigrationError> {
         self.validate()?;
         let descriptor = format!("{}|{}|{}", self.from_version, self.to_version, self.transform_name);
-        Ok(domain_digest(MIGRATION_STEP_DOMAIN_V1, descriptor.as_bytes()))
+        Ok(domain_digest(MIGRATION_STEP_DOMAIN, descriptor.as_bytes()))
     }
     fn marker_path(&self, store_root: &Path) -> PathBuf {
         gc_join(
@@ -194,35 +194,35 @@ impl MigrationStepV1 {
 /// without re-applying the transform.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
-pub struct MigrationMarkerV1 {
+pub struct MigrationMarker {
     pub schema_version: u16,
     pub from_version: u32,
     pub to_version: u32,
     pub transform_name: String,
-    pub validation_digest: DigestV1,
+    pub validation_digest: Sha256Digest,
 }
-impl MigrationMarkerV1 {
-    pub fn validate(&self) -> Result<(), MigrationErrorV1> {
-        if self.schema_version != STORE_FORMAT_SCHEMA_VERSION_V1 {
-            return Err(MigrationErrorV1::UnsupportedRecordSchema(self.schema_version));
+impl MigrationMarker {
+    pub fn validate(&self) -> Result<(), MigrationError> {
+        if self.schema_version != STORE_FORMAT_SCHEMA_VERSION {
+            return Err(MigrationError::UnsupportedRecordSchema(self.schema_version));
         }
         if self.transform_name.is_empty()
             || self.from_version == 0
             || self.to_version != self.from_version + 1
-            || self.validation_digest == DigestV1::ZERO
+            || self.validation_digest == Sha256Digest::ZERO
         {
-            return Err(MigrationErrorV1::TornOrNoncanonicalRecord(
+            return Err(MigrationError::TornOrNoncanonicalRecord(
                 "migration marker is incomplete".into(),
             ));
         }
         Ok(())
     }
-    pub fn canonical_bytes(&self) -> Result<Vec<u8>, MigrationErrorV1> {
+    pub fn canonical_bytes(&self) -> Result<Vec<u8>, MigrationError> {
         self.validate()?;
         canonical_record_bytes(self)
     }
-    pub fn digest(&self) -> Result<DigestV1, MigrationErrorV1> {
-        Ok(domain_digest(MIGRATION_MARKER_DOMAIN_V1, &self.canonical_bytes()?))
+    pub fn digest(&self) -> Result<Sha256Digest, MigrationError> {
+        Ok(domain_digest(MIGRATION_MARKER_DOMAIN, &self.canonical_bytes()?))
     }
 }
 
@@ -231,7 +231,7 @@ impl MigrationMarkerV1 {
 /// the final state.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
-pub struct MigrationReceiptV1 {
+pub struct MigrationReceipt {
     pub schema_version: u16,
     pub record_type: String,
     pub store_contract_digest: String,
@@ -239,61 +239,61 @@ pub struct MigrationReceiptV1 {
     pub new_version: u32,
     /// Format-state root digest before the run (domain digest of the
     /// canonical version record).
-    pub old_root: DigestV1,
+    pub old_root: Sha256Digest,
     /// Format-state root digest after the run.
-    pub new_root: DigestV1,
+    pub new_root: Sha256Digest,
     /// Digest of the ordered step descriptors applied by this run (domain
     /// digest of the empty byte string when nothing was applied).
-    pub transform_digest: DigestV1,
+    pub transform_digest: Sha256Digest,
     /// Digest of the final validated store state (last marker's validation
     /// digest, or the new format-state root digest when no step applied).
-    pub validation_digest: DigestV1,
+    pub validation_digest: Sha256Digest,
     pub steps_applied: u32,
     pub applied_step_names: Vec<String>,
 }
-impl MigrationReceiptV1 {
-    pub fn validate(&self) -> Result<(), MigrationErrorV1> {
-        if self.schema_version != MIGRATION_RECEIPT_SCHEMA_VERSION_V1 {
-            return Err(MigrationErrorV1::UnsupportedRecordSchema(self.schema_version));
+impl MigrationReceipt {
+    pub fn validate(&self) -> Result<(), MigrationError> {
+        if self.schema_version != MIGRATION_RECEIPT_SCHEMA_VERSION {
+            return Err(MigrationError::UnsupportedRecordSchema(self.schema_version));
         }
         if self.record_type != "migration" {
-            return Err(MigrationErrorV1::TornOrNoncanonicalRecord(
+            return Err(MigrationError::TornOrNoncanonicalRecord(
                 "migration receipt record_type is not 'migration'".into(),
             ));
         }
         if self.store_contract_digest != gc_contract_digest_hex() {
-            return Err(MigrationErrorV1::TornOrNoncanonicalRecord(
+            return Err(MigrationError::TornOrNoncanonicalRecord(
                 "migration receipt store contract digest is not current".into(),
             ));
         }
         if self.old_version == 0
             || self.new_version == 0
             || self.new_version < self.old_version
-            || self.old_root == DigestV1::ZERO
-            || self.new_root == DigestV1::ZERO
-            || self.validation_digest == DigestV1::ZERO
+            || self.old_root == Sha256Digest::ZERO
+            || self.new_root == Sha256Digest::ZERO
+            || self.validation_digest == Sha256Digest::ZERO
             || self.applied_step_names.len() as u32 != self.steps_applied
         {
-            return Err(MigrationErrorV1::TornOrNoncanonicalRecord(
+            return Err(MigrationError::TornOrNoncanonicalRecord(
                 "migration receipt commitments disagree".into(),
             ));
         }
         Ok(())
     }
-    pub fn canonical_bytes(&self) -> Result<Vec<u8>, MigrationErrorV1> {
+    pub fn canonical_bytes(&self) -> Result<Vec<u8>, MigrationError> {
         self.validate()?;
         canonical_record_bytes(self)
     }
-    pub fn digest(&self) -> Result<DigestV1, MigrationErrorV1> {
-        Ok(domain_digest(MIGRATION_RECEIPT_DOMAIN_V1, &self.canonical_bytes()?))
+    pub fn digest(&self) -> Result<Sha256Digest, MigrationError> {
+        Ok(domain_digest(MIGRATION_RECEIPT_DOMAIN, &self.canonical_bytes()?))
     }
 }
 
 /// The production migration registry. Format v1 is current, so today it is
 /// empty and the only production outcomes are no-ops and loud
-/// [`MigrationErrorV1::SchemaVersionMismatch`] refusals. Future format
+/// [`MigrationError::SchemaVersionMismatch`] refusals. Future format
 /// changes add their ordered steps here.
-pub fn production_migration_steps_v1() -> Vec<MigrationStepV1> {
+pub fn production_migration_steps() -> Vec<MigrationStep> {
     Vec::new()
 }
 
@@ -301,25 +301,25 @@ pub fn production_migration_steps_v1() -> Vec<MigrationStepV1> {
 /// means the implicit v1 default (nothing is written by detection). A present
 /// record is validated canonically; a torn record or an unknown record schema
 /// fails loudly.
-pub fn detect_store_format_version_v1(
+pub fn detect_store_format_version(
     store_root: &Path,
-) -> Result<Option<StoreFormatVersionV1>, MigrationErrorV1> {
+) -> Result<Option<StoreFormatVersion>, MigrationError> {
     let path = store_root.join(STORE_FORMAT_VERSION_FILENAME);
     let bytes = match fs::read(&path) {
         Ok(bytes) => bytes,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
-        Err(error) => return Err(MigrationErrorV1::Io(error.to_string())),
+        Err(error) => return Err(MigrationError::Io(error.to_string())),
     };
     let value: serde_json::Value = serde_json::from_slice(&bytes).map_err(|error| {
-        MigrationErrorV1::TornOrNoncanonicalRecord(format!("version record decode failed: {error}"))
+        MigrationError::TornOrNoncanonicalRecord(format!("version record decode failed: {error}"))
     })?;
     if canonical_json(&value).as_bytes() != bytes {
-        return Err(MigrationErrorV1::TornOrNoncanonicalRecord(
+        return Err(MigrationError::TornOrNoncanonicalRecord(
             "version record bytes are not canonical JSON".into(),
         ));
     }
-    let version: StoreFormatVersionV1 = serde_json::from_value(value).map_err(|error| {
-        MigrationErrorV1::TornOrNoncanonicalRecord(format!(
+    let version: StoreFormatVersion = serde_json::from_value(value).map_err(|error| {
+        MigrationError::TornOrNoncanonicalRecord(format!(
             "version record structure failed: {error}"
         ))
     })?;
@@ -329,14 +329,14 @@ pub fn detect_store_format_version_v1(
 
 /// Fail-closed compatibility gate: refuse (loudly) any on-disk store format
 /// version above the production maximum. Callers that intend to migrate use
-/// [`run_store_migrations_v1`] instead.
-pub fn ensure_format_supported_v1(store_root: &Path) -> Result<StoreFormatVersionV1, MigrationErrorV1> {
-    let detected = detect_store_format_version_v1(store_root)?;
-    let version = detected.unwrap_or_else(|| StoreFormatVersionV1::new(STORE_FORMAT_VERSION_CURRENT_V1));
-    if version.format_version > STORE_FORMAT_MAX_KNOWN_VERSION_V1 {
-        return Err(MigrationErrorV1::SchemaVersionMismatch {
+/// [`run_store_migrations`] instead.
+pub fn ensure_format_supported(store_root: &Path) -> Result<StoreFormatVersion, MigrationError> {
+    let detected = detect_store_format_version(store_root)?;
+    let version = detected.unwrap_or_else(|| StoreFormatVersion::new(STORE_FORMAT_VERSION_CURRENT));
+    if version.format_version > STORE_FORMAT_MAX_KNOWN_VERSION {
+        return Err(MigrationError::SchemaVersionMismatch {
             detected: version.format_version,
-            max_supported: STORE_FORMAT_MAX_KNOWN_VERSION_V1,
+            max_supported: STORE_FORMAT_MAX_KNOWN_VERSION,
         });
     }
     Ok(version)
@@ -349,22 +349,22 @@ pub fn ensure_format_supported_v1(store_root: &Path) -> Result<StoreFormatVersio
 /// - Steps must form a contiguous ascending chain; each step applies at most
 ///   once (a persisted marker of the same step is honored as already applied).
 /// - The receipt is persisted under `<store_root>/gc/migrations/receipts/`.
-pub fn run_store_migrations_v1(
+pub fn run_store_migrations(
     store_root: &Path,
-    steps: &[MigrationStepV1],
-) -> Result<MigrationReceiptV1, MigrationErrorV1> {
-    let detected = detect_store_format_version_v1(store_root)?;
+    steps: &[MigrationStep],
+) -> Result<MigrationReceipt, MigrationError> {
+    let detected = detect_store_format_version(store_root)?;
     let current = detected
         .map(|version| version.format_version)
-        .unwrap_or(STORE_FORMAT_VERSION_CURRENT_V1);
+        .unwrap_or(STORE_FORMAT_VERSION_CURRENT);
     let max_known = steps
         .iter()
         .map(|step| step.to_version)
         .max()
-        .unwrap_or(STORE_FORMAT_MAX_KNOWN_VERSION_V1)
-        .max(STORE_FORMAT_MAX_KNOWN_VERSION_V1);
+        .unwrap_or(STORE_FORMAT_MAX_KNOWN_VERSION)
+        .max(STORE_FORMAT_MAX_KNOWN_VERSION);
     if current > max_known {
-        return Err(MigrationErrorV1::SchemaVersionMismatch {
+        return Err(MigrationError::SchemaVersionMismatch {
             detected: current,
             max_supported: max_known,
         });
@@ -374,7 +374,7 @@ pub fn run_store_migrations_v1(
     }
     for pair in steps.windows(2) {
         if pair[0].to_version != pair[1].from_version {
-            return Err(MigrationErrorV1::InvalidStepChain(
+            return Err(MigrationError::InvalidStepChain(
                 "steps must be ordered and contiguous (v(n) -> v(n+1))".into(),
             ));
         }
@@ -383,7 +383,7 @@ pub fn run_store_migrations_v1(
         && step.from_version < current
         && current < step.to_version
     {
-        return Err(MigrationErrorV1::InvalidStepChain(
+        return Err(MigrationError::InvalidStepChain(
             "store version lies inside a step boundary (torn marker state)".into(),
         ));
     }
@@ -392,12 +392,12 @@ pub fn run_store_migrations_v1(
         .last()
         .map(|step| step.to_version)
         .unwrap_or(current);
-    let old_root = StoreFormatVersionV1::new(current).state_digest()?;
+    let old_root = StoreFormatVersion::new(current).state_digest()?;
 
     let mut steps_applied: u32 = 0;
     let mut applied_step_names: Vec<String> = Vec::new();
-    let mut applied_descriptor_digests: Vec<DigestV1> = Vec::new();
-    let mut validation_digest = StoreFormatVersionV1::new(current).state_digest()?;
+    let mut applied_descriptor_digests: Vec<Sha256Digest> = Vec::new();
+    let mut validation_digest = StoreFormatVersion::new(current).state_digest()?;
 
     for step in steps {
         if step.to_version <= current {
@@ -411,7 +411,7 @@ pub fn run_store_migrations_v1(
                     || marker.to_version != step.to_version
                     || marker.transform_name != step.transform_name
                 {
-                    return Err(MigrationErrorV1::ImmutableMarkerConflict(format!(
+                    return Err(MigrationError::ImmutableMarkerConflict(format!(
                         "marker at '{}' does not describe step {} -> {} ({})",
                         marker_path.display(),
                         step.from_version,
@@ -423,25 +423,25 @@ pub fn run_store_migrations_v1(
             }
             None => {
                 let outcome = (step.transform)(store_root).map_err(|error| {
-                    MigrationErrorV1::TransformFailed(format!(
+                    MigrationError::TransformFailed(format!(
                         "step {} -> {} ({}) failed: {error}",
                         step.from_version, step.to_version, step.transform_name
                     ))
                 })?;
-                if outcome.validation_digest == DigestV1::ZERO {
-                    return Err(MigrationErrorV1::TransformFailed(
+                if outcome.validation_digest == Sha256Digest::ZERO {
+                    return Err(MigrationError::TransformFailed(
                         "transform returned a zero validation digest".into(),
                     ));
                 }
-                let marker = MigrationMarkerV1 {
-                    schema_version: STORE_FORMAT_SCHEMA_VERSION_V1,
+                let marker = MigrationMarker {
+                    schema_version: STORE_FORMAT_SCHEMA_VERSION,
                     from_version: step.from_version,
                     to_version: step.to_version,
                     transform_name: step.transform_name.to_string(),
                     validation_digest: outcome.validation_digest,
                 };
                 atomic_write_file(&marker_path, &marker.canonical_bytes()?)
-                    .map_err(|error| MigrationErrorV1::Io(error.to_string()))?;
+                    .map_err(|error| MigrationError::Io(error.to_string()))?;
                 validation_digest = marker.validation_digest;
             }
         }
@@ -451,26 +451,26 @@ pub fn run_store_migrations_v1(
     }
 
     let new_version = target;
-    let new_root = StoreFormatVersionV1::new(new_version).state_digest()?;
+    let new_root = StoreFormatVersion::new(new_version).state_digest()?;
     let transform_digest = if applied_descriptor_digests.is_empty() {
-        domain_digest(MIGRATION_STEP_DOMAIN_V1, b"")
+        domain_digest(MIGRATION_STEP_DOMAIN, b"")
     } else {
         let mut bound = Vec::new();
         for digest in &applied_descriptor_digests {
             bound.extend_from_slice(digest.as_bytes());
         }
-        domain_digest(MIGRATION_STEP_DOMAIN_V1, &bound)
+        domain_digest(MIGRATION_STEP_DOMAIN, &bound)
     };
 
     if new_version != current {
-        let version = StoreFormatVersionV1::new(new_version);
+        let version = StoreFormatVersion::new(new_version);
         let version_bytes = version.canonical_bytes()?;
         atomic_write_file(&store_root.join(STORE_FORMAT_VERSION_FILENAME), &version_bytes)
-            .map_err(|error| MigrationErrorV1::Io(error.to_string()))?;
+            .map_err(|error| MigrationError::Io(error.to_string()))?;
     }
 
-    let receipt = MigrationReceiptV1 {
-        schema_version: MIGRATION_RECEIPT_SCHEMA_VERSION_V1,
+    let receipt = MigrationReceipt {
+        schema_version: MIGRATION_RECEIPT_SCHEMA_VERSION,
         record_type: "migration".into(),
         store_contract_digest: gc_contract_digest_hex(),
         old_version: current,
@@ -500,51 +500,51 @@ pub fn run_store_migrations_v1(
     Ok(receipt)
 }
 
-fn read_marker(path: &Path) -> Result<Option<MigrationMarkerV1>, MigrationErrorV1> {
+fn read_marker(path: &Path) -> Result<Option<MigrationMarker>, MigrationError> {
     let bytes = match fs::read(path) {
         Ok(bytes) => bytes,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
-        Err(error) => return Err(MigrationErrorV1::Io(error.to_string())),
+        Err(error) => return Err(MigrationError::Io(error.to_string())),
     };
     let value: serde_json::Value = serde_json::from_slice(&bytes).map_err(|error| {
-        MigrationErrorV1::TornOrNoncanonicalRecord(format!("marker decode failed: {error}"))
+        MigrationError::TornOrNoncanonicalRecord(format!("marker decode failed: {error}"))
     })?;
     if canonical_json(&value).as_bytes() != bytes {
-        return Err(MigrationErrorV1::TornOrNoncanonicalRecord(
+        return Err(MigrationError::TornOrNoncanonicalRecord(
             "marker bytes are not canonical JSON".into(),
         ));
     }
-    let marker: MigrationMarkerV1 = serde_json::from_value(value).map_err(|error| {
-        MigrationErrorV1::TornOrNoncanonicalRecord(format!("marker structure failed: {error}"))
+    let marker: MigrationMarker = serde_json::from_value(value).map_err(|error| {
+        MigrationError::TornOrNoncanonicalRecord(format!("marker structure failed: {error}"))
     })?;
     marker.validate()?;
     Ok(Some(marker))
 }
 
-fn persist_immutable(path: &Path, bytes: &[u8]) -> Result<(), MigrationErrorV1> {
+fn persist_immutable(path: &Path, bytes: &[u8]) -> Result<(), MigrationError> {
     match fs::read(path) {
         Ok(existing) if existing == bytes => Ok(()),
-        Ok(_) => Err(MigrationErrorV1::ReceiptConflict(
+        Ok(_) => Err(MigrationError::ReceiptConflict(
             "an immutable record already exists at this path with different bytes".into(),
         )),
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-            atomic_write_file(path, bytes).map_err(|error| MigrationErrorV1::Io(error.to_string()))
+            atomic_write_file(path, bytes).map_err(|error| MigrationError::Io(error.to_string()))
         }
-        Err(error) => Err(MigrationErrorV1::Io(error.to_string())),
+        Err(error) => Err(MigrationError::Io(error.to_string())),
     }
 }
 
-fn canonical_record_bytes<T: Serialize>(value: &T) -> Result<Vec<u8>, MigrationErrorV1> {
+fn canonical_record_bytes<T: Serialize>(value: &T) -> Result<Vec<u8>, MigrationError> {
     let value = serde_json::to_value(value)
-        .map_err(|error| MigrationErrorV1::TornOrNoncanonicalRecord(error.to_string()))?;
+        .map_err(|error| MigrationError::TornOrNoncanonicalRecord(error.to_string()))?;
     Ok(canonical_json(&value).into_bytes())
 }
 
-fn domain_digest(domain: &[u8], bytes: &[u8]) -> DigestV1 {
+fn domain_digest(domain: &[u8], bytes: &[u8]) -> Sha256Digest {
     let mut bound = Vec::with_capacity(domain.len() + 8 + bytes.len());
     bound.extend_from_slice(domain);
     bound.extend_from_slice(&(bytes.len() as u64).to_be_bytes());
     bound.extend_from_slice(bytes);
-    DigestV1::from_bytes(sha256(&bound))
+    Sha256Digest::from_bytes(sha256(&bound))
 }
 

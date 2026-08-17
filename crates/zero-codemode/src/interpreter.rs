@@ -1521,10 +1521,10 @@ impl<'tree> Interpreter<'tree> {
             )));
         };
         let point_json = self.to_json(point_value).map_err(Fault::Host)?;
-        let point: zero_abi::SemanticDecisionPointV1 =
+        let point: zero_abi::SemanticDecisionPoint =
             serde_json::from_value(point_json).map_err(|error| {
                 Fault::Host(HostError::Data(format!(
-                    "decision.require point is not a valid SemanticDecisionPointV1: {error}"
+                    "decision.require point is not a valid SemanticDecisionPoint: {error}"
                 )))
             })?;
         let observed_json = self.to_json(observed_value).map_err(Fault::Host)?;
@@ -1537,15 +1537,15 @@ impl<'tree> Interpreter<'tree> {
             })?
             .to_owned();
         match self.host.decision_gate().resolve(&point, &observed) {
-            crate::decision_gate::GateResolutionV1::Selected(alternative) => {
+            crate::decision_gate::GateResolution::Selected(alternative) => {
                 Ok(Value::String(alternative))
             }
-            crate::decision_gate::GateResolutionV1::DecisionRequired(payload) => {
+            crate::decision_gate::GateResolution::DecisionRequired(payload) => {
                 // Never select a branch privately: abort with the typed
                 // decision payload (V6-C03/H03).
                 Err(Fault::Host(HostError::DecisionRequired(payload)))
             }
-            crate::decision_gate::GateResolutionV1::PolicyError(error) => Err(Fault::Host(
+            crate::decision_gate::GateResolution::PolicyError(error) => Err(Fault::Host(
                 HostError::Data(format!("decision policy error: {error}")),
             )),
         }

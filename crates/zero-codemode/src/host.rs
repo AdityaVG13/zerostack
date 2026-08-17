@@ -254,7 +254,7 @@ impl Host {
     /// attached. The session captures this between the execution settling
     /// and restoring the policy-less gate, so the report always describes
     /// exactly the execution it rode in on.
-    pub fn decision_gate_usage_report(&self) -> Option<crate::GateUsageReportV1> {
+    pub fn decision_gate_usage_report(&self) -> Option<crate::GateUsageReport> {
         self.decision_gate.usage_report()
     }
 
@@ -383,7 +383,7 @@ pub enum HostError {
     Data(String),
     Execution(String),
     VerdictRejected(String),
-    DecisionRequired(zero_abi::DecisionRequiredV1),
+    DecisionRequired(zero_abi::DecisionRequired),
     Runtime(String),
     JavaScript(String),
     MethodNotFound(String),

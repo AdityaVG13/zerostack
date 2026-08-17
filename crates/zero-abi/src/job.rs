@@ -12,17 +12,17 @@ use serde_json::{Value, json};
 
 use crate::digest::contract_digest_hex;
 
-pub const TOKEN_JOB_ABI_VERSION_V1: &str = "zerostack.token_job.v1";
-pub const TOKEN_JOB_OPERATION_V1: &str = "job";
-pub const TOKEN_JOB_DEFAULT_WAIT_MS_V1: u64 = 30_000;
-pub const TOKEN_JOB_MAX_WAIT_MS_V1: u64 = 30_000;
-pub const TOKEN_JOB_DEFAULT_TAIL_BYTES_V1: u64 = 8 * 1024;
-pub const TOKEN_JOB_MAX_TAIL_BYTES_V1: u64 = 64 * 1024;
-pub const TOKEN_JOB_MAX_ID_BYTES_V1: usize = 256;
+pub const TOKEN_JOB_ABI_VERSION: &str = "zerostack.token_job.v1";
+pub const TOKEN_JOB_OPERATION: &str = "job";
+pub const TOKEN_JOB_DEFAULT_WAIT_MS: u64 = 30_000;
+pub const TOKEN_JOB_MAX_WAIT_MS: u64 = 30_000;
+pub const TOKEN_JOB_DEFAULT_TAIL_BYTES: u64 = 8 * 1024;
+pub const TOKEN_JOB_MAX_TAIL_BYTES: u64 = 64 * 1024;
+pub const TOKEN_JOB_MAX_ID_BYTES: usize = 256;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct TokenJobPollRequestV1 {
+pub struct TokenJobPollRequest {
     pub id: String,
     pub wait_ms: u64,
     pub since: u64,
@@ -31,7 +31,7 @@ pub struct TokenJobPollRequestV1 {
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct TokenJobPollRequestWireV1 {
+struct TokenJobPollRequestWire {
     id: String,
     #[serde(default = "default_wait_ms")]
     wait_ms: u64,
@@ -42,20 +42,20 @@ struct TokenJobPollRequestWireV1 {
 }
 
 const fn default_wait_ms() -> u64 {
-    TOKEN_JOB_DEFAULT_WAIT_MS_V1
+    TOKEN_JOB_DEFAULT_WAIT_MS
 }
 
 const fn default_tail_bytes() -> u64 {
-    TOKEN_JOB_DEFAULT_TAIL_BYTES_V1
+    TOKEN_JOB_DEFAULT_TAIL_BYTES
 }
 
-impl TokenJobPollRequestV1 {
+impl TokenJobPollRequest {
     pub fn new(id: impl Into<String>) -> Result<Self, TokenJobContractError> {
         Self::with_options(
             id,
-            TOKEN_JOB_DEFAULT_WAIT_MS_V1,
+            TOKEN_JOB_DEFAULT_WAIT_MS,
             0,
-            TOKEN_JOB_DEFAULT_TAIL_BYTES_V1,
+            TOKEN_JOB_DEFAULT_TAIL_BYTES,
         )
     }
 
@@ -77,19 +77,19 @@ impl TokenJobPollRequestV1 {
 
     pub fn validate(&self) -> Result<(), TokenJobContractError> {
         validate_id(&self.id)?;
-        if self.wait_ms > TOKEN_JOB_MAX_WAIT_MS_V1 {
+        if self.wait_ms > TOKEN_JOB_MAX_WAIT_MS {
             return Err(TokenJobContractError::WaitTooLong);
         }
-        if !(1..=TOKEN_JOB_MAX_TAIL_BYTES_V1).contains(&self.tail_bytes) {
+        if !(1..=TOKEN_JOB_MAX_TAIL_BYTES).contains(&self.tail_bytes) {
             return Err(TokenJobContractError::InvalidTailLimit);
         }
         Ok(())
     }
 }
 
-impl<'de> Deserialize<'de> for TokenJobPollRequestV1 {
+impl<'de> Deserialize<'de> for TokenJobPollRequest {
     fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let wire = TokenJobPollRequestWireV1::deserialize(deserializer)?;
+        let wire = TokenJobPollRequestWire::deserialize(deserializer)?;
         Self::with_options(wire.id, wire.wait_ms, wire.since, wire.tail_bytes)
             .map_err(serde::de::Error::custom)
     }
@@ -97,7 +97,7 @@ impl<'de> Deserialize<'de> for TokenJobPollRequestV1 {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
-pub enum TokenJobStatusV1 {
+pub enum TokenJobStatus {
     Running,
     Exited,
     Failed,
@@ -105,9 +105,9 @@ pub enum TokenJobStatusV1 {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct TokenJobPollResultV1 {
+pub struct TokenJobPollResult {
     pub id: String,
-    pub status: TokenJobStatusV1,
+    pub status: TokenJobStatus,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub pid: Option<u32>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -125,9 +125,9 @@ pub struct TokenJobPollResultV1 {
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct TokenJobPollResultWireV1 {
+struct TokenJobPollResultWire {
     id: String,
-    status: TokenJobStatusV1,
+    status: TokenJobStatus,
     #[serde(default)]
     pid: Option<u32>,
     #[serde(default)]
@@ -143,11 +143,11 @@ struct TokenJobPollResultWireV1 {
     next_poll_ms: Option<u64>,
 }
 
-impl TokenJobPollResultV1 {
+impl TokenJobPollResult {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         id: impl Into<String>,
-        status: TokenJobStatusV1,
+        status: TokenJobStatus,
         pid: Option<u32>,
         exit_code: Option<i32>,
         tail: impl Into<String>,
@@ -179,8 +179,8 @@ impl TokenJobPollResultV1 {
 
     pub fn validate(&self) -> Result<(), TokenJobContractError> {
         validate_id(&self.id)?;
-        if self.tail_bytes > TOKEN_JOB_MAX_TAIL_BYTES_V1
-            || self.tail.len() as u64 > TOKEN_JOB_MAX_TAIL_BYTES_V1
+        if self.tail_bytes > TOKEN_JOB_MAX_TAIL_BYTES
+            || self.tail.len() as u64 > TOKEN_JOB_MAX_TAIL_BYTES
         {
             return Err(TokenJobContractError::TailTooLarge);
         }
@@ -193,18 +193,18 @@ impl TokenJobPollResultV1 {
         {
             return Err(TokenJobContractError::InconsistentTail);
         }
-        if !self.changed && (self.status != TokenJobStatusV1::Running || self.tail_bytes != 0) {
+        if !self.changed && (self.status != TokenJobStatus::Running || self.tail_bytes != 0) {
             return Err(TokenJobContractError::InconsistentChange);
         }
-        if self.status == TokenJobStatusV1::Running && self.exit_code.is_some() {
+        if self.status == TokenJobStatus::Running && self.exit_code.is_some() {
             return Err(TokenJobContractError::InvalidExitCode);
         }
-        if (self.status == TokenJobStatusV1::Running) != self.next_poll_ms.is_some() {
+        if (self.status == TokenJobStatus::Running) != self.next_poll_ms.is_some() {
             return Err(TokenJobContractError::InconsistentPollState);
         }
         if self
             .next_poll_ms
-            .is_some_and(|value| value > TOKEN_JOB_MAX_WAIT_MS_V1)
+            .is_some_and(|value| value > TOKEN_JOB_MAX_WAIT_MS)
         {
             return Err(TokenJobContractError::WaitTooLong);
         }
@@ -212,9 +212,9 @@ impl TokenJobPollResultV1 {
     }
 }
 
-impl<'de> Deserialize<'de> for TokenJobPollResultV1 {
+impl<'de> Deserialize<'de> for TokenJobPollResult {
     fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let wire = TokenJobPollResultWireV1::deserialize(deserializer)?;
+        let wire = TokenJobPollResultWire::deserialize(deserializer)?;
         Self::new(
             wire.id,
             wire.status,
@@ -267,35 +267,35 @@ impl fmt::Display for TokenJobContractError {
 impl std::error::Error for TokenJobContractError {}
 
 fn validate_id(id: &str) -> Result<(), TokenJobContractError> {
-    if id.is_empty() || id.len() > TOKEN_JOB_MAX_ID_BYTES_V1 || id.chars().any(char::is_control) {
+    if id.is_empty() || id.len() > TOKEN_JOB_MAX_ID_BYTES || id.chars().any(char::is_control) {
         Err(TokenJobContractError::InvalidId)
     } else {
         Ok(())
     }
 }
 
-pub fn token_job_contract_manifest_v1() -> Value {
+pub fn token_job_contract_manifest() -> Value {
     json!({
-        "version": TOKEN_JOB_ABI_VERSION_V1,
-        "operation": TOKEN_JOB_OPERATION_V1,
+        "version": TOKEN_JOB_ABI_VERSION,
+        "operation": TOKEN_JOB_OPERATION,
         "request": {
             "encoding": "json-object/camelCase",
             "required": ["id"],
             "normalizedFields": ["id", "waitMs", "since", "tailBytes"],
-            "maxIdBytes": TOKEN_JOB_MAX_ID_BYTES_V1,
-            "defaultWaitMs": TOKEN_JOB_DEFAULT_WAIT_MS_V1,
-            "maxWaitMs": TOKEN_JOB_MAX_WAIT_MS_V1,
-            "defaultTailBytes": TOKEN_JOB_DEFAULT_TAIL_BYTES_V1,
-            "maxTailBytes": TOKEN_JOB_MAX_TAIL_BYTES_V1
+            "maxIdBytes": TOKEN_JOB_MAX_ID_BYTES,
+            "defaultWaitMs": TOKEN_JOB_DEFAULT_WAIT_MS,
+            "maxWaitMs": TOKEN_JOB_MAX_WAIT_MS,
+            "defaultTailBytes": TOKEN_JOB_DEFAULT_TAIL_BYTES,
+            "maxTailBytes": TOKEN_JOB_MAX_TAIL_BYTES
         },
         "result": {
             "encoding": "json-object/camelCase",
             "required": ["id", "status", "tail", "tailUtf8Lossless", "tailBytes", "logBytes", "cursor", "version", "changed"],
             "statuses": ["running", "exited", "failed"],
             "optional": ["pid", "exitCode", "nextPollMs"],
-            "maxIdBytes": TOKEN_JOB_MAX_ID_BYTES_V1,
-            "maxTailBytes": TOKEN_JOB_MAX_TAIL_BYTES_V1,
-            "maxNextPollMs": TOKEN_JOB_MAX_WAIT_MS_V1,
+            "maxIdBytes": TOKEN_JOB_MAX_ID_BYTES,
+            "maxTailBytes": TOKEN_JOB_MAX_TAIL_BYTES,
+            "maxNextPollMs": TOKEN_JOB_MAX_WAIT_MS,
             "invariants": {
                 "cursorAtMostLogBytes": true,
                 "tailBytesAtMostCursor": true,
@@ -310,7 +310,7 @@ pub fn token_job_contract_manifest_v1() -> Value {
     })
 }
 
-pub fn token_job_contract_digest_v1() -> String {
-    contract_digest_hex(&token_job_contract_manifest_v1())
+pub fn token_job_contract_digest() -> String {
+    contract_digest_hex(&token_job_contract_manifest())
 }
 

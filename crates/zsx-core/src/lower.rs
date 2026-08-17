@@ -5,7 +5,7 @@
 
 use serde_json::Value;
 use zero_abi::raw_worker::EngineIdentity;
-use zero_abi::{TOKEN_JOB_OPERATION_V1, TokenJobPollRequestV1};
+use zero_abi::{TOKEN_JOB_OPERATION, TokenJobPollRequest};
 use zero_codemode::ConnectorError;
 
 /// Every capability the aggregate ZSX surface registers, in stable order.
@@ -333,7 +333,7 @@ fn token_job_args(input: &Value) -> Result<Value, ConnectorError> {
     } else {
         input.clone()
     };
-    let request: TokenJobPollRequestV1 = serde_json::from_value(candidate)
+    let request: TokenJobPollRequest = serde_json::from_value(candidate)
         .map_err(|error| ConnectorError::new(format!("invalid token.job arguments: {error}")))?;
     request
         .validate()
@@ -979,7 +979,7 @@ pub fn lower(
             "read",
             token_method_args(&input, "read", "path", TOKEN_READ_OPTIONS)?,
         ),
-        "job" => (TOKEN_JOB_OPERATION_V1, token_job_args(&input)?),
+        "job" => (TOKEN_JOB_OPERATION, token_job_args(&input)?),
         "shell" => {
             let mut args = token_method_args(&input, "shell", "command", TOKEN_SHELL_OPTIONS)?;
             if let Some(object) = args.as_object_mut() {

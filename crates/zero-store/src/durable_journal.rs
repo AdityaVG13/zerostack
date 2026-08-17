@@ -10,8 +10,8 @@
 //! [`JournalBindingLike`]): the v1 four-term binding (old/new root +
 //! transaction + owner) kept for compatibility, and the v2 five-term binding
 //! (ZS-STORE-006) that adds nonce, protected scope, and a lease to the same
-//! atomic record. The v2 commit surface (`prepare_journal_v2`,
-//! `commit_journal_v2`, ...) is exercised by the two-writer commit-surface
+//! atomic record. The v2 commit surface (`prepare_lease_journal`,
+//! `commit_lease_journal`, ...) is exercised by the two-writer commit-surface
 //! integration test.
 
 use std::fs::{self, File, OpenOptions};
@@ -23,32 +23,32 @@ use std::time::SystemTime;
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
-use zero_abi::{DigestV1, canonical_json, sha256};
+use zero_abi::{Sha256Digest, canonical_json, sha256};
 
 use crate::fs_replace::{replace_file, sync_dir};
-use crate::{DurableProfileIdV1, DurableProfileV1};
+use crate::{DurableProfileId, DurableProfile};
 
 pub const DURABLE_JOURNAL_SCHEMA_VERSION_V2: u16 = 2;
 pub const DURABLE_JOURNAL_SCHEMA_VERSION_V3: u16 = 3;
-pub const DURABLE_BINDING_SCHEMA_VERSION_V1: u16 = 1;
+pub const DURABLE_BINDING_SCHEMA_VERSION: u16 = 1;
 pub const DURABLE_BINDING_SCHEMA_VERSION_V2: u16 = 2;
-pub const DURABLE_LEASE_SCHEMA_VERSION_V1: u16 = 1;
-pub const DURABLE_RECEIPT_SCHEMA_VERSION_V1: u16 = 1;
-pub const DURABLE_JOURNAL_MAX_RECORD_BYTES_V1: u64 = 64 * 1024;
+pub const DURABLE_LEASE_SCHEMA_VERSION: u16 = 1;
+pub const DURABLE_RECEIPT_SCHEMA_VERSION: u16 = 1;
+pub const DURABLE_JOURNAL_MAX_RECORD_BYTES: u64 = 64 * 1024;
 
-const BINDING_DOMAIN_V1: &[u8] = b"zerostack.durable_journal.binding.v1\0";
+const BINDING_DOMAIN: &[u8] = b"zerostack.durable_journal.binding.v1\0";
 const BINDING_DOMAIN_V2: &[u8] = b"zerostack.durable_journal.binding.v2\0";
 const JOURNAL_DOMAIN_V2: &[u8] = b"zerostack.durable_journal.record.v2\0";
 const JOURNAL_DOMAIN_V3: &[u8] = b"zerostack.durable_journal.record.v3\0";
-const ROOT_DOMAIN_V1: &[u8] = b"zerostack.durable_journal.root.v1\0";
-const CARTRIDGE_DOMAIN_V1: &[u8] = b"zerostack.durable_journal.cartridge.v1\0";
-const OWNER_DEATH_DOMAIN_V1: &[u8] = b"zerostack.durable_journal.owner_death.v1\0";
-const RECOVERY_DOMAIN_V1: &[u8] = b"zerostack.durable_journal.recovery.v1\0";
+const ROOT_DOMAIN: &[u8] = b"zerostack.durable_journal.root.v1\0";
+const CARTRIDGE_DOMAIN: &[u8] = b"zerostack.durable_journal.cartridge.v1\0";
+const OWNER_DEATH_DOMAIN: &[u8] = b"zerostack.durable_journal.owner_death.v1\0";
+const RECOVERY_DOMAIN: &[u8] = b"zerostack.durable_journal.recovery.v1\0";
 static TEMP_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
-pub enum JournalStateV1 {
+pub enum JournalState {
     Prepared,
     Committed,
     Aborted,
@@ -56,7 +56,7 @@ pub enum JournalStateV1 {
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
-pub enum AbortReasonV1 {
+pub enum AbortReason {
     ExplicitAbort,
     RecoveryObservedOldRoot,
     OwnerDeathObservedOldRoot,
@@ -64,7 +64,7 @@ pub enum AbortReasonV1 {
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
-pub enum RecoveryOutcomeV1 {
+pub enum RecoveryOutcome {
     NotStartedOldRoot,
     OldRootAborted,
     NewRootCommitted,
@@ -74,7 +74,7 @@ pub enum RecoveryOutcomeV1 {
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
-pub enum JournalFailureCodeV1 {
+pub enum JournalFailureCode {
     SchemaVersionMismatch,
     InvalidBinding,
     ProfileSubstitution,
@@ -97,7 +97,7 @@ pub enum JournalFailureCodeV1 {
     Indeterminate,
 }
 
-impl JournalFailureCodeV1 {
+impl JournalFailureCode {
     pub const fn as_str(self) -> &'static str {
         match self {
             Self::SchemaVersionMismatch => "schema_version_mismatch",
@@ -126,7 +126,7 @@ impl JournalFailureCodeV1 {
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, Hash, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
-pub enum JournalBoundaryV1 {
+pub enum JournalBoundary {
     RootInitializeBeforeWrite,
     RootInitializeAfterFileSync,
     RootInitializeAfterRename,
@@ -162,15 +162,15 @@ pub enum JournalBoundaryV1 {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct JournalErrorV1 {
-    pub code: JournalFailureCodeV1,
-    pub boundary: Option<JournalBoundaryV1>,
+pub struct JournalError {
+    pub code: JournalFailureCode,
+    pub boundary: Option<JournalBoundary>,
     pub publication_may_have_changed: bool,
     pub detail: String,
 }
 
-impl JournalErrorV1 {
-    fn new(code: JournalFailureCodeV1, detail: impl Into<String>) -> Self {
+impl JournalError {
+    fn new(code: JournalFailureCode, detail: impl Into<String>) -> Self {
         Self {
             code,
             boundary: None,
@@ -179,8 +179,8 @@ impl JournalErrorV1 {
         }
     }
     fn at(
-        code: JournalFailureCodeV1,
-        boundary: JournalBoundaryV1,
+        code: JournalFailureCode,
+        boundary: JournalBoundary,
         publication_may_have_changed: bool,
         detail: impl Into<String>,
     ) -> Self {
@@ -192,29 +192,29 @@ impl JournalErrorV1 {
         }
     }
 }
-impl std::fmt::Display for JournalErrorV1 {
+impl std::fmt::Display for JournalError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}: {}", self.code.as_str(), self.detail)
     }
 }
-impl std::error::Error for JournalErrorV1 {}
+impl std::error::Error for JournalError {}
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct JournalPathsV1 {
+pub struct JournalPaths {
     root_record: PathBuf,
     journal_record: PathBuf,
     cartridge: PathBuf,
     owner_death_receipt: PathBuf,
     recovery_receipt: PathBuf,
 }
-impl JournalPathsV1 {
+impl JournalPaths {
     pub fn new(
         root_record: impl Into<PathBuf>,
         journal_record: impl Into<PathBuf>,
         cartridge: impl Into<PathBuf>,
         owner_death_receipt: impl Into<PathBuf>,
         recovery_receipt: impl Into<PathBuf>,
-    ) -> Result<Self, JournalErrorV1> {
+    ) -> Result<Self, JournalError> {
         let paths = Self {
             root_record: root_record.into(),
             journal_record: journal_record.into(),
@@ -230,15 +230,15 @@ impl JournalPathsV1 {
             &paths.recovery_receipt,
         ];
         if all.iter().any(|path| path.file_name().is_none()) {
-            return Err(JournalErrorV1::new(
-                JournalFailureCodeV1::InvalidBinding,
+            return Err(JournalError::new(
+                JournalFailureCode::InvalidBinding,
                 "every journal path must name a file",
             ));
         }
         for (index, left) in all.iter().enumerate() {
             if all.iter().skip(index + 1).any(|right| left == right) {
-                return Err(JournalErrorV1::new(
-                    JournalFailureCodeV1::InvalidBinding,
+                return Err(JournalError::new(
+                    JournalFailureCode::InvalidBinding,
                     "journal paths must be distinct",
                 ));
             }
@@ -264,40 +264,40 @@ impl JournalPathsV1 {
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
-pub struct JournalBindingV1 {
+pub struct JournalBinding {
     pub schema_version: u16,
-    pub transaction_id: DigestV1,
-    pub assembly_manifest_digest: DigestV1,
-    pub durable_profile_id: DurableProfileIdV1,
-    pub durable_profile_digest: DigestV1,
-    pub old_root: DigestV1,
-    pub new_root: DigestV1,
-    pub owner_identity_digest: DigestV1,
+    pub transaction_id: Sha256Digest,
+    pub assembly_manifest_digest: Sha256Digest,
+    pub durable_profile_id: DurableProfileId,
+    pub durable_profile_digest: Sha256Digest,
+    pub old_root: Sha256Digest,
+    pub new_root: Sha256Digest,
+    pub owner_identity_digest: Sha256Digest,
 }
-impl JournalBindingV1 {
+impl JournalBinding {
     pub fn new(
-        transaction_id: DigestV1,
-        assembly_manifest_digest: DigestV1,
-        durable_profile_id: DurableProfileIdV1,
-        old_root: DigestV1,
-        new_root: DigestV1,
-        owner_identity_digest: DigestV1,
+        transaction_id: Sha256Digest,
+        assembly_manifest_digest: Sha256Digest,
+        durable_profile_id: DurableProfileId,
+        old_root: Sha256Digest,
+        new_root: Sha256Digest,
+        owner_identity_digest: Sha256Digest,
     ) -> Self {
         Self {
-            schema_version: DURABLE_BINDING_SCHEMA_VERSION_V1,
+            schema_version: DURABLE_BINDING_SCHEMA_VERSION,
             transaction_id,
             assembly_manifest_digest,
             durable_profile_id,
-            durable_profile_digest: DurableProfileV1::new(durable_profile_id).digest(),
+            durable_profile_digest: DurableProfile::new(durable_profile_id).digest(),
             old_root,
             new_root,
             owner_identity_digest,
         }
     }
-    pub fn validate(&self) -> Result<(), JournalErrorV1> {
-        if self.schema_version != DURABLE_BINDING_SCHEMA_VERSION_V1 {
-            return Err(JournalErrorV1::new(
-                JournalFailureCodeV1::SchemaVersionMismatch,
+    pub fn validate(&self) -> Result<(), JournalError> {
+        if self.schema_version != DURABLE_BINDING_SCHEMA_VERSION {
+            return Err(JournalError::new(
+                JournalFailureCode::SchemaVersionMismatch,
                 "journal binding schema version is not supported",
             ));
         }
@@ -308,33 +308,33 @@ impl JournalBindingV1 {
             self.new_root,
             self.owner_identity_digest,
         ]
-        .contains(&DigestV1::ZERO)
+        .contains(&Sha256Digest::ZERO)
         {
-            return Err(JournalErrorV1::new(
-                JournalFailureCodeV1::InvalidBinding,
+            return Err(JournalError::new(
+                JournalFailureCode::InvalidBinding,
                 "binding digests must be nonzero",
             ));
         }
         if self.old_root == self.new_root {
-            return Err(JournalErrorV1::new(
-                JournalFailureCodeV1::InvalidBinding,
+            return Err(JournalError::new(
+                JournalFailureCode::InvalidBinding,
                 "old and new roots must differ",
             ));
         }
-        if self.durable_profile_digest != DurableProfileV1::new(self.durable_profile_id).digest() {
-            return Err(JournalErrorV1::new(
-                JournalFailureCodeV1::ProfileSubstitution,
+        if self.durable_profile_digest != DurableProfile::new(self.durable_profile_id).digest() {
+            return Err(JournalError::new(
+                JournalFailureCode::ProfileSubstitution,
                 "durable profile identity does not match its frozen digest",
             ));
         }
         Ok(())
     }
-    pub fn canonical_bytes(&self) -> Result<Vec<u8>, JournalErrorV1> {
+    pub fn canonical_bytes(&self) -> Result<Vec<u8>, JournalError> {
         self.validate()?;
         canonical_bytes(self)
     }
-    pub fn digest(&self) -> Result<DigestV1, JournalErrorV1> {
-        Ok(domain_digest(BINDING_DOMAIN_V1, &self.canonical_bytes()?))
+    pub fn digest(&self) -> Result<Sha256Digest, JournalError> {
+        Ok(domain_digest(BINDING_DOMAIN, &self.canonical_bytes()?))
     }
 }
 
@@ -344,13 +344,13 @@ impl JournalBindingV1 {
 pub trait JournalBindingLike:
     Clone + std::fmt::Debug + PartialEq + Serialize + DeserializeOwned
 {
-    fn binding_validate(&self) -> Result<(), JournalErrorV1>;
-    fn binding_digest(&self) -> Result<DigestV1, JournalErrorV1>;
-    fn old_root(&self) -> DigestV1;
-    fn new_root(&self) -> DigestV1;
-    fn transaction_id(&self) -> DigestV1;
-    fn durable_profile_digest(&self) -> DigestV1;
-    fn owner_identity_digest(&self) -> DigestV1;
+    fn binding_validate(&self) -> Result<(), JournalError>;
+    fn binding_digest(&self) -> Result<Sha256Digest, JournalError>;
+    fn old_root(&self) -> Sha256Digest;
+    fn new_root(&self) -> Sha256Digest;
+    fn transaction_id(&self) -> Sha256Digest;
+    fn durable_profile_digest(&self) -> Sha256Digest;
+    fn owner_identity_digest(&self) -> Sha256Digest;
     /// Lease deadline for fresh attempts; `None` means the binding carries no
     /// lease and no expiry gate applies.
     fn lease_expires_at_unix_ns(&self) -> Option<u64>;
@@ -360,26 +360,26 @@ pub trait JournalBindingLike:
     fn record_domain() -> &'static [u8];
 }
 
-impl JournalBindingLike for JournalBindingV1 {
-    fn binding_validate(&self) -> Result<(), JournalErrorV1> {
+impl JournalBindingLike for JournalBinding {
+    fn binding_validate(&self) -> Result<(), JournalError> {
         self.validate()
     }
-    fn binding_digest(&self) -> Result<DigestV1, JournalErrorV1> {
+    fn binding_digest(&self) -> Result<Sha256Digest, JournalError> {
         self.digest()
     }
-    fn old_root(&self) -> DigestV1 {
+    fn old_root(&self) -> Sha256Digest {
         self.old_root
     }
-    fn new_root(&self) -> DigestV1 {
+    fn new_root(&self) -> Sha256Digest {
         self.new_root
     }
-    fn transaction_id(&self) -> DigestV1 {
+    fn transaction_id(&self) -> Sha256Digest {
         self.transaction_id
     }
-    fn durable_profile_digest(&self) -> DigestV1 {
+    fn durable_profile_digest(&self) -> Sha256Digest {
         self.durable_profile_digest
     }
-    fn owner_identity_digest(&self) -> DigestV1 {
+    fn owner_identity_digest(&self) -> Sha256Digest {
         self.owner_identity_digest
     }
     fn lease_expires_at_unix_ns(&self) -> Option<u64> {
@@ -399,43 +399,43 @@ impl JournalBindingLike for JournalBindingV1 {
 /// replay of a consumed lease instead of silently re-executing.
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
-pub struct BindingLeaseV1 {
+pub struct BindingLease {
     pub schema_version: u16,
-    pub lease_id: DigestV1,
+    pub lease_id: Sha256Digest,
     pub epoch: u64,
     pub expires_at_unix_ns: u64,
 }
-impl BindingLeaseV1 {
-    pub fn new(lease_id: DigestV1, epoch: u64, expires_at_unix_ns: u64) -> Self {
+impl BindingLease {
+    pub fn new(lease_id: Sha256Digest, epoch: u64, expires_at_unix_ns: u64) -> Self {
         Self {
-            schema_version: DURABLE_LEASE_SCHEMA_VERSION_V1,
+            schema_version: DURABLE_LEASE_SCHEMA_VERSION,
             lease_id,
             epoch,
             expires_at_unix_ns,
         }
     }
-    pub fn validate(&self) -> Result<(), JournalErrorV1> {
-        if self.schema_version != DURABLE_LEASE_SCHEMA_VERSION_V1 {
-            return Err(JournalErrorV1::new(
-                JournalFailureCodeV1::SchemaVersionMismatch,
+    pub fn validate(&self) -> Result<(), JournalError> {
+        if self.schema_version != DURABLE_LEASE_SCHEMA_VERSION {
+            return Err(JournalError::new(
+                JournalFailureCode::SchemaVersionMismatch,
                 "lease schema version is not supported",
             ));
         }
-        if self.lease_id == DigestV1::ZERO {
-            return Err(JournalErrorV1::new(
-                JournalFailureCodeV1::InvalidBinding,
+        if self.lease_id == Sha256Digest::ZERO {
+            return Err(JournalError::new(
+                JournalFailureCode::InvalidBinding,
                 "lease identity must be nonzero",
             ));
         }
         if self.epoch == 0 {
-            return Err(JournalErrorV1::new(
-                JournalFailureCodeV1::InvalidBinding,
+            return Err(JournalError::new(
+                JournalFailureCode::InvalidBinding,
                 "lease epoch must be positive",
             ));
         }
         if self.expires_at_unix_ns == 0 {
-            return Err(JournalErrorV1::new(
-                JournalFailureCodeV1::InvalidBinding,
+            return Err(JournalError::new(
+                JournalFailureCode::InvalidBinding,
                 "lease expiry must be nonzero",
             ));
         }
@@ -451,38 +451,38 @@ impl BindingLeaseV1 {
 /// (see [`verify_committed_binding_v2`]).
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
-pub struct JournalBindingV2 {
+pub struct JournalLeaseBinding {
     pub schema_version: u16,
-    pub transaction_id: DigestV1,
-    pub assembly_manifest_digest: DigestV1,
-    pub durable_profile_id: DurableProfileIdV1,
-    pub durable_profile_digest: DigestV1,
-    pub old_root: DigestV1,
-    pub new_root: DigestV1,
-    pub owner_identity_digest: DigestV1,
-    pub nonce: DigestV1,
-    pub protected_scope: DigestV1,
-    pub lease: BindingLeaseV1,
+    pub transaction_id: Sha256Digest,
+    pub assembly_manifest_digest: Sha256Digest,
+    pub durable_profile_id: DurableProfileId,
+    pub durable_profile_digest: Sha256Digest,
+    pub old_root: Sha256Digest,
+    pub new_root: Sha256Digest,
+    pub owner_identity_digest: Sha256Digest,
+    pub nonce: Sha256Digest,
+    pub protected_scope: Sha256Digest,
+    pub lease: BindingLease,
 }
-impl JournalBindingV2 {
+impl JournalLeaseBinding {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
-        transaction_id: DigestV1,
-        assembly_manifest_digest: DigestV1,
-        durable_profile_id: DurableProfileIdV1,
-        old_root: DigestV1,
-        new_root: DigestV1,
-        owner_identity_digest: DigestV1,
-        nonce: DigestV1,
-        protected_scope: DigestV1,
-        lease: BindingLeaseV1,
+        transaction_id: Sha256Digest,
+        assembly_manifest_digest: Sha256Digest,
+        durable_profile_id: DurableProfileId,
+        old_root: Sha256Digest,
+        new_root: Sha256Digest,
+        owner_identity_digest: Sha256Digest,
+        nonce: Sha256Digest,
+        protected_scope: Sha256Digest,
+        lease: BindingLease,
     ) -> Self {
         Self {
             schema_version: DURABLE_BINDING_SCHEMA_VERSION_V2,
             transaction_id,
             assembly_manifest_digest,
             durable_profile_id,
-            durable_profile_digest: DurableProfileV1::new(durable_profile_id).digest(),
+            durable_profile_digest: DurableProfile::new(durable_profile_id).digest(),
             old_root,
             new_root,
             owner_identity_digest,
@@ -491,10 +491,10 @@ impl JournalBindingV2 {
             lease,
         }
     }
-    pub fn validate(&self) -> Result<(), JournalErrorV1> {
+    pub fn validate(&self) -> Result<(), JournalError> {
         if self.schema_version != DURABLE_BINDING_SCHEMA_VERSION_V2 {
-            return Err(JournalErrorV1::new(
-                JournalFailureCodeV1::SchemaVersionMismatch,
+            return Err(JournalError::new(
+                JournalFailureCode::SchemaVersionMismatch,
                 "five-term binding schema version is not supported",
             ));
         }
@@ -507,56 +507,56 @@ impl JournalBindingV2 {
             self.nonce,
             self.protected_scope,
         ]
-        .contains(&DigestV1::ZERO)
+        .contains(&Sha256Digest::ZERO)
         {
-            return Err(JournalErrorV1::new(
-                JournalFailureCodeV1::InvalidBinding,
+            return Err(JournalError::new(
+                JournalFailureCode::InvalidBinding,
                 "five-term binding digests must be nonzero",
             ));
         }
         if self.old_root == self.new_root {
-            return Err(JournalErrorV1::new(
-                JournalFailureCodeV1::InvalidBinding,
+            return Err(JournalError::new(
+                JournalFailureCode::InvalidBinding,
                 "old and new roots must differ",
             ));
         }
-        if self.durable_profile_digest != DurableProfileV1::new(self.durable_profile_id).digest() {
-            return Err(JournalErrorV1::new(
-                JournalFailureCodeV1::ProfileSubstitution,
+        if self.durable_profile_digest != DurableProfile::new(self.durable_profile_id).digest() {
+            return Err(JournalError::new(
+                JournalFailureCode::ProfileSubstitution,
                 "durable profile identity does not match its frozen digest",
             ));
         }
         self.lease.validate()?;
         Ok(())
     }
-    pub fn canonical_bytes(&self) -> Result<Vec<u8>, JournalErrorV1> {
+    pub fn canonical_bytes(&self) -> Result<Vec<u8>, JournalError> {
         self.validate()?;
         canonical_bytes(self)
     }
-    pub fn digest(&self) -> Result<DigestV1, JournalErrorV1> {
+    pub fn digest(&self) -> Result<Sha256Digest, JournalError> {
         Ok(domain_digest(BINDING_DOMAIN_V2, &self.canonical_bytes()?))
     }
 }
-impl JournalBindingLike for JournalBindingV2 {
-    fn binding_validate(&self) -> Result<(), JournalErrorV1> {
+impl JournalBindingLike for JournalLeaseBinding {
+    fn binding_validate(&self) -> Result<(), JournalError> {
         self.validate()
     }
-    fn binding_digest(&self) -> Result<DigestV1, JournalErrorV1> {
+    fn binding_digest(&self) -> Result<Sha256Digest, JournalError> {
         self.digest()
     }
-    fn old_root(&self) -> DigestV1 {
+    fn old_root(&self) -> Sha256Digest {
         self.old_root
     }
-    fn new_root(&self) -> DigestV1 {
+    fn new_root(&self) -> Sha256Digest {
         self.new_root
     }
-    fn transaction_id(&self) -> DigestV1 {
+    fn transaction_id(&self) -> Sha256Digest {
         self.transaction_id
     }
-    fn durable_profile_digest(&self) -> DigestV1 {
+    fn durable_profile_digest(&self) -> Sha256Digest {
         self.durable_profile_digest
     }
-    fn owner_identity_digest(&self) -> DigestV1 {
+    fn owner_identity_digest(&self) -> Sha256Digest {
         self.owner_identity_digest
     }
     fn lease_expires_at_unix_ns(&self) -> Option<u64> {
@@ -575,87 +575,87 @@ impl JournalBindingLike for JournalBindingV2 {
 pub struct DurableJournalRecord<B> {
     pub schema_version: u16,
     pub binding: B,
-    pub state: JournalStateV1,
+    pub state: JournalState,
     pub sequence: u64,
-    pub predecessor_record_digest: Option<DigestV1>,
-    pub abort_reason: Option<AbortReasonV1>,
+    pub predecessor_record_digest: Option<Sha256Digest>,
+    pub abort_reason: Option<AbortReason>,
 }
 /// Durable journal record carrying the v1 four-term binding. Byte-compatible
 /// with the pre-R9 record format.
-pub type DurableJournalV2 = DurableJournalRecord<JournalBindingV1>;
+pub type DurableJournal = DurableJournalRecord<JournalBinding>;
 /// Durable journal record carrying the v2 five-term binding (nonce +
 /// protected scope + lease added to the v1 terms).
-pub type DurableJournalV3 = DurableJournalRecord<JournalBindingV2>;
+pub type DurableLeaseJournal = DurableJournalRecord<JournalLeaseBinding>;
 
 impl<B: JournalBindingLike> DurableJournalRecord<B> {
     fn prepared(binding: B) -> Self {
         Self {
             schema_version: B::record_schema_version(),
             binding,
-            state: JournalStateV1::Prepared,
+            state: JournalState::Prepared,
             sequence: 1,
             predecessor_record_digest: None,
             abort_reason: None,
         }
     }
-    fn committed(prepared: &Self, digest: DigestV1) -> Self {
+    fn committed(prepared: &Self, digest: Sha256Digest) -> Self {
         Self {
             schema_version: prepared.schema_version,
             binding: prepared.binding.clone(),
-            state: JournalStateV1::Committed,
+            state: JournalState::Committed,
             sequence: 2,
             predecessor_record_digest: Some(digest),
             abort_reason: None,
         }
     }
-    fn aborted(prepared: &Self, digest: DigestV1, reason: AbortReasonV1) -> Self {
+    fn aborted(prepared: &Self, digest: Sha256Digest, reason: AbortReason) -> Self {
         Self {
             schema_version: prepared.schema_version,
             binding: prepared.binding.clone(),
-            state: JournalStateV1::Aborted,
+            state: JournalState::Aborted,
             sequence: 2,
             predecessor_record_digest: Some(digest),
             abort_reason: Some(reason),
         }
     }
-    pub fn validate(&self) -> Result<(), JournalErrorV1> {
+    pub fn validate(&self) -> Result<(), JournalError> {
         if self.schema_version != B::record_schema_version() {
-            return Err(JournalErrorV1::new(
-                JournalFailureCodeV1::SchemaVersionMismatch,
+            return Err(JournalError::new(
+                JournalFailureCode::SchemaVersionMismatch,
                 "journal record schema version is not supported",
             ));
         }
         self.binding.binding_validate()?;
         let valid = match self.state {
-            JournalStateV1::Prepared => {
+            JournalState::Prepared => {
                 self.sequence == 1
                     && self.predecessor_record_digest.is_none()
                     && self.abort_reason.is_none()
             }
-            JournalStateV1::Committed => {
+            JournalState::Committed => {
                 self.sequence == 2
                     && self.predecessor_record_digest.is_some()
                     && self.abort_reason.is_none()
             }
-            JournalStateV1::Aborted => {
+            JournalState::Aborted => {
                 self.sequence == 2
                     && self.predecessor_record_digest.is_some()
                     && self.abort_reason.is_some()
             }
         };
         if !valid {
-            return Err(JournalErrorV1::new(
-                JournalFailureCodeV1::SequenceMismatch,
+            return Err(JournalError::new(
+                JournalFailureCode::SequenceMismatch,
                 "journal state and sequence commitments disagree",
             ));
         }
         Ok(())
     }
-    pub fn canonical_bytes(&self) -> Result<Vec<u8>, JournalErrorV1> {
+    pub fn canonical_bytes(&self) -> Result<Vec<u8>, JournalError> {
         self.validate()?;
         canonical_bytes(self)
     }
-    pub fn digest(&self) -> Result<DigestV1, JournalErrorV1> {
+    pub fn digest(&self) -> Result<Sha256Digest, JournalError> {
         Ok(domain_digest(B::record_domain(), &self.canonical_bytes()?))
     }
 }
@@ -664,63 +664,63 @@ impl<B: JournalBindingLike> DurableJournalRecord<B> {
 #[serde(deny_unknown_fields)]
 pub struct RootPublicationReceipt {
     pub schema_version: u16,
-    pub transaction_id: DigestV1,
-    pub root_digest: DigestV1,
+    pub transaction_id: Sha256Digest,
+    pub root_digest: Sha256Digest,
     pub generation: u64,
-    pub prepared_record_digest: DigestV1,
+    pub prepared_record_digest: Sha256Digest,
 }
 impl RootPublicationReceipt {
-    fn initial(root_digest: DigestV1) -> Result<Self, JournalErrorV1> {
-        if root_digest == DigestV1::ZERO {
-            return Err(JournalErrorV1::new(
-                JournalFailureCodeV1::InvalidBinding,
+    fn initial(root_digest: Sha256Digest) -> Result<Self, JournalError> {
+        if root_digest == Sha256Digest::ZERO {
+            return Err(JournalError::new(
+                JournalFailureCode::InvalidBinding,
                 "initial root digest must be nonzero",
             ));
         }
         Ok(Self {
-            schema_version: DURABLE_RECEIPT_SCHEMA_VERSION_V1,
-            transaction_id: DigestV1::ZERO,
+            schema_version: DURABLE_RECEIPT_SCHEMA_VERSION,
+            transaction_id: Sha256Digest::ZERO,
             root_digest,
             generation: 0,
-            prepared_record_digest: DigestV1::ZERO,
+            prepared_record_digest: Sha256Digest::ZERO,
         })
     }
-    fn published<B: JournalBindingLike>(binding: &B, prepared_record_digest: DigestV1) -> Self {
+    fn published<B: JournalBindingLike>(binding: &B, prepared_record_digest: Sha256Digest) -> Self {
         Self {
-            schema_version: DURABLE_RECEIPT_SCHEMA_VERSION_V1,
+            schema_version: DURABLE_RECEIPT_SCHEMA_VERSION,
             transaction_id: binding.transaction_id(),
             root_digest: binding.new_root(),
             generation: 1,
             prepared_record_digest,
         }
     }
-    pub fn validate(&self) -> Result<(), JournalErrorV1> {
-        if self.schema_version != DURABLE_RECEIPT_SCHEMA_VERSION_V1 {
-            return Err(JournalErrorV1::new(
-                JournalFailureCodeV1::SchemaVersionMismatch,
+    pub fn validate(&self) -> Result<(), JournalError> {
+        if self.schema_version != DURABLE_RECEIPT_SCHEMA_VERSION {
+            return Err(JournalError::new(
+                JournalFailureCode::SchemaVersionMismatch,
                 "published root schema version is not supported",
             ));
         }
         let initial = self.generation == 0
-            && self.transaction_id == DigestV1::ZERO
-            && self.prepared_record_digest == DigestV1::ZERO;
+            && self.transaction_id == Sha256Digest::ZERO
+            && self.prepared_record_digest == Sha256Digest::ZERO;
         let transactional = self.generation == 1
-            && self.transaction_id != DigestV1::ZERO
-            && self.prepared_record_digest != DigestV1::ZERO;
-        if self.root_digest == DigestV1::ZERO || !(initial || transactional) {
-            return Err(JournalErrorV1::new(
-                JournalFailureCodeV1::RootMismatch,
+            && self.transaction_id != Sha256Digest::ZERO
+            && self.prepared_record_digest != Sha256Digest::ZERO;
+        if self.root_digest == Sha256Digest::ZERO || !(initial || transactional) {
+            return Err(JournalError::new(
+                JournalFailureCode::RootMismatch,
                 "root generation and transaction commitments disagree",
             ));
         }
         Ok(())
     }
-    pub fn canonical_bytes(&self) -> Result<Vec<u8>, JournalErrorV1> {
+    pub fn canonical_bytes(&self) -> Result<Vec<u8>, JournalError> {
         self.validate()?;
         canonical_bytes(self)
     }
-    pub fn digest(&self) -> Result<DigestV1, JournalErrorV1> {
-        Ok(domain_digest(ROOT_DOMAIN_V1, &self.canonical_bytes()?))
+    pub fn digest(&self) -> Result<Sha256Digest, JournalError> {
+        Ok(domain_digest(ROOT_DOMAIN, &self.canonical_bytes()?))
     }
 }
 
@@ -728,33 +728,33 @@ impl RootPublicationReceipt {
 #[serde(deny_unknown_fields)]
 pub struct ContinuationCartridgeRecord<B> {
     pub schema_version: u16,
-    pub binding_digest: DigestV1,
-    pub prepared_record_digest: DigestV1,
-    pub transaction_id: DigestV1,
-    pub old_root: DigestV1,
-    pub new_root: DigestV1,
-    pub durable_profile_digest: DigestV1,
-    pub owner_identity_digest: DigestV1,
+    pub binding_digest: Sha256Digest,
+    pub prepared_record_digest: Sha256Digest,
+    pub transaction_id: Sha256Digest,
+    pub old_root: Sha256Digest,
+    pub new_root: Sha256Digest,
+    pub durable_profile_digest: Sha256Digest,
+    pub owner_identity_digest: Sha256Digest,
     // The phantom keeps a v1 cartridge and a v2 cartridge distinct types so
     // the state machine cannot mix binding formats. Serde skips it.
     _binding: std::marker::PhantomData<B>,
 }
 /// Compatibility alias for callers written against the carrier draft.
-pub type JournalRecordV1 = DurableJournalV2;
+pub type JournalRecord = DurableJournal;
 /// Compatibility alias for callers written against the carrier draft.
-pub type PublishedRootV1 = RootPublicationReceipt;
+pub type PublishedRoot = RootPublicationReceipt;
 /// Cartridge for the v1 four-term binding (pre-R9 shape).
-pub type ContinuationCartridgeV1 = ContinuationCartridgeRecord<JournalBindingV1>;
+pub type ContinuationCartridge = ContinuationCartridgeRecord<JournalBinding>;
 /// Cartridge for the v2 five-term binding.
-pub type ContinuationCartridgeV2 = ContinuationCartridgeRecord<JournalBindingV2>;
+pub type ContinuationLeaseCartridge = ContinuationCartridgeRecord<JournalLeaseBinding>;
 
 impl<B: JournalBindingLike> ContinuationCartridgeRecord<B> {
     fn new(
         binding: &B,
-        prepared_record_digest: DigestV1,
-    ) -> Result<Self, JournalErrorV1> {
+        prepared_record_digest: Sha256Digest,
+    ) -> Result<Self, JournalError> {
         Ok(Self {
-            schema_version: DURABLE_RECEIPT_SCHEMA_VERSION_V1,
+            schema_version: DURABLE_RECEIPT_SCHEMA_VERSION,
             binding_digest: binding.binding_digest()?,
             prepared_record_digest,
             transaction_id: binding.transaction_id(),
@@ -765,64 +765,64 @@ impl<B: JournalBindingLike> ContinuationCartridgeRecord<B> {
             _binding: std::marker::PhantomData,
         })
     }
-    pub fn validate_against(&self, binding: &B) -> Result<(), JournalErrorV1> {
-        if self.schema_version != DURABLE_RECEIPT_SCHEMA_VERSION_V1
+    pub fn validate_against(&self, binding: &B) -> Result<(), JournalError> {
+        if self.schema_version != DURABLE_RECEIPT_SCHEMA_VERSION
             || self.binding_digest != binding.binding_digest()?
             || self.transaction_id != binding.transaction_id()
             || self.old_root != binding.old_root()
             || self.new_root != binding.new_root()
             || self.durable_profile_digest != binding.durable_profile_digest()
             || self.owner_identity_digest != binding.owner_identity_digest()
-            || self.prepared_record_digest == DigestV1::ZERO
+            || self.prepared_record_digest == Sha256Digest::ZERO
         {
-            return Err(JournalErrorV1::new(
-                JournalFailureCodeV1::CartridgeMismatch,
+            return Err(JournalError::new(
+                JournalFailureCode::CartridgeMismatch,
                 "continuation cartridge does not bind the journal transaction",
             ));
         }
         Ok(())
     }
-    pub fn canonical_bytes(&self) -> Result<Vec<u8>, JournalErrorV1> {
+    pub fn canonical_bytes(&self) -> Result<Vec<u8>, JournalError> {
         canonical_bytes(self)
     }
-    pub fn digest(&self) -> Result<DigestV1, JournalErrorV1> {
-        Ok(domain_digest(CARTRIDGE_DOMAIN_V1, &self.canonical_bytes()?))
+    pub fn digest(&self) -> Result<Sha256Digest, JournalError> {
+        Ok(domain_digest(CARTRIDGE_DOMAIN, &self.canonical_bytes()?))
     }
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
-pub struct OwnerDeathReceiptV1 {
+pub struct OwnerDeathReceipt {
     pub schema_version: u16,
-    pub binding_digest: DigestV1,
-    pub prepared_record_digest: DigestV1,
-    pub owner_identity_digest: DigestV1,
-    pub observed_journal_state: JournalStateV1,
-    pub observed_root: DigestV1,
+    pub binding_digest: Sha256Digest,
+    pub prepared_record_digest: Sha256Digest,
+    pub owner_identity_digest: Sha256Digest,
+    pub observed_journal_state: JournalState,
+    pub observed_root: Sha256Digest,
     pub observed_at_unix_ns: u64,
-    pub failure_code: JournalFailureCodeV1,
+    pub failure_code: JournalFailureCode,
     pub recovery_required: bool,
 }
-impl OwnerDeathReceiptV1 {
-    pub fn canonical_bytes(&self) -> Result<Vec<u8>, JournalErrorV1> {
-        if self.schema_version != DURABLE_RECEIPT_SCHEMA_VERSION_V1
-            || self.failure_code != JournalFailureCodeV1::OwnerDeath
+impl OwnerDeathReceipt {
+    pub fn canonical_bytes(&self) -> Result<Vec<u8>, JournalError> {
+        if self.schema_version != DURABLE_RECEIPT_SCHEMA_VERSION
+            || self.failure_code != JournalFailureCode::OwnerDeath
             || !self.recovery_required
-            || self.binding_digest == DigestV1::ZERO
-            || self.prepared_record_digest == DigestV1::ZERO
-            || self.owner_identity_digest == DigestV1::ZERO
-            || self.observed_root == DigestV1::ZERO
+            || self.binding_digest == Sha256Digest::ZERO
+            || self.prepared_record_digest == Sha256Digest::ZERO
+            || self.owner_identity_digest == Sha256Digest::ZERO
+            || self.observed_root == Sha256Digest::ZERO
         {
-            return Err(JournalErrorV1::new(
-                JournalFailureCodeV1::InvalidBinding,
+            return Err(JournalError::new(
+                JournalFailureCode::InvalidBinding,
                 "owner-death receipt is incomplete",
             ));
         }
         canonical_bytes(self)
     }
-    pub fn digest(&self) -> Result<DigestV1, JournalErrorV1> {
+    pub fn digest(&self) -> Result<Sha256Digest, JournalError> {
         Ok(domain_digest(
-            OWNER_DEATH_DOMAIN_V1,
+            OWNER_DEATH_DOMAIN,
             &self.canonical_bytes()?,
         ))
     }
@@ -830,62 +830,62 @@ impl OwnerDeathReceiptV1 {
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
-pub struct RecoveryReceiptV1 {
+pub struct RecoveryReceipt {
     pub schema_version: u16,
-    pub binding_digest: DigestV1,
-    pub prepared_record_digest: DigestV1,
-    pub terminal_record_digest: Option<DigestV1>,
-    pub owner_death_receipt_digest: Option<DigestV1>,
-    pub observed_root: DigestV1,
-    pub outcome: RecoveryOutcomeV1,
+    pub binding_digest: Sha256Digest,
+    pub prepared_record_digest: Sha256Digest,
+    pub terminal_record_digest: Option<Sha256Digest>,
+    pub owner_death_receipt_digest: Option<Sha256Digest>,
+    pub observed_root: Sha256Digest,
+    pub outcome: RecoveryOutcome,
     pub journal_root_correspondence: bool,
     pub promotable: bool,
-    pub failure_code: Option<JournalFailureCodeV1>,
+    pub failure_code: Option<JournalFailureCode>,
 }
-impl RecoveryReceiptV1 {
-    pub fn canonical_bytes(&self) -> Result<Vec<u8>, JournalErrorV1> {
-        if self.schema_version != DURABLE_RECEIPT_SCHEMA_VERSION_V1
-            || self.binding_digest == DigestV1::ZERO
-            || self.observed_root == DigestV1::ZERO
+impl RecoveryReceipt {
+    pub fn canonical_bytes(&self) -> Result<Vec<u8>, JournalError> {
+        if self.schema_version != DURABLE_RECEIPT_SCHEMA_VERSION
+            || self.binding_digest == Sha256Digest::ZERO
+            || self.observed_root == Sha256Digest::ZERO
             || !self.journal_root_correspondence
             || !self.promotable
             || self.failure_code.is_some()
         {
-            return Err(JournalErrorV1::new(
-                JournalFailureCodeV1::InvalidBinding,
+            return Err(JournalError::new(
+                JournalFailureCode::InvalidBinding,
                 "successful recovery receipt is incomplete or non-promotable",
             ));
         }
         canonical_bytes(self)
     }
-    pub fn digest(&self) -> Result<DigestV1, JournalErrorV1> {
-        Ok(domain_digest(RECOVERY_DOMAIN_V1, &self.canonical_bytes()?))
+    pub fn digest(&self) -> Result<Sha256Digest, JournalError> {
+        Ok(domain_digest(RECOVERY_DOMAIN, &self.canonical_bytes()?))
     }
 }
 
 #[derive(Clone, Copy, Debug, Default)]
-pub struct FaultPlanV1 {
-    crash_at: Option<JournalBoundaryV1>,
+pub struct FaultPlan {
+    crash_at: Option<JournalBoundary>,
     fired: bool,
 }
-impl FaultPlanV1 {
+impl FaultPlan {
     pub const fn none() -> Self {
         Self {
             crash_at: None,
             fired: false,
         }
     }
-    pub const fn crash_at(boundary: JournalBoundaryV1) -> Self {
+    pub const fn crash_at(boundary: JournalBoundary) -> Self {
         Self {
             crash_at: Some(boundary),
             fired: false,
         }
     }
-    fn hit(&mut self, boundary: JournalBoundaryV1, changed: bool) -> Result<(), JournalErrorV1> {
+    fn hit(&mut self, boundary: JournalBoundary, changed: bool) -> Result<(), JournalError> {
         if !self.fired && self.crash_at == Some(boundary) {
             self.fired = true;
-            return Err(JournalErrorV1::at(
-                JournalFailureCodeV1::InjectedCrash,
+            return Err(JournalError::at(
+                JournalFailureCode::InjectedCrash,
                 boundary,
                 changed,
                 "preregistered crash boundary reached",
@@ -897,83 +897,83 @@ impl FaultPlanV1 {
 
 #[derive(Clone, Copy)]
 struct WriteBoundaries {
-    before: JournalBoundaryV1,
-    file_sync: JournalBoundaryV1,
-    rename: JournalBoundaryV1,
-    dir_sync: JournalBoundaryV1,
+    before: JournalBoundary,
+    file_sync: JournalBoundary,
+    rename: JournalBoundary,
+    dir_sync: JournalBoundary,
 }
 const ROOT_INIT: WriteBoundaries = WriteBoundaries {
-    before: JournalBoundaryV1::RootInitializeBeforeWrite,
-    file_sync: JournalBoundaryV1::RootInitializeAfterFileSync,
-    rename: JournalBoundaryV1::RootInitializeAfterRename,
-    dir_sync: JournalBoundaryV1::RootInitializeAfterDirectorySync,
+    before: JournalBoundary::RootInitializeBeforeWrite,
+    file_sync: JournalBoundary::RootInitializeAfterFileSync,
+    rename: JournalBoundary::RootInitializeAfterRename,
+    dir_sync: JournalBoundary::RootInitializeAfterDirectorySync,
 };
 const CARTRIDGE: WriteBoundaries = WriteBoundaries {
-    before: JournalBoundaryV1::CartridgeBeforeWrite,
-    file_sync: JournalBoundaryV1::CartridgeAfterFileSync,
-    rename: JournalBoundaryV1::CartridgeAfterRename,
-    dir_sync: JournalBoundaryV1::CartridgeAfterDirectorySync,
+    before: JournalBoundary::CartridgeBeforeWrite,
+    file_sync: JournalBoundary::CartridgeAfterFileSync,
+    rename: JournalBoundary::CartridgeAfterRename,
+    dir_sync: JournalBoundary::CartridgeAfterDirectorySync,
 };
 const PREPARE: WriteBoundaries = WriteBoundaries {
-    before: JournalBoundaryV1::PrepareBeforeWrite,
-    file_sync: JournalBoundaryV1::PrepareAfterFileSync,
-    rename: JournalBoundaryV1::PrepareAfterRename,
-    dir_sync: JournalBoundaryV1::PrepareAfterDirectorySync,
+    before: JournalBoundary::PrepareBeforeWrite,
+    file_sync: JournalBoundary::PrepareAfterFileSync,
+    rename: JournalBoundary::PrepareAfterRename,
+    dir_sync: JournalBoundary::PrepareAfterDirectorySync,
 };
 const ROOT_PUBLISH: WriteBoundaries = WriteBoundaries {
-    before: JournalBoundaryV1::RootPublishBeforeWrite,
-    file_sync: JournalBoundaryV1::RootPublishAfterFileSync,
-    rename: JournalBoundaryV1::RootPublishAfterRename,
-    dir_sync: JournalBoundaryV1::RootPublishAfterDirectorySync,
+    before: JournalBoundary::RootPublishBeforeWrite,
+    file_sync: JournalBoundary::RootPublishAfterFileSync,
+    rename: JournalBoundary::RootPublishAfterRename,
+    dir_sync: JournalBoundary::RootPublishAfterDirectorySync,
 };
 const COMMIT: WriteBoundaries = WriteBoundaries {
-    before: JournalBoundaryV1::CommitBeforeWrite,
-    file_sync: JournalBoundaryV1::CommitAfterFileSync,
-    rename: JournalBoundaryV1::CommitAfterRename,
-    dir_sync: JournalBoundaryV1::CommitAfterDirectorySync,
+    before: JournalBoundary::CommitBeforeWrite,
+    file_sync: JournalBoundary::CommitAfterFileSync,
+    rename: JournalBoundary::CommitAfterRename,
+    dir_sync: JournalBoundary::CommitAfterDirectorySync,
 };
 const ABORT: WriteBoundaries = WriteBoundaries {
-    before: JournalBoundaryV1::AbortBeforeWrite,
-    file_sync: JournalBoundaryV1::AbortAfterFileSync,
-    rename: JournalBoundaryV1::AbortAfterRename,
-    dir_sync: JournalBoundaryV1::AbortAfterDirectorySync,
+    before: JournalBoundary::AbortBeforeWrite,
+    file_sync: JournalBoundary::AbortAfterFileSync,
+    rename: JournalBoundary::AbortAfterRename,
+    dir_sync: JournalBoundary::AbortAfterDirectorySync,
 };
 const OWNER_DEATH: WriteBoundaries = WriteBoundaries {
-    before: JournalBoundaryV1::OwnerDeathBeforeWrite,
-    file_sync: JournalBoundaryV1::OwnerDeathAfterFileSync,
-    rename: JournalBoundaryV1::OwnerDeathAfterRename,
-    dir_sync: JournalBoundaryV1::OwnerDeathAfterDirectorySync,
+    before: JournalBoundary::OwnerDeathBeforeWrite,
+    file_sync: JournalBoundary::OwnerDeathAfterFileSync,
+    rename: JournalBoundary::OwnerDeathAfterRename,
+    dir_sync: JournalBoundary::OwnerDeathAfterDirectorySync,
 };
 const RECOVERY: WriteBoundaries = WriteBoundaries {
-    before: JournalBoundaryV1::RecoveryBeforeWrite,
-    file_sync: JournalBoundaryV1::RecoveryAfterFileSync,
-    rename: JournalBoundaryV1::RecoveryAfterRename,
-    dir_sync: JournalBoundaryV1::RecoveryAfterDirectorySync,
+    before: JournalBoundary::RecoveryBeforeWrite,
+    file_sync: JournalBoundary::RecoveryAfterFileSync,
+    rename: JournalBoundary::RecoveryAfterRename,
+    dir_sync: JournalBoundary::RecoveryAfterDirectorySync,
 };
 
-pub fn initialize_published_root_v1(
-    paths: &JournalPathsV1,
-    root: DigestV1,
-) -> Result<RootPublicationReceipt, JournalErrorV1> {
-    initialize_published_root_with_fault_v1(paths, root, &mut FaultPlanV1::none())
+pub fn initialize_published_root(
+    paths: &JournalPaths,
+    root: Sha256Digest,
+) -> Result<RootPublicationReceipt, JournalError> {
+    initialize_published_root_with_fault(paths, root, &mut FaultPlan::none())
 }
-pub fn initialize_published_root_with_fault_v1(
-    paths: &JournalPathsV1,
-    root: DigestV1,
-    fault: &mut FaultPlanV1,
-) -> Result<RootPublicationReceipt, JournalErrorV1> {
+pub fn initialize_published_root_with_fault(
+    paths: &JournalPaths,
+    root: Sha256Digest,
+    fault: &mut FaultPlan,
+) -> Result<RootPublicationReceipt, JournalError> {
     let expected = RootPublicationReceipt::initial(root)?;
     if let Some(existing) = read_optional::<RootPublicationReceipt>(
         paths.root_record(),
-        JournalFailureCodeV1::RootMissing,
-        ROOT_DOMAIN_V1,
+        JournalFailureCode::RootMissing,
+        ROOT_DOMAIN,
     )? {
         existing.value.validate()?;
         if existing.value == expected {
             return Ok(existing.value);
         }
-        return Err(JournalErrorV1::new(
-            JournalFailureCodeV1::RootMismatch,
+        return Err(JournalError::new(
+            JournalFailureCode::RootMismatch,
             "initialization cannot replace an existing different root",
         ));
     }
@@ -986,46 +986,46 @@ pub fn initialize_published_root_with_fault_v1(
     Ok(expected)
 }
 
-pub fn prepare_journal_v1(
-    paths: &JournalPathsV1,
-    binding: JournalBindingV1,
-) -> Result<ContinuationCartridgeV1, JournalErrorV1> {
-    prepare_journal_with_fault(paths, binding, &mut FaultPlanV1::none())
+pub fn prepare_journal(
+    paths: &JournalPaths,
+    binding: JournalBinding,
+) -> Result<ContinuationCartridge, JournalError> {
+    prepare_journal_with_fault(paths, binding, &mut FaultPlan::none())
 }
-pub fn prepare_journal_with_fault_v1(
-    paths: &JournalPathsV1,
-    binding: JournalBindingV1,
-    fault: &mut FaultPlanV1,
-) -> Result<ContinuationCartridgeV1, JournalErrorV1> {
-    prepare_journal_with_fault(paths, binding, fault)
+pub fn prepare_journal_with_fault(
+    paths: &JournalPaths,
+    binding: JournalBinding,
+    fault: &mut FaultPlan,
+) -> Result<ContinuationCartridge, JournalError> {
+    prepare_bound_journal(paths, binding, fault)
 }
 /// Five-term commit surface: prepare a journal transaction whose binding
 /// carries nonce, protected scope, and lease alongside the root/epoch pair
 /// and the session/ledger owner identity.
-pub fn prepare_journal_v2(
-    paths: &JournalPathsV1,
-    binding: JournalBindingV2,
-) -> Result<ContinuationCartridgeV2, JournalErrorV1> {
-    prepare_journal_with_fault(paths, binding, &mut FaultPlanV1::none())
+pub fn prepare_lease_journal(
+    paths: &JournalPaths,
+    binding: JournalLeaseBinding,
+) -> Result<ContinuationLeaseCartridge, JournalError> {
+    prepare_bound_journal(paths, binding, &mut FaultPlan::none())
 }
-pub fn prepare_journal_with_fault_v2(
-    paths: &JournalPathsV1,
-    binding: JournalBindingV2,
-    fault: &mut FaultPlanV1,
-) -> Result<ContinuationCartridgeV2, JournalErrorV1> {
-    prepare_journal_with_fault(paths, binding, fault)
+pub fn prepare_lease_journal_with_fault(
+    paths: &JournalPaths,
+    binding: JournalLeaseBinding,
+    fault: &mut FaultPlan,
+) -> Result<ContinuationLeaseCartridge, JournalError> {
+    prepare_bound_journal(paths, binding, fault)
 }
-fn prepare_journal_with_fault<B: JournalBindingLike>(
-    paths: &JournalPathsV1,
+fn prepare_bound_journal<B: JournalBindingLike>(
+    paths: &JournalPaths,
     binding: B,
-    fault: &mut FaultPlanV1,
-) -> Result<ContinuationCartridgeRecord<B>, JournalErrorV1> {
+    fault: &mut FaultPlan,
+) -> Result<ContinuationCartridgeRecord<B>, JournalError> {
     binding.binding_validate()?;
     if let Some(expires_at_unix_ns) = binding.lease_expires_at_unix_ns()
         && now_unix_ns() >= expires_at_unix_ns
     {
-        return Err(JournalErrorV1::new(
-            JournalFailureCodeV1::LeaseExpired,
+        return Err(JournalError::new(
+            JournalFailureCode::LeaseExpired,
             "binding lease has expired before prepare",
         ));
     }
@@ -1035,42 +1035,42 @@ fn prepare_journal_with_fault<B: JournalBindingLike>(
     // journal confusion) when the first writer moved the root.
     let root = read_root(paths)?;
     if root.root_digest != binding.old_root() {
-        return Err(JournalErrorV1::new(
-            JournalFailureCodeV1::RootMismatch,
+        return Err(JournalError::new(
+            JournalFailureCode::RootMismatch,
             "prepare requires the preregistered old root",
         ));
     }
-    if read_optional::<RecoveryReceiptV1>(
+    if read_optional::<RecoveryReceipt>(
         paths.recovery_receipt(),
-        JournalFailureCodeV1::JournalMissing,
-        RECOVERY_DOMAIN_V1,
+        JournalFailureCode::JournalMissing,
+        RECOVERY_DOMAIN,
     )?
     .is_some()
     {
-        return Err(JournalErrorV1::new(
-            JournalFailureCodeV1::AlreadyTerminal,
+        return Err(JournalError::new(
+            JournalFailureCode::AlreadyTerminal,
             "recovered transaction cannot be prepared again",
         ));
     }
     if let Some(existing) = read_optional::<DurableJournalRecord<B>>(
         paths.journal_record(),
-        JournalFailureCodeV1::JournalMissing,
+        JournalFailureCode::JournalMissing,
         B::record_domain(),
     )? {
         existing.value.validate()?;
-        if existing.value.state == JournalStateV1::Prepared && existing.value.binding == binding {
+        if existing.value.state == JournalState::Prepared && existing.value.binding == binding {
             let cartridge = read_cartridge::<B>(paths)?;
             cartridge.validate_against(&binding)?;
             if cartridge.prepared_record_digest != existing.digest {
-                return Err(JournalErrorV1::new(
-                    JournalFailureCodeV1::CartridgeMismatch,
+                return Err(JournalError::new(
+                    JournalFailureCode::CartridgeMismatch,
                     "cartridge does not bind the persisted prepared record",
                 ));
             }
             return Ok(cartridge);
         }
-        return Err(JournalErrorV1::new(
-            JournalFailureCodeV1::AlreadyTerminal,
+        return Err(JournalError::new(
+            JournalFailureCode::AlreadyTerminal,
             "another or terminal transaction already occupies this journal",
         ));
     }
@@ -1092,45 +1092,45 @@ fn prepare_journal_with_fault<B: JournalBindingLike>(
     Ok(cartridge)
 }
 
-pub fn commit_journal_v1(
-    paths: &JournalPathsV1,
-    cartridge: &ContinuationCartridgeV1,
-) -> Result<RecoveryReceiptV1, JournalErrorV1> {
-    commit_journal_with_fault(paths, cartridge, &mut FaultPlanV1::none())
+pub fn commit_journal(
+    paths: &JournalPaths,
+    cartridge: &ContinuationCartridge,
+) -> Result<RecoveryReceipt, JournalError> {
+    commit_journal_with_fault(paths, cartridge, &mut FaultPlan::none())
 }
-pub fn commit_journal_with_fault_v1(
-    paths: &JournalPathsV1,
-    cartridge: &ContinuationCartridgeV1,
-    fault: &mut FaultPlanV1,
-) -> Result<RecoveryReceiptV1, JournalErrorV1> {
-    commit_journal_with_fault(paths, cartridge, fault)
+pub fn commit_journal_with_fault(
+    paths: &JournalPaths,
+    cartridge: &ContinuationCartridge,
+    fault: &mut FaultPlan,
+) -> Result<RecoveryReceipt, JournalError> {
+    commit_bound_journal(paths, cartridge, fault)
 }
 /// Five-term commit surface: publish the new root only while the persisted
 /// root still equals the binding's parent root (exact compare-and-swap).
-pub fn commit_journal_v2(
-    paths: &JournalPathsV1,
-    cartridge: &ContinuationCartridgeV2,
-) -> Result<RecoveryReceiptV1, JournalErrorV1> {
-    commit_journal_with_fault(paths, cartridge, &mut FaultPlanV1::none())
+pub fn commit_lease_journal(
+    paths: &JournalPaths,
+    cartridge: &ContinuationLeaseCartridge,
+) -> Result<RecoveryReceipt, JournalError> {
+    commit_bound_journal(paths, cartridge, &mut FaultPlan::none())
 }
-pub fn commit_journal_with_fault_v2(
-    paths: &JournalPathsV1,
-    cartridge: &ContinuationCartridgeV2,
-    fault: &mut FaultPlanV1,
-) -> Result<RecoveryReceiptV1, JournalErrorV1> {
-    commit_journal_with_fault(paths, cartridge, fault)
+pub fn commit_lease_journal_with_fault(
+    paths: &JournalPaths,
+    cartridge: &ContinuationLeaseCartridge,
+    fault: &mut FaultPlan,
+) -> Result<RecoveryReceipt, JournalError> {
+    commit_bound_journal(paths, cartridge, fault)
 }
-fn commit_journal_with_fault<B: JournalBindingLike>(
-    paths: &JournalPathsV1,
+fn commit_bound_journal<B: JournalBindingLike>(
+    paths: &JournalPaths,
     cartridge: &ContinuationCartridgeRecord<B>,
-    fault: &mut FaultPlanV1,
-) -> Result<RecoveryReceiptV1, JournalErrorV1> {
+    fault: &mut FaultPlan,
+) -> Result<RecoveryReceipt, JournalError> {
     if let Some(existing) = existing_recovery::<B>(paths, None)? {
         if existing.binding_digest == cartridge.binding_digest {
             return Ok(existing);
         }
-        return Err(JournalErrorV1::new(
-            JournalFailureCodeV1::ImmutableReceiptConflict,
+        return Err(JournalError::new(
+            JournalFailureCode::ImmutableReceiptConflict,
             "recovery receipt and continuation cartridge bindings differ",
         ));
     }
@@ -1139,13 +1139,13 @@ fn commit_journal_with_fault<B: JournalBindingLike>(
     cartridge.validate_against(&journal.value.binding)?;
     let binding = &journal.value.binding;
     match journal.value.state {
-        JournalStateV1::Aborted => {
-            return Err(JournalErrorV1::new(
-                JournalFailureCodeV1::AlreadyTerminal,
+        JournalState::Aborted => {
+            return Err(JournalError::new(
+                JournalFailureCode::AlreadyTerminal,
                 "aborted journal cannot commit",
             ));
         }
-        JournalStateV1::Committed => {
+        JournalState::Committed => {
             let root = read_root(paths)?;
             let prepared = prepared_digest(&journal.value, journal.digest)?;
             verify_new(&root, binding, prepared)?;
@@ -1156,17 +1156,17 @@ fn commit_journal_with_fault<B: JournalBindingLike>(
                     prepared,
                     Some(journal.digest),
                     root.root_digest,
-                    RecoveryOutcomeV1::AlreadyCommitted,
+                    RecoveryOutcome::AlreadyCommitted,
                     owner_death_digest::<B>(paths, binding)?,
                 )?,
                 fault,
             );
         }
-        JournalStateV1::Prepared => {}
+        JournalState::Prepared => {}
     }
     if journal.digest != cartridge.prepared_record_digest {
-        return Err(JournalErrorV1::new(
-            JournalFailureCodeV1::CartridgeMismatch,
+        return Err(JournalError::new(
+            JournalFailureCode::CartridgeMismatch,
             "prepared record digest differs from continuation cartridge",
         ));
     }
@@ -1196,52 +1196,52 @@ fn commit_journal_with_fault<B: JournalBindingLike>(
             journal.digest,
             Some(committed.digest()?),
             binding.new_root(),
-            RecoveryOutcomeV1::NewRootCommitted,
+            RecoveryOutcome::NewRootCommitted,
             owner_death_digest::<B>(paths, binding)?,
         )?,
         fault,
     )
 }
 
-pub fn abort_journal_v1(
-    paths: &JournalPathsV1,
-    cartridge: &ContinuationCartridgeV1,
-) -> Result<RecoveryReceiptV1, JournalErrorV1> {
-    abort_journal_with_fault(paths, cartridge, &mut FaultPlanV1::none())
+pub fn abort_journal(
+    paths: &JournalPaths,
+    cartridge: &ContinuationCartridge,
+) -> Result<RecoveryReceipt, JournalError> {
+    abort_journal_with_fault(paths, cartridge, &mut FaultPlan::none())
 }
-pub fn abort_journal_with_fault_v1(
-    paths: &JournalPathsV1,
-    cartridge: &ContinuationCartridgeV1,
-    fault: &mut FaultPlanV1,
-) -> Result<RecoveryReceiptV1, JournalErrorV1> {
-    abort_journal_with_fault(paths, cartridge, fault)
+pub fn abort_journal_with_fault(
+    paths: &JournalPaths,
+    cartridge: &ContinuationCartridge,
+    fault: &mut FaultPlan,
+) -> Result<RecoveryReceipt, JournalError> {
+    abort_bound_journal(paths, cartridge, fault)
 }
 /// Five-term commit surface: abort refuses once the root has moved past the
 /// binding's parent root, so a consumed lease can never abort a successor.
-pub fn abort_journal_v2(
-    paths: &JournalPathsV1,
-    cartridge: &ContinuationCartridgeV2,
-) -> Result<RecoveryReceiptV1, JournalErrorV1> {
-    abort_journal_with_fault(paths, cartridge, &mut FaultPlanV1::none())
+pub fn abort_lease_journal(
+    paths: &JournalPaths,
+    cartridge: &ContinuationLeaseCartridge,
+) -> Result<RecoveryReceipt, JournalError> {
+    abort_bound_journal(paths, cartridge, &mut FaultPlan::none())
 }
-pub fn abort_journal_with_fault_v2(
-    paths: &JournalPathsV1,
-    cartridge: &ContinuationCartridgeV2,
-    fault: &mut FaultPlanV1,
-) -> Result<RecoveryReceiptV1, JournalErrorV1> {
-    abort_journal_with_fault(paths, cartridge, fault)
+pub fn abort_lease_journal_with_fault(
+    paths: &JournalPaths,
+    cartridge: &ContinuationLeaseCartridge,
+    fault: &mut FaultPlan,
+) -> Result<RecoveryReceipt, JournalError> {
+    abort_bound_journal(paths, cartridge, fault)
 }
-fn abort_journal_with_fault<B: JournalBindingLike>(
-    paths: &JournalPathsV1,
+fn abort_bound_journal<B: JournalBindingLike>(
+    paths: &JournalPaths,
     cartridge: &ContinuationCartridgeRecord<B>,
-    fault: &mut FaultPlanV1,
-) -> Result<RecoveryReceiptV1, JournalErrorV1> {
+    fault: &mut FaultPlan,
+) -> Result<RecoveryReceipt, JournalError> {
     if let Some(existing) = existing_recovery::<B>(paths, None)? {
         if existing.binding_digest == cartridge.binding_digest {
             return Ok(existing);
         }
-        return Err(JournalErrorV1::new(
-            JournalFailureCodeV1::ImmutableReceiptConflict,
+        return Err(JournalError::new(
+            JournalFailureCode::ImmutableReceiptConflict,
             "recovery receipt and continuation cartridge bindings differ",
         ));
     }
@@ -1250,13 +1250,13 @@ fn abort_journal_with_fault<B: JournalBindingLike>(
     cartridge.validate_against(&journal.value.binding)?;
     let binding = &journal.value.binding;
     match journal.value.state {
-        JournalStateV1::Committed => {
-            return Err(JournalErrorV1::new(
-                JournalFailureCodeV1::AlreadyTerminal,
+        JournalState::Committed => {
+            return Err(JournalError::new(
+                JournalFailureCode::AlreadyTerminal,
                 "committed journal cannot abort",
             ));
         }
-        JournalStateV1::Aborted => {
+        JournalState::Aborted => {
             let root = read_root(paths)?;
             verify_old(&root, binding)?;
             let prepared = prepared_digest(&journal.value, journal.digest)?;
@@ -1267,17 +1267,17 @@ fn abort_journal_with_fault<B: JournalBindingLike>(
                     prepared,
                     Some(journal.digest),
                     root.root_digest,
-                    RecoveryOutcomeV1::AlreadyAborted,
+                    RecoveryOutcome::AlreadyAborted,
                     owner_death_digest::<B>(paths, binding)?,
                 )?,
                 fault,
             );
         }
-        JournalStateV1::Prepared => {}
+        JournalState::Prepared => {}
     }
     if journal.digest != cartridge.prepared_record_digest {
-        return Err(JournalErrorV1::new(
-            JournalFailureCodeV1::CartridgeMismatch,
+        return Err(JournalError::new(
+            JournalFailureCode::CartridgeMismatch,
             "prepared record digest differs from continuation cartridge",
         ));
     }
@@ -1286,7 +1286,7 @@ fn abort_journal_with_fault<B: JournalBindingLike>(
     let aborted = DurableJournalRecord::<B>::aborted(
         &journal.value,
         journal.digest,
-        AbortReasonV1::ExplicitAbort,
+        AbortReason::ExplicitAbort,
     );
     durable_replace(
         paths.journal_record(),
@@ -1301,73 +1301,73 @@ fn abort_journal_with_fault<B: JournalBindingLike>(
             journal.digest,
             Some(aborted.digest()?),
             binding.old_root(),
-            RecoveryOutcomeV1::OldRootAborted,
+            RecoveryOutcome::OldRootAborted,
             owner_death_digest::<B>(paths, binding)?,
         )?,
         fault,
     )
 }
 
-pub fn record_owner_death_v1(
-    paths: &JournalPathsV1,
-    owner: DigestV1,
+pub fn record_owner_death(
+    paths: &JournalPaths,
+    owner: Sha256Digest,
     observed_at_unix_ns: u64,
-) -> Result<OwnerDeathReceiptV1, JournalErrorV1> {
-    record_owner_death_with_fault_v1(paths, owner, observed_at_unix_ns, &mut FaultPlanV1::none())
+) -> Result<OwnerDeathReceipt, JournalError> {
+    record_owner_death_with_fault(paths, owner, observed_at_unix_ns, &mut FaultPlan::none())
 }
-pub fn record_owner_death_with_fault_v1(
-    paths: &JournalPathsV1,
-    owner: DigestV1,
+pub fn record_owner_death_with_fault(
+    paths: &JournalPaths,
+    owner: Sha256Digest,
     observed_at_unix_ns: u64,
-    fault: &mut FaultPlanV1,
-) -> Result<OwnerDeathReceiptV1, JournalErrorV1> {
-    record_owner_death_with_fault::<JournalBindingV1>(paths, owner, observed_at_unix_ns, fault)
+    fault: &mut FaultPlan,
+) -> Result<OwnerDeathReceipt, JournalError> {
+    record_bound_owner_death::<JournalBinding>(paths, owner, observed_at_unix_ns, fault)
 }
-pub fn record_owner_death_v2(
-    paths: &JournalPathsV1,
-    owner: DigestV1,
+pub fn record_lease_owner_death(
+    paths: &JournalPaths,
+    owner: Sha256Digest,
     observed_at_unix_ns: u64,
-) -> Result<OwnerDeathReceiptV1, JournalErrorV1> {
-    record_owner_death_with_fault_v2(paths, owner, observed_at_unix_ns, &mut FaultPlanV1::none())
+) -> Result<OwnerDeathReceipt, JournalError> {
+    record_lease_owner_death_with_fault(paths, owner, observed_at_unix_ns, &mut FaultPlan::none())
 }
-pub fn record_owner_death_with_fault_v2(
-    paths: &JournalPathsV1,
-    owner: DigestV1,
+pub fn record_lease_owner_death_with_fault(
+    paths: &JournalPaths,
+    owner: Sha256Digest,
     observed_at_unix_ns: u64,
-    fault: &mut FaultPlanV1,
-) -> Result<OwnerDeathReceiptV1, JournalErrorV1> {
-    record_owner_death_with_fault::<JournalBindingV2>(paths, owner, observed_at_unix_ns, fault)
+    fault: &mut FaultPlan,
+) -> Result<OwnerDeathReceipt, JournalError> {
+    record_bound_owner_death::<JournalLeaseBinding>(paths, owner, observed_at_unix_ns, fault)
 }
-fn record_owner_death_with_fault<B: JournalBindingLike>(
-    paths: &JournalPathsV1,
-    owner: DigestV1,
+fn record_bound_owner_death<B: JournalBindingLike>(
+    paths: &JournalPaths,
+    owner: Sha256Digest,
     observed_at_unix_ns: u64,
-    fault: &mut FaultPlanV1,
-) -> Result<OwnerDeathReceiptV1, JournalErrorV1> {
+    fault: &mut FaultPlan,
+) -> Result<OwnerDeathReceipt, JournalError> {
     let journal = read_journal::<B>(paths)?;
     journal.value.validate()?;
     if journal.value.binding.owner_identity_digest() != owner {
-        return Err(JournalErrorV1::new(
-            JournalFailureCodeV1::OwnerIdentityMismatch,
+        return Err(JournalError::new(
+            JournalFailureCode::OwnerIdentityMismatch,
             "owner-death identity differs from prepared binding",
         ));
     }
-    if journal.value.state != JournalStateV1::Prepared {
-        return Err(JournalErrorV1::new(
-            JournalFailureCodeV1::AlreadyTerminal,
+    if journal.value.state != JournalState::Prepared {
+        return Err(JournalError::new(
+            JournalFailureCode::AlreadyTerminal,
             "terminal journal does not require owner-death recovery",
         ));
     }
     let root = read_root(paths)?;
-    let receipt = OwnerDeathReceiptV1 {
-        schema_version: DURABLE_RECEIPT_SCHEMA_VERSION_V1,
+    let receipt = OwnerDeathReceipt {
+        schema_version: DURABLE_RECEIPT_SCHEMA_VERSION,
         binding_digest: journal.value.binding.binding_digest()?,
         prepared_record_digest: journal.digest,
         owner_identity_digest: owner,
         observed_journal_state: journal.value.state,
         observed_root: root.root_digest,
         observed_at_unix_ns,
-        failure_code: JournalFailureCodeV1::OwnerDeath,
+        failure_code: JournalFailureCode::OwnerDeath,
         recovery_required: true,
     };
     write_once(
@@ -1379,40 +1379,40 @@ fn record_owner_death_with_fault<B: JournalBindingLike>(
     Ok(receipt)
 }
 
-pub fn recover_journal_v1(
-    paths: &JournalPathsV1,
-    expected: &JournalBindingV1,
-) -> Result<RecoveryReceiptV1, JournalErrorV1> {
-    recover_journal_with_fault(paths, expected, &mut FaultPlanV1::none())
+pub fn recover_journal(
+    paths: &JournalPaths,
+    expected: &JournalBinding,
+) -> Result<RecoveryReceipt, JournalError> {
+    recover_journal_with_fault(paths, expected, &mut FaultPlan::none())
 }
-pub fn recover_journal_with_fault_v1(
-    paths: &JournalPathsV1,
-    expected: &JournalBindingV1,
-    fault: &mut FaultPlanV1,
-) -> Result<RecoveryReceiptV1, JournalErrorV1> {
-    recover_journal_with_fault(paths, expected, fault)
+pub fn recover_journal_with_fault(
+    paths: &JournalPaths,
+    expected: &JournalBinding,
+    fault: &mut FaultPlan,
+) -> Result<RecoveryReceipt, JournalError> {
+    recover_bound_journal(paths, expected, fault)
 }
 /// Five-term commit surface: recovery completes a prepared five-term
 /// transaction (abort on the old root, commit on the new root) and refuses
 /// every other journal/root pairing loudly.
-pub fn recover_journal_v2(
-    paths: &JournalPathsV1,
-    expected: &JournalBindingV2,
-) -> Result<RecoveryReceiptV1, JournalErrorV1> {
-    recover_journal_with_fault(paths, expected, &mut FaultPlanV1::none())
+pub fn recover_lease_journal(
+    paths: &JournalPaths,
+    expected: &JournalLeaseBinding,
+) -> Result<RecoveryReceipt, JournalError> {
+    recover_bound_journal(paths, expected, &mut FaultPlan::none())
 }
-pub fn recover_journal_with_fault_v2(
-    paths: &JournalPathsV1,
-    expected: &JournalBindingV2,
-    fault: &mut FaultPlanV1,
-) -> Result<RecoveryReceiptV1, JournalErrorV1> {
-    recover_journal_with_fault(paths, expected, fault)
+pub fn recover_lease_journal_with_fault(
+    paths: &JournalPaths,
+    expected: &JournalLeaseBinding,
+    fault: &mut FaultPlan,
+) -> Result<RecoveryReceipt, JournalError> {
+    recover_bound_journal(paths, expected, fault)
 }
-fn recover_journal_with_fault<B: JournalBindingLike>(
-    paths: &JournalPathsV1,
+fn recover_bound_journal<B: JournalBindingLike>(
+    paths: &JournalPaths,
     expected: &B,
-    fault: &mut FaultPlanV1,
-) -> Result<RecoveryReceiptV1, JournalErrorV1> {
+    fault: &mut FaultPlan,
+) -> Result<RecoveryReceipt, JournalError> {
     expected.binding_validate()?;
     if let Some(existing) = existing_recovery(paths, Some(expected))? {
         return Ok(existing);
@@ -1420,7 +1420,7 @@ fn recover_journal_with_fault<B: JournalBindingLike>(
     let root = read_root(paths)?;
     let Some(journal) = read_optional::<DurableJournalRecord<B>>(
         paths.journal_record(),
-        JournalFailureCodeV1::JournalMissing,
+        JournalFailureCode::JournalMissing,
         B::record_domain(),
     )?
     else {
@@ -1429,18 +1429,18 @@ fn recover_journal_with_fault<B: JournalBindingLike>(
         }
         let Some(cartridge) = read_optional::<ContinuationCartridgeRecord<B>>(
             paths.cartridge(),
-            JournalFailureCodeV1::CartridgeMismatch,
-            CARTRIDGE_DOMAIN_V1,
+            JournalFailureCode::CartridgeMismatch,
+            CARTRIDGE_DOMAIN,
         )?
         else {
             return persist_recovery(
                 paths,
                 make_recovery(
                     expected,
-                    DigestV1::ZERO,
+                    Sha256Digest::ZERO,
                     None,
                     expected.old_root(),
-                    RecoveryOutcomeV1::NotStartedOldRoot,
+                    RecoveryOutcome::NotStartedOldRoot,
                     None,
                 )?,
                 fault,
@@ -1450,15 +1450,15 @@ fn recover_journal_with_fault<B: JournalBindingLike>(
         let prepared = DurableJournalRecord::<B>::prepared(expected.clone());
         let prepared_digest = prepared.digest()?;
         if cartridge.value.prepared_record_digest != prepared_digest {
-            return Err(JournalErrorV1::new(
-                JournalFailureCodeV1::CartridgeMismatch,
+            return Err(JournalError::new(
+                JournalFailureCode::CartridgeMismatch,
                 "continuation cartridge does not bind the reconstructable prepared record",
             ));
         }
         let aborted = DurableJournalRecord::<B>::aborted(
             &prepared,
             prepared_digest,
-            AbortReasonV1::RecoveryObservedOldRoot,
+            AbortReason::RecoveryObservedOldRoot,
         );
         durable_replace(
             paths.journal_record(),
@@ -1473,7 +1473,7 @@ fn recover_journal_with_fault<B: JournalBindingLike>(
                 prepared_digest,
                 Some(aborted.digest()?),
                 expected.old_root(),
-                RecoveryOutcomeV1::OldRootAborted,
+                RecoveryOutcome::OldRootAborted,
                 None,
             )?,
             fault,
@@ -1481,19 +1481,19 @@ fn recover_journal_with_fault<B: JournalBindingLike>(
     };
     journal.value.validate()?;
     if journal.value.binding.binding_digest()? != expected.binding_digest()? {
-        return Err(JournalErrorV1::new(
-            JournalFailureCodeV1::InvalidBinding,
+        return Err(JournalError::new(
+            JournalFailureCode::InvalidBinding,
             "persisted journal binding differs from recovery expectation",
         ));
     }
     let prepared = prepared_digest(&journal.value, journal.digest)?;
     let owner_death = owner_death_digest::<B>(paths, expected)?;
     match journal.value.state {
-        JournalStateV1::Prepared if root.root_digest == expected.old_root() => {
+        JournalState::Prepared if root.root_digest == expected.old_root() => {
             let reason = if owner_death.is_some() {
-                AbortReasonV1::OwnerDeathObservedOldRoot
+                AbortReason::OwnerDeathObservedOldRoot
             } else {
-                AbortReasonV1::RecoveryObservedOldRoot
+                AbortReason::RecoveryObservedOldRoot
             };
             let aborted = DurableJournalRecord::<B>::aborted(&journal.value, journal.digest, reason);
             durable_replace(
@@ -1509,13 +1509,13 @@ fn recover_journal_with_fault<B: JournalBindingLike>(
                     prepared,
                     Some(aborted.digest()?),
                     expected.old_root(),
-                    RecoveryOutcomeV1::OldRootAborted,
+                    RecoveryOutcome::OldRootAborted,
                     owner_death,
                 )?,
                 fault,
             )
         }
-        JournalStateV1::Prepared if root.root_digest == expected.new_root() => {
+        JournalState::Prepared if root.root_digest == expected.new_root() => {
             verify_new(&root, expected, prepared)?;
             let committed = DurableJournalRecord::<B>::committed(&journal.value, journal.digest);
             durable_replace(
@@ -1531,16 +1531,16 @@ fn recover_journal_with_fault<B: JournalBindingLike>(
                     prepared,
                     Some(committed.digest()?),
                     expected.new_root(),
-                    RecoveryOutcomeV1::NewRootCommitted,
+                    RecoveryOutcome::NewRootCommitted,
                     owner_death,
                 )?,
                 fault,
             )
         }
-        JournalStateV1::Prepared => Err(disagreement(
+        JournalState::Prepared => Err(disagreement(
             "prepared journal accompanies neither preregistered root",
         )),
-        JournalStateV1::Committed => {
+        JournalState::Committed => {
             verify_new(&root, expected, prepared)?;
             persist_recovery(
                 paths,
@@ -1549,13 +1549,13 @@ fn recover_journal_with_fault<B: JournalBindingLike>(
                     prepared,
                     Some(journal.digest),
                     expected.new_root(),
-                    RecoveryOutcomeV1::AlreadyCommitted,
+                    RecoveryOutcome::AlreadyCommitted,
                     owner_death,
                 )?,
                 fault,
             )
         }
-        JournalStateV1::Aborted => {
+        JournalState::Aborted => {
             verify_old(&root, expected)?;
             persist_recovery(
                 paths,
@@ -1564,7 +1564,7 @@ fn recover_journal_with_fault<B: JournalBindingLike>(
                     prepared,
                     Some(journal.digest),
                     expected.old_root(),
-                    RecoveryOutcomeV1::AlreadyAborted,
+                    RecoveryOutcome::AlreadyAborted,
                     owner_death,
                 )?,
                 fault,
@@ -1573,56 +1573,56 @@ fn recover_journal_with_fault<B: JournalBindingLike>(
     }
 }
 
-pub fn read_published_root_v1(
-    paths: &JournalPathsV1,
-) -> Result<RootPublicationReceipt, JournalErrorV1> {
+pub fn read_published_root(
+    paths: &JournalPaths,
+) -> Result<RootPublicationReceipt, JournalError> {
     read_root(paths)
 }
-pub fn read_journal_record_v1(paths: &JournalPathsV1) -> Result<DurableJournalV2, JournalErrorV1> {
-    Ok(read_journal::<JournalBindingV1>(paths)?.value)
+pub fn read_journal_record(paths: &JournalPaths) -> Result<DurableJournal, JournalError> {
+    Ok(read_journal::<JournalBinding>(paths)?.value)
 }
-pub fn read_continuation_cartridge_v1(
-    paths: &JournalPathsV1,
-) -> Result<ContinuationCartridgeV1, JournalErrorV1> {
-    read_cartridge::<JournalBindingV1>(paths)
+pub fn read_continuation_cartridge(
+    paths: &JournalPaths,
+) -> Result<ContinuationCartridge, JournalError> {
+    read_cartridge::<JournalBinding>(paths)
 }
 /// Read the committed five-term journal record. The returned record carries
 /// the full provenance binding (roots, session/ledger owner, nonce, protected
 /// scope, lease) exactly as it was committed.
-pub fn read_journal_record_v2(paths: &JournalPathsV1) -> Result<DurableJournalV3, JournalErrorV1> {
-    Ok(read_journal::<JournalBindingV2>(paths)?.value)
+pub fn read_journal_record_v2(paths: &JournalPaths) -> Result<DurableLeaseJournal, JournalError> {
+    Ok(read_journal::<JournalLeaseBinding>(paths)?.value)
 }
 pub fn read_continuation_cartridge_v2(
-    paths: &JournalPathsV1,
-) -> Result<ContinuationCartridgeV2, JournalErrorV1> {
-    read_cartridge::<JournalBindingV2>(paths)
+    paths: &JournalPaths,
+) -> Result<ContinuationLeaseCartridge, JournalError> {
+    read_cartridge::<JournalLeaseBinding>(paths)
 }
 /// Read-side verification of a committed five-term binding: the persisted
 /// record and its recovery receipt must correspond to the expected session /
 /// ledger identity and carry the same binding digest, or the read fails
 /// loudly. This is how reads verify the provenance binding of a commit.
 pub fn verify_committed_binding_v2(
-    paths: &JournalPathsV1,
-    expected: &JournalBindingV2,
-) -> Result<RecoveryReceiptV1, JournalErrorV1> {
+    paths: &JournalPaths,
+    expected: &JournalLeaseBinding,
+) -> Result<RecoveryReceipt, JournalError> {
     expected.binding_validate()?;
-    let journal = read_journal::<JournalBindingV2>(paths)?;
+    let journal = read_journal::<JournalLeaseBinding>(paths)?;
     journal.value.validate()?;
     if journal.value.binding.binding_digest()? != expected.binding_digest()? {
-        return Err(JournalErrorV1::new(
-            JournalFailureCodeV1::InvalidBinding,
+        return Err(JournalError::new(
+            JournalFailureCode::InvalidBinding,
             "committed record does not bind the expected identity",
         ));
     }
-    if journal.value.state != JournalStateV1::Committed {
-        return Err(JournalErrorV1::new(
-            JournalFailureCodeV1::AlreadyTerminal,
+    if journal.value.state != JournalState::Committed {
+        return Err(JournalError::new(
+            JournalFailureCode::AlreadyTerminal,
             "verify_committed_binding requires a committed journal record",
         ));
     }
-    existing_recovery::<JournalBindingV2>(paths, Some(expected))?.ok_or_else(|| {
-        JournalErrorV1::new(
-            JournalFailureCodeV1::JournalMissing,
+    existing_recovery::<JournalLeaseBinding>(paths, Some(expected))?.ok_or_else(|| {
+        JournalError::new(
+            JournalFailureCode::JournalMissing,
             "committed record lacks a recovery receipt",
         )
     })
@@ -1630,14 +1630,14 @@ pub fn verify_committed_binding_v2(
 
 fn make_recovery<B: JournalBindingLike>(
     binding: &B,
-    prepared: DigestV1,
-    terminal: Option<DigestV1>,
-    root: DigestV1,
-    outcome: RecoveryOutcomeV1,
-    owner: Option<DigestV1>,
-) -> Result<RecoveryReceiptV1, JournalErrorV1> {
-    Ok(RecoveryReceiptV1 {
-        schema_version: DURABLE_RECEIPT_SCHEMA_VERSION_V1,
+    prepared: Sha256Digest,
+    terminal: Option<Sha256Digest>,
+    root: Sha256Digest,
+    outcome: RecoveryOutcome,
+    owner: Option<Sha256Digest>,
+) -> Result<RecoveryReceipt, JournalError> {
+    Ok(RecoveryReceipt {
+        schema_version: DURABLE_RECEIPT_SCHEMA_VERSION,
         binding_digest: binding.binding_digest()?,
         prepared_record_digest: prepared,
         terminal_record_digest: terminal,
@@ -1650,13 +1650,13 @@ fn make_recovery<B: JournalBindingLike>(
     })
 }
 fn existing_recovery<B: JournalBindingLike>(
-    paths: &JournalPathsV1,
+    paths: &JournalPaths,
     expected: Option<&B>,
-) -> Result<Option<RecoveryReceiptV1>, JournalErrorV1> {
-    let Some(read) = read_optional::<RecoveryReceiptV1>(
+) -> Result<Option<RecoveryReceipt>, JournalError> {
+    let Some(read) = read_optional::<RecoveryReceipt>(
         paths.recovery_receipt(),
-        JournalFailureCodeV1::JournalMissing,
-        RECOVERY_DOMAIN_V1,
+        JournalFailureCode::JournalMissing,
+        RECOVERY_DOMAIN,
     )?
     else {
         return Ok(None);
@@ -1665,24 +1665,24 @@ fn existing_recovery<B: JournalBindingLike>(
     if let Some(binding) = expected
         && read.value.binding_digest != binding.binding_digest()?
     {
-        return Err(JournalErrorV1::new(
-            JournalFailureCodeV1::ImmutableReceiptConflict,
+        return Err(JournalError::new(
+            JournalFailureCode::ImmutableReceiptConflict,
             "existing recovery receipt belongs to another binding",
         ));
     }
     Ok(Some(read.value))
 }
 fn persist_recovery(
-    paths: &JournalPathsV1,
-    receipt: RecoveryReceiptV1,
-    fault: &mut FaultPlanV1,
-) -> Result<RecoveryReceiptV1, JournalErrorV1> {
-    if let Some(existing) = existing_recovery::<JournalBindingV1>(paths, None)? {
+    paths: &JournalPaths,
+    receipt: RecoveryReceipt,
+    fault: &mut FaultPlan,
+) -> Result<RecoveryReceipt, JournalError> {
+    if let Some(existing) = existing_recovery::<JournalBinding>(paths, None)? {
         if existing.binding_digest == receipt.binding_digest {
             return Ok(existing);
         }
-        return Err(JournalErrorV1::new(
-            JournalFailureCodeV1::ImmutableReceiptConflict,
+        return Err(JournalError::new(
+            JournalFailureCode::ImmutableReceiptConflict,
             "recovery receipt binding changed",
         ));
     }
@@ -1695,13 +1695,13 @@ fn persist_recovery(
     Ok(receipt)
 }
 fn owner_death_digest<B: JournalBindingLike>(
-    paths: &JournalPathsV1,
+    paths: &JournalPaths,
     binding: &B,
-) -> Result<Option<DigestV1>, JournalErrorV1> {
-    let Some(read) = read_optional::<OwnerDeathReceiptV1>(
+) -> Result<Option<Sha256Digest>, JournalError> {
+    let Some(read) = read_optional::<OwnerDeathReceipt>(
         paths.owner_death_receipt(),
-        JournalFailureCodeV1::JournalMissing,
-        OWNER_DEATH_DOMAIN_V1,
+        JournalFailureCode::JournalMissing,
+        OWNER_DEATH_DOMAIN,
     )?
     else {
         return Ok(None);
@@ -1710,8 +1710,8 @@ fn owner_death_digest<B: JournalBindingLike>(
     if read.value.binding_digest != binding.binding_digest()?
         || read.value.owner_identity_digest != binding.owner_identity_digest()
     {
-        return Err(JournalErrorV1::new(
-            JournalFailureCodeV1::OwnerIdentityMismatch,
+        return Err(JournalError::new(
+            JournalFailureCode::OwnerIdentityMismatch,
             "owner-death receipt differs from journal binding",
         ));
     }
@@ -1720,7 +1720,7 @@ fn owner_death_digest<B: JournalBindingLike>(
 fn verify_old<B: JournalBindingLike>(
     root: &RootPublicationReceipt,
     binding: &B,
-) -> Result<(), JournalErrorV1> {
+) -> Result<(), JournalError> {
     root.validate()?;
     if root.root_digest == binding.old_root() {
         Ok(())
@@ -1731,8 +1731,8 @@ fn verify_old<B: JournalBindingLike>(
 fn verify_new<B: JournalBindingLike>(
     root: &RootPublicationReceipt,
     binding: &B,
-    prepared: DigestV1,
-) -> Result<(), JournalErrorV1> {
+    prepared: Sha256Digest,
+) -> Result<(), JournalError> {
     root.validate()?;
     if root.root_digest == binding.new_root()
         && root.transaction_id == binding.transaction_id()
@@ -1747,59 +1747,59 @@ fn verify_new<B: JournalBindingLike>(
 }
 fn prepared_digest<B: JournalBindingLike>(
     record: &DurableJournalRecord<B>,
-    digest: DigestV1,
-) -> Result<DigestV1, JournalErrorV1> {
+    digest: Sha256Digest,
+) -> Result<Sha256Digest, JournalError> {
     match record.state {
-        JournalStateV1::Prepared => Ok(digest),
+        JournalState::Prepared => Ok(digest),
         _ => record.predecessor_record_digest.ok_or_else(|| {
-            JournalErrorV1::new(
-                JournalFailureCodeV1::SequenceMismatch,
+            JournalError::new(
+                JournalFailureCode::SequenceMismatch,
                 "terminal journal lacks prepared predecessor",
             )
         }),
     }
 }
-fn disagreement(detail: &str) -> JournalErrorV1 {
-    JournalErrorV1::new(JournalFailureCodeV1::JournalRootDisagreement, detail)
+fn disagreement(detail: &str) -> JournalError {
+    JournalError::new(JournalFailureCode::JournalRootDisagreement, detail)
 }
 
 struct CanonicalRead<T> {
     value: T,
-    digest: DigestV1,
+    digest: Sha256Digest,
 }
-fn read_root(paths: &JournalPathsV1) -> Result<RootPublicationReceipt, JournalErrorV1> {
+fn read_root(paths: &JournalPaths) -> Result<RootPublicationReceipt, JournalError> {
     let read = read_canonical::<RootPublicationReceipt>(
         paths.root_record(),
-        JournalFailureCodeV1::RootMissing,
-        ROOT_DOMAIN_V1,
+        JournalFailureCode::RootMissing,
+        ROOT_DOMAIN,
     )?;
     read.value.validate()?;
     Ok(read.value)
 }
 fn read_journal<B: JournalBindingLike>(
-    paths: &JournalPathsV1,
-) -> Result<CanonicalRead<DurableJournalRecord<B>>, JournalErrorV1> {
+    paths: &JournalPaths,
+) -> Result<CanonicalRead<DurableJournalRecord<B>>, JournalError> {
     read_canonical(
         paths.journal_record(),
-        JournalFailureCodeV1::JournalMissing,
+        JournalFailureCode::JournalMissing,
         B::record_domain(),
     )
 }
 fn read_cartridge<B: JournalBindingLike>(
-    paths: &JournalPathsV1,
-) -> Result<ContinuationCartridgeRecord<B>, JournalErrorV1> {
+    paths: &JournalPaths,
+) -> Result<ContinuationCartridgeRecord<B>, JournalError> {
     Ok(read_canonical::<ContinuationCartridgeRecord<B>>(
         paths.cartridge(),
-        JournalFailureCodeV1::CartridgeMismatch,
-        CARTRIDGE_DOMAIN_V1,
+        JournalFailureCode::CartridgeMismatch,
+        CARTRIDGE_DOMAIN,
     )?
     .value)
 }
 fn read_optional<T>(
     path: &Path,
-    missing: JournalFailureCodeV1,
+    missing: JournalFailureCode,
     domain: &'static [u8],
-) -> Result<Option<CanonicalRead<T>>, JournalErrorV1>
+) -> Result<Option<CanonicalRead<T>>, JournalError>
 where
     T: DeserializeOwned + Serialize,
 {
@@ -1811,52 +1811,52 @@ where
 }
 fn read_canonical<T>(
     path: &Path,
-    missing: JournalFailureCodeV1,
+    missing: JournalFailureCode,
     domain: &'static [u8],
-) -> Result<CanonicalRead<T>, JournalErrorV1>
+) -> Result<CanonicalRead<T>, JournalError>
 where
     T: DeserializeOwned + Serialize,
 {
     let metadata = match fs::symlink_metadata(path) {
         Ok(metadata) => metadata,
         Err(error) if error.kind() == io::ErrorKind::NotFound => {
-            return Err(JournalErrorV1::new(missing, "required record is absent"));
+            return Err(JournalError::new(missing, "required record is absent"));
         }
         Err(error) => {
-            return Err(JournalErrorV1::new(
-                JournalFailureCodeV1::IoBeforePublish,
+            return Err(JournalError::new(
+                JournalFailureCode::IoBeforePublish,
                 format!("record stat failed: {error}"),
             ));
         }
     };
     if !metadata.file_type().is_file() {
-        return Err(JournalErrorV1::new(
-            JournalFailureCodeV1::TornOrNoncanonicalRecord,
+        return Err(JournalError::new(
+            JournalFailureCode::TornOrNoncanonicalRecord,
             "record is not a regular file",
         ));
     }
-    if metadata.len() > DURABLE_JOURNAL_MAX_RECORD_BYTES_V1 {
-        return Err(JournalErrorV1::new(
-            JournalFailureCodeV1::RecordTooLarge,
+    if metadata.len() > DURABLE_JOURNAL_MAX_RECORD_BYTES {
+        return Err(JournalError::new(
+            JournalFailureCode::RecordTooLarge,
             "record exceeds the frozen byte bound",
         ));
     }
     let bytes = fs::read(path).map_err(|error| {
-        JournalErrorV1::new(
-            JournalFailureCodeV1::IoBeforePublish,
+        JournalError::new(
+            JournalFailureCode::IoBeforePublish,
             format!("record read failed: {error}"),
         )
     })?;
     let value: T = serde_json::from_slice(&bytes).map_err(|error| {
-        JournalErrorV1::new(
-            JournalFailureCodeV1::TornOrNoncanonicalRecord,
+        JournalError::new(
+            JournalFailureCode::TornOrNoncanonicalRecord,
             format!("record decode failed: {error}"),
         )
     })?;
     let canonical = canonical_bytes(&value)?;
     if canonical != bytes {
-        return Err(JournalErrorV1::new(
-            JournalFailureCodeV1::TornOrNoncanonicalRecord,
+        return Err(JournalError::new(
+            JournalFailureCode::TornOrNoncanonicalRecord,
             "record bytes are not canonical JSON",
         ));
     }
@@ -1865,47 +1865,47 @@ where
         digest: domain_digest(domain, &canonical),
     })
 }
-fn canonical_bytes<T: Serialize>(value: &T) -> Result<Vec<u8>, JournalErrorV1> {
+fn canonical_bytes<T: Serialize>(value: &T) -> Result<Vec<u8>, JournalError> {
     let value = serde_json::to_value(value).map_err(|error| {
-        JournalErrorV1::new(
-            JournalFailureCodeV1::InvalidBinding,
+        JournalError::new(
+            JournalFailureCode::InvalidBinding,
             format!("record serialization failed: {error}"),
         )
     })?;
     let bytes = canonical_json(&value).into_bytes();
-    if bytes.len() as u64 > DURABLE_JOURNAL_MAX_RECORD_BYTES_V1 {
-        return Err(JournalErrorV1::new(
-            JournalFailureCodeV1::RecordTooLarge,
+    if bytes.len() as u64 > DURABLE_JOURNAL_MAX_RECORD_BYTES {
+        return Err(JournalError::new(
+            JournalFailureCode::RecordTooLarge,
             "canonical record exceeds the frozen byte bound",
         ));
     }
     Ok(bytes)
 }
-fn domain_digest(domain: &[u8], bytes: &[u8]) -> DigestV1 {
+fn domain_digest(domain: &[u8], bytes: &[u8]) -> Sha256Digest {
     let mut bound = Vec::with_capacity(domain.len() + 8 + bytes.len());
     bound.extend_from_slice(domain);
     bound.extend_from_slice(&(bytes.len() as u64).to_be_bytes());
     bound.extend_from_slice(bytes);
-    DigestV1::from_bytes(sha256(&bound))
+    Sha256Digest::from_bytes(sha256(&bound))
 }
 fn write_once(
     path: &Path,
     bytes: &[u8],
     boundaries: WriteBoundaries,
-    fault: &mut FaultPlanV1,
-) -> Result<(), JournalErrorV1> {
+    fault: &mut FaultPlan,
+) -> Result<(), JournalError> {
     match fs::read(path) {
         Ok(existing) if existing == bytes => return Ok(()),
         Ok(_) => {
-            return Err(JournalErrorV1::new(
-                JournalFailureCodeV1::ImmutableReceiptConflict,
+            return Err(JournalError::new(
+                JournalFailureCode::ImmutableReceiptConflict,
                 "immutable record already exists with different bytes",
             ));
         }
         Err(error) if error.kind() == io::ErrorKind::NotFound => {}
         Err(error) => {
-            return Err(JournalErrorV1::new(
-                JournalFailureCodeV1::IoBeforePublish,
+            return Err(JournalError::new(
+                JournalFailureCode::IoBeforePublish,
                 format!("immutable record read failed: {error}"),
             ));
         }
@@ -1916,19 +1916,19 @@ fn durable_replace(
     path: &Path,
     bytes: &[u8],
     boundaries: WriteBoundaries,
-    fault: &mut FaultPlanV1,
-) -> Result<(), JournalErrorV1> {
-    if bytes.len() as u64 > DURABLE_JOURNAL_MAX_RECORD_BYTES_V1 {
-        return Err(JournalErrorV1::new(
-            JournalFailureCodeV1::RecordTooLarge,
+    fault: &mut FaultPlan,
+) -> Result<(), JournalError> {
+    if bytes.len() as u64 > DURABLE_JOURNAL_MAX_RECORD_BYTES {
+        return Err(JournalError::new(
+            JournalFailureCode::RecordTooLarge,
             "write exceeds the frozen record byte bound",
         ));
     }
     let parent = path.parent().unwrap_or_else(|| Path::new("."));
     fs::create_dir_all(parent).map_err(|error| io_before(boundaries.before, error))?;
     let file_name = path.file_name().ok_or_else(|| {
-        JournalErrorV1::new(
-            JournalFailureCodeV1::InvalidBinding,
+        JournalError::new(
+            JournalFailureCode::InvalidBinding,
             "record path has no file name",
         )
     })?;
@@ -1947,8 +1947,8 @@ fn durable_replace(
         published = true;
         fault.hit(boundaries.rename, true)?;
         sync_dir(parent).map_err(|error| {
-            JournalErrorV1::at(
-                JournalFailureCodeV1::DirectorySyncFailedAfterPublish,
+            JournalError::at(
+                JournalFailureCode::DirectorySyncFailedAfterPublish,
                 boundaries.dir_sync,
                 true,
                 format!("parent directory sync failed: {error}"),
@@ -1982,9 +1982,9 @@ fn now_unix_ns() -> u64 {
         .map(|duration| duration.as_nanos() as u64)
         .unwrap_or(0)
 }
-fn io_before(boundary: JournalBoundaryV1, error: io::Error) -> JournalErrorV1 {
-    JournalErrorV1::at(
-        JournalFailureCodeV1::IoBeforePublish,
+fn io_before(boundary: JournalBoundary, error: io::Error) -> JournalError {
+    JournalError::at(
+        JournalFailureCode::IoBeforePublish,
         boundary,
         false,
         format!("durable write failed before publication: {error}"),
@@ -1992,18 +1992,18 @@ fn io_before(boundary: JournalBoundaryV1, error: io::Error) -> JournalErrorV1 {
 }
 
 /// Machine-readable contract summary used by conformance generators.
-pub fn durable_journal_contract_v1() -> serde_json::Value {
+pub fn durable_journal_contract() -> serde_json::Value {
     json!({
         "schema_version": DURABLE_JOURNAL_SCHEMA_VERSION_V2,
         "journal_schema_version": DURABLE_JOURNAL_SCHEMA_VERSION_V2,
         "journal_schema_version_v3": DURABLE_JOURNAL_SCHEMA_VERSION_V3,
-        "binding_schema_version_v1": DURABLE_BINDING_SCHEMA_VERSION_V1,
+        "binding_schema_version": DURABLE_BINDING_SCHEMA_VERSION,
         "binding_schema_version_v2": DURABLE_BINDING_SCHEMA_VERSION_V2,
-        "lease_schema_version_v1": DURABLE_LEASE_SCHEMA_VERSION_V1,
+        "lease_schema_version": DURABLE_LEASE_SCHEMA_VERSION,
         "five_term_binding": ["old_root", "new_root", "transaction_id",
             "owner_identity_digest", "nonce", "protected_scope", "lease"],
-        "receipt_schema_version": DURABLE_RECEIPT_SCHEMA_VERSION_V1,
-        "max_record_bytes": DURABLE_JOURNAL_MAX_RECORD_BYTES_V1,
+        "receipt_schema_version": DURABLE_RECEIPT_SCHEMA_VERSION,
+        "max_record_bytes": DURABLE_JOURNAL_MAX_RECORD_BYTES,
         "states": ["prepared", "committed", "aborted"],
         "publication_law": "root_is_old_or_new_and_journal_corresponds",
         "prepare_order": ["cartridge_file_sync", "cartridge_directory_sync",

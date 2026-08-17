@@ -244,7 +244,7 @@ fn gc_report_digest_with_binding(
     collected_objects: u64,
     freed_bytes: u64,
     after_lifecycle_close: bool,
-    binding: Option<&AppliedGcEvidenceV1>,
+    binding: Option<&AppliedGcEvidence>,
 ) -> ProgramDigest {
     let base = gc_report_digest(
         schema_version,
@@ -553,24 +553,24 @@ impl LifecycleReport {
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
-pub struct GcProducerEpochV1 {
+pub struct GcProducerEpoch {
     pub engine: EngineIdentity,
     pub epoch: u64,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
-pub struct AppliedGcEvidenceV1 {
+pub struct AppliedGcEvidence {
     pub run_receipt: GcRunReceipt,
     pub run_receipt_digest: String,
-    pub producer_epochs: Vec<GcProducerEpochV1>,
+    pub producer_epochs: Vec<GcProducerEpoch>,
     pub verified_freed_bytes: u64,
 }
 
-impl AppliedGcEvidenceV1 {
+impl AppliedGcEvidence {
     pub fn new(
         run_receipt: GcRunReceipt,
-        mut producer_epochs: Vec<GcProducerEpochV1>,
+        mut producer_epochs: Vec<GcProducerEpoch>,
         verified_freed_bytes: u64,
     ) -> Result<Self, String> {
         producer_epochs.sort_by_key(|row| row.engine);
@@ -634,7 +634,7 @@ pub struct GcReport {
     freed_bytes: u64,
     after_lifecycle_close: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    applied: Option<AppliedGcEvidenceV1>,
+    applied: Option<AppliedGcEvidence>,
     digest: ProgramDigest,
 }
 
@@ -668,7 +668,7 @@ impl GcReport {
     pub fn new_applied(
         schema_version: u16,
         program_id: ProgramDigest,
-        applied: AppliedGcEvidenceV1,
+        applied: AppliedGcEvidence,
     ) -> Self {
         let collected_objects = applied.run_receipt.deleted.len() as u64;
         let freed_bytes = applied.verified_freed_bytes;
@@ -707,7 +707,7 @@ impl GcReport {
     pub fn after_lifecycle_close(&self) -> bool {
         self.after_lifecycle_close
     }
-    pub fn applied(&self) -> Option<&AppliedGcEvidenceV1> {
+    pub fn applied(&self) -> Option<&AppliedGcEvidence> {
         self.applied.as_ref()
     }
     /// Self-binding commitment over this report's fields, recomputed by assembly.

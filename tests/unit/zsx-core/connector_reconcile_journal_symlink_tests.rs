@@ -1,23 +1,23 @@
     use super::{
-        AttemptBindingV1, AttemptJournalPathsV1, AttemptStateV1, DurableProfileIdV1,
-        prepare_attempt_v1, read_current_attempt_v1, reconcile_all_attempts,
+        AttemptBinding, AttemptJournalPaths, AttemptState, DurableProfileId,
+        prepare_attempt, read_current_attempt, reconcile_all_attempts,
         reconcile_request_attempts, refuse_planted_journal_symlinks,
     };
     use std::path::Path;
-    use zero_abi::{DigestV1, EffectClass, sha256};
+    use zero_abi::{Sha256Digest, EffectClass, sha256};
 
     fn prepared_journal(dir: &Path) {
         std::fs::create_dir_all(dir).expect("journal dir");
-        let paths = AttemptJournalPathsV1::new(dir).expect("paths");
-        let binding = AttemptBindingV1::new(
-            DigestV1::from_bytes(sha256(b"4js1-attempt")),
-            DigestV1::from_bytes(sha256(b"4js1-effect")),
+        let paths = AttemptJournalPaths::new(dir).expect("paths");
+        let binding = AttemptBinding::new(
+            Sha256Digest::from_bytes(sha256(b"4js1-attempt")),
+            Sha256Digest::from_bytes(sha256(b"4js1-effect")),
             EffectClass::ReversibleMutation,
-            DigestV1::from_bytes(sha256(b"4js1-anchor")),
-            DurableProfileIdV1::PortableStrict,
-            DigestV1::from_bytes(sha256(b"4js1-owner")),
+            Sha256Digest::from_bytes(sha256(b"4js1-anchor")),
+            DurableProfileId::PortableStrict,
+            Sha256Digest::from_bytes(sha256(b"4js1-owner")),
         );
-        prepare_attempt_v1(&paths, binding).expect("prepare");
+        prepare_attempt(&paths, binding).expect("prepare");
     }
 
     fn journal_entry_names(dir: &Path) -> Vec<String> {
@@ -38,7 +38,7 @@
         prepared_journal(&journal);
         let statuses = reconcile_request_attempts(&root, 1, 1).expect("reconcile");
         assert_eq!(statuses.len(), 1, "{statuses:?}");
-        assert_eq!(statuses[0].state, AttemptStateV1::SafeToRetry);
+        assert_eq!(statuses[0].state, AttemptState::SafeToRetry);
         let _ = std::fs::remove_dir_all(&root);
     }
 
@@ -66,13 +66,13 @@
             before,
             "recovery must not write SafeToRetry through a journal-dir symlink"
         );
-        let paths = AttemptJournalPathsV1::new(&victim).expect("victim paths");
-        let current = read_current_attempt_v1(&paths)
+        let paths = AttemptJournalPaths::new(&victim).expect("victim paths");
+        let current = read_current_attempt(&paths)
             .expect("read victim")
             .expect("victim still has a journal");
         assert_eq!(
             current.state,
-            AttemptStateV1::Prepared,
+            AttemptState::Prepared,
             "victim must stay Prepared; write-through would classify SafeToRetry"
         );
         let _ = std::fs::remove_dir_all(&root);
@@ -102,13 +102,13 @@
             before,
             "recovery must not write SafeToRetry through a request-dir symlink"
         );
-        let paths = AttemptJournalPathsV1::new(&victim.join("d1")).expect("victim paths");
-        let current = read_current_attempt_v1(&paths)
+        let paths = AttemptJournalPaths::new(&victim.join("d1")).expect("victim paths");
+        let current = read_current_attempt(&paths)
             .expect("read victim")
             .expect("victim still has a journal");
         assert_eq!(
             current.state,
-            AttemptStateV1::Prepared,
+            AttemptState::Prepared,
             "victim must stay Prepared; write-through would classify SafeToRetry"
         );
         let _ = std::fs::remove_dir_all(&root);
@@ -157,12 +157,12 @@
             statuses.is_empty(),
             "planted attempts root must not become a resume status: {statuses:?}"
         );
-        let paths = AttemptJournalPathsV1::new(&victim.join("g1").join("r1").join("d1"))
+        let paths = AttemptJournalPaths::new(&victim.join("g1").join("r1").join("d1"))
             .expect("victim paths");
-        let current = read_current_attempt_v1(&paths)
+        let current = read_current_attempt(&paths)
             .expect("read victim")
             .expect("victim still has a journal");
-        assert_eq!(current.state, AttemptStateV1::Prepared);
+        assert_eq!(current.state, AttemptState::Prepared);
         let _ = std::fs::remove_dir_all(&root);
     }
 

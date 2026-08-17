@@ -26,9 +26,9 @@
 //!   classification across candidate, verification, comparison, baseline,
 //!   fallback, restoration, prewarm, and residue. Receipts bind one
 //!   parent-measured integer counter window and a preregistered residue policy;
-//!   declared estimates live in a separate namespace ([`DeclaredEstimateV1`])
+//!   declared estimates live in a separate namespace ([`DeclaredEstimate`])
 //!   that can never construct a measured receipt, and an unavailable counter is
-//!   [`ParentCounterObservationV1::Unmeasured`], never zero. Legacy v2 classes
+//!   [`ParentCounterObservation::Unmeasured`], never zero. Legacy v2 classes
 //!   map readably without rewriting archives ([`map_legacy_class_v2`]).
 //! - **Integer-only arithmetic.** Retained fractions are parts-per-million
 //!   integers widened to u128; there are no floats and no percentage strings.
@@ -60,13 +60,13 @@ pub mod resource_classes;
 pub use campaign::{CampaignError, ReuseCampaign};
 
 pub use causal_work::{
-    CAUSAL_WORK_MAX_CHARGES, CAUSAL_WORK_MAX_ID_BYTES, CAUSAL_WORK_RECEIPT_SCHEMA_V1,
-    CAUSAL_WORK_TAXONOMY_VERSION_V1, CausalClassTotalsV1, CausalCounterUnitV1, CausalWorkChargeV1,
-    CausalWorkClassV1, CausalWorkErrorV1, CausalWorkFailureCodeV1, CausalWorkOutcomeV1,
-    CausalWorkReceiptV1, CounterCorrespondenceReceiptV1, CounterEvidenceModeV1, DeclaredEstimateV1,
-    LegacyChargeClassV2, LegacyClassMappingV1, ParentCounterIdentityV1, ParentCounterObservationV1,
-    ParentCounterWindowV1, ResiduePolicyV1, causal_work_contract_digest_v1,
-    causal_work_contract_manifest_v1, map_legacy_class_v2,
+    CAUSAL_WORK_MAX_CHARGES, CAUSAL_WORK_MAX_ID_BYTES, CAUSAL_WORK_RECEIPT_SCHEMA,
+    CAUSAL_WORK_TAXONOMY_VERSION, CausalClassTotals, CausalCounterUnit, CausalWorkCharge,
+    CausalWorkClass, CausalWorkError, CausalWorkFailureCode, CausalWorkOutcome,
+    CausalWorkReceipt, CounterCorrespondenceReceipt, CounterEvidenceMode, DeclaredEstimate,
+    LegacyChargeClass, LegacyClassMapping, ParentCounterIdentity, ParentCounterObservation,
+    ParentCounterWindow, ResiduePolicy, causal_work_contract_digest,
+    causal_work_contract_manifest, map_legacy_class_v2,
 };
 
 pub use charging_maps::{
@@ -259,8 +259,8 @@ impl LedgerConfig {
 /// and wire-compatible, but they are not the complete causal authority: they
 /// can omit or double-class fallback, restoration, prewarm, and residue work,
 /// and declared estimates can masquerade as measured facts. Complete exactly-one
-/// causal accounting lives in [`causal_work`] ([`CausalWorkClassV1`],
-/// [`CausalWorkReceiptV1`]); [`map_legacy_class_v2`] maps these classes readably
+/// causal accounting lives in [`causal_work`] ([`CausalWorkClass`],
+/// [`CausalWorkReceipt`]); [`map_legacy_class_v2`] maps these classes readably
 /// without rewriting archives.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
 pub enum ChargeClass {

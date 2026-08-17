@@ -1,6 +1,6 @@
 //! Shared trivalent epistemic verdict (ZS-KERNEL-004).
 //!
-//! `SafetyVerdictV1` is the single fail-closed truth value shared by engines:
+//! `SafetyVerdict` is the single fail-closed truth value shared by engines:
 //! `Safe`, `Unsafe`, or `Unknown`. The lattice law is fixed and total:
 //!
 //! ```text
@@ -27,18 +27,18 @@ pub const VERDICT_MAX_PREMISE_NAME_BYTES: usize = 256;
 /// premise is `Unknown`, never silently treated as true.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
-pub struct PremiseV1 {
+pub struct Premise {
     pub name: String,
     pub established: Option<bool>,
 }
 
-impl PremiseV1 {
+impl Premise {
     /// Fail-closed construction: premise names must be nonempty, at most
     /// 256 bytes, and free of control characters.
     pub fn new(
         name: impl Into<String>,
         established: Option<bool>,
-    ) -> Result<Self, VerdictBuildErrorV1> {
+    ) -> Result<Self, VerdictBuildError> {
         let premise = Self {
             name: name.into(),
             established,
@@ -47,18 +47,18 @@ impl PremiseV1 {
         Ok(premise)
     }
 
-    pub fn validate(&self) -> Result<(), VerdictBuildErrorV1> {
+    pub fn validate(&self) -> Result<(), VerdictBuildError> {
         if self.name.is_empty() {
-            return Err(VerdictBuildErrorV1::EmptyName);
+            return Err(VerdictBuildError::EmptyName);
         }
         if self.name.len() > VERDICT_MAX_PREMISE_NAME_BYTES {
-            return Err(VerdictBuildErrorV1::NameTooLong {
+            return Err(VerdictBuildError::NameTooLong {
                 actual: self.name.len(),
                 maximum: VERDICT_MAX_PREMISE_NAME_BYTES,
             });
         }
         if self.name.chars().any(char::is_control) {
-            return Err(VerdictBuildErrorV1::ControlCharacter);
+            return Err(VerdictBuildError::ControlCharacter);
         }
         Ok(())
     }
@@ -66,13 +66,13 @@ impl PremiseV1 {
 
 /// Fail-closed error for premise construction.
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub enum VerdictBuildErrorV1 {
+pub enum VerdictBuildError {
     EmptyName,
     NameTooLong { actual: usize, maximum: usize },
     ControlCharacter,
 }
 
-impl fmt::Display for VerdictBuildErrorV1 {
+impl fmt::Display for VerdictBuildError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::EmptyName => write!(formatter, "premise name must be nonempty"),
@@ -84,7 +84,7 @@ impl fmt::Display for VerdictBuildErrorV1 {
     }
 }
 
-impl Error for VerdictBuildErrorV1 {}
+impl Error for VerdictBuildError {}
 
 /// Shared trivalent epistemic verdict.
 ///
@@ -92,22 +92,22 @@ impl Error for VerdictBuildErrorV1 {}
 /// with `reasons`. Reasons are sorted and deduplicated.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case", deny_unknown_fields)]
-pub enum SafetyVerdictV1 {
+pub enum SafetyVerdict {
     Safe,
     Unsafe { reasons: Vec<String> },
     Unknown { reasons: Vec<String> },
 }
 
-impl SafetyVerdictV1 {
+impl SafetyVerdict {
     /// The lattice meet: `Unsafe` dominates `Unknown` dominates `Safe`.
     ///
     /// Reasons from both sides are concatenated, deduplicated, and sorted.
     /// The meet is commutative, associative, and idempotent; `Safe` is the
     /// identity. A vacuous empty meet is `Safe` by lattice identity -- the
-    /// vacuity danger lives in [`SafetyVerdictV1::from_premises`], which
+    /// vacuity danger lives in [`SafetyVerdict::from_premises`], which
     /// fails closed on an empty premise set.
-    pub fn meet(self, other: SafetyVerdictV1) -> SafetyVerdictV1 {
-        use SafetyVerdictV1::{Safe, Unknown, Unsafe};
+    pub fn meet(self, other: SafetyVerdict) -> SafetyVerdict {
+        use SafetyVerdict::{Safe, Unknown, Unsafe};
         match (self, other) {
             (Safe, Safe) => Safe,
             (Unsafe { reasons: left }, Unsafe { reasons: right }) => {
@@ -126,10 +126,10 @@ impl SafetyVerdictV1 {
     }
 
     /// Fold a sequence of verdicts under the lattice meet. Equivalent to
-    /// repeated [`SafetyVerdictV1::meet`] with `Safe` as the starting value.
-    pub fn meet_all(iter: impl IntoIterator<Item = SafetyVerdictV1>) -> SafetyVerdictV1 {
+    /// repeated [`SafetyVerdict::meet`] with `Safe` as the starting value.
+    pub fn meet_all(iter: impl IntoIterator<Item = SafetyVerdict>) -> SafetyVerdict {
         iter.into_iter()
-            .fold(SafetyVerdictV1::Safe, SafetyVerdictV1::meet)
+            .fold(SafetyVerdict::Safe, SafetyVerdict::meet)
     }
 
     /// Evaluate a premise set into one verdict.
@@ -141,18 +141,18 @@ impl SafetyVerdictV1 {
     /// contributions are folded under the lattice meet, so one falsified
     /// premise poisons the whole result, and one missing premise downgrades
     /// `Safe` to `Unknown` but never to `Unsafe`.
-    pub fn from_premises(premises: &[PremiseV1]) -> SafetyVerdictV1 {
+    pub fn from_premises(premises: &[Premise]) -> SafetyVerdict {
         if premises.is_empty() {
-            return SafetyVerdictV1::Unknown {
+            return SafetyVerdict::Unknown {
                 reasons: vec!["no_premises".into()],
             };
         }
-        SafetyVerdictV1::meet_all(premises.iter().map(|premise| match premise.established {
-            Some(true) => SafetyVerdictV1::Safe,
-            Some(false) => SafetyVerdictV1::Unsafe {
+        SafetyVerdict::meet_all(premises.iter().map(|premise| match premise.established {
+            Some(true) => SafetyVerdict::Safe,
+            Some(false) => SafetyVerdict::Unsafe {
                 reasons: vec![premise.name.clone()],
             },
-            None => SafetyVerdictV1::Unknown {
+            None => SafetyVerdict::Unknown {
                 reasons: vec![premise.name.clone()],
             },
         }))
@@ -161,23 +161,23 @@ impl SafetyVerdictV1 {
     /// Whether this verdict grants operational authority. Only `Safe` does;
     /// `Unsafe` and `Unknown` never do.
     pub fn grants_authority(&self) -> bool {
-        matches!(self, SafetyVerdictV1::Safe)
+        matches!(self, SafetyVerdict::Safe)
     }
 
     /// Reasons carried by this verdict (empty for `Safe`).
     pub fn reasons(&self) -> &[String] {
         match self {
-            SafetyVerdictV1::Safe => &[],
-            SafetyVerdictV1::Unsafe { reasons } | SafetyVerdictV1::Unknown { reasons } => reasons,
+            SafetyVerdict::Safe => &[],
+            SafetyVerdict::Unsafe { reasons } | SafetyVerdict::Unknown { reasons } => reasons,
         }
     }
 
     /// Stable short label: `safe`, `unsafe`, or `unknown`.
     pub fn label(&self) -> &'static str {
         match self {
-            SafetyVerdictV1::Safe => "safe",
-            SafetyVerdictV1::Unsafe { .. } => "unsafe",
-            SafetyVerdictV1::Unknown { .. } => "unknown",
+            SafetyVerdict::Safe => "safe",
+            SafetyVerdict::Unsafe { .. } => "unsafe",
+            SafetyVerdict::Unknown { .. } => "unknown",
         }
     }
 }

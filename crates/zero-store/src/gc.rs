@@ -18,11 +18,11 @@ use crate::cas::{CasError, PutOutcome, SharedCas};
 use crate::fs_replace::atomic_write_file;
 use crate::{LOCK_DEADLINE, LockMode, StoreLock};
 use zero_abi::zbf::{
-    ZBF_CONTAINER_FLAG_V1, ZBF_HEADER_LEN_V1, ZBF_MAGIC_V1, ZBF_MAX_CHILDREN_V1, ZBF_MAX_DEPTH_V1,
-    ZBF_MAX_OBJECT_BYTES_V1, ZBF_SCHEMA_MAJOR_V1, ZBF_SCHEMA_MINOR_V1,
+    ZBF_CONTAINER_FLAG, ZBF_HEADER_LEN, ZBF_MAGIC, ZBF_MAX_CHILDREN, ZBF_MAX_DEPTH,
+    ZBF_MAX_OBJECT_BYTES, ZBF_SCHEMA_MAJOR, ZBF_SCHEMA_MINOR,
 };
 
-pub const GC_SCHEMA_VERSION_V1: &str = "zerostack.cas-gc.v1";
+pub const GC_SCHEMA_VERSION_LEGACY: &str = "zerostack.cas-gc.v1";
 pub const GC_SCHEMA_VERSION: &str = "zerostack.cas-gc.v2";
 /// Hard bounds keep malformed metadata from turning collection into an
 /// unbounded allocation or path traversal surface.
@@ -52,7 +52,7 @@ pub const DEFAULT_GC_REPORT_LIMIT: usize = 32;
 pub fn gc_contract_manifest() -> serde_json::Value {
     serde_json::json!({
         "schema_version": GC_SCHEMA_VERSION,
-        "legacy_read_versions": [GC_SCHEMA_VERSION_V1],
+        "legacy_read_versions": [GC_SCHEMA_VERSION_LEGACY],
         "legacy_read_record_types": [
             GC_RECORD_TYPE_REACHABILITY,
             GC_RECORD_TYPE_PIN,
@@ -568,7 +568,7 @@ pub(crate) fn content_sha256_hex(bytes: &[u8]) -> String {
 ///   fail closed (retain uncertain) and must never collect on this object's
 ///   subtree.
 pub fn refs_from_verified_bytes(bytes: &[u8]) -> Result<Vec<String>, String> {
-    if bytes.len() < ZBF_MAGIC_V1.len() || &bytes[..ZBF_MAGIC_V1.len()] != ZBF_MAGIC_V1.as_slice() {
+    if bytes.len() < ZBF_MAGIC.len() || &bytes[..ZBF_MAGIC.len()] != ZBF_MAGIC.as_slice() {
         return Ok(Vec::new());
     }
     let mut refs = Vec::new();
@@ -591,39 +591,39 @@ fn collect_zbf_refs(
     refs: &mut Vec<String>,
     seen: &mut BTreeSet<String>,
 ) -> Result<(), String> {
-    if depth > ZBF_MAX_DEPTH_V1 {
-        return Err(format!("ZBF nesting exceeds {ZBF_MAX_DEPTH_V1}"));
+    if depth > ZBF_MAX_DEPTH {
+        return Err(format!("ZBF nesting exceeds {ZBF_MAX_DEPTH}"));
     }
-    if bytes.len() as u64 > ZBF_MAX_OBJECT_BYTES_V1 {
+    if bytes.len() as u64 > ZBF_MAX_OBJECT_BYTES {
         return Err(format!(
-            "ZBF object of {} bytes exceeds {ZBF_MAX_OBJECT_BYTES_V1}",
+            "ZBF object of {} bytes exceeds {ZBF_MAX_OBJECT_BYTES}",
             bytes.len()
         ));
     }
-    if bytes.len() < ZBF_HEADER_LEN_V1 {
+    if bytes.len() < ZBF_HEADER_LEN {
         return Err(format!(
-            "ZBF object shorter than {ZBF_HEADER_LEN_V1}-byte header"
+            "ZBF object shorter than {ZBF_HEADER_LEN}-byte header"
         ));
     }
-    if &bytes[..ZBF_MAGIC_V1.len()] != ZBF_MAGIC_V1.as_slice() {
+    if &bytes[..ZBF_MAGIC.len()] != ZBF_MAGIC.as_slice() {
         return Err("embedded object is missing the ZBF magic".into());
     }
     let schema_major = be_u16(&bytes[8..10]);
     let schema_minor = be_u16(&bytes[10..12]);
-    if schema_major != ZBF_SCHEMA_MAJOR_V1 || schema_minor != ZBF_SCHEMA_MINOR_V1 {
+    if schema_major != ZBF_SCHEMA_MAJOR || schema_minor != ZBF_SCHEMA_MINOR {
         return Err(format!(
             "unsupported ZBF schema {schema_major}.{schema_minor}"
         ));
     }
     let flags = bytes[15];
-    if flags & !ZBF_CONTAINER_FLAG_V1 != 0 {
+    if flags & !ZBF_CONTAINER_FLAG != 0 {
         return Err(format!("unknown ZBF flags {flags:#04x}"));
     }
     if bytes[184..192].iter().any(|byte| *byte != 0) {
         return Err("ZBF reserved header bytes are nonzero".into());
     }
     let payload_len = be_u64(&bytes[16..24]);
-    let expected_total = (ZBF_HEADER_LEN_V1 as u64)
+    let expected_total = (ZBF_HEADER_LEN as u64)
         .checked_add(payload_len)
         .ok_or_else(|| "ZBF payload length overflows".to_string())?;
     if expected_total != bytes.len() as u64 {
@@ -632,7 +632,7 @@ fn collect_zbf_refs(
             bytes.len()
         ));
     }
-    let payload = &bytes[ZBF_HEADER_LEN_V1..];
+    let payload = &bytes[ZBF_HEADER_LEN..];
     if content_sha256_hex(payload) != lower_hex(&bytes[152..184]) {
         return Err("ZBF payload digest mismatch".into());
     }
@@ -643,9 +643,9 @@ fn collect_zbf_refs(
         return Err("ZBF container payload is shorter than its child count".into());
     }
     let count = be_u32(&payload[..4]);
-    if count > ZBF_MAX_CHILDREN_V1 {
+    if count > ZBF_MAX_CHILDREN {
         return Err(format!(
-            "ZBF child count {count} exceeds {ZBF_MAX_CHILDREN_V1}"
+            "ZBF child count {count} exceeds {ZBF_MAX_CHILDREN}"
         ));
     }
     let mut offset = 4usize;
@@ -655,7 +655,7 @@ fn collect_zbf_refs(
         }
         let child_len = be_u64(&payload[offset..offset + 8]);
         offset += 8;
-        if child_len < ZBF_HEADER_LEN_V1 as u64 {
+        if child_len < ZBF_HEADER_LEN as u64 {
             return Err("ZBF child is shorter than the fixed header".into());
         }
         let child_len = usize::try_from(child_len)
@@ -889,14 +889,14 @@ fn validate_record_common<R: GcRecord>(
         return Err(corrupt(path, format!("record_type {record_type}")));
     }
     match schema_version {
-        GC_SCHEMA_VERSION_V1 if contract_digest.is_none() => {}
+        GC_SCHEMA_VERSION if contract_digest.is_none() => {}
         GC_SCHEMA_VERSION => {
             let expected = gc_contract_digest_hex();
             if contract_digest != Some(expected.as_str()) {
                 return Err(corrupt(path, "store_contract_digest mismatch".into()));
             }
         }
-        GC_SCHEMA_VERSION_V1 => {
+        GC_SCHEMA_VERSION => {
             return Err(corrupt(
                 path,
                 "legacy record unexpectedly binds a v2 store contract".into(),

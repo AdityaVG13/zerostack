@@ -4,23 +4,23 @@
 //! the point and the observed value. If the supplied contingent policy has a
 //! covering rule, the selected alternative is returned and execution stays
 //! within one call. Otherwise the resolver returns an `Uncovered`
-//! `DecisionRequiredV1` payload -- the interpreter must NOT privately choose a
+//! `DecisionRequired` payload -- the interpreter must NOT privately choose a
 //! branch (V6-C03/H03). A rule that selects an alternative the decision point
-//! does not offer is a policy error and fails closed ([`DecisionErrorV1::AlternativeNotOffered`]),
+//! does not offer is a policy error and fails closed ([`DecisionError::AlternativeNotOffered`]),
 //! never a silent selection.
 
 use std::{error::Error, fmt};
 
 use serde::{Deserialize, Serialize};
 
-use super::verdict::SafetyVerdictV1;
+use super::verdict::SafetyVerdict;
 
 pub const OBSERVATION_CLASS_MAX_BYTES: usize = 128;
 pub const DECISION_ID_MAX_BYTES: usize = 256;
 
 /// Fail-closed error for decision-point and policy construction.
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub enum DecisionErrorV1 {
+pub enum DecisionError {
     InvalidObservationClass(String),
     InvalidDecisionPoint(String),
     InvalidPolicyRule(String),
@@ -32,7 +32,7 @@ pub enum DecisionErrorV1 {
     InvalidPolicy(String),
 }
 
-impl fmt::Display for DecisionErrorV1 {
+impl fmt::Display for DecisionError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::InvalidObservationClass(detail) => {
@@ -55,19 +55,19 @@ impl fmt::Display for DecisionErrorV1 {
     }
 }
 
-impl Error for DecisionErrorV1 {}
+impl Error for DecisionError {}
 
 /// An observation class is the stable identity of one kind of semantic
 /// observation (for example `"branch.test_suite"` or `"api.breaking_change"`).
 /// Grammar: nonempty, at most 128 bytes, lowercase `[a-z0-9_.-]` only.
 #[derive(Clone, Debug, Deserialize, Eq, Ord, PartialEq, PartialOrd, Serialize)]
 #[serde(deny_unknown_fields)]
-pub struct ObservationClassV1 {
+pub struct ObservationClass {
     pub class_id: String,
 }
 
-impl ObservationClassV1 {
-    pub fn new(class_id: impl Into<String>) -> Result<Self, DecisionErrorV1> {
+impl ObservationClass {
+    pub fn new(class_id: impl Into<String>) -> Result<Self, DecisionError> {
         let class = Self {
             class_id: class_id.into(),
         };
@@ -75,14 +75,14 @@ impl ObservationClassV1 {
         Ok(class)
     }
 
-    pub fn validate(&self) -> Result<(), DecisionErrorV1> {
+    pub fn validate(&self) -> Result<(), DecisionError> {
         if self.class_id.is_empty() {
-            return Err(DecisionErrorV1::InvalidObservationClass(
+            return Err(DecisionError::InvalidObservationClass(
                 "class_id must be nonempty".into(),
             ));
         }
         if self.class_id.len() > OBSERVATION_CLASS_MAX_BYTES {
-            return Err(DecisionErrorV1::InvalidObservationClass(format!(
+            return Err(DecisionError::InvalidObservationClass(format!(
                 "class_id is {} bytes, maximum {OBSERVATION_CLASS_MAX_BYTES}",
                 self.class_id.len()
             )));
@@ -92,7 +92,7 @@ impl ObservationClassV1 {
             .bytes()
             .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || matches!(b, b'.' | b'_' | b'-'))
         {
-            return Err(DecisionErrorV1::InvalidObservationClass(
+            return Err(DecisionError::InvalidObservationClass(
                 "class_id must match lowercase [a-z0-9_.-]".into(),
             ));
         }
@@ -104,22 +104,22 @@ impl ObservationClassV1 {
 /// observation cannot be resolved mechanically.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
-pub struct SemanticDecisionPointV1 {
+pub struct SemanticDecisionPoint {
     pub decision_id: String,
-    pub observation_class: ObservationClassV1,
+    pub observation_class: ObservationClass,
     pub question: String,
     pub alternatives: Vec<String>,
     pub evidence_refs: Vec<String>,
 }
 
-impl SemanticDecisionPointV1 {
+impl SemanticDecisionPoint {
     pub fn new(
         decision_id: impl Into<String>,
-        observation_class: ObservationClassV1,
+        observation_class: ObservationClass,
         question: impl Into<String>,
         alternatives: Vec<String>,
         evidence_refs: Vec<String>,
-    ) -> Result<Self, DecisionErrorV1> {
+    ) -> Result<Self, DecisionError> {
         let point = Self {
             decision_id: decision_id.into(),
             observation_class,
@@ -134,43 +134,43 @@ impl SemanticDecisionPointV1 {
     /// Fail-closed validation: nonempty bounded decision id and question, at
     /// least one alternative, no duplicate alternatives, and nonempty
     /// evidence refs when present.
-    pub fn validate(&self) -> Result<(), DecisionErrorV1> {
+    pub fn validate(&self) -> Result<(), DecisionError> {
         if self.decision_id.is_empty() {
-            return Err(DecisionErrorV1::InvalidDecisionPoint(
+            return Err(DecisionError::InvalidDecisionPoint(
                 "decision_id must be nonempty".into(),
             ));
         }
         if self.decision_id.len() > DECISION_ID_MAX_BYTES {
-            return Err(DecisionErrorV1::InvalidDecisionPoint(format!(
+            return Err(DecisionError::InvalidDecisionPoint(format!(
                 "decision_id is {} bytes, maximum {DECISION_ID_MAX_BYTES}",
                 self.decision_id.len()
             )));
         }
         if self.question.is_empty() {
-            return Err(DecisionErrorV1::InvalidDecisionPoint(
+            return Err(DecisionError::InvalidDecisionPoint(
                 "question must be nonempty".into(),
             ));
         }
         if self.alternatives.is_empty() {
-            return Err(DecisionErrorV1::InvalidDecisionPoint(
+            return Err(DecisionError::InvalidDecisionPoint(
                 "alternatives must be nonempty".into(),
             ));
         }
         let mut seen = std::collections::BTreeSet::new();
         for alternative in &self.alternatives {
             if alternative.is_empty() {
-                return Err(DecisionErrorV1::InvalidDecisionPoint(
+                return Err(DecisionError::InvalidDecisionPoint(
                     "alternatives must not be empty strings".into(),
                 ));
             }
             if !seen.insert(alternative.as_str()) {
-                return Err(DecisionErrorV1::InvalidDecisionPoint(format!(
+                return Err(DecisionError::InvalidDecisionPoint(format!(
                     "duplicate alternative {alternative:?}"
                 )));
             }
         }
         if self.evidence_refs.iter().any(|reference| reference.is_empty()) {
-            return Err(DecisionErrorV1::InvalidDecisionPoint(
+            return Err(DecisionError::InvalidDecisionPoint(
                 "evidence_refs must not be empty strings".into(),
             ));
         }
@@ -182,7 +182,7 @@ impl SemanticDecisionPointV1 {
 /// How a policy rule matches the observed value.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
-pub enum ObservedMatchV1 {
+pub enum ObservedMatch {
     Exact { value: String },
     Any,
 }
@@ -191,18 +191,18 @@ pub enum ObservedMatchV1 {
 /// observed value matches, select the named alternative.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
-pub struct ContingentPolicyRuleV1 {
-    pub observation_class: ObservationClassV1,
-    pub observed: ObservedMatchV1,
+pub struct ContingentPolicyRule {
+    pub observation_class: ObservationClass,
+    pub observed: ObservedMatch,
     pub select_alternative: String,
 }
 
-impl ContingentPolicyRuleV1 {
+impl ContingentPolicyRule {
     pub fn new(
-        observation_class: ObservationClassV1,
-        observed: ObservedMatchV1,
+        observation_class: ObservationClass,
+        observed: ObservedMatch,
         select_alternative: impl Into<String>,
-    ) -> Result<Self, DecisionErrorV1> {
+    ) -> Result<Self, DecisionError> {
         let rule = Self {
             observation_class,
             observed,
@@ -212,17 +212,17 @@ impl ContingentPolicyRuleV1 {
         Ok(rule)
     }
 
-    pub fn validate(&self) -> Result<(), DecisionErrorV1> {
+    pub fn validate(&self) -> Result<(), DecisionError> {
         self.observation_class.validate()?;
-        if let ObservedMatchV1::Exact { value } = &self.observed
+        if let ObservedMatch::Exact { value } = &self.observed
             && value.is_empty()
         {
-            return Err(DecisionErrorV1::InvalidPolicyRule(
+            return Err(DecisionError::InvalidPolicyRule(
                 "exact observed value must be nonempty".into(),
             ));
         }
         if self.select_alternative.is_empty() {
-            return Err(DecisionErrorV1::InvalidPolicyRule(
+            return Err(DecisionError::InvalidPolicyRule(
                 "select_alternative must be nonempty".into(),
             ));
         }
@@ -235,9 +235,9 @@ impl ContingentPolicyRuleV1 {
 /// rule covered.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
-pub struct DecisionRequiredV1 {
+pub struct DecisionRequired {
     pub decision_id: String,
-    pub observation_class: ObservationClassV1,
+    pub observation_class: ObservationClass,
     pub question: String,
     pub choices: Vec<String>,
     pub observed_value: String,
@@ -248,21 +248,21 @@ pub struct DecisionRequiredV1 {
 /// caller claiming totality must prove coverage separately.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
-pub struct ContingentPolicyV1 {
-    pub rules: Vec<ContingentPolicyRuleV1>,
+pub struct ContingentPolicy {
+    pub rules: Vec<ContingentPolicyRule>,
 }
 
-impl ContingentPolicyV1 {
-    pub fn new(rules: Vec<ContingentPolicyRuleV1>) -> Result<Self, DecisionErrorV1> {
+impl ContingentPolicy {
+    pub fn new(rules: Vec<ContingentPolicyRule>) -> Result<Self, DecisionError> {
         let policy = Self { rules };
         policy.validate()?;
         Ok(policy)
     }
 
-    pub fn validate(&self) -> Result<(), DecisionErrorV1> {
+    pub fn validate(&self) -> Result<(), DecisionError> {
         for rule in &self.rules {
             rule.validate()
-                .map_err(|error| DecisionErrorV1::InvalidPolicyRule(error.to_string()))?;
+                .map_err(|error| DecisionError::InvalidPolicyRule(error.to_string()))?;
         }
         Ok(())
     }
@@ -274,22 +274,22 @@ impl ContingentPolicyV1 {
     ///    observed match accepts the observed value selects its alternative
     ///    -- but ONLY if that alternative is offered by the point.
     /// 2. A matching rule whose alternative is not offered by the point is a
-    ///    policy error ([`DecisionErrorV1::AlternativeNotOffered`]) and fails
+    ///    policy error ([`DecisionError::AlternativeNotOffered`]) and fails
     ///    closed; it is never a silent selection.
     /// 3. No matching rule resolves to `Uncovered` with the full
-    ///    `DecisionRequiredV1` payload.
+    ///    `DecisionRequired` payload.
     pub fn resolve(
         &self,
-        point: &SemanticDecisionPointV1,
+        point: &SemanticDecisionPoint,
         observed_value: &str,
-    ) -> PolicyResolutionV1 {
+    ) -> PolicyResolution {
         for (rule_index, rule) in self.rules.iter().enumerate() {
             if rule.observation_class != point.observation_class {
                 continue;
             }
             let matched = match &rule.observed {
-                ObservedMatchV1::Exact { value } => value == observed_value,
-                ObservedMatchV1::Any => true,
+                ObservedMatch::Exact { value } => value == observed_value,
+                ObservedMatch::Any => true,
             };
             if !matched {
                 continue;
@@ -299,19 +299,19 @@ impl ContingentPolicyV1 {
                 .iter()
                 .any(|alternative| alternative == &rule.select_alternative)
             {
-                return PolicyResolutionV1::PolicyError(DecisionErrorV1::AlternativeNotOffered {
+                return PolicyResolution::PolicyError(DecisionError::AlternativeNotOffered {
                     decision_id: point.decision_id.clone(),
                     alternative: rule.select_alternative.clone(),
                     rule_index,
                 });
             }
-            return PolicyResolutionV1::Selected {
+            return PolicyResolution::Selected {
                 alternative: rule.select_alternative.clone(),
                 rule_index,
             };
         }
-        PolicyResolutionV1::Uncovered {
-            decision_required: DecisionRequiredV1 {
+        PolicyResolution::Uncovered {
+            decision_required: DecisionRequired {
                 decision_id: point.decision_id.clone(),
                 observation_class: point.observation_class.clone(),
                 question: point.question.clone(),
@@ -329,7 +329,7 @@ impl ContingentPolicyV1 {
 
 /// Result of resolving a decision point against a contingent policy.
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub enum PolicyResolutionV1 {
+pub enum PolicyResolution {
     /// A covering rule selected an offered alternative, carrying the index
     /// of the matching rule (policy order) so callers can report usage
     /// honestly. This is the ONLY resolution that lets execution continue
@@ -337,16 +337,16 @@ pub enum PolicyResolutionV1 {
     Selected { alternative: String, rule_index: usize },
     /// No rule covered the observation; the decision must be surfaced as
     /// `DecisionRequired` and execution must stop (no private selection).
-    Uncovered { decision_required: DecisionRequiredV1 },
+    Uncovered { decision_required: DecisionRequired },
     /// A rule matched but selected an unoffered alternative. Fail closed:
     /// the policy itself is defective and nothing may be selected.
-    PolicyError(DecisionErrorV1),
+    PolicyError(DecisionError),
 }
 
 /// Bridge from the shared trivalent verdict into the contingent-policy
 /// vocabulary: a decision point whose safety verdict is `Safe` may be
 /// resolved mechanically; `Unsafe` and `Unknown` never authorize a selection.
-pub fn verdict_permits_selection(verdict: &SafetyVerdictV1) -> bool {
-    matches!(verdict, SafetyVerdictV1::Safe)
+pub fn verdict_permits_selection(verdict: &SafetyVerdict) -> bool {
+    matches!(verdict, SafetyVerdict::Safe)
 }
 

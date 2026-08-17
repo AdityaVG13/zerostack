@@ -65,8 +65,8 @@ use fs_zero::{
 };
 use serde_json::Value;
 use zero_abi::{
-    ApprovalMetadata, ApprovalState, CallRequest, EffectClass, EngineIdentity, EngineStageSpanV1,
-    EngineStageTimelineV1, RefOwnership as WorkerRefOwnership, RevertMetadata, WorkerResult,
+    ApprovalMetadata, ApprovalState, CallRequest, EffectClass, EngineIdentity, EngineStageSpan,
+    EngineStageTimeline, RefOwnership as WorkerRefOwnership, RevertMetadata, WorkerResult,
     WorkerResultMetadata, canonical_worker_error_kind,
 };
 use zero_codemode::CancellationSignal;
@@ -611,9 +611,9 @@ fn run_call(
                 .telemetry_request
                 .as_ref()
                 .is_some_and(|value| value.engine_stage_timeline)
-                .then(|| EngineStageTimelineV1 {
+                .then(|| EngineStageTimeline {
                     total_ns: wall_ns,
-                    spans: vec![EngineStageSpanV1 {
+                    spans: vec![EngineStageSpan {
                         stage: "fszero.dispatch".into(),
                         start_ns: 0,
                         duration_ns: wall_ns,
@@ -678,9 +678,9 @@ fn run_call(
         .telemetry_request
         .as_ref()
         .is_some_and(|value| value.engine_stage_timeline)
-        .then(|| EngineStageTimelineV1 {
+        .then(|| EngineStageTimeline {
             total_ns: wall_ns,
-            spans: vec![EngineStageSpanV1 {
+            spans: vec![EngineStageSpan {
                 stage: "fszero.dispatch".into(),
                 start_ns: 0,
                 duration_ns: wall_ns,

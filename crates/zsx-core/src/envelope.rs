@@ -13,14 +13,14 @@
 //!
 //! | Outcome | Envelope kind | Proof |
 //! |---|---|---|
-//! | Uncovered decision point aborts the plan | `DecisionRequired` | typed [`DecisionRequiredV1`] payload: question, choices, decision id (bound as the continuation handle) |
+//! | Uncovered decision point aborts the plan | `DecisionRequired` | typed [`DecisionRequired`] payload: question, choices, decision id (bound as the continuation handle) |
 //! | Request cancelled through its token | `Cancelled` | `cancel_request` recorded the request in the cancellation slot |
 //! | Approval/permit admission rejection | `FailedNoAuthority` | typed approval validation failure (`InvalidApproval`/`ApprovalReplay`) |
 //! | Plain success, other failures | no envelope | no execute kind is provable (no verdict/roots; lifecycle/transport failure) |
 //!
 //! `resource_ledger_root` and `audit_event_range` are mandatory envelope
 //! fields the session cannot derive, so the harness supplies them through
-//! [`SessionEnvelopeContextV1`]; the session never fabricates a root.
+//! [`SessionEnvelopeContext`]; the session never fabricates a root.
 //!
 //! [`legacy_envelope_value`] renders the envelope in the `zerostack.zsx`
 //! shape (`{protocol, ok, generation, request_id, result?, error?}`).
@@ -28,14 +28,14 @@
 //! (ZS-VIEW-010): a decision-bearing outcome optionally binds the
 //! typed [`DecisionView`] into the envelope's `decision_view_root`. The
 //! session can only build the view honestly when the harness supplies the
-//! roots the session cannot prove ([`DecisionViewContextV1`] through
-//! [`SessionEnvelopeContextV1::with_decision_view`]); with no context, the
+//! roots the session cannot prove ([`DecisionViewContext`] through
+//! [`SessionEnvelopeContext::with_decision_view`]); with no context, the
 //! envelope leaves `decision_view_root` absent -- a root is never
 //! fabricated.
 
 use serde_json::{Value, json};
 use zero_abi::{
-    AuditEventRangeV1, DecisionRequiredV1, DecisionViewError, DecisionView,
+    AuditEventRange, DecisionRequired, DecisionViewError, DecisionView,
     ZeroExecuteError, ZeroExecuteFields, ZeroExecuteKind, ZeroExecuteResult,
 };
 
@@ -47,24 +47,24 @@ pub const ZSX_PROTOCOL: &str = "zerostack.zsx";
 /// audit range is rejected, so an envelope can never carry a fabricated
 /// anchor.
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct SessionEnvelopeContextV1 {
+pub struct SessionEnvelopeContext {
     /// Root string of the session resource ledger (e.g. the archive root
     /// hex of a finalized dominance receipt). Must be nonempty.
     pub resource_ledger_root: String,
     /// Inclusive audit event range the envelope must carry.
-    pub audit_event_range: AuditEventRangeV1,
+    pub audit_event_range: AuditEventRange,
     /// Optional harness-supplied decision-view context . When
     /// present, a decision-bearing outcome binds the typed [`DecisionView`]
     /// root into `decision_view_root`; when absent the field stays empty --
     /// the session never fabricates a view root.
-    pub decision_view: Option<DecisionViewContextV1>,
+    pub decision_view: Option<DecisionViewContext>,
 }
 
-impl SessionEnvelopeContextV1 {
+impl SessionEnvelopeContext {
     /// Fail-closed construction: validates the mandatory fields immediately.
     pub fn new(
         resource_ledger_root: impl Into<String>,
-        audit_event_range: AuditEventRangeV1,
+        audit_event_range: AuditEventRange,
     ) -> Result<Self, String> {
         let context = Self {
             resource_ledger_root: resource_ledger_root.into(),
@@ -80,7 +80,7 @@ impl SessionEnvelopeContextV1 {
     /// view root.
     pub fn with_decision_view(
         mut self,
-        context: DecisionViewContextV1,
+        context: DecisionViewContext,
     ) -> Result<Self, String> {
         context.validate()?;
         self.decision_view = Some(context);
@@ -110,7 +110,7 @@ impl SessionEnvelopeContextV1 {
 /// empty roots are rejected, so a view built from this context can never
 /// carry a fabricated anchor.
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct DecisionViewContextV1 {
+pub struct DecisionViewContext {
     /// Root of the task contract this execution is bound to (harness-proven).
     pub task_contract_root: String,
     /// Root of the causal lens this execution is bound to (harness-proven).
@@ -126,7 +126,7 @@ pub struct DecisionViewContextV1 {
     pub baseline_escape: bool,
 }
 
-impl DecisionViewContextV1 {
+impl DecisionViewContext {
     /// Fail-closed construction: both roots must be nonempty.
     pub fn new(
         task_contract_root: impl Into<String>,
@@ -202,18 +202,18 @@ fn with_project_root(project_root: Option<&str>) -> ZeroExecuteFields {
 /// re-validates: question, nonempty choices, and continuation handle are
 /// mandatory for this kind.
 ///
-/// when the harness supplied a [`DecisionViewContextV1`], the typed
+/// when the harness supplied a [`DecisionViewContext`], the typed
 /// [`DecisionView`] is built from the payload plus the context, its digest
 /// root is bound into `decision_view_root`, and a fail-closed build failure
 /// fails the envelope construction ([`ZeroExecuteError::InvalidDecisionView`]).
 /// With no context the field stays absent -- a view root is never
 /// fabricated.
 pub fn decision_required(
-    payload: &DecisionRequiredV1,
+    payload: &DecisionRequired,
     generation: u64,
     request_id: u64,
     project_root: Option<&str>,
-    ledger: &SessionEnvelopeContextV1,
+    ledger: &SessionEnvelopeContext,
 ) -> Result<ZeroExecuteResult, ZeroExecuteError> {
     let mut fields = ZeroExecuteFields {
         continuation_handle: Some(format!(
@@ -246,9 +246,9 @@ pub fn decision_required(
 /// harness context. A missing project root fails closed: a view without a
 /// project root would carry a fabricated anchor.
 fn build_decision_view(
-    payload: &DecisionRequiredV1,
+    payload: &DecisionRequired,
     project_root: Option<&str>,
-    context: &DecisionViewContextV1,
+    context: &DecisionViewContext,
 ) -> Result<DecisionView, DecisionViewError> {
     let project_root = project_root
         .ok_or(DecisionViewError::EmptyRoot("project_root"))?
@@ -273,7 +273,7 @@ fn build_decision_view(
 /// for this kind, keeping the fail-closed adapter outcome shape.
 pub fn cancelled(
     project_root: Option<&str>,
-    ledger: &SessionEnvelopeContextV1,
+    ledger: &SessionEnvelopeContext,
 ) -> Result<ZeroExecuteResult, ZeroExecuteError> {
     ZeroExecuteResult::cancelled(
         with_project_root(project_root),
@@ -287,7 +287,7 @@ pub fn cancelled(
 /// keeps the detailed rejection message.
 pub fn failed_no_authority(
     project_root: Option<&str>,
-    ledger: &SessionEnvelopeContextV1,
+    ledger: &SessionEnvelopeContext,
 ) -> Result<ZeroExecuteResult, ZeroExecuteError> {
     ZeroExecuteResult::failed_no_authority(
         with_project_root(project_root),

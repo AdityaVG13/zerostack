@@ -11,23 +11,23 @@ use serde_json::{Value, json};
 use zero_abi::{canonical_json, sha256};
 use zero_cert::{CompletenessWitness, Query, VerifiedEvidence};
 
-pub type SemanticCutDigestV1 = [u8; 32];
+pub type SemanticCutDigest = [u8; 32];
 
-pub const SEMANTIC_CUT_CONTRACT_VERSION_V1: u16 = 1;
-pub const SEMANTIC_CUT_SCHEMA_VERSION_V1: &str = "racc-r-semantic-cut/v1";
-pub const SEMANTIC_CUT_MAX_CANONICAL_BYTES_V1: usize = 64 * 1024;
+pub const SEMANTIC_CUT_CONTRACT_VERSION: u16 = 1;
+pub const SEMANTIC_CUT_SCHEMA_VERSION: &str = "racc-r-semantic-cut/v1";
+pub const SEMANTIC_CUT_MAX_CANONICAL_BYTES: usize = 64 * 1024;
 
-const CLAIM_DOMAIN_V1: &[u8] = b"zerostack.semantic_cut.claim.v1\0";
-const CERTIFICATE_DOMAIN_V1: &[u8] = b"zerostack.semantic_cut.certificate.v1\0";
-const CONTRACT_DOMAIN_V1: &[u8] = b"zerostack.semantic_cut.contract.v1\0";
-const RCQ_DOMAIN_V1: &[u8] = b"zerostack.semantic_cut.rcq_identity.v1\0";
-const PROJECT_RELATION_DOMAIN_V1: &[u8] = b"zerostack.semantic_cut.project_relation.v1\0";
-const EFFECT_RELATION_DOMAIN_V1: &[u8] = b"zerostack.semantic_cut.effect_relation.v1\0";
-const VERIFIER_DOMAIN_V1: &[u8] = b"zerostack.semantic_cut.verifier_identity.v1\0";
+const CLAIM_DOMAIN: &[u8] = b"zerostack.semantic_cut.claim.v1\0";
+const CERTIFICATE_DOMAIN: &[u8] = b"zerostack.semantic_cut.certificate.v1\0";
+const CONTRACT_DOMAIN: &[u8] = b"zerostack.semantic_cut.contract.v1\0";
+const RCQ_DOMAIN: &[u8] = b"zerostack.semantic_cut.rcq_identity.v1\0";
+const PROJECT_RELATION_DOMAIN: &[u8] = b"zerostack.semantic_cut.project_relation.v1\0";
+const EFFECT_RELATION_DOMAIN: &[u8] = b"zerostack.semantic_cut.effect_relation.v1\0";
+const VERIFIER_DOMAIN: &[u8] = b"zerostack.semantic_cut.verifier_identity.v1\0";
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
-pub enum ReasoningStateStatusV1 {
+pub enum ReasoningStateStatus {
     ExactPreserved,
     ExactCleanRestart,
     ScopedEquivalent,
@@ -39,7 +39,7 @@ pub enum ReasoningStateStatusV1 {
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
-pub enum SemanticAuthorityV1 {
+pub enum SemanticAuthority {
     DeterministicOnly,
     TaskSemanticSelection,
 }
@@ -47,40 +47,40 @@ pub enum SemanticAuthorityV1 {
 /// Typed epoch boundary. This is a state record, not proof by itself.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
-pub struct ReasoningSafepointV1 {
+pub struct ReasoningSafepoint {
     schema_version: String,
-    project_control_root: SemanticCutDigestV1,
-    world_fiber_digest: SemanticCutDigestV1,
-    evidence_state_digest: SemanticCutDigestV1,
-    reasoning_contract_digest: SemanticCutDigestV1,
-    fixed_model_digest: SemanticCutDigestV1,
-    opaque_reasoning_state_digest: SemanticCutDigestV1,
-    reasoning_state_status: ReasoningStateStatusV1,
-    open_obligations_digest: SemanticCutDigestV1,
-    resource_risk_reserve_digest: SemanticCutDigestV1,
-    baseline_replay_cursor_digest: SemanticCutDigestV1,
-    transaction_root_digest: SemanticCutDigestV1,
-    receipt_head_digest: SemanticCutDigestV1,
+    project_control_root: SemanticCutDigest,
+    world_fiber_digest: SemanticCutDigest,
+    evidence_state_digest: SemanticCutDigest,
+    reasoning_contract_digest: SemanticCutDigest,
+    fixed_model_digest: SemanticCutDigest,
+    opaque_reasoning_state_digest: SemanticCutDigest,
+    reasoning_state_status: ReasoningStateStatus,
+    open_obligations_digest: SemanticCutDigest,
+    resource_risk_reserve_digest: SemanticCutDigest,
+    baseline_replay_cursor_digest: SemanticCutDigest,
+    transaction_root_digest: SemanticCutDigest,
+    receipt_head_digest: SemanticCutDigest,
 }
 
-impl ReasoningSafepointV1 {
+impl ReasoningSafepoint {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
-        project_control_root: SemanticCutDigestV1,
-        world_fiber_digest: SemanticCutDigestV1,
-        evidence_state_digest: SemanticCutDigestV1,
-        reasoning_contract_digest: SemanticCutDigestV1,
-        fixed_model_digest: SemanticCutDigestV1,
-        opaque_reasoning_state_digest: SemanticCutDigestV1,
-        reasoning_state_status: ReasoningStateStatusV1,
-        open_obligations_digest: SemanticCutDigestV1,
-        resource_risk_reserve_digest: SemanticCutDigestV1,
-        baseline_replay_cursor_digest: SemanticCutDigestV1,
-        transaction_root_digest: SemanticCutDigestV1,
-        receipt_head_digest: SemanticCutDigestV1,
-    ) -> Result<Self, SemanticCutErrorV1> {
+        project_control_root: SemanticCutDigest,
+        world_fiber_digest: SemanticCutDigest,
+        evidence_state_digest: SemanticCutDigest,
+        reasoning_contract_digest: SemanticCutDigest,
+        fixed_model_digest: SemanticCutDigest,
+        opaque_reasoning_state_digest: SemanticCutDigest,
+        reasoning_state_status: ReasoningStateStatus,
+        open_obligations_digest: SemanticCutDigest,
+        resource_risk_reserve_digest: SemanticCutDigest,
+        baseline_replay_cursor_digest: SemanticCutDigest,
+        transaction_root_digest: SemanticCutDigest,
+        receipt_head_digest: SemanticCutDigest,
+    ) -> Result<Self, SemanticCutError> {
         let value = Self {
-            schema_version: SEMANTIC_CUT_SCHEMA_VERSION_V1.into(),
+            schema_version: SEMANTIC_CUT_SCHEMA_VERSION.into(),
             project_control_root,
             world_fiber_digest,
             evidence_state_digest,
@@ -98,10 +98,10 @@ impl ReasoningSafepointV1 {
         Ok(value)
     }
 
-    pub fn validate(&self) -> Result<(), SemanticCutErrorV1> {
-        if self.schema_version != SEMANTIC_CUT_SCHEMA_VERSION_V1 {
+    pub fn validate(&self) -> Result<(), SemanticCutError> {
+        if self.schema_version != SEMANTIC_CUT_SCHEMA_VERSION {
             return Err(cut_error(
-                SemanticCutFailureCodeV1::SchemaVersionMismatch,
+                SemanticCutFailureCode::SchemaVersionMismatch,
                 "reasoning safepoint schema version is not v1",
             ));
         }
@@ -123,36 +123,36 @@ impl ReasoningSafepointV1 {
         Ok(())
     }
 
-    pub fn canonical_bytes(&self) -> Result<Vec<u8>, SemanticCutErrorV1> {
+    pub fn canonical_bytes(&self) -> Result<Vec<u8>, SemanticCutError> {
         canonical_bytes(self)
     }
 
-    pub fn from_canonical_bytes(bytes: &[u8]) -> Result<Self, SemanticCutErrorV1> {
+    pub fn from_canonical_bytes(bytes: &[u8]) -> Result<Self, SemanticCutError> {
         let safepoint: Self = decode_canonical(bytes)?;
         safepoint.validate()?;
         Ok(safepoint)
     }
 
-    pub fn digest(&self) -> Result<SemanticCutDigestV1, SemanticCutErrorV1> {
+    pub fn digest(&self) -> Result<SemanticCutDigest, SemanticCutError> {
         digest_serialized(b"zerostack.semantic_cut.safepoint.v1\0", self)
     }
 
-    pub const fn project_control_root(&self) -> SemanticCutDigestV1 {
+    pub const fn project_control_root(&self) -> SemanticCutDigest {
         self.project_control_root
     }
-    pub const fn reasoning_contract_digest(&self) -> SemanticCutDigestV1 {
+    pub const fn reasoning_contract_digest(&self) -> SemanticCutDigest {
         self.reasoning_contract_digest
     }
-    pub const fn fixed_model_digest(&self) -> SemanticCutDigestV1 {
+    pub const fn fixed_model_digest(&self) -> SemanticCutDigest {
         self.fixed_model_digest
     }
-    pub const fn opaque_reasoning_state_digest(&self) -> SemanticCutDigestV1 {
+    pub const fn opaque_reasoning_state_digest(&self) -> SemanticCutDigest {
         self.opaque_reasoning_state_digest
     }
-    pub const fn reasoning_state_status(&self) -> ReasoningStateStatusV1 {
+    pub const fn reasoning_state_status(&self) -> ReasoningStateStatus {
         self.reasoning_state_status
     }
-    pub const fn receipt_head_digest(&self) -> SemanticCutDigestV1 {
+    pub const fn receipt_head_digest(&self) -> SemanticCutDigest {
         self.receipt_head_digest
     }
 
@@ -173,49 +173,49 @@ impl ReasoningSafepointV1 {
 /// Full machine-checkable claim emitted by an exact semantic-cut verifier.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
-pub struct SemanticCutClaimV1 {
+pub struct SemanticCutClaim {
     schema_version: String,
-    input_project_control_root: SemanticCutDigestV1,
-    baseline_epoch_class_digest: SemanticCutDigestV1,
-    compiled_plan_digest: SemanticCutDigestV1,
-    semantic_authority: SemanticAuthorityV1,
-    baseline_terminal: ReasoningSafepointV1,
-    compiled_terminal: ReasoningSafepointV1,
-    baseline_external_effects_digest: SemanticCutDigestV1,
-    compiled_external_effects_digest: SemanticCutDigestV1,
-    baseline_attribution_identity_digest: SemanticCutDigestV1,
-    compiled_attribution_identity_digest: SemanticCutDigestV1,
-    baseline_resource_receipt_digest: SemanticCutDigestV1,
-    compiled_resource_receipt_digest: SemanticCutDigestV1,
-    comparison_identity_digest: SemanticCutDigestV1,
-    certificate_scope_digest: SemanticCutDigestV1,
-    deoptimization_map_digest: SemanticCutDigestV1,
+    input_project_control_root: SemanticCutDigest,
+    baseline_epoch_class_digest: SemanticCutDigest,
+    compiled_plan_digest: SemanticCutDigest,
+    semantic_authority: SemanticAuthority,
+    baseline_terminal: ReasoningSafepoint,
+    compiled_terminal: ReasoningSafepoint,
+    baseline_external_effects_digest: SemanticCutDigest,
+    compiled_external_effects_digest: SemanticCutDigest,
+    baseline_attribution_identity_digest: SemanticCutDigest,
+    compiled_attribution_identity_digest: SemanticCutDigest,
+    baseline_resource_receipt_digest: SemanticCutDigest,
+    compiled_resource_receipt_digest: SemanticCutDigest,
+    comparison_identity_digest: SemanticCutDigest,
+    certificate_scope_digest: SemanticCutDigest,
+    deoptimization_map_digest: SemanticCutDigest,
 }
 
-impl SemanticCutClaimV1 {
+impl SemanticCutClaim {
     #[allow(clippy::too_many_arguments)]
     pub fn new_exact(
-        input_project_control_root: SemanticCutDigestV1,
-        baseline_epoch_class_digest: SemanticCutDigestV1,
-        compiled_plan_digest: SemanticCutDigestV1,
-        baseline_terminal: ReasoningSafepointV1,
-        compiled_terminal: ReasoningSafepointV1,
-        baseline_external_effects_digest: SemanticCutDigestV1,
-        compiled_external_effects_digest: SemanticCutDigestV1,
-        baseline_attribution_identity_digest: SemanticCutDigestV1,
-        compiled_attribution_identity_digest: SemanticCutDigestV1,
-        baseline_resource_receipt_digest: SemanticCutDigestV1,
-        compiled_resource_receipt_digest: SemanticCutDigestV1,
-        comparison_identity_digest: SemanticCutDigestV1,
-        certificate_scope_digest: SemanticCutDigestV1,
-        deoptimization_map_digest: SemanticCutDigestV1,
-    ) -> Result<Self, SemanticCutErrorV1> {
+        input_project_control_root: SemanticCutDigest,
+        baseline_epoch_class_digest: SemanticCutDigest,
+        compiled_plan_digest: SemanticCutDigest,
+        baseline_terminal: ReasoningSafepoint,
+        compiled_terminal: ReasoningSafepoint,
+        baseline_external_effects_digest: SemanticCutDigest,
+        compiled_external_effects_digest: SemanticCutDigest,
+        baseline_attribution_identity_digest: SemanticCutDigest,
+        compiled_attribution_identity_digest: SemanticCutDigest,
+        baseline_resource_receipt_digest: SemanticCutDigest,
+        compiled_resource_receipt_digest: SemanticCutDigest,
+        comparison_identity_digest: SemanticCutDigest,
+        certificate_scope_digest: SemanticCutDigest,
+        deoptimization_map_digest: SemanticCutDigest,
+    ) -> Result<Self, SemanticCutError> {
         let claim = Self {
-            schema_version: SEMANTIC_CUT_SCHEMA_VERSION_V1.into(),
+            schema_version: SEMANTIC_CUT_SCHEMA_VERSION.into(),
             input_project_control_root,
             baseline_epoch_class_digest,
             compiled_plan_digest,
-            semantic_authority: SemanticAuthorityV1::DeterministicOnly,
+            semantic_authority: SemanticAuthority::DeterministicOnly,
             baseline_terminal,
             compiled_terminal,
             baseline_external_effects_digest,
@@ -232,10 +232,10 @@ impl SemanticCutClaimV1 {
         Ok(claim)
     }
 
-    pub fn validate_exact(&self) -> Result<(), SemanticCutErrorV1> {
-        if self.schema_version != SEMANTIC_CUT_SCHEMA_VERSION_V1 {
+    pub fn validate_exact(&self) -> Result<(), SemanticCutError> {
+        if self.schema_version != SEMANTIC_CUT_SCHEMA_VERSION {
             return Err(cut_error(
-                SemanticCutFailureCodeV1::SchemaVersionMismatch,
+                SemanticCutFailureCode::SchemaVersionMismatch,
                 "semantic-cut claim schema version is not v1",
             ));
         }
@@ -278,18 +278,18 @@ impl SemanticCutClaimV1 {
         ] {
             require_nonzero(label, digest)?;
         }
-        if self.semantic_authority != SemanticAuthorityV1::DeterministicOnly {
+        if self.semantic_authority != SemanticAuthority::DeterministicOnly {
             return Err(cut_error(
-                SemanticCutFailureCodeV1::SemanticAuthorityCrossing,
+                SemanticCutFailureCode::SemanticAuthorityCrossing,
                 "semantic-cut plan may contain only declared deterministic operations",
             ));
         }
-        if self.baseline_terminal.reasoning_state_status != ReasoningStateStatusV1::ExactPreserved
+        if self.baseline_terminal.reasoning_state_status != ReasoningStateStatus::ExactPreserved
             || self.compiled_terminal.reasoning_state_status
-                != ReasoningStateStatusV1::ExactPreserved
+                != ReasoningStateStatus::ExactPreserved
         {
             return Err(cut_error(
-                SemanticCutFailureCodeV1::ContinuationNotExact,
+                SemanticCutFailureCode::ContinuationNotExact,
                 "strict epoch contraction requires exact preserved reasoning state",
             ));
         }
@@ -298,43 +298,43 @@ impl SemanticCutClaimV1 {
             .exact_continuation_equal(&self.compiled_terminal)
         {
             return Err(cut_error(
-                SemanticCutFailureCodeV1::TerminalStateMismatch,
+                SemanticCutFailureCode::TerminalStateMismatch,
                 "baseline and compiled terminal protected state are not identical",
             ));
         }
         if self.baseline_external_effects_digest != self.compiled_external_effects_digest {
             return Err(cut_error(
-                SemanticCutFailureCodeV1::ExternalEffectMismatch,
+                SemanticCutFailureCode::ExternalEffectMismatch,
                 "baseline and compiled external-effect identities differ",
             ));
         }
         if self.baseline_attribution_identity_digest != self.compiled_attribution_identity_digest {
             return Err(cut_error(
-                SemanticCutFailureCodeV1::AttributionMismatch,
+                SemanticCutFailureCode::AttributionMismatch,
                 "compiled transition changes semantic attribution",
             ));
         }
         Ok(())
     }
 
-    pub fn canonical_bytes(&self) -> Result<Vec<u8>, SemanticCutErrorV1> {
+    pub fn canonical_bytes(&self) -> Result<Vec<u8>, SemanticCutError> {
         canonical_bytes(self)
     }
 
-    pub fn from_canonical_bytes(bytes: &[u8]) -> Result<Self, SemanticCutErrorV1> {
+    pub fn from_canonical_bytes(bytes: &[u8]) -> Result<Self, SemanticCutError> {
         let claim: Self = decode_canonical(bytes)?;
         claim.validate_exact()?;
         Ok(claim)
     }
 
-    pub fn digest(&self) -> Result<SemanticCutDigestV1, SemanticCutErrorV1> {
-        digest_serialized(CLAIM_DOMAIN_V1, self)
+    pub fn digest(&self) -> Result<SemanticCutDigest, SemanticCutError> {
+        digest_serialized(CLAIM_DOMAIN, self)
     }
 
-    pub fn terminal_rcq_identity_digest(&self) -> SemanticCutDigestV1 {
+    pub fn terminal_rcq_identity_digest(&self) -> SemanticCutDigest {
         let terminal = &self.compiled_terminal;
         digest_parts(
-            RCQ_DOMAIN_V1,
+            RCQ_DOMAIN,
             &[
                 &terminal.fixed_model_digest,
                 &terminal.reasoning_contract_digest,
@@ -343,9 +343,9 @@ impl SemanticCutClaimV1 {
         )
     }
 
-    pub fn terminal_project_relation_digest(&self) -> SemanticCutDigestV1 {
+    pub fn terminal_project_relation_digest(&self) -> SemanticCutDigest {
         digest_parts(
-            PROJECT_RELATION_DOMAIN_V1,
+            PROJECT_RELATION_DOMAIN,
             &[
                 &self.baseline_terminal.project_control_root,
                 &self.compiled_terminal.project_control_root,
@@ -353,9 +353,9 @@ impl SemanticCutClaimV1 {
         )
     }
 
-    pub fn external_effect_relation_digest(&self) -> SemanticCutDigestV1 {
+    pub fn external_effect_relation_digest(&self) -> SemanticCutDigest {
         digest_parts(
-            EFFECT_RELATION_DOMAIN_V1,
+            EFFECT_RELATION_DOMAIN,
             &[
                 &self.baseline_external_effects_digest,
                 &self.compiled_external_effects_digest,
@@ -363,28 +363,28 @@ impl SemanticCutClaimV1 {
         )
     }
 
-    pub const fn input_project_control_root(&self) -> SemanticCutDigestV1 {
+    pub const fn input_project_control_root(&self) -> SemanticCutDigest {
         self.input_project_control_root
     }
-    pub const fn compiled_plan_digest(&self) -> SemanticCutDigestV1 {
+    pub const fn compiled_plan_digest(&self) -> SemanticCutDigest {
         self.compiled_plan_digest
     }
-    pub const fn comparison_identity_digest(&self) -> SemanticCutDigestV1 {
+    pub const fn comparison_identity_digest(&self) -> SemanticCutDigest {
         self.comparison_identity_digest
     }
-    pub const fn certificate_scope_digest(&self) -> SemanticCutDigestV1 {
+    pub const fn certificate_scope_digest(&self) -> SemanticCutDigest {
         self.certificate_scope_digest
     }
-    pub const fn reasoning_contract_digest(&self) -> SemanticCutDigestV1 {
+    pub const fn reasoning_contract_digest(&self) -> SemanticCutDigest {
         self.compiled_terminal.reasoning_contract_digest
     }
-    pub const fn fixed_model_digest(&self) -> SemanticCutDigestV1 {
+    pub const fn fixed_model_digest(&self) -> SemanticCutDigest {
         self.compiled_terminal.fixed_model_digest
     }
-    pub const fn attribution_identity_digest(&self) -> SemanticCutDigestV1 {
+    pub const fn attribution_identity_digest(&self) -> SemanticCutDigest {
         self.compiled_attribution_identity_digest
     }
-    pub const fn deoptimization_map_digest(&self) -> SemanticCutDigestV1 {
+    pub const fn deoptimization_map_digest(&self) -> SemanticCutDigest {
         self.deoptimization_map_digest
     }
 }
@@ -392,20 +392,20 @@ impl SemanticCutClaimV1 {
 /// Opaque G3 authority. Only exact claim validation plus verified bytes can mint it.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
-pub struct SemanticCutEvidenceV1 {
+pub struct SemanticCutEvidence {
     contract_version: u16,
-    claim: SemanticCutClaimV1,
-    claim_digest: SemanticCutDigestV1,
-    evidence_digest: SemanticCutDigestV1,
-    verifier_identity_digest: SemanticCutDigestV1,
-    certificate_digest: SemanticCutDigestV1,
+    claim: SemanticCutClaim,
+    claim_digest: SemanticCutDigest,
+    evidence_digest: SemanticCutDigest,
+    verifier_identity_digest: SemanticCutDigest,
+    certificate_digest: SemanticCutDigest,
 }
 
-impl SemanticCutEvidenceV1 {
+impl SemanticCutEvidence {
     pub fn verify_owner_scoped(
-        claim: SemanticCutClaimV1,
+        claim: SemanticCutClaim,
         evidence: &VerifiedEvidence<'_, '_>,
-    ) -> Result<Self, SemanticCutErrorV1> {
+    ) -> Result<Self, SemanticCutError> {
         claim.validate_exact()?;
         match (evidence.query(), &evidence.certificate().completeness) {
             (
@@ -415,7 +415,7 @@ impl SemanticCutEvidenceV1 {
             | (Query::TestTrace { .. }, CompletenessWitness::TestTrace { exit_code: 0, .. }) => {}
             _ => {
                 return Err(cut_error(
-                    SemanticCutFailureCodeV1::UnsupportedEvidenceClass,
+                    SemanticCutFailureCode::UnsupportedEvidenceClass,
                     "semantic-cut authority requires a successful verified build or test trace",
                 ));
             }
@@ -423,7 +423,7 @@ impl SemanticCutEvidenceV1 {
         let canonical_claim = claim.canonical_bytes()?;
         if evidence.payload() != canonical_claim {
             return Err(cut_error(
-                SemanticCutFailureCodeV1::EvidencePayloadMismatch,
+                SemanticCutFailureCode::EvidencePayloadMismatch,
                 "verified evidence payload is not the exact canonical semantic-cut claim",
             ));
         }
@@ -432,16 +432,16 @@ impl SemanticCutEvidenceV1 {
             .certificate()
             .canonical_digest()
             .map_err(|error| json_error(error.to_string()))?;
-        let verifier_identity_digest = semantic_cut_verifier_identity_v1(evidence);
+        let verifier_identity_digest = semantic_cut_verifier_identity(evidence);
         let certificate_digest = certificate_digest(
-            SEMANTIC_CUT_CONTRACT_VERSION_V1,
+            SEMANTIC_CUT_CONTRACT_VERSION,
             claim_digest,
             evidence_digest,
             verifier_identity_digest,
             claim.terminal_rcq_identity_digest(),
         );
         Ok(Self {
-            contract_version: SEMANTIC_CUT_CONTRACT_VERSION_V1,
+            contract_version: SEMANTIC_CUT_CONTRACT_VERSION,
             claim,
             claim_digest,
             evidence_digest,
@@ -450,10 +450,10 @@ impl SemanticCutEvidenceV1 {
         })
     }
 
-    pub fn validate(&self) -> Result<(), SemanticCutErrorV1> {
-        if self.contract_version != SEMANTIC_CUT_CONTRACT_VERSION_V1 {
+    pub fn validate(&self) -> Result<(), SemanticCutError> {
+        if self.contract_version != SEMANTIC_CUT_CONTRACT_VERSION {
             return Err(cut_error(
-                SemanticCutFailureCodeV1::SchemaVersionMismatch,
+                SemanticCutFailureCode::SchemaVersionMismatch,
                 "semantic-cut certificate contract version is not v1",
             ));
         }
@@ -470,15 +470,15 @@ impl SemanticCutEvidenceV1 {
             ) != self.certificate_digest
         {
             return Err(cut_error(
-                SemanticCutFailureCodeV1::CertificateDigestMismatch,
+                SemanticCutFailureCode::CertificateDigestMismatch,
                 "semantic-cut certificate digest does not bind its claim and evidence",
             ));
         }
         Ok(())
     }
 
-    pub fn record(&self) -> SemanticCutCertificateRecordV1 {
-        SemanticCutCertificateRecordV1 {
+    pub fn record(&self) -> SemanticCutCertificateRecord {
+        SemanticCutCertificateRecord {
             contract_version: self.contract_version,
             claim: self.claim.clone(),
             claim_digest: self.claim_digest,
@@ -488,16 +488,16 @@ impl SemanticCutEvidenceV1 {
         }
     }
 
-    pub const fn claim(&self) -> &SemanticCutClaimV1 {
+    pub const fn claim(&self) -> &SemanticCutClaim {
         &self.claim
     }
-    pub const fn certificate_digest(&self) -> SemanticCutDigestV1 {
+    pub const fn certificate_digest(&self) -> SemanticCutDigest {
         self.certificate_digest
     }
-    pub const fn verifier_identity_digest(&self) -> SemanticCutDigestV1 {
+    pub const fn verifier_identity_digest(&self) -> SemanticCutDigest {
         self.verifier_identity_digest
     }
-    pub fn terminal_rcq_identity_digest(&self) -> SemanticCutDigestV1 {
+    pub fn terminal_rcq_identity_digest(&self) -> SemanticCutDigest {
         self.claim.terminal_rcq_identity_digest()
     }
 }
@@ -505,18 +505,18 @@ impl SemanticCutEvidenceV1 {
 /// Public receipt form. It is replay-validatable but cannot authorize execution.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
-pub struct SemanticCutCertificateRecordV1 {
+pub struct SemanticCutCertificateRecord {
     pub contract_version: u16,
-    pub claim: SemanticCutClaimV1,
-    pub claim_digest: SemanticCutDigestV1,
-    pub evidence_digest: SemanticCutDigestV1,
-    pub verifier_identity_digest: SemanticCutDigestV1,
-    pub certificate_digest: SemanticCutDigestV1,
+    pub claim: SemanticCutClaim,
+    pub claim_digest: SemanticCutDigest,
+    pub evidence_digest: SemanticCutDigest,
+    pub verifier_identity_digest: SemanticCutDigest,
+    pub certificate_digest: SemanticCutDigest,
 }
 
-impl SemanticCutCertificateRecordV1 {
-    pub fn validate(&self) -> Result<(), SemanticCutErrorV1> {
-        let certificate = SemanticCutEvidenceV1 {
+impl SemanticCutCertificateRecord {
+    pub fn validate(&self) -> Result<(), SemanticCutError> {
+        let certificate = SemanticCutEvidence {
             contract_version: self.contract_version,
             claim: self.claim.clone(),
             claim_digest: self.claim_digest,
@@ -527,21 +527,21 @@ impl SemanticCutCertificateRecordV1 {
         certificate.validate()
     }
 
-    pub fn canonical_bytes(&self) -> Result<Vec<u8>, SemanticCutErrorV1> {
+    pub fn canonical_bytes(&self) -> Result<Vec<u8>, SemanticCutError> {
         self.validate()?;
         canonical_bytes(self)
     }
 
-    pub fn from_canonical_bytes(bytes: &[u8]) -> Result<Self, SemanticCutErrorV1> {
+    pub fn from_canonical_bytes(bytes: &[u8]) -> Result<Self, SemanticCutError> {
         let record: Self = decode_canonical(bytes)?;
         record.validate()?;
         Ok(record)
     }
 }
 
-pub fn semantic_cut_verifier_identity_v1(
+pub fn semantic_cut_verifier_identity(
     evidence: &VerifiedEvidence<'_, '_>,
-) -> SemanticCutDigestV1 {
+) -> SemanticCutDigest {
     let provenance = evidence.provenance();
     let body = json!({
         "index_id": provenance.index_id,
@@ -551,10 +551,10 @@ pub fn semantic_cut_verifier_identity_v1(
         "parser_id": provenance.parser_id,
         "parser_version": provenance.parser_version,
     });
-    digest_value(VERIFIER_DOMAIN_V1, &body)
+    digest_value(VERIFIER_DOMAIN, &body)
 }
 
-pub fn semantic_cut_contract_manifest_v1() -> Value {
+pub fn semantic_cut_contract_manifest() -> Value {
     json!({
         "canonical_encoding": "sorted_key_json_no_whitespace",
         "certificate_fields": [
@@ -583,7 +583,7 @@ pub fn semantic_cut_contract_manifest_v1() -> Value {
             "certificate_scope_digest",
             "deoptimization_map_digest",
         ],
-        "contract_version": SEMANTIC_CUT_CONTRACT_VERSION_V1,
+        "contract_version": SEMANTIC_CUT_CONTRACT_VERSION,
         "epoch_contractible_when": [
             "project_control_state_exact",
             "reasoning_contract_exact",
@@ -628,17 +628,17 @@ pub fn semantic_cut_contract_manifest_v1() -> Value {
             "transaction_root_digest",
             "receipt_head_digest",
         ],
-        "schema_version": SEMANTIC_CUT_SCHEMA_VERSION_V1,
+        "schema_version": SEMANTIC_CUT_SCHEMA_VERSION,
         "strict_proof_mode": "exact_continuation_identity_only",
     })
 }
 
-pub fn semantic_cut_contract_digest_v1() -> SemanticCutDigestV1 {
-    digest_value(CONTRACT_DOMAIN_V1, &semantic_cut_contract_manifest_v1())
+pub fn semantic_cut_contract_digest() -> SemanticCutDigest {
+    digest_value(CONTRACT_DOMAIN, &semantic_cut_contract_manifest())
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum SemanticCutFailureCodeV1 {
+pub enum SemanticCutFailureCode {
     SchemaVersionMismatch,
     MissingBinding,
     SemanticAuthorityCrossing,
@@ -655,42 +655,42 @@ pub enum SemanticCutFailureCodeV1 {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct SemanticCutErrorV1 {
-    failure_code: SemanticCutFailureCodeV1,
+pub struct SemanticCutError {
+    failure_code: SemanticCutFailureCode,
     message: String,
 }
 
-impl SemanticCutErrorV1 {
-    pub const fn failure_code(&self) -> SemanticCutFailureCodeV1 {
+impl SemanticCutError {
+    pub const fn failure_code(&self) -> SemanticCutFailureCode {
         self.failure_code
     }
 }
 
-impl fmt::Display for SemanticCutErrorV1 {
+impl fmt::Display for SemanticCutError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(formatter, "{:?}: {}", self.failure_code, self.message)
     }
 }
-impl Error for SemanticCutErrorV1 {}
+impl Error for SemanticCutError {}
 
 fn cut_error(
-    failure_code: SemanticCutFailureCodeV1,
+    failure_code: SemanticCutFailureCode,
     message: impl Into<String>,
-) -> SemanticCutErrorV1 {
-    SemanticCutErrorV1 {
+) -> SemanticCutError {
+    SemanticCutError {
         failure_code,
         message: message.into(),
     }
 }
 
-fn json_error(message: impl Into<String>) -> SemanticCutErrorV1 {
-    cut_error(SemanticCutFailureCodeV1::SerializationFailure, message)
+fn json_error(message: impl Into<String>) -> SemanticCutError {
+    cut_error(SemanticCutFailureCode::SerializationFailure, message)
 }
 
-fn require_nonzero(label: &str, digest: SemanticCutDigestV1) -> Result<(), SemanticCutErrorV1> {
+fn require_nonzero(label: &str, digest: SemanticCutDigest) -> Result<(), SemanticCutError> {
     if digest == [0; 32] {
         Err(cut_error(
-            SemanticCutFailureCodeV1::MissingBinding,
+            SemanticCutFailureCode::MissingBinding,
             format!("{label} digest is zero"),
         ))
     } else {
@@ -698,32 +698,32 @@ fn require_nonzero(label: &str, digest: SemanticCutDigestV1) -> Result<(), Seman
     }
 }
 
-fn canonical_bytes(value: &impl Serialize) -> Result<Vec<u8>, SemanticCutErrorV1> {
+fn canonical_bytes(value: &impl Serialize) -> Result<Vec<u8>, SemanticCutError> {
     let value = serde_json::to_value(value).map_err(|error| json_error(error.to_string()))?;
     let bytes = canonical_json(&value).into_bytes();
-    if bytes.len() > SEMANTIC_CUT_MAX_CANONICAL_BYTES_V1 {
+    if bytes.len() > SEMANTIC_CUT_MAX_CANONICAL_BYTES {
         return Err(cut_error(
-            SemanticCutFailureCodeV1::CanonicalPayloadTooLarge,
+            SemanticCutFailureCode::CanonicalPayloadTooLarge,
             "semantic-cut canonical payload exceeds the frozen byte bound",
         ));
     }
     Ok(bytes)
 }
 
-fn decode_canonical<T>(bytes: &[u8]) -> Result<T, SemanticCutErrorV1>
+fn decode_canonical<T>(bytes: &[u8]) -> Result<T, SemanticCutError>
 where
     T: for<'de> Deserialize<'de> + Serialize,
 {
-    if bytes.len() > SEMANTIC_CUT_MAX_CANONICAL_BYTES_V1 {
+    if bytes.len() > SEMANTIC_CUT_MAX_CANONICAL_BYTES {
         return Err(cut_error(
-            SemanticCutFailureCodeV1::CanonicalPayloadTooLarge,
+            SemanticCutFailureCode::CanonicalPayloadTooLarge,
             "semantic-cut canonical payload exceeds the frozen byte bound",
         ));
     }
     let value: T = serde_json::from_slice(bytes).map_err(|error| json_error(error.to_string()))?;
     if canonical_bytes(&value)? != bytes {
         return Err(cut_error(
-            SemanticCutFailureCodeV1::NonCanonicalEncoding,
+            SemanticCutFailureCode::NonCanonicalEncoding,
             "semantic-cut payload is not canonical sorted-key JSON",
         ));
     }
@@ -733,15 +733,15 @@ where
 fn digest_serialized(
     domain: &[u8],
     value: &impl Serialize,
-) -> Result<SemanticCutDigestV1, SemanticCutErrorV1> {
+) -> Result<SemanticCutDigest, SemanticCutError> {
     Ok(digest_parts(domain, &[&canonical_bytes(value)?]))
 }
 
-fn digest_value(domain: &[u8], value: &Value) -> SemanticCutDigestV1 {
+fn digest_value(domain: &[u8], value: &Value) -> SemanticCutDigest {
     digest_parts(domain, &[canonical_json(value).as_bytes()])
 }
 
-fn digest_parts(domain: &[u8], parts: &[&[u8]]) -> SemanticCutDigestV1 {
+fn digest_parts(domain: &[u8], parts: &[&[u8]]) -> SemanticCutDigest {
     let mut bytes = Vec::new();
     bytes.extend_from_slice(domain);
     for part in parts {
@@ -753,13 +753,13 @@ fn digest_parts(domain: &[u8], parts: &[&[u8]]) -> SemanticCutDigestV1 {
 
 fn certificate_digest(
     contract_version: u16,
-    claim_digest: SemanticCutDigestV1,
-    evidence_digest: SemanticCutDigestV1,
-    verifier_identity_digest: SemanticCutDigestV1,
-    terminal_rcq_identity_digest: SemanticCutDigestV1,
-) -> SemanticCutDigestV1 {
+    claim_digest: SemanticCutDigest,
+    evidence_digest: SemanticCutDigest,
+    verifier_identity_digest: SemanticCutDigest,
+    terminal_rcq_identity_digest: SemanticCutDigest,
+) -> SemanticCutDigest {
     digest_parts(
-        CERTIFICATE_DOMAIN_V1,
+        CERTIFICATE_DOMAIN,
         &[
             &contract_version.to_be_bytes(),
             &claim_digest,

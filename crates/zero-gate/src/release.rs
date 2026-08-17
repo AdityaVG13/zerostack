@@ -17,7 +17,7 @@ use std::{error::Error, fmt};
 
 use serde::{Deserialize, Serialize};
 
-pub const RELEASE_CONTRACT_VERSION_V1: u16 = 1;
+pub const RELEASE_CONTRACT_VERSION: u16 = 1;
 
 /// The nine public-claim gates (Draft 5 public-release gates, BENCH-009).
 pub const PUBLIC_CLAIM_GATES: [&str; 9] = [
@@ -42,12 +42,12 @@ pub const SUPERSEDED_FORMULATIONS: [&str; 3] = [
 
 /// Fail-closed error for claim and supersession construction.
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub enum ReleaseErrorV1 {
+pub enum ReleaseError {
     InvalidClaim(String),
     InvalidSupersession(String),
 }
 
-impl fmt::Display for ReleaseErrorV1 {
+impl fmt::Display for ReleaseError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::InvalidClaim(detail) => write!(formatter, "invalid release claim: {detail}"),
@@ -58,24 +58,24 @@ impl fmt::Display for ReleaseErrorV1 {
     }
 }
 
-impl Error for ReleaseErrorV1 {}
+impl Error for ReleaseError {}
 
 /// One supersession record: a formulation was superseded by a newer one with
 /// a recorded reason. `None` in `superseded_by` marks the current authority.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
-pub struct SupersessionRecordV1 {
+pub struct SupersessionRecord {
     pub formulation_id: String,
     pub superseded_by: Option<String>,
     pub reason: String,
 }
 
-impl SupersessionRecordV1 {
+impl SupersessionRecord {
     pub fn new(
         formulation_id: impl Into<String>,
         superseded_by: Option<String>,
         reason: impl Into<String>,
-    ) -> Result<Self, ReleaseErrorV1> {
+    ) -> Result<Self, ReleaseError> {
         let record = Self {
             formulation_id: formulation_id.into(),
             superseded_by,
@@ -85,14 +85,14 @@ impl SupersessionRecordV1 {
         Ok(record)
     }
 
-    pub fn validate(&self) -> Result<(), ReleaseErrorV1> {
+    pub fn validate(&self) -> Result<(), ReleaseError> {
         if self.formulation_id.is_empty() {
-            return Err(ReleaseErrorV1::InvalidSupersession(
+            return Err(ReleaseError::InvalidSupersession(
                 "formulation_id must be nonempty".into(),
             ));
         }
         if self.reason.is_empty() {
-            return Err(ReleaseErrorV1::InvalidSupersession(
+            return Err(ReleaseError::InvalidSupersession(
                 "reason must be nonempty".into(),
             ));
         }
@@ -104,23 +104,23 @@ impl SupersessionRecordV1 {
 /// it before release.
 #[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
-pub struct SupersessionTableV1 {
-    pub records: Vec<SupersessionRecordV1>,
+pub struct SupersessionTable {
+    pub records: Vec<SupersessionRecord>,
 }
 
-impl SupersessionTableV1 {
-    pub fn new(records: Vec<SupersessionRecordV1>) -> Result<Self, ReleaseErrorV1> {
+impl SupersessionTable {
+    pub fn new(records: Vec<SupersessionRecord>) -> Result<Self, ReleaseError> {
         let table = Self { records };
         table.validate()?;
         Ok(table)
     }
 
-    pub fn validate(&self) -> Result<(), ReleaseErrorV1> {
+    pub fn validate(&self) -> Result<(), ReleaseError> {
         let mut ids = std::collections::BTreeSet::new();
         for record in &self.records {
             record.validate()?;
             if !ids.insert(record.formulation_id.clone()) {
-                return Err(ReleaseErrorV1::InvalidSupersession(format!(
+                return Err(ReleaseError::InvalidSupersession(format!(
                     "duplicate formulation {}",
                     record.formulation_id
                 )));
@@ -151,7 +151,7 @@ impl SupersessionTableV1 {
 /// One public claim under release review.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
-pub struct PublicClaimV1 {
+pub struct PublicClaim {
     pub claim_version: u16,
     pub claim_id: String,
     /// The formulation this claim cites as current authority.
@@ -163,7 +163,7 @@ pub struct PublicClaimV1 {
     pub claim_scope: String,
 }
 
-impl PublicClaimV1 {
+impl PublicClaim {
     pub fn new(
         claim_id: impl Into<String>,
         formulation_id: impl Into<String>,
@@ -171,9 +171,9 @@ impl PublicClaimV1 {
         required_artifacts: Vec<String>,
         provider_fact_date_unix_ms: Option<u64>,
         claim_scope: impl Into<String>,
-    ) -> Result<Self, ReleaseErrorV1> {
+    ) -> Result<Self, ReleaseError> {
         let claim = Self {
-            claim_version: RELEASE_CONTRACT_VERSION_V1,
+            claim_version: RELEASE_CONTRACT_VERSION,
             claim_id: claim_id.into(),
             formulation_id: formulation_id.into(),
             gates,
@@ -185,20 +185,20 @@ impl PublicClaimV1 {
         Ok(claim)
     }
 
-    pub fn validate(&self) -> Result<(), ReleaseErrorV1> {
-        if self.claim_version != RELEASE_CONTRACT_VERSION_V1 {
-            return Err(ReleaseErrorV1::InvalidClaim(format!(
+    pub fn validate(&self) -> Result<(), ReleaseError> {
+        if self.claim_version != RELEASE_CONTRACT_VERSION {
+            return Err(ReleaseError::InvalidClaim(format!(
                 "unsupported claim version {}",
                 self.claim_version
             )));
         }
         if self.claim_id.is_empty() || self.formulation_id.is_empty() {
-            return Err(ReleaseErrorV1::InvalidClaim(
+            return Err(ReleaseError::InvalidClaim(
                 "claim_id and formulation_id must be nonempty".into(),
             ));
         }
         if self.claim_scope.is_empty() {
-            return Err(ReleaseErrorV1::InvalidClaim(
+            return Err(ReleaseError::InvalidClaim(
                 "claim_scope must be nonempty".into(),
             ));
         }
@@ -206,17 +206,17 @@ impl PublicClaimV1 {
     }
 
     /// All gate names must be declared; unknown gate names are rejected.
-    pub fn gate_names(&self) -> Result<(), ReleaseErrorV1> {
+    pub fn gate_names(&self) -> Result<(), ReleaseError> {
         for gate in PUBLIC_CLAIM_GATES {
             if !self.gates.contains_key(gate) {
-                return Err(ReleaseErrorV1::InvalidClaim(format!(
+                return Err(ReleaseError::InvalidClaim(format!(
                     "missing gate {gate}"
                 )));
             }
         }
         for name in self.gates.keys() {
             if !PUBLIC_CLAIM_GATES.contains(&name.as_str()) {
-                return Err(ReleaseErrorV1::InvalidClaim(format!(
+                return Err(ReleaseError::InvalidClaim(format!(
                     "unknown gate {name}"
                 )));
             }
@@ -227,20 +227,20 @@ impl PublicClaimV1 {
 
 /// The release verdict: approved, or rejected with deterministic reasons.
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct ReleaseVerdictV1 {
+pub struct ReleaseVerdict {
     pub approved: bool,
     pub reasons: Vec<String>,
 }
 
 /// The release checker: gates + supersession + artifact/date/scope
 /// completeness. One deterministic verdict, nothing inferred.
-pub struct ReleaseCheckerV1;
+pub struct ReleaseChecker;
 
-impl ReleaseCheckerV1 {
+impl ReleaseChecker {
     pub fn check(
-        claim: &PublicClaimV1,
-        supersession: &SupersessionTableV1,
-    ) -> Result<ReleaseVerdictV1, ReleaseErrorV1> {
+        claim: &PublicClaim,
+        supersession: &SupersessionTable,
+    ) -> Result<ReleaseVerdict, ReleaseError> {
         claim.validate()?;
         claim.gate_names()?;
         supersession.validate()?;
@@ -266,7 +266,7 @@ impl ReleaseCheckerV1 {
                 claim.formulation_id, reason
             ));
         }
-        Ok(ReleaseVerdictV1 {
+        Ok(ReleaseVerdict {
             approved: reasons.is_empty(),
             reasons,
         })

@@ -32,7 +32,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::error::Error;
 use std::fmt;
 
-use zero_abi::{CoverageGradeV1, ProtectedDimensionV1, ProtectedScopeObligationsV1};
+use zero_abi::{CoverageGrade, ProtectedDimension, ProtectedScopeObligations};
 
 // ---------------------------------------------------------------------------
 // Thm 5.1 -- Explanation Evidence Preservation
@@ -186,7 +186,7 @@ fn verify_expandable_omission(
 /// declared unresolved decision count and the observed call count are
 /// measured/typed inputs to the checker.
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct ContinuationHandle {
+pub struct DecisionDelimitedHandle {
     /// Handle identifier.
     pub id: String,
     /// `d`: unresolved adaptive semantic decisions declared for the
@@ -201,7 +201,7 @@ pub struct ContinuationHandle {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct DecisionDelimitedRefactorInput {
     /// The continuation handles of the refactor interaction.
-    pub handles: Vec<ContinuationHandle>,
+    pub handles: Vec<DecisionDelimitedHandle>,
     /// Premise: every other operation is privately composable.
     pub other_operations_privately_composable: bool,
     /// Premise: every other operation is verifiable.
@@ -271,7 +271,7 @@ pub fn check_decision_delimited_refactor(
 /// protected equivalence only when `V == B` and every premise holds.
 pub struct PortNonregressionInput<'a> {
     /// The declared obligation set `B` with per-obligation coverage grades.
-    pub obligations: &'a ProtectedScopeObligationsV1,
+    pub obligations: &'a ProtectedScopeObligations,
     /// Premise: the verifier is sound.
     pub verifier_sound: bool,
     /// Premise: the source baseline remains available for uncovered
@@ -288,10 +288,10 @@ pub struct ProtectedEquivalenceCertification {
     /// Verified obligation count `|V|` (equals `|B|` when certified).
     pub verified_obligations: usize,
     /// Every covered dimension, in declaration order.
-    pub dimensions: Vec<ProtectedDimensionV1>,
+    pub dimensions: Vec<ProtectedDimension>,
 }
 
-/// Verifies Thm 7.1's premises over a [`ProtectedScopeObligationsV1`].
+/// Verifies Thm 7.1's premises over a [`ProtectedScopeObligations`].
 ///
 /// Refuses (obligations stay Unknown) when `V != B` -- any obligation with
 /// grade `Unknown` -- when a required obligation is only `Observed` (the
@@ -316,7 +316,7 @@ pub fn check_port_nonregression_coverage(
     if let Some(weak) = obligations
         .obligations
         .iter()
-        .find(|obligation| obligation.required && obligation.grade == CoverageGradeV1::Observed)
+        .find(|obligation| obligation.required && obligation.grade == CoverageGrade::Observed)
     {
         return Err(TheoremViolation::WeakRequiredObligation {
             dimension: weak.dimension,
@@ -476,9 +476,9 @@ pub enum TheoremViolation {
     /// No obligations were declared, so nothing can be certified.
     NoDeclaredObligations,
     /// `V != B`: obligations with grade `Unknown` stay Unknown.
-    IncompleteCoverage { uncovered: Vec<ProtectedDimensionV1> },
+    IncompleteCoverage { uncovered: Vec<ProtectedDimension> },
     /// A required obligation is only `Observed`, not Proved/BoundedComplete.
-    WeakRequiredObligation { dimension: ProtectedDimensionV1 },
+    WeakRequiredObligation { dimension: ProtectedDimension },
     /// The verifier-soundness premise is unmet.
     UnsoundVerifier,
     /// The source-baseline premise is unmet.

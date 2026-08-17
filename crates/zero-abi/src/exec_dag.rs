@@ -3,11 +3,11 @@
 //! A plan's operations form an explicit dependency DAG: every node lists the
 //! node ids it depends on, and the DAG is validated fail-closed (unique ids,
 //! existing deps, no self-dep, acyclic). Deterministic traversals --
-//! [`ExecDagV1::topo_order`], [`ExecDagV1::layers`] (independent/batchable
-//! groups), [`ExecDagV1::critical_path`] -- are the dependency-aware
+//! [`ExecDag::topo_order`], [`ExecDag::layers`] (independent/batchable
+//! groups), [`ExecDag::critical_path`] -- are the dependency-aware
 //! scheduling surface. Decision-boundary nodes mark where execution must
 //! halt for a protected decision; the contingent-policy crossing rule
-//! ([`ExecDagV1::crossing_rule`]) is the hub-side rule that crossing a
+//! ([`ExecDag::crossing_rule`]) is the hub-side rule that crossing a
 //! boundary requires an attached contingent policy, fail-closed otherwise.
 //! Per-observation resolution stays with the DecisionGate (zero-codemode);
 //! this module owns the structural rule.
@@ -16,7 +16,7 @@ use std::collections::{BTreeSet, HashMap};
 
 use serde::{Deserialize, Serialize};
 
-use crate::decision::ContingentPolicyV1;
+use crate::decision::ContingentPolicy;
 use crate::digest::sha256_hex;
 use crate::schema::canonical_json;
 
@@ -28,7 +28,7 @@ pub const MAX_EXEC_DAG_DEPENDENCIES_PER_NODE: usize = 256;
 /// Kind of a node in an execution plan DAG.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "PascalCase")]
-pub enum ExecNodeKindV1 {
+pub enum ExecNodeKind {
     /// Plain operation node.
     Op,
     /// Decision-boundary node: execution must halt here unless a contingent
@@ -38,83 +38,83 @@ pub enum ExecNodeKindV1 {
 
 /// One operation in a plan DAG.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct ExecNodeV1 {
+pub struct ExecNode {
     /// Unique opaque node id (e.g. `op:read_a`, `dec:choose_strategy`).
     pub id: String,
     /// Node kind (plain op or decision boundary).
-    pub kind: ExecNodeKindV1,
+    pub kind: ExecNodeKind,
     /// Positive scheduling weight (critical-path cost; 0 = unweighted).
     pub weight: u64,
     /// Explicit dependency edges: node ids that must complete first.
     pub deps: Vec<String>,
 }
 
-impl ExecNodeV1 {
+impl ExecNode {
     /// Build one node, rejecting empty ids and self-dependencies.
     pub fn new(
         id: impl Into<String>,
-        kind: ExecNodeKindV1,
+        kind: ExecNodeKind,
         weight: u64,
         deps: impl IntoIterator<Item = impl Into<String>>,
-    ) -> Result<Self, ExecDagErrorV1> {
+    ) -> Result<Self, ExecDagError> {
         let id = id.into();
         if id.trim().is_empty() {
-            return Err(ExecDagErrorV1::EmptyNodeId);
+            return Err(ExecDagError::EmptyNodeId);
         }
         let deps: Vec<String> = deps.into_iter().map(Into::into).collect();
         for dep in &deps {
             if dep.trim().is_empty() {
-                return Err(ExecDagErrorV1::EmptyDependency { node: id.clone() });
+                return Err(ExecDagError::EmptyDependency { node: id.clone() });
             }
             if dep == &id {
-                return Err(ExecDagErrorV1::SelfDependency { node: id.clone() });
+                return Err(ExecDagError::SelfDependency { node: id.clone() });
             }
         }
-        Ok(ExecNodeV1 { id, kind, weight, deps })
+        Ok(ExecNode { id, kind, weight, deps })
     }
 }
 
 /// A plan as an explicit dependency DAG (ZS-EXEC-001).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct ExecDagV1 {
+pub struct ExecDag {
     /// Nodes in arbitrary insertion order; order never affects semantics.
-    pub nodes: Vec<ExecNodeV1>,
+    pub nodes: Vec<ExecNode>,
 }
 
-impl ExecDagV1 {
+impl ExecDag {
     /// New DAG from nodes (validated on first use by `validate`).
-    pub fn new(nodes: Vec<ExecNodeV1>) -> Self {
-        ExecDagV1 { nodes }
+    pub fn new(nodes: Vec<ExecNode>) -> Self {
+        ExecDag { nodes }
     }
 
     /// Fail-closed structural validation: unique non-empty ids, existing
     /// dependency targets, no self-dependency, acyclic, size caps.
-    pub fn validate(&self) -> Result<(), ExecDagErrorV1> {
+    pub fn validate(&self) -> Result<(), ExecDagError> {
         if self.nodes.len() > MAX_EXEC_DAG_NODES {
-            return Err(ExecDagErrorV1::TooManyNodes {
+            return Err(ExecDagError::TooManyNodes {
                 count: self.nodes.len(),
             });
         }
         let mut seen: HashMap<&str, ()> = HashMap::with_capacity(self.nodes.len());
         for node in &self.nodes {
             if node.id.trim().is_empty() {
-                return Err(ExecDagErrorV1::EmptyNodeId);
+                return Err(ExecDagError::EmptyNodeId);
             }
             if seen.insert(node.id.as_str(), ()).is_some() {
-                return Err(ExecDagErrorV1::DuplicateNodeId { id: node.id.clone() });
+                return Err(ExecDagError::DuplicateNodeId { id: node.id.clone() });
             }
             if node.deps.len() > MAX_EXEC_DAG_DEPENDENCIES_PER_NODE {
-                return Err(ExecDagErrorV1::TooManyDependencies { node: node.id.clone() });
+                return Err(ExecDagError::TooManyDependencies { node: node.id.clone() });
             }
             for dep in &node.deps {
                 if !seen.contains_key(dep.as_str()) && !self.nodes.iter().any(|n| n.id == *dep) {
-                    return Err(ExecDagErrorV1::MissingDependency {
+                    return Err(ExecDagError::MissingDependency {
                         node: node.id.clone(),
                         dep: dep.clone(),
                     });
                 }
                 if dep == &node.id {
-                    return Err(ExecDagErrorV1::SelfDependency { node: node.id.clone() });
+                    return Err(ExecDagError::SelfDependency { node: node.id.clone() });
                 }
             }
         }
@@ -125,7 +125,7 @@ impl ExecDagV1 {
     /// Deterministic topological order (Kahn with id-sorted ready set):
     /// a node always follows all of its dependencies, and equal-ready nodes
     /// come in lexicographic id order.
-    pub fn topo_order(&self) -> Result<Vec<String>, ExecDagErrorV1> {
+    pub fn topo_order(&self) -> Result<Vec<String>, ExecDagError> {
         let ids: Vec<&str> = self.nodes.iter().map(|n| n.id.as_str()).collect();
         let mut remaining: HashMap<&str, usize> = HashMap::with_capacity(self.nodes.len());
         let mut children: HashMap<&str, Vec<&str>> = HashMap::with_capacity(self.nodes.len());
@@ -160,7 +160,7 @@ impl ExecDagV1 {
                 .map(|n| n.id.clone())
                 .filter(|id| !order.contains(id))
                 .collect();
-            return Err(ExecDagErrorV1::CycleDetected { remaining: stuck });
+            return Err(ExecDagError::CycleDetected { remaining: stuck });
         }
         Ok(order)
     }
@@ -170,7 +170,7 @@ impl ExecDagV1 {
     /// layer are mutually independent and may run concurrently; nodes across
     /// layers are dependency-ordered and never reordered. Layers are sorted
     /// by node id, so the grouping is deterministic.
-    pub fn layers(&self) -> Result<Vec<Vec<String>>, ExecDagErrorV1> {
+    pub fn layers(&self) -> Result<Vec<Vec<String>>, ExecDagError> {
         self.validate()?;
         let mut remaining: HashMap<&str, usize> = HashMap::with_capacity(self.nodes.len());
         let mut children: HashMap<&str, Vec<&str>> = HashMap::with_capacity(self.nodes.len());
@@ -209,7 +209,7 @@ impl ExecDagV1 {
     /// Critical path: the highest total-weight dependency chain, computed in
     /// topological order with deterministic tie-breaking (lexicographically
     /// smallest node id wins ties). An empty DAG yields an empty path.
-    pub fn critical_path(&self) -> Result<Vec<String>, ExecDagErrorV1> {
+    pub fn critical_path(&self) -> Result<Vec<String>, ExecDagError> {
         let topo = self.topo_order()?;
         if topo.is_empty() {
             return Ok(Vec::new());
@@ -258,7 +258,7 @@ impl ExecDagV1 {
 
     /// Whether the plan contains any decision-boundary node.
     pub fn requires_policy(&self) -> bool {
-        self.nodes.iter().any(|n| n.kind == ExecNodeKindV1::DecisionBoundary)
+        self.nodes.iter().any(|n| n.kind == ExecNodeKind::DecisionBoundary)
     }
 
     /// Hub-side contingent-policy crossing rule (ZS-EXEC-001): a plan with
@@ -269,8 +269,8 @@ impl ExecDagV1 {
     /// DecisionGate at runtime.
     pub fn crossing_rule(
         &self,
-        policy: Option<&ContingentPolicyV1>,
-    ) -> Result<(), ExecDagErrorV1> {
+        policy: Option<&ContingentPolicy>,
+    ) -> Result<(), ExecDagError> {
         if !self.requires_policy() {
             return Ok(());
         }
@@ -279,32 +279,32 @@ impl ExecDagV1 {
             let first_boundary = self
                 .nodes
                 .iter()
-                .filter(|n| n.kind == ExecNodeKindV1::DecisionBoundary)
+                .filter(|n| n.kind == ExecNodeKind::DecisionBoundary)
                 .map(|n| n.id.as_str())
                 .min_by_key(|id| order.iter().position(|o| o == id))
                 .expect("requires_policy guarantees a boundary node");
-            return Err(ExecDagErrorV1::DecisionBoundaryUncovered {
+            return Err(ExecDagError::DecisionBoundaryUncovered {
                 node_id: first_boundary.to_string(),
             });
         };
-        policy.validate().map_err(|error| ExecDagErrorV1::InvalidPolicy(error.to_string()))
+        policy.validate().map_err(|error| ExecDagError::InvalidPolicy(error.to_string()))
     }
 
     /// Canonical plan digest: SHA-256 over canonical JSON of the nodes in
     /// id-sorted order. Same plan (any insertion order) => same digest.
-    pub fn plan_digest(&self) -> Result<String, ExecDagErrorV1> {
+    pub fn plan_digest(&self) -> Result<String, ExecDagError> {
         self.validate()?;
         let mut nodes = self.nodes.clone();
         nodes.sort_by(|a, b| a.id.cmp(&b.id));
         let value = serde_json::to_value(&nodes)
-            .map_err(|error| ExecDagErrorV1::Serialize(error.to_string()))?;
+            .map_err(|error| ExecDagError::Serialize(error.to_string()))?;
         Ok(sha256_hex(canonical_json(&value).as_bytes()))
     }
 }
 
 /// Fail-closed DAG errors (ZS-EXEC-001).
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum ExecDagErrorV1 {
+pub enum ExecDagError {
     /// A node id was empty.
     EmptyNodeId,
     /// Two nodes share an id.
@@ -331,38 +331,38 @@ pub enum ExecDagErrorV1 {
     Serialize(String),
 }
 
-impl std::fmt::Display for ExecDagErrorV1 {
+impl std::fmt::Display for ExecDagError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            ExecDagErrorV1::EmptyNodeId => write!(f, "empty node id"),
-            ExecDagErrorV1::DuplicateNodeId { id } => write!(f, "duplicate node id {id}"),
-            ExecDagErrorV1::MissingDependency { node, dep } => {
+            ExecDagError::EmptyNodeId => write!(f, "empty node id"),
+            ExecDagError::DuplicateNodeId { id } => write!(f, "duplicate node id {id}"),
+            ExecDagError::MissingDependency { node, dep } => {
                 write!(f, "node {node} depends on missing node {dep}")
             }
-            ExecDagErrorV1::SelfDependency { node } => write!(f, "node {node} depends on itself"),
-            ExecDagErrorV1::CycleDetected { remaining } => {
+            ExecDagError::SelfDependency { node } => write!(f, "node {node} depends on itself"),
+            ExecDagError::CycleDetected { remaining } => {
                 write!(f, "dependency cycle among nodes {remaining:?}")
             }
-            ExecDagErrorV1::TooManyNodes { count } => {
+            ExecDagError::TooManyNodes { count } => {
                 write!(f, "plan has {count} nodes, cap is {MAX_EXEC_DAG_NODES}")
             }
-            ExecDagErrorV1::TooManyDependencies { node } => write!(
+            ExecDagError::TooManyDependencies { node } => write!(
                 f,
                 "node {node} exceeds dependency cap {MAX_EXEC_DAG_DEPENDENCIES_PER_NODE}"
             ),
-            ExecDagErrorV1::DecisionBoundaryUncovered { node_id } => {
+            ExecDagError::DecisionBoundaryUncovered { node_id } => {
                 write!(f, "decision boundary {node_id} uncovered: crossing requires a contingent policy")
             }
-            ExecDagErrorV1::InvalidPolicy(detail) => {
+            ExecDagError::InvalidPolicy(detail) => {
                 write!(f, "invalid contingent policy: {detail}")
             }
-            ExecDagErrorV1::EmptyDependency { node } => {
+            ExecDagError::EmptyDependency { node } => {
                 write!(f, "node {node} lists an empty dependency id")
             }
-            ExecDagErrorV1::Serialize(detail) => write!(f, "serialization failed: {detail}"),
+            ExecDagError::Serialize(detail) => write!(f, "serialization failed: {detail}"),
         }
     }
 }
 
-impl std::error::Error for ExecDagErrorV1 {}
+impl std::error::Error for ExecDagError {}
 

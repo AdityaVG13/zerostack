@@ -9,7 +9,7 @@ use std::{collections::BTreeSet, error::Error, fmt};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
-use crate::{DigestV1, canonical_json, sha256};
+use crate::{Sha256Digest, canonical_json, sha256};
 
 pub const ROBUST_SNAP_MODEL_VERSION: &str = "zerostack.robust_snap.finite.v1";
 pub const ROBUST_SNAP_CONTRACT_VERSION: u16 = 1;
@@ -19,11 +19,11 @@ pub const ROBUST_SNAP_MAX_LEAVES: usize = 64;
 pub const ROBUST_SNAP_MAX_EVIDENCE_DEPTH: usize = 16;
 pub const ROBUST_SNAP_MAX_ASSUMPTIONS: usize = 32;
 pub const ROBUST_SNAP_MAX_ASSUMPTION_BYTES: usize = 512;
-const CERTIFICATE_DOMAIN_V1: &[u8] = b"zerostack.robust_snap.certificate.v1\0";
+const CERTIFICATE_DOMAIN: &[u8] = b"zerostack.robust_snap.certificate.v1\0";
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, Ord, PartialEq, PartialOrd, Serialize)]
 #[serde(rename_all = "snake_case")]
-pub enum ProtectedEffectClassV1 {
+pub enum ProtectedEffectClass {
     ReadOnly,
     ReversibleMutation,
     ApprovalRequiredMutation,
@@ -32,27 +32,27 @@ pub enum ProtectedEffectClassV1 {
 
 #[derive(Clone, Debug, Deserialize, Eq, Ord, PartialEq, PartialOrd, Serialize)]
 #[serde(deny_unknown_fields)]
-pub struct ProtectedEffectV1 {
-    pub effect_digest: DigestV1,
-    pub effect_class: ProtectedEffectClassV1,
+pub struct ProtectedEffect {
+    pub effect_digest: Sha256Digest,
+    pub effect_class: ProtectedEffectClass,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct WorldFiberDescriptor {
     pub model_version: String,
-    pub assembly_manifest_digest: DigestV1,
-    pub source_image_digest: DigestV1,
-    pub task_fingerprint: DigestV1,
+    pub assembly_manifest_digest: Sha256Digest,
+    pub source_image_digest: Sha256Digest,
+    pub task_fingerprint: Sha256Digest,
     pub assumptions: Vec<String>,
-    pub worlds: Vec<DigestV1>,
+    pub worlds: Vec<Sha256Digest>,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct ProtectedEffectSet {
-    pub world_id: DigestV1,
-    pub effects: Vec<ProtectedEffectV1>,
+    pub world_id: Sha256Digest,
+    pub effects: Vec<ProtectedEffect>,
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -77,24 +77,24 @@ impl SnapLevel {
 
 #[derive(Clone, Debug, Deserialize, Eq, Ord, PartialEq, PartialOrd, Serialize)]
 #[serde(deny_unknown_fields)]
-pub struct EvidenceObservationV1 {
-    pub evidence_id: DigestV1,
-    pub outcome_digest: DigestV1,
+pub struct EvidenceObservation {
+    pub evidence_id: Sha256Digest,
+    pub outcome_digest: Sha256Digest,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, Ord, PartialEq, PartialOrd, Serialize)]
 #[serde(deny_unknown_fields)]
-pub struct EvidenceLeafV1 {
-    pub path: Vec<EvidenceObservationV1>,
-    pub admitted_worlds: Vec<DigestV1>,
-    pub selected_effect: ProtectedEffectV1,
+pub struct EvidenceLeaf {
+    pub path: Vec<EvidenceObservation>,
+    pub admitted_worlds: Vec<Sha256Digest>,
+    pub selected_effect: ProtectedEffect,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct EvidenceDecisionTree {
-    pub evidence_schema_digest: DigestV1,
-    pub leaves: Vec<EvidenceLeafV1>,
+    pub evidence_schema_digest: Sha256Digest,
+    pub leaves: Vec<EvidenceLeaf>,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -103,12 +103,12 @@ pub struct RobustSnapCertificate {
     pub model_version: String,
     pub fiber: WorldFiberDescriptor,
     pub protected_effects: Vec<ProtectedEffectSet>,
-    pub first_turn_selectable: Vec<ProtectedEffectV1>,
-    pub expressible_and_verifiable: Vec<ProtectedEffectV1>,
+    pub first_turn_selectable: Vec<ProtectedEffect>,
+    pub expressible_and_verifiable: Vec<ProtectedEffect>,
     pub snap_level: SnapLevel,
-    pub selected_effect: Option<ProtectedEffectV1>,
+    pub selected_effect: Option<ProtectedEffect>,
     pub evidence_tree: Option<EvidenceDecisionTree>,
-    pub certificate_digest: DigestV1,
+    pub certificate_digest: Sha256Digest,
 }
 
 impl RobustSnapCertificate {
@@ -116,10 +116,10 @@ impl RobustSnapCertificate {
     pub fn create_s0(
         fiber: WorldFiberDescriptor,
         protected_effects: Vec<ProtectedEffectSet>,
-        first_turn_selectable: Vec<ProtectedEffectV1>,
-        expressible_and_verifiable: Vec<ProtectedEffectV1>,
-        selected_effect: ProtectedEffectV1,
-    ) -> Result<Self, RobustSnapErrorV1> {
+        first_turn_selectable: Vec<ProtectedEffect>,
+        expressible_and_verifiable: Vec<ProtectedEffect>,
+        selected_effect: ProtectedEffect,
+    ) -> Result<Self, RobustSnapError> {
         Self::create(
             fiber,
             protected_effects,
@@ -134,9 +134,9 @@ impl RobustSnapCertificate {
     pub fn create_s1(
         fiber: WorldFiberDescriptor,
         protected_effects: Vec<ProtectedEffectSet>,
-        expressible_and_verifiable: Vec<ProtectedEffectV1>,
+        expressible_and_verifiable: Vec<ProtectedEffect>,
         evidence_tree: EvidenceDecisionTree,
-    ) -> Result<Self, RobustSnapErrorV1> {
+    ) -> Result<Self, RobustSnapError> {
         Self::create(
             fiber,
             protected_effects,
@@ -152,12 +152,12 @@ impl RobustSnapCertificate {
     fn create(
         fiber: WorldFiberDescriptor,
         protected_effects: Vec<ProtectedEffectSet>,
-        first_turn_selectable: Vec<ProtectedEffectV1>,
-        expressible_and_verifiable: Vec<ProtectedEffectV1>,
+        first_turn_selectable: Vec<ProtectedEffect>,
+        expressible_and_verifiable: Vec<ProtectedEffect>,
         snap_level: SnapLevel,
-        selected_effect: Option<ProtectedEffectV1>,
+        selected_effect: Option<ProtectedEffect>,
         evidence_tree: Option<EvidenceDecisionTree>,
-    ) -> Result<Self, RobustSnapErrorV1> {
+    ) -> Result<Self, RobustSnapError> {
         let mut certificate = Self {
             model_version: ROBUST_SNAP_MODEL_VERSION.into(),
             fiber,
@@ -167,18 +167,18 @@ impl RobustSnapCertificate {
             snap_level,
             selected_effect,
             evidence_tree,
-            certificate_digest: DigestV1::ZERO,
+            certificate_digest: Sha256Digest::ZERO,
         };
         certificate.validate_semantics()?;
         certificate.certificate_digest = certificate.compute_digest()?;
         Ok(certificate)
     }
 
-    pub fn validate(&self) -> Result<(), RobustSnapErrorV1> {
+    pub fn validate(&self) -> Result<(), RobustSnapError> {
         self.validate_semantics()?;
         let actual = self.compute_digest()?;
         if actual != self.certificate_digest {
-            return Err(RobustSnapErrorV1::CertificateDigestMismatch {
+            return Err(RobustSnapError::CertificateDigestMismatch {
                 expected: self.certificate_digest,
                 actual,
             });
@@ -186,27 +186,27 @@ impl RobustSnapCertificate {
         Ok(())
     }
 
-    pub fn canonical_bytes(&self) -> Result<Vec<u8>, RobustSnapErrorV1> {
+    pub fn canonical_bytes(&self) -> Result<Vec<u8>, RobustSnapError> {
         self.validate()?;
         let value = serde_json::to_value(self)
-            .map_err(|error| RobustSnapErrorV1::Json(error.to_string()))?;
+            .map_err(|error| RobustSnapError::Json(error.to_string()))?;
         Ok(canonical_json(&value).into_bytes())
     }
 
-    pub fn compute_digest(&self) -> Result<DigestV1, RobustSnapErrorV1> {
+    pub fn compute_digest(&self) -> Result<Sha256Digest, RobustSnapError> {
         let mut body = serde_json::to_value(self)
-            .map_err(|error| RobustSnapErrorV1::Json(error.to_string()))?;
+            .map_err(|error| RobustSnapError::Json(error.to_string()))?;
         body.as_object_mut()
-            .ok_or_else(|| RobustSnapErrorV1::Json("certificate must be an object".into()))?
+            .ok_or_else(|| RobustSnapError::Json("certificate must be an object".into()))?
             .remove("certificate_digest");
         let canonical = canonical_json(&body);
-        let mut bound = Vec::with_capacity(CERTIFICATE_DOMAIN_V1.len() + canonical.len());
-        bound.extend_from_slice(CERTIFICATE_DOMAIN_V1);
+        let mut bound = Vec::with_capacity(CERTIFICATE_DOMAIN.len() + canonical.len());
+        bound.extend_from_slice(CERTIFICATE_DOMAIN);
         bound.extend_from_slice(canonical.as_bytes());
-        Ok(DigestV1::from_bytes(sha256(&bound)))
+        Ok(Sha256Digest::from_bytes(sha256(&bound)))
     }
 
-    pub fn common_s0_effects(&self) -> Result<Vec<ProtectedEffectV1>, RobustSnapErrorV1> {
+    pub fn common_s0_effects(&self) -> Result<Vec<ProtectedEffect>, RobustSnapError> {
         let worlds = self.fiber.worlds.iter().copied().collect::<BTreeSet<_>>();
         let mut common = self.common_for_worlds(&worlds)?;
         common.retain(|effect| self.first_turn_selectable.binary_search(effect).is_ok());
@@ -218,11 +218,11 @@ impl RobustSnapCertificate {
         Ok(common.into_iter().collect())
     }
 
-    fn validate_semantics(&self) -> Result<(), RobustSnapErrorV1> {
+    fn validate_semantics(&self) -> Result<(), RobustSnapError> {
         if self.model_version != ROBUST_SNAP_MODEL_VERSION
             || self.fiber.model_version != ROBUST_SNAP_MODEL_VERSION
         {
-            return Err(RobustSnapErrorV1::UnsupportedModelVersion);
+            return Err(RobustSnapError::UnsupportedModelVersion);
         }
         validate_fiber(&self.fiber)?;
         validate_effect_vector("first_turn_selectable", &self.first_turn_selectable)?;
@@ -232,56 +232,56 @@ impl RobustSnapCertificate {
         )?;
         validate_protected_sets(&self.fiber, &self.protected_effects)?;
         match self.snap_level {
-            SnapLevel::Unknown => Err(RobustSnapErrorV1::UnknownCannotPass),
+            SnapLevel::Unknown => Err(RobustSnapError::UnknownCannotPass),
             SnapLevel::S0 => self.validate_s0(),
             SnapLevel::S1 => self.validate_s1(),
         }
     }
 
-    fn validate_s0(&self) -> Result<(), RobustSnapErrorV1> {
+    fn validate_s0(&self) -> Result<(), RobustSnapError> {
         if self.evidence_tree.is_some() {
-            return Err(RobustSnapErrorV1::EvidenceTreeForbiddenAtS0);
+            return Err(RobustSnapError::EvidenceTreeForbiddenAtS0);
         }
         let selected = self
             .selected_effect
             .as_ref()
-            .ok_or(RobustSnapErrorV1::SelectedEffectRequiredAtS0)?;
+            .ok_or(RobustSnapError::SelectedEffectRequiredAtS0)?;
         let common = self.common_s0_effects()?;
         if common.is_empty() {
-            return Err(RobustSnapErrorV1::EmptyCommonProtectedEffectSet);
+            return Err(RobustSnapError::EmptyCommonProtectedEffectSet);
         }
         if common.binary_search(selected).is_err() {
-            return Err(RobustSnapErrorV1::SelectedEffectNotCommon);
+            return Err(RobustSnapError::SelectedEffectNotCommon);
         }
         Ok(())
     }
 
-    fn validate_s1(&self) -> Result<(), RobustSnapErrorV1> {
+    fn validate_s1(&self) -> Result<(), RobustSnapError> {
         if self.selected_effect.is_some() {
-            return Err(RobustSnapErrorV1::GlobalSelectionForbiddenAtS1);
+            return Err(RobustSnapError::GlobalSelectionForbiddenAtS1);
         }
         let tree = self
             .evidence_tree
             .as_ref()
-            .ok_or(RobustSnapErrorV1::EvidenceTreeRequiredAtS1)?;
+            .ok_or(RobustSnapError::EvidenceTreeRequiredAtS1)?;
         if tree.leaves.is_empty() {
-            return Err(RobustSnapErrorV1::EmptyDecisionTree);
+            return Err(RobustSnapError::EmptyDecisionTree);
         }
         if tree.leaves.len() > ROBUST_SNAP_MAX_LEAVES {
-            return Err(RobustSnapErrorV1::BoundExceeded("evidence_tree.leaves"));
+            return Err(RobustSnapError::BoundExceeded("evidence_tree.leaves"));
         }
         require_strict_order("evidence_tree.leaves", &tree.leaves)?;
         let fiber_worlds = self.fiber.worlds.iter().copied().collect::<BTreeSet<_>>();
         let mut covered = BTreeSet::new();
         for leaf in &tree.leaves {
             if leaf.path.is_empty() {
-                return Err(RobustSnapErrorV1::EmptyEvidencePath);
+                return Err(RobustSnapError::EmptyEvidencePath);
             }
             if leaf.path.len() > ROBUST_SNAP_MAX_EVIDENCE_DEPTH {
-                return Err(RobustSnapErrorV1::BoundExceeded("evidence_leaf.path"));
+                return Err(RobustSnapError::BoundExceeded("evidence_leaf.path"));
             }
             if leaf.admitted_worlds.is_empty() {
-                return Err(RobustSnapErrorV1::EmptyEvidenceLeaf);
+                return Err(RobustSnapError::EmptyEvidenceLeaf);
             }
             require_strict_order("evidence_leaf.admitted_worlds", &leaf.admitted_worlds)?;
             let leaf_worlds = leaf
@@ -290,11 +290,11 @@ impl RobustSnapCertificate {
                 .copied()
                 .collect::<BTreeSet<_>>();
             if !leaf_worlds.is_subset(&fiber_worlds) {
-                return Err(RobustSnapErrorV1::LeafWorldOutsideFiber);
+                return Err(RobustSnapError::LeafWorldOutsideFiber);
             }
             for world in &leaf_worlds {
                 if !covered.insert(*world) {
-                    return Err(RobustSnapErrorV1::WorldAppearsInMultipleLeaves);
+                    return Err(RobustSnapError::WorldAppearsInMultipleLeaves);
                 }
             }
             let mut common = self.common_for_worlds(&leaf_worlds)?;
@@ -304,21 +304,21 @@ impl RobustSnapCertificate {
                     .is_ok()
             });
             if !common.contains(&leaf.selected_effect) {
-                return Err(RobustSnapErrorV1::LeafEffectNotProtected);
+                return Err(RobustSnapError::LeafEffectNotProtected);
             }
         }
         if covered != fiber_worlds {
-            return Err(RobustSnapErrorV1::EvidenceTreeDropsWorld);
+            return Err(RobustSnapError::EvidenceTreeDropsWorld);
         }
         Ok(())
     }
 
     fn common_for_worlds(
         &self,
-        worlds: &BTreeSet<DigestV1>,
-    ) -> Result<BTreeSet<ProtectedEffectV1>, RobustSnapErrorV1> {
+        worlds: &BTreeSet<Sha256Digest>,
+    ) -> Result<BTreeSet<ProtectedEffect>, RobustSnapError> {
         let mut iter = worlds.iter();
-        let first = iter.next().ok_or(RobustSnapErrorV1::EmptyWorldFiber)?;
+        let first = iter.next().ok_or(RobustSnapError::EmptyWorldFiber)?;
         let mut common = self
             .effects_for(*first)?
             .iter()
@@ -335,46 +335,46 @@ impl RobustSnapCertificate {
         Ok(common)
     }
 
-    fn effects_for(&self, world: DigestV1) -> Result<&[ProtectedEffectV1], RobustSnapErrorV1> {
+    fn effects_for(&self, world: Sha256Digest) -> Result<&[ProtectedEffect], RobustSnapError> {
         self.protected_effects
             .binary_search_by_key(&world, |set| set.world_id)
             .ok()
             .map(|index| self.protected_effects[index].effects.as_slice())
-            .ok_or(RobustSnapErrorV1::MissingProtectedEffectSet)
+            .ok_or(RobustSnapError::MissingProtectedEffectSet)
     }
 }
 
 /// Heuristics may reorder the complete fiber but cannot narrow it.
 pub fn validate_heuristic_world_order(
     fiber: &WorldFiberDescriptor,
-    ranked_worlds: &[DigestV1],
-) -> Result<(), RobustSnapErrorV1> {
+    ranked_worlds: &[Sha256Digest],
+) -> Result<(), RobustSnapError> {
     if ranked_worlds.len() != fiber.worlds.len() {
-        return Err(RobustSnapErrorV1::HeuristicDroppedWorld);
+        return Err(RobustSnapError::HeuristicDroppedWorld);
     }
     let expected = fiber.worlds.iter().copied().collect::<BTreeSet<_>>();
     let actual = ranked_worlds.iter().copied().collect::<BTreeSet<_>>();
     if actual.len() != ranked_worlds.len() || actual != expected {
-        return Err(RobustSnapErrorV1::HeuristicDroppedWorld);
+        return Err(RobustSnapError::HeuristicDroppedWorld);
     }
     Ok(())
 }
 
-fn validate_fiber(fiber: &WorldFiberDescriptor) -> Result<(), RobustSnapErrorV1> {
+fn validate_fiber(fiber: &WorldFiberDescriptor) -> Result<(), RobustSnapError> {
     if fiber.worlds.is_empty() {
-        return Err(RobustSnapErrorV1::EmptyWorldFiber);
+        return Err(RobustSnapError::EmptyWorldFiber);
     }
     if fiber.worlds.len() > ROBUST_SNAP_MAX_WORLDS {
-        return Err(RobustSnapErrorV1::BoundExceeded("fiber.worlds"));
+        return Err(RobustSnapError::BoundExceeded("fiber.worlds"));
     }
     require_strict_order("fiber.worlds", &fiber.worlds)?;
     if fiber.assumptions.is_empty() || fiber.assumptions.len() > ROBUST_SNAP_MAX_ASSUMPTIONS {
-        return Err(RobustSnapErrorV1::BoundExceeded("fiber.assumptions"));
+        return Err(RobustSnapError::BoundExceeded("fiber.assumptions"));
     }
     require_strict_order("fiber.assumptions", &fiber.assumptions)?;
     for assumption in &fiber.assumptions {
         if assumption.is_empty() || assumption.len() > ROBUST_SNAP_MAX_ASSUMPTION_BYTES {
-            return Err(RobustSnapErrorV1::InvalidAssumption);
+            return Err(RobustSnapError::InvalidAssumption);
         }
     }
     Ok(())
@@ -382,10 +382,10 @@ fn validate_fiber(fiber: &WorldFiberDescriptor) -> Result<(), RobustSnapErrorV1>
 
 fn validate_effect_vector(
     field: &'static str,
-    effects: &[ProtectedEffectV1],
-) -> Result<(), RobustSnapErrorV1> {
+    effects: &[ProtectedEffect],
+) -> Result<(), RobustSnapError> {
     if effects.len() > ROBUST_SNAP_MAX_EFFECTS {
-        return Err(RobustSnapErrorV1::BoundExceeded(field));
+        return Err(RobustSnapError::BoundExceeded(field));
     }
     require_strict_order(field, effects)
 }
@@ -393,14 +393,14 @@ fn validate_effect_vector(
 fn validate_protected_sets(
     fiber: &WorldFiberDescriptor,
     sets: &[ProtectedEffectSet],
-) -> Result<(), RobustSnapErrorV1> {
+) -> Result<(), RobustSnapError> {
     if sets.len() != fiber.worlds.len() {
-        return Err(RobustSnapErrorV1::ProtectedWorldSetMismatch);
+        return Err(RobustSnapError::ProtectedWorldSetMismatch);
     }
     let set_worlds = sets.iter().map(|set| set.world_id).collect::<Vec<_>>();
     require_strict_order("protected_effects", &set_worlds)?;
     if set_worlds != fiber.worlds {
-        return Err(RobustSnapErrorV1::ProtectedWorldSetMismatch);
+        return Err(RobustSnapError::ProtectedWorldSetMismatch);
     }
     for set in sets {
         validate_effect_vector("protected_effects.effects", &set.effects)?;
@@ -411,9 +411,9 @@ fn validate_protected_sets(
 fn require_strict_order<T: Ord>(
     field: &'static str,
     values: &[T],
-) -> Result<(), RobustSnapErrorV1> {
+) -> Result<(), RobustSnapError> {
     if values.windows(2).any(|pair| pair[0] >= pair[1]) {
-        Err(RobustSnapErrorV1::NonCanonicalOrder(field))
+        Err(RobustSnapError::NonCanonicalOrder(field))
     } else {
         Ok(())
     }
@@ -421,7 +421,7 @@ fn require_strict_order<T: Ord>(
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
-pub enum RobustSnapFailureCodeV1 {
+pub enum RobustSnapFailureCode {
     UnsupportedModelVersion,
     UnknownCannotPass,
     EmptyWorldFiber,
@@ -449,7 +449,7 @@ pub enum RobustSnapFailureCodeV1 {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub enum RobustSnapErrorV1 {
+pub enum RobustSnapError {
     UnsupportedModelVersion,
     UnknownCannotPass,
     EmptyWorldFiber,
@@ -473,60 +473,60 @@ pub enum RobustSnapErrorV1 {
     LeafEffectNotProtected,
     HeuristicDroppedWorld,
     CertificateDigestMismatch {
-        expected: DigestV1,
-        actual: DigestV1,
+        expected: Sha256Digest,
+        actual: Sha256Digest,
     },
     Json(String),
 }
 
-impl RobustSnapErrorV1 {
-    pub const fn code(&self) -> RobustSnapFailureCodeV1 {
+impl RobustSnapError {
+    pub const fn code(&self) -> RobustSnapFailureCode {
         match self {
-            Self::UnsupportedModelVersion => RobustSnapFailureCodeV1::UnsupportedModelVersion,
-            Self::UnknownCannotPass => RobustSnapFailureCodeV1::UnknownCannotPass,
-            Self::EmptyWorldFiber => RobustSnapFailureCodeV1::EmptyWorldFiber,
-            Self::BoundExceeded(_) => RobustSnapFailureCodeV1::BoundExceeded,
-            Self::NonCanonicalOrder(_) => RobustSnapFailureCodeV1::NonCanonicalOrder,
-            Self::InvalidAssumption => RobustSnapFailureCodeV1::InvalidAssumption,
-            Self::ProtectedWorldSetMismatch => RobustSnapFailureCodeV1::ProtectedWorldSetMismatch,
-            Self::MissingProtectedEffectSet => RobustSnapFailureCodeV1::MissingProtectedEffectSet,
+            Self::UnsupportedModelVersion => RobustSnapFailureCode::UnsupportedModelVersion,
+            Self::UnknownCannotPass => RobustSnapFailureCode::UnknownCannotPass,
+            Self::EmptyWorldFiber => RobustSnapFailureCode::EmptyWorldFiber,
+            Self::BoundExceeded(_) => RobustSnapFailureCode::BoundExceeded,
+            Self::NonCanonicalOrder(_) => RobustSnapFailureCode::NonCanonicalOrder,
+            Self::InvalidAssumption => RobustSnapFailureCode::InvalidAssumption,
+            Self::ProtectedWorldSetMismatch => RobustSnapFailureCode::ProtectedWorldSetMismatch,
+            Self::MissingProtectedEffectSet => RobustSnapFailureCode::MissingProtectedEffectSet,
             Self::EmptyCommonProtectedEffectSet => {
-                RobustSnapFailureCodeV1::EmptyCommonProtectedEffectSet
+                RobustSnapFailureCode::EmptyCommonProtectedEffectSet
             }
-            Self::SelectedEffectRequiredAtS0 => RobustSnapFailureCodeV1::SelectedEffectRequiredAtS0,
-            Self::SelectedEffectNotCommon => RobustSnapFailureCodeV1::SelectedEffectNotCommon,
-            Self::EvidenceTreeForbiddenAtS0 => RobustSnapFailureCodeV1::EvidenceTreeForbiddenAtS0,
-            Self::EvidenceTreeRequiredAtS1 => RobustSnapFailureCodeV1::EvidenceTreeRequiredAtS1,
+            Self::SelectedEffectRequiredAtS0 => RobustSnapFailureCode::SelectedEffectRequiredAtS0,
+            Self::SelectedEffectNotCommon => RobustSnapFailureCode::SelectedEffectNotCommon,
+            Self::EvidenceTreeForbiddenAtS0 => RobustSnapFailureCode::EvidenceTreeForbiddenAtS0,
+            Self::EvidenceTreeRequiredAtS1 => RobustSnapFailureCode::EvidenceTreeRequiredAtS1,
             Self::GlobalSelectionForbiddenAtS1 => {
-                RobustSnapFailureCodeV1::GlobalSelectionForbiddenAtS1
+                RobustSnapFailureCode::GlobalSelectionForbiddenAtS1
             }
-            Self::EmptyDecisionTree => RobustSnapFailureCodeV1::EmptyDecisionTree,
-            Self::EmptyEvidencePath => RobustSnapFailureCodeV1::EmptyEvidencePath,
-            Self::EmptyEvidenceLeaf => RobustSnapFailureCodeV1::EmptyEvidenceLeaf,
-            Self::LeafWorldOutsideFiber => RobustSnapFailureCodeV1::LeafWorldOutsideFiber,
+            Self::EmptyDecisionTree => RobustSnapFailureCode::EmptyDecisionTree,
+            Self::EmptyEvidencePath => RobustSnapFailureCode::EmptyEvidencePath,
+            Self::EmptyEvidenceLeaf => RobustSnapFailureCode::EmptyEvidenceLeaf,
+            Self::LeafWorldOutsideFiber => RobustSnapFailureCode::LeafWorldOutsideFiber,
             Self::WorldAppearsInMultipleLeaves => {
-                RobustSnapFailureCodeV1::WorldAppearsInMultipleLeaves
+                RobustSnapFailureCode::WorldAppearsInMultipleLeaves
             }
-            Self::EvidenceTreeDropsWorld => RobustSnapFailureCodeV1::EvidenceTreeDropsWorld,
-            Self::LeafEffectNotProtected => RobustSnapFailureCodeV1::LeafEffectNotProtected,
-            Self::HeuristicDroppedWorld => RobustSnapFailureCodeV1::HeuristicDroppedWorld,
+            Self::EvidenceTreeDropsWorld => RobustSnapFailureCode::EvidenceTreeDropsWorld,
+            Self::LeafEffectNotProtected => RobustSnapFailureCode::LeafEffectNotProtected,
+            Self::HeuristicDroppedWorld => RobustSnapFailureCode::HeuristicDroppedWorld,
             Self::CertificateDigestMismatch { .. } => {
-                RobustSnapFailureCodeV1::CertificateDigestMismatch
+                RobustSnapFailureCode::CertificateDigestMismatch
             }
-            Self::Json(_) => RobustSnapFailureCodeV1::Json,
+            Self::Json(_) => RobustSnapFailureCode::Json,
         }
     }
 }
 
-impl fmt::Display for RobustSnapErrorV1 {
+impl fmt::Display for RobustSnapError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "Robust Snap verification failed: {:?}", self.code())
     }
 }
 
-impl Error for RobustSnapErrorV1 {}
+impl Error for RobustSnapError {}
 
-pub fn robust_snap_contract_manifest_v1() -> Value {
+pub fn robust_snap_contract_manifest() -> Value {
     json!({
         "contract": "zerostack.robust_snap",
         "contract_version": ROBUST_SNAP_CONTRACT_VERSION,
@@ -549,9 +549,9 @@ pub fn robust_snap_contract_manifest_v1() -> Value {
     })
 }
 
-pub fn robust_snap_contract_digest_v1() -> DigestV1 {
-    DigestV1::from_bytes(sha256(
-        canonical_json(&robust_snap_contract_manifest_v1()).as_bytes(),
+pub fn robust_snap_contract_digest() -> Sha256Digest {
+    Sha256Digest::from_bytes(sha256(
+        canonical_json(&robust_snap_contract_manifest()).as_bytes(),
     ))
 }
 

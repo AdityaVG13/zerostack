@@ -16,12 +16,12 @@
 //!
 //! The caller owns the ordering contract:
 //!
-//! 1. `prepare_attempt_v1` persists the write-once Prepared entry.
+//! 1. `prepare_attempt` persists the write-once Prepared entry.
 //! 2. Effect admission happens only after prepare returns.
-//! 3. `mark_dispatch_crossed_v1` persists the dispatch boundary immediately
+//! 3. `mark_dispatch_crossed` persists the dispatch boundary immediately
 //!    before the effect is dispatched.
-//! 4. The effect runs; the caller persists `mark_succeeded_v1`,
-//!    `mark_failed_v1`, or `mark_indeterminate_v1`, or crashes.
+//! 4. The effect runs; the caller persists `mark_succeeded`,
+//!    `mark_failed`, or `mark_indeterminate`, or crashes.
 //!
 //! Entries are immutable: each sequence number is a distinct write-once file
 //! (`attempt-<sequence>.json`) inside the caller-supplied directory, so a
@@ -31,7 +31,7 @@
 //! this crate cannot name gate receipt types — and the journal binds their
 //! canonical digests, which are authoritative once persisted.
 //!
-//! Recovery law (`recover_attempt_v1`):
+//! Recovery law (`recover_attempt`):
 //!
 //! - Succeeded | Failed | Indeterminate | Aborted | SafeToRetry: returned
 //!   unchanged.
@@ -42,7 +42,7 @@
 //!   proves completion, Failed only when authoritative evidence proves safe
 //!   rollback, and Indeterminate otherwise.
 //!
-//! Aborted is produced only by an explicit caller abort (`abort_attempt_v1`);
+//! Aborted is produced only by an explicit caller abort (`abort_attempt`);
 //! recovery never writes an Aborted entry.
 //!
 //! Recovery never writes a DispatchCrossed entry and no API can redispatch a
@@ -65,25 +65,25 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
-use zero_abi::{DigestV1, EffectClass, canonical_json, sha256};
+use zero_abi::{Sha256Digest, EffectClass, canonical_json, sha256};
 
 use crate::fs_replace::{replace_file, sync_dir};
-use crate::{DurableProfileIdV1, DurableProfileV1};
+use crate::{DurableProfileId, DurableProfile};
 
-pub const ATTEMPT_JOURNAL_SCHEMA_VERSION_V1: u16 = 1;
-pub const ATTEMPT_BINDING_SCHEMA_VERSION_V1: u16 = 1;
-pub const ATTEMPT_RECEIPT_SCHEMA_VERSION_V1: u16 = 1;
-pub const ATTEMPT_JOURNAL_MAX_RECORD_BYTES_V1: u64 = 64 * 1024;
-pub const ATTEMPT_JOURNAL_MAX_ENTRIES_V1: u64 = 8;
+pub const ATTEMPT_JOURNAL_SCHEMA_VERSION: u16 = 1;
+pub const ATTEMPT_BINDING_SCHEMA_VERSION: u16 = 1;
+pub const ATTEMPT_RECEIPT_SCHEMA_VERSION: u16 = 1;
+pub const ATTEMPT_JOURNAL_MAX_RECORD_BYTES: u64 = 64 * 1024;
+pub const ATTEMPT_JOURNAL_MAX_ENTRIES: u64 = 8;
 
-const ATTEMPT_BINDING_DOMAIN_V1: &[u8] = b"zerostack.attempt_journal.binding.v1\0";
-const ATTEMPT_ENTRY_DOMAIN_V1: &[u8] = b"zerostack.attempt_journal.entry.v1\0";
-const ATTEMPT_RECOVERY_DOMAIN_V1: &[u8] = b"zerostack.attempt_journal.recovery.v1\0";
+const ATTEMPT_BINDING_DOMAIN: &[u8] = b"zerostack.attempt_journal.binding.v1\0";
+const ATTEMPT_ENTRY_DOMAIN: &[u8] = b"zerostack.attempt_journal.entry.v1\0";
+const ATTEMPT_RECOVERY_DOMAIN: &[u8] = b"zerostack.attempt_journal.recovery.v1\0";
 static ATTEMPT_TEMP_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
-pub enum AttemptStateV1 {
+pub enum AttemptState {
     Prepared,
     DispatchCrossed,
     Succeeded,
@@ -92,7 +92,7 @@ pub enum AttemptStateV1 {
     SafeToRetry,
     Aborted,
 }
-impl AttemptStateV1 {
+impl AttemptState {
     pub const fn as_str(self) -> &'static str {
         match self {
             Self::Prepared => "prepared",
@@ -118,13 +118,13 @@ impl AttemptStateV1 {
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
-pub enum AttemptAbortReasonV1 {
+pub enum AttemptAbortReason {
     ExplicitAbort,
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
-pub enum AttemptRecoveryOutcomeV1 {
+pub enum AttemptRecoveryOutcome {
     AlreadySucceeded,
     AlreadyFailed,
     AlreadyIndeterminate,
@@ -138,7 +138,7 @@ pub enum AttemptRecoveryOutcomeV1 {
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
-pub enum AttemptFailureCodeV1 {
+pub enum AttemptFailureCode {
     SchemaVersionMismatch,
     InvalidBinding,
     ProfileSubstitution,
@@ -157,7 +157,7 @@ pub enum AttemptFailureCodeV1 {
     DirectorySyncFailedAfterPublish,
     InjectedCrash,
 }
-impl AttemptFailureCodeV1 {
+impl AttemptFailureCode {
     pub const fn as_str(self) -> &'static str {
         match self {
             Self::SchemaVersionMismatch => "schema_version_mismatch",
@@ -183,7 +183,7 @@ impl AttemptFailureCodeV1 {
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, Hash, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
-pub enum AttemptBoundaryV1 {
+pub enum AttemptBoundary {
     PrepareBeforeWrite,
     PrepareAfterFileSync,
     PrepareAfterRename,
@@ -215,14 +215,14 @@ pub enum AttemptBoundaryV1 {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct AttemptJournalErrorV1 {
-    pub code: AttemptFailureCodeV1,
-    pub boundary: Option<AttemptBoundaryV1>,
+pub struct AttemptJournalError {
+    pub code: AttemptFailureCode,
+    pub boundary: Option<AttemptBoundary>,
     pub entry_published: bool,
     pub detail: String,
 }
-impl AttemptJournalErrorV1 {
-    fn new(code: AttemptFailureCodeV1, detail: impl Into<String>) -> Self {
+impl AttemptJournalError {
+    fn new(code: AttemptFailureCode, detail: impl Into<String>) -> Self {
         Self {
             code,
             boundary: None,
@@ -231,8 +231,8 @@ impl AttemptJournalErrorV1 {
         }
     }
     fn at(
-        code: AttemptFailureCodeV1,
-        boundary: AttemptBoundaryV1,
+        code: AttemptFailureCode,
+        boundary: AttemptBoundary,
         entry_published: bool,
         detail: impl Into<String>,
     ) -> Self {
@@ -244,23 +244,23 @@ impl AttemptJournalErrorV1 {
         }
     }
 }
-impl std::fmt::Display for AttemptJournalErrorV1 {
+impl std::fmt::Display for AttemptJournalError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}: {}", self.code.as_str(), self.detail)
     }
 }
-impl std::error::Error for AttemptJournalErrorV1 {}
+impl std::error::Error for AttemptJournalError {}
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct AttemptJournalPathsV1 {
+pub struct AttemptJournalPaths {
     directory: PathBuf,
 }
-impl AttemptJournalPathsV1 {
-    pub fn new(directory: impl Into<PathBuf>) -> Result<Self, AttemptJournalErrorV1> {
+impl AttemptJournalPaths {
+    pub fn new(directory: impl Into<PathBuf>) -> Result<Self, AttemptJournalError> {
         let directory = directory.into();
         if directory.as_os_str().is_empty() || directory.file_name().is_none() {
-            return Err(AttemptJournalErrorV1::new(
-                AttemptFailureCodeV1::InvalidBinding,
+            return Err(AttemptJournalError::new(
+                AttemptFailureCode::InvalidBinding,
                 "attempt journal directory must name a directory",
             ));
         }
@@ -276,40 +276,40 @@ impl AttemptJournalPathsV1 {
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
-pub struct AttemptBindingV1 {
+pub struct AttemptBinding {
     pub schema_version: u16,
-    pub attempt_id: DigestV1,
-    pub effect_digest: DigestV1,
+    pub attempt_id: Sha256Digest,
+    pub effect_digest: Sha256Digest,
     pub effect_class: EffectClass,
-    pub admission_anchor_digest: DigestV1,
-    pub durable_profile_id: DurableProfileIdV1,
-    pub durable_profile_digest: DigestV1,
-    pub owner_identity_digest: DigestV1,
+    pub admission_anchor_digest: Sha256Digest,
+    pub durable_profile_id: DurableProfileId,
+    pub durable_profile_digest: Sha256Digest,
+    pub owner_identity_digest: Sha256Digest,
 }
-impl AttemptBindingV1 {
+impl AttemptBinding {
     pub fn new(
-        attempt_id: DigestV1,
-        effect_digest: DigestV1,
+        attempt_id: Sha256Digest,
+        effect_digest: Sha256Digest,
         effect_class: EffectClass,
-        admission_anchor_digest: DigestV1,
-        durable_profile_id: DurableProfileIdV1,
-        owner_identity_digest: DigestV1,
+        admission_anchor_digest: Sha256Digest,
+        durable_profile_id: DurableProfileId,
+        owner_identity_digest: Sha256Digest,
     ) -> Self {
         Self {
-            schema_version: ATTEMPT_BINDING_SCHEMA_VERSION_V1,
+            schema_version: ATTEMPT_BINDING_SCHEMA_VERSION,
             attempt_id,
             effect_digest,
             effect_class,
             admission_anchor_digest,
             durable_profile_id,
-            durable_profile_digest: DurableProfileV1::new(durable_profile_id).digest(),
+            durable_profile_digest: DurableProfile::new(durable_profile_id).digest(),
             owner_identity_digest,
         }
     }
-    pub fn validate(&self) -> Result<(), AttemptJournalErrorV1> {
-        if self.schema_version != ATTEMPT_BINDING_SCHEMA_VERSION_V1 {
-            return Err(AttemptJournalErrorV1::new(
-                AttemptFailureCodeV1::SchemaVersionMismatch,
+    pub fn validate(&self) -> Result<(), AttemptJournalError> {
+        if self.schema_version != ATTEMPT_BINDING_SCHEMA_VERSION {
+            return Err(AttemptJournalError::new(
+                AttemptFailureCode::SchemaVersionMismatch,
                 "attempt binding schema version is not supported",
             ));
         }
@@ -319,28 +319,28 @@ impl AttemptBindingV1 {
             self.admission_anchor_digest,
             self.owner_identity_digest,
         ]
-        .contains(&DigestV1::ZERO)
+        .contains(&Sha256Digest::ZERO)
         {
-            return Err(AttemptJournalErrorV1::new(
-                AttemptFailureCodeV1::InvalidBinding,
+            return Err(AttemptJournalError::new(
+                AttemptFailureCode::InvalidBinding,
                 "attempt binding digests must be nonzero",
             ));
         }
-        if self.durable_profile_digest != DurableProfileV1::new(self.durable_profile_id).digest() {
-            return Err(AttemptJournalErrorV1::new(
-                AttemptFailureCodeV1::ProfileSubstitution,
+        if self.durable_profile_digest != DurableProfile::new(self.durable_profile_id).digest() {
+            return Err(AttemptJournalError::new(
+                AttemptFailureCode::ProfileSubstitution,
                 "durable profile identity does not match its frozen digest",
             ));
         }
         Ok(())
     }
-    pub fn canonical_bytes(&self) -> Result<Vec<u8>, AttemptJournalErrorV1> {
+    pub fn canonical_bytes(&self) -> Result<Vec<u8>, AttemptJournalError> {
         self.validate()?;
         canonical_bytes(self)
     }
-    pub fn digest(&self) -> Result<DigestV1, AttemptJournalErrorV1> {
+    pub fn digest(&self) -> Result<Sha256Digest, AttemptJournalError> {
         Ok(domain_digest(
-            ATTEMPT_BINDING_DOMAIN_V1,
+            ATTEMPT_BINDING_DOMAIN,
             &self.canonical_bytes()?,
         ))
     }
@@ -348,30 +348,30 @@ impl AttemptBindingV1 {
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields, tag = "kind", rename_all = "snake_case")]
-pub enum AttemptEvidenceV1 {
+pub enum AttemptEvidence {
     Completion {
-        receipt_digest: DigestV1,
+        receipt_digest: Sha256Digest,
         observed_at_unix_ns: u64,
     },
     Failure {
-        failure_receipt_digest: DigestV1,
+        failure_receipt_digest: Sha256Digest,
         observed_at_unix_ns: u64,
     },
 }
-impl AttemptEvidenceV1 {
-    fn validate(&self) -> Result<(), AttemptJournalErrorV1> {
+impl AttemptEvidence {
+    fn validate(&self) -> Result<(), AttemptJournalError> {
         match self {
-            Self::Completion { receipt_digest, .. } if *receipt_digest == DigestV1::ZERO => {
-                Err(AttemptJournalErrorV1::new(
-                    AttemptFailureCodeV1::InvalidEvidence,
+            Self::Completion { receipt_digest, .. } if *receipt_digest == Sha256Digest::ZERO => {
+                Err(AttemptJournalError::new(
+                    AttemptFailureCode::InvalidEvidence,
                     "completion receipt digest must be nonzero",
                 ))
             }
             Self::Failure {
                 failure_receipt_digest,
                 ..
-            } if *failure_receipt_digest == DigestV1::ZERO => Err(AttemptJournalErrorV1::new(
-                AttemptFailureCodeV1::InvalidEvidence,
+            } if *failure_receipt_digest == Sha256Digest::ZERO => Err(AttemptJournalError::new(
+                AttemptFailureCode::InvalidEvidence,
                 "failure receipt digest must be nonzero",
             )),
             _ => Ok(()),
@@ -381,22 +381,22 @@ impl AttemptEvidenceV1 {
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
-pub struct AttemptEntryV1 {
+pub struct AttemptEntry {
     pub schema_version: u16,
-    pub binding: AttemptBindingV1,
-    pub state: AttemptStateV1,
+    pub binding: AttemptBinding,
+    pub state: AttemptState,
     pub sequence: u64,
-    pub predecessor_entry_digest: Option<DigestV1>,
+    pub predecessor_entry_digest: Option<Sha256Digest>,
     pub crossed_at_unix_ns: Option<u64>,
-    pub abort_reason: Option<AttemptAbortReasonV1>,
-    pub evidence: Option<AttemptEvidenceV1>,
+    pub abort_reason: Option<AttemptAbortReason>,
+    pub evidence: Option<AttemptEvidence>,
 }
-impl AttemptEntryV1 {
-    fn prepared(binding: AttemptBindingV1, sequence: u64) -> Self {
+impl AttemptEntry {
+    fn prepared(binding: AttemptBinding, sequence: u64) -> Self {
         Self {
-            schema_version: ATTEMPT_JOURNAL_SCHEMA_VERSION_V1,
+            schema_version: ATTEMPT_JOURNAL_SCHEMA_VERSION,
             binding,
-            state: AttemptStateV1::Prepared,
+            state: AttemptState::Prepared,
             sequence,
             predecessor_entry_digest: None,
             crossed_at_unix_ns: None,
@@ -406,14 +406,14 @@ impl AttemptEntryV1 {
     }
     fn dispatch_crossed(
         prepared: &Self,
-        prepared_digest: DigestV1,
+        prepared_digest: Sha256Digest,
         sequence: u64,
         crossed_at_unix_ns: u64,
     ) -> Self {
         Self {
-            schema_version: ATTEMPT_JOURNAL_SCHEMA_VERSION_V1,
+            schema_version: ATTEMPT_JOURNAL_SCHEMA_VERSION,
             binding: prepared.binding.clone(),
-            state: AttemptStateV1::DispatchCrossed,
+            state: AttemptState::DispatchCrossed,
             sequence,
             predecessor_entry_digest: Some(prepared_digest),
             crossed_at_unix_ns: Some(crossed_at_unix_ns),
@@ -423,14 +423,14 @@ impl AttemptEntryV1 {
     }
     fn succeeded(
         dispatch: &Self,
-        dispatch_digest: DigestV1,
+        dispatch_digest: Sha256Digest,
         sequence: u64,
-        evidence: AttemptEvidenceV1,
+        evidence: AttemptEvidence,
     ) -> Self {
         Self {
-            schema_version: ATTEMPT_JOURNAL_SCHEMA_VERSION_V1,
+            schema_version: ATTEMPT_JOURNAL_SCHEMA_VERSION,
             binding: dispatch.binding.clone(),
-            state: AttemptStateV1::Succeeded,
+            state: AttemptState::Succeeded,
             sequence,
             predecessor_entry_digest: Some(dispatch_digest),
             crossed_at_unix_ns: None,
@@ -440,14 +440,14 @@ impl AttemptEntryV1 {
     }
     fn failed(
         dispatch: &Self,
-        dispatch_digest: DigestV1,
+        dispatch_digest: Sha256Digest,
         sequence: u64,
-        evidence: AttemptEvidenceV1,
+        evidence: AttemptEvidence,
     ) -> Self {
         Self {
-            schema_version: ATTEMPT_JOURNAL_SCHEMA_VERSION_V1,
+            schema_version: ATTEMPT_JOURNAL_SCHEMA_VERSION,
             binding: dispatch.binding.clone(),
-            state: AttemptStateV1::Failed,
+            state: AttemptState::Failed,
             sequence,
             predecessor_entry_digest: Some(dispatch_digest),
             crossed_at_unix_ns: None,
@@ -455,11 +455,11 @@ impl AttemptEntryV1 {
             evidence: Some(evidence),
         }
     }
-    fn indeterminate(dispatch: &Self, dispatch_digest: DigestV1, sequence: u64) -> Self {
+    fn indeterminate(dispatch: &Self, dispatch_digest: Sha256Digest, sequence: u64) -> Self {
         Self {
-            schema_version: ATTEMPT_JOURNAL_SCHEMA_VERSION_V1,
+            schema_version: ATTEMPT_JOURNAL_SCHEMA_VERSION,
             binding: dispatch.binding.clone(),
-            state: AttemptStateV1::Indeterminate,
+            state: AttemptState::Indeterminate,
             sequence,
             predecessor_entry_digest: Some(dispatch_digest),
             crossed_at_unix_ns: None,
@@ -467,11 +467,11 @@ impl AttemptEntryV1 {
             evidence: None,
         }
     }
-    fn safe_to_retry(prepared: &Self, prepared_digest: DigestV1, sequence: u64) -> Self {
+    fn safe_to_retry(prepared: &Self, prepared_digest: Sha256Digest, sequence: u64) -> Self {
         Self {
-            schema_version: ATTEMPT_JOURNAL_SCHEMA_VERSION_V1,
+            schema_version: ATTEMPT_JOURNAL_SCHEMA_VERSION,
             binding: prepared.binding.clone(),
-            state: AttemptStateV1::SafeToRetry,
+            state: AttemptState::SafeToRetry,
             sequence,
             predecessor_entry_digest: Some(prepared_digest),
             crossed_at_unix_ns: None,
@@ -481,14 +481,14 @@ impl AttemptEntryV1 {
     }
     fn aborted(
         prepared: &Self,
-        prepared_digest: DigestV1,
+        prepared_digest: Sha256Digest,
         sequence: u64,
-        reason: AttemptAbortReasonV1,
+        reason: AttemptAbortReason,
     ) -> Self {
         Self {
-            schema_version: ATTEMPT_JOURNAL_SCHEMA_VERSION_V1,
+            schema_version: ATTEMPT_JOURNAL_SCHEMA_VERSION,
             binding: prepared.binding.clone(),
-            state: AttemptStateV1::Aborted,
+            state: AttemptState::Aborted,
             sequence,
             predecessor_entry_digest: Some(prepared_digest),
             crossed_at_unix_ns: None,
@@ -496,37 +496,37 @@ impl AttemptEntryV1 {
             evidence: None,
         }
     }
-    pub fn validate(&self) -> Result<(), AttemptJournalErrorV1> {
-        if self.schema_version != ATTEMPT_JOURNAL_SCHEMA_VERSION_V1 {
-            return Err(AttemptJournalErrorV1::new(
-                AttemptFailureCodeV1::SchemaVersionMismatch,
+    pub fn validate(&self) -> Result<(), AttemptJournalError> {
+        if self.schema_version != ATTEMPT_JOURNAL_SCHEMA_VERSION {
+            return Err(AttemptJournalError::new(
+                AttemptFailureCode::SchemaVersionMismatch,
                 "attempt entry schema version is not supported",
             ));
         }
         self.binding.validate()?;
         let structural = match self.state {
-            AttemptStateV1::Prepared => {
+            AttemptState::Prepared => {
                 self.sequence == 1
                     && self.predecessor_entry_digest.is_none()
                     && self.crossed_at_unix_ns.is_none()
                     && self.abort_reason.is_none()
             }
-            AttemptStateV1::DispatchCrossed => {
+            AttemptState::DispatchCrossed => {
                 self.sequence >= 2
                     && self.predecessor_entry_digest.is_some()
                     && self.crossed_at_unix_ns.is_some()
                     && self.abort_reason.is_none()
             }
-            AttemptStateV1::Succeeded
-            | AttemptStateV1::Failed
-            | AttemptStateV1::Indeterminate
-            | AttemptStateV1::SafeToRetry => {
+            AttemptState::Succeeded
+            | AttemptState::Failed
+            | AttemptState::Indeterminate
+            | AttemptState::SafeToRetry => {
                 self.sequence >= 2
                     && self.predecessor_entry_digest.is_some()
                     && self.crossed_at_unix_ns.is_none()
                     && self.abort_reason.is_none()
             }
-            AttemptStateV1::Aborted => {
+            AttemptState::Aborted => {
                 self.sequence >= 2
                     && self.predecessor_entry_digest.is_some()
                     && self.crossed_at_unix_ns.is_none()
@@ -534,27 +534,27 @@ impl AttemptEntryV1 {
             }
         };
         if !structural {
-            return Err(AttemptJournalErrorV1::new(
-                AttemptFailureCodeV1::SequenceMismatch,
+            return Err(AttemptJournalError::new(
+                AttemptFailureCode::SequenceMismatch,
                 "attempt state and sequence commitments disagree",
             ));
         }
         let paired = match self.state {
-            AttemptStateV1::Succeeded => {
-                matches!(self.evidence, Some(AttemptEvidenceV1::Completion { .. }))
+            AttemptState::Succeeded => {
+                matches!(self.evidence, Some(AttemptEvidence::Completion { .. }))
             }
-            AttemptStateV1::Failed => {
-                matches!(self.evidence, Some(AttemptEvidenceV1::Failure { .. }))
+            AttemptState::Failed => {
+                matches!(self.evidence, Some(AttemptEvidence::Failure { .. }))
             }
-            AttemptStateV1::Prepared
-            | AttemptStateV1::DispatchCrossed
-            | AttemptStateV1::Indeterminate
-            | AttemptStateV1::SafeToRetry
-            | AttemptStateV1::Aborted => self.evidence.is_none(),
+            AttemptState::Prepared
+            | AttemptState::DispatchCrossed
+            | AttemptState::Indeterminate
+            | AttemptState::SafeToRetry
+            | AttemptState::Aborted => self.evidence.is_none(),
         };
         if !paired {
-            return Err(AttemptJournalErrorV1::new(
-                AttemptFailureCodeV1::InvalidEvidence,
+            return Err(AttemptJournalError::new(
+                AttemptFailureCode::InvalidEvidence,
                 "attempt evidence does not match the entry state",
             ));
         }
@@ -563,13 +563,13 @@ impl AttemptEntryV1 {
         }
         Ok(())
     }
-    pub fn canonical_bytes(&self) -> Result<Vec<u8>, AttemptJournalErrorV1> {
+    pub fn canonical_bytes(&self) -> Result<Vec<u8>, AttemptJournalError> {
         self.validate()?;
         canonical_bytes(self)
     }
-    pub fn digest(&self) -> Result<DigestV1, AttemptJournalErrorV1> {
+    pub fn digest(&self) -> Result<Sha256Digest, AttemptJournalError> {
         Ok(domain_digest(
-            ATTEMPT_ENTRY_DOMAIN_V1,
+            ATTEMPT_ENTRY_DOMAIN,
             &self.canonical_bytes()?,
         ))
     }
@@ -577,94 +577,94 @@ impl AttemptEntryV1 {
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
-pub struct AttemptRecoveryReceiptV1 {
+pub struct AttemptRecoveryReceipt {
     pub schema_version: u16,
-    pub binding_digest: DigestV1,
-    pub outcome: AttemptRecoveryOutcomeV1,
-    pub terminal_entry_digest: DigestV1,
-    pub terminal_state: AttemptStateV1,
+    pub binding_digest: Sha256Digest,
+    pub outcome: AttemptRecoveryOutcome,
+    pub terminal_entry_digest: Sha256Digest,
+    pub terminal_state: AttemptState,
 }
-impl AttemptRecoveryReceiptV1 {
-    pub fn validate(&self) -> Result<(), AttemptJournalErrorV1> {
-        if self.schema_version != ATTEMPT_RECEIPT_SCHEMA_VERSION_V1 {
-            return Err(AttemptJournalErrorV1::new(
-                AttemptFailureCodeV1::SchemaVersionMismatch,
+impl AttemptRecoveryReceipt {
+    pub fn validate(&self) -> Result<(), AttemptJournalError> {
+        if self.schema_version != ATTEMPT_RECEIPT_SCHEMA_VERSION {
+            return Err(AttemptJournalError::new(
+                AttemptFailureCode::SchemaVersionMismatch,
                 "attempt recovery receipt schema version is not supported",
             ));
         }
-        if self.binding_digest == DigestV1::ZERO
-            || self.terminal_entry_digest == DigestV1::ZERO
+        if self.binding_digest == Sha256Digest::ZERO
+            || self.terminal_entry_digest == Sha256Digest::ZERO
             || !self.terminal_state.is_terminal()
         {
-            return Err(AttemptJournalErrorV1::new(
-                AttemptFailureCodeV1::InvalidBinding,
+            return Err(AttemptJournalError::new(
+                AttemptFailureCode::InvalidBinding,
                 "attempt recovery receipt is incomplete",
             ));
         }
         let paired = matches!(
             (self.outcome, self.terminal_state),
             (
-                AttemptRecoveryOutcomeV1::AlreadySucceeded,
-                AttemptStateV1::Succeeded
+                AttemptRecoveryOutcome::AlreadySucceeded,
+                AttemptState::Succeeded
             ) | (
-                AttemptRecoveryOutcomeV1::AlreadyFailed,
-                AttemptStateV1::Failed
+                AttemptRecoveryOutcome::AlreadyFailed,
+                AttemptState::Failed
             ) | (
-                AttemptRecoveryOutcomeV1::AlreadyIndeterminate,
-                AttemptStateV1::Indeterminate
+                AttemptRecoveryOutcome::AlreadyIndeterminate,
+                AttemptState::Indeterminate
             ) | (
-                AttemptRecoveryOutcomeV1::AlreadyAborted,
-                AttemptStateV1::Aborted
+                AttemptRecoveryOutcome::AlreadyAborted,
+                AttemptState::Aborted
             ) | (
-                AttemptRecoveryOutcomeV1::AlreadySafeToRetry,
-                AttemptStateV1::SafeToRetry
+                AttemptRecoveryOutcome::AlreadySafeToRetry,
+                AttemptState::SafeToRetry
             ) | (
-                AttemptRecoveryOutcomeV1::ClassifiedSucceeded,
-                AttemptStateV1::Succeeded
+                AttemptRecoveryOutcome::ClassifiedSucceeded,
+                AttemptState::Succeeded
             ) | (
-                AttemptRecoveryOutcomeV1::ClassifiedFailed,
-                AttemptStateV1::Failed
+                AttemptRecoveryOutcome::ClassifiedFailed,
+                AttemptState::Failed
             ) | (
-                AttemptRecoveryOutcomeV1::ClassifiedIndeterminate,
-                AttemptStateV1::Indeterminate
+                AttemptRecoveryOutcome::ClassifiedIndeterminate,
+                AttemptState::Indeterminate
             ) | (
-                AttemptRecoveryOutcomeV1::ClassifiedSafeToRetry,
-                AttemptStateV1::SafeToRetry
+                AttemptRecoveryOutcome::ClassifiedSafeToRetry,
+                AttemptState::SafeToRetry
             )
         );
         if !paired {
-            return Err(AttemptJournalErrorV1::new(
-                AttemptFailureCodeV1::InvalidBinding,
+            return Err(AttemptJournalError::new(
+                AttemptFailureCode::InvalidBinding,
                 "attempt recovery receipt outcome and terminal state disagree",
             ));
         }
         Ok(())
     }
-    pub fn canonical_bytes(&self) -> Result<Vec<u8>, AttemptJournalErrorV1> {
+    pub fn canonical_bytes(&self) -> Result<Vec<u8>, AttemptJournalError> {
         self.validate()?;
         canonical_bytes(self)
     }
-    pub fn digest(&self) -> Result<DigestV1, AttemptJournalErrorV1> {
+    pub fn digest(&self) -> Result<Sha256Digest, AttemptJournalError> {
         Ok(domain_digest(
-            ATTEMPT_RECOVERY_DOMAIN_V1,
+            ATTEMPT_RECOVERY_DOMAIN,
             &self.canonical_bytes()?,
         ))
     }
 }
 
 #[derive(Clone, Copy, Debug, Default)]
-pub struct AttemptFaultPlanV1 {
-    crash_at: Option<AttemptBoundaryV1>,
+pub struct AttemptFaultPlan {
+    crash_at: Option<AttemptBoundary>,
     fired: bool,
 }
-impl AttemptFaultPlanV1 {
+impl AttemptFaultPlan {
     pub const fn none() -> Self {
         Self {
             crash_at: None,
             fired: false,
         }
     }
-    pub const fn crash_at(boundary: AttemptBoundaryV1) -> Self {
+    pub const fn crash_at(boundary: AttemptBoundary) -> Self {
         Self {
             crash_at: Some(boundary),
             fired: false,
@@ -672,13 +672,13 @@ impl AttemptFaultPlanV1 {
     }
     fn hit(
         &mut self,
-        boundary: AttemptBoundaryV1,
+        boundary: AttemptBoundary,
         entry_published: bool,
-    ) -> Result<(), AttemptJournalErrorV1> {
+    ) -> Result<(), AttemptJournalError> {
         if !self.fired && self.crash_at == Some(boundary) {
             self.fired = true;
-            return Err(AttemptJournalErrorV1::at(
-                AttemptFailureCodeV1::InjectedCrash,
+            return Err(AttemptJournalError::at(
+                AttemptFailureCode::InjectedCrash,
                 boundary,
                 entry_published,
                 "preregistered crash boundary reached",
@@ -690,131 +690,131 @@ impl AttemptFaultPlanV1 {
 
 #[derive(Clone, Copy)]
 struct WriteBoundaries {
-    before: AttemptBoundaryV1,
-    file_sync: AttemptBoundaryV1,
-    rename: AttemptBoundaryV1,
-    dir_sync: AttemptBoundaryV1,
+    before: AttemptBoundary,
+    file_sync: AttemptBoundary,
+    rename: AttemptBoundary,
+    dir_sync: AttemptBoundary,
 }
 const PREPARE_BOUNDARIES: WriteBoundaries = WriteBoundaries {
-    before: AttemptBoundaryV1::PrepareBeforeWrite,
-    file_sync: AttemptBoundaryV1::PrepareAfterFileSync,
-    rename: AttemptBoundaryV1::PrepareAfterRename,
-    dir_sync: AttemptBoundaryV1::PrepareAfterDirectorySync,
+    before: AttemptBoundary::PrepareBeforeWrite,
+    file_sync: AttemptBoundary::PrepareAfterFileSync,
+    rename: AttemptBoundary::PrepareAfterRename,
+    dir_sync: AttemptBoundary::PrepareAfterDirectorySync,
 };
 const DISPATCH_CROSS_BOUNDARIES: WriteBoundaries = WriteBoundaries {
-    before: AttemptBoundaryV1::DispatchCrossBeforeWrite,
-    file_sync: AttemptBoundaryV1::DispatchCrossAfterFileSync,
-    rename: AttemptBoundaryV1::DispatchCrossAfterRename,
-    dir_sync: AttemptBoundaryV1::DispatchCrossAfterDirectorySync,
+    before: AttemptBoundary::DispatchCrossBeforeWrite,
+    file_sync: AttemptBoundary::DispatchCrossAfterFileSync,
+    rename: AttemptBoundary::DispatchCrossAfterRename,
+    dir_sync: AttemptBoundary::DispatchCrossAfterDirectorySync,
 };
 const SUCCEED_BOUNDARIES: WriteBoundaries = WriteBoundaries {
-    before: AttemptBoundaryV1::SucceedBeforeWrite,
-    file_sync: AttemptBoundaryV1::SucceedAfterFileSync,
-    rename: AttemptBoundaryV1::SucceedAfterRename,
-    dir_sync: AttemptBoundaryV1::SucceedAfterDirectorySync,
+    before: AttemptBoundary::SucceedBeforeWrite,
+    file_sync: AttemptBoundary::SucceedAfterFileSync,
+    rename: AttemptBoundary::SucceedAfterRename,
+    dir_sync: AttemptBoundary::SucceedAfterDirectorySync,
 };
 const FAIL_BOUNDARIES: WriteBoundaries = WriteBoundaries {
-    before: AttemptBoundaryV1::FailBeforeWrite,
-    file_sync: AttemptBoundaryV1::FailAfterFileSync,
-    rename: AttemptBoundaryV1::FailAfterRename,
-    dir_sync: AttemptBoundaryV1::FailAfterDirectorySync,
+    before: AttemptBoundary::FailBeforeWrite,
+    file_sync: AttemptBoundary::FailAfterFileSync,
+    rename: AttemptBoundary::FailAfterRename,
+    dir_sync: AttemptBoundary::FailAfterDirectorySync,
 };
 const INDETERMINATE_BOUNDARIES: WriteBoundaries = WriteBoundaries {
-    before: AttemptBoundaryV1::IndeterminateBeforeWrite,
-    file_sync: AttemptBoundaryV1::IndeterminateAfterFileSync,
-    rename: AttemptBoundaryV1::IndeterminateAfterRename,
-    dir_sync: AttemptBoundaryV1::IndeterminateAfterDirectorySync,
+    before: AttemptBoundary::IndeterminateBeforeWrite,
+    file_sync: AttemptBoundary::IndeterminateAfterFileSync,
+    rename: AttemptBoundary::IndeterminateAfterRename,
+    dir_sync: AttemptBoundary::IndeterminateAfterDirectorySync,
 };
 const ABORT_BOUNDARIES: WriteBoundaries = WriteBoundaries {
-    before: AttemptBoundaryV1::AbortBeforeWrite,
-    file_sync: AttemptBoundaryV1::AbortAfterFileSync,
-    rename: AttemptBoundaryV1::AbortAfterRename,
-    dir_sync: AttemptBoundaryV1::AbortAfterDirectorySync,
+    before: AttemptBoundary::AbortBeforeWrite,
+    file_sync: AttemptBoundary::AbortAfterFileSync,
+    rename: AttemptBoundary::AbortAfterRename,
+    dir_sync: AttemptBoundary::AbortAfterDirectorySync,
 };
 const RECOVER_BOUNDARIES: WriteBoundaries = WriteBoundaries {
-    before: AttemptBoundaryV1::RecoverBeforeWrite,
-    file_sync: AttemptBoundaryV1::RecoverAfterFileSync,
-    rename: AttemptBoundaryV1::RecoverAfterRename,
-    dir_sync: AttemptBoundaryV1::RecoverAfterDirectorySync,
+    before: AttemptBoundary::RecoverBeforeWrite,
+    file_sync: AttemptBoundary::RecoverAfterFileSync,
+    rename: AttemptBoundary::RecoverAfterRename,
+    dir_sync: AttemptBoundary::RecoverAfterDirectorySync,
 };
 
 /// Persist the Prepared entry before effect admission. Idempotent for the
 /// same binding; a journal that already crossed dispatch or is terminal is
 /// rejected with `AlreadyTerminal`.
-pub fn prepare_attempt_v1(
-    paths: &AttemptJournalPathsV1,
-    binding: AttemptBindingV1,
-) -> Result<AttemptEntryV1, AttemptJournalErrorV1> {
-    prepare_attempt_with_fault_v1(paths, binding, &mut AttemptFaultPlanV1::none())
+pub fn prepare_attempt(
+    paths: &AttemptJournalPaths,
+    binding: AttemptBinding,
+) -> Result<AttemptEntry, AttemptJournalError> {
+    prepare_attempt_with_fault(paths, binding, &mut AttemptFaultPlan::none())
 }
-pub fn prepare_attempt_with_fault_v1(
-    paths: &AttemptJournalPathsV1,
-    binding: AttemptBindingV1,
-    fault: &mut AttemptFaultPlanV1,
-) -> Result<AttemptEntryV1, AttemptJournalErrorV1> {
+pub fn prepare_attempt_with_fault(
+    paths: &AttemptJournalPaths,
+    binding: AttemptBinding,
+    fault: &mut AttemptFaultPlan,
+) -> Result<AttemptEntry, AttemptJournalError> {
     binding.validate()?;
     let chain = read_chain(paths)?;
     if let Some(current) = chain.last() {
-        if current.value.state == AttemptStateV1::Prepared {
+        if current.value.state == AttemptState::Prepared {
             if current.value.binding == binding {
                 return Ok(current.value.clone());
             }
-            return Err(AttemptJournalErrorV1::new(
-                AttemptFailureCodeV1::ImmutableEntryConflict,
+            return Err(AttemptJournalError::new(
+                AttemptFailureCode::ImmutableEntryConflict,
                 "attempt journal is already prepared with a different binding",
             ));
         }
-        return Err(AttemptJournalErrorV1::new(
-            AttemptFailureCodeV1::AlreadyTerminal,
+        return Err(AttemptJournalError::new(
+            AttemptFailureCode::AlreadyTerminal,
             "attempt journal already crossed dispatch or is terminal",
         ));
     }
-    let prepared = AttemptEntryV1::prepared(binding, 1);
+    let prepared = AttemptEntry::prepared(binding, 1);
     write_once_entry(paths, 1, &prepared, PREPARE_BOUNDARIES, fault)?;
     Ok(prepared)
 }
 
 /// Persist the dispatch boundary immediately before the effect is dispatched.
 /// The caller must hold the digest of the persisted Prepared entry.
-pub fn mark_dispatch_crossed_v1(
-    paths: &AttemptJournalPathsV1,
-    prepared_entry_digest: DigestV1,
+pub fn mark_dispatch_crossed(
+    paths: &AttemptJournalPaths,
+    prepared_entry_digest: Sha256Digest,
     crossed_at_unix_ns: u64,
-) -> Result<AttemptEntryV1, AttemptJournalErrorV1> {
-    mark_dispatch_crossed_with_fault_v1(
+) -> Result<AttemptEntry, AttemptJournalError> {
+    mark_dispatch_crossed_with_fault(
         paths,
         prepared_entry_digest,
         crossed_at_unix_ns,
-        &mut AttemptFaultPlanV1::none(),
+        &mut AttemptFaultPlan::none(),
     )
 }
-pub fn mark_dispatch_crossed_with_fault_v1(
-    paths: &AttemptJournalPathsV1,
-    prepared_entry_digest: DigestV1,
+pub fn mark_dispatch_crossed_with_fault(
+    paths: &AttemptJournalPaths,
+    prepared_entry_digest: Sha256Digest,
     crossed_at_unix_ns: u64,
-    fault: &mut AttemptFaultPlanV1,
-) -> Result<AttemptEntryV1, AttemptJournalErrorV1> {
+    fault: &mut AttemptFaultPlan,
+) -> Result<AttemptEntry, AttemptJournalError> {
     let chain = read_chain(paths)?;
     let Some(current) = chain.last() else {
-        return Err(AttemptJournalErrorV1::new(
-            AttemptFailureCodeV1::JournalMissing,
+        return Err(AttemptJournalError::new(
+            AttemptFailureCode::JournalMissing,
             "no prepared attempt exists to dispatch",
         ));
     };
     match current.value.state {
-        AttemptStateV1::Prepared => {}
-        AttemptStateV1::DispatchCrossed => {
+        AttemptState::Prepared => {}
+        AttemptState::DispatchCrossed => {
             if current.value.predecessor_entry_digest == Some(prepared_entry_digest) {
                 return Ok(current.value.clone());
             }
-            return Err(AttemptJournalErrorV1::new(
-                AttemptFailureCodeV1::ReceiptMismatch,
+            return Err(AttemptJournalError::new(
+                AttemptFailureCode::ReceiptMismatch,
                 "dispatch already crossed for a different prepared entry",
             ));
         }
         state => {
-            return Err(AttemptJournalErrorV1::new(
-                AttemptFailureCodeV1::AlreadyTerminal,
+            return Err(AttemptJournalError::new(
+                AttemptFailureCode::AlreadyTerminal,
                 format!(
                     "terminal attempt cannot be redispatched (current state {})",
                     state.as_str()
@@ -823,13 +823,13 @@ pub fn mark_dispatch_crossed_with_fault_v1(
         }
     }
     if current.digest != prepared_entry_digest {
-        return Err(AttemptJournalErrorV1::new(
-            AttemptFailureCodeV1::ReceiptMismatch,
+        return Err(AttemptJournalError::new(
+            AttemptFailureCode::ReceiptMismatch,
             "prepared entry digest does not match the persisted journal",
         ));
     }
     let sequence = chain.len() as u64 + 1;
-    let crossed = AttemptEntryV1::dispatch_crossed(
+    let crossed = AttemptEntry::dispatch_crossed(
         &current.value,
         current.digest,
         sequence,
@@ -840,41 +840,41 @@ pub fn mark_dispatch_crossed_with_fault_v1(
 }
 
 /// Persist authoritative completion evidence as a terminal Succeeded entry.
-pub fn mark_succeeded_v1(
-    paths: &AttemptJournalPathsV1,
-    dispatch_entry_digest: DigestV1,
-    receipt_digest: DigestV1,
+pub fn mark_succeeded(
+    paths: &AttemptJournalPaths,
+    dispatch_entry_digest: Sha256Digest,
+    receipt_digest: Sha256Digest,
     observed_at_unix_ns: u64,
-) -> Result<AttemptEntryV1, AttemptJournalErrorV1> {
-    mark_succeeded_with_fault_v1(
+) -> Result<AttemptEntry, AttemptJournalError> {
+    mark_succeeded_with_fault(
         paths,
         dispatch_entry_digest,
         receipt_digest,
         observed_at_unix_ns,
-        &mut AttemptFaultPlanV1::none(),
+        &mut AttemptFaultPlan::none(),
     )
 }
-pub fn mark_succeeded_with_fault_v1(
-    paths: &AttemptJournalPathsV1,
-    dispatch_entry_digest: DigestV1,
-    receipt_digest: DigestV1,
+pub fn mark_succeeded_with_fault(
+    paths: &AttemptJournalPaths,
+    dispatch_entry_digest: Sha256Digest,
+    receipt_digest: Sha256Digest,
     observed_at_unix_ns: u64,
-    fault: &mut AttemptFaultPlanV1,
-) -> Result<AttemptEntryV1, AttemptJournalErrorV1> {
-    if receipt_digest == DigestV1::ZERO {
-        return Err(AttemptJournalErrorV1::new(
-            AttemptFailureCodeV1::InvalidEvidence,
+    fault: &mut AttemptFaultPlan,
+) -> Result<AttemptEntry, AttemptJournalError> {
+    if receipt_digest == Sha256Digest::ZERO {
+        return Err(AttemptJournalError::new(
+            AttemptFailureCode::InvalidEvidence,
             "completion receipt digest must be nonzero",
         ));
     }
-    let evidence = AttemptEvidenceV1::Completion {
+    let evidence = AttemptEvidence::Completion {
         receipt_digest,
         observed_at_unix_ns,
     };
-    mark_terminal_with_fault_v1(
+    mark_terminal_with_fault(
         paths,
         dispatch_entry_digest,
-        AttemptStateV1::Succeeded,
+        AttemptState::Succeeded,
         Some(evidence),
         SUCCEED_BOUNDARIES,
         fault,
@@ -882,41 +882,41 @@ pub fn mark_succeeded_with_fault_v1(
 }
 
 /// Persist authoritative failure evidence as a terminal Failed entry.
-pub fn mark_failed_v1(
-    paths: &AttemptJournalPathsV1,
-    dispatch_entry_digest: DigestV1,
-    failure_receipt_digest: DigestV1,
+pub fn mark_failed(
+    paths: &AttemptJournalPaths,
+    dispatch_entry_digest: Sha256Digest,
+    failure_receipt_digest: Sha256Digest,
     observed_at_unix_ns: u64,
-) -> Result<AttemptEntryV1, AttemptJournalErrorV1> {
-    mark_failed_with_fault_v1(
+) -> Result<AttemptEntry, AttemptJournalError> {
+    mark_failed_with_fault(
         paths,
         dispatch_entry_digest,
         failure_receipt_digest,
         observed_at_unix_ns,
-        &mut AttemptFaultPlanV1::none(),
+        &mut AttemptFaultPlan::none(),
     )
 }
-pub fn mark_failed_with_fault_v1(
-    paths: &AttemptJournalPathsV1,
-    dispatch_entry_digest: DigestV1,
-    failure_receipt_digest: DigestV1,
+pub fn mark_failed_with_fault(
+    paths: &AttemptJournalPaths,
+    dispatch_entry_digest: Sha256Digest,
+    failure_receipt_digest: Sha256Digest,
     observed_at_unix_ns: u64,
-    fault: &mut AttemptFaultPlanV1,
-) -> Result<AttemptEntryV1, AttemptJournalErrorV1> {
-    if failure_receipt_digest == DigestV1::ZERO {
-        return Err(AttemptJournalErrorV1::new(
-            AttemptFailureCodeV1::InvalidEvidence,
+    fault: &mut AttemptFaultPlan,
+) -> Result<AttemptEntry, AttemptJournalError> {
+    if failure_receipt_digest == Sha256Digest::ZERO {
+        return Err(AttemptJournalError::new(
+            AttemptFailureCode::InvalidEvidence,
             "failure receipt digest must be nonzero",
         ));
     }
-    let evidence = AttemptEvidenceV1::Failure {
+    let evidence = AttemptEvidence::Failure {
         failure_receipt_digest,
         observed_at_unix_ns,
     };
-    mark_terminal_with_fault_v1(
+    mark_terminal_with_fault(
         paths,
         dispatch_entry_digest,
-        AttemptStateV1::Failed,
+        AttemptState::Failed,
         Some(evidence),
         FAIL_BOUNDARIES,
         fault,
@@ -925,51 +925,51 @@ pub fn mark_failed_with_fault_v1(
 
 /// Persist a terminal Indeterminate entry: the effect may have run and no
 /// authoritative evidence exists. The attempt is never redispatched.
-pub fn mark_indeterminate_v1(
-    paths: &AttemptJournalPathsV1,
-    dispatch_entry_digest: DigestV1,
-) -> Result<AttemptEntryV1, AttemptJournalErrorV1> {
-    mark_indeterminate_with_fault_v1(
+pub fn mark_indeterminate(
+    paths: &AttemptJournalPaths,
+    dispatch_entry_digest: Sha256Digest,
+) -> Result<AttemptEntry, AttemptJournalError> {
+    mark_indeterminate_with_fault(
         paths,
         dispatch_entry_digest,
-        &mut AttemptFaultPlanV1::none(),
+        &mut AttemptFaultPlan::none(),
     )
 }
-pub fn mark_indeterminate_with_fault_v1(
-    paths: &AttemptJournalPathsV1,
-    dispatch_entry_digest: DigestV1,
-    fault: &mut AttemptFaultPlanV1,
-) -> Result<AttemptEntryV1, AttemptJournalErrorV1> {
-    mark_terminal_with_fault_v1(
+pub fn mark_indeterminate_with_fault(
+    paths: &AttemptJournalPaths,
+    dispatch_entry_digest: Sha256Digest,
+    fault: &mut AttemptFaultPlan,
+) -> Result<AttemptEntry, AttemptJournalError> {
+    mark_terminal_with_fault(
         paths,
         dispatch_entry_digest,
-        AttemptStateV1::Indeterminate,
+        AttemptState::Indeterminate,
         None,
         INDETERMINATE_BOUNDARIES,
         fault,
     )
 }
 
-fn mark_terminal_with_fault_v1(
-    paths: &AttemptJournalPathsV1,
-    dispatch_entry_digest: DigestV1,
-    terminal_state: AttemptStateV1,
-    evidence: Option<AttemptEvidenceV1>,
+fn mark_terminal_with_fault(
+    paths: &AttemptJournalPaths,
+    dispatch_entry_digest: Sha256Digest,
+    terminal_state: AttemptState,
+    evidence: Option<AttemptEvidence>,
     boundaries: WriteBoundaries,
-    fault: &mut AttemptFaultPlanV1,
-) -> Result<AttemptEntryV1, AttemptJournalErrorV1> {
+    fault: &mut AttemptFaultPlan,
+) -> Result<AttemptEntry, AttemptJournalError> {
     let chain = read_chain(paths)?;
     let Some(current) = chain.last() else {
-        return Err(AttemptJournalErrorV1::new(
-            AttemptFailureCodeV1::JournalMissing,
+        return Err(AttemptJournalError::new(
+            AttemptFailureCode::JournalMissing,
             "no dispatched attempt exists to resolve",
         ));
     };
     if current.value.state == terminal_state {
         let dispatch = &chain[chain.len() - 2];
         if dispatch.digest != dispatch_entry_digest {
-            return Err(AttemptJournalErrorV1::new(
-                AttemptFailureCodeV1::ReceiptMismatch,
+            return Err(AttemptJournalError::new(
+                AttemptFailureCode::ReceiptMismatch,
                 "dispatch entry digest does not match the persisted journal",
             ));
         }
@@ -983,14 +983,14 @@ fn mark_terminal_with_fault_v1(
         if candidate == current.value {
             return Ok(current.value.clone());
         }
-        return Err(AttemptJournalErrorV1::new(
-            AttemptFailureCodeV1::ImmutableEntryConflict,
+        return Err(AttemptJournalError::new(
+            AttemptFailureCode::ImmutableEntryConflict,
             "terminal entry already exists with different evidence",
         ));
     }
-    if current.value.state != AttemptStateV1::DispatchCrossed {
-        return Err(AttemptJournalErrorV1::new(
-            AttemptFailureCodeV1::InvalidTransition,
+    if current.value.state != AttemptState::DispatchCrossed {
+        return Err(AttemptJournalError::new(
+            AttemptFailureCode::InvalidTransition,
             format!(
                 "cannot transition from {} to {}",
                 current.value.state.as_str(),
@@ -999,8 +999,8 @@ fn mark_terminal_with_fault_v1(
         ));
     }
     if current.digest != dispatch_entry_digest {
-        return Err(AttemptJournalErrorV1::new(
-            AttemptFailureCodeV1::ReceiptMismatch,
+        return Err(AttemptJournalError::new(
+            AttemptFailureCode::ReceiptMismatch,
             "dispatch entry digest does not match the persisted journal",
         ));
     }
@@ -1017,27 +1017,27 @@ fn mark_terminal_with_fault_v1(
 }
 
 fn terminal_entry(
-    dispatch: &AttemptEntryV1,
-    dispatch_digest: DigestV1,
+    dispatch: &AttemptEntry,
+    dispatch_digest: Sha256Digest,
     sequence: u64,
-    state: AttemptStateV1,
-    evidence: Option<AttemptEvidenceV1>,
-) -> AttemptEntryV1 {
+    state: AttemptState,
+    evidence: Option<AttemptEvidence>,
+) -> AttemptEntry {
     match state {
-        AttemptStateV1::Succeeded => AttemptEntryV1::succeeded(
+        AttemptState::Succeeded => AttemptEntry::succeeded(
             dispatch,
             dispatch_digest,
             sequence,
             evidence.expect("succeeded requires completion evidence"),
         ),
-        AttemptStateV1::Failed => AttemptEntryV1::failed(
+        AttemptState::Failed => AttemptEntry::failed(
             dispatch,
             dispatch_digest,
             sequence,
             evidence.expect("failed requires failure evidence"),
         ),
-        AttemptStateV1::Indeterminate => {
-            AttemptEntryV1::indeterminate(dispatch, dispatch_digest, sequence)
+        AttemptState::Indeterminate => {
+            AttemptEntry::indeterminate(dispatch, dispatch_digest, sequence)
         }
         _ => unreachable!("terminal_entry only builds succeeded, failed, indeterminate"),
     }
@@ -1045,58 +1045,58 @@ fn terminal_entry(
 
 /// Abort a Prepared attempt before dispatch. Terminal Aborted entries are
 /// immutable; aborting an already-aborted attempt is idempotent.
-pub fn abort_attempt_v1(
-    paths: &AttemptJournalPathsV1,
-    prepared_entry_digest: DigestV1,
-) -> Result<AttemptEntryV1, AttemptJournalErrorV1> {
-    abort_attempt_with_fault_v1(
+pub fn abort_attempt(
+    paths: &AttemptJournalPaths,
+    prepared_entry_digest: Sha256Digest,
+) -> Result<AttemptEntry, AttemptJournalError> {
+    abort_attempt_with_fault(
         paths,
         prepared_entry_digest,
-        &mut AttemptFaultPlanV1::none(),
+        &mut AttemptFaultPlan::none(),
     )
 }
-pub fn abort_attempt_with_fault_v1(
-    paths: &AttemptJournalPathsV1,
-    prepared_entry_digest: DigestV1,
-    fault: &mut AttemptFaultPlanV1,
-) -> Result<AttemptEntryV1, AttemptJournalErrorV1> {
+pub fn abort_attempt_with_fault(
+    paths: &AttemptJournalPaths,
+    prepared_entry_digest: Sha256Digest,
+    fault: &mut AttemptFaultPlan,
+) -> Result<AttemptEntry, AttemptJournalError> {
     let chain = read_chain(paths)?;
     let Some(current) = chain.last() else {
-        return Err(AttemptJournalErrorV1::new(
-            AttemptFailureCodeV1::JournalMissing,
+        return Err(AttemptJournalError::new(
+            AttemptFailureCode::JournalMissing,
             "no prepared attempt exists to abort",
         ));
     };
     match current.value.state {
-        AttemptStateV1::Prepared => {
+        AttemptState::Prepared => {
             if current.digest != prepared_entry_digest {
-                return Err(AttemptJournalErrorV1::new(
-                    AttemptFailureCodeV1::ReceiptMismatch,
+                return Err(AttemptJournalError::new(
+                    AttemptFailureCode::ReceiptMismatch,
                     "prepared entry digest does not match the persisted journal",
                 ));
             }
             let sequence = chain.len() as u64 + 1;
-            let aborted = AttemptEntryV1::aborted(
+            let aborted = AttemptEntry::aborted(
                 &current.value,
                 current.digest,
                 sequence,
-                AttemptAbortReasonV1::ExplicitAbort,
+                AttemptAbortReason::ExplicitAbort,
             );
             write_once_entry(paths, sequence, &aborted, ABORT_BOUNDARIES, fault)?;
             Ok(aborted)
         }
-        AttemptStateV1::Aborted => {
+        AttemptState::Aborted => {
             let prepared = &chain[chain.len() - 2];
             if prepared.digest != prepared_entry_digest {
-                return Err(AttemptJournalErrorV1::new(
-                    AttemptFailureCodeV1::ReceiptMismatch,
+                return Err(AttemptJournalError::new(
+                    AttemptFailureCode::ReceiptMismatch,
                     "prepared entry digest does not match the persisted journal",
                 ));
             }
             Ok(current.value.clone())
         }
-        state => Err(AttemptJournalErrorV1::new(
-            AttemptFailureCodeV1::InvalidTransition,
+        state => Err(AttemptJournalError::new(
+            AttemptFailureCode::InvalidTransition,
             format!("cannot transition from {} to aborted", state.as_str()),
         )),
     }
@@ -1111,61 +1111,61 @@ pub fn abort_attempt_with_fault_v1(
 /// only when authoritative evidence proves completion or safe rollback, and
 /// Indeterminate otherwise. Recovery never writes a DispatchCrossed entry,
 /// so no recovered attempt can be redispatched.
-pub fn recover_attempt_v1(
-    paths: &AttemptJournalPathsV1,
-    expected: &AttemptBindingV1,
-    evidence: Option<AttemptEvidenceV1>,
-) -> Result<AttemptRecoveryReceiptV1, AttemptJournalErrorV1> {
-    recover_attempt_with_fault_v1(paths, expected, evidence, &mut AttemptFaultPlanV1::none())
+pub fn recover_attempt(
+    paths: &AttemptJournalPaths,
+    expected: &AttemptBinding,
+    evidence: Option<AttemptEvidence>,
+) -> Result<AttemptRecoveryReceipt, AttemptJournalError> {
+    recover_attempt_with_fault(paths, expected, evidence, &mut AttemptFaultPlan::none())
 }
-pub fn recover_attempt_with_fault_v1(
-    paths: &AttemptJournalPathsV1,
-    expected: &AttemptBindingV1,
-    evidence: Option<AttemptEvidenceV1>,
-    fault: &mut AttemptFaultPlanV1,
-) -> Result<AttemptRecoveryReceiptV1, AttemptJournalErrorV1> {
+pub fn recover_attempt_with_fault(
+    paths: &AttemptJournalPaths,
+    expected: &AttemptBinding,
+    evidence: Option<AttemptEvidence>,
+    fault: &mut AttemptFaultPlan,
+) -> Result<AttemptRecoveryReceipt, AttemptJournalError> {
     expected.validate()?;
     let chain = read_chain(paths)?;
     let Some(current) = chain.last() else {
-        return Err(AttemptJournalErrorV1::new(
-            AttemptFailureCodeV1::JournalMissing,
+        return Err(AttemptJournalError::new(
+            AttemptFailureCode::JournalMissing,
             "no attempt journal exists to recover",
         ));
     };
     if chain[0].value.binding != *expected {
-        return Err(AttemptJournalErrorV1::new(
-            AttemptFailureCodeV1::InvalidBinding,
+        return Err(AttemptJournalError::new(
+            AttemptFailureCode::InvalidBinding,
             "persisted attempt binding differs from recovery expectation",
         ));
     }
     let binding_digest = expected.digest()?;
     match current.value.state {
-        AttemptStateV1::Succeeded => make_recovery_receipt(
+        AttemptState::Succeeded => make_recovery_receipt(
             binding_digest,
-            AttemptRecoveryOutcomeV1::AlreadySucceeded,
+            AttemptRecoveryOutcome::AlreadySucceeded,
             &current.value,
         ),
-        AttemptStateV1::Failed => make_recovery_receipt(
+        AttemptState::Failed => make_recovery_receipt(
             binding_digest,
-            AttemptRecoveryOutcomeV1::AlreadyFailed,
+            AttemptRecoveryOutcome::AlreadyFailed,
             &current.value,
         ),
-        AttemptStateV1::Indeterminate => make_recovery_receipt(
+        AttemptState::Indeterminate => make_recovery_receipt(
             binding_digest,
-            AttemptRecoveryOutcomeV1::AlreadyIndeterminate,
+            AttemptRecoveryOutcome::AlreadyIndeterminate,
             &current.value,
         ),
-        AttemptStateV1::SafeToRetry => make_recovery_receipt(
+        AttemptState::SafeToRetry => make_recovery_receipt(
             binding_digest,
-            AttemptRecoveryOutcomeV1::AlreadySafeToRetry,
+            AttemptRecoveryOutcome::AlreadySafeToRetry,
             &current.value,
         ),
-        AttemptStateV1::Aborted => make_recovery_receipt(
+        AttemptState::Aborted => make_recovery_receipt(
             binding_digest,
-            AttemptRecoveryOutcomeV1::AlreadyAborted,
+            AttemptRecoveryOutcome::AlreadyAborted,
             &current.value,
         ),
-        AttemptStateV1::Prepared => {
+        AttemptState::Prepared => {
             // Dispatch never crossed, so the journal proves the effect never
             // ran: classify SafeToRetry and terminate the journal. A fresh
             // attempt may be admitted elsewhere; this journal can never
@@ -1173,28 +1173,28 @@ pub fn recover_attempt_with_fault_v1(
             // ran has no outcome evidence.
             let sequence = chain.len() as u64 + 1;
             let safe_to_retry =
-                AttemptEntryV1::safe_to_retry(&current.value, current.digest, sequence);
+                AttemptEntry::safe_to_retry(&current.value, current.digest, sequence);
             write_once_entry(paths, sequence, &safe_to_retry, RECOVER_BOUNDARIES, fault)?;
             make_recovery_receipt(
                 binding_digest,
-                AttemptRecoveryOutcomeV1::ClassifiedSafeToRetry,
+                AttemptRecoveryOutcome::ClassifiedSafeToRetry,
                 &safe_to_retry,
             )
         }
-        AttemptStateV1::DispatchCrossed => {
+        AttemptState::DispatchCrossed => {
             let sequence = chain.len() as u64 + 1;
             let (outcome, terminal) = match evidence {
-                Some(evidence @ AttemptEvidenceV1::Completion { .. }) => (
-                    AttemptRecoveryOutcomeV1::ClassifiedSucceeded,
-                    AttemptEntryV1::succeeded(&current.value, current.digest, sequence, evidence),
+                Some(evidence @ AttemptEvidence::Completion { .. }) => (
+                    AttemptRecoveryOutcome::ClassifiedSucceeded,
+                    AttemptEntry::succeeded(&current.value, current.digest, sequence, evidence),
                 ),
-                Some(evidence @ AttemptEvidenceV1::Failure { .. }) => (
-                    AttemptRecoveryOutcomeV1::ClassifiedFailed,
-                    AttemptEntryV1::failed(&current.value, current.digest, sequence, evidence),
+                Some(evidence @ AttemptEvidence::Failure { .. }) => (
+                    AttemptRecoveryOutcome::ClassifiedFailed,
+                    AttemptEntry::failed(&current.value, current.digest, sequence, evidence),
                 ),
                 None => (
-                    AttemptRecoveryOutcomeV1::ClassifiedIndeterminate,
-                    AttemptEntryV1::indeterminate(&current.value, current.digest, sequence),
+                    AttemptRecoveryOutcome::ClassifiedIndeterminate,
+                    AttemptEntry::indeterminate(&current.value, current.digest, sequence),
                 ),
             };
             write_once_entry(paths, sequence, &terminal, RECOVER_BOUNDARIES, fault)?;
@@ -1205,27 +1205,27 @@ pub fn recover_attempt_with_fault_v1(
 
 /// Read the current (latest) entry, if any. Validates the whole chain; a torn
 /// or non-contiguous journal fails loudly.
-pub fn read_current_attempt_v1(
-    paths: &AttemptJournalPathsV1,
-) -> Result<Option<AttemptEntryV1>, AttemptJournalErrorV1> {
+pub fn read_current_attempt(
+    paths: &AttemptJournalPaths,
+) -> Result<Option<AttemptEntry>, AttemptJournalError> {
     Ok(read_chain(paths)?.last().map(|entry| entry.value.clone()))
 }
 
 /// Read a single entry by sequence without chain validation.
-pub fn read_attempt_entry_v1(
-    paths: &AttemptJournalPathsV1,
+pub fn read_attempt_entry(
+    paths: &AttemptJournalPaths,
     sequence: u64,
-) -> Result<AttemptEntryV1, AttemptJournalErrorV1> {
+) -> Result<AttemptEntry, AttemptJournalError> {
     Ok(read_canonical_entry(paths, sequence)?.value)
 }
 
 fn make_recovery_receipt(
-    binding_digest: DigestV1,
-    outcome: AttemptRecoveryOutcomeV1,
-    terminal: &AttemptEntryV1,
-) -> Result<AttemptRecoveryReceiptV1, AttemptJournalErrorV1> {
-    let receipt = AttemptRecoveryReceiptV1 {
-        schema_version: ATTEMPT_RECEIPT_SCHEMA_VERSION_V1,
+    binding_digest: Sha256Digest,
+    outcome: AttemptRecoveryOutcome,
+    terminal: &AttemptEntry,
+) -> Result<AttemptRecoveryReceipt, AttemptJournalError> {
+    let receipt = AttemptRecoveryReceipt {
+        schema_version: ATTEMPT_RECEIPT_SCHEMA_VERSION,
         binding_digest,
         outcome,
         terminal_entry_digest: terminal.digest()?,
@@ -1235,35 +1235,35 @@ fn make_recovery_receipt(
     Ok(receipt)
 }
 
-fn is_valid_transition(from: AttemptStateV1, to: AttemptStateV1) -> bool {
+fn is_valid_transition(from: AttemptState, to: AttemptState) -> bool {
     matches!(
         (from, to),
-        (AttemptStateV1::Prepared, AttemptStateV1::DispatchCrossed)
-            | (AttemptStateV1::Prepared, AttemptStateV1::Aborted)
-            | (AttemptStateV1::Prepared, AttemptStateV1::SafeToRetry)
-            | (AttemptStateV1::DispatchCrossed, AttemptStateV1::Succeeded)
-            | (AttemptStateV1::DispatchCrossed, AttemptStateV1::Failed)
+        (AttemptState::Prepared, AttemptState::DispatchCrossed)
+            | (AttemptState::Prepared, AttemptState::Aborted)
+            | (AttemptState::Prepared, AttemptState::SafeToRetry)
+            | (AttemptState::DispatchCrossed, AttemptState::Succeeded)
+            | (AttemptState::DispatchCrossed, AttemptState::Failed)
             | (
-                AttemptStateV1::DispatchCrossed,
-                AttemptStateV1::Indeterminate
+                AttemptState::DispatchCrossed,
+                AttemptState::Indeterminate
             )
     )
 }
 
 struct CanonicalRead<T> {
     value: T,
-    digest: DigestV1,
+    digest: Sha256Digest,
 }
 
 fn read_chain(
-    paths: &AttemptJournalPathsV1,
-) -> Result<Vec<CanonicalRead<AttemptEntryV1>>, AttemptJournalErrorV1> {
-    let mut entries: Vec<CanonicalRead<AttemptEntryV1>> = Vec::new();
+    paths: &AttemptJournalPaths,
+) -> Result<Vec<CanonicalRead<AttemptEntry>>, AttemptJournalError> {
+    let mut entries: Vec<CanonicalRead<AttemptEntry>> = Vec::new();
     let mut sequence: u64 = 1;
-    while sequence <= ATTEMPT_JOURNAL_MAX_ENTRIES_V1 {
+    while sequence <= ATTEMPT_JOURNAL_MAX_ENTRIES {
         match read_canonical_entry(paths, sequence) {
             Ok(entry) => entries.push(entry),
-            Err(error) if error.code == AttemptFailureCodeV1::EntryMissing => break,
+            Err(error) if error.code == AttemptFailureCode::EntryMissing => break,
             Err(error) => return Err(error),
         }
         sequence += 1;
@@ -1271,32 +1271,32 @@ fn read_chain(
     if entries.is_empty() {
         return Ok(entries);
     }
-    for probe in sequence..=ATTEMPT_JOURNAL_MAX_ENTRIES_V1 {
+    for probe in sequence..=ATTEMPT_JOURNAL_MAX_ENTRIES {
         if read_canonical_entry(paths, probe).is_ok() {
-            return Err(AttemptJournalErrorV1::new(
-                AttemptFailureCodeV1::SequenceMismatch,
+            return Err(AttemptJournalError::new(
+                AttemptFailureCode::SequenceMismatch,
                 "attempt entry chain is not contiguous",
             ));
         }
     }
     for (index, entry) in entries.iter().enumerate() {
         if entry.value.sequence != index as u64 + 1 {
-            return Err(AttemptJournalErrorV1::new(
-                AttemptFailureCodeV1::SequenceMismatch,
+            return Err(AttemptJournalError::new(
+                AttemptFailureCode::SequenceMismatch,
                 "attempt entry sequence does not match its chain position",
             ));
         }
         if index > 0 {
             let previous = &entries[index - 1];
             if entry.value.predecessor_entry_digest != Some(previous.digest) {
-                return Err(AttemptJournalErrorV1::new(
-                    AttemptFailureCodeV1::SequenceMismatch,
+                return Err(AttemptJournalError::new(
+                    AttemptFailureCode::SequenceMismatch,
                     "attempt entry predecessor digest does not chain",
                 ));
             }
             if !is_valid_transition(previous.value.state, entry.value.state) {
-                return Err(AttemptJournalErrorV1::new(
-                    AttemptFailureCodeV1::InvalidTransition,
+                return Err(AttemptJournalError::new(
+                    AttemptFailureCode::InvalidTransition,
                     format!(
                         "attempt chain contains a forbidden transition from {} to {}",
                         previous.value.state.as_str(),
@@ -1310,13 +1310,13 @@ fn read_chain(
 }
 
 fn read_canonical_entry(
-    paths: &AttemptJournalPathsV1,
+    paths: &AttemptJournalPaths,
     sequence: u64,
-) -> Result<CanonicalRead<AttemptEntryV1>, AttemptJournalErrorV1> {
-    let read = read_canonical::<AttemptEntryV1>(
+) -> Result<CanonicalRead<AttemptEntry>, AttemptJournalError> {
+    let read = read_canonical::<AttemptEntry>(
         &paths.entry_path(sequence),
-        AttemptFailureCodeV1::EntryMissing,
-        ATTEMPT_ENTRY_DOMAIN_V1,
+        AttemptFailureCode::EntryMissing,
+        ATTEMPT_ENTRY_DOMAIN,
     )?;
     read.value.validate()?;
     Ok(read)
@@ -1324,55 +1324,55 @@ fn read_canonical_entry(
 
 fn read_canonical<T>(
     path: &Path,
-    missing: AttemptFailureCodeV1,
+    missing: AttemptFailureCode,
     domain: &[u8],
-) -> Result<CanonicalRead<T>, AttemptJournalErrorV1>
+) -> Result<CanonicalRead<T>, AttemptJournalError>
 where
     T: DeserializeOwned + Serialize,
 {
     let metadata = match fs::symlink_metadata(path) {
         Ok(metadata) => metadata,
         Err(error) if error.kind() == io::ErrorKind::NotFound => {
-            return Err(AttemptJournalErrorV1::new(
+            return Err(AttemptJournalError::new(
                 missing,
                 "required entry is absent",
             ));
         }
         Err(error) => {
-            return Err(AttemptJournalErrorV1::new(
-                AttemptFailureCodeV1::IoBeforePublish,
+            return Err(AttemptJournalError::new(
+                AttemptFailureCode::IoBeforePublish,
                 format!("entry stat failed: {error}"),
             ));
         }
     };
     if !metadata.file_type().is_file() {
-        return Err(AttemptJournalErrorV1::new(
-            AttemptFailureCodeV1::TornOrNoncanonicalRecord,
+        return Err(AttemptJournalError::new(
+            AttemptFailureCode::TornOrNoncanonicalRecord,
             "entry is not a regular file",
         ));
     }
-    if metadata.len() > ATTEMPT_JOURNAL_MAX_RECORD_BYTES_V1 {
-        return Err(AttemptJournalErrorV1::new(
-            AttemptFailureCodeV1::RecordTooLarge,
+    if metadata.len() > ATTEMPT_JOURNAL_MAX_RECORD_BYTES {
+        return Err(AttemptJournalError::new(
+            AttemptFailureCode::RecordTooLarge,
             "entry exceeds the frozen byte bound",
         ));
     }
     let bytes = fs::read(path).map_err(|error| {
-        AttemptJournalErrorV1::new(
-            AttemptFailureCodeV1::IoBeforePublish,
+        AttemptJournalError::new(
+            AttemptFailureCode::IoBeforePublish,
             format!("entry read failed: {error}"),
         )
     })?;
     let value: T = serde_json::from_slice(&bytes).map_err(|error| {
-        AttemptJournalErrorV1::new(
-            AttemptFailureCodeV1::TornOrNoncanonicalRecord,
+        AttemptJournalError::new(
+            AttemptFailureCode::TornOrNoncanonicalRecord,
             format!("entry decode failed: {error}"),
         )
     })?;
     let canonical = canonical_bytes(&value)?;
     if canonical != bytes {
-        return Err(AttemptJournalErrorV1::new(
-            AttemptFailureCodeV1::TornOrNoncanonicalRecord,
+        return Err(AttemptJournalError::new(
+            AttemptFailureCode::TornOrNoncanonicalRecord,
             "entry bytes are not canonical JSON",
         ));
     }
@@ -1382,41 +1382,41 @@ where
     })
 }
 
-fn canonical_bytes<T: Serialize>(value: &T) -> Result<Vec<u8>, AttemptJournalErrorV1> {
+fn canonical_bytes<T: Serialize>(value: &T) -> Result<Vec<u8>, AttemptJournalError> {
     let value = serde_json::to_value(value).map_err(|error| {
-        AttemptJournalErrorV1::new(
-            AttemptFailureCodeV1::InvalidBinding,
+        AttemptJournalError::new(
+            AttemptFailureCode::InvalidBinding,
             format!("entry serialization failed: {error}"),
         )
     })?;
     let bytes = canonical_json(&value).into_bytes();
-    if bytes.len() as u64 > ATTEMPT_JOURNAL_MAX_RECORD_BYTES_V1 {
-        return Err(AttemptJournalErrorV1::new(
-            AttemptFailureCodeV1::RecordTooLarge,
+    if bytes.len() as u64 > ATTEMPT_JOURNAL_MAX_RECORD_BYTES {
+        return Err(AttemptJournalError::new(
+            AttemptFailureCode::RecordTooLarge,
             "canonical entry exceeds the frozen byte bound",
         ));
     }
     Ok(bytes)
 }
 
-fn domain_digest(domain: &[u8], bytes: &[u8]) -> DigestV1 {
+fn domain_digest(domain: &[u8], bytes: &[u8]) -> Sha256Digest {
     let mut bound = Vec::with_capacity(domain.len() + 8 + bytes.len());
     bound.extend_from_slice(domain);
     bound.extend_from_slice(&(bytes.len() as u64).to_be_bytes());
     bound.extend_from_slice(bytes);
-    DigestV1::from_bytes(sha256(&bound))
+    Sha256Digest::from_bytes(sha256(&bound))
 }
 
 fn write_once_entry(
-    paths: &AttemptJournalPathsV1,
+    paths: &AttemptJournalPaths,
     sequence: u64,
-    entry: &AttemptEntryV1,
+    entry: &AttemptEntry,
     boundaries: WriteBoundaries,
-    fault: &mut AttemptFaultPlanV1,
-) -> Result<(), AttemptJournalErrorV1> {
-    if sequence > ATTEMPT_JOURNAL_MAX_ENTRIES_V1 {
-        return Err(AttemptJournalErrorV1::new(
-            AttemptFailureCodeV1::TooManyEntries,
+    fault: &mut AttemptFaultPlan,
+) -> Result<(), AttemptJournalError> {
+    if sequence > ATTEMPT_JOURNAL_MAX_ENTRIES {
+        return Err(AttemptJournalError::new(
+            AttemptFailureCode::TooManyEntries,
             "attempt journal entry bound exceeded",
         ));
     }
@@ -1425,15 +1425,15 @@ fn write_once_entry(
     match fs::read(&path) {
         Ok(existing) if existing == bytes => return Ok(()),
         Ok(_) => {
-            return Err(AttemptJournalErrorV1::new(
-                AttemptFailureCodeV1::ImmutableEntryConflict,
+            return Err(AttemptJournalError::new(
+                AttemptFailureCode::ImmutableEntryConflict,
                 "immutable entry already exists with different bytes",
             ));
         }
         Err(error) if error.kind() == io::ErrorKind::NotFound => {}
         Err(error) => {
-            return Err(AttemptJournalErrorV1::new(
-                AttemptFailureCodeV1::IoBeforePublish,
+            return Err(AttemptJournalError::new(
+                AttemptFailureCode::IoBeforePublish,
                 format!("immutable entry read failed: {error}"),
             ));
         }
@@ -1445,19 +1445,19 @@ fn durable_replace(
     path: &Path,
     bytes: &[u8],
     boundaries: WriteBoundaries,
-    fault: &mut AttemptFaultPlanV1,
-) -> Result<(), AttemptJournalErrorV1> {
-    if bytes.len() as u64 > ATTEMPT_JOURNAL_MAX_RECORD_BYTES_V1 {
-        return Err(AttemptJournalErrorV1::new(
-            AttemptFailureCodeV1::RecordTooLarge,
+    fault: &mut AttemptFaultPlan,
+) -> Result<(), AttemptJournalError> {
+    if bytes.len() as u64 > ATTEMPT_JOURNAL_MAX_RECORD_BYTES {
+        return Err(AttemptJournalError::new(
+            AttemptFailureCode::RecordTooLarge,
             "write exceeds the frozen record byte bound",
         ));
     }
     let parent = path.parent().unwrap_or_else(|| Path::new("."));
     fs::create_dir_all(parent).map_err(|error| io_before(boundaries.before, error))?;
     let file_name = path.file_name().ok_or_else(|| {
-        AttemptJournalErrorV1::new(
-            AttemptFailureCodeV1::InvalidBinding,
+        AttemptJournalError::new(
+            AttemptFailureCode::InvalidBinding,
             "entry path has no file name",
         )
     })?;
@@ -1476,8 +1476,8 @@ fn durable_replace(
         published = true;
         fault.hit(boundaries.rename, true)?;
         sync_dir(parent).map_err(|error| {
-            AttemptJournalErrorV1::at(
-                AttemptFailureCodeV1::DirectorySyncFailedAfterPublish,
+            AttemptJournalError::at(
+                AttemptFailureCode::DirectorySyncFailedAfterPublish,
                 boundaries.dir_sync,
                 true,
                 format!("parent directory sync failed: {error}"),
@@ -1507,9 +1507,9 @@ fn open_unique_temp(parent: &Path, file_name: &std::ffi::OsStr) -> io::Result<(F
     }
 }
 
-fn io_before(boundary: AttemptBoundaryV1, error: io::Error) -> AttemptJournalErrorV1 {
-    AttemptJournalErrorV1::at(
-        AttemptFailureCodeV1::IoBeforePublish,
+fn io_before(boundary: AttemptBoundary, error: io::Error) -> AttemptJournalError {
+    AttemptJournalError::at(
+        AttemptFailureCode::IoBeforePublish,
         boundary,
         false,
         format!("durable write failed before publication: {error}"),
@@ -1517,13 +1517,13 @@ fn io_before(boundary: AttemptBoundaryV1, error: io::Error) -> AttemptJournalErr
 }
 
 /// Machine-readable contract summary used by conformance generators.
-pub fn attempt_journal_contract_v1() -> serde_json::Value {
+pub fn attempt_journal_contract() -> serde_json::Value {
     json!({
-        "schema_version": ATTEMPT_JOURNAL_SCHEMA_VERSION_V1,
-        "binding_schema_version": ATTEMPT_BINDING_SCHEMA_VERSION_V1,
-        "receipt_schema_version": ATTEMPT_RECEIPT_SCHEMA_VERSION_V1,
-        "max_record_bytes": ATTEMPT_JOURNAL_MAX_RECORD_BYTES_V1,
-        "max_entries": ATTEMPT_JOURNAL_MAX_ENTRIES_V1,
+        "schema_version": ATTEMPT_JOURNAL_SCHEMA_VERSION,
+        "binding_schema_version": ATTEMPT_BINDING_SCHEMA_VERSION,
+        "receipt_schema_version": ATTEMPT_RECEIPT_SCHEMA_VERSION,
+        "max_record_bytes": ATTEMPT_JOURNAL_MAX_RECORD_BYTES,
+        "max_entries": ATTEMPT_JOURNAL_MAX_ENTRIES,
         "entry_file": "attempt-<sequence>.json",
         "states": ["prepared", "dispatch_crossed", "succeeded", "failed",
             "indeterminate", "safe_to_retry", "aborted"],

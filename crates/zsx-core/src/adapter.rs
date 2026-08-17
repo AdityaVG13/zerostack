@@ -73,8 +73,8 @@
 use std::fmt;
 
 use zero_abi::{
-    CallRequest, EngineIdentity, EngineStageTimelineV1, WorkerError, WorkerResult,
-    WorkerTokenAccountingV1, WorkerTrace,
+    CallRequest, EngineIdentity, EngineStageTimeline, WorkerError, WorkerResult,
+    WorkerTokenAccounting, WorkerTrace,
 };
 use zero_codemode::CancellationSignal;
 
@@ -201,10 +201,10 @@ pub struct AdapterCall<'a> {
 #[derive(Clone, Debug)]
 pub struct AdapterResponse {
     pub result: WorkerResult,
-    /// Optional transport telemetry; must pass `validate_engine_stage_timeline_v1`.
-    pub engine_timeline: Option<EngineStageTimelineV1>,
-    /// Optional transport telemetry; must pass `validate_worker_token_accounting_v1`.
-    pub worker_token_accounting: Option<WorkerTokenAccountingV1>,
+    /// Optional transport telemetry; must pass `validate_engine_stage_timeline`.
+    pub engine_timeline: Option<EngineStageTimeline>,
+    /// Optional transport telemetry; must pass `validate_worker_token_accounting`.
+    pub worker_token_accounting: Option<WorkerTokenAccounting>,
 }
 
 /// A typed in-process adapter failure, mirroring `WorkerResponseFrame::Error`.
@@ -215,8 +215,8 @@ pub struct AdapterResponse {
 pub struct AdapterError {
     pub error: Box<WorkerError>,
     pub trace: Option<Box<WorkerTrace>>,
-    pub engine_timeline: Option<Box<EngineStageTimelineV1>>,
-    pub worker_token_accounting: Option<Box<WorkerTokenAccountingV1>>,
+    pub engine_timeline: Option<Box<EngineStageTimeline>>,
+    pub worker_token_accounting: Option<Box<WorkerTokenAccounting>>,
 }
 
 impl AdapterError {
