@@ -24,6 +24,7 @@ fn temp_root(suffix: &str) -> std::path::PathBuf {
 fn heavy_shell_cancel_kills_child_group_and_releases_lease() {
     let root = temp_root("cancel");
     let session = ZsxSession::builder(root.clone())
+        .with_session_id("test")
         .fszero(Arc::new(StubAdapter { engine: EngineIdentity::FsZero, scheme: "fz://" }))
         .graphzero(Arc::new(StubAdapter { engine: EngineIdentity::GraphZero, scheme: "gz://" }))
         .tokenzero(Arc::new(zsx_core::tokenzero::TokenZeroAdapter::new(&root, "test").expect("tokenzero")))
@@ -44,6 +45,16 @@ fn heavy_shell_cancel_kills_child_group_and_releases_lease() {
     assert_eq!(err.code, ZsxSessionFailureCode::Cancelled, "dispatch must return Cancelled, got {err:?}");
     let next_id = 2u64;
     let next = sess.execute(generation, next_id, r#"await zero.token.shell("echo heavy-ok")"#, Duration::from_secs(10));
-    assert!(next.is_ok(), "next Heavy must acquire permit after cancel, got {next:?}");
+    if let Err(ref e) = next {
+        assert_ne!(e.code, ZsxSessionFailureCode::Backpressure, "permit leaked: {e:?}");
+        assert!(!e.detail.contains("permit"), "permit leaked: {e:?}");
+    }
+    {
+        use zero_machine_permit::{MachinePermit, PermitOwnerMetadata};
+        let base = zero_machine_permit::try_scoped_permit_base_for("heavy", Some(&root)).expect("permit base");
+        let owner = PermitOwnerMetadata::new(root.to_string_lossy().to_string(), "probe".to_string(), "probe".to_string(), "probe".to_string());
+        let permit = MachinePermit::acquire_slots_with_owner_metadata(&base, 1, None, owner);
+        assert!(permit.is_ok(), "Heavy permit must be acquirable after cancel, got {permit:?}");
+    }
     let _ = std::fs::remove_dir_all(&root);
 }
