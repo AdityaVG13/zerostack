@@ -8,6 +8,7 @@ Hub contracts for ZeroStack and the three engines. This folder is not a test har
 | [engine-topology-v1.json](engine-topology-v1.json) | Repos, crates, dependency direction |
 | [contracts/](contracts/) | Narrow crate contracts |
 | [schemas/](schemas/) | JSON Schema for wire types |
+| [golden/](golden/) | Three-tier golden artifacts (Tier1Raw / Tier2Canonical / Tier3Logical) |
 | [models/](models/) | Example instances |
 | [authority/](authority/) | Claim ledger (unproven until measured) |
 

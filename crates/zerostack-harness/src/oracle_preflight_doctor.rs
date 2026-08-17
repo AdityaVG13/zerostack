@@ -8,6 +8,7 @@ use crate::engine_identity::{
     ORACLE_CLIPPY, ORACLE_MIRI, ORACLE_PROPERTY_SUITE_V1, ORACLE_ROUND_TRIP, ORACLE_SPEC_V1,
     SUBJECT_IDENTITY_LABEL, oracle_label_is_allowed,
 };
+use crate::golden;
 use crate::repo::repo_root;
 use crate::spec_oracle::{all_verifiers, verify_spec_source_hashes};
 
@@ -127,6 +128,11 @@ pub fn run(root: &Path) -> PreflightReport {
             format!("{} spec sources match contract", rows.len()),
         ),
         Err(error) => push(&mut checks, "spec_source_sha256", false, error.to_string()),
+    }
+
+    match golden::verify_all(root) {
+        Ok(detail) => push(&mut checks, "golden_three_tier", true, detail),
+        Err(error) => push(&mut checks, "golden_three_tier", false, error),
     }
 
     let zsx = locate_zsx(root);

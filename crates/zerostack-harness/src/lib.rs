@@ -8,6 +8,7 @@
 pub mod differential_v2;
 pub mod engine_identity;
 pub mod external_tool_oracle;
+pub mod golden;
 pub mod oracle;
 pub mod oracle_preflight_doctor;
 pub mod property_oracle;

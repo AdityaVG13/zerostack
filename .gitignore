@@ -158,6 +158,8 @@ conformance/schemas/*
 !conformance/schemas/zerobench-r-run-v1.schema.json
 !conformance/schemas/zerobench-r-report-v1.schema.json
 !conformance/schemas/two-phase-gate-v1.schema.json
+!conformance/golden/
+!conformance/golden/**
 
 # Local bench history
 .bench-history/

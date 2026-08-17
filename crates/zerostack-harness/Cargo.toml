@@ -19,3 +19,6 @@ zero-abi = { path = "../zero-abi" }
 zero-ledger = { path = "../zero-ledger" }
 zero-process = { path = "../zero-process" }
 zero-ref = { path = "../zero-ref" }
+
+[dev-dependencies]
+insta = { version = "1", features = ["json"] }
