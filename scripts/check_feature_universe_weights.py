@@ -1,18 +1,36 @@
 #!/usr/bin/env python3
-"""Validate the product FeatureUniverse matrix and its normalized weights."""
+"""Validate the product FeatureUniverse matrix and its normalized weights.
+
+Weight policy (Phase 2 waiver): this hub FeatureUniverse is ONE product
+universe. The loader enforces a single global sum(weights) == 1.0.
+Family labels (zero-ref, zsx, …) are organizational, not independent
+scoring categories. Gauntlet per-category 1.0 does not apply: there are
+not 5 port-class categories here. See
+ZeroStack__gauntlet_workspace/docs/contracts/parity_score_contract.toml
+and phase2_spec_contract.md.
+"""
 
 from __future__ import annotations
 
 import math
+import re
 import sys
 import tomllib
 from collections import Counter
 from pathlib import Path
 from typing import Any, cast
 
-MATRIX_PATH = Path(__file__).resolve().parents[1] / "conformance/contracts/supported_surface_matrix.toml"
+REPO_ROOT = Path(__file__).resolve().parents[1]
+MATRIX_PATH = REPO_ROOT / "conformance/contracts/supported_surface_matrix.toml"
 ALLOWED_STATUSES = ("present", "partial", "missing", "excluded")
+# missing / excluded / partial are deferred or debt: retry_condition required.
+RETRY_STATUSES = ("partial", "missing", "excluded")
 WEIGHT_TOLERANCE = 1e-9
+BEAD_ID = re.compile(r"^ZS-[A-Z]+-\d+$")
+LAZY_RETRY = re.compile(
+    r"^(later|tbd|todo|n/?a|if it seems important)\b",
+    re.IGNORECASE,
+)
 
 FeatureRow = dict[str, Any]
 
@@ -86,6 +104,24 @@ def parse_weight(row: FeatureRow, feature_id: str) -> float:
     return numeric_weight
 
 
+def validate_evidence_paths(row: FeatureRow, feature_id: str) -> None:
+    evidence = row.get("evidence")
+    if evidence is None:
+        return
+    if not isinstance(evidence, list) or not all(nonempty_string(item) for item in evidence):
+        fail(f"{feature_id}: evidence must be a list of non-empty strings")
+    for item in evidence:
+        path_text = cast(str, item).strip()
+        if BEAD_ID.match(path_text):
+            fail(
+                f"{feature_id}: evidence {path_text!r} is a bead id, not a repo path "
+                "(put bead ids in notes)"
+            )
+        candidate = REPO_ROOT / path_text
+        if not candidate.exists():
+            fail(f"{feature_id}: evidence path does not exist: {path_text}")
+
+
 def validate_evidence(row: FeatureRow, feature_id: str, status: str) -> None:
     evidence = row.get("evidence")
     valid = (
@@ -95,6 +131,7 @@ def validate_evidence(row: FeatureRow, feature_id: str, status: str) -> None:
     )
     if not valid:
         fail(f"{feature_id}: {status} requires non-empty evidence")
+    validate_evidence_paths(row, feature_id)
 
 
 def validate_rationale(row: FeatureRow, feature_id: str, status: str) -> None:
@@ -102,11 +139,27 @@ def validate_rationale(row: FeatureRow, feature_id: str, status: str) -> None:
         fail(f"{feature_id}: {status} requires a non-empty rationale")
 
 
+def validate_retry_condition(row: FeatureRow, feature_id: str, status: str) -> None:
+    retry = row.get("retry_condition")
+    if not nonempty_string(retry):
+        fail(f"{feature_id}: {status} requires a non-empty retry_condition")
+    text = cast(str, retry).strip()
+    if LAZY_RETRY.match(text) or len(text) < 24:
+        fail(
+            f"{feature_id}: retry_condition must be a load-bearing predicate "
+            "(not later/TBD/todo)"
+        )
+
+
 def validate_support(row: FeatureRow, feature_id: str, status: str) -> None:
+    if "evidence" in row:
+        validate_evidence_paths(row, feature_id)
     if status in ("present", "partial"):
         validate_evidence(row, feature_id, status)
-        return
-    validate_rationale(row, feature_id, status)
+    else:
+        validate_rationale(row, feature_id, status)
+    if status in RETRY_STATUSES:
+        validate_retry_condition(row, feature_id, status)
 
 
 def parse_feature_row(value: object, index: int, known_ids: set[str]) -> tuple[str, str, float]:

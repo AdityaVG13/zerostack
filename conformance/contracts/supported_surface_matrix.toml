@@ -1,10 +1,19 @@
-# Product FeatureUniverse: base matrix plus round-01 delta and explicit private-engine exclusions.
-# Weights preserve base relative units; additions receive one minimum unit before normalization.
+# Product FeatureUniverse: hub public surface (Phase 2 honest lock).
+# Weights preserve historical relative units; Phase 2 additions are
+# rubric-weighted (CONTRACT-core > composition > supporting > excluded).
+# Policy: ONE global universe. sum(weights) == 1.0 globally.
+# Family labels are organizational, not independent scoring categories.
+# Gauntlet per-category 1.0 is waived: this is not 5 port-class categories.
+# Excluded rows still carry non-zero weight (coverage debt for strict-100%).
+# missing/excluded/partial require rationale (when not present) and retry_condition.
+# evidence must be existing repo-relative paths, never bead IDs.
 schema_version = "zerostack.supported_surface_matrix.v1"
 project = "ZeroStack"
 class = "Greenfield-Rust-class"
 source_base_schema = "gauntlet.supported_surface_matrix.v1"
 source_delta_schema = "gauntlet.surface_matrix_delta.v1"
+weight_policy = "global-sum-1.0"
+weight_unit_denominator = 232
 allowed_statuses = ["present", "partial", "missing", "excluded"]
 
 declared_feature_ids = [
@@ -46,6 +55,39 @@ declared_feature_ids = [
   "F-HUB-RAW-WORKER-DOC",
   "F-FSZERO-PRIVATE-ENGINE-SURFACE",
   "F-GRAPHZERO-PRIVATE-ENGINE-SURFACE",
+  "F-ZSX-CLI-EXEC",
+  "F-ZSX-CLI-MCP",
+  "F-ZSX-REEXEC",
+  "F-ZSX-SESSION",
+  "F-ZSX-DOMAIN-ADAPTER",
+  "F-ZSX-LOWER",
+  "F-ZSX-CONTINUATION",
+  "F-ZSX-DAG-EXEC",
+  "F-ZSX-RESULT-V6",
+  "F-ZSX-Q99-REPORT",
+  "F-NODE-NATIVE-SESSION",
+  "F-MCP-TRANSPORT",
+  "F-MCP-CATALOG-TWO-TOOLS",
+  "F-CODEMODE-HOST",
+  "F-CODEMODE-EDIT-PROTOCOL",
+  "F-CODEMODE-CANCEL",
+  "F-ABI-ZERO-EXECUTE",
+  "F-ABI-RESULT-V1",
+  "F-ABI-CWIR",
+  "F-ABI-CACHE-ENTRY",
+  "F-CERT-VERIFIED-EVIDENCE",
+  "F-CERT-WORKER-TRUST",
+  "F-GATE-TWO-PHASE",
+  "F-GATE-Q99",
+  "F-GATE-DEOPT",
+  "F-LEDGER-CAUSAL-WORK",
+  "F-LEDGER-FRESH-WORK",
+  "F-GAUGE-ORDINAL-REF",
+  "F-PROCESS-IDENTITY",
+  "F-STORE-DURABLE-JOURNAL",
+  "F-STORE-ATTEMPT-JOURNAL",
+  "F-STORE-SESSION-WAL",
+  "F-TOKENZERO-PRIVATE-ENGINE-SURFACE"
 ]
 
 [[feature]]
@@ -53,8 +95,9 @@ id = "F-REF-PARSE"
 family = "zero-ref"
 name = "ZeroRefV1 parse + Display round-trip"
 status = "present"
-weight = 0.062015503876
-evidence = ["crates/zero-ref/"]
+weight = 0.034482758620
+weight_units = 8
+evidence = ["crates/zero-ref/src/lib.rs"]
 notes = "parser + Display; golden vectors exist"
 
 [[feature]]
@@ -62,8 +105,9 @@ id = "F-REF-SELECT-CANONICAL"
 family = "zero-ref"
 name = "select_fragment ClampEnd canonical policy"
 status = "present"
-weight = 0.062015503876
-evidence = ["crates/zero-ref/"]
+weight = 0.034482758620
+weight_units = 8
+evidence = ["crates/zero-ref/src/lib.rs"]
 notes = "CANONICAL_LINE_END_POLICY = ClampEnd"
 
 [[feature]]
@@ -71,8 +115,9 @@ id = "F-REF-SELECT-STRICT"
 family = "zero-ref"
 name = "select_fragment_with_policy Strict"
 status = "present"
-weight = 0.031007751938
-evidence = ["crates/zero-ref/"]
+weight = 0.017241379310
+weight_units = 4
+evidence = ["crates/zero-ref/src/lib.rs"]
 notes = "available for compatibility"
 
 [[feature]]
@@ -80,8 +125,11 @@ id = "F-REF-PROPTEST"
 family = "zero-ref"
 name = "Property suite for parse/select"
 status = "missing"
-weight = 0.046511627907
+weight = 0.025862068965
+weight_units = 6
+evidence = ["crates/zero-ref/src/lib.rs", "crates/zero-ref/Cargo.toml"]
 rationale = "no proptest in zero-ref crate"
+retry_condition = "Retry only when crates/zero-ref/Cargo.toml depends on proptest and at least one proptest! parse/select property is run by cargo test -p zero-ref."
 notes = "no proptest in zero-ref crate"
 
 [[feature]]
@@ -89,8 +137,10 @@ id = "F-REF-ENGINE-ADOPTION-LOCKSTEP"
 family = "zero-ref"
 name = "Engine consumers honor ClampEnd not Reject"
 status = "partial"
-weight = 0.062015503876
-evidence = ["crates/zero-ref/"]
+weight = 0.034482758620
+weight_units = 8
+evidence = ["crates/zero-ref/src/lib.rs"]
+retry_condition = "Retry only when a hub gate fails a sibling engine that uses Reject instead of ClampEnd, evidenced by a live zsx receipt or an engine CI job — not a comment-only lockstep claim."
 notes = "TokenZero sibling gauntlet found EmbeddedStore reject vs RecoveryStore clamp TrueDivergence; hub defines ClampEnd but cannot enforce engines"
 
 [[feature]]
@@ -98,8 +148,9 @@ id = "F-STORE-ATOMIC-WRITE"
 family = "zero-store"
 name = "atomic_write_file temp+sync+rename+dirsync"
 status = "present"
-weight = 0.054263565891
-evidence = ["crates/zero-store/"]
+weight = 0.030172413793
+weight_units = 7
+evidence = ["crates/zero-store/src/fs_replace.rs"]
 notes = "Unix dir sync; Windows retry sharing"
 
 [[feature]]
@@ -107,64 +158,77 @@ id = "F-STORE-CAS"
 family = "zero-store"
 name = "CAS blobs/sha256/hh/hash layout + digest verify"
 status = "present"
-weight = 0.054263565891
-evidence = ["crates/zero-store/"]
+weight = 0.030172413793
+weight_units = 7
+evidence = ["crates/zero-store/src/cas.rs"]
 
 [[feature]]
 id = "F-STORE-GC-LOCK"
 family = "zero-store"
 name = "GC coordinator lock"
 status = "present"
-weight = 0.031007751938
-evidence = ["crates/zero-store/"]
+weight = 0.017241379310
+weight_units = 4
+evidence = ["crates/zero-store/src/gc_lock.rs"]
 
 [[feature]]
 id = "F-STORE-ROOT-RESOLVE"
 family = "zero-store"
 name = "Store root env resolution + shared opt-in"
 status = "present"
-weight = 0.038759689922
-evidence = ["crates/zero-store/"]
+weight = 0.021551724137
+weight_units = 5
+evidence = ["crates/zero-store/src/store_root.rs"]
 
 [[feature]]
 id = "F-STORE-CRASH-ORACLE"
 family = "zero-store"
 name = "Crash-boundary / mid-write kill oracle suite"
 status = "missing"
-weight = 0.046511627907
-rationale = "no deterministic FaultVFS / crash-boundary harness"
+weight = 0.025862068965
+weight_units = 6
+evidence = ["crates/zero-store/src/durable_journal.rs"]
+rationale = "FaultPlan types exist; no deterministic FaultVFS / crash-boundary harness that kills mid-rename and asserts recovery"
+retry_condition = "Retry only when crates/zero-store has a deterministic FaultVFS (or equivalent) test that kills mid-rename and asserts recover_journal leaves a valid CAS object or a loud JournalError, wired into cargo test -p zero-store."
 
 [[feature]]
 id = "F-STORE-BENCH-HISTORY"
 family = "zero-store"
 name = ".bench-history pass-over-pass ratchet"
 status = "missing"
-weight = 0.038759689922
-rationale = "The source FeatureUniverse records this capability as not implemented."
+weight = 0.021551724137
+weight_units = 5
+evidence = ["benchmarks/savings-bench-v1.json"]
+rationale = "No committed .bench-history/*.latest.json and no numeric pass-over-pass gate"
+retry_condition = "Retry only when .bench-history/<bench>.latest.json is committed and a script or CI job compares a new run against it with a numeric pass-over-pass gate."
 
 [[feature]]
 id = "F-ABI-RAW-WORKER-V2"
 family = "zero-abi"
 name = "raw_worker protocol v2 types + handshake"
 status = "present"
-weight = 0.046511627907
-evidence = ["crates/zero-abi/"]
+weight = 0.025862068965
+weight_units = 6
+evidence = ["crates/zero-abi/src/raw_worker.rs"]
 
 [[feature]]
 id = "F-ABI-SCHEMA-DIGEST"
 family = "zero-abi"
 name = "JSON schema normalize + operation digest"
 status = "present"
-weight = 0.038759689922
-evidence = ["crates/zero-abi/"]
+weight = 0.021551724137
+weight_units = 5
+evidence = ["crates/zero-abi/src/schema.rs"]
 
 [[feature]]
 id = "F-ABI-PROPTEST-ROUNDTRIP"
 family = "zero-abi"
 name = "Property encode/decode round-trip"
 status = "partial"
-weight = 0.031007751938
-evidence = ["crates/zero-abi/"]
+weight = 0.017241379310
+weight_units = 4
+evidence = ["crates/zero-abi/src/schema.rs"]
+retry_condition = "Retry only when crates/zero-abi (or a later harness crate) has a proptest! encode/decode identity for a wire type and cargo test -p zero-abi runs it."
 notes = "types and digest live in zero-abi; no property suite in-tree"
 
 [[feature]]
@@ -172,48 +236,61 @@ id = "F-PERMIT-CORE"
 family = "machine-permit"
 name = "Machine permit issue/verify surface"
 status = "present"
-weight = 0.031007751938
-evidence = ["crates/zerostack-machine-permit/"]
+weight = 0.017241379310
+weight_units = 4
+evidence = ["crates/zerostack-machine-permit/src/lib.rs"]
 
 [[feature]]
 id = "F-CONF-HARNESS"
 family = "conformance"
 name = "CodeMode conformance harness CLI + checks"
 status = "missing"
-weight = 0.038759689922
-rationale = "No in-repo conformance CLI. CONTRACT.md is the product contract; live zsx is the proof surface."
+weight = 0.021551724137
+weight_units = 5
+evidence = ["conformance/CONTRACT.md"]
+rationale = "No in-repo conformance CLI. CONTRACT.md §8 forbids a second catalog; live zsx is the proof surface."
+retry_condition = "Reconsider only if conformance/CONTRACT.md §8 is amended to allow an in-repo conformance CLI. Do not resurrect {ns}_execute_code as a synonym for zero_execute."
 
 [[feature]]
 id = "F-CONF-GOLDEN-SCHEMA"
 family = "conformance"
 name = "Schema golden + mapping checks"
 status = "present"
-weight = 0.023255813953
-evidence = ["conformance/"]
+weight = 0.012931034482
+weight_units = 3
+evidence = ["conformance/schemas/zero-result-v1.schema.json", "conformance/fixtures/raw_worker_v2_frames.json"]
 
 [[feature]]
 id = "F-ORACLE-ENGINE-IDENTITY"
 family = "gauntlet-oracle"
 name = "EngineIdentity Subject≠Oracle discriminator"
 status = "missing"
-weight = 0.023255813953
-rationale = "The source FeatureUniverse records this capability as not implemented."
+weight = 0.012931034482
+weight_units = 3
+evidence = ["crates/zero-abi/src/raw_worker.rs"]
+rationale = "zero-abi raw_worker::EngineIdentity names fz/gz/tz dispatch, not a gauntlet Subject≠Oracle comparator discriminator"
+retry_condition = "Retry only when a harness crate emits EngineIdentity::{Subject,Oracle} on every comparator artifact and asserts they are distinct (Phase 3 greenfield oracle wiring)."
 
 [[feature]]
 id = "F-ORACLE-FAILURE-BUNDLE"
 family = "gauntlet-oracle"
 name = "FailureBundle v1 provenance on divergence"
 status = "missing"
-weight = 0.023255813953
-rationale = "The source FeatureUniverse records this capability as not implemented."
+weight = 0.012931034482
+weight_units = 3
+evidence = ["conformance/CONTRACT.md"]
+rationale = "No FailureBundle v1 type with first_divergence_jsonptr in the hub tree"
+retry_condition = "Retry only when a harness crate emits FailureBundle v1 with first_divergence_jsonptr on TrueDivergence (Phase 3/6)."
 
 [[feature]]
 id = "F-CI-PR-GATES"
 family = "ci"
 name = "PR/push CI with clippy -D, deny, targeted tests"
 status = "partial"
-weight = 0.031007751938
+weight = 0.017241379310
+weight_units = 4
 evidence = [".github/workflows/ci.yml"]
+retry_condition = "Retry only when .github/workflows/ci.yml or DSR runs cargo test (targeted or workspace) on every PR/push, not only workflow_dispatch fmt/clippy/build."
 notes = "manual workflow_dispatch: fmt, clippy, cargo build --workspace. No test suite."
 
 [[feature]]
@@ -221,24 +298,32 @@ id = "F-FUZZ"
 family = "quality"
 name = "cargo-fuzz targets for parse/CAS/protocol"
 status = "missing"
-weight = 0.023255813953
-rationale = "The source FeatureUniverse records this capability as not implemented."
+weight = 0.012931034482
+weight_units = 3
+evidence = ["tests/unit/zero-abi/fuzz_corpus_untrusted_bytes_20260815.rs"]
+rationale = "No fuzz/fuzz_targets/ cargo-fuzz campaign; only a checked-in untrusted-bytes corpus file"
+retry_condition = "Retry only when fuzz/fuzz_targets/ contains at least one cargo-fuzz target for ZeroRef parse, CAS put, or raw_worker frame decode, and cargo fuzz list names it."
 
 [[feature]]
 id = "F-MIRI-NARROW"
 family = "quality"
 name = "Miri on zero-ref/zero-store hot paths"
 status = "missing"
-weight = 0.015503875969
-rationale = "The source FeatureUniverse records this capability as not implemented."
+weight = 0.008620689655
+weight_units = 2
+evidence = ["rust-toolchain.toml"]
+rationale = "No CI or rch job runs cargo +nightly miri test on zero-ref or zero-store"
+retry_condition = "Retry only when CI or rch runs cargo +nightly miri test -p zero-ref (or -p zero-store hot paths) and a failing UB report fails the gate."
 
 [[feature]]
 id = "F-FEATURE-UNIVERSE-INREPO"
 family = "surface"
 name = "In-repo FeatureUniverse + coverage dashboard"
 status = "partial"
-weight = 0.023255813953
+weight = 0.012931034482
+weight_units = 3
 evidence = ["conformance/contracts/supported_surface_matrix.toml", "scripts/check_feature_universe_weights.py"]
+retry_condition = "Retry only when a coverage dashboard (script or crate) emits per-family present/partial/missing/excluded counts from this matrix and is invoked from CI or scripts/."
 notes = "The matrix and weight gate are in-repo; a coverage dashboard is not implemented."
 
 [[feature]]
@@ -246,25 +331,29 @@ id = "F-HUB-NO-ENGINE-SOURCE"
 family = "hub-policy"
 name = "Hub never publishes private engine source"
 status = "present"
-weight = 0.015503875969
-evidence = ["AGENTS.md", "scripts/check_no_host_paths.py"]
-notes = "policy in AGENTS; privacy scripts enforce host paths"
+weight = 0.008620689655
+weight_units = 2
+evidence = ["README.md", "scripts/check_no_host_paths.py"]
+notes = "README: foundation crates (no engine source). AGENTS.md states the same law but is gitignored -- not evidence."
 
 [[feature]]
 id = "F-REF-ERROR-TAXONOMY"
 family = "zero-ref"
 name = "ZeroRefErrorClass + ZeroRefError public taxonomy"
 status = "partial"
-weight = 0.007751937984
-evidence = ["crates/zero-ref/src/lib.rs", "ZS-REF-003"]
-notes = "Types public; ZS-REF-003 taxonomy overclaims in-crate production."
+weight = 0.004310344827
+weight_units = 1
+evidence = ["crates/zero-ref/src/lib.rs"]
+retry_condition = "Retry only when production paths in crates/zero-ref/src/lib.rs construct every ZeroRefErrorClass variant, or tests assert ZeroRefErrorClass::ALL is reachable — not merely that the enum is public."
+notes = "Types public; bead ZS-REF-003 taxonomy overclaims in-crate production."
 
 [[feature]]
 id = "F-REF-LEGACY-ALIAS"
 family = "zero-ref"
 name = "LEGACY_BYTE_FRAGMENT_ALIAS accept/normalize"
 status = "present"
-weight = 0.007751937984
+weight = 0.004310344827
+weight_units = 1
 evidence = ["crates/zero-ref/src/lib.rs"]
 notes = "Const + parse path for GraphZero legacy #B start+len form."
 
@@ -273,54 +362,64 @@ id = "F-REF-SERDE-FROMSTR"
 family = "zero-ref"
 name = "FromStr / serde for ZeroRefV1"
 status = "missing"
-weight = 0.007751937984
-evidence = ["ZS-REF-008"]
-rationale = "ZS-REF-008; only Display/parse helpers today."
-notes = "ZS-REF-008; only Display/parse helpers today."
+weight = 0.004310344827
+weight_units = 1
+evidence = ["crates/zero-ref/src/lib.rs"]
+rationale = "ZeroRefV1 has Display and parse(); no FromStr impl and no serde of the Display form"
+retry_condition = "Retry only when ZeroRefV1 implements FromStr and serde (de)serialization of the Display form, with a unit test that s.parse::<ZeroRefV1>()? equals ZeroRefV1::parse(s)?."
+notes = "bead ZS-REF-008; only Display/parse helpers today."
 
 [[feature]]
 id = "F-REF-CAPABILITY-NEGOTIATION"
 family = "zero-ref"
 name = "Capability / version negotiation API"
 status = "missing"
-weight = 0.007751937984
-evidence = ["ZS-REF-009"]
-rationale = "ZS-REF-009; ZEROREF_VERSION const only."
-notes = "ZS-REF-009; ZEROREF_VERSION const only."
+weight = 0.004310344827
+weight_units = 1
+evidence = ["crates/zero-ref/src/lib.rs"]
+rationale = "ZEROREF_VERSION / ZEROREF_MAJOR / ZEROREF_MINOR consts only; no public negotiate function"
+retry_condition = "Retry only when a public function (not just ZEROREF_VERSION) accepts a peer (major, minor) and returns IncompatibleVersion for a different major before any payload work."
+notes = "bead ZS-REF-009; ZEROREF_VERSION const only."
 
 [[feature]]
 id = "F-STORE-REPLACE-FILE"
 family = "zero-store"
 name = "replace_file primitive"
 status = "present"
-weight = 0.007751937984
-evidence = ["crates/zero-store/src/fs_replace.rs", "ZS-STORE-004"]
-notes = "Distinct from atomic_write_file; ZS-STORE-004 zero durability tests."
+weight = 0.004310344827
+weight_units = 1
+evidence = ["crates/zero-store/src/fs_replace.rs"]
+notes = "Distinct from atomic_write_file; bead ZS-STORE-004 notes zero dedicated durability tests."
 
 [[feature]]
 id = "F-STORE-ENSURE-LAYOUT"
 family = "zero-store"
 name = "ensure_layout + project_key layout helpers"
 status = "partial"
-weight = 0.007751937984
-evidence = ["crates/zero-store/src/store_root.rs", "ZS-STORE-011"]
-notes = "ZS-STORE-011 ensure_layout does not create blobs/ or gc/."
+weight = 0.004310344827
+weight_units = 1
+evidence = ["crates/zero-store/src/store_root.rs"]
+retry_condition = "Retry only when ensure_layout creates blobs/ and gc/ (or documents a loud error if a caller expected them) and a unit test fails if those directories are absent after a successful call."
+notes = "bead ZS-STORE-011: ensure_layout creates unified_root + engine_dir, not blobs/ or gc/."
 
 [[feature]]
 id = "F-STORE-QUARANTINE-REAP"
 family = "zero-store"
 name = "CAS_QUARANTINE_DIR + CAS_TEMP_REAP_AGE"
 status = "partial"
-weight = 0.007751937984
+weight = 0.004310344827
+weight_units = 1
 evidence = ["crates/zero-store/src/cas.rs"]
-notes = "Constants re-exported; not separate FU row under F-STORE-CAS."
+retry_condition = "Retry only when CAS put/gc actually moves corrupt objects into CAS_QUARANTINE_DIR and reaps temps older than CAS_TEMP_REAP_AGE, with a unit test covering both constants."
+notes = "Constants re-exported; not a separate full harvest path under F-STORE-CAS."
 
 [[feature]]
 id = "F-ABI-FRAME-CODEC"
 family = "zero-abi"
 name = "encode_frame / decode_request_frame frame codec"
 status = "present"
-weight = 0.007751937984
+weight = 0.004310344827
+weight_units = 1
 evidence = ["crates/zero-abi/src/raw_worker.rs"]
 notes = "Distinct pub API; ZS-ABI-003 ProtocolLimits partial enforce."
 
@@ -329,7 +428,8 @@ id = "F-ABI-SCHEMA-STRUCTURAL"
 family = "zero-abi"
 name = "normalize_schema + structural equality + schema_diff"
 status = "present"
-weight = 0.007751937984
+weight = 0.004310344827
+weight_units = 1
 evidence = ["crates/zero-abi/src/schema.rs", "README.md"]
 notes = "README foundation promise; F-ABI-SCHEMA-DIGEST names digest only."
 
@@ -338,7 +438,8 @@ id = "F-PERMIT-SCOPED-BASE"
 family = "machine-permit"
 name = "scoped_permit_base multi-root isolation"
 status = "present"
-weight = 0.007751937984
+weight = 0.004310344827
+weight_units = 1
 evidence = ["crates/zerostack-machine-permit/src/lib.rs"]
 notes = "Public scoped_permit_base/MachinePermit/AcquireError; README omits crate."
 
@@ -347,8 +448,9 @@ id = "F-HUB-FOUNDATION-DOC-PERMIT"
 family = "hub-policy"
 name = "README documents machine-permit foundation crate"
 status = "present"
-weight = 0.007751937984
-evidence = ["README.md", "crates/zerostack-machine-permit/"]
+weight = 0.004310344827
+weight_units = 1
+evidence = ["README.md", "crates/zerostack-machine-permit/src/lib.rs"]
 notes = "README documents the zero-machine-permit foundation crate."
 
 [[feature]]
@@ -356,7 +458,8 @@ id = "F-HUB-RAW-WORKER-DOC"
 family = "hub-policy"
 name = "README documents raw_worker as zero-abi surface"
 status = "present"
-weight = 0.007751937984
+weight = 0.004310344827
+weight_units = 1
 evidence = ["README.md", "crates/zero-abi/src/raw_worker.rs"]
 notes = "README documents raw-worker v2 as the shared canonical dispatch contract."
 
@@ -365,15 +468,335 @@ id = "F-FSZERO-PRIVATE-ENGINE-SURFACE"
 family = "engine-scope"
 name = "FSZero private engine-only surfaces"
 status = "excluded"
-weight = 0.007751937984
-evidence = ["README.md"]
-rationale = "FSZero is private and in development; engine-only surfaces are outside the public product FeatureUniverse until release."
+weight = 0.004310344827
+weight_units = 1
+evidence = ["README.md", "conformance/CONTRACT.md"]
+rationale = "FSZero is a private sibling engine; engine-only surfaces are outside this hub FeatureUniverse until they are published as a hub workspace member."
+retry_condition = "Re-include only when FSZero is a public Cargo workspace member of this hub with its own CONTRACT.md, or conformance/CONTRACT.md is amended to treat engine-only surfaces as hub FeatureUniverse rows."
 
 [[feature]]
 id = "F-GRAPHZERO-PRIVATE-ENGINE-SURFACE"
 family = "engine-scope"
 name = "GraphZero private engine-only surfaces"
 status = "excluded"
-weight = 0.007751937996
-evidence = ["README.md"]
-rationale = "GraphZero is private and in development; engine-only surfaces are outside the public product FeatureUniverse until release."
+weight = 0.004310344827
+weight_units = 1
+evidence = ["README.md", "conformance/CONTRACT.md"]
+rationale = "GraphZero is a private sibling engine; engine-only surfaces are outside this hub FeatureUniverse until they are published as a hub workspace member."
+retry_condition = "Re-include only when GraphZero is a public Cargo workspace member of this hub with its own CONTRACT.md, or conformance/CONTRACT.md is amended to treat engine-only surfaces as hub FeatureUniverse rows."
+
+[[feature]]
+id = "F-ZSX-CLI-EXEC"
+family = "zsx"
+name = "zsx exec -C ROOT CodeMode entry"
+status = "present"
+weight = 0.034482758620
+weight_units = 8
+evidence = ["crates/zsx/src/main.rs", "crates/zsx/src/exec.rs"]
+notes = "CONTRACT.md §2 CodeMode surface"
+
+[[feature]]
+id = "F-ZSX-CLI-MCP"
+family = "zsx"
+name = "zsx mcp harness-owned stdio entry"
+status = "present"
+weight = 0.025862068965
+weight_units = 6
+evidence = ["crates/zsx/src/main.rs", "crates/zsx/src/mcp.rs"]
+notes = "CONTRACT.md §2 MCP surface; serve() + parent-death poll"
+
+[[feature]]
+id = "F-ZSX-REEXEC"
+family = "zsx"
+name = "Image freshness + in-place reexec on plugin bin change"
+status = "present"
+weight = 0.008620689655
+weight_units = 2
+evidence = ["crates/zsx/src/reexec.rs"]
+notes = "OnceLock running image; image_is_stale / reexec_if_plugin_bin_changed"
+
+[[feature]]
+id = "F-ZSX-SESSION"
+family = "zsx-core"
+name = "ZsxSession composition host"
+status = "present"
+weight = 0.025862068965
+weight_units = 6
+evidence = ["crates/zsx-core/src/session.rs", "crates/zsx-core/src/lib.rs"]
+notes = "builder + execute + replacement + shutdown"
+
+[[feature]]
+id = "F-ZSX-DOMAIN-ADAPTER"
+family = "zsx-core"
+name = "DomainAdapter trait; engines never import each other"
+status = "present"
+weight = 0.017241379310
+weight_units = 4
+evidence = ["crates/zsx-core/src/adapter.rs"]
+notes = "CONTRACT.md §1 composition"
+
+[[feature]]
+id = "F-ZSX-LOWER"
+family = "zsx-core"
+name = "Plan surface → engine method lowering"
+status = "present"
+weight = 0.012931034482
+weight_units = 3
+evidence = ["crates/zsx-core/src/lower.rs"]
+notes = "METHODS table + lower() / engine_for()"
+
+[[feature]]
+id = "F-ZSX-CONTINUATION"
+family = "zsx-core"
+name = "Durable continuation registry"
+status = "present"
+weight = 0.008620689655
+weight_units = 2
+evidence = ["crates/zsx-core/src/continuation.rs"]
+
+[[feature]]
+id = "F-ZSX-DAG-EXEC"
+family = "zsx-core"
+name = "Exec DAG scheduler"
+status = "present"
+weight = 0.008620689655
+weight_units = 2
+evidence = ["crates/zsx-core/src/dag_exec.rs"]
+
+[[feature]]
+id = "F-ZSX-RESULT-V6"
+family = "zsx-core"
+name = "Session v6 / legacy zerostack.zsx.v1 envelope"
+status = "present"
+weight = 0.021551724137
+weight_units = 5
+evidence = ["crates/zsx-core/src/result_v6.rs"]
+notes = "pairs with F-ABI-RESULT-V1 zero-result/v1"
+
+[[feature]]
+id = "F-ZSX-Q99-REPORT"
+family = "zsx-core"
+name = "Session Q99 / residency report"
+status = "partial"
+weight = 0.008620689655
+weight_units = 2
+evidence = ["crates/zsx-core/src/residency.rs"]
+retry_condition = "Retry only when FSZero/GraphZero adapters supply measured WorkerTokenAccountingV1 so L1/L2 Q99 windows are non-empty in production, or the report loudly refuses to emit a numeric Q99 when observations are empty (already partial: empty windows documented)."
+notes = "Types + schema live; residual: engine adapters return no worker token accounting so L1/L2 stay empty."
+
+[[feature]]
+id = "F-NODE-NATIVE-SESSION"
+family = "zsx-node"
+name = "NativeZsxSession N-API binding"
+status = "present"
+weight = 0.008620689655
+weight_units = 2
+evidence = ["crates/zsx-node/src/session.rs", "crates/zsx-node/src/lib.rs"]
+
+[[feature]]
+id = "F-MCP-TRANSPORT"
+family = "zero-mcp"
+name = "FastMCP / stdio MCP transport authority"
+status = "present"
+weight = 0.012931034482
+weight_units = 3
+evidence = ["crates/zero-mcp/src/lib.rs", "crates/zero-mcp/src/mcp_transport.rs"]
+notes = "FastMcpTransport is feature-gated (fastmcp); dispatcher + execute_call always present"
+
+[[feature]]
+id = "F-MCP-CATALOG-TWO-TOOLS"
+family = "zero-mcp"
+name = "MCP catalog is exactly zero_execute + zero_wait"
+status = "present"
+weight = 0.025862068965
+weight_units = 6
+evidence = ["crates/zsx/src/mcp.rs"]
+notes = "CONTRACT.md §2; tools() returns those two names only"
+
+[[feature]]
+id = "F-CODEMODE-HOST"
+family = "zero-codemode"
+name = "Confined CodeMode interpreter host"
+status = "present"
+weight = 0.021551724137
+weight_units = 5
+evidence = ["crates/zero-codemode/src/host.rs", "crates/zero-codemode/src/lib.rs"]
+
+[[feature]]
+id = "F-CODEMODE-EDIT-PROTOCOL"
+family = "zero-codemode"
+name = "zero-edit-protocol/v1 EditOp list"
+status = "present"
+weight = 0.008620689655
+weight_units = 2
+evidence = ["crates/zero-codemode/src/edit_protocol.rs", "conformance/contracts/zero-edit-protocol-v1.md"]
+
+[[feature]]
+id = "F-CODEMODE-CANCEL"
+family = "zero-codemode"
+name = "Cancellation + late-Ok commit_race settlement"
+status = "partial"
+weight = 0.012931034482
+weight_units = 3
+evidence = ["crates/zero-codemode/src/cancellation.rs", "crates/zsx-core/src/session.rs", "crates/zero-mcp/src/mcp_transport.rs"]
+retry_condition = "Retry only when a cancelled or timed-out zero_execute that later receives Ok reports commit_race with retryable=false and keeps the committed payload, covered by a hub test that does not live only in rival dirty crates/zsx-core/src/fszero.rs. Late domain Err must stay that Err."
+notes = "CancellationSignal + CommitRace code + MCP late-Ok salvage exist; AGENTS still lists MCP late-Ok salvage as open."
+
+[[feature]]
+id = "F-ABI-ZERO-EXECUTE"
+family = "zero-abi"
+name = "ZeroExecuteResultV6 plan ABI"
+status = "present"
+weight = 0.017241379310
+weight_units = 4
+evidence = ["crates/zero-abi/src/zero_execute.rs"]
+
+[[feature]]
+id = "F-ABI-RESULT-V1"
+family = "zero-abi"
+name = "zero-result/v1 ack + content envelope"
+status = "present"
+weight = 0.021551724137
+weight_units = 5
+evidence = ["crates/zero-abi/src/result.rs", "conformance/schemas/zero-result-v1.schema.json"]
+notes = "CONTRACT.md §3"
+
+[[feature]]
+id = "F-ABI-CWIR"
+family = "zero-abi"
+name = "Causal work IR types + digest"
+status = "present"
+weight = 0.008620689655
+weight_units = 2
+evidence = ["crates/zero-abi/src/cwir.rs"]
+
+[[feature]]
+id = "F-ABI-CACHE-ENTRY"
+family = "zero-abi"
+name = "cache-entry/v1 completeness-witness key"
+status = "present"
+weight = 0.008620689655
+weight_units = 2
+evidence = ["crates/zero-abi/src/cache_entry.rs", "conformance/contracts/cache-entry-v1.md"]
+
+[[feature]]
+id = "F-CERT-VERIFIED-EVIDENCE"
+family = "zero-cert"
+name = "Unforgeable VerifiedEvidence receipts"
+status = "present"
+weight = 0.012931034482
+weight_units = 3
+evidence = ["crates/zero-cert/src/lib.rs", "crates/zero-cert/src/effect_witness.rs"]
+
+[[feature]]
+id = "F-CERT-WORKER-TRUST"
+family = "zero-cert"
+name = "Worker admission / trust receipts"
+status = "present"
+weight = 0.008620689655
+weight_units = 2
+evidence = ["crates/zero-cert/src/worker_trust.rs"]
+
+[[feature]]
+id = "F-GATE-TWO-PHASE"
+family = "zero-gate"
+name = "Proof-carrying two-phase commit"
+status = "present"
+weight = 0.012931034482
+weight_units = 3
+evidence = ["crates/zero-gate/src/two_phase.rs", "crates/zero-gate/src/lib.rs"]
+
+[[feature]]
+id = "F-GATE-Q99"
+family = "zero-gate"
+name = "Q99 window / residency contracts"
+status = "present"
+weight = 0.008620689655
+weight_units = 2
+evidence = ["crates/zero-gate/src/q99.rs"]
+
+[[feature]]
+id = "F-GATE-DEOPT"
+family = "zero-gate"
+name = "Exact deoptimization / baseline restore"
+status = "present"
+weight = 0.004310344827
+weight_units = 1
+evidence = ["crates/zero-gate/src/deoptimization.rs"]
+
+[[feature]]
+id = "F-LEDGER-CAUSAL-WORK"
+family = "zero-ledger"
+name = "Causal work receipt + exclusive classification"
+status = "present"
+weight = 0.012931034482
+weight_units = 3
+evidence = ["crates/zero-ledger/src/causal_work.rs", "crates/zero-ledger/src/lib.rs"]
+notes = "CONTRACT.md §5 honesty: estimates cannot construct measured receipts"
+
+[[feature]]
+id = "F-LEDGER-FRESH-WORK"
+family = "zero-ledger"
+name = "fresh-work-vector/v1 four-component sum"
+status = "present"
+weight = 0.008620689655
+weight_units = 2
+evidence = ["crates/zero-ledger/src/fresh_work.rs", "conformance/contracts/fresh-work-vector-v1.md"]
+
+[[feature]]
+id = "F-GAUGE-ORDINAL-REF"
+family = "zero-gauge"
+name = "scheme://o/generation/ordinal refs"
+status = "present"
+weight = 0.008620689655
+weight_units = 2
+evidence = ["crates/zero-gauge/src/lib.rs"]
+
+[[feature]]
+id = "F-PROCESS-IDENTITY"
+family = "zero-process"
+name = "Parent-death owner watch + process identity"
+status = "present"
+weight = 0.012931034482
+weight_units = 3
+evidence = ["crates/zero-process/src/identity.rs", "crates/zero-process/src/lib.rs"]
+notes = "daemonless: session-owned, parent-death-bound"
+
+[[feature]]
+id = "F-STORE-DURABLE-JOURNAL"
+family = "zero-store"
+name = "Durable journal V2/V3 state machine"
+status = "present"
+weight = 0.012931034482
+weight_units = 3
+evidence = ["crates/zero-store/src/durable_journal.rs"]
+
+[[feature]]
+id = "F-STORE-ATTEMPT-JOURNAL"
+family = "zero-store"
+name = "Attempt journal prepare/recover"
+status = "present"
+weight = 0.008620689655
+weight_units = 2
+evidence = ["crates/zero-store/src/attempt_journal.rs"]
+
+[[feature]]
+id = "F-STORE-SESSION-WAL"
+family = "zero-store"
+name = "Session WAL replay"
+status = "present"
+weight = 0.008620689655
+weight_units = 2
+evidence = ["crates/zero-store/src/session_wal.rs"]
+
+[[feature]]
+id = "F-TOKENZERO-PRIVATE-ENGINE-SURFACE"
+family = "engine-scope"
+name = "TokenZero private engine-only surfaces"
+status = "excluded"
+weight = 0.004310344864
+weight_units = 1
+evidence = ["README.md", "conformance/CONTRACT.md"]
+rationale = "TokenZero Exact-token certification is engine-owned; hub envelope binds honesty (visibleTokenCount null) but engine-only surfaces are outside this hub FeatureUniverse."
+retry_condition = "Re-include only when TokenZero is a public Cargo workspace member of this hub with its own CONTRACT.md, or conformance/CONTRACT.md is amended to treat engine-only Exact-token surfaces as hub FeatureUniverse rows."
+
