@@ -41,7 +41,7 @@ pub const SCRUB_MAX_OBJECTS_PER_PASS: usize = 262_144;
 /// size policy).
 pub const SCRUB_MAX_OBJECT_BYTES: u64 = CAS_MAX_OBJECT_BYTES;
 
-const SCRUB_RECEIPT_DOMAIN: &[u8] = b"zerostack.scrub.receipt.v1\0";
+const SCRUB_RECEIPT_DOMAIN: &[u8] = b"zerostack.scrub.receipt\0";
 
 /// Configuration of one scrub pass.
 #[derive(Clone, Copy, Debug)]

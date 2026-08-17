@@ -37,8 +37,8 @@ pub const AGGREGATE_PROGRAM_EVIDENCE_CLASSES: [AggregateEvidenceClass; 5] = [
     AggregateEvidenceClass::Gc,
 ];
 
-const AGGREGATE_PROGRAM_CONTRACT_DOMAIN: &[u8] = b"zerostack.aggregate_program_receipt.v1\0";
-const AGGREGATE_PROGRAM_RECEIPT_DOMAIN: &[u8] = b"zerostack.aggregate_program_receipt.head.v1\0";
+const AGGREGATE_PROGRAM_CONTRACT_DOMAIN: &[u8] = b"zerostack.aggregate_program_receipt\0";
+const AGGREGATE_PROGRAM_RECEIPT_DOMAIN: &[u8] = b"zerostack.aggregate_program_receipt.head\0";
 
 /// Distinct evidence classes an aggregate Program must carry per engine.
 ///
@@ -302,7 +302,7 @@ pub fn aggregate_program_contract_manifest() -> Value {
     json!({
         "artifact_profile": "zbf_1_portable_strict",
         "contract_version": AGGREGATE_PROGRAM_SCHEMA_VERSION,
-        "name": "zerostack.aggregate_program_receipt.v1",
+        "name": "zerostack.aggregate_program_receipt",
         "engines": AGGREGATE_PROGRAM_REQUIRED_ENGINES,
         "evidence_classes": AGGREGATE_PROGRAM_EVIDENCE_CLASSES,
         "negative_space": [

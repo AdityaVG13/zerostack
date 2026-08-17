@@ -4,7 +4,7 @@
 # spec source (`certifying = false`). Preflight reports advisory drift
 # as yellow and must not refuse to certify on that hash.
 
-schema_version = "gauntlet.spec_version_contract.v1"
+schema_version = "gauntlet.spec_version_contract"
 
 [meta]
 project_class = "Greenfield-Rust-class"

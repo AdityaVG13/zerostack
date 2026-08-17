@@ -12,7 +12,7 @@ use serde_json::{Value, json};
 
 use crate::digest::contract_digest_hex;
 
-pub const TOKEN_JOB_ABI_VERSION: &str = "zerostack.token_job.v1";
+pub const TOKEN_JOB_ABI_VERSION: &str = "zerostack.token_job";
 pub const TOKEN_JOB_OPERATION: &str = "job";
 pub const TOKEN_JOB_DEFAULT_WAIT_MS: u64 = 30_000;
 pub const TOKEN_JOB_MAX_WAIT_MS: u64 = 30_000;

@@ -19,7 +19,7 @@ use zero_abi::{
 };
 
 pub const VERIFIER_REGISTRY_CONTRACT_VERSION: u16 = 1;
-pub const VERIFIER_REGISTRY_SCHEMA_VERSION: &str = "zerostack.verifier_registry.v1";
+pub const VERIFIER_REGISTRY_SCHEMA_VERSION: &str = "zerostack.verifier_registry";
 pub const VERIFIER_REGISTRY_MAX_INPUT_ROOTS: usize = 4096;
 pub const VERIFIER_REGISTRY_MAX_GRADES: usize = 64;
 pub const OBLIGATION_CHECKLIST_MAX_ENTRIES: usize = 64;

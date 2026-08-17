@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "model_version": "zerostack.invalidation-freshness.v1",
+  "model_version": "zerostack.invalidation-freshness",
   "authority_binding": {
     "kind": "freeze",
     "freeze_id": "Z3",

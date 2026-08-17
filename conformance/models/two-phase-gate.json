@@ -84,7 +84,7 @@
     "ReadyToFinalize",
     "CommitReceipt"
   ],
-  "model_version": "zerostack.two-phase-gate.v1",
+  "model_version": "zerostack.two-phase-gate",
   "phase_contract": {
     "close": {
       "guard": "G8",

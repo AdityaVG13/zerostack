@@ -124,7 +124,7 @@
       "$ref": "#/$defs/digest"
     },
     "schema_version": {
-      "const": "zerostack.deoptimization_plan.v1"
+      "const": "zerostack.deoptimization_plan"
     },
     "trigger": {
       "$ref": "#/$defs/trigger"

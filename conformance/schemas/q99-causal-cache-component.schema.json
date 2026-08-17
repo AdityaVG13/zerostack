@@ -218,7 +218,7 @@
       ]
     },
     "schema_version": {
-      "const": "zerostack.q99.causal_cache_component.v1"
+      "const": "zerostack.q99.causal_cache_component"
     },
     "validity": {
       "$ref": "#/$defs/validity"

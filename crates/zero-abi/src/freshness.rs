@@ -13,7 +13,7 @@ use std::error::Error;
 use std::fmt;
 
 pub const FRESHNESS_CONTRACT_VERSION: u16 = 1;
-pub const FRESHNESS_MODEL_VERSION: &str = "zerostack.invalidation-freshness.v1";
+pub const FRESHNESS_MODEL_VERSION: &str = "zerostack.invalidation-freshness";
 pub const FRESHNESS_MAX_REPOSITORIES: usize = 64;
 pub const FRESHNESS_MAX_NODES: usize = 4_096;
 pub const FRESHNESS_MAX_EDGES: usize = 16_384;
@@ -385,7 +385,7 @@ impl IndexedThroughCertificate {
 
     fn expected_replay_identity(&self) -> Sha256Digest {
         digest_json(
-            &json!({"domain": "zerostack.freshness.replay.v1", "index_id": self.index_id, "index_generation": self.index_generation, "influence_digest": self.influence.certificate_digest}),
+            &json!({"domain": "zerostack.freshness.replay", "index_id": self.index_id, "index_generation": self.index_generation, "influence_digest": self.influence.certificate_digest}),
         )
     }
 

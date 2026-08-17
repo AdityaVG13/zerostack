@@ -396,7 +396,7 @@ impl ResolvedStore {
 
 /// Schema identity for [StoreResolutionReport], shared by every engine's
 /// doctor output so the three become comparable.
-pub const STORE_RESOLUTION_SCHEMA: &str = "zerostack.store_resolution.v1";
+pub const STORE_RESOLUTION_SCHEMA: &str = "zerostack.store_resolution";
 
 /// Resolution outcome in reportable form. Engines render their own JSON from
 /// these fields, which keeps `serde` out of this crate's dependency set.

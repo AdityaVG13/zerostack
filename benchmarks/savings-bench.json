@@ -1,5 +1,5 @@
 {
-  "schema": "zerostack.savings-bench.v1",
+  "schema": "zerostack.savings-bench",
   "measured_at": "2026-08-16T03:47:00Z",
   "fixture": {
     "file": "compact_50k.txt",

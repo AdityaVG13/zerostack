@@ -60,7 +60,7 @@ use crate::kernel_runtime::{CacheAdmissionRecord, KernelEventJournal, KernelRunt
 /// Schema version of the boundary audit report.
 pub const BOUNDARY_AUDIT_SCHEMA_VERSION: u16 = 1;
 /// Domain tag bound into the audit report digest.
-pub const BOUNDARY_AUDIT_DOMAIN: &[u8] = b"zerostack.boundary-audit.v1\0";
+pub const BOUNDARY_AUDIT_DOMAIN: &[u8] = b"zerostack.boundary-audit\0";
 /// ABI tag carried by audit artifacts.
 pub const BOUNDARY_AUDIT_ABI_VERSION: &str = "v6-r14";
 

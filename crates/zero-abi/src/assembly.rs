@@ -23,7 +23,7 @@ use crate::{
 
 pub const ASSEMBLY_MANIFEST_SCHEMA_VERSION: u16 = 1;
 pub const ASSEMBLY_ABI_CONTRACT_VERSION: u16 = 1;
-pub const ASSEMBLY_MANIFEST_DOMAIN: &[u8] = b"zerostack.assembly_manifest.v1\0";
+pub const ASSEMBLY_MANIFEST_DOMAIN: &[u8] = b"zerostack.assembly_manifest\0";
 pub const MAX_ASSEMBLY_MANIFEST_BYTES: usize = 1_048_576;
 pub const MAX_ASSEMBLY_ITEMS: usize = 64;
 pub const MAX_ASSEMBLY_STRING_BYTES: usize = 512;
@@ -775,7 +775,7 @@ pub fn assembly_abi_contract_manifest() -> Value {
         "contract": "zerostack.assembly_abi",
         "contract_version": ASSEMBLY_ABI_CONTRACT_VERSION,
         "manifest_schema_version": ASSEMBLY_MANIFEST_SCHEMA_VERSION,
-        "digest": {"algorithm": "sha256", "domain": "zerostack.assembly_manifest.v1\u{0}"},
+        "digest": {"algorithm": "sha256", "domain": "zerostack.assembly_manifest\u{0}"},
         "encoding": "rfc8259_json_sorted_object_keys_no_whitespace",
         "linked_contracts": {
             "cwir_contract_version": CWIR_CONTRACT_VERSION,

@@ -14,16 +14,16 @@ use zero_cert::{CompletenessWitness, Query, VerifiedEvidence};
 pub type SemanticCutDigest = [u8; 32];
 
 pub const SEMANTIC_CUT_CONTRACT_VERSION: u16 = 1;
-pub const SEMANTIC_CUT_SCHEMA_VERSION: &str = "racc-r-semantic-cut/v1";
+pub const SEMANTIC_CUT_SCHEMA_VERSION: &str = "racc-r-semantic-cut";
 pub const SEMANTIC_CUT_MAX_CANONICAL_BYTES: usize = 64 * 1024;
 
-const CLAIM_DOMAIN: &[u8] = b"zerostack.semantic_cut.claim.v1\0";
-const CERTIFICATE_DOMAIN: &[u8] = b"zerostack.semantic_cut.certificate.v1\0";
-const CONTRACT_DOMAIN: &[u8] = b"zerostack.semantic_cut.contract.v1\0";
-const RCQ_DOMAIN: &[u8] = b"zerostack.semantic_cut.rcq_identity.v1\0";
-const PROJECT_RELATION_DOMAIN: &[u8] = b"zerostack.semantic_cut.project_relation.v1\0";
-const EFFECT_RELATION_DOMAIN: &[u8] = b"zerostack.semantic_cut.effect_relation.v1\0";
-const VERIFIER_DOMAIN: &[u8] = b"zerostack.semantic_cut.verifier_identity.v1\0";
+const CLAIM_DOMAIN: &[u8] = b"zerostack.semantic_cut.claim\0";
+const CERTIFICATE_DOMAIN: &[u8] = b"zerostack.semantic_cut.certificate\0";
+const CONTRACT_DOMAIN: &[u8] = b"zerostack.semantic_cut.contract\0";
+const RCQ_DOMAIN: &[u8] = b"zerostack.semantic_cut.rcq_identity\0";
+const PROJECT_RELATION_DOMAIN: &[u8] = b"zerostack.semantic_cut.project_relation\0";
+const EFFECT_RELATION_DOMAIN: &[u8] = b"zerostack.semantic_cut.effect_relation\0";
+const VERIFIER_DOMAIN: &[u8] = b"zerostack.semantic_cut.verifier_identity\0";
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -134,7 +134,7 @@ impl ReasoningSafepoint {
     }
 
     pub fn digest(&self) -> Result<SemanticCutDigest, SemanticCutError> {
-        digest_serialized(b"zerostack.semantic_cut.safepoint.v1\0", self)
+        digest_serialized(b"zerostack.semantic_cut.safepoint\0", self)
     }
 
     pub const fn project_control_root(&self) -> SemanticCutDigest {
@@ -594,7 +594,7 @@ pub fn semantic_cut_contract_manifest() -> Value {
             "successful_verifier_receipt",
             "verified_claim_payload_exact",
         ],
-        "name": "zerostack.semantic_cut.v1",
+        "name": "zerostack.semantic_cut",
         "negative_space": [
             "approximate_continuation_as_exact",
             "classifier_score_as_rcq_proof",

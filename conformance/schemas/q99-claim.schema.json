@@ -69,7 +69,7 @@
       "$ref": "#/$defs/u128"
     },
     "schema_version": {
-      "const": "zerostack.q99.claim.v1"
+      "const": "zerostack.q99.claim"
     },
     "source_receipt_digests": {
       "items": {

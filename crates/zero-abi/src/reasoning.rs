@@ -13,7 +13,7 @@ use serde_json::{Value, json};
 
 use crate::{Sha256Digest, canonical_json, sha256};
 
-pub const REASONING_CONTRACT_SCHEMA_VERSION: &str = "racc-r-reasoning-contract/v1";
+pub const REASONING_CONTRACT_SCHEMA_VERSION: &str = "racc-r-reasoning-contract";
 pub const REASONING_CONTRACT_VERSION: u16 = 1;
 pub const REASONING_CONTRACT_MAX_CANONICAL_BYTES: usize = 32 * 1024;
 pub const REASONING_CONTRACT_MAX_EXTENSION_BYTES: usize = 8 * 1024;
@@ -26,10 +26,10 @@ pub const REASONING_CONTRACT_MAX_STOP_SEQUENCE_BYTES: usize = 256;
 pub const REASONING_CONTRACT_TEMPERATURE_PPM_MAX: u32 = 2_000_000;
 pub const REASONING_CONTRACT_TOP_P_PPM_MAX: u32 = 1_000_000;
 
-const CONTRACT_DOMAIN: &[u8] = b"zerostack.reasoning_contract.contract.v1\0";
-const INSTANCE_DOMAIN: &[u8] = b"zerostack.reasoning_contract.instance.v1\0";
-const ADMISSION_DOMAIN: &[u8] = b"zerostack.reasoning_contract.admission.v1\0";
-const SCHEMA_DOMAIN: &[u8] = b"zerostack.reasoning_contract.schema.v1\0";
+const CONTRACT_DOMAIN: &[u8] = b"zerostack.reasoning_contract.contract\0";
+const INSTANCE_DOMAIN: &[u8] = b"zerostack.reasoning_contract.instance\0";
+const ADMISSION_DOMAIN: &[u8] = b"zerostack.reasoning_contract.admission\0";
+const SCHEMA_DOMAIN: &[u8] = b"zerostack.reasoning_contract.schema\0";
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "kebab-case")]
@@ -818,7 +818,7 @@ pub fn reasoning_contract_manifest() -> Value {
         "contract_version": REASONING_CONTRACT_VERSION,
         "headroom_order": ["reasoning", "visible_output", "tool", "recovery", "input"],
         "max_canonical_bytes": REASONING_CONTRACT_MAX_CANONICAL_BYTES,
-        "name": "zerostack.reasoning_contract.v1",
+        "name": "zerostack.reasoning_contract",
         "negative_space": [
             "cache_eligibility_as_hit", "effort_downshift", "opaque_state_summary_as_exact",
             "reasoning_tokens_estimated_from_visible_output", "silent_output_ceiling_reduction",

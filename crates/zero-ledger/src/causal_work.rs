@@ -425,7 +425,7 @@ impl CausalWorkReceipt {
             .as_object_mut()
             .ok_or_else(|| CausalWorkError::Json("receipt must be object".into()))?
             .remove("receipt_digest");
-        let mut bytes = b"zerostack.causal_work_receipt.v1\0".to_vec();
+        let mut bytes = b"zerostack.causal_work_receipt\0".to_vec();
         bytes.extend_from_slice(canonical_json(&value).as_bytes());
         Ok(Sha256Digest::from_bytes(sha256(&bytes)))
     }
@@ -534,7 +534,7 @@ pub struct LegacyClassMapping {
     pub measured_fact: bool,
 }
 
-pub const fn map_legacy_class_v2(legacy: LegacyChargeClass) -> LegacyClassMapping {
+pub const fn map_legacy_class(legacy: LegacyChargeClass) -> LegacyClassMapping {
     let suggested_causal_class = match legacy {
         LegacyChargeClass::Billed | LegacyChargeClass::FailedTrial => {
             CausalWorkClass::Candidate

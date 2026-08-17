@@ -7,11 +7,11 @@
 # Excluded rows still carry non-zero weight (coverage debt for strict-100%).
 # missing/excluded/partial require rationale (when not present) and retry_condition.
 # evidence must be existing repo-relative paths, never bead IDs.
-schema_version = "zerostack.supported_surface_matrix.v1"
+schema_version = "zerostack.supported_surface_matrix"
 project = "ZeroStack"
 class = "Greenfield-Rust-class"
-source_base_schema = "gauntlet.supported_surface_matrix.v1"
-source_delta_schema = "gauntlet.surface_matrix_delta.v1"
+source_base_schema = "gauntlet.supported_surface_matrix"
+source_delta_schema = "gauntlet.surface_matrix_delta"
 weight_policy = "global-sum-1.0"
 weight_unit_denominator = 244
 allowed_statuses = ["present", "partial", "missing", "excluded"]
@@ -675,7 +675,7 @@ evidence = ["crates/zero-abi/src/cwir.rs"]
 [[feature]]
 id = "F-ABI-CACHE-ENTRY"
 family = "zero-abi"
-name = "cache-entry/v1 completeness-witness key"
+name = "cache-entry completeness-witness key"
 status = "present"
 weight = 0.008196721311
 weight_units = 2

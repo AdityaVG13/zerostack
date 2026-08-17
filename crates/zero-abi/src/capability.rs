@@ -41,7 +41,7 @@ pub enum CasLayout {
 pub struct LayoutVersion(NonZeroU64);
 
 impl LayoutVersion {
-    pub const V1: Self = Self(NonZeroU64::MIN);
+    pub const CURRENT: Self = Self(NonZeroU64::MIN);
 
     pub const fn new(value: NonZeroU64) -> Self {
         Self(value)

@@ -31,7 +31,7 @@ use crate::Sha256Digest;
 
 pub const ROOTED_ABI_VERSION: &str = "zerostack.racc";
 pub const ROOT_HASH_ALGORITHM: &str = "sha256";
-pub const EVENT_LOG_GENESIS_DOMAIN: &[u8] = b"zerostack.eventlog.genesis.v1\0";
+pub const EVENT_LOG_GENESIS_DOMAIN: &[u8] = b"zerostack.eventlog.genesis\0";
 pub const CONTRACT_VERSION: u16 = 1;
 
 /// Fail-closed error for identity kernel construction and verification.
@@ -150,20 +150,20 @@ pub enum ObjectClass {
 impl ObjectClass {
     pub fn domain(self) -> &'static str {
         match self {
-            ObjectClass::TaskContract => "zerostack.object.task_contract.v1",
-            ObjectClass::ProtectedScope => "zerostack.object.protected_scope.v1",
-            ObjectClass::FormationReceipt => "zerostack.object.formation_receipt.v1",
-            ObjectClass::EventRecord => "zerostack.object.event_record.v1",
-            ObjectClass::SuccessorRecord => "zerostack.object.successor_record.v1",
-            ObjectClass::ExecuteResult => "zerostack.object.execute_result.v1",
-            ObjectClass::ContinuationHandle => "zerostack.object.continuation_handle.v1",
+            ObjectClass::TaskContract => "zerostack.object.task_contract",
+            ObjectClass::ProtectedScope => "zerostack.object.protected_scope",
+            ObjectClass::FormationReceipt => "zerostack.object.formation_receipt",
+            ObjectClass::EventRecord => "zerostack.object.event_record",
+            ObjectClass::SuccessorRecord => "zerostack.object.successor_record",
+            ObjectClass::ExecuteResult => "zerostack.object.execute_result",
+            ObjectClass::ContinuationHandle => "zerostack.object.continuation_handle",
             ObjectClass::ContinuationCompactRecord => {
-                "zerostack.object.continuation_compact_record.v1"
+                "zerostack.object.continuation_compact_record"
             }
-            ObjectClass::DecisionView => "zerostack.object.decision_view.v1",
-            ObjectClass::Delta => "zerostack.object.delta.v1",
-            ObjectClass::AuthorityObject => "zerostack.object.authority_object.v1",
-            ObjectClass::MigrationReceipt => "zerostack.object.migration_receipt.v1",
+            ObjectClass::DecisionView => "zerostack.object.decision_view",
+            ObjectClass::Delta => "zerostack.object.delta",
+            ObjectClass::AuthorityObject => "zerostack.object.authority_object",
+            ObjectClass::MigrationReceipt => "zerostack.object.migration_receipt",
         }
     }
 }

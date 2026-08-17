@@ -55,7 +55,7 @@
       "type": "array"
     },
     "schema_version": {
-      "const": "racc-r-dcr-certificate/v1"
+      "const": "racc-r-dcr-certificate"
     },
     "task_identity": {
       "$ref": "#/$defs/digest"

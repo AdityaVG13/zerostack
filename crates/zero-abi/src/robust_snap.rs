@@ -11,7 +11,7 @@ use serde_json::{Value, json};
 
 use crate::{Sha256Digest, canonical_json, sha256};
 
-pub const ROBUST_SNAP_MODEL_VERSION: &str = "zerostack.robust_snap.finite.v1";
+pub const ROBUST_SNAP_MODEL_VERSION: &str = "zerostack.robust_snap.finite";
 pub const ROBUST_SNAP_CONTRACT_VERSION: u16 = 1;
 pub const ROBUST_SNAP_MAX_WORLDS: usize = 32;
 pub const ROBUST_SNAP_MAX_EFFECTS: usize = 64;
@@ -19,7 +19,7 @@ pub const ROBUST_SNAP_MAX_LEAVES: usize = 64;
 pub const ROBUST_SNAP_MAX_EVIDENCE_DEPTH: usize = 16;
 pub const ROBUST_SNAP_MAX_ASSUMPTIONS: usize = 32;
 pub const ROBUST_SNAP_MAX_ASSUMPTION_BYTES: usize = 512;
-const CERTIFICATE_DOMAIN: &[u8] = b"zerostack.robust_snap.certificate.v1\0";
+const CERTIFICATE_DOMAIN: &[u8] = b"zerostack.robust_snap.certificate\0";
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, Ord, PartialEq, PartialOrd, Serialize)]
 #[serde(rename_all = "snake_case")]

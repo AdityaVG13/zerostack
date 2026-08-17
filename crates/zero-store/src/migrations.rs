@@ -37,10 +37,10 @@ pub const MIGRATION_RECEIPT_SCHEMA_VERSION: u16 = 1;
 /// File name of the format-version record, relative to the store root.
 pub const STORE_FORMAT_VERSION_FILENAME: &str = "format_version";
 
-pub const FORMAT_VERSION_DOMAIN: &[u8] = b"zerostack.store_format.version.v1\0";
-pub const MIGRATION_RECEIPT_DOMAIN: &[u8] = b"zerostack.store_format.migration_receipt.v1\0";
-pub const MIGRATION_STEP_DOMAIN: &[u8] = b"zerostack.store_format.migration_step.v1\0";
-pub const MIGRATION_MARKER_DOMAIN: &[u8] = b"zerostack.store_format.migration_marker.v1\0";
+pub const FORMAT_VERSION_DOMAIN: &[u8] = b"zerostack.store_format.version\0";
+pub const MIGRATION_RECEIPT_DOMAIN: &[u8] = b"zerostack.store_format.migration_receipt\0";
+pub const MIGRATION_STEP_DOMAIN: &[u8] = b"zerostack.store_format.migration_step\0";
+pub const MIGRATION_MARKER_DOMAIN: &[u8] = b"zerostack.store_format.migration_marker\0";
 
 /// Explicit on-disk store-format version record.
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]

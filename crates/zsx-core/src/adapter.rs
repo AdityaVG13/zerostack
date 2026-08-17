@@ -29,7 +29,7 @@
 //!         AdapterBinding {
 //!             engine: EngineIdentity::FsZero,
 //!             worker_revision: env!("CARGO_PKG_VERSION").into(),
-//!             semantic_contract_version: "fszero.codemode.v1".into(),
+//!             semantic_contract_version: "fszero.codemode".into(),
 //!             semantic_contract_digest: <64-lower-hex>.into(),
 //!             operation_registry_digest: <64-lower-hex>.into(),
 //!             ref_scheme: "fz://".into(),
@@ -87,7 +87,7 @@ pub struct AdapterBinding {
     pub engine: EngineIdentity,
     /// Engine-owned revision string, surfaced in worker traces.
     pub worker_revision: String,
-    /// Engine-owned semantic contract version (e.g. `fszero.codemode.v1`).
+    /// Engine-owned semantic contract version (e.g. `fszero.codemode`).
     pub semantic_contract_version: String,
     /// 64-character lowercase hex semantic contract digest.
     pub semantic_contract_digest: String,

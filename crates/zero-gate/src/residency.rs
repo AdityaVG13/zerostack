@@ -353,7 +353,7 @@ impl Q99Window {
 
 // ---------------------------------------------------------------------------
 // Residency plan + independent threshold checker (ZS-CACHE-011, schema
-// causal_residency_plan_v6.schema.json).
+// causal_residency_plan.schema.json).
 // ---------------------------------------------------------------------------
 
 /// One object in a residency plan, matching the canonical V6 schema object.
@@ -392,7 +392,7 @@ impl ResidencyPlanObject {
 }
 
 /// Optimizer proposal: which objects to keep resident at which tier.
-/// Mirrors `causal_residency_plan_v6.schema.json` exactly.
+/// Mirrors `causal_residency_plan.schema.json` exactly.
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct ResidencyPlan {

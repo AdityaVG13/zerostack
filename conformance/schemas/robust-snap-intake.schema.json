@@ -26,7 +26,7 @@
       "$ref": "#/$defs/digest"
     },
     "schema_version": {
-      "const": "zerostack.robust_snap.intake_claim.v1"
+      "const": "zerostack.robust_snap.intake_claim"
     },
     "snap_certificate_digest": {
       "$ref": "#/$defs/digest"

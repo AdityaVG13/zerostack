@@ -29,10 +29,10 @@ use crate::{
 };
 
 pub const DEOPTIMIZATION_CONTRACT_VERSION: u16 = 1;
-pub const BASELINE_SAFEPOINT_SCHEMA_VERSION: &str = "zerostack.baseline_safepoint.v1";
-pub const BASELINE_RESTORATION_SCHEMA_VERSION: &str = "zerostack.baseline_restoration.v1";
-pub const BASELINE_EXECUTION_SCHEMA_VERSION: &str = "zerostack.baseline_execution.v1";
-pub const DEOPTIMIZATION_PLAN_SCHEMA_VERSION: &str = "zerostack.deoptimization_plan.v1";
+pub const BASELINE_SAFEPOINT_SCHEMA_VERSION: &str = "zerostack.baseline_safepoint";
+pub const BASELINE_RESTORATION_SCHEMA_VERSION: &str = "zerostack.baseline_restoration";
+pub const BASELINE_EXECUTION_SCHEMA_VERSION: &str = "zerostack.baseline_execution";
+pub const DEOPTIMIZATION_PLAN_SCHEMA_VERSION: &str = "zerostack.deoptimization_plan";
 pub const DEOPTIMIZATION_RESUME_SCHEMA_SHA256: &str =
     "984eeed082d5a1d190f644072e21b4821c5649f19f240e057dfbb6ff9554e8ba";
 pub const DEOPTIMIZATION_EXECUTION_SCHEMA_SHA256: &str =
@@ -41,19 +41,19 @@ pub const DEOPTIMIZATION_PLAN_SCHEMA_SHA256: &str =
     "667e8ca57b3702882dfb7504b80e13a2de5e6e911e58c8e0d67004e3438da203";
 pub const DEOPTIMIZATION_MAX_CANONICAL_BYTES: usize = 1_048_576;
 
-const SAFEPOINT_DOMAIN: &[u8] = b"zerostack.deoptimization.safepoint_claim.v1\0";
+const SAFEPOINT_DOMAIN: &[u8] = b"zerostack.deoptimization.safepoint_claim\0";
 const SAFEPOINT_CERTIFICATE_DOMAIN: &[u8] =
-    b"zerostack.deoptimization.safepoint_certificate.v1\0";
-const REASONING_ENTRY_DOMAIN: &[u8] = b"zerostack.deoptimization.reasoning_entry.v1\0";
-const PLAN_DOMAIN: &[u8] = b"zerostack.deoptimization.plan.v1\0";
-const RESTORATION_CLAIM_DOMAIN: &[u8] = b"zerostack.deoptimization.restoration_claim.v1\0";
-const RESUME_PERMIT_DOMAIN: &[u8] = b"zerostack.deoptimization.resume_permit.v1\0";
-const INVOCATION_DOMAIN: &[u8] = b"zerostack.deoptimization.baseline_invocation.v1\0";
-const EXECUTION_CLAIM_DOMAIN: &[u8] = b"zerostack.deoptimization.baseline_execution_claim.v1\0";
+    b"zerostack.deoptimization.safepoint_certificate\0";
+const REASONING_ENTRY_DOMAIN: &[u8] = b"zerostack.deoptimization.reasoning_entry\0";
+const PLAN_DOMAIN: &[u8] = b"zerostack.deoptimization.plan\0";
+const RESTORATION_CLAIM_DOMAIN: &[u8] = b"zerostack.deoptimization.restoration_claim\0";
+const RESUME_PERMIT_DOMAIN: &[u8] = b"zerostack.deoptimization.resume_permit\0";
+const INVOCATION_DOMAIN: &[u8] = b"zerostack.deoptimization.baseline_invocation\0";
+const EXECUTION_CLAIM_DOMAIN: &[u8] = b"zerostack.deoptimization.baseline_execution_claim\0";
 const EXECUTION_RECEIPT_DOMAIN: &[u8] =
-    b"zerostack.deoptimization.baseline_execution_receipt.v1\0";
-const VERIFIER_DOMAIN: &[u8] = b"zerostack.deoptimization.verifier_identity.v1\0";
-const CONTRACT_DOMAIN: &[u8] = b"zerostack.deoptimization.contract.v1\0";
+    b"zerostack.deoptimization.baseline_execution_receipt\0";
+const VERIFIER_DOMAIN: &[u8] = b"zerostack.deoptimization.verifier_identity\0";
+const CONTRACT_DOMAIN: &[u8] = b"zerostack.deoptimization.contract\0";
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]

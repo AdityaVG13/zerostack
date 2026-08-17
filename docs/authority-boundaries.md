@@ -70,7 +70,7 @@ Each row: Exists? No. Falsifier revokes claim. Bead = future work; no cross-repo
 
 | Surface | Bead | Paths/symbols | Falsifier |
 |---|---|---|---|
-| zero.execute zerokernel/v1 | `zerostack-0n55` | `zero_execute.rs:ZeroExecuteResult` + `ContinuationCartridgeRecord:729` | Unknown field not fail-closed => fail |
+| zero.execute zerokernel | `zerostack-0n55` | `zero_execute.rs:ZeroExecuteResult` + `ContinuationCartridgeRecord:729` | Unknown field not fail-closed => fail |
 | Supervisor embedded/one-shot | `zerostack-s0lx` | `zero-codemode/src/worker.rs`, `zero-process:VerifiedChild` | Executor !=0 after terminal => W10-T11 fail |
 | Preflight broker | `zerostack-pvwg` | `z.context.{projectRoot,workspaceRoot,requestRoot,sessionRoot}` | Semantic auto-repair => fail |
 | Guest z surface | `zerostack-fhcj`/`zerostack-xbg3` | `z.resolve`/`z.expand`/`z.snap`/`z.transaction` | Broken W9 chain with authority => W10-T12 fail |

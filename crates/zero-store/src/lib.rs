@@ -50,9 +50,9 @@ pub use cas::{
 };
 pub use durable_journal::{
     AbortReason, BindingLease, ContinuationCartridge, ContinuationLeaseCartridge,
-    DURABLE_BINDING_SCHEMA_VERSION, DURABLE_BINDING_SCHEMA_VERSION_V2,
-    DURABLE_JOURNAL_MAX_RECORD_BYTES, DURABLE_JOURNAL_SCHEMA_VERSION_V2,
-    DURABLE_JOURNAL_SCHEMA_VERSION_V3, DURABLE_LEASE_SCHEMA_VERSION,
+    DURABLE_BINDING_SCHEMA_VERSION, DURABLE_LEASE_BINDING_SCHEMA_VERSION,
+    DURABLE_JOURNAL_MAX_RECORD_BYTES, DURABLE_JOURNAL_SCHEMA_VERSION,
+    DURABLE_LEASE_JOURNAL_SCHEMA_VERSION, DURABLE_LEASE_SCHEMA_VERSION,
     DURABLE_RECEIPT_SCHEMA_VERSION, DurableJournal, DurableLeaseJournal, FaultPlan,
     JournalBindingLike, JournalBinding, JournalLeaseBinding, JournalBoundary, JournalError,
     JournalFailureCode, JournalPaths, JournalRecord, JournalState,
@@ -62,11 +62,11 @@ pub use durable_journal::{
     commit_journal_with_fault, commit_lease_journal_with_fault, durable_journal_contract,
     initialize_published_root, initialize_published_root_with_fault, prepare_journal,
     prepare_lease_journal, prepare_journal_with_fault, prepare_lease_journal_with_fault,
-    read_continuation_cartridge, read_continuation_cartridge_v2, read_journal_record,
-    read_journal_record_v2, read_published_root, record_owner_death,
+    read_continuation_cartridge, read_lease_continuation_cartridge, read_journal_record,
+    read_lease_journal_record, read_published_root, record_owner_death,
     record_lease_owner_death, record_owner_death_with_fault, record_lease_owner_death_with_fault,
     recover_journal, recover_lease_journal, recover_journal_with_fault,
-    recover_lease_journal_with_fault, verify_committed_binding_v2,
+    recover_lease_journal_with_fault, verify_committed_lease_binding,
 };
 pub use fs_replace::{
     SyncPolicy, atomic_write_file, atomic_write_file_with_sync, replace_file, sync_unsupported,

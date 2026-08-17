@@ -18,17 +18,17 @@ pub const QUALITY_ENVELOPE_MAX_DIMENSIONS: usize = 128;
 pub const QUALITY_ENVELOPE_MAX_METRIC_ID_BYTES: usize = 128;
 pub const QUALITY_PPM_SCALE: i64 = 1_000_000;
 
-const PAIR_DOMAIN: &[u8] = b"zerostack.quality.pair.v1\0";
-const EXACT_DOMAIN: &[u8] = b"zerostack.quality.exact_neutral.v1\0";
-const POINTWISE_DOMAIN: &[u8] = b"zerostack.quality.pointwise.v1\0";
-const CLASS_RULE_DOMAIN: &[u8] = b"zerostack.quality.class_rule.v1\0";
-const MEMBERSHIP_DOMAIN: &[u8] = b"zerostack.quality.membership.v1\0";
-const SCOPED_DOMAIN: &[u8] = b"zerostack.quality.scoped.v1\0";
-const DISTRIBUTIONAL_CLAIM_DOMAIN: &[u8] = b"zerostack.quality.distributional_claim.v1\0";
-const DISTRIBUTIONAL_DOMAIN: &[u8] = b"zerostack.quality.distributional.v1\0";
-const VERIFIER_DOMAIN: &[u8] = b"zerostack.quality.verifier.v1\0";
-const ADMISSION_DOMAIN: &[u8] = b"zerostack.quality.admission.v1\0";
-const CONTRACT_DOMAIN: &[u8] = b"zerostack.quality.contract.v1\0";
+const PAIR_DOMAIN: &[u8] = b"zerostack.quality.pair\0";
+const EXACT_DOMAIN: &[u8] = b"zerostack.quality.exact_neutral\0";
+const POINTWISE_DOMAIN: &[u8] = b"zerostack.quality.pointwise\0";
+const CLASS_RULE_DOMAIN: &[u8] = b"zerostack.quality.class_rule\0";
+const MEMBERSHIP_DOMAIN: &[u8] = b"zerostack.quality.membership\0";
+const SCOPED_DOMAIN: &[u8] = b"zerostack.quality.scoped\0";
+const DISTRIBUTIONAL_CLAIM_DOMAIN: &[u8] = b"zerostack.quality.distributional_claim\0";
+const DISTRIBUTIONAL_DOMAIN: &[u8] = b"zerostack.quality.distributional\0";
+const VERIFIER_DOMAIN: &[u8] = b"zerostack.quality.verifier\0";
+const ADMISSION_DOMAIN: &[u8] = b"zerostack.quality.admission\0";
+const CONTRACT_DOMAIN: &[u8] = b"zerostack.quality.contract\0";
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -1537,7 +1537,7 @@ pub fn quality_envelope_contract_manifest() -> Value {
         "linked_capabilities": ["zero_cert::VerifiedEvidence"],
         "max_canonical_bytes": QUALITY_ENVELOPE_MAX_CANONICAL_BYTES,
         "max_dimensions": QUALITY_ENVELOPE_MAX_DIMENSIONS,
-        "name": "zerostack.quality_envelope.v1",
+        "name": "zerostack.quality_envelope",
         "negative_space": [
             "float_quality_arithmetic",
             "heuristic_quality_evidence",

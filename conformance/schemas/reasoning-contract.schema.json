@@ -149,7 +149,7 @@
       "$ref": "#/$defs/sampling_params"
     },
     "schema_version": {
-      "const": "racc-r-reasoning-contract/v1"
+      "const": "racc-r-reasoning-contract"
     },
     "stopping_policy": {
       "$ref": "#/$defs/stopping_policy"

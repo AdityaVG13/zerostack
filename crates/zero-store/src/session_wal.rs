@@ -273,7 +273,7 @@ pub fn session_wal_contract() -> serde_json::Value {
         "merge": "caller_owned",
         "foreign_writer": "file_identity",
         "sync_policies": ["required", "tolerate_unsupported", "never"],
-        "not": "durable_journal_v2",
+        "not": "durable_journal",
     })
 }
 

@@ -20,8 +20,8 @@ use crate::two_phase::{
     validate_receipt_record,
 };
 
-const DURABLE_PUBLICATION_DOMAIN: &[u8] = b"zerostack.durable_publication.v1\0";
-const NATIVE_DURABILITY_RECEIPT_DOMAIN: &[u8] = b"zerostack.native_durability_receipt.v1\0";
+const DURABLE_PUBLICATION_DOMAIN: &[u8] = b"zerostack.durable_publication\0";
+const NATIVE_DURABILITY_RECEIPT_DOMAIN: &[u8] = b"zerostack.native_durability_receipt\0";
 pub const DURABLE_PUBLICATION_SCHEMA_VERSION: u16 = 1;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

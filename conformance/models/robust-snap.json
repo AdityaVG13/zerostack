@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "model_version": "zerostack.robust_snap.finite.v1",
+  "model_version": "zerostack.robust_snap.finite",
   "authority": {
     "freeze_id": "Z2",
     "authority_hash": "dc6a8262b0cae49c3aed38f08ce13fb1d6c80acc90c7f05fdff21558243c73af"

@@ -26,8 +26,8 @@ use crate::{
 };
 
 pub const REINVESTMENT_CONTRACT_VERSION: u16 = 1;
-pub const REINVESTMENT_PLAN_SCHEMA_VERSION: &str = "zerostack.reinvestment.plan.v1";
-pub const REINVESTMENT_SELECTION_SCHEMA_VERSION: &str = "zerostack.reinvestment.selection.v1";
+pub const REINVESTMENT_PLAN_SCHEMA_VERSION: &str = "zerostack.reinvestment.plan";
+pub const REINVESTMENT_SELECTION_SCHEMA_VERSION: &str = "zerostack.reinvestment.selection";
 pub const REINVESTMENT_MAX_ACTIONS: usize = 128;
 pub const REINVESTMENT_MAX_COORDINATES: usize = 32;
 pub const REINVESTMENT_MAX_CANONICAL_BYTES: usize = 1_048_576;
@@ -38,15 +38,15 @@ pub const REINVESTMENT_PLAN_SCHEMA_SHA256: &str =
 pub const REINVESTMENT_SELECTION_SCHEMA_SHA256: &str =
     "24c80a2156361fbd5f8da599823476fe08d3bc0f8d28cee4de96c8536358ed3f";
 
-const RESOURCE_IDENTITY_DOMAIN: &[u8] = b"zerostack.reinvestment.resource_identity.v1\0";
-const ACTION_CLAIM_DOMAIN: &[u8] = b"zerostack.reinvestment.action_claim.v1\0";
-const ACTION_AUTHORITY_DOMAIN: &[u8] = b"zerostack.reinvestment.action_authority.v1\0";
-const PLAN_DOMAIN: &[u8] = b"zerostack.reinvestment.plan.v1\0";
-const BRANCH_DOMAIN: &[u8] = b"zerostack.reinvestment.branch.v1\0";
-const SELECTION_CLAIM_DOMAIN: &[u8] = b"zerostack.reinvestment.selection_claim.v1\0";
-const SELECTION_AUTHORITY_DOMAIN: &[u8] = b"zerostack.reinvestment.selection_authority.v1\0";
-const BASELINE_DOMAIN: &[u8] = b"zerostack.reinvestment.baseline.v1\0";
-const CONTRACT_DOMAIN: &[u8] = b"zerostack.reinvestment.contract.v1\0";
+const RESOURCE_IDENTITY_DOMAIN: &[u8] = b"zerostack.reinvestment.resource_identity\0";
+const ACTION_CLAIM_DOMAIN: &[u8] = b"zerostack.reinvestment.action_claim\0";
+const ACTION_AUTHORITY_DOMAIN: &[u8] = b"zerostack.reinvestment.action_authority\0";
+const PLAN_DOMAIN: &[u8] = b"zerostack.reinvestment.plan\0";
+const BRANCH_DOMAIN: &[u8] = b"zerostack.reinvestment.branch\0";
+const SELECTION_CLAIM_DOMAIN: &[u8] = b"zerostack.reinvestment.selection_claim\0";
+const SELECTION_AUTHORITY_DOMAIN: &[u8] = b"zerostack.reinvestment.selection_authority\0";
+const BASELINE_DOMAIN: &[u8] = b"zerostack.reinvestment.baseline\0";
+const CONTRACT_DOMAIN: &[u8] = b"zerostack.reinvestment.contract\0";
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]

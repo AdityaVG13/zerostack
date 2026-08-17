@@ -85,7 +85,7 @@ pub struct SessionApprovalGrant {
     pub expires_at_unix_ms: u64,
 }
 
-pub const SESSION_APPROVAL_SCHEMA: &str = "zerostack.session.approval_grant.v1";
+pub const SESSION_APPROVAL_SCHEMA: &str = "zerostack.session.approval_grant";
 pub const MAX_SESSION_APPROVAL_GRANTS: usize = 64;
 pub const MAX_SESSION_APPROVAL_LIFETIME_MS: u64 = 300_000;
 pub const MAX_SESSION_CONSUMED_APPROVALS: usize = 65_536;

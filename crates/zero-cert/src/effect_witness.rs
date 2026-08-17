@@ -13,9 +13,9 @@ use zero_abi::{CwirVerifierClass, Sha256Digest, EffectProgram, canonical_json, s
 use crate::{CompletenessWitness, Query, VerifiedEvidence};
 
 pub const EFFECT_WITNESS_CONTRACT_VERSION: u16 = 1;
-pub const EFFECT_WITNESS_DOMAIN: &[u8] = b"zerostack.effect_witness.v1\0";
-pub const EFFECT_ACCEPTED_DOMAIN: &[u8] = b"zerostack.effect_verification.accepted.v1\0";
-pub const EFFECT_EVIDENCE_REF_DOMAIN: &[u8] = b"zerostack.effect_witness.evidence_ref.v1\0";
+pub const EFFECT_WITNESS_DOMAIN: &[u8] = b"zerostack.effect_witness\0";
+pub const EFFECT_ACCEPTED_DOMAIN: &[u8] = b"zerostack.effect_verification.accepted\0";
+pub const EFFECT_EVIDENCE_REF_DOMAIN: &[u8] = b"zerostack.effect_witness.evidence_ref\0";
 pub const EFFECT_WITNESS_MAX_CANONICAL_BYTES: usize = 262_144;
 pub const EFFECT_WITNESS_MAX_EVIDENCE_REFS: usize = 512;
 pub const EFFECT_WITNESS_MAX_EXPANSIONS: usize = 512;
@@ -820,9 +820,9 @@ pub fn effect_witness_contract_manifest() -> Value {
         "contract_version": EFFECT_WITNESS_CONTRACT_VERSION,
         "encoding": "rfc8259_json_sorted_object_keys_no_whitespace",
         "domains": {
-            "witness": "zerostack.effect_witness.v1\u{0}",
-            "accepted": "zerostack.effect_verification.accepted.v1\u{0}",
-            "evidence_ref": "zerostack.effect_witness.evidence_ref.v1\u{0}"
+            "witness": "zerostack.effect_witness\u{0}",
+            "accepted": "zerostack.effect_verification.accepted\u{0}",
+            "evidence_ref": "zerostack.effect_witness.evidence_ref\u{0}"
         },
         "outcomes": ["accepted", "rejected", "incomplete"],
         "witness_fields": [

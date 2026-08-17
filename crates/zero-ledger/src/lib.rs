@@ -29,7 +29,7 @@
 //!   declared estimates live in a separate namespace ([`DeclaredEstimate`])
 //!   that can never construct a measured receipt, and an unavailable counter is
 //!   [`ParentCounterObservation::Unmeasured`], never zero. Legacy v2 classes
-//!   map readably without rewriting archives ([`map_legacy_class_v2`]).
+//!   map readably without rewriting archives ([`map_legacy_class`]).
 //! - **Integer-only arithmetic.** Retained fractions are parts-per-million
 //!   integers widened to u128; there are no floats and no percentage strings.
 //!   [`RetainedFractionPpm`] is range-validated at construction and on the wire.
@@ -66,7 +66,7 @@ pub use causal_work::{
     CausalWorkReceipt, CounterCorrespondenceReceipt, CounterEvidenceMode, DeclaredEstimate,
     LegacyChargeClass, LegacyClassMapping, ParentCounterIdentity, ParentCounterObservation,
     ParentCounterWindow, ResiduePolicy, causal_work_contract_digest,
-    causal_work_contract_manifest, map_legacy_class_v2,
+    causal_work_contract_manifest, map_legacy_class,
 };
 
 pub use charging_maps::{
@@ -260,7 +260,7 @@ impl LedgerConfig {
 /// can omit or double-class fallback, restoration, prewarm, and residue work,
 /// and declared estimates can masquerade as measured facts. Complete exactly-one
 /// causal accounting lives in [`causal_work`] ([`CausalWorkClass`],
-/// [`CausalWorkReceipt`]); [`map_legacy_class_v2`] maps these classes readably
+/// [`CausalWorkReceipt`]); [`map_legacy_class`] maps these classes readably
 /// without rewriting archives.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
 pub enum ChargeClass {
@@ -740,7 +740,7 @@ pub struct ArchiveAttestation {
 impl ArchiveAttestation {
     /// Canonical archive root over the retained span digests.
     pub fn root_of(retained_span_digests: &[Digest]) -> Digest {
-        fold_root("racc.archive.v1", retained_span_digests)
+        fold_root("racc.archive", retained_span_digests)
     }
 
     /// Verifies the retained spans against the declared archive root.
@@ -791,10 +791,10 @@ impl PolicyDecision {
     fn leaf(self) -> Digest {
         match self {
             Self::SufficiencyProven { witness_digest } => {
-                fold_root("racc.policy.proven.v1", &[witness_digest])
+                fold_root("racc.policy.proven", &[witness_digest])
             }
             Self::RawFallbackServed { view_digest } => {
-                fold_root("racc.policy.fallback.v1", &[view_digest])
+                fold_root("racc.policy.fallback", &[view_digest])
             }
         }
     }
@@ -810,7 +810,7 @@ impl PolicyEvidence {
     /// Canonical certificate root over the per-decision receipts.
     pub fn root_of(decisions: &[PolicyDecision]) -> Digest {
         let leaves: Vec<Digest> = decisions.iter().map(|d| d.leaf()).collect();
-        fold_root("racc.policy.v1", &leaves)
+        fold_root("racc.policy", &leaves)
     }
 
     /// Verifies the per-decision receipts against the declared certificate root.
@@ -856,8 +856,8 @@ pub enum TaskOutcome {
 impl TaskOutcome {
     fn leaf(self) -> Digest {
         match self {
-            Self::Accepted { task_digest } => fold_root("racc.task.accepted.v1", &[task_digest]),
-            Self::Regressed { task_digest } => fold_root("racc.task.regressed.v1", &[task_digest]),
+            Self::Accepted { task_digest } => fold_root("racc.task.accepted", &[task_digest]),
+            Self::Regressed { task_digest } => fold_root("racc.task.regressed", &[task_digest]),
         }
     }
 
@@ -881,7 +881,7 @@ impl TaskAcceptanceReceipt {
     /// Canonical acceptance root over the per-task outcomes.
     pub fn root_of(outcomes: &[TaskOutcome]) -> Digest {
         let leaves: Vec<Digest> = outcomes.iter().map(|o| o.leaf()).collect();
-        fold_root("racc.task.v1", &leaves)
+        fold_root("racc.task", &leaves)
     }
 
     /// Verifies the outcomes against the declared root and rejects regressions.

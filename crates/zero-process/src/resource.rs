@@ -101,7 +101,7 @@ pub struct ResourceReceipt {
 impl ResourceReceipt {
     pub fn for_policy(policy: ProcessResourcePolicy) -> Self {
         Self {
-            schema: "zerostack.process.resource_receipt.v1",
+            schema: "zerostack.process.resource_receipt",
             source: "zero-process/native",
             platform: std::env::consts::OS,
             profile: "aggregate-default",

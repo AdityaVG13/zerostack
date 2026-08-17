@@ -33,11 +33,11 @@ use zero_abi::{Sha256Digest, canonical_json};
 /// Schema version of worker-trust artifacts.
 pub const WORKER_TRUST_SCHEMA_VERSION: u16 = 1;
 /// Domain tag bound into worker envelope digests.
-pub const WORKER_TRUST_ENVELOPE_DOMAIN: &[u8] = b"zerostack.worker-trust.envelope.v1\0";
+pub const WORKER_TRUST_ENVELOPE_DOMAIN: &[u8] = b"zerostack.worker-trust.envelope\0";
 /// Domain tag bound into refusal record digests.
-pub const WORKER_TRUST_REFUSAL_DOMAIN: &[u8] = b"zerostack.worker-trust.refusal.v1\0";
+pub const WORKER_TRUST_REFUSAL_DOMAIN: &[u8] = b"zerostack.worker-trust.refusal\0";
 /// Domain tag bound into admission receipt digests.
-pub const WORKER_TRUST_ADMISSION_DOMAIN: &[u8] = b"zerostack.worker-trust.admission.v1\0";
+pub const WORKER_TRUST_ADMISSION_DOMAIN: &[u8] = b"zerostack.worker-trust.admission\0";
 /// ABI tag carried by worker-trust artifacts.
 pub const WORKER_TRUST_ABI_VERSION: &str = "v6-r14";
 

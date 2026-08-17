@@ -42,7 +42,7 @@ use zero_abi::{Sha256Digest, canonical_json};
 /// Schema version of trace-export artifacts.
 pub const TRACE_EXPORT_SCHEMA_VERSION: u16 = 1;
 /// Domain tag bound into trace record digests.
-pub const TRACE_EXPORT_DOMAIN: &[u8] = b"zerostack.trace-export.v1\0";
+pub const TRACE_EXPORT_DOMAIN: &[u8] = b"zerostack.trace-export\0";
 /// Records file name inside an export directory.
 pub const TRACE_EXPORT_RECORDS_FILE: &str = "trace_records.jsonl";
 /// Sealed-head file name inside an export directory.

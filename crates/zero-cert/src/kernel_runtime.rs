@@ -58,13 +58,13 @@ use zero_abi::{
 use zero_abi::cache_entry::CacheKey;
 
 /// Runtime mechanism version domain for the identity kernel.
-pub const KERNEL_RUNTIME_VERSION: &str = "zerostack.kernel-runtime.v1";
+pub const KERNEL_RUNTIME_VERSION: &str = "zerostack.kernel-runtime";
 /// File name for the append-only records of a [`FileEventJournalStore`].
 pub const EVENT_JOURNAL_RECORDS_FILE: &str = "records.jsonl";
 /// File name for the sealed-head marker of a [`FileEventJournalStore`].
 pub const EVENT_JOURNAL_SEALED_HEAD_FILE: &str = "sealed_head";
 /// Domain tag bound into every [`CacheAdmissionRecord`] root.
-pub const CACHE_ADMISSION_DOMAIN: &[u8] = b"zerostack.cache-admission.v1\0";
+pub const CACHE_ADMISSION_DOMAIN: &[u8] = b"zerostack.cache-admission\0";
 
 /// Loud, fail-closed error for identity-kernel runtime join points.
 #[derive(Clone, Debug, Eq, PartialEq)]

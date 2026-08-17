@@ -8,8 +8,8 @@ use serde::{Deserialize, Serialize};
 /// The shared telemetry schema version.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum TelemetrySchema {
-    #[serde(rename = "zero-telemetry/v1")]
-    V1,
+    #[serde(rename = "zero-telemetry")]
+    Current,
 }
 
 /// Exact cross-engine prevented-read counter set.
@@ -24,7 +24,7 @@ pub struct ZeroTelemetry {
 impl Default for ZeroTelemetry {
     fn default() -> Self {
         Self {
-            schema: TelemetrySchema::V1,
+            schema: TelemetrySchema::Current,
             prevented_files: 0,
             prevented_bytes: 0,
         }

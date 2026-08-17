@@ -43,13 +43,13 @@ pub const MAX_GC_OBJECTS: u64 = 1_000_000;
 /// Domain-separated digest used by every Program assembly commitment.
 pub type ProgramDigest = [u8; 32];
 
-const PLANNER_DOMAIN: &[u8] = b"zerostack.program.planner.v1\0";
-const WORKER_DOMAIN: &[u8] = b"zerostack.program.worker.v1\0";
-const MCP_DOMAIN: &[u8] = b"zerostack.program.mcp.v1\0";
-const LIFECYCLE_DOMAIN: &[u8] = b"zerostack.program.lifecycle.v1\0";
-const GC_DOMAIN: &[u8] = b"zerostack.program.gc.v1\0";
-const MCP_EVIDENCE_DOMAIN: &[u8] = b"zerostack.program.worker.mcp-evidence.v1\0";
-const PROGRAM_DOMAIN: &[u8] = b"zerostack.program.proof.v1\0";
+const PLANNER_DOMAIN: &[u8] = b"zerostack.program.planner\0";
+const WORKER_DOMAIN: &[u8] = b"zerostack.program.worker\0";
+const MCP_DOMAIN: &[u8] = b"zerostack.program.mcp\0";
+const LIFECYCLE_DOMAIN: &[u8] = b"zerostack.program.lifecycle\0";
+const GC_DOMAIN: &[u8] = b"zerostack.program.gc\0";
+const MCP_EVIDENCE_DOMAIN: &[u8] = b"zerostack.program.worker.mcp-evidence\0";
+const PROGRAM_DOMAIN: &[u8] = b"zerostack.program.proof\0";
 
 /// The five independent evidence sources a Program proof aggregates.
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -254,7 +254,7 @@ fn gc_report_digest_with_binding(
         after_lifecycle_close,
     );
     let mut bytes = Vec::new();
-    append_bounded(&mut bytes, b"zerostack.program.gc.applied.v1\0");
+    append_bounded(&mut bytes, b"zerostack.program.gc.applied\0");
     append_digest(&mut bytes, &base);
     if let Some(binding) = binding {
         append_bounded(&mut bytes, binding.run_receipt_digest.as_bytes());

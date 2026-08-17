@@ -78,7 +78,7 @@ fn validate_identifier(value: &str) -> Result<(), ()> {
     }
 }
 
-pub const SURFACE_CONTRACT_VERSION: &str = "zerostack.surface/v1";
+pub const SURFACE_CONTRACT_VERSION: &str = "zerostack.surface";
 
 /// The single public face selected for one installed artifact.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]

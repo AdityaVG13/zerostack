@@ -46,7 +46,7 @@ use zero_gate::residency::{
 };
 
 /// Schema of the session Q99 report (a typed telemetry receipt, not prose).
-pub const SESSION_Q99_REPORT_SCHEMA: &str = "zerostack.session_q99_report.v1";
+pub const SESSION_Q99_REPORT_SCHEMA: &str = "zerostack.session_q99_report";
 
 /// All tiers in report order.
 const TIERS: [CacheLayerTier; 3] = [

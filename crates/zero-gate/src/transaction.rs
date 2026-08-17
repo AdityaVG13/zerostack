@@ -29,13 +29,13 @@ pub const TRANSACTION_CONTRACT_VERSION: u16 = 1;
 pub const TRANSACTION_MAX_RESOURCES: usize = 256;
 pub const TRANSACTION_MAX_CANONICAL_BYTES: usize = 1_048_576;
 
-const REQUEST_DOMAIN: &[u8] = b"zerostack.effect_closure.request.v1\0";
-const TRANSACTION_ID_DOMAIN: &[u8] = b"zerostack.effect_transaction.id.v1\0";
-const MANIFEST_DOMAIN: &[u8] = b"zerostack.effect_closure.manifest.v1\0";
-const EXTERNAL_INVENTORY_DOMAIN: &[u8] = b"zerostack.effect_closure.external_inventory.v1\0";
-const EXTERNAL_DEBT_DOMAIN: &[u8] = b"zerostack.effect_closure.external_debt.v1\0";
-const JOURNAL_RECEIPT_DOMAIN: &[u8] = b"zerostack.effect_transaction.receipt.v1\0";
-const CONTRACT_DOMAIN: &[u8] = b"zerostack.transaction.contract.v1\0";
+const REQUEST_DOMAIN: &[u8] = b"zerostack.effect_closure.request\0";
+const TRANSACTION_ID_DOMAIN: &[u8] = b"zerostack.effect_transaction.id\0";
+const MANIFEST_DOMAIN: &[u8] = b"zerostack.effect_closure.manifest\0";
+const EXTERNAL_INVENTORY_DOMAIN: &[u8] = b"zerostack.effect_closure.external_inventory\0";
+const EXTERNAL_DEBT_DOMAIN: &[u8] = b"zerostack.effect_closure.external_debt\0";
+const JOURNAL_RECEIPT_DOMAIN: &[u8] = b"zerostack.effect_transaction.receipt\0";
+const CONTRACT_DOMAIN: &[u8] = b"zerostack.transaction.contract\0";
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, Ord, PartialEq, PartialOrd, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -1318,7 +1318,7 @@ pub fn transaction_contract() -> Value {
                 "project_journal_root_only"
             ]
         },
-        "store_carrier": "zero_store.durable_journal.v2",
+        "store_carrier": "zero_store.durable_journal",
         "transaction_id_fields": [
             "request_digest", "manifest_digest", "action_digest", "assembly_manifest_digest",
             "length_prefixed_durable_profile_id", "candidate_root", "owner_identity_digest"

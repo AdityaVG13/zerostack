@@ -1,5 +1,5 @@
 {
-  "schema": "zerostack.zero_gauge.complete_atoms.v1",
+  "schema": "zerostack.zero_gauge.complete_atoms",
   "provider_lock": {
     "provider": "runtime",
     "model": "caller-supplied",

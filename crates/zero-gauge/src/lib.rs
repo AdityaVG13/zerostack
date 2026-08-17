@@ -306,7 +306,7 @@ where
     if &fixture.provider_lock != expected_lock {
         return Err(CertificationError::ProviderLockMismatch);
     }
-    if fixture.schema != "zerostack.zero_gauge.complete_atoms.v1" {
+    if fixture.schema != "zerostack.zero_gauge.complete_atoms" {
         return Err(CertificationError::UnsupportedSchema);
     }
     if fixture.instances.is_empty() {

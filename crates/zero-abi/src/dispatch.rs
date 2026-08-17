@@ -12,7 +12,7 @@ use crate::{
     schema::normalize_schema,
 };
 
-pub const CANONICAL_DISPATCH_VERSION: &str = "zerostack.canonical_dispatch.v2";
+pub const CANONICAL_DISPATCH_VERSION: &str = "zerostack.canonical_dispatch";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]

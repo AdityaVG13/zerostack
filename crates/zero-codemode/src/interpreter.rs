@@ -558,7 +558,7 @@ impl<'tree> Interpreter<'tree> {
             return Ok(result);
         }
         let body = serde_json::json!({
-            "schema": "zerostack.codemode.step_receipt.v1",
+            "schema": "zerostack.codemode.step_receipt",
             "generation": self.generation,
             "request_id": self.request_id,
             "step_count": self.step_entries.len(),

@@ -28,8 +28,8 @@ use zero_abi::{
 use zero_cert::{CompletenessWitness, Query, VerifiedEvidence};
 
 pub const DCR_CONTRACT_VERSION: u16 = 1;
-pub const DCR_SCHEMA_VERSION: &str = "racc-r-dcr-certificate/v1";
-pub const DCR_PROBLEM_SCHEMA_VERSION: &str = "zerostack.dcr.problem.v1";
+pub const DCR_SCHEMA_VERSION: &str = "racc-r-dcr-certificate";
+pub const DCR_PROBLEM_SCHEMA_VERSION: &str = "zerostack.dcr.problem";
 pub const DCR_SCHEMA_SHA256: &str =
     "bd41d160b90dfd153cce4bf6154d5b8d5e2b65b63d5b4f60ab421b43485db160";
 pub const DCR_MAX_WORLDS: usize = ROBUST_SNAP_MAX_WORLDS;
@@ -40,18 +40,18 @@ pub const DCR_MAX_QUERY_TRACE: usize = 32;
 pub const DCR_MAX_CANONICAL_BYTES: usize = 1_048_576;
 pub const DCR_MAX_DP_STATES: usize = 65_536;
 
-const PROBLEM_DOMAIN: &[u8] = b"zerostack.dcr.problem.v1\0";
-const FIBER_DOMAIN: &[u8] = b"zerostack.dcr.world_fiber.v1\0";
-const SURFACE_DOMAIN: &[u8] = b"zerostack.dcr.accessible_surface.v1\0";
-const EFFECT_CLASS_DOMAIN: &[u8] = b"zerostack.dcr.common_effect_class.v1\0";
-const HYPEREDGE_DOMAIN: &[u8] = b"zerostack.dcr.conflict_hyperedge.v1\0";
-const CLAIM_DOMAIN: &[u8] = b"zerostack.dcr.claim.v1\0";
-const COMPLETE_DOMAIN: &[u8] = b"zerostack.dcr.complete_certificate.v1\0";
-const CONFLICT_DOMAIN: &[u8] = b"zerostack.dcr.conflict_decision.v1\0";
-const UNKNOWN_DOMAIN: &[u8] = b"zerostack.dcr.unknown_decision.v1\0";
-const VERIFIER_DOMAIN: &[u8] = b"zerostack.dcr.verifier_identity.v1\0";
-const OBSERVATION_DOMAIN: &[u8] = b"zerostack.dcr.query_observation.v1\0";
-const CONTRACT_DOMAIN: &[u8] = b"zerostack.dcr.contract.v1\0";
+const PROBLEM_DOMAIN: &[u8] = b"zerostack.dcr.problem\0";
+const FIBER_DOMAIN: &[u8] = b"zerostack.dcr.world_fiber\0";
+const SURFACE_DOMAIN: &[u8] = b"zerostack.dcr.accessible_surface\0";
+const EFFECT_CLASS_DOMAIN: &[u8] = b"zerostack.dcr.common_effect_class\0";
+const HYPEREDGE_DOMAIN: &[u8] = b"zerostack.dcr.conflict_hyperedge\0";
+const CLAIM_DOMAIN: &[u8] = b"zerostack.dcr.claim\0";
+const COMPLETE_DOMAIN: &[u8] = b"zerostack.dcr.complete_certificate\0";
+const CONFLICT_DOMAIN: &[u8] = b"zerostack.dcr.conflict_decision\0";
+const UNKNOWN_DOMAIN: &[u8] = b"zerostack.dcr.unknown_decision\0";
+const VERIFIER_DOMAIN: &[u8] = b"zerostack.dcr.verifier_identity\0";
+const OBSERVATION_DOMAIN: &[u8] = b"zerostack.dcr.query_observation\0";
+const CONTRACT_DOMAIN: &[u8] = b"zerostack.dcr.contract\0";
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]

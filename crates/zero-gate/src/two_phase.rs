@@ -41,12 +41,12 @@ pub const MAX_CONTROLLER_INSTRUCTIONS: usize = 4_096;
 
 pub type Sha256Digest = [u8; 32];
 
-const TWO_PHASE_CONTRACT_DOMAIN_V2: &[u8] = b"zerostack.kernel.contract.v2\0";
-const TWO_PHASE_CONTRACT_DOMAIN_V3: &[u8] = b"zerostack.kernel.contract.v3\0";
-const TWO_PHASE_CONTRACT_DOMAIN_V4: &[u8] = b"zerostack.kernel.contract.v4\0";
-const TWO_PHASE_CONTRACT_DOMAIN_V5: &[u8] = b"zerostack.kernel.contract.v5\0";
+const TWO_PHASE_BASE_CONTRACT_DOMAIN: &[u8] = b"zerostack.kernel.contract.base\0";
+const TWO_PHASE_IDENTITY_CONTRACT_DOMAIN: &[u8] = b"zerostack.kernel.contract.identity\0";
+const TWO_PHASE_QUALITY_CONTRACT_DOMAIN: &[u8] = b"zerostack.kernel.contract.quality\0";
+const TWO_PHASE_CONTRACT_DOMAIN: &[u8] = b"zerostack.kernel.contract\0";
 
-pub fn two_phase_contract_manifest_v2() -> Value {
+pub fn two_phase_base_contract_manifest() -> Value {
     json!({
         "artifact_profile": "zbf_1_portable_strict",
         "contract_version": 2,
@@ -56,7 +56,7 @@ pub fn two_phase_contract_manifest_v2() -> Value {
             "transaction": transaction_contract_digest(),
             "zbf": zbf_contract_digest(),
         },
-        "name": "zerostack.two_phase_kernel.v2",
+        "name": "zerostack.two_phase_kernel.base",
         "negative_space": [
             "native_filesystem_durability",
             "production_worker_contract_enforcement",
@@ -104,15 +104,15 @@ pub fn two_phase_contract_manifest_v2() -> Value {
     })
 }
 
-pub fn two_phase_contract_digest_v2() -> Sha256Digest {
-    let canonical = canonical_json(&two_phase_contract_manifest_v2());
-    let mut bytes = Vec::with_capacity(TWO_PHASE_CONTRACT_DOMAIN_V2.len() + canonical.len());
-    bytes.extend_from_slice(TWO_PHASE_CONTRACT_DOMAIN_V2);
+pub fn two_phase_base_contract_digest() -> Sha256Digest {
+    let canonical = canonical_json(&two_phase_base_contract_manifest());
+    let mut bytes = Vec::with_capacity(TWO_PHASE_BASE_CONTRACT_DOMAIN.len() + canonical.len());
+    bytes.extend_from_slice(TWO_PHASE_BASE_CONTRACT_DOMAIN);
     bytes.extend_from_slice(canonical.as_bytes());
     hash_bytes(&bytes)
 }
 
-pub fn two_phase_contract_manifest_v3() -> Value {
+pub fn two_phase_identity_contract_manifest() -> Value {
     json!({
         "artifact_profile": "zbf_1_portable_strict",
         "candidate_protocol_identity": [
@@ -120,7 +120,7 @@ pub fn two_phase_contract_manifest_v3() -> Value {
             "source_tree_digest",
             "image_digest",
             "fixed_model_digest",
-            "two_phase_contract_digest_v3",
+            "two_phase_identity_contract_digest",
         ],
         "contract_version": 3,
         "guard_order": Guard::ALL,
@@ -130,7 +130,7 @@ pub fn two_phase_contract_manifest_v3() -> Value {
             "transaction": transaction_contract_digest(),
             "zbf": zbf_contract_digest(),
         },
-        "name": "zerostack.two_phase_kernel.v3",
+        "name": "zerostack.two_phase_kernel.identity",
         "negative_space": [
             "individual_candidate_claim_from_distributional_evidence",
             "native_filesystem_durability",
@@ -185,15 +185,15 @@ pub fn two_phase_contract_manifest_v3() -> Value {
     })
 }
 
-pub fn two_phase_contract_digest_v3() -> Sha256Digest {
-    let canonical = canonical_json(&two_phase_contract_manifest_v3());
-    let mut bytes = Vec::with_capacity(TWO_PHASE_CONTRACT_DOMAIN_V3.len() + canonical.len());
-    bytes.extend_from_slice(TWO_PHASE_CONTRACT_DOMAIN_V3);
+pub fn two_phase_identity_contract_digest() -> Sha256Digest {
+    let canonical = canonical_json(&two_phase_identity_contract_manifest());
+    let mut bytes = Vec::with_capacity(TWO_PHASE_IDENTITY_CONTRACT_DOMAIN.len() + canonical.len());
+    bytes.extend_from_slice(TWO_PHASE_IDENTITY_CONTRACT_DOMAIN);
     bytes.extend_from_slice(canonical.as_bytes());
     hash_bytes(&bytes)
 }
 
-pub fn two_phase_contract_manifest_v4() -> Value {
+pub fn two_phase_quality_contract_manifest() -> Value {
     json!({
         "artifact_profile": "zbf_1_portable_strict",
         "candidate_protocol_identity": [
@@ -202,7 +202,7 @@ pub fn two_phase_contract_manifest_v4() -> Value {
             "image_digest",
             "fixed_model_digest",
             "reasoning_contract_digest",
-            "two_phase_contract_digest_v4",
+            "two_phase_quality_contract_digest",
         ],
         "contract_version": 4,
         "guard_order": Guard::ALL,
@@ -214,7 +214,7 @@ pub fn two_phase_contract_manifest_v4() -> Value {
             "transaction": transaction_contract_digest(),
             "zbf": zbf_contract_digest(),
         },
-        "name": "zerostack.two_phase_kernel.v4",
+        "name": "zerostack.two_phase_kernel.quality",
         "negative_space": [
             "approximate_continuation_as_exact",
             "clean_restart_as_exact_continuation",
@@ -280,15 +280,15 @@ pub fn two_phase_contract_manifest_v4() -> Value {
     })
 }
 
-pub fn two_phase_contract_digest_v4() -> Sha256Digest {
-    let canonical = canonical_json(&two_phase_contract_manifest_v4());
-    let mut bytes = Vec::with_capacity(TWO_PHASE_CONTRACT_DOMAIN_V4.len() + canonical.len());
-    bytes.extend_from_slice(TWO_PHASE_CONTRACT_DOMAIN_V4);
+pub fn two_phase_quality_contract_digest() -> Sha256Digest {
+    let canonical = canonical_json(&two_phase_quality_contract_manifest());
+    let mut bytes = Vec::with_capacity(TWO_PHASE_QUALITY_CONTRACT_DOMAIN.len() + canonical.len());
+    bytes.extend_from_slice(TWO_PHASE_QUALITY_CONTRACT_DOMAIN);
     bytes.extend_from_slice(canonical.as_bytes());
     hash_bytes(&bytes)
 }
 
-pub fn two_phase_contract_manifest_v5() -> Value {
+pub fn two_phase_contract_manifest() -> Value {
     json!({
         "artifact_profile": "zbf_1_portable_strict",
         "candidate_protocol_identity": [
@@ -297,7 +297,7 @@ pub fn two_phase_contract_manifest_v5() -> Value {
             "image_digest",
             "fixed_model_digest",
             "reasoning_contract_digest",
-            "two_phase_contract_digest_v5",
+            "two_phase_contract_digest",
         ],
         "contract_version": TWO_PHASE_SCHEMA_VERSION,
         "guard_order": Guard::ALL,
@@ -310,7 +310,7 @@ pub fn two_phase_contract_manifest_v5() -> Value {
             "transaction": transaction_contract_digest(),
             "zbf": zbf_contract_digest(),
         },
-        "name": "zerostack.two_phase_kernel.v5",
+        "name": "zerostack.two_phase_kernel",
         "negative_space": [
             "approximate_continuation_as_exact",
             "journal_root_recovery_as_exact_deoptimization",
@@ -380,10 +380,10 @@ pub fn two_phase_contract_manifest_v5() -> Value {
     })
 }
 
-pub fn two_phase_contract_digest_v5() -> Sha256Digest {
-    let canonical = canonical_json(&two_phase_contract_manifest_v5());
-    let mut bytes = Vec::with_capacity(TWO_PHASE_CONTRACT_DOMAIN_V5.len() + canonical.len());
-    bytes.extend_from_slice(TWO_PHASE_CONTRACT_DOMAIN_V5);
+pub fn two_phase_contract_digest() -> Sha256Digest {
+    let canonical = canonical_json(&two_phase_contract_manifest());
+    let mut bytes = Vec::with_capacity(TWO_PHASE_CONTRACT_DOMAIN.len() + canonical.len());
+    bytes.extend_from_slice(TWO_PHASE_CONTRACT_DOMAIN);
     bytes.extend_from_slice(canonical.as_bytes());
     hash_bytes(&bytes)
 }
@@ -639,7 +639,7 @@ impl CanonicalArtifactSet {
         }
         let image_digest = image_digest(source_root_digest, &artifact_identities);
         let mut commitment = Vec::new();
-        commitment.extend_from_slice(b"zerostack.kernel.artifact_set.v2\0");
+        commitment.extend_from_slice(b"zerostack.kernel.artifact_set\0");
         commitment.extend_from_slice(&assembly_manifest_digest);
         commitment.extend_from_slice(&source_root_digest);
         commitment.extend_from_slice(&image_digest);
@@ -668,7 +668,7 @@ impl CanonicalArtifactSet {
 
 fn image_digest(source_root: Sha256Digest, artifacts: &[Sha256Digest]) -> Sha256Digest {
     let mut bytes = Vec::with_capacity(64 + artifacts.len() * 32);
-    bytes.extend_from_slice(b"zerostack.kernel.image.v2\0");
+    bytes.extend_from_slice(b"zerostack.kernel.image\0");
     bytes.extend_from_slice(&source_root);
     bytes.extend_from_slice(&(artifacts.len() as u64).to_be_bytes());
     for artifact in artifacts {
@@ -774,7 +774,7 @@ impl ExecutionTrace {
 
     pub fn digest(&self) -> Sha256Digest {
         let mut bytes = Vec::with_capacity(96 + self.events.len() * 3);
-        bytes.extend_from_slice(b"zerostack.kernel.trace.v5\0");
+        bytes.extend_from_slice(b"zerostack.kernel.trace\0");
         bytes.extend_from_slice(&TWO_PHASE_SCHEMA_VERSION.to_be_bytes());
         for event in &self.events {
             bytes.push(event.guard as u8);
@@ -823,7 +823,7 @@ pub struct ExecutionBinding {
 impl ExecutionBinding {
     pub fn digest(&self) -> Sha256Digest {
         let mut bytes = Vec::new();
-        bytes.extend_from_slice(b"zerostack.kernel.binding.v5\0");
+        bytes.extend_from_slice(b"zerostack.kernel.binding\0");
         bytes.extend_from_slice(&self.schema_version.to_be_bytes());
         bytes.extend_from_slice(&self.assembly_manifest_digest);
         bytes.extend_from_slice(&self.source_tree_digest);
@@ -853,7 +853,7 @@ pub fn candidate_protocol_identity(binding: &ExecutionBinding) -> Sha256Digest {
     bytes.extend_from_slice(&binding.image_digest);
     bytes.extend_from_slice(&binding.fixed_model_digest);
     bytes.extend_from_slice(&binding.reasoning_contract_digest);
-    bytes.extend_from_slice(&two_phase_contract_digest_v5());
+    bytes.extend_from_slice(&two_phase_contract_digest());
     let mut framed = b"ZERO.TWO_PHASE.CANDIDATE_PROTOCOL.V1\0".to_vec();
     framed.extend_from_slice(&bytes);
     hash_bytes(&framed)
@@ -920,7 +920,7 @@ pub struct ControllerPlan {
 impl ControllerPlan {
     pub fn digest(&self) -> Sha256Digest {
         let mut bytes = Vec::with_capacity(40 + self.instructions.len());
-        bytes.extend_from_slice(b"zerostack.kernel.plan.v5\0");
+        bytes.extend_from_slice(b"zerostack.kernel.plan\0");
         bytes.extend_from_slice(&(self.instructions.len() as u64).to_be_bytes());
         bytes.extend(
             self.instructions
@@ -1101,7 +1101,7 @@ fn safety_shield_digest(
     acceptance_digest: Option<Sha256Digest>,
 ) -> Sha256Digest {
     let mut bytes = Vec::new();
-    bytes.extend_from_slice(b"zerostack.kernel.safety_shield.v2\0");
+    bytes.extend_from_slice(b"zerostack.kernel.safety_shield\0");
     bytes.push(match kind {
         SafetyShieldKind::ReadOnly => 0,
         SafetyShieldKind::AcceptedEffect => 1,
@@ -1153,7 +1153,7 @@ impl PrepareRequest {
     /// Canonical commitment to every G0-G7 admission input.
     pub fn admission_digest(&self) -> Sha256Digest {
         let mut bytes = Vec::new();
-        bytes.extend_from_slice(b"zerostack.kernel.admission.v6\0");
+        bytes.extend_from_slice(b"zerostack.kernel.admission\0");
         bytes.extend_from_slice(&self.binding.digest());
         bytes.push(self.surface as u8);
         bytes.push(effect_class_tag(self.effect_class));
@@ -1401,7 +1401,7 @@ pub fn validate_permit_record(record: &PermitRecord) -> Result<(), KernelError> 
         ));
     }
     let mut bytes = Vec::new();
-    bytes.extend_from_slice(b"zerostack.kernel.permit.v6\0");
+    bytes.extend_from_slice(b"zerostack.kernel.permit\0");
     bytes.extend_from_slice(&record.admission_digest);
     bytes.extend_from_slice(&record.trace.digest());
     bytes.extend_from_slice(&record.expiry_deadline_ms.to_be_bytes());
@@ -1892,7 +1892,7 @@ fn validate_source_heads(heads: &[SourceHead]) -> Result<(), KernelError> {
 
 fn permit_digest(request: &PrepareRequest, trace: &ExecutionTrace) -> Sha256Digest {
     let mut bytes = Vec::new();
-    bytes.extend_from_slice(b"zerostack.kernel.permit.v6\0");
+    bytes.extend_from_slice(b"zerostack.kernel.permit\0");
     bytes.extend_from_slice(&request.admission_digest());
     bytes.extend_from_slice(&trace.digest());
     bytes.extend_from_slice(&request.expiry_deadline_ms.to_be_bytes());
@@ -2954,7 +2954,7 @@ fn receipt_digest(
     restoration: RestorationAccounting,
 ) -> Sha256Digest {
     let mut bytes = Vec::new();
-    bytes.extend_from_slice(b"zerostack.kernel.receipt.v5\0");
+    bytes.extend_from_slice(b"zerostack.kernel.receipt\0");
     bytes.extend_from_slice(&TWO_PHASE_SCHEMA_VERSION.to_be_bytes());
     bytes.push(kind as u8);
     bytes.extend_from_slice(&permit_id);
@@ -3009,7 +3009,7 @@ fn receipt_digest(
 
 fn effect_list_digest(effects: &[StagedEffect]) -> Sha256Digest {
     let mut bytes = Vec::new();
-    bytes.extend_from_slice(b"zerostack.kernel.effects.v5\0");
+    bytes.extend_from_slice(b"zerostack.kernel.effects\0");
     bytes.extend_from_slice(&(effects.len() as u64).to_be_bytes());
     for effect in effects {
         bytes.extend_from_slice(&effect.effect_digest);

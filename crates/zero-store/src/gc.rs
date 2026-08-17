@@ -1,4 +1,4 @@
-//! Canonical `zerostack.cas-gc.v2` protocol with read-only v1 compatibility.
+//! Canonical `zerostack.cas-gc` protocol with read-only v1 compatibility.
 //!
 //! This module owns only store metadata and immutable CAS lifecycle. It has no
 //! engine-specific authority; engines publish roots, pins, and leases here.
@@ -22,8 +22,8 @@ use zero_abi::zbf::{
     ZBF_MAX_OBJECT_BYTES, ZBF_SCHEMA_MAJOR, ZBF_SCHEMA_MINOR,
 };
 
-pub const GC_SCHEMA_VERSION_LEGACY: &str = "zerostack.cas-gc.v1";
-pub const GC_SCHEMA_VERSION: &str = "zerostack.cas-gc.v2";
+pub const GC_SCHEMA_VERSION_LEGACY: &str = "zerostack.cas-gc.legacy";
+pub const GC_SCHEMA_VERSION: &str = "zerostack.cas-gc";
 /// Hard bounds keep malformed metadata from turning collection into an
 /// unbounded allocation or path traversal surface.
 pub const GC_MAX_RECORD_BYTES: u64 = 32 * 1024 * 1024;
@@ -1447,7 +1447,7 @@ fn build_dry_run_report(
 
 fn sweep_plan_digest(run_id: &str, store_root: &str, objects: &[String]) -> String {
     zero_abi::contract_digest_hex(&serde_json::json!({
-        "domain": "zerostack.gc-sweep-plan.v1",
+        "domain": "zerostack.gc-sweep-plan",
         "store_contract_digest": gc_contract_digest_hex(),
         "run_id": run_id,
         "store_root": store_root,

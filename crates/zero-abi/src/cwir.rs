@@ -17,12 +17,12 @@ use crate::{ArtifactOwner, Sha256Digest, canonical_json, sha256};
 
 pub const CWIR_CONTRACT_VERSION: u16 = 1;
 pub const CWIR_MODEL_VERSION: u16 = 1;
-pub const CWIR_SEMANTIC_DOMAIN: &[u8] = b"zerostack.cwir.semantic.v1\0";
-pub const CWIR_TASK_DOMAIN: &[u8] = b"zerostack.cwir.task.v1\0";
-pub const CWIR_NODE_DOMAIN: &[u8] = b"zerostack.cwir.node.v1\0";
-pub const CWIR_EDGE_DOMAIN: &[u8] = b"zerostack.cwir.edge.v1\0";
-pub const CWIR_OBLIGATION_DOMAIN: &[u8] = b"zerostack.cwir.obligation.v1\0";
-pub const CWIR_EXPANSION_DOMAIN: &[u8] = b"zerostack.cwir.expansion.v1\0";
+pub const CWIR_SEMANTIC_DOMAIN: &[u8] = b"zerostack.cwir.semantic\0";
+pub const CWIR_TASK_DOMAIN: &[u8] = b"zerostack.cwir.task\0";
+pub const CWIR_NODE_DOMAIN: &[u8] = b"zerostack.cwir.node\0";
+pub const CWIR_EDGE_DOMAIN: &[u8] = b"zerostack.cwir.edge\0";
+pub const CWIR_OBLIGATION_DOMAIN: &[u8] = b"zerostack.cwir.obligation\0";
+pub const CWIR_EXPANSION_DOMAIN: &[u8] = b"zerostack.cwir.expansion\0";
 pub const CWIR_MAX_CANONICAL_BYTES: usize = 1_048_576;
 pub const CWIR_MAX_NODES: usize = 4_096;
 pub const CWIR_MAX_EDGES: usize = 8_192;
@@ -1151,12 +1151,12 @@ pub fn cwir_contract_manifest() -> Value {
         "model_version": CWIR_MODEL_VERSION,
         "encoding": "rfc8259_json_sorted_object_keys_no_whitespace",
         "domains": {
-            "semantic": "zerostack.cwir.semantic.v1\u{0}",
-            "task": "zerostack.cwir.task.v1\u{0}",
-            "node": "zerostack.cwir.node.v1\u{0}",
-            "edge": "zerostack.cwir.edge.v1\u{0}",
-            "obligation": "zerostack.cwir.obligation.v1\u{0}",
-            "expansion": "zerostack.cwir.expansion.v1\u{0}"
+            "semantic": "zerostack.cwir.semantic\u{0}",
+            "task": "zerostack.cwir.task\u{0}",
+            "node": "zerostack.cwir.node\u{0}",
+            "edge": "zerostack.cwir.edge\u{0}",
+            "obligation": "zerostack.cwir.obligation\u{0}",
+            "expansion": "zerostack.cwir.expansion\u{0}"
         },
         "semantic_fields": [
             "contract_version", "model_version", "task", "state", "nodes", "edges",

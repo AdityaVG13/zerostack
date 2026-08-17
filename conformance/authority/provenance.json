@@ -1,5 +1,5 @@
 {
-  "schema": "zerostack.claim-authority-provenance.v1",
+  "schema": "zerostack.claim-authority-provenance",
   "authority_version": 1,
   "authority_hash": "dc6a8262b0cae49c3aed38f08ce13fb1d6c80acc90c7f05fdff21558243c73af",
   "authority_hash_algorithm": "sha256(canonical-json(path->sha256))",

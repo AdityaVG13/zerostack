@@ -15,12 +15,12 @@ use zero_ledger::{CausalCounterUnit, CausalWorkReceipt, causal_work_contract_dig
 use crate::invalidation::BoundCausalCacheInvalidation;
 
 pub const Q99_CONTRACT_VERSION: u16 = 1;
-pub const Q99_CONTRACT_VERSION_V2: u16 = 2;
-pub const Q99_CACHE_SCHEMA_VERSION: &str = "zerostack.q99.causal_cache_component.v1";
-pub const Q99_METRIC_SCHEMA_VERSION: &str = "zerostack.q99.metric_receipt.v1";
-pub const Q99_TASK_PAIR_SCHEMA_VERSION: &str = "zerostack.q99.task_pair.v1";
-pub const Q99_PREPARATION_SCHEMA_VERSION: &str = "zerostack.q99.preparation.v1";
-pub const Q99_CLAIM_SCHEMA_VERSION: &str = "zerostack.q99.claim.v1";
+pub const Q99_INVALIDATION_CONTRACT_VERSION: u16 = 2;
+pub const Q99_CACHE_SCHEMA_VERSION: &str = "zerostack.q99.causal_cache_component";
+pub const Q99_METRIC_SCHEMA_VERSION: &str = "zerostack.q99.metric_receipt";
+pub const Q99_TASK_PAIR_SCHEMA_VERSION: &str = "zerostack.q99.task_pair";
+pub const Q99_PREPARATION_SCHEMA_VERSION: &str = "zerostack.q99.preparation";
+pub const Q99_CLAIM_SCHEMA_VERSION: &str = "zerostack.q99.claim";
 pub const Q99_CACHE_SCHEMA_SHA256: &str =
     "3773a3c93fa8cb7259e079a68af5b84f76b92791904e8049fb028f2bdbb3e55d";
 pub const Q99_CLAIM_SCHEMA_SHA256: &str =
@@ -29,15 +29,15 @@ pub const Q99_MAX_CANONICAL_BYTES: usize = 1_048_576;
 pub const Q99_MAX_TASKS: usize = 65_536;
 pub const Q99_COMPONENT_COUNT: usize = 9;
 
-const CACHE_COMPONENT_DOMAIN: &[u8] = b"zerostack.q99.cache_component.v1\0";
-const CACHE_ADMISSION_DOMAIN: &[u8] = b"zerostack.q99.cache_admission.v1\0";
-const METRIC_RECEIPT_DOMAIN: &[u8] = b"zerostack.q99.metric_receipt.v1\0";
-const TASK_PAIR_DOMAIN: &[u8] = b"zerostack.q99.task_pair.v1\0";
-const PREPARATION_DOMAIN: &[u8] = b"zerostack.q99.preparation.v1\0";
-const VERIFIED_WORK_DOMAIN: &[u8] = b"zerostack.q99.verified_causal_work.v1\0";
-const CLAIM_DOMAIN: &[u8] = b"zerostack.q99.claim.v1\0";
-const VERIFIER_DOMAIN: &[u8] = b"zerostack.q99.verifier_identity.v1\0";
-const CONTRACT_DOMAIN: &[u8] = b"zerostack.q99.contract.v1\0";
+const CACHE_COMPONENT_DOMAIN: &[u8] = b"zerostack.q99.cache_component\0";
+const CACHE_ADMISSION_DOMAIN: &[u8] = b"zerostack.q99.cache_admission\0";
+const METRIC_RECEIPT_DOMAIN: &[u8] = b"zerostack.q99.metric_receipt\0";
+const TASK_PAIR_DOMAIN: &[u8] = b"zerostack.q99.task_pair\0";
+const PREPARATION_DOMAIN: &[u8] = b"zerostack.q99.preparation\0";
+const VERIFIED_WORK_DOMAIN: &[u8] = b"zerostack.q99.verified_causal_work\0";
+const CLAIM_DOMAIN: &[u8] = b"zerostack.q99.claim\0";
+const VERIFIER_DOMAIN: &[u8] = b"zerostack.q99.verifier_identity\0";
+const CONTRACT_DOMAIN: &[u8] = b"zerostack.q99.contract\0";
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, Ord, PartialEq, PartialOrd, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -190,7 +190,7 @@ impl CausalCacheBinding {
 
     pub fn digest(&self) -> Result<Sha256Digest, Q99Error> {
         self.validate()?;
-        digest_serialized(b"zerostack.q99.cache_binding.v1\0", self)
+        digest_serialized(b"zerostack.q99.cache_binding\0", self)
     }
 }
 
@@ -362,7 +362,7 @@ impl CausalCacheAssessmentRecord {
         self.binding.validate()?;
         if !matches!(
             self.contract_version,
-            Q99_CONTRACT_VERSION | Q99_CONTRACT_VERSION_V2
+            Q99_CONTRACT_VERSION | Q99_INVALIDATION_CONTRACT_VERSION
         ) || self.components.len() != Q99_COMPONENT_COUNT
         {
             return Err(q99_error(
@@ -513,7 +513,7 @@ pub fn validate_causal_cache(
             && record.claim.validity == CacheValidity::ExactReasoningContinuation
     });
     let mut record = CausalCacheAssessmentRecord {
-        contract_version: Q99_CONTRACT_VERSION_V2,
+        contract_version: Q99_INVALIDATION_CONTRACT_VERSION,
         binding,
         components: records,
         admission_class,
@@ -1423,7 +1423,7 @@ pub fn q99_contract_digest() -> Sha256Digest {
 }
 
 pub fn q99_invalidation_contract_manifest() -> Value {
-    q99_contract_manifest_for(Q99_CONTRACT_VERSION_V2, true)
+    q99_contract_manifest_for(Q99_INVALIDATION_CONTRACT_VERSION, true)
 }
 
 pub fn q99_invalidation_contract_digest() -> Sha256Digest {
@@ -1602,7 +1602,7 @@ pub(crate) fn verified_evidence_digest(
     }))
     .map_err(|error| json_error(error.to_string()))?;
     Ok(digest_value(
-        b"zerostack.q99.verified_evidence.v1\0",
+        b"zerostack.q99.verified_evidence\0",
         &value,
     ))
 }

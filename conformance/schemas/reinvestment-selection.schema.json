@@ -49,7 +49,7 @@
       ],
       "properties": {
         "schema_version": {
-          "const": "zerostack.reinvestment.selection.v1"
+          "const": "zerostack.reinvestment.selection"
         },
         "plan_digest": {
           "$ref": "#/$defs/digest"

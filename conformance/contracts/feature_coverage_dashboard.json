@@ -264,7 +264,7 @@
     "strict_100_certifiable": false,
     "strict_coverage": 0.940573
   },
-  "schema_version": "zerostack.feature_coverage_dashboard.v1",
+  "schema_version": "zerostack.feature_coverage_dashboard",
   "source": "conformance/contracts/supported_surface_matrix.toml",
   "status_histogram": {
     "excluded": 3,

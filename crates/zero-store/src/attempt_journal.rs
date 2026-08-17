@@ -76,9 +76,9 @@ pub const ATTEMPT_RECEIPT_SCHEMA_VERSION: u16 = 1;
 pub const ATTEMPT_JOURNAL_MAX_RECORD_BYTES: u64 = 64 * 1024;
 pub const ATTEMPT_JOURNAL_MAX_ENTRIES: u64 = 8;
 
-const ATTEMPT_BINDING_DOMAIN: &[u8] = b"zerostack.attempt_journal.binding.v1\0";
-const ATTEMPT_ENTRY_DOMAIN: &[u8] = b"zerostack.attempt_journal.entry.v1\0";
-const ATTEMPT_RECOVERY_DOMAIN: &[u8] = b"zerostack.attempt_journal.recovery.v1\0";
+const ATTEMPT_BINDING_DOMAIN: &[u8] = b"zerostack.attempt_journal.binding\0";
+const ATTEMPT_ENTRY_DOMAIN: &[u8] = b"zerostack.attempt_journal.entry\0";
+const ATTEMPT_RECOVERY_DOMAIN: &[u8] = b"zerostack.attempt_journal.recovery\0";
 static ATTEMPT_TEMP_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]

@@ -13,7 +13,7 @@ use serde_json::Value;
 use crate::{canonical_json, sha256_hex};
 
 /// Wire schema identifier for this shared cache-entry contract.
-pub const CACHE_ENTRY_SCHEMA: &str = "cache-entry/v1";
+pub const CACHE_ENTRY_SCHEMA: &str = "cache-entry";
 
 /// A non-empty content-addressed root used by a cache key or value.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]

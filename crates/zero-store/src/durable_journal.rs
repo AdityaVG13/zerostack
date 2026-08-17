@@ -28,22 +28,22 @@ use zero_abi::{Sha256Digest, canonical_json, sha256};
 use crate::fs_replace::{replace_file, sync_dir};
 use crate::{DurableProfileId, DurableProfile};
 
-pub const DURABLE_JOURNAL_SCHEMA_VERSION_V2: u16 = 2;
-pub const DURABLE_JOURNAL_SCHEMA_VERSION_V3: u16 = 3;
+pub const DURABLE_JOURNAL_SCHEMA_VERSION: u16 = 2;
+pub const DURABLE_LEASE_JOURNAL_SCHEMA_VERSION: u16 = 3;
 pub const DURABLE_BINDING_SCHEMA_VERSION: u16 = 1;
-pub const DURABLE_BINDING_SCHEMA_VERSION_V2: u16 = 2;
+pub const DURABLE_LEASE_BINDING_SCHEMA_VERSION: u16 = 2;
 pub const DURABLE_LEASE_SCHEMA_VERSION: u16 = 1;
 pub const DURABLE_RECEIPT_SCHEMA_VERSION: u16 = 1;
 pub const DURABLE_JOURNAL_MAX_RECORD_BYTES: u64 = 64 * 1024;
 
-const BINDING_DOMAIN: &[u8] = b"zerostack.durable_journal.binding.v1\0";
-const BINDING_DOMAIN_V2: &[u8] = b"zerostack.durable_journal.binding.v2\0";
-const JOURNAL_DOMAIN_V2: &[u8] = b"zerostack.durable_journal.record.v2\0";
-const JOURNAL_DOMAIN_V3: &[u8] = b"zerostack.durable_journal.record.v3\0";
-const ROOT_DOMAIN: &[u8] = b"zerostack.durable_journal.root.v1\0";
-const CARTRIDGE_DOMAIN: &[u8] = b"zerostack.durable_journal.cartridge.v1\0";
-const OWNER_DEATH_DOMAIN: &[u8] = b"zerostack.durable_journal.owner_death.v1\0";
-const RECOVERY_DOMAIN: &[u8] = b"zerostack.durable_journal.recovery.v1\0";
+const BINDING_DOMAIN: &[u8] = b"zerostack.durable_journal.binding\0";
+const LEASE_BINDING_DOMAIN: &[u8] = b"zerostack.durable_journal.lease_binding\0";
+const JOURNAL_DOMAIN: &[u8] = b"zerostack.durable_journal.record\0";
+const LEASE_JOURNAL_DOMAIN: &[u8] = b"zerostack.durable_journal.lease_record\0";
+const ROOT_DOMAIN: &[u8] = b"zerostack.durable_journal.root\0";
+const CARTRIDGE_DOMAIN: &[u8] = b"zerostack.durable_journal.cartridge\0";
+const OWNER_DEATH_DOMAIN: &[u8] = b"zerostack.durable_journal.owner_death\0";
+const RECOVERY_DOMAIN: &[u8] = b"zerostack.durable_journal.recovery\0";
 static TEMP_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -386,10 +386,10 @@ impl JournalBindingLike for JournalBinding {
         None
     }
     fn record_schema_version() -> u16 {
-        DURABLE_JOURNAL_SCHEMA_VERSION_V2
+        DURABLE_JOURNAL_SCHEMA_VERSION
     }
     fn record_domain() -> &'static [u8] {
-        JOURNAL_DOMAIN_V2
+        JOURNAL_DOMAIN
     }
 }
 
@@ -448,7 +448,7 @@ impl BindingLease {
 /// all captured in one atomic record, together with the session/ledger
 /// identity (`owner_identity_digest`) that produced the commit. A committed
 /// record therefore carries full provenance, and reads can verify the binding
-/// (see [`verify_committed_binding_v2`]).
+/// (see [`verify_committed_lease_binding`]).
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct JournalLeaseBinding {
@@ -478,7 +478,7 @@ impl JournalLeaseBinding {
         lease: BindingLease,
     ) -> Self {
         Self {
-            schema_version: DURABLE_BINDING_SCHEMA_VERSION_V2,
+            schema_version: DURABLE_LEASE_BINDING_SCHEMA_VERSION,
             transaction_id,
             assembly_manifest_digest,
             durable_profile_id,
@@ -492,7 +492,7 @@ impl JournalLeaseBinding {
         }
     }
     pub fn validate(&self) -> Result<(), JournalError> {
-        if self.schema_version != DURABLE_BINDING_SCHEMA_VERSION_V2 {
+        if self.schema_version != DURABLE_LEASE_BINDING_SCHEMA_VERSION {
             return Err(JournalError::new(
                 JournalFailureCode::SchemaVersionMismatch,
                 "five-term binding schema version is not supported",
@@ -534,7 +534,7 @@ impl JournalLeaseBinding {
         canonical_bytes(self)
     }
     pub fn digest(&self) -> Result<Sha256Digest, JournalError> {
-        Ok(domain_digest(BINDING_DOMAIN_V2, &self.canonical_bytes()?))
+        Ok(domain_digest(LEASE_BINDING_DOMAIN, &self.canonical_bytes()?))
     }
 }
 impl JournalBindingLike for JournalLeaseBinding {
@@ -563,10 +563,10 @@ impl JournalBindingLike for JournalLeaseBinding {
         Some(self.lease.expires_at_unix_ns)
     }
     fn record_schema_version() -> u16 {
-        DURABLE_JOURNAL_SCHEMA_VERSION_V3
+        DURABLE_LEASE_JOURNAL_SCHEMA_VERSION
     }
     fn record_domain() -> &'static [u8] {
-        JOURNAL_DOMAIN_V3
+        LEASE_JOURNAL_DOMAIN
     }
 }
 
@@ -1589,10 +1589,10 @@ pub fn read_continuation_cartridge(
 /// Read the committed five-term journal record. The returned record carries
 /// the full provenance binding (roots, session/ledger owner, nonce, protected
 /// scope, lease) exactly as it was committed.
-pub fn read_journal_record_v2(paths: &JournalPaths) -> Result<DurableLeaseJournal, JournalError> {
+pub fn read_lease_journal_record(paths: &JournalPaths) -> Result<DurableLeaseJournal, JournalError> {
     Ok(read_journal::<JournalLeaseBinding>(paths)?.value)
 }
-pub fn read_continuation_cartridge_v2(
+pub fn read_lease_continuation_cartridge(
     paths: &JournalPaths,
 ) -> Result<ContinuationLeaseCartridge, JournalError> {
     read_cartridge::<JournalLeaseBinding>(paths)
@@ -1601,7 +1601,7 @@ pub fn read_continuation_cartridge_v2(
 /// record and its recovery receipt must correspond to the expected session /
 /// ledger identity and carry the same binding digest, or the read fails
 /// loudly. This is how reads verify the provenance binding of a commit.
-pub fn verify_committed_binding_v2(
+pub fn verify_committed_lease_binding(
     paths: &JournalPaths,
     expected: &JournalLeaseBinding,
 ) -> Result<RecoveryReceipt, JournalError> {
@@ -1994,11 +1994,11 @@ fn io_before(boundary: JournalBoundary, error: io::Error) -> JournalError {
 /// Machine-readable contract summary used by conformance generators.
 pub fn durable_journal_contract() -> serde_json::Value {
     json!({
-        "schema_version": DURABLE_JOURNAL_SCHEMA_VERSION_V2,
-        "journal_schema_version": DURABLE_JOURNAL_SCHEMA_VERSION_V2,
-        "journal_schema_version_v3": DURABLE_JOURNAL_SCHEMA_VERSION_V3,
+        "schema_version": DURABLE_JOURNAL_SCHEMA_VERSION,
+        "journal_schema_version": DURABLE_JOURNAL_SCHEMA_VERSION,
+        "lease_journal_schema_version": DURABLE_LEASE_JOURNAL_SCHEMA_VERSION,
         "binding_schema_version": DURABLE_BINDING_SCHEMA_VERSION,
-        "binding_schema_version_v2": DURABLE_BINDING_SCHEMA_VERSION_V2,
+        "lease_binding_schema_version": DURABLE_LEASE_BINDING_SCHEMA_VERSION,
         "lease_schema_version": DURABLE_LEASE_SCHEMA_VERSION,
         "five_term_binding": ["old_root", "new_root", "transaction_id",
             "owner_identity_digest", "nonce", "protected_scope", "lease"],

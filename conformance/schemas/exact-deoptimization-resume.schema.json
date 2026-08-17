@@ -162,7 +162,7 @@
       "$ref": "#/$defs/digest"
     },
     "schema_version": {
-      "const": "zerostack.baseline_restoration.v1"
+      "const": "zerostack.baseline_restoration"
     },
     "successor_receipt_head_digest": {
       "$ref": "#/$defs/digest"

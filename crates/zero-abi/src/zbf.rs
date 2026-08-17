@@ -20,7 +20,7 @@ pub const ZBF_CONTAINER_FLAG: u8 = 0x01;
 pub const ZBF_MAX_OBJECT_BYTES: u64 = 16 * 1024 * 1024;
 pub const ZBF_MAX_CHILDREN: u32 = 1024;
 pub const ZBF_MAX_DEPTH: u16 = 16;
-const ZBF_PROFILE_DOMAIN: &[u8] = b"zerostack.zbf_profile.v1\0";
+const ZBF_PROFILE_DOMAIN: &[u8] = b"zerostack.zbf_profile\0";
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, Ord, PartialEq, PartialOrd, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -745,7 +745,7 @@ pub fn zbf_contract_manifest() -> serde_json::Value {
             "source_root_digest", "producer_contract_digest", "payload_digest", "reserved"
         ],
         "container_payload": "u32 child_count; repeated u64 child_len + complete_zbf_object",
-        "profile_domain": "zerostack.zbf_profile.v1\u{0}",
+        "profile_domain": "zerostack.zbf_profile\u{0}",
         "required_profiles": ["portable_strict", "apfs_strict", "ext4_xfs_strict", "ntfs_strict"],
         "bounds": {
             "max_object_bytes": ZBF_MAX_OBJECT_BYTES,

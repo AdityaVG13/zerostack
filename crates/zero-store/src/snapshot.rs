@@ -30,7 +30,7 @@ use crate::durable_journal::{JournalError, JournalPaths, read_published_root};
 /// Schema version of snapshot artifacts.
 pub const SNAPSHOT_SCHEMA_VERSION: u16 = 1;
 /// Domain tag bound into every staleness receipt digest.
-pub const SNAPSHOT_STALENESS_DOMAIN: &[u8] = b"zerostack.snapshot-staleness.v1\0";
+pub const SNAPSHOT_STALENESS_DOMAIN: &[u8] = b"zerostack.snapshot-staleness\0";
 /// ABI tag carried by snapshot artifacts.
 pub const SNAPSHOT_ABI_VERSION: &str = "v6-r14";
 

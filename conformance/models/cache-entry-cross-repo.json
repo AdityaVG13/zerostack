@@ -1,5 +1,5 @@
 {
-  "schema": "cache-entry/v1",
+  "schema": "cache-entry",
   "key": {
     "operator": {
       "id": "graphzero-index-v1",

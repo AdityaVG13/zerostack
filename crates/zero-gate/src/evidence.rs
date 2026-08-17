@@ -49,7 +49,7 @@ pub const PROGRAM_EVIDENCE_HUB_REPOSITORY: &str = "ZeroStack";
 
 /// Domain separating the aggregate `program_digest` from its three engine
 /// proof digests. The digest is derived from real evidence, never fixed.
-const PROGRAM_EVIDENCE_PROGRAM_DOMAIN: &[u8] = b"zerostack.aggregate_program.program.v1\0";
+const PROGRAM_EVIDENCE_PROGRAM_DOMAIN: &[u8] = b"zerostack.aggregate_program.program\0";
 
 /// Distinct evidence classes an engine must contribute, in canonical order.
 #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
@@ -83,11 +83,11 @@ impl EvidenceClass {
     /// The exact contract label this class's artifacts must declare.
     pub const fn contract(self) -> &'static str {
         match self {
-            Self::Planner => "zerostack.program.planner.v1",
-            Self::Worker => "zerostack.program.worker.v1",
-            Self::Mcp => "zerostack.program.mcp.v1",
-            Self::Lifecycle => "zerostack.program.lifecycle.v1",
-            Self::Gc => "zerostack.program.gc.v1",
+            Self::Planner => "zerostack.program.planner",
+            Self::Worker => "zerostack.program.worker",
+            Self::Mcp => "zerostack.program.mcp",
+            Self::Lifecycle => "zerostack.program.lifecycle",
+            Self::Gc => "zerostack.program.gc",
         }
     }
 
@@ -223,7 +223,7 @@ impl ProgramEvidenceManifest {
 #[serde(deny_unknown_fields)]
 pub struct ProgramEvidenceArtifact {
     /// Exact contract label of the evidence class (e.g.
-    /// `zerostack.program.planner.v1`).
+    /// `zerostack.program.planner`).
     pub contract: String,
     pub schema_version: u16,
     /// Must equal the manifest's exact explicit source head.

@@ -17,7 +17,7 @@ use serde_json::{Value, json};
 use crate::{ArtifactOwner, CwirVerifierClass, Sha256Digest, EffectClass, canonical_json, sha256};
 
 pub const EFFECT_IR_CONTRACT_VERSION: u16 = 1;
-pub const EFFECT_IR_ACTION_DOMAIN: &[u8] = b"zerostack.effect_ir.action.v1\0";
+pub const EFFECT_IR_ACTION_DOMAIN: &[u8] = b"zerostack.effect_ir.action\0";
 pub const EFFECT_IR_MAX_CANONICAL_BYTES: usize = 1_048_576;
 pub const EFFECT_IR_MAX_OPERATIONS: usize = 256;
 pub const EFFECT_IR_MAX_TARGETS: usize = 512;
@@ -957,7 +957,7 @@ pub fn effect_ir_contract_manifest() -> Value {
         "contract": "zerostack.effect_ir",
         "contract_version": EFFECT_IR_CONTRACT_VERSION,
         "encoding": "rfc8259_json_sorted_object_keys_no_whitespace",
-        "action_domain": "zerostack.effect_ir.action.v1\u{0}",
+        "action_domain": "zerostack.effect_ir.action\u{0}",
         "program_fields": [
             "contract_version", "base_state", "intent", "targets", "preconditions",
             "operations", "exceptions", "verification", "rollback", "action_digest"

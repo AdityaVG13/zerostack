@@ -125,7 +125,7 @@ impl fmt::Display for ConnectorError {
 impl std::error::Error for ConnectorError {}
 
 /// Schema tag of the envelope returned in place of an oversized result.
-pub const RESULT_SPILL_SCHEMA: &str = "zerostack.codemode.result_spill.v1";
+pub const RESULT_SPILL_SCHEMA: &str = "zerostack.codemode.result_spill";
 
 /// Upper bound on the inline preview carried beside a spilled result ref.
 /// 3 KiB holds a real HIT list or the head of a crash dump; 512 bytes was

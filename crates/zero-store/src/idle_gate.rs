@@ -35,7 +35,7 @@ use zero_abi::{Sha256Digest, canonical_json};
 /// Schema version of the idle-gate artifacts.
 pub const IDLE_GATE_SCHEMA_VERSION: u16 = 1;
 /// Domain tag bound into every idle-gate evidence digest.
-pub const IDLE_GATE_DOMAIN: &[u8] = b"zerostack.idle-gate.v1\0";
+pub const IDLE_GATE_DOMAIN: &[u8] = b"zerostack.idle-gate\0";
 /// Default idle CPU budget: 0.1% expressed in parts per billion (1e-3).
 pub const DEFAULT_IDLE_MAX_CPU_FRACTION_PPB: u64 = 1_000_000;
 /// Default idle RSS budget: 500 MB.
@@ -445,7 +445,7 @@ pub fn measure_idle_window<S: IdleSampler>(
 pub fn idle_gate_contract() -> serde_json::Value {
     serde_json::json!({
         "schema_version": IDLE_GATE_SCHEMA_VERSION,
-        "domain": "zerostack.idle-gate.v1",
+        "domain": "zerostack.idle-gate",
         "budgets": {
             "max_cpu_fraction": "0.1% (1_000_000 ppb)",
             "max_rss_bytes": 500 * 1024 * 1024,

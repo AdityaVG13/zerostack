@@ -1,6 +1,6 @@
 # Compact Phase 7 catalog of ProofObligations already enforced.
 # Hashes are of the enforcer source, not of blessed outputs that recapture.
-schema_version = "zerostack.invariant_catalog.v1"
+schema_version = "zerostack.invariant_catalog"
 project = "ZeroStack"
 class = "Greenfield-Rust-class"
 
@@ -13,7 +13,7 @@ status = "enforced"
 
 [[invariant.artifact]]
 path = "crates/zerostack-harness/src/engine_identity.rs"
-schema_version = "zerostack.engine-identity.v1"
+schema_version = "zerostack.engine-identity"
 hash = "9e628dac150f5fbd9b754b3e07ff98b933eaa7441fed4d41652eccdd9e376877"
 
 [[invariant]]
@@ -25,7 +25,7 @@ status = "enforced"
 
 [[invariant.artifact]]
 path = "crates/zerostack-harness/src/oracle.rs"
-schema_version = "zerostack.oracle-compare.v1"
+schema_version = "zerostack.oracle-compare"
 hash = "c8c3fefd2adcb2ea31a9e6275f3af47e248c25113cdb704ef7b01548a2a06534"
 
 [[invariant]]
@@ -53,12 +53,12 @@ status = "enforced"
 
 [[invariant.artifact]]
 path = "scripts/check_bench_history.py"
-schema_version = "zerostack.comprehensive-bench-report.v3"
+schema_version = "zerostack.comprehensive-bench-report"
 hash = "da0c9bec5d4cc9858226ecea4d11fdc7a3c2a5c64786e41923b5785c345bef3a"
 
 [[invariant.artifact]]
 path = ".bench-history/savings-bench.latest.json"
-schema_version = "zerostack.comprehensive-bench-report.v3"
+schema_version = "zerostack.comprehensive-bench-report"
 
 [[invariant]]
 id = "INV-CRASH-ORACLE"
@@ -69,7 +69,7 @@ status = "enforced"
 
 [[invariant.artifact]]
 path = "crates/zerostack-harness/tests/crash_oracle.rs"
-schema_version = "zerostack.crash-oracle.v1"
+schema_version = "zerostack.crash-oracle"
 hash = "6ec7ea017e10a0c54f27ff7b03bce5b14ade39d0130db1b48ade8a040cea6878"
 
 [[invariant]]
@@ -81,5 +81,5 @@ status = "enforced"
 
 [[invariant.artifact]]
 path = "scripts/check_feature_universe_weights.py"
-schema_version = "zerostack.supported_surface_matrix.v1"
+schema_version = "zerostack.supported_surface_matrix"
 hash = "f4bb63d02dbcfdeacbdcd81bbd56b18ed0a0cdb6731c67ec8f72be610381cdd4"

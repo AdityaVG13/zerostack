@@ -183,7 +183,7 @@
       ],
       "properties": {
         "schema_version": {
-          "const": "zerostack.reinvestment.plan.v1"
+          "const": "zerostack.reinvestment.plan"
         },
         "scope_digest": {
           "$ref": "#/$defs/digest"

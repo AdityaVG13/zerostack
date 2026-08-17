@@ -98,7 +98,7 @@
       "$ref": "#/$defs/digest"
     },
     "schema_version": {
-      "const": "zerostack.causal_artifact.intake_claim.v1"
+      "const": "zerostack.causal_artifact.intake_claim"
     },
     "support_class": {
       "enum": [

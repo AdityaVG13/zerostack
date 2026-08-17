@@ -21,8 +21,8 @@ use crate::q99::{
 };
 
 pub const INVALIDATION_INTAKE_CONTRACT_VERSION: u16 = 1;
-pub const ROBUST_SNAP_INTAKE_SCHEMA_VERSION: &str = "zerostack.robust_snap.intake_claim.v1";
-pub const CAUSAL_ARTIFACT_SCHEMA_VERSION: &str = "zerostack.causal_artifact.intake_claim.v1";
+pub const ROBUST_SNAP_INTAKE_SCHEMA_VERSION: &str = "zerostack.robust_snap.intake_claim";
+pub const CAUSAL_ARTIFACT_SCHEMA_VERSION: &str = "zerostack.causal_artifact.intake_claim";
 pub const ROBUST_SNAP_INTAKE_SCHEMA_SHA256: &str =
     "3a9a8056807e143daff4dd3713d73226ecb0ff36981e6307ea0eab744d4ff180";
 pub const CAUSAL_ARTIFACT_SCHEMA_SHA256: &str =
@@ -30,12 +30,12 @@ pub const CAUSAL_ARTIFACT_SCHEMA_SHA256: &str =
 pub const INVALIDATION_MAX_CANONICAL_BYTES: usize = 1_048_576;
 pub const INVALIDATION_MAX_SUPPORT_ROOTS: usize = 4_096;
 
-const SNAP_CLAIM_DOMAIN: &[u8] = b"zerostack.robust_snap.intake_claim.v1\0";
-const SNAP_RECORD_DOMAIN: &[u8] = b"zerostack.robust_snap.intake_record.v1\0";
-const ARTIFACT_CLAIM_DOMAIN: &[u8] = b"zerostack.causal_artifact.intake_claim.v1\0";
-const ARTIFACT_RECORD_DOMAIN: &[u8] = b"zerostack.causal_artifact.intake_record.v1\0";
-const CACHE_BINDING_DOMAIN: &[u8] = b"zerostack.causal_artifact.cache_binding.v1\0";
-const CONTRACT_DOMAIN: &[u8] = b"zerostack.invalidation_intake.contract.v1\0";
+const SNAP_CLAIM_DOMAIN: &[u8] = b"zerostack.robust_snap.intake_claim\0";
+const SNAP_RECORD_DOMAIN: &[u8] = b"zerostack.robust_snap.intake_record\0";
+const ARTIFACT_CLAIM_DOMAIN: &[u8] = b"zerostack.causal_artifact.intake_claim\0";
+const ARTIFACT_RECORD_DOMAIN: &[u8] = b"zerostack.causal_artifact.intake_record\0";
+const CACHE_BINDING_DOMAIN: &[u8] = b"zerostack.causal_artifact.cache_binding\0";
+const CONTRACT_DOMAIN: &[u8] = b"zerostack.invalidation_intake.contract\0";
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -164,7 +164,7 @@ impl RobustSnapIntakeRecord {
         )?;
         if self.claim.digest()? != self.claim_digest
             || self.claim.snap_certificate_digest != self.snap_certificate.certificate_digest
-            || domain_digest(b"zerostack.robust_snap.canonical_bytes.v1\0", &snap_bytes)
+            || domain_digest(b"zerostack.robust_snap.canonical_bytes\0", &snap_bytes)
                 != self.snap_certificate_bytes_digest
             || self.disposition != expected_disposition
             || self.expected_authority_digest()? != self.authority_digest
@@ -262,7 +262,7 @@ pub fn verify_robust_snap_intake(
         claim,
         snap_certificate,
         snap_certificate_bytes_digest: domain_digest(
-            b"zerostack.robust_snap.canonical_bytes.v1\0",
+            b"zerostack.robust_snap.canonical_bytes\0",
             &snap_bytes,
         ),
         evidence_digest: verified_evidence_digest(evidence).map_err(map_q99_evidence_error)?,
@@ -528,7 +528,7 @@ impl CausalArtifactIntakeRecord {
         if self.claim.digest()? != self.claim_digest
             || self.claim.support_closure_digest != self.support_closure.certificate_digest
             || domain_digest(
-                b"zerostack.causal_artifact.closure_bytes.v1\0",
+                b"zerostack.causal_artifact.closure_bytes\0",
                 &closure_bytes,
             ) != self.support_closure_bytes_digest
             || self.disposition != expected_disposition
@@ -712,7 +712,7 @@ pub fn verify_causal_artifact_intake(
         claim,
         support_closure,
         support_closure_bytes_digest: domain_digest(
-            b"zerostack.causal_artifact.closure_bytes.v1\0",
+            b"zerostack.causal_artifact.closure_bytes\0",
             &closure_bytes,
         ),
         evidence_digest: verified_evidence_digest(evidence).map_err(map_q99_evidence_error)?,
