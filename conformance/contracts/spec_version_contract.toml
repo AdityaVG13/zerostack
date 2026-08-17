@@ -68,8 +68,8 @@ sha256 = "32712333e2ebe73add922d8de2b339af22007f4ee7ee0e5f966da9a0992f4d7e"
 [[spec_sources]]
 name = "feature-universe"
 path = "conformance/contracts/supported_surface_matrix.toml"
-sha256 = "204b2059875d499dd4d5e97d4b1b75407fc585e6c1b6a840f74262c5997f3a05"
-description = "In-repo FeatureUniverse. Phase 4: F-CONF-HARNESS partial; three-tier goldens at conformance/golden/."
+sha256 = "4fe0fb88eae721cfeba673f2943eab0a661871afe3141d49cc476011bb806ee1"
+description = "In-repo FeatureUniverse. Phase 6: FailureBundle + crash oracle present; F-CONF-HARNESS still partial (no CLI catalog)."
 
 [[spec_sources]]
 name = "cache-entry-v1"

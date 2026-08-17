@@ -124,13 +124,15 @@ notes = "available for compatibility"
 id = "F-REF-PROPTEST"
 family = "zero-ref"
 name = "Property suite for parse/select"
-status = "missing"
+status = "present"
 weight = 0.025862068965
 weight_units = 6
-evidence = ["crates/zero-ref/src/lib.rs", "crates/zero-ref/Cargo.toml"]
-rationale = "no proptest in zero-ref crate"
-retry_condition = "Retry only when crates/zero-ref/Cargo.toml depends on proptest and at least one proptest! parse/select property is run by cargo test -p zero-ref."
-notes = "no proptest in zero-ref crate"
+evidence = [
+  "crates/zero-ref/src/lib.rs",
+  "crates/zero-ref/Cargo.toml",
+  "crates/zero-ref/tests/zeroref_proptest.rs",
+]
+notes = "proptest parse/Display identity + legacy #Bstart+len normalization; FileFailurePersistence::WithSource"
 
 [[feature]]
 id = "F-REF-ENGINE-ADOPTION-LOCKSTEP"
@@ -184,12 +186,16 @@ evidence = ["crates/zero-store/src/store_root.rs"]
 id = "F-STORE-CRASH-ORACLE"
 family = "zero-store"
 name = "Crash-boundary / mid-write kill oracle suite"
-status = "missing"
+status = "present"
 weight = 0.025862068965
 weight_units = 6
-evidence = ["crates/zero-store/src/durable_journal.rs"]
-rationale = "FaultPlan types exist; no deterministic FaultVFS / crash-boundary harness that kills mid-rename and asserts recovery"
-retry_condition = "Retry only when crates/zero-store has a deterministic FaultVFS (or equivalent) test that kills mid-rename and asserts recover_journal leaves a valid CAS object or a loud JournalError, wired into cargo test -p zero-store."
+evidence = [
+  "crates/zero-store/src/durable_journal.rs",
+  "crates/zerostack-harness/src/crash_boundary.rs",
+  "crates/zerostack-harness/src/fault_vfs.rs",
+  "crates/zerostack-harness/tests/crash_oracle.rs",
+]
+notes = "Harness crash oracle arms FaultPlanV1 at named JournalBoundaryV1 points. AfterTmpWriteBeforeRename leaves no visible dest; leftover temps are not dest; MidJournalRecover is fail-closed or a consistent prefix."
 
 [[feature]]
 id = "F-STORE-BENCH-HISTORY"
@@ -250,9 +256,9 @@ status = "partial"
 weight = 0.021551724137
 weight_units = 5
 evidence = ["crates/zerostack-harness/", "conformance/CONTRACT.md"]
-rationale = "crates/zerostack-harness exists (EngineIdentity, 48 spec verifiers, preflight). CONTRACT.md §8 still forbids an in-repo conformance CLI catalog."
+rationale = "crates/zerostack-harness exists (EngineIdentity, 48 spec verifiers, preflight, FailureBundle, crash oracle, e-process). CONTRACT.md §8 still forbids an in-repo conformance CLI catalog."
 retry_condition = "Reconsider only if conformance/CONTRACT.md §8 is amended to allow an in-repo conformance CLI. Do not resurrect {ns}_execute_code as a synonym for zero_execute."
-notes = "Phase 3/4: harness crate is not a second MCP catalog and is not a product CLI."
+notes = "Phase 6: harness implements the contract (bundle, metamorphic, fault, e-process). Still not a second MCP catalog and not a product CLI."
 
 [[feature]]
 id = "F-CONF-GOLDEN-SCHEMA"
@@ -282,12 +288,15 @@ notes = "Harness EngineIdentity is Subject=zerostack vs Oracle in {spec-v1,prope
 id = "F-ORACLE-FAILURE-BUNDLE"
 family = "gauntlet-oracle"
 name = "FailureBundle v1 provenance on divergence"
-status = "missing"
+status = "present"
 weight = 0.012931034482
 weight_units = 3
-evidence = ["conformance/CONTRACT.md"]
-rationale = "No FailureBundle v1 type with first_divergence_jsonptr in the hub tree"
-retry_condition = "Retry only when a harness crate emits FailureBundle v1 with first_divergence_jsonptr on TrueDivergence (Phase 3/6)."
+evidence = [
+  "crates/zerostack-harness/src/failure_bundle.rs",
+  "crates/zerostack-harness/src/mismatch.rs",
+  "crates/zerostack-harness/src/mismatch_minimizer.rs",
+]
+notes = "FailureBundle v1.0.0 writes /failure/first_divergence even when partial. CI fails only on TrueDivergence."
 
 [[feature]]
 id = "F-CI-PR-GATES"

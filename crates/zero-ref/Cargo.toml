@@ -10,3 +10,10 @@ description = "ZeroRef v1: the portable cross-engine blob ref subset for ZeroSta
 [dependencies]
 serde = { workspace = true }
 sha2 = { workspace = true }
+
+[dev-dependencies]
+proptest = "1"
+
+[[test]]
+name = "zeroref_proptest"
+path = "tests/zeroref_proptest.rs"
