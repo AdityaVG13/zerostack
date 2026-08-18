@@ -712,11 +712,105 @@ fn run_call(
     })
 }
 
+/// Bounded fused-edit no-target diagnostics (zerostack-g45o).
+///
+/// The fused `fs.edit` uniqueness gate is safety-critical: it must stay
+/// `exactly_one` and the preimage gate must not be weakened. This helper
+/// only enriches the existing `has no target` error with bounded,
+/// caller-provided evidence (query tokens + scope) so shell quoting or
+/// tokenization failures are actionable, without leaking file contents.
+const FUSED_QUERY_PREVIEW_LIMIT: usize = 80;
+const FUSED_SCOPE_PREVIEW_LIMIT: usize = 80;
+const FUSED_TOKEN_LIMIT: usize = 3;
+const FUSED_TOKEN_CHAR_LIMIT: usize = 24;
+const FUSED_DIAGNOSTIC_MAX_BYTES: usize = 500;
+
+fn bounded_fused_preview(value: &str, limit: usize) -> String {
+    let raw_len = value.chars().count();
+    // Normalize: trim outer whitespace (mirrors typical shell quoting confusion)
+    // and escape control chars for single-line safety.
+    let trimmed = value.trim();
+    let escaped = trimmed
+        .replace('\\', "\\\\")
+        .replace('\n', "\\n")
+        .replace('\r', "\\r")
+        .replace('\t', "\\t")
+        .replace('"', "\\\"");
+    let preview = if escaped.chars().count() > limit {
+        let truncated: String = escaped.chars().take(limit).collect();
+        format!("\"{truncated}…\"")
+    } else {
+        format!("\"{escaped}\"")
+    };
+    format!("{preview} len={raw_len}")
+}
+
+fn bounded_token_preview(query: &str) -> String {
+    let tokens: Vec<String> = query
+        .split_whitespace()
+        .filter(|t| !t.is_empty())
+        .map(|s| s.to_string())
+        .collect();
+    if tokens.is_empty() {
+        return "[] count=0".to_string();
+    }
+    let mut parts = Vec::new();
+    for token in tokens.iter().take(FUSED_TOKEN_LIMIT) {
+        let escaped = token
+            .replace('\\', "\\\\")
+            .replace('\n', "\\n")
+            .replace('"', "\\\"");
+        let shown = if escaped.chars().count() > FUSED_TOKEN_CHAR_LIMIT {
+            let truncated: String = escaped.chars().take(FUSED_TOKEN_CHAR_LIMIT).collect();
+            format!("\"{truncated}…\"")
+        } else {
+            format!("\"{escaped}\"")
+        };
+        parts.push(shown);
+    }
+    let mut out = format!("[{}]", parts.join(", "));
+    if tokens.len() > FUSED_TOKEN_LIMIT {
+        out.push_str(&format!(" +{} more", tokens.len() - FUSED_TOKEN_LIMIT));
+    }
+    out.push_str(&format!(" count={}", tokens.len()));
+    out
+}
+
+fn enriched_fused_no_target_message(request: &CallRequest, original: &str) -> Option<String> {
+    if !original.contains("has no target") {
+        return None;
+    }
+    if request.op != "fs.edit" {
+        return None;
+    }
+    let map = request.args.as_object()?;
+    let query = map.get("query")?.as_str()?;
+    let scope = map.get("scope").and_then(Value::as_str).unwrap_or("");
+    let query_preview = bounded_fused_preview(query, FUSED_QUERY_PREVIEW_LIMIT);
+    let scope_preview = bounded_fused_preview(scope, FUSED_SCOPE_PREVIEW_LIMIT);
+    let tokens = bounded_token_preview(query);
+    // Bounded corrective guidance; no file content, no preimage/replacement.
+    let mut enriched = format!(
+        "{original} (query={query_preview} tokens={tokens} scope={scope_preview}); hint: query is literal case-sensitive substring without shell quoting or regex; strip surrounding quotes/backticks, verify literal appears in scope via fs.search, and retry; uniqueness remains exactly_one and preimage is still required"
+    );
+    if enriched.len() > FUSED_DIAGNOSTIC_MAX_BYTES {
+        enriched.truncate(FUSED_DIAGNOSTIC_MAX_BYTES);
+        // Ensure valid UTF-8 truncation (truncate is byte-based, but we know it's ASCII-heavy).
+        while !enriched.is_char_boundary(enriched.len()) {
+            enriched.pop();
+        }
+        enriched.push_str("…");
+    }
+    Some(enriched)
+}
+
 /// Convert one typed dispatcher failure into an adapter failure.
 fn domain_error_to_adapter(error: &DomainError, request: &CallRequest) -> AdapterError {
+    let message = enriched_fused_no_target_message(request, &error.message)
+        .unwrap_or_else(|| error.message.clone());
     AdapterError::new(
         domain_error_kind(&error.class),
-        error.message.clone(),
+        message,
         error.retryable,
         Some(request.trace.clone()),
     )
