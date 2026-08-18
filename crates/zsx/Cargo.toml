@@ -17,3 +17,10 @@ path = "src/main.rs"
 [dependencies]
 serde_json.workspace = true
 zsx-core = { path = "../zsx-core", features = ["fszero", "graphzero", "tokenzero"] }
+
+[dev-dependencies]
+zero-abi = { path = "../zero-abi" }
+
+[[test]]
+name = "supervisor"
+path = "../../tests/unit/zsx/supervisor.rs"

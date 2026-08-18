@@ -50,13 +50,23 @@ fn run(args: &[String]) -> Result<Value, Box<dyn std::error::Error>> {
             std::process::exit(0);
         }
         [command, rest @ ..] if command == "exec" => exec_command(rest),
+        [command, rest @ ..] if command == "kernel" => {
+            // One-shot kernel child (Wave 10 supervisor): reads one canonical
+            // ZerokernelExecuteRequest from stdin, runs it through the
+            // embedded profile, writes the canonical
+            // ZerokernelExecuteResponse to stdout, and exits. It owns
+            // stdout, so nothing else may print in this mode.
+            let _ = rest;
+            let code = zsx_core::supervisor::run_kernel_child();
+            std::process::exit(code);
+        }
         [command, rest @ ..] if command == "mcp" => {
             mcp_command(rest)?;
             // Serve already wrote framed MCP replies. A leftover JSON line
             // after EOF would be a protocol violation.
             std::process::exit(0);
         }
-        _ => Err("usage: zsx exec -C ROOT | zsx mcp [-C ROOT]".into()),
+        _ => Err("usage: zsx exec -C ROOT | zsx mcp [-C ROOT] | zsx kernel".into()),
     }
 }
 
@@ -116,8 +126,13 @@ fn print_help() {
     println!("Usage:");
     println!("  zsx exec -C ROOT [--file PLAN] [--timeout-ms N]");
     println!("  zsx mcp  [-C ROOT]");
+    println!("  zsx kernel");
     println!();
     println!("exec    one-shot CodeMode plan (stdin or --file). Process exits.");
+    println!("kernel  one-shot zerokernel child for the Wave 10 supervisor:");
+    println!("        one canonical request on stdin, one canonical response on");
+    println!("        stdout, then exit. Never run by hand; the supervisor");
+    println!("        spawns, waits, and reaps it.");
     println!("mcp     harness-owned stdio MCP: zero_execute / zero_wait.");
     println!("        Idle is a blocking stdin read (no background work).");
     println!("        The host starts this process and kills it with the session.");

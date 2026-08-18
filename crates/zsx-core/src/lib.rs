@@ -5,8 +5,15 @@
 //! (FSZero, GraphZero, TokenZero) in memory, and the aggregate session
 //! authority (generation, bounded queue, approvals, cancellation,
 //! replacement, shutdown). It depends on `zero-codemode` only for the
-//! confined interpreter host; it never spawns a worker process and never
-//! serializes through NDJSON or a session socket.
+//! confined interpreter host; the canonical in-process path never spawns a
+//! worker process and never serializes through NDJSON or a session socket.
+//!
+//! The call-scoped Wave 10 supervisor ([`supervisor`]) is the one
+//! process-backed path: its one-shot isolate profile spawns a short-lived
+//! kernel child over stdio pipes and kills/reaps the exact process tree on
+//! every terminal path; the embedded reentrant profile runs fresh per-call
+//! runtimes on the calling thread. Both profiles share the zerokernel
+//! protocol envelope and leave the native path untouched as the fallback.
 //!
 //! The previous session socket and raw-worker compatibility executables were
 //! removed after all native adapters passed the cutover gates.
@@ -38,6 +45,7 @@ mod lower;
 mod residency;
 mod envelope;
 mod session;
+pub mod supervisor;
 mod verdict;
 
 /// Real FSZero engine adapter (feature `fszero`), over the immutable FSZero
@@ -87,6 +95,17 @@ pub use session::{
     ZsxBuilder, ZsxExecutionMetrics, ZsxExecutionResult, ZsxExecuteEnvelope, ZsxSession,
     ZsxSessionCancellation, ZsxSessionError, ZsxSessionFailureCode,
 };
+/// Wave 10 call-scoped daemonless execute supervisor (embedded reentrant and
+/// one-shot isolate profiles over the same zerokernel protocol envelope).
+pub use supervisor::{
+    KERNEL_CHILD_COMMAND, KERNEL_CHILD_MAX_REQUEST_BYTES, KERNEL_CHILD_MAX_RESPONSE_BYTES,
+    KERNEL_CHILD_STDERR_CAPTURE_BYTES, ONESHOT_CANCEL_POLL, ONESHOT_EXIT_SETTLE,
+    ONESHOT_KILL_GRACE, ONESHOT_SETTLE_GRACE, SESSION_ID_ENV, STORE_ROOT_ENV,
+    SUPERVISOR_IDLE_WAIT, OneShotChild, Supervisor, SupervisorBuilder, SupervisorError,
+    SupervisorProfile,
+};
+#[cfg(all(feature = "fszero", feature = "graphzero", feature = "tokenzero"))]
+pub use supervisor::run_kernel_child;
 pub use verdict::{
     VERDICT_LOOP_RECEIPT_SCHEMA, VerdictDecision, VerdictLoopEnvelope, VerdictLoopReceipt,
     VerdictLoopResult,
@@ -107,19 +126,22 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 /// Number of child processes spawned by zsx-core code since process start.
 ///
-/// The canonical in-process path never increments this counter. Any future
-/// process-backed compatibility adapter must increment it through the same
-/// instrumentation, so fixture tests can prove "one process, no worker
-/// spawn" deterministically.
+/// The canonical in-process path never increments this counter. The
+/// supervisor's one-shot isolate profile increments it through the same
+/// instrumentation (one short-lived kernel child per call, killed and
+/// reaped on every terminal path), so tests can prove "one spawn per
+/// one-shot call, zero survivors" deterministically.
 static PROCESS_SPAWNS: AtomicU64 = AtomicU64::new(0);
 
-/// Total child processes spawned by zsx-core code (0 for the canonical path).
+/// Total child processes spawned by zsx-core code (0 for the canonical
+/// in-process path; one per one-shot supervisor call).
 pub fn process_spawn_count() -> u64 {
     PROCESS_SPAWNS.load(Ordering::Relaxed)
 }
 
 /// Instrument one child-process spawn. Only process-backed compatibility
-/// code may call this; the in-process path must not.
+/// code (the supervisor one-shot profile) may call this; the in-process
+/// path must not.
 #[allow(dead_code)]
 pub(crate) fn record_process_spawn() {
     PROCESS_SPAWNS.fetch_add(1, Ordering::Relaxed);

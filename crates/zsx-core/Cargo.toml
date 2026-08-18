@@ -31,6 +31,7 @@ zero-abi = { path = "../zero-abi" }
 zero-gate = { path = "../zero-gate" }
 zero-ledger = { path = "../zero-ledger" }
 zero-codemode = { path = "../zero-codemode" }
+zero-process = { path = "../zero-process" }
 zero-ref = { path = "../zero-ref" }
 zero-store = { path = "../zero-store" }
 zero-machine-permit = { path = "../zerostack-machine-permit" }
