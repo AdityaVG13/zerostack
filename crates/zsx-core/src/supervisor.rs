@@ -97,8 +97,8 @@ use zero_abi::zerokernel::{
     RootEvidence, RootSnapshot, ZerokernelExecuteRequest, ZerokernelExecuteResponse,
 };
 use zero_codemode::{
-    CancellationSignal, ExecutionMetrics, Host, HostError, HostLimits, MAX_INFLIGHT_CONNECTOR_CALLS,
-    finalize_visible_error,
+    CancellationSignal, Connector, ExecutionMetrics, Host, HostError, HostLimits,
+    MAX_INFLIGHT_CONNECTOR_CALLS, finalize_visible_error,
 };
 use zero_process::VerifiedChild;
 
@@ -525,9 +525,9 @@ impl Supervisor {
         snapshot: &RootSnapshot,
     ) -> PreflightReport {
         let mut checked_roots = Vec::new();
-        let mut warnings = Vec::new();
+        let warnings = Vec::new();
         let mut errors = Vec::new();
-        let mut check_directory = |label: &str, value: &str, checked: &mut Vec<String>, errs: &mut Vec<String>| {
+        let check_directory = |label: &str, value: &str, checked: &mut Vec<String>, errs: &mut Vec<String>| {
             checked.push(value.to_owned());
             if !is_directory(Path::new(value)) {
                 errs.push(format!("{label} {value} is not an existing directory"));
@@ -618,11 +618,11 @@ impl Supervisor {
                 generation,
                 request_id,
             })
-            .map_err(SupervisorError::Runtime)?;
+            .map_err(|err| SupervisorError::Runtime(err.to_string()))?;
         connector.set_request_cancellation(signal);
         let outcome = host.execute_measured_with_cancel_timeout_context(
             &request.program,
-            Rc::clone(&connector),
+            Rc::clone(&connector) as Rc<dyn Connector>,
             Arc::clone(cancel),
             Duration::from_millis(request.budget.wall_ms),
             generation,
@@ -635,7 +635,7 @@ impl Supervisor {
             cancel.store(true, Ordering::Release);
             connector
                 .wait_for_dispatch_idle(SUPERVISOR_IDLE_WAIT)
-                .map_err(SupervisorError::Runtime)?;
+                .map_err(|err| SupervisorError::Runtime(err.to_string()))?;
         }
         connector.clear_request_cancellation();
         connector.clear_execution_context();
@@ -705,7 +705,7 @@ impl Supervisor {
             })();
             let _ = writer_done_tx.send(result);
         })
-        .map_err(SupervisorError::Internal)?;
+        .map_err(|err| SupervisorError::Internal(err.to_string()))?;
 
         let (output_tx, output_rx) = mpsc::sync_channel(1);
         let reader = spawn_thread("zsx-kernel-stdout", move || {
@@ -734,7 +734,7 @@ impl Supervisor {
             }
             let _ = output_tx.send(Ok(buffer));
         })
-        .map_err(SupervisorError::Internal)?;
+        .map_err(|err| SupervisorError::Internal(err.to_string()))?;
 
         let stderr_state = Arc::new((Mutex::new(StderrState::default()), Condvar::new()));
         let stderr_thread = spawn_thread("zsx-kernel-stderr", {
@@ -774,7 +774,7 @@ impl Supervisor {
                 ready.notify_all();
             }
         })
-        .map_err(SupervisorError::Internal)?;
+        .map_err(|err| SupervisorError::Internal(err.to_string()))?;
 
         // Wait for the response line under the bounded deadline, polling the
         // cancellation flag. Every exit from this loop leads to kill (when
@@ -920,10 +920,10 @@ impl Supervisor {
         result: Result<serde_json::Value, HostError>,
     ) -> Result<ZerokernelExecuteResponse, SupervisorError> {
         let ledger = KernelResourceLedger {
-            wall_ms_used: nanos_to_ms_ceil(metrics.wall_time_ns),
+            wall_ms_used: nanos_to_ms_ceil(u128::from(metrics.wall_time_ns)),
             // The restricted interpreter has no separate CPU clock; wall is
             // the honest upper bound (CPU time can never exceed wall).
-            cpu_ms_used: nanos_to_ms_ceil(metrics.wall_time_ns),
+            cpu_ms_used: nanos_to_ms_ceil(u128::from(metrics.wall_time_ns)),
             calls_made: metrics
                 .connector_dispatches
                 .min(u64::from(u32::MAX)) as u32,
@@ -1289,7 +1289,7 @@ fn stderr_tail(state: &Arc<(Mutex<StderrState>, Condvar)>, wait: Duration) -> St
                 }
             }
             Err(poisoned) => {
-                guard = poisoned.into_inner();
+                guard = poisoned.into_inner().0;
                 break;
             }
         }
