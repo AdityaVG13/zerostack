@@ -1,5 +1,30 @@
 use std::fmt;
 use std::time::Duration;
+/// Default CodeMode JS/runtime wall in milliseconds.
+///
+/// Received from `FSZero/crates/fs-zero/src/codemode/limits.rs` on
+/// 2026-08-17 so every engine adapter shares one host-owned wall policy.
+pub const MAX_WALL_MS: u64 = 2_000;
+
+/// Environment variables that may override the shared CodeMode wall.
+pub const CODEMODE_WALL_MS_ENVS: &[&str] = &[
+    "FSZERO_CODEMODE_WALL_MS",
+    "ZEROSTACK_CODEMODE_WALL_MS",
+    "TOKENZERO_CODEMODE_WALL_MS",
+];
+
+/// Effective wall with a 1ms floor; malformed values fall through.
+pub fn effective_max_wall_ms() -> u64 {
+    for key in CODEMODE_WALL_MS_ENVS {
+        if let Ok(value) = std::env::var(key) {
+            if let Ok(parsed) = value.trim().parse::<u64>() {
+                return parsed.max(1);
+            }
+        }
+    }
+    MAX_WALL_MS
+}
+
 
 /// Resource limits applied to one host execution.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -76,7 +101,7 @@ impl Default for HostLimits {
         Self {
             memory_bytes: 64 * 1024 * 1024,
             stack_bytes: 512 * 1024,
-            wall_timeout: Duration::from_secs(2),
+            wall_timeout: Duration::from_millis(effective_max_wall_ms()),
             instruction_budget: 100_000,
             microtask_ceiling: 1_024,
             max_inflight_connector_calls: crate::MAX_INFLIGHT_CONNECTOR_CALLS,

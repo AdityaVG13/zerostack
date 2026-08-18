@@ -1,4 +1,13 @@
 #![forbid(unsafe_code)]
+//!
+//! Canonical generic CodeMode host authority. The receive audit on
+//! 2026-08-17 classified `FSZero/crates/fs-zero/src/codemode/{js,host,limits}`
+//! as host concerns already implemented here by [`Host`], the restricted
+//! interpreter, and the shared limits table. FSZero's connector, runtime,
+//! transaction, recipes, world parsing, and `fz://` result adaptation remain
+//! engine/store concerns. Its MCP transport loop is already owned by
+//! `zero-mcp`; only FSZero store methods remain engine-local.
+
 
 mod cancellation;
 mod decision_gate;
@@ -26,7 +35,10 @@ pub use host::{
     PUBLIC_RESULT_FIELDS, RESULT_SPILL_PREVIEW_BYTES, RESULT_SPILL_SCHEMA, finalize_visible_error,
     runtime_creation_count,
 };
-pub use limits::{HostLimits, LimitError, OUTPUT_WALL_ARRANGEMENTS, OutputWallArrangement};
+pub use limits::{
+    CODEMODE_WALL_MS_ENVS, HostLimits, LimitError, MAX_WALL_MS, OUTPUT_WALL_ARRANGEMENTS,
+    OutputWallArrangement, effective_max_wall_ms,
+};
 pub use wrap::{PlanError, validate_plan, wrap_plan};
 pub use zero_abi::{
     CapabilityDescriptor, DomainAdapterRegistration, GlobalRegistration, RegistrationError,
