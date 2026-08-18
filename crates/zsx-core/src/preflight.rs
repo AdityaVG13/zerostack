@@ -985,12 +985,16 @@ impl<'s> RegionScanner<'s> {
             match byte {
                 b'\'' | b'"' => i = self.scan_string(i)?.1,
                 b'`' => i = self.scan_template(i)?.0,
-                b'(' | b'{' | b'[' => depth += 1,
+                b'(' | b'{' | b'[' => {
+                    depth += 1;
+                    i += 1;
+                }
                 b')' | b'}' | b']' => {
                     depth = depth.checked_sub(1)?;
                     if byte == close_byte && depth == 0 {
                         return Some(i);
                     }
+                    i += 1;
                 }
                 _ => i += self.char_len_at(i),
             }
