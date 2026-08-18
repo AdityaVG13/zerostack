@@ -396,6 +396,8 @@ pub struct WorkerResult {
 /// a protocol change, not a free string.
 pub const WORKER_ERROR_KINDS: &[&str] = &[
     "validation",
+    "invalid_frame",
+    "contract_mismatch",
     "unknown",
     "unsupported",
     "forbidden",
