@@ -45,3 +45,8 @@ path = "../../tests/unit/zsx-core/residency.rs"
 [[test]]
 name = "lowering"
 path = "../../tests/unit/zsx-core/lowering.rs"
+
+[[test]]
+name = "fs_search_cancel_reusable"
+path = "../../tests/unit/zsx-core/fs_search_cancel_reusable.rs"
+required-features = ["fszero", "graphzero", "tokenzero"]
