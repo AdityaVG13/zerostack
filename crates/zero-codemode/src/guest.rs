@@ -6,7 +6,11 @@
 //!
 //! - **context** — the injected operational roots, never model-typed;
 //! - **state** — a small serializable per-call map (bounded keys, values,
-//!   and total bytes) that dies with the fresh runtime;
+//!   and total bytes) that dies with the fresh runtime. The supervisor
+//!   hydrates it from the committed session root before the plan runs
+//!   ([`GuestSurface::state_hydrate`]) and stages its delta as the K0
+//!   session-state successor (zerostack-7inx); inside the runtime it is
+//!   still read-only plumbing (`z.state.get/set/delete/list`);
 //! - **help / inspect / capabilities.search** — bounded views over the
 //!   registered V6 catalog plus this table;
 //! - **invoke / parallel** — the read-only capability reach of
@@ -217,6 +221,50 @@ impl GuestSurface {
         self.state_bytes
             .set(self.state_bytes.get().saturating_sub(removed_bytes));
         Ok(true)
+    }
+
+    /// Seed the per-call state map from a hydrated session root (K0
+    /// persistence, zerostack-7inx). Every entry is re-validated against
+    /// the same key/value/total budgets as `z.state.set`; the seed is
+    /// all-or-nothing (on error the surface stays as it was). The caller
+    /// verifies the source root through the store before this runs.
+    pub fn state_hydrate(&self, state: BTreeMap<String, JsonValue>) -> Result<(), String> {
+        let mut next = BTreeMap::new();
+        let mut bytes = 0usize;
+        for (key, value) in state {
+            self.check_key(&key)?;
+            if next.len() >= K0_STATE_MAX_KEYS {
+                return Err(format!(
+                    "hydrated state holds {} keys, at the {K0_STATE_MAX_KEYS}-key bound",
+                    next.len()
+                ));
+            }
+            let encoded = serde_json::to_string(&value)
+                .map_err(|error| format!("hydrated state value is not serializable: {error}"))?;
+            if encoded.len() > K0_STATE_MAX_VALUE_BYTES {
+                return Err(format!(
+                    "hydrated state value for '{key}' is {} bytes, above the {K0_STATE_MAX_VALUE_BYTES}-byte per-value bound",
+                    encoded.len()
+                ));
+            }
+            bytes = bytes.saturating_add(encoded.len());
+            if bytes > K0_STATE_MAX_TOTAL_BYTES {
+                return Err(format!(
+                    "hydrated state total would reach {bytes} bytes, above the {K0_STATE_MAX_TOTAL_BYTES}-byte budget"
+                ));
+            }
+            next.insert(key, value);
+        }
+        *self.state.borrow_mut() = next;
+        self.state_bytes.set(bytes);
+        Ok(())
+    }
+
+    /// Full snapshot of the per-call state map: the staged successor base
+    /// of the K0 session-state CAS (the supervisor compares it against the
+    /// hydrated baseline after the plan settles).
+    pub fn state_snapshot(&self) -> BTreeMap<String, JsonValue> {
+        self.state.borrow().clone()
     }
 
     fn check_key(&self, key: &str) -> Result<(), String> {

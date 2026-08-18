@@ -48,6 +48,10 @@ mod lower;
 /// K0 capability broker: parse / resolve / normalize / inject / validate
 /// preflight boundary for the Wave 10 supervisor (zerostack-pvwg).
 pub mod preflight;
+/// K0 session-state persistence over the published CAS (zerostack-7inx):
+/// committed-root pointer, hydration, and the exact compare-and-swap
+/// successor commit under the store coordination lock.
+pub mod k0_state;
 /// Bounded one-file read grants for explicit absolute reads outside the
 /// session root (`fs.readGrant` / `zero.fs.read_grant`).
 pub mod read_grant;

@@ -20,6 +20,7 @@ zsx-core = { path = "../zsx-core", features = ["fszero", "graphzero", "tokenzero
 
 [dev-dependencies]
 zero-abi = { path = "../zero-abi" }
+zero-store = { path = "../zero-store" }
 
 [[test]]
 name = "supervisor"
@@ -28,3 +29,7 @@ path = "../../tests/unit/zsx/supervisor.rs"
 [[test]]
 name = "k0_budgets"
 path = "../../tests/unit/zsx/k0_budgets.rs"
+
+[[test]]
+name = "k0_state"
+path = "../../tests/unit/zsx/k0_state.rs"

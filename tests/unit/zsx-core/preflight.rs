@@ -726,21 +726,14 @@ fn supervisor_binds_receipt_and_terminals_in_one_call() {
         .build_canonical()
         .expect("embedded supervisor builds");
     let root_text = root.to_string_lossy().into_owned();
-    let state_text = state_root.to_string_lossy().into_owned();
     let make_request = |program: &str| {
         ZerokernelExecuteRequest::new(
             program.into(),
             Some(session.clone()),
             FiniteBudget::new(WALL_MS, CPU_MS, 64 * 1024 * 1024, 64).expect("budget"),
             ReturnPolicy::new(ReturnKind::Inline, 4096).expect("policy"),
-            RootBindings::new(
-                Some(root_text.clone()),
-                root_text.clone(),
-                None,
-                None,
-                Some(state_text.clone()),
-            )
-            .expect("roots"),
+            RootBindings::new(Some(root_text.clone()), root_text.clone(), None, None, None)
+                .expect("roots"),
         )
         .expect("request")
     };

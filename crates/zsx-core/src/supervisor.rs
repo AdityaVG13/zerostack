@@ -75,6 +75,17 @@
 //!   The surface adds no capability: the broker validates every `z.*`
 //!   mention, and the runtime surface enforces the same read-only reach.
 //!   The native path never installs `z`.
+//! - **K0 session state** (zerostack-7inx): every fresh runtime hydrates
+//!   `z.state` from the request's expected session root (a lowercase
+//!   64-hex SHA-256 CAS identity), or from the committed root when no
+//!   expectation is given. After a successful, quiescent completion the
+//!   staged delta may CAS one successor through the published CAS
+//!   ([`crate::k0_state::commit_successor`], under the store coordination
+//!   lock). A stale expected root is a typed `session root conflict` that
+//!   performs no write; syntax error, JS exception, deadline,
+//!   cancellation, worker crash, output limit, and conflict terminals all
+//!   leave the prior session and project roots unchanged, proven by the
+//!   response's root evidence. No live JS heap is authoritative.
 //! - **K0 budget vector** (zerostack-zksb): every named dimension is
 //!   finite and enforced through the existing seams. The request's
 //!   `budget` maps onto the host limits: `wall_ms` -> interpreter and
@@ -87,8 +98,8 @@
 //!   frames, 1024 microtasks, 64 in-flight calls, and the return-policy
 //!   visible result budget (spill ref or typed `ResultTooLarge`). The
 //!   guest surface bounds the parallel fan-out (`K0_PARALLEL_LIMIT`), the
-//!   per-call state delta (keys/values/total bytes, in-memory only — the
-//!   durable delta is zero because K0 has no commit surface), and every
+//!   per-call state delta (keys/values/total bytes — bounded in memory,
+//!   then staged as the K0 session-state successor below), and every
 //!   `z.invoke`/`z.parallel` target to the read-only reach. Unavailable
 //!   authority classes (GPU, process/spawn, shell-as-a-surface, network,
 //!   OS/environment, database, daemon, FFI, codegen) fail typed as denied
@@ -126,6 +137,7 @@ use std::sync::{Arc, Condvar, Mutex};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 
+use serde_json::Value as JsonValue;
 use zero_abi::guest::K0_PARALLEL_LIMIT;
 use zero_abi::raw_worker::EngineIdentity;
 use zero_abi::zerokernel::{
@@ -138,10 +150,12 @@ use zero_codemode::{
     HostError, HostLimits, MAX_INFLIGHT_CONNECTOR_CALLS, finalize_visible_error,
 };
 use zero_process::VerifiedChild;
+use zero_store::SharedCas;
 
 use crate::adapter::DomainAdapter;
 use crate::connector::{AggregateExecutionContext, ZsxConnector, registration};
 use crate::guest_w9e::W9eEvidence;
+use crate::k0_state::{self, CommitOutcome};
 use crate::preflight::BrokerOutcome;
 
 /// Subcommand the one-shot child runs in the same executable
@@ -436,7 +450,7 @@ impl Supervisor {
         })?;
         self.bind_session(&request)?;
         self.bind_roots(&request)?;
-        let snapshot = self.root_snapshot(&request);
+        let snapshot = self.root_snapshot(&request)?;
         let preflight = self.preflight(&request, &snapshot);
         if !preflight.ok {
             return Ok(failed_response(
@@ -539,26 +553,38 @@ impl Supervisor {
                 self.root.display()
             )));
         }
+        // The K0 session root is a committed-state CAS identity, not a
+        // directory: the request's expected root must be a full lowercase
+        // 64-hex SHA-256 object identity (zerostack-7inx). Its existence
+        // and content are checked by the read-only preflight.
         if let Some(session_root) = &request.roots.expected_session_root
-            && let Ok(resolved) = Path::new(session_root).canonicalize()
-            && resolved != self.state_root
+            && !k0_state::is_session_root_identity(session_root)
         {
-            return Err(SupervisorError::RootMismatch(format!(
-                "expected_session_root {} resolves to {} but this supervisor's session state root is {}",
-                session_root,
-                resolved.display(),
-                self.state_root.display()
+            return Err(SupervisorError::InvalidRequest(format!(
+                "expected_session_root {session_root:?} is not a full lowercase 64-hex SHA-256 session root identity"
             )));
         }
         Ok(())
     }
 
-    /// The root snapshot both sides of the unchanged root evidence. The
-    /// read-only protocol carries no successor root.
-    fn root_snapshot(&self, request: &ZerokernelExecuteRequest) -> RootSnapshot {
+    /// The root snapshot both sides of the root evidence. The session root
+    /// is the **committed** session-state root (the durable truth at
+    /// request time), never the request's expectation: failure evidence
+    /// must prove the committed roots unchanged, and the completed
+    /// evidence derives its `before` from this same base. A malformed
+    /// committed-root pointer is internal corruption and fails closed.
+    fn root_snapshot(
+        &self,
+        request: &ZerokernelExecuteRequest,
+    ) -> Result<RootSnapshot, SupervisorError> {
         let root_text = self.root.to_string_lossy().into_owned();
-        let state_text = self.state_root.to_string_lossy().into_owned();
-        RootSnapshot {
+        let committed = k0_state::current_session_root(&self.state_root, &self.session_id)
+            .map_err(|error| {
+                SupervisorError::Internal(format!(
+                    "cannot read the committed session root: {error}"
+                ))
+            })?;
+        Ok(RootSnapshot {
             workspace_root: Some(
                 request
                     .roots
@@ -567,14 +593,8 @@ impl Supervisor {
                     .unwrap_or_else(|| root_text.clone()),
             ),
             project_root: request.roots.project_root.clone(),
-            session_root: Some(
-                request
-                    .roots
-                    .expected_session_root
-                    .clone()
-                    .unwrap_or(state_text),
-            ),
-        }
+            session_root: committed,
+        })
     }
 
     /// Read-only preflight: every injected root must exist with the expected
@@ -607,13 +627,36 @@ impl Supervisor {
                 &mut errors,
             );
         }
-        if let Some(session_root) = &snapshot.session_root {
-            check_directory(
-                "expected_session_root",
-                session_root,
-                &mut checked_roots,
-                &mut errors,
-            );
+        // K0 session state (zerostack-7inx): the session root is a
+        // committed-state CAS identity, not a directory. The expected root
+        // (when provided) must exist and verify as a bounded state object;
+        // the committed root (when one exists) must too — a missing or
+        // corrupt committed object is fail-closed store corruption, never
+        // a silent reset.
+        let cas = SharedCas::open(self.state_root.to_path_buf());
+        if let Some(expected) = &request.roots.expected_session_root {
+            checked_roots.push(expected.clone());
+            if !cas.contains(expected) {
+                errors.push(format!(
+                    "expected_session_root {expected} is not present in the session store"
+                ));
+            } else if let Err(detail) = k0_state::read_state_map(&cas, expected) {
+                errors.push(format!(
+                    "expected_session_root {expected} is not a valid session state root: {detail}"
+                ));
+            }
+        }
+        if let Some(committed) = &snapshot.session_root {
+            checked_roots.push(committed.clone());
+            if !cas.contains(committed) {
+                errors.push(format!(
+                    "committed session root {committed} is missing from the session store"
+                ));
+            } else if let Err(detail) = k0_state::read_state_map(&cas, committed) {
+                errors.push(format!(
+                    "committed session root {committed} is not a valid session state root: {detail}"
+                ));
+            }
         }
         if let Some(request_root) = &request.roots.request_root {
             checked_roots.push(request_root.clone());
@@ -662,11 +705,41 @@ impl Supervisor {
             })?,
         );
         let limits = host_limits_for_budget(&request.budget)?;
+        // K0 session state (zerostack-7inx): the fresh runtime hydrates
+        // its `z.state` map from the request's expected session root, or
+        // from the committed root when no expectation is given. The
+        // hydrated map is the delta baseline; a successor is staged from
+        // it only after the plan settles quiescently. Preflight already
+        // verified every state root it could see, so these reads fail
+        // closed only on a store race or corruption.
+        let base_root: Option<String> = match &request.roots.expected_session_root {
+            Some(expected) => Some(expected.clone()),
+            None => k0_state::current_session_root(&self.state_root, &self.session_id)
+                .map_err(|error| {
+                    SupervisorError::Runtime(format!(
+                        "cannot read committed session state: {error}"
+                    ))
+                })?,
+        };
+        let baseline: BTreeMap<String, JsonValue> = match &base_root {
+            Some(root) => {
+                let cas = SharedCas::open(self.state_root.to_path_buf());
+                k0_state::read_state_map(&cas, root).map_err(|error| {
+                    SupervisorError::Runtime(format!(
+                        "cannot hydrate session state from root {root}: {error}"
+                    ))
+                })?
+            }
+            None => BTreeMap::new(),
+        };
         // K0 guest surface (zerostack-fhcj): the fresh runtime installs the
         // `z` global bound to the injected roots; the native path never
         // does. The surface (including its per-call state) dies with this
         // runtime.
-        let guest = guest_surface_for(&request, &self.session_id, &self.state_root)?;
+        let guest = guest_surface_for(&request, &self.session_id, base_root.clone())?;
+        guest.state_hydrate(baseline.clone()).map_err(|error| {
+            SupervisorError::Runtime(format!("cannot hydrate the guest state map: {error}"))
+        })?;
         let mut host = Host::new(limits, registration())
             .map_err(|error| SupervisorError::Runtime(format!("cannot create host: {error}")))?;
         host = host
@@ -726,7 +799,17 @@ impl Supervisor {
             continuation_handle: guest.persisted_continuation(),
             ..ExactHandles::default()
         };
-        self.project_outcome(preflight, snapshot, outcome.metrics, outcome.result, handles)
+        self.project_outcome(
+            preflight,
+            snapshot,
+            outcome.metrics,
+            outcome.result,
+            handles,
+            &guest,
+            &baseline,
+            request.roots.expected_session_root.as_deref(),
+            base_root.as_deref(),
+        )
     }
 
     /// One-shot profile: spawn exactly one sandboxed child, feed it the
@@ -1001,6 +1084,12 @@ impl Supervisor {
     /// exact handles carry the guest-persisted continuation handle of a
     /// completed call (`z.persistHandle`); terminal failures never carry a
     /// successor handle.
+    ///
+    /// The K0 session-state commit (zerostack-7inx) runs here, after the
+    /// runtime is already quiescent: on a completed result the staged
+    /// state delta is CAS'd against the expected/committed root under the
+    /// store coordination lock. Every other terminal — and every conflict
+    /// — proves the roots unchanged and performs no write.
     fn project_outcome(
         &self,
         preflight: PreflightReport,
@@ -1008,6 +1097,10 @@ impl Supervisor {
         metrics: ExecutionMetrics,
         result: Result<serde_json::Value, HostError>,
         handles: ExactHandles,
+        guest: &GuestSurface,
+        baseline: &BTreeMap<String, JsonValue>,
+        expected_session_root: Option<&str>,
+        base_root: Option<&str>,
     ) -> Result<ZerokernelExecuteResponse, SupervisorError> {
         let ledger = KernelResourceLedger {
             wall_ms_used: nanos_to_ms_ceil(u128::from(metrics.wall_time_ns)),
@@ -1026,6 +1119,58 @@ impl Supervisor {
                     .map(|encoded| encoded.len())
                     .unwrap_or(0)
                     .min(u32::MAX as usize) as u32;
+                let final_state = guest.state_snapshot();
+                let evidence = match k0_state::commit_successor(
+                    &self.state_root,
+                    &self.session_id,
+                    expected_session_root,
+                    baseline,
+                    &final_state,
+                ) {
+                    Ok(CommitOutcome::Committed { successor }) => RootEvidence {
+                        before: snapshot_with_session_root(&snapshot, base_root),
+                        after: RootSnapshot {
+                            session_root: Some(successor.clone()),
+                            ..snapshot.clone()
+                        },
+                        unchanged: false,
+                        successor_root: Some(successor),
+                    },
+                    Ok(CommitOutcome::Unchanged) => evidence,
+                    Ok(CommitOutcome::Conflict { current }) => {
+                        let observed =
+                            snapshot_with_session_root(&snapshot, current.as_deref());
+                        let detail = match &current {
+                            Some(current) => format!(
+                                "session root conflict: expected {expected}, committed root is {current}",
+                                expected = expected_session_root.unwrap_or("(none)")
+                            ),
+                            None => format!(
+                                "session root conflict: expected {expected} but no session root is committed",
+                                expected = expected_session_root.unwrap_or("(none)")
+                            ),
+                        };
+                        return Ok(failed_response(
+                            preflight,
+                            ledger,
+                            RootEvidence {
+                                before: observed.clone(),
+                                after: observed,
+                                unchanged: true,
+                                successor_root: None,
+                            },
+                            &detail,
+                        ));
+                    }
+                    Err(detail) => {
+                        return Ok(failed_response(
+                            preflight,
+                            ledger,
+                            unchanged_evidence(&snapshot),
+                            &format!("cannot commit session state: {detail}"),
+                        ));
+                    }
+                };
                 ZerokernelExecuteResponse::completed(
                     handles,
                     preflight,
@@ -1060,6 +1205,17 @@ impl Supervisor {
                 &finalize_visible_error(&format!("execution failed: {error}")),
             )),
         }
+    }
+}
+
+/// The root snapshot with an explicit session root. Used to build the
+/// `before`/`after` evidence of a committed successor and the observed
+/// evidence of a session-root conflict.
+fn snapshot_with_session_root(snapshot: &RootSnapshot, session_root: Option<&str>) -> RootSnapshot {
+    RootSnapshot {
+        workspace_root: snapshot.workspace_root.clone(),
+        project_root: snapshot.project_root.clone(),
+        session_root: session_root.map(str::to_owned),
     }
 }
 
@@ -1500,22 +1656,22 @@ fn failed_response(
 
 /// Build the per-call K0 guest surface bound to the request's injected
 /// roots. Every root comes from the caller; the guest never retypes session
-/// or project identity. The parallel-spec bound is the catalog constant.
+/// or project identity. `session_root` is the session-state root the call
+/// hydrates from (the request's expected root, else the committed root) —
+/// `None` on a fresh session with no expectation, surfaced to the guest as
+/// an absent `z.context.sessionRoot`. The parallel-spec bound is the
+/// catalog constant.
 fn guest_surface_for(
     request: &ZerokernelExecuteRequest,
     session_id: &str,
-    state_root: &Path,
+    session_root: Option<String>,
 ) -> Result<GuestSurface, SupervisorError> {
     Ok(GuestSurface::new(
         GuestContext {
             project_root: request.roots.project_root.clone(),
             workspace_root: request.roots.workspace_root.clone(),
             request_root: request.roots.request_root.clone(),
-            session_root: request
-                .roots
-                .expected_session_root
-                .clone()
-                .or_else(|| Some(state_root.to_string_lossy().into_owned())),
+            session_root,
             capability_manifest_root: request.roots.capability_manifest_root.clone(),
             session_id: session_id.to_owned(),
             abi_version: ZEROKERNEL_ABI_VERSION.to_owned(),

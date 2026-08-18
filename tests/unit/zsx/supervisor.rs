@@ -104,20 +104,16 @@ fn request_for(
     session: &str,
 ) -> ZerokernelExecuteRequest {
     let root_text = root.to_string_lossy().into_owned();
-    let state_text = state_root.to_string_lossy().into_owned();
+    // No expected session root: the call hydrates from the committed root
+    // (or from nothing on a fresh session) and commits unconditionally.
+    let _ = state_root;
     ZerokernelExecuteRequest::new(
         program.into(),
         Some(session.into()),
         FiniteBudget::new(wall_ms, CPU_MS, 64 * 1024 * 1024, 64).expect("budget"),
         ReturnPolicy::new(ReturnKind::Inline, 4096).expect("policy"),
-        RootBindings::new(
-            Some(root_text.clone()),
-            root_text,
-            None,
-            None,
-            Some(state_text),
-        )
-        .expect("roots"),
+        RootBindings::new(Some(root_text.clone()), root_text, None, None, None)
+            .expect("roots"),
     )
     .expect("request")
 }
@@ -528,11 +524,31 @@ fn session_and_root_binding_fail_closed() {
         std::env::temp_dir().to_string_lossy().into_owned(),
         None,
         None,
-        Some(fixture.state_root.to_string_lossy().into_owned()),
+        None,
     )
     .expect("roots");
     let error = embedded.execute(request).expect_err("foreign root refuses");
     assert!(matches!(error, SupervisorError::RootMismatch(_)));
+    assert_eq!(embedded.live_executors(), 0);
+
+    // A non-identity expected session root is a caller contract violation
+    // (the K0 session root is a committed-state CAS identity, not a path).
+    let mut request = fixture.request("return 42;", WALL_MS);
+    request.roots = RootBindings::new(
+        Some(fixture.root.to_string_lossy().into_owned()),
+        fixture.root.to_string_lossy().into_owned(),
+        None,
+        None,
+        Some("0123456789abcdef".into()),
+    )
+    .expect("roots");
+    let error = embedded
+        .execute(request)
+        .expect_err("non-identity expected session root refuses");
+    assert!(
+        matches!(error, SupervisorError::InvalidRequest(_)),
+        "error={error}"
+    );
     assert_eq!(embedded.live_executors(), 0);
 }
 
@@ -553,7 +569,7 @@ fn preflight_reports_missing_request_root() {
             fixture.root.to_string_lossy().into_owned(),
             Some(missing.to_string_lossy().into_owned()),
             None,
-            Some(fixture.state_root.to_string_lossy().into_owned()),
+            None,
         )
         .expect("roots"),
     )

@@ -77,20 +77,15 @@ impl Fixture {
 
     fn request(&self, program: &str) -> ZerokernelExecuteRequest {
         let root_text = self.root.to_string_lossy().into_owned();
-        let state_text = self.state_root.to_string_lossy().into_owned();
+        // No expected session root: the call hydrates from the committed
+        // root (none on a fresh session) and commits unconditionally.
         ZerokernelExecuteRequest::new(
             program.into(),
             Some(self.session.clone()),
             FiniteBudget::new(WALL_MS, CPU_MS, 64 * 1024 * 1024, 64).expect("budget"),
             ReturnPolicy::new(ReturnKind::Inline, 4096).expect("policy"),
-            RootBindings::new(
-                Some(root_text.clone()),
-                root_text,
-                None,
-                None,
-                Some(state_text),
-            )
-            .expect("roots"),
+            RootBindings::new(Some(root_text.clone()), root_text, None, None, None)
+                .expect("roots"),
         )
         .expect("request")
     }
@@ -264,10 +259,9 @@ fn guest_context_and_state_round_trip() {
         result["projectRoot"],
         json!(fixture.root.to_string_lossy().into_owned())
     );
-    assert_eq!(
-        result["sessionRoot"],
-        json!(fixture.state_root.to_string_lossy().into_owned())
-    );
+    // A fresh session with no committed state and no expected root has no
+    // session state root; the guest sees it as absent.
+    assert_eq!(result["sessionRoot"], JsonValue::Null);
     assert_eq!(result["workspaceRoot"], result["projectRoot"]);
     assert_eq!(result["manifestRoot"], JsonValue::Null);
     assert_eq!(supervisor.live_executors(), 0);
@@ -296,7 +290,8 @@ fn guest_state_is_bounded_and_typed() {
         "errors={:?}",
         response.preflight.errors
     );
-    // State dies with the runtime: a fresh call sees an empty map.
+    // The failed call never committed, so a fresh call (no expected root,
+    // nothing committed) still sees an empty map.
     let response = supervisor
         .execute(fixture.request("return z.state.list();"))
         .expect("fresh runtime executes");

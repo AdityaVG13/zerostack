@@ -19,12 +19,13 @@
 //! - unavailable authority: GPU / process / shell / network / database
 //!   mentions fail typed as denied (broker and runtime), never as unknown
 //!   names, and no one-shot child is spawned for a broker refusal;
-//! - durable delta: per-call guest state never writes to the state root;
-//!   failing calls leave project and session roots unchanged;
+//! - durable delta: a successful state-writing call commits exactly one
+//!   bounded successor through the session-state CAS (zerostack-7inx);
+//!   every failing call leaves project and session roots unchanged;
 //! - every terminal leaves zero live executors/children/GPU and bounded
 //!   ledger charges; the session stays usable.
 
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -89,21 +90,20 @@ impl Fixture {
         self.request_budgeted(
             program,
             FiniteBudget::new(WALL_MS, CPU_MS, MEMORY_BYTES, MAX_CALLS).expect("budget"),
-            Some(self.state_root.clone()),
+            None,
         )
     }
 
+    /// `expected_session_root` is a committed-state CAS identity (a full
+    /// lowercase 64-hex SHA-256); `None` hydrates from the committed root
+    /// and commits unconditionally.
     fn request_budgeted(
         &self,
         program: &str,
         budget: FiniteBudget,
-        expected_session_root: Option<PathBuf>,
+        expected_session_root: Option<String>,
     ) -> ZerokernelExecuteRequest {
         let root_text = self.root.to_string_lossy().into_owned();
-        let state_text = expected_session_root
-            .unwrap_or_else(|| self.state_root.clone())
-            .to_string_lossy()
-            .into_owned();
         ZerokernelExecuteRequest::new(
             program.into(),
             Some(self.session.clone()),
@@ -114,7 +114,7 @@ impl Fixture {
                 root_text,
                 None,
                 None,
-                Some(state_text),
+                expected_session_root,
             )
             .expect("roots"),
         )
@@ -169,20 +169,6 @@ fn has_error(response: &zero_abi::zerokernel::ZerokernelExecuteResponse, needle:
     failed_errors(response)
         .iter()
         .any(|error| error.contains(needle))
-}
-
-/// Sorted top-level entries of a directory (relative names). Used to prove
-/// the state root gains no durable delta from per-call guest state.
-fn dir_entries(root: &Path) -> Vec<String> {
-    let mut entries: Vec<String> = match std::fs::read_dir(root) {
-        Ok(entries) => entries
-            .flatten()
-            .map(|entry| entry.file_name().to_string_lossy().into_owned())
-            .collect(),
-        Err(_) => Vec::new(),
-    };
-    entries.sort();
-    entries
 }
 
 // ---------------------------------------------------------------------------
@@ -312,7 +298,7 @@ fn output_budget_bounded_spill_or_typed_failure() {
     let request = fixture.request_budgeted(
         program,
         FiniteBudget::new(WALL_MS, CPU_MS, MEMORY_BYTES, MAX_CALLS).expect("budget"),
-        Some(fixture.root.clone()),
+        None,
     );
     let response = no_spill
         .execute(request)
@@ -410,21 +396,14 @@ fn source_bytes_beyond_protocol_bound_refused() {
     // execution and before any one-shot child spawn. The struct is built
     // directly (the `new` constructor validates and would refuse first).
     let root_text = fixture.root.to_string_lossy().into_owned();
-    let state_text = fixture.state_root.to_string_lossy().into_owned();
     let request = ZerokernelExecuteRequest {
         abi_version: zero_abi::zerokernel::ZEROKERNEL_ABI_VERSION.into(),
         program: format!("/* {} */ return 1;", "x".repeat(70 * 1024)),
         session: Some(fixture.session.clone()),
         budget: FiniteBudget::new(WALL_MS, CPU_MS, MEMORY_BYTES, MAX_CALLS).expect("budget"),
         return_policy: ReturnPolicy::new(ReturnKind::Inline, 4096).expect("policy"),
-        roots: RootBindings::new(
-            Some(root_text.clone()),
-            root_text,
-            None,
-            None,
-            Some(state_text),
-        )
-        .expect("roots"),
+        roots: RootBindings::new(Some(root_text.clone()), root_text, None, None, None)
+            .expect("roots"),
     };
     let error = oneshot
         .execute(request)
@@ -612,13 +591,14 @@ fn denied_authority_classes_fail_typed_before_execution() {
 // ---------------------------------------------------------------------------
 
 #[test]
-fn guest_state_is_per_call_and_failure_leaves_roots_unchanged() {
+fn guest_state_commits_successor_and_failure_terminals_leave_roots_unchanged() {
     let fixture = Fixture::new("durable-delta");
     let embedded = fixture.embedded();
-    let before = dir_entries(&fixture.state_root);
 
-    // A successful call that writes guest state: the delta is in-memory and
-    // dies with the runtime — nothing durable appears in the state root.
+    // A successful call that writes guest state stages one bounded
+    // successor through the session-state CAS: the response carries the
+    // committed root and the per-session pointer appears under the state
+    // root (the durable delta is now one successor, never the live heap).
     let response = embedded
         .execute(fixture.request(
             r#"
@@ -629,20 +609,44 @@ fn guest_state_is_per_call_and_failure_leaves_roots_unchanged() {
         .expect("state plan executes");
     assert_eq!(response.kind, ZerokernelResultKind::Completed, "errors={:?}", failed_errors(&response));
     assert_eq!(response.result, Some(json!(["k"])));
-    assert_eq!(dir_entries(&fixture.state_root), before, "guest state must not persist");
+    assert!(
+        !response.root_evidence.unchanged,
+        "a state delta must commit a successor"
+    );
+    let successor = response
+        .root_evidence
+        .successor_root
+        .clone()
+        .expect("completed state write carries the successor root");
+    assert_eq!(
+        response.root_evidence.after.session_root.as_deref(),
+        Some(successor.as_str())
+    );
+    assert_eq!(
+        response.root_evidence.before.session_root, None,
+        "a fresh session has no prior committed root"
+    );
+    let pointer =
+        zsx_core::k0_state::session_root_pointer(&fixture.state_root, &fixture.session);
+    assert_eq!(
+        std::fs::read_to_string(&pointer)
+            .expect("committed root pointer")
+            .trim(),
+        successor
+    );
 
     // A failing call that first writes guest state and then spins to the
-    // deadline: the failure terminal proves roots unchanged and the state
-    // root gains no durable delta.
+    // deadline: the failure terminal proves roots unchanged and commits
+    // nothing (the pointer keeps the prior successor).
     let budget = FiniteBudget::new(400, CPU_MS, MEMORY_BYTES, MAX_CALLS).expect("budget");
     let response = embedded
         .execute(fixture.request_budgeted(
             r#"
-            z.state.set("k", {n: 1});
+            z.state.set("k2", {n: 2});
             while (true) {}
         "#,
             budget,
-            None,
+            Some(successor.clone()),
         ))
         .expect("deadline is a protocol response");
     assert_eq!(response.kind, ZerokernelResultKind::Failed, "errors={:?}", failed_errors(&response));
@@ -653,7 +657,31 @@ fn guest_state_is_per_call_and_failure_leaves_roots_unchanged() {
         response.root_evidence.after,
         "failure must prove roots unchanged"
     );
-    assert_eq!(dir_entries(&fixture.state_root), before, "failure must not write durable state");
+    assert_eq!(
+        std::fs::read_to_string(&pointer)
+            .expect("committed root pointer")
+            .trim(),
+        successor,
+        "failure must not move the committed root"
+    );
+    assert_quiescent(&embedded);
+
+    // The committed state survives the failed terminal: a fresh executor
+    // with the same expected root hydrates the original state and a
+    // read-only call commits nothing.
+    let response = embedded
+        .execute(fixture.request_budgeted(
+            "return z.state.get('k').n;",
+            FiniteBudget::new(WALL_MS, CPU_MS, MEMORY_BYTES, MAX_CALLS).expect("budget"),
+            Some(successor),
+        ))
+        .expect("hydrated plan executes");
+    assert_eq!(response.kind, ZerokernelResultKind::Completed, "errors={:?}", failed_errors(&response));
+    assert_eq!(response.result, Some(json!(1)), "state must survive the failed terminal");
+    assert!(
+        response.root_evidence.unchanged,
+        "a read-only call must not commit a successor"
+    );
     assert_quiescent(&embedded);
 }
 
