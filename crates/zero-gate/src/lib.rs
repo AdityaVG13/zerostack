@@ -27,6 +27,7 @@ pub mod durable_publication;
 pub mod evidence;
 pub mod invalidation;
 pub mod program;
+pub mod project_image;
 pub mod q99;
 pub mod quality;
 pub mod release;
@@ -38,7 +39,6 @@ pub mod semantic_cut;
 pub mod transaction;
 pub mod two_phase;
 pub mod verifier_registry;
-pub mod verdict;
 pub use aggregate::*;
 pub use asset::*;
 pub use deoptimization::*;
@@ -46,6 +46,13 @@ pub use durable_publication::*;
 pub use evidence::*;
 pub use invalidation::*;
 pub use program::*;
+pub use project_image::{
+    CausalGraphRef, DeclaredChange, DemandScenario, ExactObject, HypotheticalChildReport,
+    PerObjectLayers, ProjectImageError, ProjectImageManifest, ProofGraphRef,
+    RegisteredRepresentation, RepresentationKind, ShadowResourceLedger, ShadowResourceRow,
+    ValidityClass, hypothetical_child, validity_class_map, PROJECT_IMAGE_DOMAIN,
+    PROJECT_IMAGE_SCHEMA_VERSION, SHADOW_HAS_AUTHORITY,
+};
 pub use q99::*;
 pub use quality::*;
 pub use release::*;
@@ -58,7 +65,6 @@ pub use transaction::*;
 pub use two_phase::*;
 pub use verifier_registry::*;
 pub use verdict::*;
-
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct NextBudget {
     budget: u128,
