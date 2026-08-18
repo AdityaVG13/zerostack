@@ -75,6 +75,30 @@
 //!   The surface adds no capability: the broker validates every `z.*`
 //!   mention, and the runtime surface enforces the same read-only reach.
 //!   The native path never installs `z`.
+//! - **K0 budget vector** (zerostack-zksb): every named dimension is
+//!   finite and enforced through the existing seams. The request's
+//!   `budget` maps onto the host limits: `wall_ms` -> interpreter and
+//!   parent deadline, `cpu_ms` -> guest fuel (instruction budget at
+//!   10 000 instructions per CPU-ms, capped at the 10M host ceiling),
+//!   `memory_bytes` -> typed heap budget, `max_calls` -> typed total
+//!   host-call budget (`CallBudgetExceeded` at the next dispatch past the
+//!   bound). Host-owned ceilings stay constant and finite: 1 MiB stack
+//!   (typed evaluation-depth bound), 256 KiB plan bytes, 1 MiB JSON
+//!   frames, 1024 microtasks, 64 in-flight calls, and the return-policy
+//!   visible result budget (spill ref or typed `ResultTooLarge`). The
+//!   guest surface bounds the parallel fan-out (`K0_PARALLEL_LIMIT`), the
+//!   per-call state delta (keys/values/total bytes, in-memory only — the
+//!   durable delta is zero because K0 has no commit surface), and every
+//!   `z.invoke`/`z.parallel` target to the read-only reach. Unavailable
+//!   authority classes (GPU, process/spawn, shell-as-a-surface, network,
+//!   OS/environment, database, daemon, FFI, codegen) fail typed as denied
+//!   before any execution — never as unknown names — and their live
+//!   resource counts are structurally zero (`live_gpu`). `token.shell` is
+//!   a registered V6 capability and keeps the canonical adapter policy on
+//!   the direct `zero.*` surface; it is not part of the guest reach.
+//!   Unresolved promises wait under the wall deadline and fail typed
+//!   `DeadlineExceeded`; soft cancellation (shared flag, SIGTERM grace)
+//!   always precedes hard termination (SIGKILL to the exact tree).
 //!
 //! # Honest accounting notes
 //!
@@ -165,8 +189,16 @@ pub const ONESHOT_CANCEL_POLL: Duration = Duration::from_millis(25);
 /// One-call executor stack budget, matching the connector host.
 const SUPERVISOR_STACK_BYTES: usize = 1024 * 1024;
 
-/// One-call interpreter instruction budget, matching the connector host.
+/// One-call interpreter instruction budget ceiling, matching the connector
+/// host. The per-call fuel is derived from the request's `cpu_ms` budget at
+/// [`SUPERVISOR_INSTRUCTIONS_PER_CPU_MS`] and capped here.
 const SUPERVISOR_INSTRUCTION_BUDGET: u64 = 10_000_000;
+
+/// Instructions of guest fuel per millisecond of CPU budget. The
+/// interpreter has no CPU clock, so `cpu_ms` maps to fuel at this
+/// documented rate: a 100 ms CPU budget allows 1 000 000 instructions, and
+/// anything ≥ 1000 ms binds at the host ceiling above.
+const SUPERVISOR_INSTRUCTIONS_PER_CPU_MS: u64 = 10_000;
 
 /// One-call microtask ceiling, matching the connector host.
 const SUPERVISOR_MICROTASK_CEILING: usize = 1_024;
@@ -359,6 +391,16 @@ impl Supervisor {
     /// One-shot children currently live. Zero after every settled call.
     pub fn live_children(&self) -> u64 {
         self.live_children.load(Ordering::Acquire)
+    }
+
+    /// Live GPU contexts. Structurally zero: the K0 registration grants no
+    /// GPU capability, the broker refuses every GPU-surface mention typed
+    /// before any execution, and the runtime target check denies GPU
+    /// targets in `z.invoke`/`z.parallel`. The accessor is the audit
+    /// instrument so a test can assert the idle count together with
+    /// executors and children.
+    pub fn live_gpu(&self) -> u64 {
+        0
     }
 
     /// Total one-shot children spawned since this supervisor was built. The
@@ -1372,18 +1414,43 @@ fn spawn_thread(
 
 /// Build the bounded host limits for one call from the request's finite
 /// budget. Every budget field is protocol-bounded before this runs.
+///
+/// The budget vector maps onto the host seams as follows:
+/// - `wall_ms` -> wall timeout (enforced by the interpreter deadline and
+///   the one-shot parent deadline);
+/// - `cpu_ms` -> guest fuel (instruction budget) at
+///   [`SUPERVISOR_INSTRUCTIONS_PER_CPU_MS`], so CPU budget is a real bound
+///   on guest compute (the interpreter has no CPU clock; the ledger
+///   reports wall as the honest CPU upper bound);
+/// - `memory_bytes` -> heap budget (typed `MemoryLimit` on staged and
+///   actual allocations);
+/// - `max_calls` -> the per-execution total connector-call budget (typed
+///   `CallBudgetExceeded` at the next dispatch past the bound);
+/// - stack, plan bytes, JSON bytes, microtasks, and in-flight calls are
+///   the host-owned ceilings below; the visible result budget comes from
+///   the return policy.
 fn host_limits_for_budget(budget: &FiniteBudget) -> Result<HostLimits, SupervisorError> {
     HostLimits::new(
         budget.memory_bytes as usize,
         SUPERVISOR_STACK_BYTES,
         Duration::from_millis(budget.wall_ms),
-        SUPERVISOR_INSTRUCTION_BUDGET,
+        fuel_from_cpu_ms(budget.cpu_ms),
         SUPERVISOR_MICROTASK_CEILING,
         MAX_INFLIGHT_CONNECTOR_CALLS,
+        u64::from(budget.max_calls),
         SUPERVISOR_MAX_PLAN_BYTES,
         SUPERVISOR_MAX_JSON_BYTES,
     )
     .map_err(|error| SupervisorError::Internal(format!("invalid host limits: {error}")))
+}
+
+/// Guest fuel derived from the request's CPU budget at a documented rate.
+/// `cpu_ms` ≥ 1000 binds at the host ceiling [`SUPERVISOR_INSTRUCTION_BUDGET`]
+/// (10 000 × 1000 ms), so the protocol maximum (300 000 ms) stays finite.
+fn fuel_from_cpu_ms(cpu_ms: u64) -> u64 {
+    cpu_ms
+        .saturating_mul(SUPERVISOR_INSTRUCTIONS_PER_CPU_MS)
+        .min(SUPERVISOR_INSTRUCTION_BUDGET)
 }
 
 /// The visible result budget for one call. The protocol measures the

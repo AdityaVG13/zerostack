@@ -235,6 +235,12 @@ impl GuestSurface {
     /// Validate one `z.invoke` / `z.parallel` target: it must be a
     /// registered read-only capability (or a read-only `fs.compound` op).
     pub fn check_read_only_target(&self, surface: &str, method: &str, args: &JsonValue) -> Result<(), String> {
+        if let Some(class) = zero_abi::guest::denied_authority(surface) {
+            return Err(format!(
+                "K0 grants no {class} authority: {surface}.{method} is not registered; \
+                 the K0 capability reach is read-only and bounded"
+            ));
+        }
         if surface == "fs" && method == "compound" {
             // The op rides the object `name` key or the positional first
             // element, exactly like the lowering authority reads it.

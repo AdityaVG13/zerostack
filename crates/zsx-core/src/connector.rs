@@ -2007,6 +2007,12 @@ pub(crate) fn host_limits() -> Result<zero_codemode::HostLimits, HostError> {
         10_000_000,
         16_384,
         MAX_INFLIGHT_CONNECTOR_CALLS,
+        // Finite tool-host total-call ceiling: 10M dispatches within the
+        // 30 s wall would need ~3 µs per adapter round-trip, which the
+        // dispatch machinery cannot reach. The bound exists so the native
+        // host is finite too; the K0 guest total-call budget comes from the
+        // request's `max_calls` instead (supervisor-side mapping).
+        10_000_000,
         256 * 1024,
         16 * 1024 * 1024,
     )

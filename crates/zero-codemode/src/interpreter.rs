@@ -323,6 +323,7 @@ pub(super) fn execute_measured(
             Err(HostError::DeadlineExceeded) => Some("deadline".into()),
             Err(HostError::FuelExhausted) => Some("instruction_budget".into()),
             Err(HostError::MicrotaskLimit) => Some("microtask_budget".into()),
+            Err(HostError::CallBudgetExceeded { .. }) => Some("call_budget".into()),
             Err(HostError::MemoryLimit { .. }) => Some("memory_budget".into()),
             Err(HostError::ResultTooLarge { .. } | HostError::ResultSpill(_)) => {
                 Some("output_budget".into())
@@ -1577,6 +1578,20 @@ impl<'tree> Interpreter<'tree> {
                 "arguments exceed JSON limit".into(),
             )));
         }
+        // Total host-call budget: every admitted dispatch (direct `zero.*`,
+        // `z.invoke`, and each `z.parallel` fan-out spec) counts against
+        // the per-execution bound. The next dispatch past the bound fails
+        // typed before any adapter work, so sequential or parallel call
+        // floods are bounded by the budget, not by wall alone.
+        if self.metrics.connector_dispatches >= self.host.limits.max_connector_calls {
+            self.metrics
+                .first_saturation_cause
+                .get_or_insert_with(|| "call_budget".into());
+            return Err(Fault::Host(HostError::CallBudgetExceeded {
+                made: self.metrics.connector_dispatches,
+                maximum: self.host.limits.max_connector_calls,
+            }));
+        }
         self.metrics.logical_operations = self.metrics.logical_operations.saturating_add(1);
         self.wait_for_dispatch_slot()?;
         let retained_promises = self.promises.len().checked_add(1).ok_or_else(|| {
@@ -1813,7 +1828,32 @@ impl<'tree> Interpreter<'tree> {
                         _ => None,
                     });
                     let Some(next) = next else {
-                        return Err(HostError::Connector("promise did not settle".into()));
+                        // No pending chain can settle this promise right
+                        // now. Keep making progress: poll connector
+                        // completions (their then-callbacks may settle this
+                        // promise) under the wall deadline and loop. A
+                        // genuinely unresolved promise reaches the wall
+                        // deadline and fails typed; it can never hang the
+                        // call past the budget (zerostack-zksb).
+                        self.tick()?;
+                        self.microtasks = self.microtasks.saturating_add(1);
+                        if self.microtasks > self.host.limits.microtask_ceiling {
+                            return Err(HostError::MicrotaskLimit);
+                        }
+                        match self.receiver.recv_timeout(
+                            self.deadline
+                                .saturating_duration_since(Instant::now())
+                                .min(Duration::from_millis(25)),
+                        ) {
+                            Ok(completion) => self.settle(completion)?,
+                            Err(RecvTimeoutError::Timeout) => {}
+                            Err(RecvTimeoutError::Disconnected) => {
+                                return Err(HostError::Connector(
+                                    "connector completion channel closed".into(),
+                                ));
+                            }
+                        }
+                        continue;
                     };
                     self.pump(next)?;
                 }

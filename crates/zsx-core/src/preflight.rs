@@ -75,8 +75,8 @@ use zero_abi::decision::{
 use zero_abi::guest::{
     K0_GUEST_ABSENT_MEMBERS, K0_GUEST_CAPABILITIES_MEMBERS, K0_GUEST_MEMBERS,
     K0_GUEST_PROPERTIES, K0_GUEST_STATE_MEMBERS, K0_READ_ONLY_CAPABILITIES,
-    K0_READ_ONLY_COMPOUND_OPS, is_k0_guest_member, is_k0_guest_state_member,
-    is_k0_read_only_capability, is_k0_read_only_compound_op,
+    K0_READ_ONLY_COMPOUND_OPS, denied_authority, is_k0_guest_member,
+    is_k0_guest_state_member, is_k0_read_only_capability, is_k0_read_only_compound_op,
 };
 use zero_abi::zerokernel::{ZEROKERNEL_ABI_VERSION, ZerokernelExecuteRequest};
 use zero_codemode::guest::split_qualified;
@@ -282,6 +282,11 @@ fn resolve_guest_mention(
                             "z.parallel spec '{spec}' is invalid: {detail}"
                         ))
                     })?;
+                    if let Some(class) = denied_authority(&surface) {
+                        return Err(BrokerOutcome::Refused(format!(
+                            "K0 grants no {class} authority: z.parallel spec '{spec}' is denied"
+                        )));
+                    }
                     if !is_k0_read_only_capability(surface, method) {
                         return Err(BrokerOutcome::Refused(format!(
                             "{surface}.{method} is not in the read-only K0 reach of z.invoke/z.parallel; read-only capabilities: {}",
@@ -328,6 +333,12 @@ fn resolve_guest_invoke(
     let (surface, method) = split_qualified(target).map_err(|detail| {
         BrokerOutcome::Refused(format!("z.invoke target '{target}' is invalid: {detail}"))
     })?;
+    if let Some(class) = denied_authority(&surface) {
+        return Err(BrokerOutcome::Refused(format!(
+            "K0 grants no {class} authority: z.invoke target '{target}' is denied; registered read-only capabilities: {}",
+            read_only_capability_list()
+        )));
+    }
     if surface == "fs" && method == "compound" {
         // The op rides the object `name` key or the positional first
         // element, exactly like the lowering authority reads it.
@@ -440,6 +451,17 @@ pub fn broker(
             ));
         }
         if !is_surface_name(&mention.surface) {
+            // Unavailable authority classes fail typed before any
+            // candidate resolution: GPU, process/spawn, shell, network,
+            // OS/environment, database, daemon, FFI, codegen. The denial is
+            // the law, not an unknown-name gap, and the corresponding live
+            // resource counts stay structurally zero.
+            if let Some(class) = denied_authority(&mention.surface) {
+                return BrokerOutcome::Refused(format!(
+                    "K0 grants no {class} authority: zero.{}.{} is not registered; the K0 surface grants only read-only capabilities",
+                    mention.surface, mention.method
+                ));
+            }
             let candidates = closest_candidates(SURFACES.iter().copied(), &mention.surface);
             if candidates.is_empty() {
                 return BrokerOutcome::Refused(format!(

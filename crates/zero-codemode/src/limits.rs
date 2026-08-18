@@ -37,6 +37,12 @@ pub struct HostLimits {
     /// Maximum connector calls admitted concurrently. This bounds queueing,
     /// not the total logical operations an execution may perform.
     pub max_inflight_connector_calls: usize,
+    /// Maximum connector calls admitted per execution in total. Every
+    /// admitted dispatch (direct `zero.*`, `z.invoke`, and each
+    /// `z.parallel` fan-out spec) counts; the next dispatch past the bound
+    /// fails typed. This is the total-call dimension of the budget vector;
+    /// the in-flight bound above is the concurrency dimension.
+    pub max_connector_calls: u64,
     pub max_plan_bytes: usize,
     pub max_json_bytes: usize,
 }
@@ -50,6 +56,7 @@ impl HostLimits {
         instruction_budget: u64,
         microtask_ceiling: usize,
         max_inflight_connector_calls: usize,
+        max_connector_calls: u64,
         max_plan_bytes: usize,
         max_json_bytes: usize,
     ) -> Result<Self, LimitError> {
@@ -60,6 +67,7 @@ impl HostLimits {
             instruction_budget,
             microtask_ceiling,
             max_inflight_connector_calls,
+            max_connector_calls,
             max_plan_bytes,
             max_json_bytes,
         };
@@ -86,6 +94,9 @@ impl HostLimits {
         if self.max_inflight_connector_calls == 0 {
             return Err(LimitError::Zero("max_inflight_connector_calls"));
         }
+        if self.max_connector_calls == 0 {
+            return Err(LimitError::Zero("max_connector_calls"));
+        }
         if self.max_plan_bytes == 0 {
             return Err(LimitError::Zero("max_plan_bytes"));
         }
@@ -105,6 +116,7 @@ impl Default for HostLimits {
             instruction_budget: 100_000,
             microtask_ceiling: 1_024,
             max_inflight_connector_calls: crate::MAX_INFLIGHT_CONNECTOR_CALLS,
+            max_connector_calls: u64::from(crate::MAX_INFLIGHT_CONNECTOR_CALLS) * 16,
             max_plan_bytes: 256 * 1024,
             max_json_bytes: 1024 * 1024,
         }

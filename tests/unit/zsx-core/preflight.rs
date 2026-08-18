@@ -374,9 +374,16 @@ fn z_invoke_targets_are_registered_read_only() {
         }
         other => panic!("z.invoke('fs.reade') must be DecisionRequired, got {other:?}"),
     }
+    // `process` is a deliberately denied authority class (zerostack-zksb):
+    // the refusal names the class instead of falling back to the generic
+    // unknown-target text, and it is still a structural refusal, never a
+    // decision.
     match broker_for("return await z.invoke('process.env', {});", &fixture.root) {
         BrokerOutcome::Refused(detail) => {
-            assert!(detail.contains("not a registered capability"), "detail: {detail}");
+            assert!(
+                detail.contains("K0 grants no process authority"),
+                "detail: {detail}"
+            );
         }
         other => panic!("z.invoke('process.env') must be refused, got {other:?}"),
     }

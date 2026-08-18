@@ -414,6 +414,10 @@ pub enum HostError {
     ResultSpill(String),
     MemoryLimit { requested: usize, maximum: usize },
     MicrotaskLimit,
+    /// The execution admitted its total host-call budget (`max_calls`);
+    /// the next dispatch is refused typed. Bounded and mid-flight, so a
+    /// hostile plan cannot burn wall on unbounded sequential calls.
+    CallBudgetExceeded { made: u64, maximum: u64 },
     DeadlineExceeded,
     FuelExhausted,
     Cancelled,
@@ -452,6 +456,9 @@ impl fmt::Display for HostError {
                 )
             }
             Self::MicrotaskLimit => f.write_str("microtask ceiling exceeded"),
+            Self::CallBudgetExceeded { made, maximum } => {
+                write!(f, "host-call budget exceeded: made {made} calls; maximum is {maximum}")
+            }
             Self::DeadlineExceeded => f.write_str("wall-clock deadline exceeded"),
             Self::FuelExhausted => f.write_str("instruction budget exhausted"),
             Self::Cancelled => f.write_str("execution cancelled"),

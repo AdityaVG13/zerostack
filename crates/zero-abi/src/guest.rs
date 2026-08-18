@@ -62,6 +62,48 @@ pub const K0_STATE_MAX_TOTAL_BYTES: usize = 16 * 1024;
 /// Maximum results of one `z.capabilities.search(query)`.
 pub const K0_CAPABILITIES_SEARCH_MAX_RESULTS: usize = 32;
 
+/// Capability surfaces that name authority classes K0 deliberately does not
+/// grant: GPU, process/spawn, shell-as-a-surface, operating system,
+/// environment, network, database, daemon, FFI, and dynamic codegen. A
+/// mention of one fails typed with its authority class instead of the
+/// generic unknown-surface text, so the denial is the law, not a catalog
+/// gap. Because no grant exists, the corresponding live-resource counts
+/// (GPU contexts, guest processes, network transfers) are structurally
+/// zero. `token.shell` is NOT listed: it is a registered V6 capability and
+/// keeps the canonical adapter policy on the direct `zero.*` surface; it
+/// stays outside the read-only reach of `z.invoke`/`z.parallel`.
+pub const K0_DENIED_SURFACES: &[(&str, &str)] = &[
+    ("gpu", "GPU"),
+    ("cuda", "GPU"),
+    ("vulkan", "GPU"),
+    ("metal", "GPU"),
+    ("process", "process"),
+    ("spawn", "process"),
+    ("shell", "shell"),
+    ("os", "operating-system"),
+    ("env", "environment"),
+    ("net", "network"),
+    ("network", "network"),
+    ("http", "network"),
+    ("fetch", "network"),
+    ("socket", "network"),
+    ("db", "database"),
+    ("daemon", "daemon"),
+    ("pool", "daemon"),
+    ("ffi", "FFI"),
+    ("codegen", "dynamic-codegen"),
+];
+
+/// The authority class denied for `surface`, if any (`gpu`, `process`,
+/// `network`, `shell`, `daemon`, `database`, `operating-system`,
+/// `environment`, `FFI`, `dynamic-codegen`).
+pub fn denied_authority(surface: &str) -> Option<&'static str> {
+    K0_DENIED_SURFACES
+        .iter()
+        .find(|(candidate, _)| *candidate == surface)
+        .map(|(_, class)| *class)
+}
+
 /// Every V6 capability the read-only `z.invoke` / `z.parallel` seam may
 /// reach, in stable order. This is the complete K0 capability reach: no
 /// write/edit/transact/multi_edit, no reserve/index/remember, no shell/job

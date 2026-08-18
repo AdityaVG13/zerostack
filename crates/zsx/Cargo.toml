@@ -24,3 +24,7 @@ zero-abi = { path = "../zero-abi" }
 [[test]]
 name = "supervisor"
 path = "../../tests/unit/zsx/supervisor.rs"
+
+[[test]]
+name = "k0_budgets"
+path = "../../tests/unit/zsx/k0_budgets.rs"
