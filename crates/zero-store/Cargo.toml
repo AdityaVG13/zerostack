@@ -21,3 +21,7 @@ path = "../../tests/unit/zero-store/ensure_layout.rs"
 [[test]]
 name = "gc_schema"
 path = "../../tests/unit/zero-store/gc_schema.rs"
+
+[[test]]
+name = "quarantine_reap"
+path = "../../tests/unit/zero-store/quarantine_reap.rs"

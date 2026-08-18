@@ -408,12 +408,11 @@ notes = "ensure_layout creates engine_dir, blobs/, and gc/ under cas_host()."
 id = "F-STORE-QUARANTINE-REAP"
 family = "zero-store"
 name = "CAS_QUARANTINE_DIR + CAS_TEMP_REAP_AGE"
-status = "partial"
+status = "present"
 weight = 0.004098360656
 weight_units = 1
-evidence = ["crates/zero-store/src/cas.rs"]
-retry_condition = "Retry only when CAS put/gc actually moves corrupt objects into CAS_QUARANTINE_DIR and reaps temps older than CAS_TEMP_REAP_AGE, with a unit test covering both constants."
-notes = "Constants re-exported; not a separate full harvest path under F-STORE-CAS."
+evidence = ["crates/zero-store/src/cas.rs", "tests/unit/zero-store/quarantine_reap.rs"]
+notes = "CAS put reaps stale .tmp-* older than CAS_TEMP_REAP_AGE and quarantine moves digest-mismatched bodies into gc/quarantine."
 
 [[feature]]
 id = "F-ABI-FRAME-CODEC"
