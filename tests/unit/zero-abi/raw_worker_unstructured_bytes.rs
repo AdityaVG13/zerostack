@@ -1,4 +1,6 @@
 //! Unstructured-byte crash oracle for raw-worker frames (zerostack-raw-worker-unstructured-bytes-ci-c4j6).
+//! Inspection 2026-08-17: decode_*_frame are panic-free (no unwrap/expect on untrusted
+//! bytes, checked arithmetic, bounded JSON parse); no production fix required.
 //!
 //! Feeds random `&[u8]` with size guards into both decoders. Must never panic.
 //! Keeps the typed Call proptest as the structure-aware oracle; this file is only
