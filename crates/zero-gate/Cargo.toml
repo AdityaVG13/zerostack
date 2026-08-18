@@ -23,3 +23,7 @@ path = "src/bin/program-evidence.rs"
 [[test]]
 name = "project_image_q99"
 path = "../../tests/unit/zero-gate/project_image_q99.rs"
+
+[[test]]
+name = "demand_expand"
+path = "../../tests/unit/zero-gate/demand_expand.rs"

@@ -22,6 +22,7 @@ use zero_cert::{CommandId, VerifiedEvidence};
 
 pub mod aggregate;
 pub mod asset;
+pub mod demand_expand;
 pub mod deoptimization;
 pub mod durable_publication;
 pub mod evidence;
@@ -41,6 +42,7 @@ pub mod two_phase;
 pub mod verifier_registry;
 pub use aggregate::*;
 pub use asset::*;
+pub use demand_expand::*;
 pub use deoptimization::*;
 pub use durable_publication::*;
 pub use evidence::*;
