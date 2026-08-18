@@ -52,6 +52,21 @@ run.text;  // TypeError: unknown property 'text' ... available properties: ack, 
 
 Use `Object.keys(value)` to inspect an unfamiliar nested domain value. The strict guard applies recursively.
 
+### Long shell jobs
+
+`zero.token.shell` keeps short commands direct. A request whose effective
+timeout (`timeoutMs`, `timeout_ms`, or `timeout_seconds`) exceeds **60000 ms**
+is a long job by contract: it automatically launches in the background and
+returns the job receipt `{job, cursor, version}` immediately instead of
+blocking the model or TUI for minutes with no output. Poll
+`zero.token.job(id, { waitMs?, since?, tailBytes? })` for incremental tail
+progress until `status` leaves `running`; each poll is bounded (`waitMs` max
+30000). An explicit `background: false` keeps the call foreground even above
+the threshold, and argv-form commands (string arrays) always run foreground.
+Background jobs are session-owned: cancellation tears down the session's job
+tree (process-group termination), and the heavy dispatch permit is held only
+for the launch, never for the job's lifetime.
+
 For composed plans, `ctx` provides transport-safe helpers so callers do not
 hard-code nested envelope paths:
 
