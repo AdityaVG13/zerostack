@@ -22,7 +22,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use zero_abi::{Sha256Digest, canonical_json, sha256};
+use zero_abi::{canonical_json, sha256, Sha256Digest};
 
 use crate::residency::{LayerValidityEntry, LayerValidityLedger};
 
@@ -243,7 +243,10 @@ pub struct RegisteredRepresentation {
 }
 
 impl RegisteredRepresentation {
-    pub fn present(kind: RepresentationKind, digest: Sha256Digest) -> Result<Self, ProjectImageError> {
+    pub fn present(
+        kind: RepresentationKind,
+        digest: Sha256Digest,
+    ) -> Result<Self, ProjectImageError> {
         if digest == Sha256Digest::ZERO {
             return Err(ProjectImageError::InvalidRepresentation(
                 "representation digest is zero".into(),
@@ -266,9 +269,9 @@ impl RegisteredRepresentation {
 
     pub fn validate(&self) -> Result<(), ProjectImageError> {
         match (&self.digest, &self.unknown_reason) {
-            (Some(d), _) if *d == Sha256Digest::ZERO => Err(ProjectImageError::InvalidRepresentation(
-                "representation digest is zero".into(),
-            )),
+            (Some(d), _) if *d == Sha256Digest::ZERO => Err(
+                ProjectImageError::InvalidRepresentation("representation digest is zero".into()),
+            ),
             (None, None) => Err(ProjectImageError::UnknownMissing(
                 "representation unknown without reason".into(),
             )),
@@ -314,7 +317,7 @@ impl PerObjectLayers {
         }
         if self.l2_needs_refetch {
             match self.l2_logically_valid {
-                Some(true) => {},
+                Some(true) => {}
                 _ => {
                     return Err(ProjectImageError::InvalidValidity(
                         "l2_needs_refetch requires l2_logically_valid == true".into(),
@@ -328,12 +331,10 @@ impl PerObjectLayers {
             && self.l3_physically_resident.is_none()
             && self.unknown_reason.is_none()
         {
-            return Err(ProjectImageError::UnknownMissing(
-                format!(
-                    "per-object layers for {} is fully unknown without reason",
-                    self.object_root.to_hex()
-                ),
-            ));
+            return Err(ProjectImageError::UnknownMissing(format!(
+                "per-object layers for {} is fully unknown without reason",
+                self.object_root.to_hex()
+            )));
         }
         Ok(())
     }
@@ -414,9 +415,10 @@ impl DemandScenario {
             ));
         }
         if self.demanded_object_roots.is_empty() && self.unknown_reason.is_none() {
-            return Err(ProjectImageError::UnknownMissing(
-                format!("demand scenario {} has no objects and no unknown_reason", self.scenario_id),
-            ));
+            return Err(ProjectImageError::UnknownMissing(format!(
+                "demand scenario {} has no objects and no unknown_reason",
+                self.scenario_id
+            )));
         }
         for d in &self.demanded_object_roots {
             if *d == Sha256Digest::ZERO {
@@ -452,9 +454,10 @@ impl ShadowResourceRow {
         }
         match self.measurement_source.as_str() {
             "exact" | "estimate" | "unknown" => Ok(()),
-            _ => Err(ProjectImageError::InvalidObject(
-                format!("resource row measurement_source must be exact|estimate|unknown, got {:?}", self.measurement_source),
-            )),
+            _ => Err(ProjectImageError::InvalidObject(format!(
+                "resource row measurement_source must be exact|estimate|unknown, got {:?}",
+                self.measurement_source
+            ))),
         }
     }
 }
@@ -717,10 +720,7 @@ pub struct DeclaredChange {
 }
 
 impl DeclaredChange {
-    pub fn new(
-        changed_object_roots: Vec<Sha256Digest>,
-        affected_claim_ids: Vec<String>,
-    ) -> Self {
+    pub fn new(changed_object_roots: Vec<Sha256Digest>, affected_claim_ids: Vec<String>) -> Self {
         Self {
             changed_object_roots,
             affected_claim_ids,
@@ -835,11 +835,7 @@ pub fn hypothetical_child(
     }
     // Also, any changed root not already in parent is a new object synthesis (unknown bytes).
     for d in &changed_sorted {
-        if !parent
-            .exact_objects
-            .iter()
-            .any(|o| o.digest == *d)
-        {
+        if !parent.exact_objects.iter().any(|o| o.digest == *d) {
             child_exact_objects.push(ExactObject {
                 digest: *d,
                 byte_len: 0,
@@ -868,8 +864,11 @@ pub fn hypothetical_child(
         }
     }
     // Layers for newly introduced changed roots.
-    let existing_layer_roots: BTreeSet<Sha256Digest> =
-        parent.per_object_layers.iter().map(|l| l.object_root).collect();
+    let existing_layer_roots: BTreeSet<Sha256Digest> = parent
+        .per_object_layers
+        .iter()
+        .map(|l| l.object_root)
+        .collect();
     for d in &changed_sorted {
         if !existing_layer_roots.contains(d) {
             child_layers.push(PerObjectLayers {
@@ -937,7 +936,9 @@ pub fn hypothetical_child(
 // ---------------------------------------------------------------------------
 
 /// Build a `BTreeMap` view of per-object validity classes for quick lookup.
-pub fn validity_class_map(manifest: &ProjectImageManifest) -> BTreeMap<Sha256Digest, ValidityClass> {
+pub fn validity_class_map(
+    manifest: &ProjectImageManifest,
+) -> BTreeMap<Sha256Digest, ValidityClass> {
     manifest
         .per_object_layers
         .iter()
@@ -945,24 +946,24 @@ pub fn validity_class_map(manifest: &ProjectImageManifest) -> BTreeMap<Sha256Dig
         .collect()
 }
 
-/// Rebuild a `LayerValidityLedger` from the manifest's per-object layers
-/// (only entries that are fully known).
+/// Build a best-effort L2-only validity view from fully known manifest layers.
+///
+/// The manifest remains the source of truth. L1/L3 flags are intentionally
+/// not carried because `LayerValidityLedger` exposes no reconstruction API for
+/// them. Entries without L2 validity are skipped; refetch-pending L2 identity
+/// is preserved with [`LayerValidityLedger::mark_l3_loss`].
 pub fn layer_ledger_from_manifest(manifest: &ProjectImageManifest) -> LayerValidityLedger {
     let mut ledger = LayerValidityLedger::new();
     for layer in &manifest.per_object_layers {
-        if let Some(entry) = layer.to_layer_entry() {
-            // Insert via publish/mark pattern: we directly populate the ledger
-            // by publishing L2 where needed and preserving L1/L3 flags through
-            // the entry's semantics. For shadow replay we just insert the entry
-            // through the ledger's publish API where possible.
-            let _ = ledger.publish_l2(entry.object_root);
-            // Re-apply L1/L3 distinction via direct entry if the ledger already
-            // has the object.
-            if let Some(e) = ledger.entry(entry.object_root) {
-                let _ = e;
-            }
-            // Fallback: if publish failed due to state, we keep the manifest as
-            // source of truth; the ledger is best-effort for known entries.
+        let Some(entry) = layer.to_layer_entry() else {
+            continue;
+        };
+        if !entry.l2_valid {
+            continue;
+        }
+        let _ = ledger.publish_l2(entry.object_root);
+        if entry.l2_needs_refetch {
+            let _ = ledger.mark_l3_loss(entry.object_root);
         }
     }
     ledger
@@ -1015,7 +1016,9 @@ fn mass_from_u128(value: u128, what: &str) -> Result<u64, ProjectImageError> {
 }
 
 /// Sort and validate an envelope: unique scenario ids, each scenario valid.
-fn sorted_scenarios(scenarios: &[DemandScenario]) -> Result<Vec<DemandScenario>, ProjectImageError> {
+fn sorted_scenarios(
+    scenarios: &[DemandScenario],
+) -> Result<Vec<DemandScenario>, ProjectImageError> {
     let mut sorted = scenarios.to_vec();
     sorted.sort_by(|a, b| a.scenario_id.cmp(&b.scenario_id));
     for pair in sorted.windows(2) {
@@ -1032,8 +1035,14 @@ fn sorted_scenarios(scenarios: &[DemandScenario]) -> Result<Vec<DemandScenario>,
     Ok(sorted)
 }
 
-fn layer_lookup<'a>(manifest: &'a ProjectImageManifest) -> BTreeMap<Sha256Digest, &'a PerObjectLayers> {
-    manifest.per_object_layers.iter().map(|l| (l.object_root, l)).collect()
+fn layer_lookup<'a>(
+    manifest: &'a ProjectImageManifest,
+) -> BTreeMap<Sha256Digest, &'a PerObjectLayers> {
+    manifest
+        .per_object_layers
+        .iter()
+        .map(|l| (l.object_root, l))
+        .collect()
 }
 
 /// Exact non-negative rational, kept in reduced form with `denominator > 0`.
@@ -1410,7 +1419,9 @@ fn default_true() -> bool {
 impl ProposedAction {
     pub fn validate(&self) -> Result<(), ProjectImageError> {
         if self.action_id.is_empty() {
-            return Err(ProjectImageError::InvalidDemand("action_id is empty".into()));
+            return Err(ProjectImageError::InvalidDemand(
+                "action_id is empty".into(),
+            ));
         }
         for root in &self.invalidate_object_roots {
             if *root == Sha256Digest::ZERO {
@@ -1582,8 +1593,7 @@ pub fn simulate_action_guard(
     let valid_after: u128 = valid_after_i128.max(0) as u128;
     let valid_after_mass = mass_from_u128(valid_after, "valid after mass")?;
 
-    let obligation_numerator_100 =
-        100_i128 * valid_after as i128 - 99_i128 * next_demanded_i128;
+    let obligation_numerator_100 = 100_i128 * valid_after as i128 - 99_i128 * next_demanded_i128;
     let obligation_holds = obligation_numerator_100 >= 0;
 
     // g_min = max(0, ceil((100*(B + A_valid) - W_next) / 100)).

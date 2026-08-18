@@ -6,11 +6,11 @@
 //! scope/projection, renderer mismatch, missing/Unknown evidence, hidden
 //! retry after issue, trusted-route-only issuance, and read-only permit.
 
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 use zero_abi::{
-    CompletenessEvidence, ExpandOutcome, LiveCompleteness, LiveExpandState,
-    SafeExpandError, SafeExpandHandle, SafeExpandIssueRequest, SafeExpandIssuer,
-    SafetyVerdict, Sha256Digest, sha256,
+    sha256, CompletenessEvidence, ExpandOutcome, LiveCompleteness, LiveExpandState,
+    SafeExpandError, SafeExpandHandle, SafeExpandIssueRequest, SafeExpandIssuer, SafetyVerdict,
+    Sha256Digest,
 };
 
 // ---------------------------------------------------------------------------
@@ -105,7 +105,10 @@ fn assert_unsafe(outcome: &ExpandOutcome, reasons: &[&str]) {
         }
         other => panic!("expected Unsafe, got {other:?}"),
     }
-    assert!(outcome.permit().is_none(), "Unsafe must never carry a permit");
+    assert!(
+        outcome.permit().is_none(),
+        "Unsafe must never carry a permit"
+    );
 }
 
 fn assert_unknown(outcome: &ExpandOutcome, reasons: &[&str]) {
@@ -121,7 +124,10 @@ fn assert_unknown(outcome: &ExpandOutcome, reasons: &[&str]) {
         }
         other => panic!("expected Unknown, got {other:?}"),
     }
-    assert!(outcome.permit().is_none(), "Unknown must never carry a permit");
+    assert!(
+        outcome.permit().is_none(),
+        "Unknown must never carry a permit"
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -170,8 +176,13 @@ fn handle_wire_round_trip_is_canonical_and_self_verifying() {
     let bytes = handle.canonical_bytes().expect("canonical bytes");
     let restored: SafeExpandHandle =
         serde_json::from_slice(&bytes).expect("canonical wire form must deserialize");
-    assert_eq!(restored, handle, "round trip must reproduce the identical handle");
-    issuer.verify(&restored).expect("restored handle must verify");
+    assert_eq!(
+        restored, handle,
+        "round trip must reproduce the identical handle"
+    );
+    issuer
+        .verify(&restored)
+        .expect("restored handle must verify");
 }
 
 // ---------------------------------------------------------------------------
@@ -191,10 +202,7 @@ fn forged_handle_bound_field_tamper_fails() {
         Err(SafeExpandError::ForgedHandle),
         "tampered bindings must fail the issuance MAC"
     );
-    assert_unsafe(
-        &issuer.revalidate(&forged, &live()),
-        &["forged_handle"],
-    );
+    assert_unsafe(&issuer.revalidate(&forged, &live()), &["forged_handle"]);
 }
 
 #[test]
@@ -287,10 +295,7 @@ fn wrong_abi_version_is_typed_unsafe() {
             actual: "zerostack.old".to_owned()
         })
     );
-    assert_unsafe(
-        &issuer.revalidate(&wrong, &live()),
-        &["wrong_abi_version"],
-    );
+    assert_unsafe(&issuer.revalidate(&wrong, &live()), &["wrong_abi_version"]);
 }
 
 // ---------------------------------------------------------------------------
@@ -352,10 +357,7 @@ fn altered_projection_handle_fails() {
     let handle = issuer.issue(&request()).unwrap();
     let mut live = live();
     live.projection_root = digest(0x31);
-    assert_unsafe(
-        &issuer.revalidate(&handle, &live),
-        &["projection_mismatch"],
-    );
+    assert_unsafe(&issuer.revalidate(&handle, &live), &["projection_mismatch"]);
 }
 
 #[test]
@@ -394,7 +396,10 @@ fn missing_evidence_is_unknown_never_safe() {
     live.completeness.checker_version = None;
     assert_unknown(
         &issuer.revalidate(&handle, &live),
-        &["completeness_evidence_missing", "completeness_checker_missing"],
+        &[
+            "completeness_evidence_missing",
+            "completeness_checker_missing",
+        ],
     );
 }
 
@@ -406,7 +411,10 @@ fn unknown_verdict_is_unknown_never_safe() {
     live.completeness.verdict = SafetyVerdict::Unknown {
         reasons: vec!["graph_not_complete".to_owned()],
     };
-    assert_unknown(&issuer.revalidate(&handle, &live), &["completeness_unknown"]);
+    assert_unknown(
+        &issuer.revalidate(&handle, &live),
+        &["completeness_unknown"],
+    );
 }
 
 #[test]
@@ -454,10 +462,7 @@ fn unsafe_dominates_unknown() {
     // must be Unsafe, never a downgrade or a guessed Safe.
     live.project_root = digest(0xaa);
     live.completeness.certificate_root = None;
-    assert_unsafe(
-        &issuer.revalidate(&handle, &live),
-        &["project_mismatch", "completeness_evidence_missing"],
-    );
+    assert_unsafe(&issuer.revalidate(&handle, &live), &["project_mismatch"]);
 }
 
 // ---------------------------------------------------------------------------
@@ -600,7 +605,14 @@ fn permit_encodes_read_only_authority_only() {
     };
     let rendered = serde_json::to_value(&permit).unwrap();
     let object = rendered.as_object().unwrap();
-    for forbidden in ["write", "commit", "edit", "mutation", "transaction", "effect"] {
+    for forbidden in [
+        "write",
+        "commit",
+        "edit",
+        "mutation",
+        "transaction",
+        "effect",
+    ] {
         for key in object.keys() {
             assert!(
                 !key.contains(forbidden),

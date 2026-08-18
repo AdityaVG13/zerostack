@@ -62,6 +62,21 @@ name = "read_grant"
 path = "../../tests/unit/zsx-core/read_grant.rs"
 
 [[test]]
+name = "lookup"
+path = "../../tests/unit/zsx-core/lookup.rs"
+required-features = ["fszero", "graphzero", "tokenzero"]
+
+[[test]]
+name = "fs_error_diagnostics"
+path = "../../tests/unit/zsx-core/fs_error_diagnostics.rs"
+required-features = ["fszero", "graphzero", "tokenzero"]
+
+[[test]]
+name = "long_job"
+path = "../../tests/unit/zsx-core/long_job.rs"
+required-features = ["fszero", "graphzero", "tokenzero"]
+
+[[test]]
 name = "guest_surface"
 path = "../../tests/unit/zsx-core/guest_surface.rs"
 required-features = ["fszero", "graphzero", "tokenzero"]

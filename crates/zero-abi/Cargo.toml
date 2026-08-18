@@ -51,3 +51,7 @@ path = "../../tests/unit/zero-abi/raw_worker_unstructured_bytes.rs"
 [[test]]
 name = "raw_worker_response_golden"
 path = "../../tests/unit/zero-abi/raw_worker_response_golden.rs"
+
+[[test]]
+name = "abi_digest_mutation"
+path = "../../tests/unit/zero-abi/abi_digest_mutation.rs"

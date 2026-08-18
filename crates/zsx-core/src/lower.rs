@@ -889,6 +889,15 @@ fn normalize_lookup_args(input: Value) -> Result<Value, ConnectorError> {
     if !root.is_string() {
         return Err(ConnectorError::new("fs.lookup root must be a string"));
     }
+    if root
+        .as_str()
+        .is_some_and(|root| root.len() > crate::lookup::MAX_LOOKUP_ROOT_BYTES)
+    {
+        return Err(ConnectorError::new(format!(
+            "fs.lookup root exceeds max {} UTF-8 bytes",
+            crate::lookup::MAX_LOOKUP_ROOT_BYTES
+        )));
+    }
     if let Some(q) = &query_val {
         if !q.is_string() && !q.is_null() {
             return Err(ConnectorError::new("fs.lookup query must be a string"));
@@ -910,6 +919,12 @@ fn normalize_lookup_args(input: Value) -> Result<Value, ConnectorError> {
     if let Some(q) = query_val {
         if !q.is_null() {
             let s = q.as_str().unwrap_or("").trim();
+            if s.len() > crate::lookup::MAX_LOOKUP_QUERY_BYTES {
+                return Err(ConnectorError::new(format!(
+                    "fs.lookup query exceeds max {} UTF-8 bytes",
+                    crate::lookup::MAX_LOOKUP_QUERY_BYTES
+                )));
+            }
             if !s.is_empty() {
                 out.insert("query".into(), Value::String(s.to_owned()));
             }
@@ -1124,9 +1139,10 @@ pub fn lower(
                 }
                 // Long-job path (zerostack-620s): an effective timeout above
                 // the documented foreground bound automatically runs the
-                // shell as a background job, so the call returns the job
-                // receipt immediately and the caller polls zero.token.job
-                // for progress. Short calls keep their direct semantics; an
+                // shell as a background job, so the call returns immediately
+                // with a domain result containing the job receipt at
+                // `content.value`; the caller polls zero.token.job for
+                // progress. Short calls keep their direct semantics; an
                 // explicit `background` choice always wins; argv shells stay
                 // foreground because the background seam accepts command
                 // strings only.

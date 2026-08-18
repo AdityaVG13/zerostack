@@ -72,8 +72,8 @@ use zero_abi::zerokernel::{
 };
 use zero_cert::CommandId;
 use zero_gate::project_image::{
-    CausalGraphRef, DemandScenario, ExactObject, PerObjectLayers, ProofGraphRef,
-    ProjectImageManifest, ShadowResourceLedger,
+    CausalGraphRef, DemandScenario, ExactObject, PerObjectLayers, ProjectImageManifest,
+    ProofGraphRef, ShadowResourceLedger,
 };
 use zero_gate::{
     CoverageAtom, DemandRequest, FirstExpansion, GraphZeroCompletenessInput, NativeBaseline,
@@ -96,23 +96,79 @@ const SOAK_MIN_N: usize = 0;
 
 /// Named regression -> exact covering suite/test in the gate command.
 const MATRIX_MANIFEST: &[(&str, &str, &str)] = &[
-    ("infinite_loop", "zsx.supervisor", "deadline_failed_and_quiescent_both_profiles"),
-    ("infinite_loop_fuel", "zsx.k0_budgets", "fuel_budget_bounds_guest_compute_typed"),
-    ("unresolved_promise", "zsx.k0_budgets", "unresolved_promise_hits_wall_deadline_typed"),
+    (
+        "infinite_loop",
+        "zsx.supervisor",
+        "deadline_failed_and_quiescent_both_profiles",
+    ),
+    (
+        "infinite_loop_fuel",
+        "zsx.k0_budgets",
+        "fuel_budget_bounds_guest_compute_typed",
+    ),
+    (
+        "unresolved_promise",
+        "zsx.k0_budgets",
+        "unresolved_promise_hits_wall_deadline_typed",
+    ),
     ("memory", "zsx.k0_budgets", "memory_budget_fails_typed"),
     ("stack", "zsx.k0_budgets", "stack_depth_fails_typed"),
-    ("output", "zsx.k0_budgets", "output_budget_bounded_spill_or_typed_failure"),
-    ("forbidden_fs", "zsx.supervisor", "rejected_arguments_reject_without_execution"),
-    ("forbidden_net_spawn_gpu", "zsx.k0_budgets", "denied_authority_classes_fail_typed_before_execution"),
-    ("worker_crash", "zsx.supervisor", "worker_crash_reaped_and_reported"),
-    ("stale_root", "zsx.k0_state", "stale_expected_root_conflicts_and_preserves_committed_state"),
-    ("cas_conflict", "zsx.k0_state", "concurrent_successors_yield_one_commit_and_one_typed_conflict"),
-    ("cancel", "zsx.supervisor", "mid_flight_cancellation_kills_and_reaps"),
+    (
+        "output",
+        "zsx.k0_budgets",
+        "output_budget_bounded_spill_or_typed_failure",
+    ),
+    (
+        "forbidden_fs",
+        "zsx.supervisor",
+        "rejected_arguments_reject_without_execution",
+    ),
+    (
+        "forbidden_net_spawn_gpu",
+        "zsx.k0_budgets",
+        "denied_authority_classes_fail_typed_before_execution",
+    ),
+    (
+        "worker_crash",
+        "zsx.supervisor",
+        "worker_crash_reaped_and_reported",
+    ),
+    (
+        "stale_root",
+        "zsx.k0_state",
+        "stale_expected_root_conflicts_and_preserves_committed_state",
+    ),
+    (
+        "cas_conflict",
+        "zsx.k0_state",
+        "concurrent_successors_yield_one_commit_and_one_typed_conflict",
+    ),
+    (
+        "cancel",
+        "zsx.supervisor",
+        "mid_flight_cancellation_kills_and_reaps",
+    ),
     ("verifier_reject", "zsx.k0_gate", "verifier_reject section"),
-    ("both_profiles", "zsx.supervisor", "success_completed_envelope_identical_across_profiles"),
-    ("persistent_state", "zsx.k0_state", "state_survives_multiple_fresh_executor_instances"),
-    ("w9e_resolve_expand_snap", "zsx.k0_gate", "w9e_chain + paired_quality sections"),
-    ("receipts_ledger", "zsx.k0_gate", "ledger + receipt assertions in every section"),
+    (
+        "both_profiles",
+        "zsx.supervisor",
+        "success_completed_envelope_identical_across_profiles",
+    ),
+    (
+        "persistent_state",
+        "zsx.k0_state",
+        "state_survives_multiple_fresh_executor_instances",
+    ),
+    (
+        "w9e_resolve_expand_snap",
+        "zsx.k0_gate",
+        "w9e_chain + paired_quality sections",
+    ),
+    (
+        "receipts_ledger",
+        "zsx.k0_gate",
+        "ledger + receipt assertions in every section",
+    ),
     ("process_tree", "zsx.k0_gate", "process audit section"),
     ("native_fallback", "zsx.k0_gate", "direct_vs_kernel section"),
     ("soak", "zsx.k0_gate", "soak section (opt-in)"),
@@ -177,7 +233,12 @@ impl Fixture {
         budget: FiniteBudget,
         expected_session_root: Option<String>,
     ) -> ZerokernelExecuteRequest {
-        self.request_full(program, budget, ReturnPolicy::new(ReturnKind::Inline, 4096).expect("policy"), expected_session_root)
+        self.request_full(
+            program,
+            budget,
+            ReturnPolicy::new(ReturnKind::Inline, 4096).expect("policy"),
+            expected_session_root,
+        )
     }
 
     fn request_full(
@@ -193,8 +254,14 @@ impl Fixture {
             Some(self.session.clone()),
             budget,
             policy,
-            RootBindings::new(Some(root_text.clone()), root_text, None, None, expected_session_root)
-                .expect("roots"),
+            RootBindings::new(
+                Some(root_text.clone()),
+                root_text,
+                None,
+                None,
+                expected_session_root,
+            )
+            .expect("roots"),
         )
         .expect("request")
     }
@@ -295,10 +362,7 @@ fn scenario(id: &str, atoms: &[Sha256Digest]) -> DemandScenario {
 }
 
 fn manifest(objects: Vec<ExactObject>, scenarios: Vec<DemandScenario>) -> ProjectImageManifest {
-    let layers = objects
-        .iter()
-        .map(|object| layer(object.digest))
-        .collect();
+    let layers = objects.iter().map(|object| layer(object.digest)).collect();
     ProjectImageManifest::new(
         digest(0x7f),
         objects,
@@ -421,7 +485,10 @@ impl Gate {
             ("direct_vs_kernel", self.direct_vs_kernel()),
             ("guest_surface_smoke", self.guest_surface_smoke()),
             ("w9e_chain", self.w9e_chain()),
-            ("paired_quality_and_first_expand", self.paired_quality_and_first_expand()),
+            (
+                "paired_quality_and_first_expand",
+                self.paired_quality_and_first_expand(),
+            ),
             ("parameter_friction", self.parameter_friction()),
             ("verifier_reject", self.verifier_reject()),
             ("soak", self.soak()),
@@ -457,10 +524,11 @@ impl Gate {
                 && oneshot_response.result == Some(json!(42)),
             "direct-vs-kernel: both profiles return 42",
         );
+        let envelope_identical = embedded_response.preflight == oneshot_response.preflight
+            && embedded_response.root_evidence == oneshot_response.root_evidence
+            && embedded_response.handles == oneshot_response.handles;
         self.check(
-            embedded_response.preflight == oneshot_response.preflight
-                && embedded_response.root_evidence == oneshot_response.root_evidence
-                && embedded_response.handles == oneshot_response.handles,
+            envelope_identical,
             "direct-vs-kernel: identical protocol envelope across profiles",
         );
         self.check(
@@ -515,12 +583,8 @@ impl Gate {
         let mut oneshot_walls = Vec::new();
         for _ in 0..self.samples {
             let started = Instant::now();
-            let out = zsx_cli::exec::exec(
-                fixture.root.clone(),
-                program,
-                Duration::from_secs(15),
-            )
-            .map_err(|e| format!("native direct exec: {e}"))?;
+            let out = zsx_cli::exec::exec(fixture.root.clone(), program, Duration::from_secs(15))
+                .map_err(|e| format!("native direct exec: {e}"))?;
             native_walls.push(started.elapsed());
             self.check(
                 out["ok"] == json!(true) && out["result"] == json!(42),
@@ -599,9 +663,10 @@ impl Gate {
             .execute(fixture.request(program))
             .map_err(|e| format!("crash execute: {e}"))?;
         self.one_shot_calls += 1;
+        let worker_crash_failed_closed = response.kind == ZerokernelResultKind::Failed
+            && has_error(&response, "without a response");
         self.check(
-            response.kind == ZerokernelResultKind::Failed
-                && has_error(&response, "without a response"),
+            worker_crash_failed_closed,
             "direct-vs-kernel: worker crash fails closed typed",
         );
         self.check(
@@ -610,8 +675,10 @@ impl Gate {
         );
         let out = zsx_cli::exec::exec(fixture.root.clone(), program, Duration::from_secs(15))
             .map_err(|e| format!("native after crash: {e}"))?;
+        let native_fallback_usable_after_crash =
+            out["ok"] == json!(true) && out["result"] == json!(42);
         self.check(
-            out["ok"] == json!(true) && out["result"] == json!(42),
+            native_fallback_usable_after_crash,
             "direct-vs-kernel: native fallback usable after worker crash",
         );
         self.check(
@@ -632,9 +699,9 @@ impl Gate {
             "native_mean_ms": mean_ms(&native_walls),
             "embedded_mean_ms": mean_ms(&embedded_walls),
             "oneshot_mean_ms": mean_ms(&oneshot_walls),
-            "envelope_identical": true,
-            "worker_crash_failed_closed": true,
-            "native_fallback_usable_after_crash": true,
+            "envelope_identical": envelope_identical,
+            "worker_crash_failed_closed": worker_crash_failed_closed,
+            "native_fallback_usable_after_crash": native_fallback_usable_after_crash,
         }))
     }
 
@@ -664,9 +731,15 @@ impl Gate {
             .map_err(|e| format!("guest surface execute: {e}"))?;
         self.check(
             response.kind == ZerokernelResultKind::Completed,
-            format!("guest surface: smoke must complete: {:?}", failed_errors(&response)),
+            format!(
+                "guest surface: smoke must complete: {:?}",
+                failed_errors(&response)
+            ),
         );
-        self.check(response.validate().is_ok(), "guest surface: receipt validates");
+        self.check(
+            response.validate().is_ok(),
+            "guest surface: receipt validates",
+        );
         let result = response.result.clone().unwrap_or_default();
         self.check(
             result["project"] == json!(fixture.root.to_string_lossy().into_owned()),
@@ -683,9 +756,9 @@ impl Gate {
 
         // The read-only reach refuses mutation typed.
         let response = embedded
-            .execute(fixture.request(
-                r#"return await z.invoke('fs.write', {path: 'a', content: 'x'});"#,
-            ))
+            .execute(
+                fixture.request(r#"return await z.invoke('fs.write', {path: 'a', content: 'x'});"#),
+            )
             .map_err(|e| format!("guest surface refusal execute: {e}"))?;
         self.check(
             response.kind == ZerokernelResultKind::Failed
@@ -783,7 +856,9 @@ impl Gate {
         );
         self.check(
             result["snapped"] == json!("snapped")
-                && result["packetViewRoot"].as_str().is_some_and(|root| !root.is_empty()),
+                && result["packetViewRoot"]
+                    .as_str()
+                    .is_some_and(|root| !root.is_empty()),
             "w9e chain: snap produces the decision-view packet",
         );
         self.check(
@@ -887,7 +962,10 @@ impl Gate {
                 other => {
                     self.check(
                         false,
-                        format!("paired quality: native snap must snap, got {:?}", other.outcome_kind()),
+                        format!(
+                            "paired quality: native snap must snap, got {:?}",
+                            other.outcome_kind()
+                        ),
                     );
                 }
             }
@@ -946,9 +1024,15 @@ impl Gate {
             supervisor_walls.push(started.elapsed());
             self.check(
                 response.kind == ZerokernelResultKind::Completed,
-                format!("paired quality: supervisor resolve completes: {:?}", failed_errors(&response)),
+                format!(
+                    "paired quality: supervisor resolve completes: {:?}",
+                    failed_errors(&response)
+                ),
             );
-            self.check(response.validate().is_ok(), "paired quality: supervisor receipt validates");
+            self.check(
+                response.validate().is_ok(),
+                "paired quality: supervisor receipt validates",
+            );
             let result = response.result.clone().unwrap_or_default();
             let atoms: BTreeSet<String> = result["atoms"]
                 .as_array()
@@ -991,14 +1075,23 @@ impl Gate {
         let supervisor_median_ms = median_ms(&supervisor_walls);
 
         // Paired equality: same evidence, same expansion, same quality.
+        let paired_projection_identical = supervisor_projection_root.as_deref()
+            == Some(first_expansion.projection_root.to_hex().as_str());
+        let paired_visible_identical = adjudicated.visible_bytes == first_expansion.visible_bytes;
+        let paired_identical = paired_projection_identical && paired_visible_identical;
         self.check(
-            supervisor_projection_root.as_deref() == Some(first_expansion.projection_root.to_hex().as_str()),
+            paired_projection_identical,
             "paired quality: projection roots identical across paths",
         );
         self.check(
-            adjudicated.visible_bytes == first_expansion.visible_bytes,
+            paired_visible_identical,
             "paired quality: adjudicated visible bytes consistent",
         );
+        let no_quality_regression = paired_identical
+            && !adjudicated.false_complete
+            && adjudicated.first_try_sufficiency
+            && adjudicated.retry_count == 0
+            && adjudicated.certified_atoms == adjudicated.expanded_atoms;
 
         self.supervisors.push(supervisor);
         self.fixtures.push(fixture);
@@ -1015,8 +1108,8 @@ impl Gate {
             "false_complete": adjudicated.false_complete,
             "first_try_sufficiency": adjudicated.first_try_sufficiency,
             "native_savings_bytes": adjudicated.native_savings_bytes,
-            "paired_identical": true,
-            "no_quality_regression": true,
+            "paired_identical": paired_identical,
+            "no_quality_regression": no_quality_regression,
         }))
     }
 
@@ -1045,7 +1138,11 @@ impl Gate {
             seed.kind == ZerokernelResultKind::Completed,
             "parameter friction: seed commit completes",
         );
-        let committed = seed.root_evidence.successor_root.clone().unwrap_or_default();
+        let committed = seed
+            .root_evidence
+            .successor_root
+            .clone()
+            .unwrap_or_default();
         self.check(
             !committed.is_empty(),
             "parameter friction: seed produces a committed root",
@@ -1167,7 +1264,8 @@ impl Gate {
             let policy = ReturnPolicy::new(ReturnKind::Inline, point.preview)
                 .map_err(|e| format!("policy: {e}"))?;
             let budget_wall_ms = point.budget.wall_ms;
-            let request = fixture.request_full(point.program, point.budget.clone(), policy, point.expected);
+            let request =
+                fixture.request_full(point.program, point.budget.clone(), policy, point.expected);
             let mut walls = Vec::new();
             let mut ledger_walls = Vec::new();
             let mut calls_made = 0u32;
@@ -1304,7 +1402,10 @@ impl Gate {
             .map_err(|f| format!("accepting verifier must accept: {:?}", f.reason()))?;
         let receipt = verified.into_receipt();
         self.check(receipt.task_id() == 9, "verifier reject: receipt task id");
-        self.check(receipt.verifier() == CommandId(3), "verifier reject: receipt verifier");
+        self.check(
+            receipt.verifier() == CommandId(3),
+            "verifier reject: receipt verifier",
+        );
         self.check(
             receipt.verifier_environment_digest() == &[5u8; 32],
             "verifier reject: receipt verifier environment digest",
@@ -1313,7 +1414,10 @@ impl Gate {
             receipt.outcome() == TaskOutcome::Passed,
             "verifier reject: receipt outcome Passed",
         );
-        self.check(receipt.exit_code() == 0, "verifier reject: receipt exit code");
+        self.check(
+            receipt.exit_code() == 0,
+            "verifier reject: receipt exit code",
+        );
         self.check(
             receipt.expected_artifact_digests() == &[[6u8; 32]][..]
                 && receipt.observed_artifact_digests() == &[[6u8; 32]][..],
@@ -1383,7 +1487,8 @@ impl Gate {
                 "oneshot" => fixture.oneshot(),
                 _ => fixture.embedded(),
             };
-            let budget = FiniteBudget::new(WALL_MS, CPU_MS, MEMORY_BYTES, MAX_CALLS).expect("budget");
+            let budget =
+                FiniteBudget::new(WALL_MS, CPU_MS, MEMORY_BYTES, MAX_CALLS).expect("budget");
             let request = fixture.request_budgeted("return 1;", budget, None);
             for index in 0..n {
                 let t = Instant::now();
@@ -1447,7 +1552,8 @@ impl Gate {
                 "oneshot" => fixture.oneshot(),
                 _ => fixture.embedded(),
             };
-            let budget = FiniteBudget::new(WALL_MS, CPU_MS, MEMORY_BYTES, MAX_CALLS).expect("budget");
+            let budget =
+                FiniteBudget::new(WALL_MS, CPU_MS, MEMORY_BYTES, MAX_CALLS).expect("budget");
             let mut expected = seed.root_evidence.successor_root.clone();
             let mut previous_successor = expected.clone();
             for index in 0..n {
@@ -1463,7 +1569,10 @@ impl Gate {
                 }
                 self.check(
                     response.kind == ZerokernelResultKind::Completed,
-                    format!("stateful soak[{index}]: must complete: {:?}", failed_errors(&response)),
+                    format!(
+                        "stateful soak[{index}]: must complete: {:?}",
+                        failed_errors(&response)
+                    ),
                 );
                 self.check(
                     response.result == Some(json!(index)),
@@ -1493,11 +1602,9 @@ impl Gate {
             if profile == "oneshot" {
                 self.one_shot_calls += n as u64;
             }
-            let committed = zsx_core::k0_state::current_session_root(
-                &fixture.state_root,
-                &fixture.session,
-            )
-            .map_err(|e| format!("stateful soak pointer: {e}"))?;
+            let committed =
+                zsx_core::k0_state::current_session_root(&fixture.state_root, &fixture.session)
+                    .map_err(|e| format!("stateful soak pointer: {e}"))?;
             self.check(
                 committed == previous_successor,
                 "stateful soak: committed-root pointer matches the last successor",
@@ -1513,7 +1620,11 @@ impl Gate {
                 soak_spawns += 1;
                 self.one_shot_calls += 1;
             }
-            let expected_after = if n == 0 { None } else { Some(json!((n - 1) as u64)) };
+            let expected_after = if n == 0 {
+                None
+            } else {
+                Some(json!((n - 1) as u64))
+            };
             self.check(
                 response.kind == ZerokernelResultKind::Completed,
                 "stateful soak: hydration completes",
@@ -1605,7 +1716,7 @@ impl Gate {
             "process_spawn_delta": spawned,
             "one_shot_calls": self.one_shot_calls,
             "orphans": spawned.saturating_sub(self.one_shot_calls),
-            "daemon_or_listener": no_daemon_or_listener,
+            "no_daemon_or_listener": no_daemon_or_listener,
         })
     }
 
@@ -1633,7 +1744,8 @@ impl Gate {
                     sections.insert(name.to_owned(), value);
                 }
                 Err(detail) => {
-                    self.failures.push(format!("section {name} aborted: {detail}"));
+                    self.failures
+                        .push(format!("section {name} aborted: {detail}"));
                     sections.insert(name.to_owned(), json!({ "aborted": true, "error": detail }));
                 }
             }
@@ -1660,7 +1772,8 @@ impl Gate {
             "warnings": self.warnings,
             "failures": self.failures,
             "duration_ms": elapsed.as_secs_f64() * 1000.0,
-            "how_run": "rch exec -- env CARGO_TARGET_DIR=\"${RCH_TARGET_BASE:-${TMPDIR:-/tmp}}/rch_target_zerostack_k0_gate\" cargo test -p zsx --test supervisor --test k0_budgets --test k0_state --test k0_gate -- --test-threads=1 --nocapture",
+            "how_run": "rch exec -- env CARGO_TARGET_DIR=\"${RCH_TARGET_BASE:-${TMPDIR:-/tmp}}/rch_target_zerostack_k0_gate\" cargo test -p zsx --test k0_gate -- --test-threads=1 --nocapture",
+            "companion_command": "rch exec -- env CARGO_TARGET_DIR=\"${RCH_TARGET_BASE:-${TMPDIR:-/tmp}}/rch_target_zerostack_k0_gate\" cargo test -p zsx --test supervisor --test k0_budgets --test k0_state -- --test-threads=1",
             "env_controls": {
                 "ZEROSTACK_K0_GATE_SOAK": "off|empty|stateful|both (default off; the bounded 10k soak)",
                 "ZEROSTACK_K0_GATE_SOAK_N": "soak call count (default 10000, clamped 0..=100000)",
@@ -1775,7 +1888,9 @@ fn k0_release_gate() {
 
 fn emit_report(report: &JsonValue) {
     let text = serde_json::to_string_pretty(report).expect("report serializes");
-    println!("\n===== ZEROSTACK K0 GATE REPORT (zerostack.k0_gate.v1) =====\n{text}\n===== END K0 GATE REPORT =====");
+    println!(
+        "\n===== ZEROSTACK K0 GATE REPORT (zerostack.k0_gate.v1) =====\n{text}\n===== END K0 GATE REPORT ====="
+    );
     if let Ok(path) = std::env::var("ZEROSTACK_K0_GATE_REPORT") {
         if !path.is_empty() {
             if let Err(error) = std::fs::write(&path, text) {

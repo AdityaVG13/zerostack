@@ -209,15 +209,15 @@ const HELP_ENTRIES: &[HelpEntry] = &[
     HelpEntry {
         surface: "token",
         method: "job",
-        signature: "zero.token.job(id: string, { waitMs?, since?, tailBytes? }) — poll a background token.shell job; waitMs max 30000",
-        description: "Poll or control background token jobs",
+        signature: "zero.token.job(id: string, { waitMs?, since?, tailBytes? }) — poll a background token.shell job; waitMs max 30000; content.value carries status/cursor/tail",
+        description: "Poll a background token.shell job through its TokenZero domain result",
         keywords: &["job", "background", "poll"],
     },
     HelpEntry {
         surface: "token",
         method: "shell",
         signature: "zero.token.shell(command: string | string[], { cwd?, mode?, timeoutMs?, timeout_seconds?, timeout_ms?, stdin?, rewrite?, no_rewrite?, background? })",
-        description: "Run one shell command with token-budgeted output; an effective timeout above 60000ms (or background: true) returns a job receipt {job, cursor, version} to poll with zero.token.job — background: false forces a direct foreground run",
+        description: "Run one shell command with token-budgeted output; an effective timeout above 60000ms (or background: true) returns immediately with a domain result whose content.value is the {job, cursor, version} receipt to poll with zero.token.job — background: false forces a direct foreground run",
         keywords: &["shell", "command", "exec", "run", "background", "job"],
     },
     HelpEntry {
@@ -244,9 +244,9 @@ const HELP_ENTRIES: &[HelpEntry] = &[
     HelpEntry {
         surface: "fs",
         method: "lookup",
-        signature: r#"zero.fs.lookup({ root: string, query?: string, pattern?: string, limit?: number }) — bounded indexed filename/path lookup; root is workspace-relative and must not escape; limit 1..=100 (default 20); deterministic lexicographic ordering; no file contents are read"#,
-        description: "Bounded indexed filename/path lookup without content reads; explicit root stays inside the approved workspace, explicit limit keeps results deterministic",
-        keywords: &["lookup", "filename", "path", "indexed", "bounded", "filename lookup", "path lookup", "glob", "find file"],
+        signature: r#"zero.fs.lookup({ root: string, query?: string, pattern?: string, limit?: number }) — bounded filename/path lookup; workspace-relative root max 4096 UTF-8 bytes and must not escape; query max 256 bytes; scan max depth 64 / 10000 entries; returned paths max 512 bytes; limit 1..=100 (default 20); deterministic ordering; content.value reports result_truncated/scan_truncated/oversized_results_omitted/visited (total is observed-only when scan_truncated); no file contents are read"#,
+        description: "Bounded filename/path lookup without content reads; explicit root stays inside the approved workspace, bounded scan/query/result limits keep work deterministic and observable",
+        keywords: &["lookup", "filename", "path", "bounded", "filename lookup", "path lookup", "glob", "find file"],
     },
     HelpEntry {
         surface: "fs",

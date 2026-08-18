@@ -1406,12 +1406,12 @@ impl Connector for ZsxConnector {
             return completion.complete(Ok(value.to_string()));
         }
         let (engine, op, args) = lower(&capability.surface, &capability.method, input)?;
-        // `fs.lookup` is a bounded indexed filename/path lookup executed
-        // directly by the connector: explicit workspace-relative `root`,
-        // bounded `limit`, deterministic ordering, no content reads, and
-        // no root escape. It reuses the FS surface patterns (METHODS +
-        // help + lower) but does not dispatch through FSZero's content
-        // search or a broad directory walker.
+        // `fs.lookup` is a bounded filename/path lookup executed directly
+        // by the connector: explicit workspace-relative `root`, bounded
+        // `limit`, deterministic ordering, no content reads, and no root
+        // escape. It reuses the FS surface patterns (METHODS + help + lower)
+        // but does not dispatch through FSZero's content search or an
+        // unbounded directory walker.
         if engine == EngineIdentity::FsZero && op == "fs.lookup" {
             let value = crate::lookup::lookup_search(&self.state.workspace_root, &args)
                 .map_err(|e| ConnectorError::new(e.to_string()))?;

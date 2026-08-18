@@ -15,19 +15,18 @@
 
 use proptest::prelude::*;
 use proptest::test_runner::Config;
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 use zero_abi::{
-    ApprovalGrant, CheckerIdentity, EvidenceItem, ExplicitFallback, FallbackKind,
-    FiniteWitness, Falsifier, KillMetrics, PermitGrant, ResourceLedger, RootedEvidence,
-    SafetyVerdict, SavingsCategory, V7ShadowReport, VCQK_CHECKER_CAUSAL_ID,
-    VCQK_CHECKER_CHAIN_ID, VCQK_CHECKER_SAVINGS_ID, VCQK_CONTRACT_CAUSAL,
-    VCQK_CONTRACT_CHAIN, VCQK_CONTRACT_SAVINGS, VCQK_KILL_NONCONVERGENCE_MAX_ISSUES,
-    VCQK_LEARNING_REFINEMENT_PUBLISH_AUTHORITY,
-    VCQK_MAX_BASELINE_SEGMENTS, VCQK_MAX_CHAIN_LINKS, VCQK_MAX_CLOSURE_EDGES,
-    VCQK_MAX_CLOSURE_NODES, VCQK_MAX_DEMANDED_OUTPUTS, VCQK_MAX_IDENTIFIER_BYTES,
-    VCQK_MAX_SAVINGS_ENTRIES, VCQK_SCOPE_CAUSAL, VCQK_SCOPE_CHAIN, VCQK_SCOPE_SAVINGS,
     check_causal_closure, check_certificate_chain, check_savings_provenance,
-    savings_overhead_killed,
+    savings_overhead_killed, ApprovalGrant, CheckerIdentity, EvidenceItem, ExplicitFallback,
+    FallbackKind, Falsifier, FiniteWitness, KillMetrics, PermitGrant, ResourceLedger,
+    RootedEvidence, SafetyVerdict, SavingsCategory, V7ShadowReport, VCQK_CHECKER_CAUSAL_ID,
+    VCQK_CHECKER_CHAIN_ID, VCQK_CHECKER_SAVINGS_ID, VCQK_CONTRACT_CAUSAL, VCQK_CONTRACT_CHAIN,
+    VCQK_CONTRACT_SAVINGS, VCQK_KILL_NONCONVERGENCE_MAX_ISSUES,
+    VCQK_LEARNING_REFINEMENT_PUBLISH_AUTHORITY, VCQK_MAX_BASELINE_SEGMENTS, VCQK_MAX_CHAIN_LINKS,
+    VCQK_MAX_CLOSURE_EDGES, VCQK_MAX_CLOSURE_NODES, VCQK_MAX_DEMANDED_OUTPUTS,
+    VCQK_MAX_IDENTIFIER_BYTES, VCQK_MAX_SAVINGS_ENTRIES, VCQK_SCOPE_CAUSAL, VCQK_SCOPE_CHAIN,
+    VCQK_SCOPE_SAVINGS,
 };
 
 const ROOT_A: &str = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
@@ -39,7 +38,11 @@ const DIGEST_1: &str = "11111111111111111111111111111111111111111111111111111111
 // ---------------------------------------------------------------------------
 
 fn fallback() -> ExplicitFallback {
-    ExplicitFallback::new(FallbackKind::FrozenRawBaseline, "run the frozen raw baseline").unwrap()
+    ExplicitFallback::new(
+        FallbackKind::FrozenRawBaseline,
+        "run the frozen raw baseline",
+    )
+    .unwrap()
 }
 
 /// A validated Safe report usable as a certificate-chain link.
@@ -85,10 +88,7 @@ fn causal_bytes(demanded: &[&str], nodes: &[(&str, &str)], edges: &[(&str, &str)
     .unwrap()
 }
 
-fn savings_bytes(
-    baseline: &[(&str, &str)],
-    savings: &[(&str, &str)],
-) -> Vec<u8> {
+fn savings_bytes(baseline: &[(&str, &str)], savings: &[(&str, &str)]) -> Vec<u8> {
     serde_json::to_vec(&json!({
         "baseline": baseline.iter().map(|(id, kind)| json!({"id": id, "kind": kind})).collect::<Vec<_>>(),
         "savings": savings.iter().map(|(segment, category)| json!({"segment": segment, "category": category})).collect::<Vec<_>>(),
@@ -99,9 +99,19 @@ fn savings_bytes(
 fn assert_no_gate_fields(report: &V7ShadowReport) {
     let text = String::from_utf8(report.to_canonical_bytes().unwrap()).unwrap();
     for key in [
-        "grant_id", "approval_id", "permit_id", "canonical_operation_id", "session_id",
-        "request_id", "authority_digest", "policy_digest", "issued_at_unix_ms",
-        "expires_at_unix_ms", "effect_class", "engine", "operation",
+        "grant_id",
+        "approval_id",
+        "permit_id",
+        "canonical_operation_id",
+        "session_id",
+        "request_id",
+        "authority_digest",
+        "policy_digest",
+        "issued_at_unix_ms",
+        "expires_at_unix_ms",
+        "effect_class",
+        "engine",
+        "operation",
     ] {
         assert!(
             !text.contains(&format!("\"{key}\"")),
@@ -135,9 +145,19 @@ fn assert_baseline_available(report: &V7ShadowReport, input_len: usize) {
 fn chain_positive_fixture_is_safe_and_round_trips() {
     let first = link(ROOT_A, "scope:project/main", "zero.contract/v1", "1.0.0");
     let root1 = first.certificate.as_ref().unwrap().root.clone();
-    let second = link(&root1, "scope:project/main/child", "zero.contract/v1", "1.0.0");
+    let second = link(
+        &root1,
+        "scope:project/main/child",
+        "zero.contract/v1",
+        "1.0.0",
+    );
     let root2 = second.certificate.as_ref().unwrap().root.clone();
-    let third = link(&root2, "scope:project/main/child/grandchild", "zero.contract/v1/chain", "1.0.0");
+    let third = link(
+        &root2,
+        "scope:project/main/child/grandchild",
+        "zero.contract/v1/chain",
+        "1.0.0",
+    );
     let root3 = third.certificate.as_ref().unwrap().root.clone();
 
     let input = chain_bytes(&[first, second, third]);
@@ -174,7 +194,13 @@ fn chain_positive_fixture_is_safe_and_round_trips() {
 
 #[test]
 fn chain_single_link_is_a_well_formed_chain() {
-    let report = check_certificate_chain(&chain_bytes(&[link(ROOT_A, "scope:project/main", "zero.contract/v1", "1.0.0")])).unwrap();
+    let report = check_certificate_chain(&chain_bytes(&[link(
+        ROOT_A,
+        "scope:project/main",
+        "zero.contract/v1",
+        "1.0.0",
+    )]))
+    .unwrap();
     assert_eq!(report.verdict, SafetyVerdict::Safe);
     assert!(report.grants_authority());
 }
@@ -184,7 +210,9 @@ fn chain_empty_input_is_unknown() {
     let report = check_certificate_chain(b"[]").unwrap();
     assert_eq!(
         report.verdict,
-        SafetyVerdict::Unknown { reasons: vec!["no_chain_links".into()] }
+        SafetyVerdict::Unknown {
+            reasons: vec!["no_chain_links".into()]
+        }
     );
     assert!(!report.grants_authority());
     assert!(report.certificate.is_none());
@@ -205,7 +233,9 @@ fn chain_unparseable_document_is_unknown() {
         let report = check_certificate_chain(bytes).unwrap();
         assert_eq!(
             report.verdict,
-            SafetyVerdict::Unknown { reasons: vec!["unparseable_input".into()] }
+            SafetyVerdict::Unknown {
+                reasons: vec!["unparseable_input".into()]
+            }
         );
         assert!(!report.grants_authority());
         assert!(report.certificate.is_none());
@@ -218,12 +248,19 @@ fn chain_adjacent_root_mismatch_is_unsafe() {
     // Successor evidence anchors on an unrelated root, not the predecessor
     // certificate root.
     let first = link(ROOT_A, "scope:project/main", "zero.contract/v1", "1.0.0");
-    let second = link(ROOT_B, "scope:project/main/child", "zero.contract/v1", "1.0.0");
+    let second = link(
+        ROOT_B,
+        "scope:project/main/child",
+        "zero.contract/v1",
+        "1.0.0",
+    );
     let input = chain_bytes(&[first, second]);
     let report = check_certificate_chain(&input).unwrap();
     assert_eq!(
         report.verdict,
-        SafetyVerdict::Unsafe { reasons: vec!["adjacent_root_not_bound".into()] }
+        SafetyVerdict::Unsafe {
+            reasons: vec!["adjacent_root_not_bound".into()]
+        }
     );
     assert!(!report.grants_authority());
     assert!(report.certificate.is_none());
@@ -241,7 +278,9 @@ fn chain_scope_mismatch_is_unsafe() {
     let report = check_certificate_chain(&chain_bytes(&[first, second])).unwrap();
     assert_eq!(
         report.verdict,
-        SafetyVerdict::Unsafe { reasons: vec!["scope_does_not_chain".into()] }
+        SafetyVerdict::Unsafe {
+            reasons: vec!["scope_does_not_chain".into()]
+        }
     );
     assert!(!report.grants_authority());
 }
@@ -251,11 +290,18 @@ fn chain_contract_mismatch_is_unsafe() {
     let first = link(ROOT_A, "scope:project/main", "zero.contract/v1", "1.0.0");
     let root1 = first.certificate.as_ref().unwrap().root.clone();
     // Contract v2 does not extend v1 as a path descendant.
-    let second = link(&root1, "scope:project/main/child", "zero.contract/v2", "1.0.0");
+    let second = link(
+        &root1,
+        "scope:project/main/child",
+        "zero.contract/v2",
+        "1.0.0",
+    );
     let report = check_certificate_chain(&chain_bytes(&[first, second])).unwrap();
     assert_eq!(
         report.verdict,
-        SafetyVerdict::Unsafe { reasons: vec!["contract_does_not_chain".into()] }
+        SafetyVerdict::Unsafe {
+            reasons: vec!["contract_does_not_chain".into()]
+        }
     );
     assert!(!report.grants_authority());
 }
@@ -266,11 +312,18 @@ fn chain_checker_identity_mismatch_is_unsafe() {
     let root1 = first.certificate.as_ref().unwrap().root.clone();
     // An upgraded checker invalidates every prior certificate: the chain
     // cannot span versions.
-    let second = link(&root1, "scope:project/main/child", "zero.contract/v1", "2.0.0");
+    let second = link(
+        &root1,
+        "scope:project/main/child",
+        "zero.contract/v1",
+        "2.0.0",
+    );
     let report = check_certificate_chain(&chain_bytes(&[first, second])).unwrap();
     assert_eq!(
         report.verdict,
-        SafetyVerdict::Unsafe { reasons: vec!["checker_identity_broken".into()] }
+        SafetyVerdict::Unsafe {
+            reasons: vec!["checker_identity_broken".into()]
+        }
     );
     assert!(!report.grants_authority());
 }
@@ -279,7 +332,9 @@ fn chain_checker_identity_mismatch_is_unsafe() {
 fn chain_non_certificate_link_is_unsafe() {
     let first = link(ROOT_A, "scope:project/main", "zero.contract/v1", "1.0.0");
     let unknown_link = V7ShadowReport::new(
-        SafetyVerdict::Unknown { reasons: vec!["missing_evidence".into()] },
+        SafetyVerdict::Unknown {
+            reasons: vec!["missing_evidence".into()],
+        },
         CheckerIdentity::new("w7/chain_v1", "1.0.0").unwrap(),
         "scope:project/main/child",
         "zero.contract/v1",
@@ -293,12 +348,15 @@ fn chain_non_certificate_link_is_unsafe() {
     .unwrap();
     let mut bytes = chain_bytes(&[first]);
     bytes.pop(); // drop trailing ']'
+    bytes.push(b',');
     bytes.extend_from_slice(&unknown_link.to_canonical_bytes().unwrap());
     bytes.push(b']');
     let report = check_certificate_chain(&bytes).unwrap();
     assert_eq!(
         report.verdict,
-        SafetyVerdict::Unsafe { reasons: vec!["non_certificate_link:1".into()] }
+        SafetyVerdict::Unsafe {
+            reasons: vec!["non_certificate_link:1".into()]
+        }
     );
     assert!(!report.grants_authority());
 }
@@ -312,7 +370,9 @@ fn chain_unparseable_link_is_unknown() {
     let report = check_certificate_chain(&bytes).unwrap();
     assert_eq!(
         report.verdict,
-        SafetyVerdict::Unknown { reasons: vec!["unparseable_link".into()] }
+        SafetyVerdict::Unknown {
+            reasons: vec!["unparseable_link".into()]
+        }
     );
     assert!(!report.grants_authority());
     assert!(!report.ledger.complete);
@@ -323,14 +383,21 @@ fn chain_mismatch_dominates_missing_link_evidence() {
     // An adjacent mismatch (Unsafe) plus a gap (Unknown) must yield Unsafe:
     // the lattice law is Unsafe > Unknown > Safe.
     let first = link(ROOT_A, "scope:project/main", "zero.contract/v1", "1.0.0");
-    let second = link(ROOT_B, "scope:project/main/child", "zero.contract/v1", "1.0.0");
+    let second = link(
+        ROOT_B,
+        "scope:project/main/child",
+        "zero.contract/v1",
+        "1.0.0",
+    );
     let mut bytes = chain_bytes(&[first, second]);
     bytes.pop();
     bytes.extend_from_slice(b",{\"bogus\":true}]");
     let report = check_certificate_chain(&bytes).unwrap();
     assert_eq!(
         report.verdict,
-        SafetyVerdict::Unsafe { reasons: vec!["adjacent_root_not_bound".into()] }
+        SafetyVerdict::Unsafe {
+            reasons: vec!["adjacent_root_not_bound".into()]
+        }
     );
 }
 
@@ -341,7 +408,9 @@ fn chain_oversized_chain_is_unknown() {
     let report = check_certificate_chain(&bytes).unwrap();
     assert_eq!(
         report.verdict,
-        SafetyVerdict::Unknown { reasons: vec!["input_exceeds_checker_bounds".into()] }
+        SafetyVerdict::Unknown {
+            reasons: vec!["input_exceeds_checker_bounds".into()]
+        }
     );
     assert!(!report.grants_authority());
     assert!(!report.ledger.complete);
@@ -355,7 +424,11 @@ fn chain_oversized_chain_is_unknown() {
 fn causal_positive_fixture_is_safe() {
     let bytes = causal_bytes(
         &["d1", "d2"],
-        &[("d1", "declared_output"), ("d2", "declared_output"), ("x", "derived")],
+        &[
+            ("d1", "declared_output"),
+            ("d2", "declared_output"),
+            ("x", "derived"),
+        ],
         &[("x", "d1"), ("d1", "d2")],
     );
     let report = check_causal_closure(&bytes).unwrap();
@@ -400,7 +473,9 @@ fn causal_demanded_output_outside_closure_is_unsafe() {
     let report = check_causal_closure(&bytes).unwrap();
     assert_eq!(
         report.verdict,
-        SafetyVerdict::Unsafe { reasons: vec!["demanded_output_outside_declared_closure".into()] }
+        SafetyVerdict::Unsafe {
+            reasons: vec!["demanded_output_outside_declared_closure".into()]
+        }
     );
     assert!(!report.grants_authority());
     assert!(report.certificate.is_none());
@@ -416,7 +491,9 @@ fn causal_open_dependency_edge_is_unsafe() {
     let report = check_causal_closure(&bytes).unwrap();
     assert_eq!(
         report.verdict,
-        SafetyVerdict::Unsafe { reasons: vec!["open_dependency_edge".into()] }
+        SafetyVerdict::Unsafe {
+            reasons: vec!["open_dependency_edge".into()]
+        }
     );
     assert!(!report.grants_authority());
     assert!(report.ledger.complete);
@@ -428,7 +505,9 @@ fn causal_unparseable_document_is_unknown() {
         let report = check_causal_closure(bytes).unwrap();
         assert_eq!(
             report.verdict,
-            SafetyVerdict::Unknown { reasons: vec!["unparseable_input".into()] }
+            SafetyVerdict::Unknown {
+                reasons: vec!["unparseable_input".into()]
+            }
         );
         assert!(!report.grants_authority());
         assert!(!report.ledger.complete);
@@ -441,38 +520,52 @@ fn causal_empty_demand_list_is_unknown_vacuous() {
     let report = check_causal_closure(&bytes).unwrap();
     assert_eq!(
         report.verdict,
-        SafetyVerdict::Unknown { reasons: vec!["no_demanded_outputs".into()] }
+        SafetyVerdict::Unknown {
+            reasons: vec!["no_demanded_outputs".into()]
+        }
     );
     assert!(!report.grants_authority());
 }
 
 #[test]
 fn causal_oversized_declaration_is_unknown() {
-    let many: Vec<String> = (0..=VCQK_MAX_DEMANDED_OUTPUTS).map(|i| format!("d{i}")).collect();
+    let many: Vec<String> = (0..=VCQK_MAX_DEMANDED_OUTPUTS)
+        .map(|i| format!("d{i}"))
+        .collect();
     let bytes = serde_json::to_vec(&json!({"demanded": many, "nodes": [], "edges": []})).unwrap();
     let report = check_causal_closure(&bytes).unwrap();
     assert_eq!(
         report.verdict,
-        SafetyVerdict::Unknown { reasons: vec!["input_exceeds_checker_bounds".into()] }
+        SafetyVerdict::Unknown {
+            reasons: vec!["input_exceeds_checker_bounds".into()]
+        }
     );
     assert!(!report.grants_authority());
 
     let too_many_nodes: Vec<Value> = (0..=VCQK_MAX_CLOSURE_NODES)
         .map(|i| json!({"id": format!("n{i}"), "kind": "derived"}))
         .collect();
-    let bytes = serde_json::to_vec(&json!({"demanded": ["d1"], "nodes": too_many_nodes, "edges": []})).unwrap();
+    let bytes =
+        serde_json::to_vec(&json!({"demanded": ["d1"], "nodes": too_many_nodes, "edges": []}))
+            .unwrap();
     assert_eq!(
         check_causal_closure(&bytes).unwrap().verdict,
-        SafetyVerdict::Unknown { reasons: vec!["input_exceeds_checker_bounds".into()] }
+        SafetyVerdict::Unknown {
+            reasons: vec!["input_exceeds_checker_bounds".into()]
+        }
     );
 
     let too_many_edges: Vec<Value> = (0..=VCQK_MAX_CLOSURE_EDGES)
         .map(|i| json!({"from": format!("a{i}"), "to": format!("b{i}")}))
         .collect();
-    let bytes = serde_json::to_vec(&json!({"demanded": ["d1"], "nodes": [], "edges": too_many_edges})).unwrap();
+    let bytes =
+        serde_json::to_vec(&json!({"demanded": ["d1"], "nodes": [], "edges": too_many_edges}))
+            .unwrap();
     assert_eq!(
         check_causal_closure(&bytes).unwrap().verdict,
-        SafetyVerdict::Unknown { reasons: vec!["input_exceeds_checker_bounds".into()] }
+        SafetyVerdict::Unknown {
+            reasons: vec!["input_exceeds_checker_bounds".into()]
+        }
     );
 }
 
@@ -483,7 +576,9 @@ fn causal_oversized_identifier_is_unknown() {
     let report = check_causal_closure(&bytes).unwrap();
     assert_eq!(
         report.verdict,
-        SafetyVerdict::Unknown { reasons: vec!["identifier_too_long".into()] }
+        SafetyVerdict::Unknown {
+            reasons: vec!["identifier_too_long".into()]
+        }
     );
     assert!(!report.grants_authority());
 }
@@ -504,10 +599,22 @@ fn causal_unknown_and_unsafe_never_carry_authority() {
 #[test]
 fn savings_positive_fixture_is_safe_with_all_categories() {
     let bytes = savings_bytes(
-        &[("s1", "model_turn"), ("s2", "tool_call"), ("s3", "verifier_run"),
-          ("s4", "tool_call"), ("s5", "model_turn"), ("s6", "model_turn")],
-        &[("s1", "reused"), ("s2", "private_execution"), ("s3", "verifier_collapsed"),
-          ("s4", "proved_irrelevant"), ("s5", "policy_preauthorized"), ("s6", "baseline_preserved")],
+        &[
+            ("s1", "model_turn"),
+            ("s2", "tool_call"),
+            ("s3", "verifier_run"),
+            ("s4", "tool_call"),
+            ("s5", "model_turn"),
+            ("s6", "model_turn"),
+        ],
+        &[
+            ("s1", "reused"),
+            ("s2", "private_execution"),
+            ("s3", "verifier_collapsed"),
+            ("s4", "proved_irrelevant"),
+            ("s5", "policy_preauthorized"),
+            ("s6", "baseline_preserved"),
+        ],
     );
     let report = check_savings_provenance(&bytes).unwrap();
     assert_eq!(report.verdict, SafetyVerdict::Safe);
@@ -519,8 +626,16 @@ fn savings_positive_fixture_is_safe_with_all_categories() {
     assert_eq!(report.evidence.items.len(), 6);
     // Witness facts carry the category distribution.
     assert!(report.witness.facts.iter().any(|fact| fact == "reused: 1"));
-    assert!(report.witness.facts.iter().any(|fact| fact == "baseline_preserved: 1"));
-    assert!(report.witness.facts.iter().any(|fact| fact == "baseline segments: 6"));
+    assert!(report
+        .witness
+        .facts
+        .iter()
+        .any(|fact| fact == "baseline_preserved: 1"));
+    assert!(report
+        .witness
+        .facts
+        .iter()
+        .any(|fact| fact == "baseline segments: 6"));
     assert!(report.ledger.complete);
     assert_baseline_available(&report, bytes.len());
     assert_no_gate_fields(&report);
@@ -537,13 +652,19 @@ fn savings_positive_fixture_is_safe_with_all_categories() {
 fn savings_missing_transcript_segment_is_unknown() {
     // s3 has no savings entry: missing evidence, no public saving claim.
     let bytes = savings_bytes(
-        &[("s1", "model_turn"), ("s2", "tool_call"), ("s3", "model_turn")],
+        &[
+            ("s1", "model_turn"),
+            ("s2", "tool_call"),
+            ("s3", "model_turn"),
+        ],
         &[("s1", "reused"), ("s2", "private_execution")],
     );
     let report = check_savings_provenance(&bytes).unwrap();
     assert_eq!(
         report.verdict,
-        SafetyVerdict::Unknown { reasons: vec!["segment_unmapped:s3".into()] }
+        SafetyVerdict::Unknown {
+            reasons: vec!["segment_unmapped:s3".into()]
+        }
     );
     assert!(!report.grants_authority());
     assert!(report.certificate.is_none());
@@ -556,12 +677,18 @@ fn savings_missing_transcript_segment_is_unknown() {
 fn savings_duplicate_mapping_is_unsafe() {
     let bytes = savings_bytes(
         &[("s1", "model_turn"), ("s2", "tool_call")],
-        &[("s1", "reused"), ("s1", "private_execution"), ("s2", "reused")],
+        &[
+            ("s1", "reused"),
+            ("s1", "private_execution"),
+            ("s2", "reused"),
+        ],
     );
     let report = check_savings_provenance(&bytes).unwrap();
     assert_eq!(
         report.verdict,
-        SafetyVerdict::Unsafe { reasons: vec!["duplicate_mapping".into()] }
+        SafetyVerdict::Unsafe {
+            reasons: vec!["duplicate_mapping".into()]
+        }
     );
     assert!(!report.grants_authority());
     assert!(report.ledger.complete);
@@ -576,21 +703,22 @@ fn savings_entry_for_unknown_segment_is_unsafe() {
     let report = check_savings_provenance(&bytes).unwrap();
     assert_eq!(
         report.verdict,
-        SafetyVerdict::Unsafe { reasons: vec!["unknown_segment_in_savings_map".into()] }
+        SafetyVerdict::Unsafe {
+            reasons: vec!["unknown_segment_in_savings_map".into()]
+        }
     );
     assert!(!report.grants_authority());
 }
 
 #[test]
 fn savings_unsupported_category_is_unsafe() {
-    let bytes = savings_bytes(
-        &[("s1", "model_turn")],
-        &[("s1", "teleported")],
-    );
+    let bytes = savings_bytes(&[("s1", "model_turn")], &[("s1", "teleported")]);
     let report = check_savings_provenance(&bytes).unwrap();
     assert_eq!(
         report.verdict,
-        SafetyVerdict::Unsafe { reasons: vec!["unsupported_category".into()] }
+        SafetyVerdict::Unsafe {
+            reasons: vec!["unsupported_category".into()]
+        }
     );
     assert!(!report.grants_authority());
     assert!(report.ledger.complete);
@@ -605,7 +733,9 @@ fn savings_duplicate_baseline_segment_is_unsafe() {
     let report = check_savings_provenance(&bytes).unwrap();
     assert_eq!(
         report.verdict,
-        SafetyVerdict::Unsafe { reasons: vec!["duplicate_baseline_segment".into()] }
+        SafetyVerdict::Unsafe {
+            reasons: vec!["duplicate_baseline_segment".into()]
+        }
     );
     assert!(!report.grants_authority());
 }
@@ -616,7 +746,9 @@ fn savings_empty_baseline_is_unknown() {
     let report = check_savings_provenance(&bytes).unwrap();
     assert_eq!(
         report.verdict,
-        SafetyVerdict::Unknown { reasons: vec!["no_baseline_segments".into()] }
+        SafetyVerdict::Unknown {
+            reasons: vec!["no_baseline_segments".into()]
+        }
     );
     assert!(!report.grants_authority());
 }
@@ -627,7 +759,9 @@ fn savings_unparseable_document_is_unknown() {
         let report = check_savings_provenance(bytes).unwrap();
         assert_eq!(
             report.verdict,
-            SafetyVerdict::Unknown { reasons: vec!["unparseable_input".into()] }
+            SafetyVerdict::Unknown {
+                reasons: vec!["unparseable_input".into()]
+            }
         );
         assert!(!report.grants_authority());
     }
@@ -642,7 +776,9 @@ fn savings_oversized_documents_are_unknown() {
     let report = check_savings_provenance(&bytes).unwrap();
     assert_eq!(
         report.verdict,
-        SafetyVerdict::Unknown { reasons: vec!["input_exceeds_checker_bounds".into()] }
+        SafetyVerdict::Unknown {
+            reasons: vec!["input_exceeds_checker_bounds".into()]
+        }
     );
     assert!(!report.grants_authority());
 
@@ -652,13 +788,18 @@ fn savings_oversized_documents_are_unknown() {
     let bytes = serde_json::to_vec(&json!({"baseline": [], "savings": too_many_entries})).unwrap();
     assert_eq!(
         check_savings_provenance(&bytes).unwrap().verdict,
-        SafetyVerdict::Unknown { reasons: vec!["input_exceeds_checker_bounds".into()] }
+        SafetyVerdict::Unknown {
+            reasons: vec!["input_exceeds_checker_bounds".into()]
+        }
     );
 }
 
 #[test]
 fn savings_classify_is_total() {
-    assert_eq!(SavingsCategory::classify("reused"), Some(SavingsCategory::Reused));
+    assert_eq!(
+        SavingsCategory::classify("reused"),
+        Some(SavingsCategory::Reused)
+    );
     assert_eq!(
         SavingsCategory::classify("private_execution"),
         Some(SavingsCategory::PrivateExecution)
@@ -692,12 +833,8 @@ fn savings_classify_is_total() {
 #[test]
 fn kill_false_authority_counts_refuted_safe_roots() {
     let mut metrics = KillMetrics::new();
-    let report = check_causal_closure(&causal_bytes(
-        &["d1"],
-        &[("d1", "declared_output")],
-        &[],
-    ))
-    .unwrap();
+    let report =
+        check_causal_closure(&causal_bytes(&["d1"], &[("d1", "declared_output")], &[])).unwrap();
     let root = report.certificate.as_ref().unwrap().root.clone();
     metrics.observe_report(&report);
     assert_eq!(metrics.safe_reports(), 1);
@@ -719,12 +856,8 @@ fn kill_false_authority_counts_refuted_safe_roots() {
 #[test]
 fn kill_unsafe_and_unknown_reports_are_counted_without_roots() {
     let mut metrics = KillMetrics::new();
-    let unsafe_report = check_causal_closure(&causal_bytes(
-        &["ghost"],
-        &[("d1", "declared_output")],
-        &[],
-    ))
-    .unwrap();
+    let unsafe_report =
+        check_causal_closure(&causal_bytes(&["ghost"], &[("d1", "declared_output")], &[])).unwrap();
     let unknown_report = check_causal_closure(b"garbage").unwrap();
     metrics.observe_report(&unsafe_report);
     metrics.observe_report(&unknown_report);
@@ -741,7 +874,10 @@ fn kill_non_converging_counterexamples() {
         metrics.observe_counterexample(ROOT_A);
     }
     assert_eq!(metrics.non_converging_counterexamples(), 0);
-    assert_eq!(metrics.counterexample_reissues(), VCQK_KILL_NONCONVERGENCE_MAX_ISSUES - 1);
+    assert_eq!(
+        metrics.counterexample_reissues(),
+        VCQK_KILL_NONCONVERGENCE_MAX_ISSUES - 1
+    );
     // One more issue crosses the bound: exactly one kill per root.
     metrics.observe_counterexample(ROOT_A);
     assert_eq!(metrics.non_converging_counterexamples(), 1);
@@ -905,8 +1041,14 @@ fn checkers_are_total_on_nasty_hand_written_inputs() {
 
 #[test]
 fn checkers_are_versioned() {
-    assert_eq!(check_certificate_chain(b"[]").unwrap().checker.id, VCQK_CHECKER_CHAIN_ID);
-    assert_eq!(check_causal_closure(b"[]").unwrap().checker.id, VCQK_CHECKER_CAUSAL_ID);
+    assert_eq!(
+        check_certificate_chain(b"[]").unwrap().checker.id,
+        VCQK_CHECKER_CHAIN_ID
+    );
+    assert_eq!(
+        check_causal_closure(b"[]").unwrap().checker.id,
+        VCQK_CHECKER_CAUSAL_ID
+    );
     assert_eq!(
         check_savings_provenance(b"[]").unwrap().checker.id,
         VCQK_CHECKER_SAVINGS_ID

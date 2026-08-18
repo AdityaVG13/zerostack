@@ -742,8 +742,25 @@ fn run_call(
 const FUSED_QUERY_PREVIEW_LIMIT: usize = 80;
 const FUSED_SCOPE_PREVIEW_LIMIT: usize = 80;
 const FUSED_TOKEN_LIMIT: usize = 3;
-const FUSED_TOKEN_CHAR_LIMIT: usize = 24;
+const FUSED_TOKEN_BYTE_LIMIT: usize = 24;
 const FUSED_DIAGNOSTIC_MAX_BYTES: usize = 500;
+
+fn truncate_utf8_bytes(value: &str, max_bytes: usize) -> String {
+    if value.len() <= max_bytes {
+        return value.to_owned();
+    }
+    const ELLIPSIS: &str = "…";
+    if max_bytes < ELLIPSIS.len() {
+        return String::new();
+    }
+    let mut end = max_bytes.saturating_sub(ELLIPSIS.len());
+    while !value.is_char_boundary(end) {
+        end -= 1;
+    }
+    let mut truncated = value[..end].to_owned();
+    truncated.push_str(ELLIPSIS);
+    truncated
+}
 
 fn bounded_fused_preview(value: &str, limit: usize) -> String {
     let raw_len = value.chars().count();
@@ -780,12 +797,10 @@ fn bounded_token_preview(query: &str) -> String {
             .replace('\\', "\\\\")
             .replace('\n', "\\n")
             .replace('"', "\\\"");
-        let shown = if escaped.chars().count() > FUSED_TOKEN_CHAR_LIMIT {
-            let truncated: String = escaped.chars().take(FUSED_TOKEN_CHAR_LIMIT).collect();
-            format!("\"{truncated}…\"")
-        } else {
-            format!("\"{escaped}\"")
-        };
+        let shown = format!(
+            "\"{}\"",
+            truncate_utf8_bytes(&escaped, FUSED_TOKEN_BYTE_LIMIT)
+        );
         parts.push(shown);
     }
     let mut out = format!("[{}]", parts.join(", "));
@@ -806,21 +821,17 @@ fn enriched_fused_no_target_message(request: &CallRequest, original: &str) -> Op
     let map = request.args.as_object()?;
     let query = map.get("query")?.as_str()?;
     let scope = map.get("scope").and_then(Value::as_str).unwrap_or("");
-    let query_preview = bounded_fused_preview(query, FUSED_QUERY_PREVIEW_LIMIT);
-    let scope_preview = bounded_fused_preview(scope, FUSED_SCOPE_PREVIEW_LIMIT);
-    let tokens = bounded_token_preview(query);
-    // Bounded corrective guidance; no file content, no preimage/replacement.
-    let mut enriched = format!(
-        "{original} (query={query_preview} tokens={tokens} scope={scope_preview}); hint: query is literal case-sensitive substring without shell quoting or regex; strip surrounding quotes/backticks, verify literal appears in scope via fs.search, and retry; uniqueness remains exactly_one and preimage is still required"
-    );
-    if enriched.len() > FUSED_DIAGNOSTIC_MAX_BYTES {
-        enriched.truncate(FUSED_DIAGNOSTIC_MAX_BYTES);
-        // Ensure valid UTF-8 truncation (truncate is byte-based, but we know it's ASCII-heavy).
-        while !enriched.is_char_boundary(enriched.len()) {
-            enriched.pop();
-        }
-        enriched.push_str("…");
-    }
+    let query_preview =
+        truncate_utf8_bytes(&bounded_fused_preview(query, FUSED_QUERY_PREVIEW_LIMIT), 48);
+    let scope_preview =
+        truncate_utf8_bytes(&bounded_fused_preview(scope, FUSED_SCOPE_PREVIEW_LIMIT), 48);
+    let tokens = truncate_utf8_bytes(&bounded_token_preview(query), 112);
+    let original = truncate_utf8_bytes(original, 80);
+    const GUIDANCE: &str = "; hint: query is a literal case-sensitive substring, not shell quoting or regex; remove quotes/backticks, verify via fs.search, and retry; uniqueness remains exactly_one and preimage is still required";
+    let head = format!("{original} (query={query_preview} tokens={tokens} scope={scope_preview})");
+    let head_budget = FUSED_DIAGNOSTIC_MAX_BYTES.saturating_sub(GUIDANCE.len());
+    let mut enriched = truncate_utf8_bytes(&head, head_budget);
+    enriched.push_str(GUIDANCE);
     Some(enriched)
 }
 
@@ -839,7 +850,10 @@ fn domain_error_to_adapter(error: &DomainError, request: &CallRequest) -> Adapte
 /// Rewrite the absolute read paths of one request to their root-relative
 /// forms from the granted read plan. Only the planned files are named; a
 /// request path that is not part of the plan fails closed.
-fn rewrite_read_request(request: &CallRequest, plan: &ReadPlan) -> Result<CallRequest, AdapterError> {
+fn rewrite_read_request(
+    request: &CallRequest,
+    plan: &ReadPlan,
+) -> Result<CallRequest, AdapterError> {
     let mut rewritten = request.clone();
     match request.op.as_str() {
         "fs.read" => {

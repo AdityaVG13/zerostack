@@ -140,9 +140,7 @@ pub fn absolute_read_paths(op: &str, args: &Value) -> Result<Vec<String>, String
         return Ok(Vec::new());
     }
     if paths.iter().any(|path| !Path::new(path).is_absolute()) {
-        return Err(
-            "fs.multiRead cannot mix project-relative and absolute paths".to_string()
-        );
+        return Err("fs.multiRead cannot mix project-relative and absolute paths".to_string());
     }
     Ok(paths.into_iter().map(str::to_owned).collect())
 }
@@ -174,11 +172,8 @@ pub fn mint_read_grant(
             "fs.readGrant requires an absolute path, got '{path}'"
         ));
     }
-    let canonical = std::fs::canonicalize(Path::new(path)).map_err(|error| {
-        format!(
-            "fs.readGrant target '{path}' does not resolve: {error}"
-        )
-    })?;
+    let canonical = std::fs::canonicalize(Path::new(path))
+        .map_err(|error| format!("fs.readGrant target '{path}' does not resolve: {error}"))?;
     let metadata = std::fs::metadata(&canonical).map_err(|error| {
         format!(
             "fs.readGrant target '{}' cannot be inspected: {error}",
@@ -267,24 +262,25 @@ pub fn take_read_grants(
             });
             continue;
         }
-        let Some(active_index) = active
-            .iter()
-            .position(|grant| Path::new(&grant.canonical_path) == target)
-        else {
+        let active_index = active.iter().enumerate().find_map(|(index, grant)| {
+            let already_matched = matched.iter().any(|(prior_index, _)| *prior_index == index);
+            (!already_matched && Path::new(&grant.canonical_path) == target).then_some(index)
+        });
+        let Some(active_index) = active_index else {
+            if active
+                .iter()
+                .any(|grant| Path::new(&grant.canonical_path) == target)
+            {
+                return Err(format!(
+                    "explicit read path '{}' repeats a granted file; mint one read grant per occurrence",
+                    path
+                ));
+            }
             return Err(format!(
                 "explicit read outside the session root requires a read grant; no active grant matches canonical path '{}'; mint one with fs.readGrant({{ path }}) first",
                 target.display()
             ));
         };
-        if matched
-            .iter()
-            .any(|(prior_index, _)| *prior_index == active_index)
-        {
-            return Err(format!(
-                "explicit read path '{}' repeats a granted file; mint one read grant per occurrence",
-                path
-            ));
-        }
         matched.push((active_index, entry_index));
         entries.push(ReadPathGrant {
             requested_path: path.clone(),
@@ -445,9 +441,7 @@ pub fn plan_granted_read(
             )
         })?;
         if relative.as_os_str().is_empty() {
-            return Err(
-                "explicit read path must name a file below its selected root".to_string()
-            );
+            return Err("explicit read path must name a file below its selected root".to_string());
         }
         rewrite.relative_path = relative.to_string_lossy().into_owned();
     }
@@ -463,8 +457,8 @@ pub fn post_verify_read(plan: &ReadPlan) -> Result<(), String> {
         let Some(grant) = &rewrite.grant else {
             continue;
         };
-        let resolved = std::fs::canonicalize(plan.root.join(&rewrite.relative_path))
-            .map_err(|error| {
+        let resolved =
+            std::fs::canonicalize(plan.root.join(&rewrite.relative_path)).map_err(|error| {
                 format!(
                     "granted read target '{}' vanished during read: {error}",
                     grant.canonical_path.display()

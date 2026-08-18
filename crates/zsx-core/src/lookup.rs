@@ -1,9 +1,9 @@
-//! Bounded indexed filename/path lookup for ZeroStack.
+//! Bounded filename/path lookup for ZeroStack.
 //!
 //! Planner-free, approval-free, read-only lookup scoped to the approved
 //! workspace root. Explicit `root`, explicit bounded `limit`, deterministic
 //! lexicographic ordering, and no file-content reads. Any root escape or
-//! missing root fails closed. This is the narrow indexed replacement for
+//! missing root fails closed. This is the narrow bounded replacement for
 //! broad `shell find` calls that timed out in papercut `pc_2178c942f3ff`.
 
 use std::path::{Component, Path, PathBuf};
@@ -15,47 +15,116 @@ const DEFAULT_LOOKUP_LIMIT: usize = 20;
 const MAX_LOOKUP_LIMIT: usize = 100;
 const MAX_LOOKUP_DEPTH: usize = 64;
 const MAX_VISITED_ENTRIES: usize = 10_000;
+pub(crate) const MAX_LOOKUP_ROOT_BYTES: usize = 4_096;
+pub(crate) const MAX_LOOKUP_QUERY_BYTES: usize = 256;
+const MAX_LOOKUP_RESULT_PATH_BYTES: usize = 512;
 
 fn tokenize_query(raw: &str) -> String {
     raw.trim().to_owned()
 }
 
-fn glob_match(pattern: &str, text: &str) -> bool {
-    let p: Vec<char> = pattern.chars().collect();
-    let t: Vec<char> = text.chars().collect();
-    glob_match_at(&p, 0, &t, 0)
+/// Linear-state wildcard matcher: `*` stays within one path component,
+/// `**` may cross separators, and `?` consumes one non-separator character.
+/// The active-state vectors make runtime O(pattern × text), never recursive
+/// or exponentially backtracking on adversarial patterns.
+struct GlobPattern {
+    pattern: Vec<char>,
 }
 
-fn glob_match_at(p: &[char], pi: usize, t: &[char], ti: usize) -> bool {
-    if pi == p.len() {
-        return ti == t.len();
+impl GlobPattern {
+    fn new(pattern: &str) -> Self {
+        Self {
+            pattern: pattern.chars().collect(),
+        }
     }
-    if p[pi] == '*' {
-        if pi + 1 < p.len() && p[pi + 1] == '*' {
-            if pi + 2 < p.len() && p[pi + 2] == '/' {
-                if glob_match_at(p, pi + 3, t, ti) {
-                    return true;
+
+    fn epsilon_closure(&self, states: &mut [bool]) {
+        loop {
+            let mut changed = false;
+            for index in 0..self.pattern.len() {
+                if !states[index] || self.pattern[index] != '*' {
+                    continue;
+                }
+                let doubled =
+                    index + 1 < self.pattern.len() && self.pattern[index + 1] == '*';
+                let skip = index + if doubled { 2 } else { 1 };
+                if !states[skip] {
+                    states[skip] = true;
+                    changed = true;
+                }
+                if doubled
+                    && skip < self.pattern.len()
+                    && self.pattern[skip] == '/'
+                    && !states[skip + 1]
+                {
+                    states[skip + 1] = true;
+                    changed = true;
                 }
             }
-            return (ti..=t.len()).any(|idx| glob_match_at(p, pi + 1, t, idx));
+            if !changed {
+                break;
+            }
         }
-        if pi + 1 == p.len() {
-            return t[ti..].iter().all(|c| *c != '/');
+    }
+
+    fn is_match(&self, text: &str) -> bool {
+        let state_count = self.pattern.len() + 1;
+        let mut states = vec![false; state_count];
+        let mut next = vec![false; state_count];
+        states[0] = true;
+        self.epsilon_closure(&mut states);
+        for character in text.chars() {
+            next.fill(false);
+            for index in 0..self.pattern.len() {
+                if !states[index] {
+                    continue;
+                }
+                match self.pattern[index] {
+                    '*' => {
+                        let doubled = index + 1 < self.pattern.len()
+                            && self.pattern[index + 1] == '*';
+                        if doubled || character != '/' {
+                            next[index] = true;
+                        }
+                    }
+                    '?' if character != '/' => next[index + 1] = true,
+                    literal if literal == character => next[index + 1] = true,
+                    _ => {}
+                }
+            }
+            self.epsilon_closure(&mut next);
+            std::mem::swap(&mut states, &mut next);
         }
-        return (ti..=t.len())
-            .any(|idx| (idx == t.len() || t[ti..idx].iter().all(|c| *c != '/')) && glob_match_at(p, pi + 1, t, idx));
+        states[self.pattern.len()]
     }
-    if ti == t.len() {
-        return false;
+}
+
+fn lookup_matches(
+    query: Option<&str>,
+    glob: Option<&GlobPattern>,
+    relative_path: &str,
+    file_name: &str,
+) -> bool {
+    match (query, glob) {
+        (_, Some(pattern)) => {
+            pattern.is_match(relative_path) || pattern.is_match(file_name)
+        }
+        (Some(query), None) => relative_path.contains(query) || file_name.contains(query),
+        (None, None) => true,
     }
-    if p[pi] == '?' {
-        return t[ti] != '/' && glob_match_at(p, pi + 1, t, ti + 1);
-    }
-    p[pi] == t[ti] && glob_match_at(p, pi + 1, t, ti + 1)
 }
 
 fn connector_err(msg: impl Into<String>) -> ConnectorError {
     ConnectorError::new(msg.into())
+}
+
+fn bounded_result_path(path: String) -> Result<String, ConnectorError> {
+    if path.len() > MAX_LOOKUP_RESULT_PATH_BYTES {
+        return Err(connector_err(format!(
+            "fs.lookup encountered a result path exceeding max {MAX_LOOKUP_RESULT_PATH_BYTES} UTF-8 bytes"
+        )));
+    }
+    Ok(path)
 }
 
 fn lexical_join_and_validate(workspace_root: &Path, root: &str) -> Result<PathBuf, ConnectorError> {
@@ -210,6 +279,11 @@ pub fn lookup_search(workspace_root: &Path, input: &Value) -> Result<Value, Conn
         }
         None => return Err(connector_err("fs.lookup requires root")),
     };
+    if root.len() > MAX_LOOKUP_ROOT_BYTES {
+        return Err(connector_err(format!(
+            "fs.lookup root exceeds max {MAX_LOOKUP_ROOT_BYTES} UTF-8 bytes"
+        )));
+    }
 
     let query = match query_val {
         Some(Value::String(s)) => {
@@ -227,6 +301,18 @@ pub fn lookup_search(workspace_root: &Path, input: &Value) -> Result<Value, Conn
         }
         None => None,
     };
+    if query
+        .as_ref()
+        .is_some_and(|query| query.len() > MAX_LOOKUP_QUERY_BYTES)
+    {
+        return Err(connector_err(format!(
+            "fs.lookup query exceeds max {MAX_LOOKUP_QUERY_BYTES} UTF-8 bytes"
+        )));
+    }
+    let glob = query
+        .as_deref()
+        .filter(|query| query.contains('*') || query.contains('?'))
+        .map(GlobPattern::new);
 
     let limit = match limit_val {
         Some(Value::Number(n)) => {
@@ -278,6 +364,10 @@ pub fn lookup_search(workspace_root: &Path, input: &Value) -> Result<Value, Conn
             "count": 0,
             "total": 0,
             "truncated": false,
+            "result_truncated": false,
+            "scan_truncated": false,
+            "oversized_results_omitted": 0,
+            "visited": 0,
             "paths": [],
             "results": [],
             "entries": [],
@@ -288,6 +378,8 @@ pub fn lookup_search(workspace_root: &Path, input: &Value) -> Result<Value, Conn
 
     let mut results: Vec<String> = Vec::new();
     let mut visited = 0usize;
+    let mut scan_truncated = false;
+    let mut oversized_results_omitted = 0usize;
 
     if is_file {
         let rel = target
@@ -296,17 +388,12 @@ pub fn lookup_search(workspace_root: &Path, input: &Value) -> Result<Value, Conn
             .to_string_lossy()
             .replace('\\', "/");
         let file_name = target.file_name().and_then(|n| n.to_str()).unwrap_or("");
-        let matched = if let Some(q) = &query {
-            if q.contains('*') || q.contains('?') {
-                glob_match(q, &rel) || glob_match(q, file_name)
-            } else {
-                rel.contains(q) || file_name.contains(q)
-            }
-        } else {
-            true
-        };
+        let matched = lookup_matches(query.as_deref(), glob.as_ref(), &rel, file_name);
         if matched {
-            results.push(rel);
+            match bounded_result_path(rel) {
+                Ok(rel) => results.push(rel),
+                Err(_) => oversized_results_omitted += 1,
+            }
         }
     } else if is_dir {
         let mut stack: Vec<(PathBuf, usize)> = vec![(target.clone(), 0)];
@@ -314,7 +401,8 @@ pub fn lookup_search(workspace_root: &Path, input: &Value) -> Result<Value, Conn
             if depth > MAX_LOOKUP_DEPTH {
                 continue;
             }
-            if visited > MAX_VISITED_ENTRIES {
+            if visited >= MAX_VISITED_ENTRIES {
+                scan_truncated = true;
                 break;
             }
             let rd = match std::fs::read_dir(&dir) {
@@ -323,8 +411,18 @@ pub fn lookup_search(workspace_root: &Path, input: &Value) -> Result<Value, Conn
             };
             let mut entries: Vec<(PathBuf, bool)> = Vec::new();
             for ent in rd {
-                let ent = match ent { Ok(e) => e, Err(_) => continue };
-                let ft = match ent.file_type() { Ok(f) => f, Err(_) => continue };
+                if visited >= MAX_VISITED_ENTRIES {
+                    scan_truncated = true;
+                    break;
+                }
+                let ent = match ent {
+                    Ok(e) => e,
+                    Err(_) => continue,
+                };
+                let ft = match ent.file_type() {
+                    Ok(f) => f,
+                    Err(_) => continue,
+                };
                 if ft.is_symlink() {
                     continue;
                 }
@@ -332,9 +430,6 @@ pub fn lookup_search(workspace_root: &Path, input: &Value) -> Result<Value, Conn
                 let is_dir = ft.is_dir();
                 entries.push((p, is_dir));
                 visited += 1;
-                if visited > MAX_VISITED_ENTRIES {
-                    break;
-                }
             }
             entries.sort_by(|a, b| a.0.file_name().cmp(&b.0.file_name()));
             for (path, is_dir_entry) in entries {
@@ -344,20 +439,20 @@ pub fn lookup_search(workspace_root: &Path, input: &Value) -> Result<Value, Conn
                     .to_string_lossy()
                     .replace('\\', "/");
                 let file_name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
-                let matched = if let Some(q) = &query {
-                    if q.contains('*') || q.contains('?') {
-                        glob_match(q, &rel) || glob_match(q, file_name)
-                    } else {
-                        rel.contains(q) || file_name.contains(q)
-                    }
-                } else {
-                    true
-                };
+                let matched =
+                    lookup_matches(query.as_deref(), glob.as_ref(), &rel, file_name);
                 if matched {
-                    results.push(rel.clone());
+                    match bounded_result_path(rel) {
+                        Ok(rel) => results.push(rel),
+                        Err(_) => oversized_results_omitted += 1,
+                    }
                 }
-                if is_dir_entry && depth + 1 <= MAX_LOOKUP_DEPTH {
-                    stack.push((path, depth + 1));
+                if is_dir_entry {
+                    if depth + 1 <= MAX_LOOKUP_DEPTH {
+                        stack.push((path, depth + 1));
+                    } else {
+                        scan_truncated = true;
+                    }
                 }
             }
         }
@@ -365,7 +460,9 @@ pub fn lookup_search(workspace_root: &Path, input: &Value) -> Result<Value, Conn
 
     results.sort();
     let total = results.len();
-    let truncated = total > limit;
+    let result_truncated = total > limit;
+    let truncated =
+        result_truncated || scan_truncated || oversized_results_omitted > 0;
     let truncated_results: Vec<String> = results.into_iter().take(limit).collect();
     let count = truncated_results.len();
 
@@ -378,6 +475,10 @@ pub fn lookup_search(workspace_root: &Path, input: &Value) -> Result<Value, Conn
         "count": count,
         "total": total,
         "truncated": truncated,
+        "result_truncated": result_truncated,
+        "scan_truncated": scan_truncated,
+        "oversized_results_omitted": oversized_results_omitted,
+        "visited": visited,
         "paths": truncated_results.clone(),
         "results": truncated_results.clone(),
         "entries": truncated_results.clone(),

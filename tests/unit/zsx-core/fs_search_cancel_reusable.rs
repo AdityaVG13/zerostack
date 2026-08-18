@@ -26,12 +26,12 @@ fn temp_root(label: &str) -> std::path::PathBuf {
 }
 
 fn heavy_permit_holders(root: &std::path::Path) -> usize {
-    let base = match zerostack_machine_permit::try_scoped_permit_base_for("heavy", Some(root)) {
+    let base = match zero_machine_permit::try_scoped_permit_base_for("heavy", Some(root)) {
         Ok(b) => b,
         Err(_) => return 0,
     };
     // Heavy class uses 1 slot (see dispatch_permit_slots).
-    match zerostack_machine_permit::permit_status(&base, 1) {
+    match zero_machine_permit::permit_status(&base, 1) {
         Ok(holders) => holders.len(),
         Err(_) => 0,
     }
@@ -41,7 +41,8 @@ fn heavy_permit_holders(root: &std::path::Path) -> usize {
 fn fs_compound_search_cancel_leaves_dispatch_reusable() {
     let root = temp_root("search-cancel");
     // Minimal project file so FSZero has a repo.
-    std::fs::write(root.join(".papercuts.jsonl"), "pc_2178c942f3ff one-line\n").expect("write papercuts");
+    std::fs::write(root.join(".papercuts.jsonl"), "pc_2178c942f3ff one-line\n")
+        .expect("write papercuts");
     // Add extra files to give search a non-zero window for in-flight cancel.
     for i in 0..1200 {
         let path = root.join(format!("filler_{i:04}.txt"));
@@ -54,11 +55,14 @@ fn fs_compound_search_cancel_leaves_dispatch_reusable() {
     }
 
     let session = ZsxSession::builder(root.clone())
-        .fszero(Arc::new(
-            zsx_core::fszero::FsZeroAdapter::new(&root, "zibb-session").expect("fszero"),
-        ))
+        .with_session_id("zibb-session")
+        .fszero(Arc::new(zsx_core::fszero::FsZeroAdapter::new(
+            &root,
+            "zibb-session",
+        )))
         .graphzero(Arc::new(zsx_core::graphzero::GraphZeroAdapter::new(
-            &root, "zibb-session",
+            &root,
+            "zibb-session",
         )))
         .tokenzero(Arc::new(
             zsx_core::tokenzero::TokenZeroAdapter::new(&root, "zibb-session").expect("tokenzero"),
@@ -87,7 +91,9 @@ fn fs_compound_search_cancel_leaves_dispatch_reusable() {
             )
         });
         std::thread::sleep(Duration::from_millis(15));
-        let actively = session.cancellation().cancel_request(generation, request_id);
+        let actively = session
+            .cancellation()
+            .cancel_request(generation, request_id);
         let res = handle.join().expect("join search");
         if actively {
             match res {
@@ -99,7 +105,8 @@ fn fs_compound_search_cancel_leaves_dispatch_reusable() {
                         "cancelled search must be Cancelled, got {err:?}"
                     );
                     assert!(
-                        !err.to_string().contains("aggregate dispatches did not stop"),
+                        !err.to_string()
+                            .contains("aggregate dispatches did not stop"),
                         "must not leak aggregate-dispatch timeout: {err:?}"
                     );
                     cancelled_once = true;

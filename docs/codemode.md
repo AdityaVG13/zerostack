@@ -57,15 +57,19 @@ Use `Object.keys(value)` to inspect an unfamiliar nested domain value. The stric
 `zero.token.shell` keeps short commands direct. A request whose effective
 timeout (`timeoutMs`, `timeout_ms`, or `timeout_seconds`) exceeds **60000 ms**
 is a long job by contract: it automatically launches in the background and
-returns the job receipt `{job, cursor, version}` immediately instead of
-blocking the model or TUI for minutes with no output. Poll
-`zero.token.job(id, { waitMs?, since?, tailBytes? })` for incremental tail
-progress until `status` leaves `running`; each poll is bounded (`waitMs` max
+returns immediately. The TokenZero domain result carries the job receipt
+`{job, cursor, version}` at `content.value`; do not treat the outer
+`{ack, content}` envelope as the receipt. Poll
+`zero.token.job(id, { waitMs?, since?, tailBytes? })`; each poll's
+`content.value` carries `status`, cursor, and tail. Continue until `status`
+leaves `running`; each poll is bounded (`waitMs` max
 30000). An explicit `background: false` keeps the call foreground even above
 the threshold, and argv-form commands (string arrays) always run foreground.
-Background jobs are session-owned: cancellation tears down the session's job
-tree (process-group termination), and the heavy dispatch permit is held only
-for the launch, never for the job's lifetime.
+The heavy dispatch permit is held only for launch, never for the job's
+lifetime. Engine timeouts terminate the owned process group. In-process
+`ZsxSession`/MCP shutdown cannot yet cancel an active background job because
+the engine teardown hook is not public; this no-claim boundary is tracked by
+`zerostack-9uew`. Use a finite job timeout and poll to a terminal status.
 
 For composed plans, `ctx` provides transport-safe helpers so callers do not
 hard-code nested envelope paths:

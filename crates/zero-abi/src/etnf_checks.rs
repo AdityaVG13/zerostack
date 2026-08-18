@@ -53,9 +53,9 @@ use serde_json::Value;
 
 use crate::digest::sha256_hex;
 use crate::etnf::{
-    CheckerIdentity, ETNF_MAX_ID_BYTES, EtnfError, EvidenceItem, ExplicitFallback,
-    FallbackKind, FiniteWitness, Falsifier, ProposedAuthorityTransition,
-    ProposedTransitionKind, ResourceLedger, RootedEvidence, V7ShadowReport,
+    CheckerIdentity, EtnfError, EvidenceItem, ExplicitFallback, FallbackKind, Falsifier,
+    FiniteWitness, ProposedAuthorityTransition, ProposedTransitionKind, ResourceLedger,
+    RootedEvidence, V7ShadowReport, ETNF_MAX_ID_BYTES,
 };
 use crate::verdict::SafetyVerdict;
 
@@ -318,7 +318,8 @@ impl KillMetrics {
         *issues += 1;
         if *issues > VCQK_KILL_NONCONVERGENCE_MAX_ISSUES {
             self.non_converging_counterexamples += 1;
-            self.counted_nonconverging.insert(counterexample_root.to_string());
+            self.counted_nonconverging
+                .insert(counterexample_root.to_string());
         } else if *issues > 1 {
             self.counterexample_reissues += 1;
         }
@@ -341,7 +342,7 @@ impl KillMetrics {
 
     /// Constant proof that learning/refinement cannot publish authority.
     pub const fn learning_has_no_publish_authority() -> bool {
-        VCQK_LEARNING_REFINEMENT_PUBLISH_AUTHORITY
+        !VCQK_LEARNING_REFINEMENT_PUBLISH_AUTHORITY
     }
 
     pub fn safe_reports(&self) -> u64 {
@@ -399,7 +400,10 @@ fn checker(id: &'static str) -> Result<CheckerIdentity, EtnfError> {
 }
 
 fn fallback() -> Result<ExplicitFallback, EtnfError> {
-    ExplicitFallback::new(FallbackKind::FrozenRawBaseline, "run the frozen raw baseline")
+    ExplicitFallback::new(
+        FallbackKind::FrozenRawBaseline,
+        "run the frozen raw baseline",
+    )
 }
 
 /// Equal-or-descendant path chaining used for adjacent scopes and contracts
@@ -518,7 +522,9 @@ fn unknown_report(
     items_checked: u64,
 ) -> Result<V7ShadowReport, EtnfError> {
     build_report(
-        SafetyVerdict::Unknown { reasons: vec![reason.to_string()] },
+        SafetyVerdict::Unknown {
+            reasons: vec![reason.to_string()],
+        },
         checker,
         scope,
         contract,
@@ -589,7 +595,11 @@ pub fn check_certificate_chain(bytes: &[u8]) -> Result<V7ShadowReport, EtnfError
             VCQK_CONTRACT_CHAIN,
             anchor,
             Vec::new(),
-            vec![format!("certificate chain has {} links, maximum {}", elements.len(), VCQK_MAX_CHAIN_LINKS)],
+            vec![format!(
+                "certificate chain has {} links, maximum {}",
+                elements.len(),
+                VCQK_MAX_CHAIN_LINKS
+            )],
             falsifiers,
             bytes_read,
             element_count,
@@ -680,7 +690,9 @@ pub fn check_certificate_chain(bytes: &[u8]) -> Result<V7ShadowReport, EtnfError
     let proposal = match &verdict {
         SafetyVerdict::Safe => {
             let head = links.last().and_then(|link| {
-                link.certificate.as_ref().map(|certificate| certificate.root.clone())
+                link.certificate
+                    .as_ref()
+                    .map(|certificate| certificate.root.clone())
             });
             head.and_then(|target| {
                 ProposedAuthorityTransition::new(ProposedTransitionKind::ReuseCachedResult, target)
@@ -804,7 +816,12 @@ pub fn check_causal_closure(bytes: &[u8]) -> Result<V7ShadowReport, EtnfError> {
         .demanded
         .iter()
         .chain(document.nodes.iter().map(|node| &node.id))
-        .chain(document.edges.iter().flat_map(|edge| [&edge.from, &edge.to]))
+        .chain(
+            document
+                .edges
+                .iter()
+                .flat_map(|edge| [&edge.from, &edge.to]),
+        )
     {
         if !identifier_within_bounds(identifier) {
             return unknown_report(
@@ -866,14 +883,16 @@ pub fn check_causal_closure(bytes: &[u8]) -> Result<V7ShadowReport, EtnfError> {
     let items = demanded
         .iter()
         .enumerate()
-        .map(|(index, id)| {
-            EvidenceItem::new(format!("demand:{index}"), sha256_hex(id.as_bytes()))
-        })
+        .map(|(index, id)| EvidenceItem::new(format!("demand:{index}"), sha256_hex(id.as_bytes())))
         .collect::<Result<Vec<_>, _>>()?;
 
     let mut facts = vec![
         format!("demanded outputs: {}", demanded.len()),
-        format!("declared closure: {} nodes, {} edges", nodes.len(), edges.len()),
+        format!(
+            "declared closure: {} nodes, {} edges",
+            nodes.len(),
+            edges.len()
+        ),
     ];
     if verdict.grants_authority() {
         facts.push("every demanded output is a declared node".to_string());
@@ -881,16 +900,13 @@ pub fn check_causal_closure(bytes: &[u8]) -> Result<V7ShadowReport, EtnfError> {
     }
 
     let proposal = match &verdict {
-        SafetyVerdict::Safe => demanded
-            .iter()
-            .next()
-            .and_then(|first| {
-                ProposedAuthorityTransition::new(
-                    ProposedTransitionKind::ReuseCachedResult,
-                    sha256_hex(first.as_bytes()),
-                )
-                .ok()
-            }),
+        SafetyVerdict::Safe => demanded.iter().next().and_then(|first| {
+            ProposedAuthorityTransition::new(
+                ProposedTransitionKind::ReuseCachedResult,
+                sha256_hex(first.as_bytes()),
+            )
+            .ok()
+        }),
         _ => None,
     };
 
@@ -1026,7 +1042,10 @@ pub fn check_savings_provenance(bytes: &[u8]) -> Result<V7ShadowReport, EtnfErro
     }
 
     for entry in &document.savings {
-        entries_by_segment.entry(entry.segment.clone()).or_default().push(entry);
+        entries_by_segment
+            .entry(entry.segment.clone())
+            .or_default()
+            .push(entry);
         if !baseline_ids.contains(&entry.segment) {
             verdict = verdict.meet(SafetyVerdict::Unsafe {
                 reasons: vec!["unknown_segment_in_savings_map".to_string()],
@@ -1047,9 +1066,10 @@ pub fn check_savings_provenance(bytes: &[u8]) -> Result<V7ShadowReport, EtnfErro
                     reasons: vec!["duplicate_mapping".to_string()],
                 });
             }
-            Some(entries) => match entries.first().and_then(|entry| {
-                SavingsCategory::classify(&entry.category)
-            }) {
+            Some(entries) => match entries
+                .first()
+                .and_then(|entry| SavingsCategory::classify(&entry.category))
+            {
                 Some(category) => {
                     *category_counts.entry(category.as_str()).or_insert(0) += 1;
                 }
@@ -1065,9 +1085,7 @@ pub fn check_savings_provenance(bytes: &[u8]) -> Result<V7ShadowReport, EtnfErro
     let items = baseline_ids
         .iter()
         .enumerate()
-        .map(|(index, id)| {
-            EvidenceItem::new(format!("segment:{index}"), sha256_hex(id.as_bytes()))
-        })
+        .map(|(index, id)| EvidenceItem::new(format!("segment:{index}"), sha256_hex(id.as_bytes())))
         .collect::<Result<Vec<_>, _>>()?;
 
     let mut facts = vec![
@@ -1086,16 +1104,13 @@ pub fn check_savings_provenance(bytes: &[u8]) -> Result<V7ShadowReport, EtnfErro
     }
 
     let proposal = match &verdict {
-        SafetyVerdict::Safe => baseline_ids
-            .iter()
-            .next()
-            .and_then(|first| {
-                ProposedAuthorityTransition::new(
-                    ProposedTransitionKind::ReuseCachedResult,
-                    sha256_hex(first.as_bytes()),
-                )
-                .ok()
-            }),
+        SafetyVerdict::Safe => baseline_ids.iter().next().and_then(|first| {
+            ProposedAuthorityTransition::new(
+                ProposedTransitionKind::ReuseCachedResult,
+                sha256_hex(first.as_bytes()),
+            )
+            .ok()
+        }),
         _ => None,
     };
 
@@ -1118,5 +1133,3 @@ pub fn check_savings_provenance(bytes: &[u8]) -> Result<V7ShadowReport, EtnfErro
         ledger,
     )
 }
-
-

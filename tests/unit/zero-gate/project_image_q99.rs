@@ -2,13 +2,13 @@
 //! reporter (`zerostack-e7dz`): pass, deny, repair, zero-weight, missing
 //! evidence, and provider-hit-only cases, with L1/L2/L3 never aliased.
 
-use zero_abi::{Sha256Digest, sha256};
+use zero_abi::{sha256, Sha256Digest};
 use zero_gate::{
-    ActionGuardOutcome, CausalGraphRef, DeclaredAddObject, DeclaredChange, DemandMassClass,
-    DemandScenario, ExactObject, ExactRational, PerObjectLayers, PrewarmLedgerRow,
-    ProjectImageManifest, ProofGraphRef, ProposedAction, ShadowResourceLedger,
     child_warm_swap_report, compute_demand_coverage, compute_q99_slack, demand_coverage,
-    hypothetical_child, simulate_action_guard,
+    hypothetical_child, layer_ledger_from_manifest, simulate_action_guard, ActionGuardOutcome,
+    CausalGraphRef, DeclaredAddObject, DeclaredChange, DemandMassClass, DemandScenario,
+    ExactObject, ExactRational, PerObjectLayers, PrewarmLedgerRow, ProjectImageManifest,
+    ProofGraphRef, ProposedAction, ShadowResourceLedger,
 };
 
 // ---------------------------------------------------------------------------
@@ -69,6 +69,38 @@ fn manifest(
     .expect("manifest")
 }
 
+#[test]
+fn manifest_layer_ledger_preserves_only_valid_l2_state() {
+    let valid = d(1);
+    let refetch = d(2);
+    let invalid = d(3);
+    let manifest = manifest(
+        vec![obj(1), obj(2), obj(3)],
+        vec![
+            layer(valid, Some(true), Some(true), Some(true), false, None),
+            layer(refetch, Some(true), Some(true), Some(false), true, None),
+            layer(invalid, Some(true), Some(false), Some(true), false, None),
+        ],
+        vec![scenario("layers", &[valid, refetch, invalid], 1)],
+    );
+
+    let ledger = layer_ledger_from_manifest(&manifest);
+    let valid_entry = ledger.entry(valid).expect("valid L2 entry");
+    assert!(valid_entry.l2_valid);
+    assert!(!valid_entry.l2_needs_refetch);
+    assert!(!valid_entry.l1_valid && !valid_entry.l3_valid);
+
+    let refetch_entry = ledger.entry(refetch).expect("refetch-pending L2 entry");
+    assert!(refetch_entry.l2_valid);
+    assert!(refetch_entry.l2_needs_refetch);
+    assert!(!refetch_entry.l1_valid && !refetch_entry.l3_valid);
+
+    assert!(
+        ledger.entry(invalid).is_none(),
+        "manifest entries without L2 validity must not be promoted"
+    );
+}
+
 fn action(
     id: &str,
     invalidate: Vec<Sha256Digest>,
@@ -101,11 +133,18 @@ fn pass_action_holds_q99_exact() {
     assert_eq!(coverage.valid_mass, 100);
     assert_eq!(coverage.invalid_mass, 0);
     assert_eq!(coverage.unknown_mass, 0);
-    assert_eq!(coverage.l1_hit_mass, 100, "L1 hit is reported, never aliased");
+    assert_eq!(
+        coverage.l1_hit_mass, 100,
+        "L1 hit is reported, never aliased"
+    );
     assert_eq!(coverage.l3_resident_mass, 100);
     assert_eq!(coverage.l2_refetch_mass, 0);
     let c = coverage.coverage.expect("coverage rational");
-    assert_eq!(c, ExactRational::new(100, 100).expect("1/1"), "exact 100/100");
+    assert_eq!(
+        c,
+        ExactRational::new(100, 100).expect("1/1"),
+        "exact 100/100"
+    );
     assert_eq!(c.to_ppm().expect("ppm"), 1_000_000);
     assert_eq!(coverage.denominator_label, "q99_demanded_mass:100");
     assert!(coverage.coverage_unknown_reason.is_none());
@@ -253,8 +292,8 @@ fn deny_insufficient_repair() {
         ],
     );
 
-    let sim =
-        simulate_action_guard(&m, &action("big-invalidation", vec![q1], vec![], true)).expect("guard");
+    let sim = simulate_action_guard(&m, &action("big-invalidation", vec![q1], vec![], true))
+        .expect("guard");
     assert_eq!(sim.current_demanded_mass, 100);
     assert_eq!(sim.next_demanded_mass, 90, "10 of 100 invalidated");
     assert_eq!(sim.baseline_valid_mass, 10);
@@ -263,7 +302,10 @@ fn deny_insufficient_repair() {
     assert_eq!(sim.g_min_numerator_100, 910, "100*(10+0) - 90");
     assert_eq!(sim.g_min, 10, "ceil(910/100)");
     assert_eq!(sim.shortfall_to_hold_q99, 90, "ceil(8910/100)");
-    assert!(!sim.repair_restores_q99, "10 mass of repair cannot reach 99% of 90");
+    assert!(
+        !sim.repair_restores_q99,
+        "10 mass of repair cannot reach 99% of 90"
+    );
     assert!(matches!(
         &sim.outcome,
         ActionGuardOutcome::Deny { reason } if reason.starts_with("minimum_repair_insufficient:")
@@ -290,8 +332,8 @@ fn deny_when_replenish_not_simulated() {
         l1_provider_hit: None,
         unknown_reason: Some("missing evidence".to_owned()),
     };
-    let sim =
-        simulate_action_guard(&m, &action("no-replenish", vec![], vec![add], false)).expect("guard");
+    let sim = simulate_action_guard(&m, &action("no-replenish", vec![], vec![add], false))
+        .expect("guard");
     assert_eq!(sim.g_min, 89, "repair exists but is not simulated");
     assert_eq!(
         sim.outcome,
@@ -327,9 +369,13 @@ fn zero_weight_envelope_unavailable_never_fake() {
 
     let slack = compute_q99_slack(&m, &m.demand_scenarios).expect("slack");
     assert!(!slack.slack_holds, "no vacuous hold on zero demand");
-    assert_eq!(slack.unavailable_reason.as_deref(), Some("zero_weight_envelope"));
+    assert_eq!(
+        slack.unavailable_reason.as_deref(),
+        Some("zero_weight_envelope")
+    );
 
-    let sim = simulate_action_guard(&m, &action("zero-action", vec![z1], vec![], true)).expect("guard");
+    let sim =
+        simulate_action_guard(&m, &action("zero-action", vec![z1], vec![], true)).expect("guard");
     assert_eq!(sim.next_demanded_mass, 0);
     assert_eq!(
         sim.outcome,
@@ -357,10 +403,7 @@ fn coverage_and_slack_exact_rational_no_aliasing() {
             layer(c, None, Some(false), Some(true), false, None),
             layer(e, Some(true), Some(true), Some(true), true, None),
         ],
-        vec![
-            scenario("s1", &[a, b, c, e], 50),
-            scenario("s2", &[a], 30),
-        ],
+        vec![scenario("s1", &[a, b, c, e], 50), scenario("s2", &[a], 30)],
     );
 
     let coverage = compute_demand_coverage(&m, &m.demand_scenarios).expect("coverage");
@@ -429,7 +472,10 @@ fn coverage_and_slack_exact_rational_no_aliasing() {
     assert_eq!(sim.g_min, 179, "ceil(17820/100)");
     assert_eq!(sim.shortfall_to_hold_q99, 49, "ceil(4820/100)");
     assert!(sim.repair_restores_q99);
-    assert_eq!(sim.outcome, ActionGuardOutcome::RepairRequired { g_min: 179 });
+    assert_eq!(
+        sim.outcome,
+        ActionGuardOutcome::RepairRequired { g_min: 179 }
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -454,7 +500,10 @@ fn warm_swap_report_deterministic_child_and_prewarm_ledger() {
 
     let change = DeclaredChange::new(vec![z], vec!["c1".to_owned()]);
     let fork = hypothetical_child(&parent, &change).expect("fork");
-    assert_ne!(fork.child_root, parent.root, "child root differs from parent");
+    assert_ne!(
+        fork.child_root, parent.root,
+        "child root differs from parent"
+    );
     assert_eq!(fork.preserved_old_root, parent.root);
 
     // Child envelope: same demand as the parent (the change did not alter it).
@@ -476,7 +525,10 @@ fn warm_swap_report_deterministic_child_and_prewarm_ledger() {
     let report =
         child_warm_swap_report(&parent, &change, &child_envelope, prewarm).expect("warm swap");
 
-    assert_eq!(report.schema_version, "zerostack.project_image.shadow.q99.v1");
+    assert_eq!(
+        report.schema_version,
+        "zerostack.project_image.shadow.q99.v1"
+    );
     assert_eq!(report.parent_root, parent.root);
     assert_eq!(report.child_root, fork.child_root);
     assert_eq!(report.preserved_old_root, parent.root);
@@ -486,26 +538,31 @@ fn warm_swap_report_deterministic_child_and_prewarm_ledger() {
     // Child coverage: changed root Z became unknown (missing evidence).
     assert_eq!(report.coverage.demanded_mass, 300);
     assert_eq!(report.coverage.valid_mass, 200, "x + y stay L2-valid");
-    assert_eq!(report.coverage.unknown_mass, 100, "z is unknown in the child");
+    assert_eq!(
+        report.coverage.unknown_mass, 100,
+        "z is unknown in the child"
+    );
     assert_eq!(
         report.coverage.coverage.expect("coverage rational"),
         ExactRational::new(200, 300).expect("2/3")
     );
-    assert_eq!(
-        report.slack.slack_numerator_100,
-        -9_700,
-        "100*200 - 99*300"
-    );
+    assert_eq!(report.slack.slack_numerator_100, -9_700, "100*200 - 99*300");
     assert!(!report.warm_swap_holds_q99, "200 < 0.99*300");
     assert_eq!(report.child_repair_to_hold_q99, 97, "ceil(9700/100)");
 
     assert_eq!(report.total_prewarm_mass, 80);
-    assert_eq!(report.unselected_prewarm_mass, 30, "unselected work is ledged");
+    assert_eq!(
+        report.unselected_prewarm_mass, 30,
+        "unselected work is ledged"
+    );
     assert_eq!(report.prewarm_rows.len(), 2);
 
     // The hypothetical action cannot mutate or publish roots: the parent is
     // byte-identical after the report.
-    assert_eq!(parent.digest().expect("parent digest after"), parent_digest_before);
+    assert_eq!(
+        parent.digest().expect("parent digest after"),
+        parent_digest_before
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -675,7 +732,10 @@ fn reports_are_deterministic_and_authority_free() {
     assert_eq!(sim1, sim2, "guard is deterministic");
     assert!(!sim1.has_authority(), "guard grants no authority");
     assert!(
-        sim1.shadow_note.as_deref().unwrap_or_default().contains("shadow"),
+        sim1.shadow_note
+            .as_deref()
+            .unwrap_or_default()
+            .contains("shadow"),
         "guard is explicitly shadow"
     );
 
@@ -685,7 +745,8 @@ fn reports_are_deterministic_and_authority_free() {
     assert!(!slack1.has_authority(), "slack grants no authority");
 
     // Invalidating an absent root contributes zero mass, exactly.
-    let absent = simulate_action_guard(&m, &action("absent", vec![d(9)], vec![], true)).expect("guard");
+    let absent =
+        simulate_action_guard(&m, &action("absent", vec![d(9)], vec![], true)).expect("guard");
     assert_eq!(absent.invalidated_mass, 0);
     assert_eq!(absent.next_demanded_mass, absent.current_demanded_mass);
 }
