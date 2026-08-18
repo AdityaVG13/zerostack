@@ -600,7 +600,7 @@ fn denied_authority_classes_fail_typed_before_execution() {
     // A successful call still reports zero GPU contexts: the idle GPU count
     // is structurally zero.
     let response = embedded
-        .execute(fixture.request("return await z.capabilities.search({query: 'fs'});"))
+        .execute(fixture.request("return await z.capabilities.search('fs');"))
         .expect("successful call executes");
     assert_eq!(response.kind, ZerokernelResultKind::Completed);
     assert_eq!(embedded.live_gpu(), 0);

@@ -116,7 +116,7 @@ impl Default for HostLimits {
             instruction_budget: 100_000,
             microtask_ceiling: 1_024,
             max_inflight_connector_calls: crate::MAX_INFLIGHT_CONNECTOR_CALLS,
-            max_connector_calls: u64::from(crate::MAX_INFLIGHT_CONNECTOR_CALLS) * 16,
+            max_connector_calls: crate::MAX_INFLIGHT_CONNECTOR_CALLS as u64 * 16,
             max_plan_bytes: 256 * 1024,
             max_json_bytes: 1024 * 1024,
         }
