@@ -86,7 +86,7 @@ fn arb_object_inner(
     let child_depth = depth - 1;
     // Bound children to 0..4 to keep payload small and CI fast.
     prop_oneof![
-        leaf.clone().boxed(),
+        arb_leaf(profile, assembly, source_root, producer).boxed(),
         prop::collection::vec(
             arb_object_inner(profile, assembly, source_root, producer, child_depth),
             0..4

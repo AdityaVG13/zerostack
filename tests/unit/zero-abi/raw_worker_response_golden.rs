@@ -195,7 +195,6 @@ const ERROR_GOLDEN: &str = concat!(
 const CANCEL_ACK_GOLDEN: &str = r#"{"kind":"cancel_ack","request_id":"request-1","cancelled":true}"#;
 const CANCEL_ACK_GOLDEN_NL: &str = concat!(r#"{"kind":"cancel_ack","request_id":"request-1","cancelled":true}"#, "\n");
 
-const SHUTDOWN_ACK_GOLDEN: &str = r#"{"kind":"shutdown_ack"}"#;
 const SHUTDOWN_ACK_GOLDEN_NL: &str = concat!(r#"{"kind":"shutdown_ack"}"#, "\n");
 
 fn assert_golden(frame: &WorkerResponseFrame, expected: &str) {
