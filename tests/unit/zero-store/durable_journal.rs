@@ -14,16 +14,17 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use zero_abi::Sha256Digest;
+use zero_abi::{EffectClass, Sha256Digest};
 use zero_store::{
-    abort_journal, commit_journal, commit_journal_with_fault, commit_lease_journal,
-    commit_lease_journal_with_fault, prepare_journal, prepare_journal_with_fault,
-    prepare_lease_journal, read_continuation_cartridge, read_journal_record,
-    read_lease_continuation_cartridge, read_lease_journal_record, read_published_root,
-    recover_journal, recover_lease_journal, record_owner_death, verify_committed_lease_binding,
-    BindingLease, DurableProfileId, FaultPlan, JournalBinding, JournalBoundary,
+    AttemptBinding, AttemptEntry, AttemptEvidence, AttemptJournalPaths, AttemptRecoveryOutcome,
+    AttemptState, BindingLease, DurableProfileId, FaultPlan, JournalBinding, JournalBoundary,
     JournalFailureCode, JournalLeaseBinding, JournalPaths, JournalState, RecoveryOutcome,
-    initialize_published_root,
+    abort_journal, commit_journal, commit_journal_with_fault, commit_lease_journal,
+    commit_lease_journal_with_fault, initialize_published_root, prepare_journal,
+    prepare_journal_with_fault, prepare_lease_journal, read_continuation_cartridge,
+    read_current_attempt, read_journal_record, read_lease_continuation_cartridge,
+    read_lease_journal_record, read_published_root, recover_attempt, recover_journal,
+    recover_lease_journal, record_owner_death, verify_committed_lease_binding,
 };
 
 static NEXT: AtomicU64 = AtomicU64::new(0);
@@ -33,6 +34,10 @@ fn digest(byte: u8) -> Sha256Digest {
     b[0] = byte;
     b[31] = 0x5a;
     Sha256Digest::from_bytes(b)
+}
+
+fn digest_hex(value: &str) -> Sha256Digest {
+    serde_json::from_str(&format!("\"{value}\"")).expect("valid digest")
 }
 
 fn unique_dir(label: &str) -> PathBuf {
@@ -161,6 +166,86 @@ fn torn_write_and_profile_substitution_fail_loudly() {
         substituted.validate().unwrap_err().code,
         JournalFailureCode::ProfileSubstitution
     );
+    let _ = fs::remove_dir_all(dir);
+}
+
+#[test]
+fn pre_cutover_attempt_chain_reconciles_with_frozen_v1_domains() {
+    let dir = unique_dir("attempt-v1-domains");
+    let paths = AttemptJournalPaths::new(dir.join("attempt")).expect("attempt paths");
+    fs::create_dir_all(paths.directory()).expect("attempt directory");
+    let binding = AttemptBinding {
+        schema_version: 1,
+        attempt_id: digest_hex("75c7da638d06f95a77630a972550cada6edf882d62bb4300311c203cc659a31e"),
+        effect_digest: digest_hex("cb8dc3b6b369bad576da0bf7019933562fcc6599f360ce434fe7939d58008855"),
+        effect_class: EffectClass::Irreversible,
+        admission_anchor_digest: digest_hex(
+            "2c61e44edd85f6c09257e8dd60451dec4676ba56733d94538c1adbf05a3912bb",
+        ),
+        durable_profile_id: DurableProfileId::PortableStrict,
+        durable_profile_digest: digest_hex(
+            "c8bf0ccc2c25dcd2f222a137c612e6daae00c2f4509c75eedc3b87592d0c7c9c",
+        ),
+        owner_identity_digest: digest_hex(
+            "9ce742b039bff7628eaa673092be75a270abe0fb364554cb305fc2cf79a12024",
+        ),
+    };
+    let first = AttemptEntry {
+        schema_version: 1,
+        binding: binding.clone(),
+        state: AttemptState::Prepared,
+        sequence: 1,
+        predecessor_entry_digest: None,
+        crossed_at_unix_ns: None,
+        abort_reason: None,
+        evidence: None,
+    };
+    let first_digest =
+        digest_hex("c64d36ee315266a02a44cef0ca763787978187b02f408e3212436a43c0906cfc");
+    assert_eq!(first.digest().expect("legacy first digest"), first_digest);
+    let second = AttemptEntry {
+        schema_version: 1,
+        binding: binding.clone(),
+        state: AttemptState::DispatchCrossed,
+        sequence: 2,
+        predecessor_entry_digest: Some(first_digest),
+        crossed_at_unix_ns: Some(1_787_010_862_028_746_000),
+        abort_reason: None,
+        evidence: None,
+    };
+    let second_digest =
+        digest_hex("95186b72eb13474e90103b40ccb999f9c2c1e10da3f6f4be0bf925fbba2a5b0e");
+    assert_eq!(second.digest().expect("legacy second digest"), second_digest);
+    let third = AttemptEntry {
+        schema_version: 1,
+        binding: binding.clone(),
+        state: AttemptState::Succeeded,
+        sequence: 3,
+        predecessor_entry_digest: Some(second_digest),
+        crossed_at_unix_ns: None,
+        abort_reason: None,
+        evidence: Some(AttemptEvidence::Completion {
+            receipt_digest: digest_hex(
+                "1bb21c7d7885c0a3132bbadd915ccf936f04ac02eafa71a92e8df2be49ddbf98",
+            ),
+            observed_at_unix_ns: 1_787_010_862_205_347_000,
+        }),
+    };
+    for (sequence, entry) in [(1, &first), (2, &second), (3, &third)] {
+        fs::write(
+            paths.directory().join(format!("attempt-{sequence}.json")),
+            entry.canonical_bytes().expect("canonical legacy entry"),
+        )
+        .expect("write legacy entry");
+    }
+
+    let current = read_current_attempt(&paths)
+        .expect("legacy chain validates")
+        .expect("terminal entry");
+    assert_eq!(current.state, AttemptState::Succeeded);
+    let receipt = recover_attempt(&paths, &binding, None).expect("legacy terminal reconciles");
+    assert_eq!(receipt.outcome, AttemptRecoveryOutcome::AlreadySucceeded);
+
     let _ = fs::remove_dir_all(dir);
 }
 

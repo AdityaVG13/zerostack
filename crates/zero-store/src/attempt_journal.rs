@@ -79,6 +79,17 @@ pub const ATTEMPT_JOURNAL_MAX_ENTRIES: u64 = 8;
 const ATTEMPT_BINDING_DOMAIN: &[u8] = b"zerostack.attempt_journal.binding\0";
 const ATTEMPT_ENTRY_DOMAIN: &[u8] = b"zerostack.attempt_journal.entry\0";
 const ATTEMPT_RECOVERY_DOMAIN: &[u8] = b"zerostack.attempt_journal.recovery\0";
+const LEGACY_ZBF_PROFILE_DOMAIN: &[u8] = b"zerostack.zbf_profile.v1\0";
+const ATTEMPT_BINDING_DOMAIN_V1: &[u8] = b"zerostack.attempt_journal.binding.v1\0";
+const ATTEMPT_ENTRY_DOMAIN_V1: &[u8] = b"zerostack.attempt_journal.entry.v1\0";
+
+fn legacy_profile_digest(profile_id: DurableProfileId) -> Sha256Digest {
+    let bytes = DurableProfile::new(profile_id).canonical_bytes();
+    let mut bound = Vec::with_capacity(LEGACY_ZBF_PROFILE_DOMAIN.len() + bytes.len());
+    bound.extend_from_slice(LEGACY_ZBF_PROFILE_DOMAIN);
+    bound.extend_from_slice(&bytes);
+    Sha256Digest::from_bytes(sha256(&bound))
+}
 static ATTEMPT_TEMP_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -326,23 +337,30 @@ impl AttemptBinding {
                 "attempt binding digests must be nonzero",
             ));
         }
-        if self.durable_profile_digest != DurableProfile::new(self.durable_profile_id).digest() {
+        let current = DurableProfile::new(self.durable_profile_id).digest();
+        let legacy = legacy_profile_digest(self.durable_profile_id);
+        if self.durable_profile_digest != current && self.durable_profile_digest != legacy {
             return Err(AttemptJournalError::new(
                 AttemptFailureCode::ProfileSubstitution,
-                "durable profile identity does not match its frozen digest",
+                "durable profile identity does not match a known frozen digest",
             ));
         }
         Ok(())
+    }
+    fn uses_legacy_domains(&self) -> bool {
+        self.durable_profile_digest == legacy_profile_digest(self.durable_profile_id)
     }
     pub fn canonical_bytes(&self) -> Result<Vec<u8>, AttemptJournalError> {
         self.validate()?;
         canonical_bytes(self)
     }
     pub fn digest(&self) -> Result<Sha256Digest, AttemptJournalError> {
-        Ok(domain_digest(
-            ATTEMPT_BINDING_DOMAIN,
-            &self.canonical_bytes()?,
-        ))
+        let domain = if self.uses_legacy_domains() {
+            ATTEMPT_BINDING_DOMAIN_V1
+        } else {
+            ATTEMPT_BINDING_DOMAIN
+        };
+        Ok(domain_digest(domain, &self.canonical_bytes()?))
     }
 }
 
@@ -568,10 +586,12 @@ impl AttemptEntry {
         canonical_bytes(self)
     }
     pub fn digest(&self) -> Result<Sha256Digest, AttemptJournalError> {
-        Ok(domain_digest(
-            ATTEMPT_ENTRY_DOMAIN,
-            &self.canonical_bytes()?,
-        ))
+        let domain = if self.binding.uses_legacy_domains() {
+            ATTEMPT_ENTRY_DOMAIN_V1
+        } else {
+            ATTEMPT_ENTRY_DOMAIN
+        };
+        Ok(domain_digest(domain, &self.canonical_bytes()?))
     }
 }
 
@@ -1313,12 +1333,16 @@ fn read_canonical_entry(
     paths: &AttemptJournalPaths,
     sequence: u64,
 ) -> Result<CanonicalRead<AttemptEntry>, AttemptJournalError> {
-    let read = read_canonical::<AttemptEntry>(
+    let mut read = read_canonical::<AttemptEntry>(
         &paths.entry_path(sequence),
         AttemptFailureCode::EntryMissing,
         ATTEMPT_ENTRY_DOMAIN,
     )?;
     read.value.validate()?;
+    // The 2026-08 profile-domain cutover changed both profile and journal
+    // domains without changing the numeric schema. Recompute from the
+    // validated binding so old chains retain their original predecessor IDs.
+    read.digest = read.value.digest()?;
     Ok(read)
 }
 

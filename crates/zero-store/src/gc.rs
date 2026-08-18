@@ -24,6 +24,9 @@ use zero_abi::zbf::{
 
 pub const GC_SCHEMA_VERSION_LEGACY: &str = "zerostack.cas-gc.legacy";
 const GC_SCHEMA_VERSION_V1: &str = "zerostack.cas-gc.v1";
+const GC_SCHEMA_VERSION_V2: &str = "zerostack.cas-gc.v2";
+const GC_CONTRACT_DIGEST_V2: &str =
+    "ad931317c574795866b794c67dc4067415decc91113dae699e692c69d64aea0e";
 pub const GC_SCHEMA_VERSION: &str = "zerostack.cas-gc";
 /// Hard bounds keep malformed metadata from turning collection into an
 /// unbounded allocation or path traversal surface.
@@ -864,13 +867,21 @@ fn write_gc_json<T: Serialize>(path: &Path, value: &T) -> Result<(), GcError> {
     gc_atomic_write(path, &serialize_gc_json(value)?).map_err(GcError::Io)
 }
 
+fn bound_gc_contract_matches(schema_version: &str, contract_digest: &str) -> bool {
+    match schema_version {
+        GC_SCHEMA_VERSION_V2 => contract_digest == GC_CONTRACT_DIGEST_V2,
+        GC_SCHEMA_VERSION => contract_digest == gc_contract_digest_hex(),
+        _ => false,
+    }
+}
+
 fn validate_record_schema(
     schema_version: &str,
     record_type: &str,
     path: &Path,
     expected_type: &str,
 ) -> Result<(), GcError> {
-    let reason = if schema_version != GC_SCHEMA_VERSION {
+    let reason = if schema_version != GC_SCHEMA_VERSION && schema_version != GC_SCHEMA_VERSION_V2 {
         Some(format!("unsupported schema_version {schema_version}"))
     } else if record_type != expected_type {
         Some(format!("record_type {record_type}"))
@@ -891,9 +902,10 @@ fn validate_record_common<R: GcRecord>(
     }
     match schema_version {
         GC_SCHEMA_VERSION_LEGACY | GC_SCHEMA_VERSION_V1 if contract_digest.is_none() => {}
-        GC_SCHEMA_VERSION => {
-            let expected = gc_contract_digest_hex();
-            if contract_digest != Some(expected.as_str()) {
+        GC_SCHEMA_VERSION_V2 | GC_SCHEMA_VERSION => {
+            if !contract_digest
+                .is_some_and(|digest| bound_gc_contract_matches(schema_version, digest))
+            {
                 return Err(corrupt(path, "store_contract_digest mismatch".into()));
             }
         }
@@ -1479,7 +1491,10 @@ fn read_sweep_progress(path: &Path) -> Result<SweepProgress, GcError> {
         path,
         GC_RECORD_TYPE_SWEEP_PROGRESS,
     )?;
-    if progress.store_contract_digest != gc_contract_digest_hex() {
+    if !bound_gc_contract_matches(
+        &progress.schema_version,
+        &progress.store_contract_digest,
+    ) {
         return Err(corrupt(path, "store_contract_digest mismatch".into()));
     }
     validate_run_id(&progress.run_id).map_err(|error| corrupt(path, error.to_string()))?;
@@ -1882,18 +1897,18 @@ fn validate_candidate_object(
 pub fn validate_dry_run_report(value: &serde_json::Value) -> Result<(), GcError> {
     serialize_gc_json(value)?;
     exact_keys(value, DRY_RUN_FIELDS, "extra top-level keys")?;
-    if value
-        .get("schema_version")
-        .and_then(serde_json::Value::as_str)
-        != Some(GC_SCHEMA_VERSION)
-    {
+    let schema_version = require_str(value, "schema_version")?;
+    if schema_version != GC_SCHEMA_VERSION && schema_version != GC_SCHEMA_VERSION_V2 {
         return Err(GcError::SchemaViolation("schema_version".into()));
     }
     if value.get("record_type").and_then(serde_json::Value::as_str) != Some(GC_RECORD_TYPE_DRY_RUN)
     {
         return Err(GcError::SchemaViolation("record_type".into()));
     }
-    if require_str(value, "store_contract_digest")? != gc_contract_digest_hex() {
+    if !bound_gc_contract_matches(
+        schema_version,
+        require_str(value, "store_contract_digest")?,
+    ) {
         return Err(GcError::SchemaViolation("store_contract_digest".into()));
     }
     validate_run_id(require_str(value, "run_id")?)?;
@@ -1975,13 +1990,17 @@ pub fn gc_report_digest_hex(report: &DryRunReport) -> Result<String, GcError> {
 pub fn validate_repair_receipt(value: &serde_json::Value) -> Result<(), GcError> {
     serialize_gc_json(value)?;
     exact_keys(value, REPAIR_RECEIPT_FIELDS, "extra repair receipt keys")?;
-    if require_str(value, "schema_version")? != GC_SCHEMA_VERSION {
+    let schema_version = require_str(value, "schema_version")?;
+    if schema_version != GC_SCHEMA_VERSION && schema_version != GC_SCHEMA_VERSION_V2 {
         return Err(GcError::SchemaViolation("schema_version".into()));
     }
     if require_str(value, "record_type")? != GC_RECORD_TYPE_REPAIR {
         return Err(GcError::SchemaViolation("record_type".into()));
     }
-    if require_str(value, "store_contract_digest")? != gc_contract_digest_hex() {
+    if !bound_gc_contract_matches(
+        schema_version,
+        require_str(value, "store_contract_digest")?,
+    ) {
         return Err(GcError::SchemaViolation("store_contract_digest".into()));
     }
     require_gc_producer(require_str(value, "producer_id")?)?;
