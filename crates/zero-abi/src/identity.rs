@@ -142,6 +142,9 @@ pub enum ObjectClass {
     /// zero-gate authority objects (permits, assets, admission records)
     /// rooted under the same canonical byte path.
     AuthorityObject,
+    /// W9-E trusted safe-expand handle (zerostack-qg2a): the self-rooted
+    /// seal of every authority binding of one exact expansion.
+    SafeExpandHandle,
     /// Rooted receipt for migrating a legacy rooted object into the current
     /// ABI (ZS-KERNEL-007): pins source and target roots under one receipt.
     MigrationReceipt,
@@ -163,6 +166,7 @@ impl ObjectClass {
             ObjectClass::DecisionView => "zerostack.object.decision_view",
             ObjectClass::Delta => "zerostack.object.delta",
             ObjectClass::AuthorityObject => "zerostack.object.authority_object",
+            ObjectClass::SafeExpandHandle => "zerostack.object.safe_expand_handle",
             ObjectClass::MigrationReceipt => "zerostack.object.migration_receipt",
         }
     }
