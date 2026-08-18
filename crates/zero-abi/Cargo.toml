@@ -35,3 +35,7 @@ path = "../../tests/unit/zero-abi/safe_expand.rs"
 [[test]]
 name = "etnf"
 path = "../../tests/unit/zero-abi/etnf.rs"
+
+[[test]]
+name = "zbf_from_bytes_harness"
+path = "../../tests/unit/zero-abi/zbf_from_bytes_harness.rs"

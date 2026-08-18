@@ -14,6 +14,10 @@ thiserror = "2"
 zero-abi = { path = "../zero-abi" }
 zero-ref = { path = "../zero-ref" }
 
+[dev-dependencies]
+proptest = "1"
+sha2 = { workspace = true }
+
 [[test]]
 name = "ensure_layout"
 path = "../../tests/unit/zero-store/ensure_layout.rs"
@@ -25,3 +29,7 @@ path = "../../tests/unit/zero-store/gc_schema.rs"
 [[test]]
 name = "quarantine_reap"
 path = "../../tests/unit/zero-store/quarantine_reap.rs"
+
+[[test]]
+name = "zbf_refs_differential"
+path = "../../tests/unit/zero-store/zbf_refs_differential.rs"
