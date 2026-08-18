@@ -923,7 +923,16 @@ impl Gate {
         let fixture = Fixture::new("paired-quality");
         let supervisor = fixture.embedded_with_w9e(evidence);
         let program = format!(
-            "return await z.resolve({{scenario_id: 's1', projection_atoms: ['{}', '{}']}});",
+            r#"
+            const r = await z.resolve({{scenario_id: 's1', projection_atoms: ['{}', '{}']}});
+            return {{
+                atoms: r.atoms,
+                projection_root: r.projection_root,
+                visible_bytes: r.visible_bytes,
+                certified_atoms: r.certified_atoms,
+                first_try_sufficiency: r.first_try_sufficiency,
+            }};
+            "#,
             atom_a.to_hex(),
             atom_b.to_hex()
         );
