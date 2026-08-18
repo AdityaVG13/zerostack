@@ -312,13 +312,13 @@ retry_condition = "Retry only when a tracked fuzz target ships with the clone."
 id = "F-MIRI-NARROW"
 family = "quality"
 name = "Miri on zero-ref/zero-store hot paths"
-status = "partial"
+status = "present"
 weight = 0.008196721311
 weight_units = 2
 evidence = ["scripts/run_miri_narrow.sh", "rust-toolchain.toml"]
-rationale = "Script exists and host miri test -p zero-ref is green; rch classified the command as non-compilation and ran it locally, so this is not yet a remote/CI gate."
-retry_condition = "miri test -p zero-ref green on rch"
-notes = "scripts/run_miri_narrow.sh is the floor. Host rust-toolchain presence is not the feature."
+rationale = "The narrow zero-ref Miri gate is remotely executed by RCH through cargo-miri. Fresh Spark proof on aarch64-unknown-linux-gnu passed zeroref_api 8/8, zeroref_proptest 2/2, and doctest 1/1."
+retry_condition = "Retry on any narrow Miri failure or if rch admit no longer classifies the cargo-miri command as offload."
+notes = "scripts/run_miri_narrow.sh is the remote floor; host-only rustup/Miri evidence is insufficient."
 [[feature]]
 id = "F-FEATURE-UNIVERSE-INREPO"
 family = "surface"

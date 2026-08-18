@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-exclude = ["conformance", "fuzz"]
+exclude = ["conformance", "fuzz", ".rch-tmp", ".rch-tmp/*"]
 members = [
     "crates/zero-abi",
     "crates/zero-cert",

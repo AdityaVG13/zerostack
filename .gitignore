@@ -83,14 +83,14 @@ crates/zerostack-harness/
 bindings/node/prebuilds/
 tests/scripts/
 tests/unit/zero-abi/fuzz_corpus_untrusted_bytes_20260815.rs
-scripts/bench/
+scripts/bench/*
+!scripts/bench/savings_bench.py
 scripts/bless-golden.sh
 scripts/capture_golden.py
 scripts/check_bench_history.py
 scripts/check_feature_coverage_dashboard.py
 scripts/check_golden_integrity.py
 scripts/check_ledger_retry.py
-scripts/run_miri_narrow.sh
 
 .dolt/
 .beads-credential-key
