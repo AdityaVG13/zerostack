@@ -11,6 +11,7 @@ pub const CODEMODE_WALL_MS_ENVS: &[&str] = &[
     "FSZERO_CODEMODE_WALL_MS",
     "ZEROSTACK_CODEMODE_WALL_MS",
     "TOKENZERO_CODEMODE_WALL_MS",
+    "GRAPHZERO_CODEMODE_MAX_WALL_MS",
 ];
 
 /// Effective wall with a 1ms floor; malformed values fall through.
@@ -24,7 +25,6 @@ pub fn effective_max_wall_ms() -> u64 {
     }
     MAX_WALL_MS
 }
-
 
 /// Resource limits applied to one host execution.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

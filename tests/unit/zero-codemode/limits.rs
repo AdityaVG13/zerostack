@@ -41,6 +41,12 @@ fn named_environment_overrides_share_priority_and_floor() {
     assert_eq!(HostLimits::default().wall_timeout, Duration::from_millis(MAX_WALL_MS));
 
     // SAFETY: this test target has one test and is run with one test thread.
+    unsafe { std::env::set_var("GRAPHZERO_CODEMODE_MAX_WALL_MS", "432") };
+    assert_eq!(effective_max_wall_ms(), 432);
+    // SAFETY: this test target has one test and is run with one test thread.
+    unsafe { std::env::remove_var("GRAPHZERO_CODEMODE_MAX_WALL_MS") };
+
+    // SAFETY: this test target has one test and is run with one test thread.
     unsafe { std::env::set_var("TOKENZERO_CODEMODE_WALL_MS", "0") };
     assert_eq!(effective_max_wall_ms(), 1);
 

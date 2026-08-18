@@ -7,7 +7,11 @@
 //! transaction, recipes, world parsing, and `fz://` result adaptation remain
 //! engine/store concerns. Its MCP transport loop is already owned by
 //! `zero-mcp`; only FSZero store methods remain engine-local.
-
+//!
+//! `GraphZero/crates/graphzero-engine/src/codemode` was audited on the same
+//! date: generic execution, limits, scheduling, and response bounding map to
+//! this host; query steps, snapshot state, `gz://query` envelopes, and index
+//! evidence remain GraphZero domain authority.
 
 mod cancellation;
 mod decision_gate;

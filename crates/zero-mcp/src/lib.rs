@@ -8,6 +8,12 @@
 //! [`zero_abi::SurfaceRegistration`] and callbacks that own operation
 //! semantics; this crate does not import an engine crate or execute CodeMode
 //! plans.
+//!
+//! The 2026-08-17 receive audit of
+//! `GraphZero/crates/graphzero-mcp-compat` found the compatibility crate
+//! already delegates registration, bounded dispatch, cancellation, and stdio
+//! lifecycle here. Its GraphZero operation catalog and callbacks remain a
+//! domain adapter; no second MCP transport is received.
 
 pub mod mcp_transport;
 
