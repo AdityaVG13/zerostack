@@ -1777,13 +1777,13 @@ impl W9eRoute {
                 actual: session.delta_seq,
             });
         }
-        if state.terminal {
-            return Err(DemandError::SessionExhausted { handle_id });
-        }
 
         let permit = self.revalidate_or_refuse(&state.handle, live)?;
         Self::check_session_consistency(&state, &permit)?;
 
+        if state.terminal {
+            return Err(DemandError::SessionExhausted { handle_id });
+        }
         let mut new_atoms: Vec<Sha256Digest> = Vec::with_capacity(request.atom_refs.len());
         for atom in &request.atom_refs {
             if !state.plan.contains(*atom) {

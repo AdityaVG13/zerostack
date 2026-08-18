@@ -249,23 +249,22 @@ fn corpus_complete_multi_file_first_expansion_is_root_projection_exact() {
     assert_eq!(expansion.projection_root, expansion.permit.projection_root());
     assert_eq!(expansion.projection_root, plan.projection_root);
     assert_eq!(returned, sorted(&all));
-    assert_eq!(
-        expansion.atoms,
-        vec![
-            zero_gate::ExpandedAtom {
-                atom_root: a,
-                byte_len: 100
-            },
-            zero_gate::ExpandedAtom {
-                atom_root: b,
-                byte_len: 200
-            },
-            zero_gate::ExpandedAtom {
-                atom_root: c,
-                byte_len: 300
-            },
-        ]
-    );
+    let mut expected_atoms = vec![
+        zero_gate::ExpandedAtom {
+            atom_root: a,
+            byte_len: 100,
+        },
+        zero_gate::ExpandedAtom {
+            atom_root: b,
+            byte_len: 200,
+        },
+        zero_gate::ExpandedAtom {
+            atom_root: c,
+            byte_len: 300,
+        },
+    ];
+    expected_atoms.sort_by_key(|atom| atom.atom_root);
+    assert_eq!(expansion.atoms, expected_atoms);
     expansion.validate().unwrap();
 
     // Metrics: exact visible bytes, ledged backend work, zero retries,
@@ -378,6 +377,21 @@ fn corpus_partial_projection_deltas_append_only_new_atoms() {
     session = delta.session;
 
     // Delta 2: atom D -- now the envelope is exhausted.
+    // Re-expanding an already-expanded atom is refused.
+    match route.expand_delta(&session, &IncrementalDeltaRequest::new(vec![c]).unwrap(), &live) {
+        Err(DemandError::DeltaAtomAlreadyExpanded { atom_root }) => assert_eq!(atom_root, c),
+        other => panic!("expected DeltaAtomAlreadyExpanded, got {other:?}"),
+    }
+
+    // An atom outside the certified envelope is refused.
+    match route.expand_delta(
+        &session,
+        &IncrementalDeltaRequest::new(vec![digest(9)]).unwrap(),
+        &live,
+    ) {
+        Err(DemandError::DeltaAtomNotCertified { .. }) => {}
+        other => panic!("expected DeltaAtomNotCertified, got {other:?}"),
+    }
     let delta = route
         .expand_delta(&session, &IncrementalDeltaRequest::new(vec![d]).unwrap(), &live)
         .unwrap();
@@ -395,21 +409,6 @@ fn corpus_partial_projection_deltas_append_only_new_atoms() {
     expanded.insert(d);
     assert_eq!(expanded, envelope.into_iter().collect());
 
-    // Re-expanding an already-expanded atom is refused.
-    match route.expand_delta(&session, &IncrementalDeltaRequest::new(vec![c]).unwrap(), &live) {
-        Err(DemandError::DeltaAtomAlreadyExpanded { atom_root }) => assert_eq!(atom_root, c),
-        other => panic!("expected DeltaAtomAlreadyExpanded, got {other:?}"),
-    }
-
-    // An atom outside the certified envelope is refused.
-    match route.expand_delta(
-        &session,
-        &IncrementalDeltaRequest::new(vec![digest(9)]).unwrap(),
-        &live,
-    ) {
-        Err(DemandError::DeltaAtomNotCertified { .. }) => {}
-        other => panic!("expected DeltaAtomNotCertified, got {other:?}"),
-    }
 
     // A stale continuation (replayed pre-delta token) is refused.
     let stale = expansion.session.clone();
