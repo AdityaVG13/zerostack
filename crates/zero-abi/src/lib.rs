@@ -23,6 +23,7 @@ pub mod decision_view;
 pub mod digest;
 pub mod dispatch;
 pub mod effect;
+pub mod etnf;
 pub mod exec_dag;
 pub mod exec_stream;
 pub mod exec_trace;
@@ -34,6 +35,7 @@ pub mod reasoning;
 pub mod result;
 pub mod redaction;
 pub mod robust_snap;
+pub mod safe_expand;
 pub mod schema;
 pub mod surface;
 pub mod telemetry;
@@ -116,6 +118,13 @@ pub use effect::{
     EffectRollback, EffectTarget, EffectVerificationPlan, EffectVerificationStep,
     TypedEffectOperation, effect_ir_contract_digest, effect_ir_contract_manifest,
 };
+pub use etnf::{
+    CheckerIdentity, ETNF_HEX_DIGEST_LEN, ETNF_MAX_EVIDENCE_ITEMS, ETNF_MAX_FALSIFIERS,
+    ETNF_MAX_ID_BYTES, ETNF_MAX_STRING_BYTES, ETNF_MAX_WITNESS_FACTS, ETNF_SCHEMA_ID,
+    EtnfError, EvidenceItem, ExplicitFallback, FallbackKind, FiniteWitness, Falsifier,
+    ProposedAuthorityTransition, ProposedTransitionKind, ResourceLedger, RootedEvidence,
+    ShadowCertificate, V7ShadowReport,
+};
 pub use exec_dag::{
     MAX_EXEC_DAG_DEPENDENCIES_PER_NODE, MAX_EXEC_DAG_NODES, ExecDagError, ExecDag,
     ExecNodeKind, ExecNode,
@@ -183,6 +192,12 @@ pub use robust_snap::{
     ROBUST_SNAP_MODEL_VERSION, RobustSnapCertificate, RobustSnapError, RobustSnapFailureCode,
     SnapLevel, WorldFiberDescriptor, robust_snap_contract_digest,
     robust_snap_contract_manifest, validate_heuristic_world_order,
+};
+pub use safe_expand::{
+    CompletenessBinding, CompletenessEvidence, ExpandOutcome, ExpandPermit,
+    LiveCompleteness, LiveExpandState, MAX_SAFE_EXPAND_STRING_BYTES,
+    SAFE_EXPAND_CONTRACT_VERSION, SafeExpandError, SafeExpandHandle,
+    SafeExpandIssueRequest, SafeExpandIssuer,
 };
 pub use schema::{
     canonical_json, canonical_schema_json, normalize_schema, schema_diff, schema_fingerprint_hex,

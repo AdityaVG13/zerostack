@@ -27,3 +27,11 @@ path = "../../tests/unit/zero-abi/zerokernel.rs"
 [[test]]
 name = "result"
 path = "../../tests/unit/zero-abi/result.rs"
+
+[[test]]
+name = "safe_expand"
+path = "../../tests/unit/zero-abi/safe_expand.rs"
+
+[[test]]
+name = "etnf"
+path = "../../tests/unit/zero-abi/etnf.rs"
