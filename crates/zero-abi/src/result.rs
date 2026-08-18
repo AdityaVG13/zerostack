@@ -162,7 +162,7 @@ fn validate_preview(preview: Option<&str>) -> Result<(), ZeroResultBuildError> {
 /// Extracted from the engine-local CodeMode hosts. Canonical `fz://` /
 /// `gz://` / `tz://` recovery keys become `content.kind=ref`. Non-canonical
 /// aliases stay inline. Failures are always inline `{ok:false, detail, method}`.
-pub fn zero_result_from_engine_step(
+pub fn from_step(
     ack: &str,
     ok: bool,
     method: &str,
@@ -213,7 +213,7 @@ pub fn zero_result_from_engine_step(
 }
 
 /// Serialize a result for the CodeMode wire (canonical tagged shape only).
-pub fn zero_result_to_wire(result: &ZeroResult) -> Value {
+pub fn to_wire(result: &ZeroResult) -> Value {
     serde_json::to_value(result).expect("ZeroResult always serializes")
 }
 
