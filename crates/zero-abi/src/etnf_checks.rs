@@ -418,7 +418,7 @@ fn identifier_within_bounds(value: &str) -> bool {
 }
 
 fn chain_falsifiers() -> Result<Vec<Falsifier>, EtnfError> {
-    vec![
+    Ok(vec![
         Falsifier::new(
             "W7-T03-f1",
             "adjacent root binding: successor evidence anchor must equal the predecessor certificate root",
@@ -439,13 +439,11 @@ fn chain_falsifiers() -> Result<Vec<Falsifier>, EtnfError> {
             "W7-T03-f5",
             "every chain link must be a Safe report carrying a live certificate",
         )?,
-    ]
-    .into_iter()
-    .collect()
+    ])
 }
 
 fn causal_falsifiers() -> Result<Vec<Falsifier>, EtnfError> {
-    vec![
+    Ok(vec![
         Falsifier::new(
             "W7-T11-f1",
             "a demanded output is absent from the declared closure",
@@ -454,13 +452,11 @@ fn causal_falsifiers() -> Result<Vec<Falsifier>, EtnfError> {
             "W7-T11-f2",
             "a dependency edge references a node the declared closure does not contain",
         )?,
-    ]
-    .into_iter()
-    .collect()
+    ])
 }
 
 fn savings_falsifiers() -> Result<Vec<Falsifier>, EtnfError> {
-    vec![
+    Ok(vec![
         Falsifier::new(
             "W7-T13-f1",
             "a savings entry declares a category outside the six trace-auditable classifications",
@@ -477,9 +473,7 @@ fn savings_falsifiers() -> Result<Vec<Falsifier>, EtnfError> {
             "W7-T13-f4",
             "the baseline itself repeats a segment identifier",
         )?,
-    ]
-    .into_iter()
-    .collect()
+    ])
 }
 
 #[allow(clippy::too_many_arguments)]
