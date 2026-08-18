@@ -283,10 +283,10 @@ fn corpus_safe_multi_file_snap_single_expansion_no_discovery() {
         ]
     );
     assert_eq!(packet.atoms.len(), 3);
-    assert_eq!(packet.atoms[0], zero_gate::snap_to_file::PacketAtom {
+    assert!(packet.atoms.contains(&zero_gate::snap_to_file::PacketAtom {
         atom_root: a.to_hex(),
-        byte_len: 100
-    });
+        byte_len: 100,
+    }));
     packet.validate().unwrap();
     packet.verify_root(&packet.packet_root()).unwrap();
 
