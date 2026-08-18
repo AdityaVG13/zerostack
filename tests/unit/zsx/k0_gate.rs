@@ -1060,7 +1060,7 @@ impl Gate {
             Point {
                 name: "wall_5000ms",
                 profile: "embedded",
-                budget: default,
+                budget: default.clone(),
                 preview: 4096,
                 expected: None,
                 program: "return 1;",
@@ -1080,7 +1080,7 @@ impl Gate {
             Point {
                 name: "calls_64",
                 profile: "embedded",
-                budget: default,
+                budget: default.clone(),
                 preview: 4096,
                 expected: None,
                 program: "return 1;",
@@ -1100,7 +1100,7 @@ impl Gate {
             Point {
                 name: "expected_root_committed",
                 profile: "embedded",
-                budget: default,
+                budget: default.clone(),
                 preview: 4096,
                 expected: Some(committed.clone()),
                 program: "return 1;",
@@ -1110,7 +1110,7 @@ impl Gate {
             Point {
                 name: "preview_64",
                 profile: "embedded",
-                budget: default,
+                budget: default.clone(),
                 preview: 64,
                 expected: None,
                 program: "return 1;",
@@ -1120,7 +1120,7 @@ impl Gate {
             Point {
                 name: "preview_4096",
                 profile: "embedded",
-                budget: default,
+                budget: default.clone(),
                 preview: 4096,
                 expected: None,
                 program: "return 1;",
@@ -1130,7 +1130,7 @@ impl Gate {
             Point {
                 name: "oneshot_trivial",
                 profile: "oneshot",
-                budget: default,
+                budget: default.clone(),
                 preview: 4096,
                 expected: None,
                 program: "return 1;",
@@ -1370,7 +1370,7 @@ impl Gate {
 
         if mode == "empty" || mode == "both" {
             let fixture = Fixture::new("soak-empty");
-            let supervisor = match profile {
+            let supervisor = match profile.as_str() {
                 "oneshot" => fixture.oneshot(),
                 _ => fixture.embedded(),
             };
@@ -1434,7 +1434,7 @@ impl Gate {
                 seed.kind == ZerokernelResultKind::Completed,
                 "stateful soak: seed commit completes",
             );
-            let supervisor = match profile {
+            let supervisor = match profile.as_str() {
                 "oneshot" => fixture.oneshot(),
                 _ => fixture.embedded(),
             };
