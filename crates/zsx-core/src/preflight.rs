@@ -636,7 +636,7 @@ pub fn broker(
     if let Some(manifest_root) = &request.roots.capability_manifest_root {
         if scan.opaque {
             return BrokerOutcome::Refused(format!(
-                "plan contains constructs the preflight scanner cannot fully analyze ({}) so capability-manifest compliance cannot be certified",
+                "plan contains constructs the preflight scanner cannot fully analyze ({}) so it cannot certify capability-manifest compliance",
                 scan.opaque_reason.as_deref().unwrap_or("unknown construct")
             ));
         }
@@ -675,6 +675,9 @@ pub fn broker(
     // enumerate at preflight, runtime enforcement covers the overflow.
     if external_reads.len() <= MAX_EXTERNAL_PATHS {
         for path in &external_reads {
+            if in_root_path(path, &root_text) {
+                continue;
+            }
             if !mints.contains(path) {
                 return BrokerOutcome::Refused(format!(
                     "external read of {path} requires an explicit grant: mint zero.fs.read_grant({{path: {path}}}) (or zero.fs.compound('readGrant', {{path: {path}}})) for exactly that path first"
@@ -906,23 +909,18 @@ fn collect_mint(
     root_text: &str,
     mints: &mut Vec<String>,
 ) -> Result<(), String> {
-    let path = mention
-        .first_arg
-        .clone()
-        .or_else(|| {
-            mention
-                .object_keys
-                .iter()
-                .find(|key| key.key == "path")
-                .and_then(|key| key.single.clone())
-        })
-        .or_else(|| {
-            mention
-                .object_keys
-                .iter()
-                .find(|key| key.key == "arg")
-                .and_then(|key| key.single.clone())
-        });
+    let object_path = || {
+        mention
+            .object_keys
+            .iter()
+            .find(|key| key.key == "path" || key.key == "arg")
+            .and_then(|key| key.single.clone())
+    };
+    let path = if mention.surface == "fs" && mention.method == "compound" {
+        object_path()
+    } else {
+        mention.first_arg.clone().or_else(object_path)
+    };
     let Some(path) = path else {
         return Err("fs.read_grant requires a path string".to_owned());
     };
@@ -1385,15 +1383,15 @@ pub fn scan_plan(program: &str) -> PlanScan {
                             }
                             continue;
                         }
-                        if is_surface_name(&member1)
-                            && !shadowed.surface_shadowed(&member1)
+                        if is_surface_name(ident)
+                            && !shadowed.surface_shadowed(ident)
                             && !shadowed.zero
                         {
                             // Bare surface call without the zero root.
                             if let Some(mention) = capture_mention(
                                 &mut scanner,
                                 a2,
-                                mention_args(&member1, ident, false, false, false),
+                                mention_args(ident, &member1, false, false, false),
                             ) {
                                 mentions.push(mention);
                             }
