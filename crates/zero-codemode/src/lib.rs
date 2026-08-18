@@ -12,6 +12,11 @@
 //! date: generic execution, limits, scheduling, and response bounding map to
 //! this host; query steps, snapshot state, `gz://query` envelopes, and index
 //! evidence remain GraphZero domain authority.
+//!
+//! `TokenZero/crates/tokenzero-codemode` was also audited on 2026-08-17. It is
+//! now a thin raw-worker CLI over TokenZero domain execution; no interpreter
+//! or generic host remains to receive. Model-facing schema, rendering,
+//! compression, accounting, and `tz://` handles stay in TokenZero.
 
 mod cancellation;
 mod decision_gate;

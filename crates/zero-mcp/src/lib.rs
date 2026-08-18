@@ -14,7 +14,13 @@
 //! already delegates registration, bounded dispatch, cancellation, and stdio
 //! lifecycle here. Its GraphZero operation catalog and callbacks remain a
 //! domain adapter; no second MCP transport is received.
+//!
+//! The same audit received TokenZero's engine-neutral background-job
+//! notification planner into [`job_progress`]. TokenZero retains tool
+//! execution, model-facing schema/rendering, token accounting, compression,
+//! filters, pulse, and `tz://` expansion.
 
+pub mod job_progress;
 pub mod mcp_transport;
 
 #[cfg(feature = "fastmcp")]
