@@ -20,6 +20,8 @@ zsx-core = { path = "../zsx-core", features = ["fszero", "graphzero", "tokenzero
 
 [dev-dependencies]
 zero-abi = { path = "../zero-abi" }
+zero-cert = { path = "../zero-cert" }
+zero-gate = { path = "../zero-gate" }
 zero-store = { path = "../zero-store" }
 
 [[test]]
@@ -33,3 +35,7 @@ path = "../../tests/unit/zsx/k0_budgets.rs"
 [[test]]
 name = "k0_state"
 path = "../../tests/unit/zsx/k0_state.rs"
+
+[[test]]
+name = "k0_gate"
+path = "../../tests/unit/zsx/k0_gate.rs"
