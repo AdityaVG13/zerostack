@@ -42,6 +42,9 @@ mod dag_exec;
 mod help;
 mod lookup;
 mod lower;
+/// K0 capability broker: parse / resolve / normalize / inject / validate
+/// preflight boundary for the Wave 10 supervisor (zerostack-pvwg).
+pub mod preflight;
 /// Bounded one-file read grants for explicit absolute reads outside the
 /// session root (`fs.readGrant` / `zero.fs.read_grant`).
 pub mod read_grant;

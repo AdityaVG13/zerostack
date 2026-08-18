@@ -55,6 +55,15 @@
 //!   policy — `fs.edit`/`fs.transact` journaled mutations, shell, index,
 //!   remember — is exactly the canonical adapter policy, unchanged from
 //!   native.
+//! - **K0 preflight boundary** (zerostack-pvwg): every call first runs the
+//!   capability broker ([`crate::preflight::broker`]), which parses the
+//!   cell, resolves and normalizes capability mentions against the existing
+//!   V6 registration, injects the operational context into the receipt, and
+//!   validates rooted manifests and explicit read-grant coverage. It never
+//!   rewrites the program; semantic ambiguity returns a typed
+//!   `DecisionRequired`, structural refusals fail before any execution (and
+//!   before any one-shot child spawn), and the original program is what the
+//!   interpreter runs.
 //!
 //! # Honest accounting notes
 //!
@@ -95,6 +104,7 @@ use zero_process::VerifiedChild;
 
 use crate::adapter::DomainAdapter;
 use crate::connector::{AggregateExecutionContext, ZsxConnector, registration};
+use crate::preflight::BrokerOutcome;
 
 /// Subcommand the one-shot child runs in the same executable
 /// (`<current_exe> kernel`). The `zsx` binary implements it.
@@ -375,6 +385,41 @@ impl Supervisor {
                 unchanged_evidence(&snapshot),
                 "preflight failed",
             ));
+        }
+        // K0 capability broker (zerostack-pvwg): parse / resolve /
+        // normalize / inject / validate. The broker never rewrites the
+        // program; it either proves the plan structurally sound (receipt
+        // evidence merged into the preflight report), returns a typed
+        // DecisionRequired for semantic ambiguity, or refuses before any
+        // execution — one call either way, and a refused one-shot request
+        // never spawns its child.
+        let mut preflight = preflight;
+        match crate::preflight::broker(&request, &self.root, &self.session_id) {
+            BrokerOutcome::Proceed(receipt) => {
+                preflight.warnings.extend(receipt.warning_lines());
+            }
+            BrokerOutcome::DecisionRequired(decision) => {
+                return Ok(ZerokernelExecuteResponse::decision_required(
+                    ExactHandles::default(),
+                    preflight,
+                    zeroed_ledger(),
+                    unchanged_evidence(&snapshot),
+                    decision,
+                )
+                .map_err(|error| {
+                    SupervisorError::Internal(format!(
+                        "cannot build broker decision response: {error}"
+                    ))
+                })?);
+            }
+            BrokerOutcome::Refused(detail) => {
+                return Ok(failed_response(
+                    preflight,
+                    zeroed_ledger(),
+                    unchanged_evidence(&snapshot),
+                    &detail,
+                ));
+            }
         }
         if cancel.load(Ordering::Acquire) {
             return Ok(failed_response(

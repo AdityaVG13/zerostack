@@ -38,10 +38,15 @@ zero-machine-permit = { path = "../zerostack-machine-permit" }
 
 [dev-dependencies]
 serde_json.workspace = true
+zero-abi = { path = "../zero-abi" }
 
 [[test]]
 name = "residency"
 path = "../../tests/unit/zsx-core/residency.rs"
+
+[[test]]
+name = "preflight"
+path = "../../tests/unit/zsx-core/preflight.rs"
 
 [[test]]
 name = "lowering"

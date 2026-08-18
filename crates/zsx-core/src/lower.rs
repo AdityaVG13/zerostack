@@ -136,7 +136,11 @@ const TOKEN_SHELL_OPTIONS: &[(&str, TokenOptionType)] = &[
 /// choice always wins, and argv-form commands stay foreground because the
 /// background seam accepts command strings only.
 pub const TOKEN_SHELL_AUTO_BACKGROUND_THRESHOLD_MS: u64 = 60_000;
-const COMPOUND_OPS: &[(&str, &str)] = &[
+/// Approved `fs.compound` operation names mapped to their canonical domain
+/// operations. Shared with the K0 capability broker (zerostack-pvwg), which
+/// resolves compound mentions against this same table and never invents a
+/// second one.
+pub const COMPOUND_OPS: &[(&str, &str)] = &[
     ("read", "fs.read"),
     ("readGrant", "fs.readGrant"),
     ("search", "fs.search"),
@@ -763,6 +767,11 @@ fn remap_compound_paths_args(
     }
 }
 
+/// Approved search-query alias keys folded onto `query` before dispatch.
+/// Shared with the K0 capability broker (zerostack-pvwg) so preflight
+/// evidence names the same approved folds the lowering applies.
+pub const SEARCH_QUERY_ALIAS_KEYS: &[&str] = &["regex", "pattern", "q"];
+
 fn normalize_compound_search_args(args: Value) -> Value {
     let Value::Object(mut map) = args else {
         return args;
@@ -776,7 +785,7 @@ fn normalize_compound_search_args(args: Value) -> Value {
             .and_then(Value::as_str)
             .is_some_and(|s| !s.is_empty());
     if !has_query {
-        for key in ["regex", "pattern", "q"] {
+        for key in SEARCH_QUERY_ALIAS_KEYS {
             if let Some(value) = map.get(key).cloned() {
                 if value.as_str().is_some_and(|s| !s.is_empty()) {
                     map.insert("query".into(), value);
@@ -814,6 +823,17 @@ fn compound_name_and_args(input: &Value) -> Result<(&str, Value), ConnectorError
     Ok((name, args))
 }
 
+/// Approved `fs.lookup` key aliases folded onto the canonical keys before
+/// dispatch. Shared with the K0 capability broker (zerostack-pvwg) so
+/// preflight evidence names the same approved folds the lowering applies.
+pub const LOOKUP_ROOT_ALIAS_KEYS: &[&str] = &["path", "dir"];
+pub const LOOKUP_QUERY_ALIAS_KEYS: &[&str] = &["pattern", "name", "filename", "glob", "q"];
+pub const LOOKUP_LIMIT_ALIAS_KEYS: &[&str] = &["max_results", "maxResults", "max"];
+
+fn first_alias_key<'a>(map: &'a serde_json::Map<String, Value>, keys: &[&str]) -> Option<&'a Value> {
+    keys.iter().find_map(|key| map.get(*key))
+}
+
 fn normalize_lookup_args(input: Value) -> Result<Value, ConnectorError> {
     let map = match input {
         Value::Array(items) => {
@@ -839,22 +859,15 @@ fn normalize_lookup_args(input: Value) -> Result<Value, ConnectorError> {
     };
     let root_val = map
         .get("root")
-        .or_else(|| map.get("path"))
-        .or_else(|| map.get("dir"))
+        .or_else(|| first_alias_key(&map, LOOKUP_ROOT_ALIAS_KEYS))
         .cloned();
     let query_val = map
         .get("query")
-        .or_else(|| map.get("pattern"))
-        .or_else(|| map.get("name"))
-        .or_else(|| map.get("filename"))
-        .or_else(|| map.get("glob"))
-        .or_else(|| map.get("q"))
+        .or_else(|| first_alias_key(&map, LOOKUP_QUERY_ALIAS_KEYS))
         .cloned();
     let limit_val = map
         .get("limit")
-        .or_else(|| map.get("max_results"))
-        .or_else(|| map.get("maxResults"))
-        .or_else(|| map.get("max"))
+        .or_else(|| first_alias_key(&map, LOOKUP_LIMIT_ALIAS_KEYS))
         .cloned();
     let Some(root) = root_val else {
         return Err(ConnectorError::new("fs.lookup requires root"));
