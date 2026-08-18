@@ -136,7 +136,7 @@ weight_units = 6
 evidence = [
   "crates/zero-ref/src/lib.rs",
   "crates/zero-ref/Cargo.toml",
-  "crates/zero-ref/tests/zeroref_proptest.rs",
+  "tests/unit/zero-ref/zeroref_proptest.rs",
 ]
 notes = "proptest parse/Display identity + legacy #Bstart+len normalization; FileFailurePersistence::WithSource"
 
@@ -233,7 +233,7 @@ name = "Property encode/decode round-trip"
 status = "present"
 weight = 0.016393442623
 weight_units = 4
-evidence = ["crates/zero-abi/tests/abi_proptest.rs"]
+evidence = ["tests/unit/zero-abi/abi_proptest.rs"]
 notes = "proptest! encode_frame/decode_request_frame identity on Handshake and Shutdown frames."
 
 [[feature]]
@@ -249,11 +249,13 @@ evidence = ["crates/zerostack-machine-permit/src/lib.rs"]
 id = "F-CONF-HARNESS"
 family = "conformance"
 name = "CodeMode conformance harness CLI + checks"
-status = "missing"
+status = "partial"
 weight = 0.020491803279
 weight_units = 5
-rationale = "CONTRACT.md is the product contract. Live zsx is the proof surface. No in-repo conformance CLI."
-retry_condition = "Reconsider only if CONTRACT.md §8 is amended to allow an in-repo conformance CLI."
+evidence = ["crates/zerostack-harness/", "conformance/CONTRACT.md"]
+rationale = "crates/zerostack-harness exists (EngineIdentity, 48 spec verifiers, preflight, FailureBundle, crash oracle, e-process). CONTRACT.md §8 still forbids an in-repo conformance CLI catalog."
+retry_condition = "Reconsider only if conformance/CONTRACT.md §8 is amended to allow an in-repo conformance CLI. Do not resurrect {ns}_execute_code as a synonym for zero_execute."
+notes = "Phase 6: harness implements the contract (bundle, metamorphic, fault, e-process). Still not a second MCP catalog and not a product CLI."
 
 [[feature]]
 id = "F-CONF-GOLDEN-SCHEMA"
@@ -310,12 +312,13 @@ retry_condition = "Retry only when a tracked fuzz target ships with the clone."
 id = "F-MIRI-NARROW"
 family = "quality"
 name = "Miri on zero-ref/zero-store hot paths"
-status = "missing"
+status = "partial"
 weight = 0.008196721311
 weight_units = 2
-rationale = "No clone-visible Miri gate."
-retry_condition = "Retry only when rust-toolchain plus a documented targeted miri command is part of the public tree."
-
+evidence = ["scripts/run_miri_narrow.sh", "rust-toolchain.toml"]
+rationale = "Script exists and host miri test -p zero-ref is green; rch classified the command as non-compilation and ran it locally, so this is not yet a remote/CI gate."
+retry_condition = "miri test -p zero-ref green on rch"
+notes = "scripts/run_miri_narrow.sh is the floor. Host rust-toolchain presence is not the feature."
 [[feature]]
 id = "F-FEATURE-UNIVERSE-INREPO"
 family = "surface"
@@ -346,7 +349,7 @@ name = "ZeroRefErrorClass + ZeroRefError public taxonomy"
 status = "partial"
 weight = 0.004098360656
 weight_units = 1
-evidence = ["crates/zero-ref/src/lib.rs", "crates/zero-ref/tests/zeroref_api.rs"]
+evidence = ["crates/zero-ref/src/lib.rs", "tests/unit/zero-ref/zeroref_api.rs"]
 rationale = "Parser/selector emit 5 classes; negotiate emits IncompatibleVersion; Missing/Io/PolicyDenied/LegacyAmbiguity are reserved for store/resolution and are not constructed here."
 retry_condition = "Retry only when store/resolution production paths in this crate construct Missing, Io, PolicyDenied, and LegacyAmbiguity, or those variants are removed from ALL."
 notes = "Honest partial. Reserved classes are documented; ALL is constructible; parser never emits reserved classes."
@@ -368,7 +371,7 @@ name = "FromStr / serde for ZeroRef"
 status = "present"
 weight = 0.004098360656
 weight_units = 1
-evidence = ["crates/zero-ref/src/lib.rs", "crates/zero-ref/tests/zeroref_api.rs"]
+evidence = ["crates/zero-ref/src/lib.rs", "tests/unit/zero-ref/zeroref_api.rs"]
 notes = "FromStr delegates to parse(); serde (de)serializes the Display string."
 
 [[feature]]
@@ -378,7 +381,7 @@ name = "Capability / version negotiation API"
 status = "present"
 weight = 0.004098360656
 weight_units = 1
-evidence = ["crates/zero-ref/src/lib.rs", "crates/zero-ref/tests/zeroref_api.rs"]
+evidence = ["crates/zero-ref/src/lib.rs", "tests/unit/zero-ref/zeroref_api.rs"]
 notes = "public negotiate(major, minor) returns IncompatibleVersion on major mismatch. Minor is additive."
 
 [[feature]]
@@ -398,7 +401,7 @@ name = "ensure_layout + project_key layout helpers"
 status = "present"
 weight = 0.004098360656
 weight_units = 1
-evidence = ["crates/zero-store/src/store_root.rs", "crates/zero-store/tests/ensure_layout.rs"]
+evidence = ["crates/zero-store/src/store_root.rs", "tests/unit/zero-store/ensure_layout.rs"]
 notes = "ensure_layout creates engine_dir, blobs/, and gc/ under cas_host()."
 
 [[feature]]
