@@ -23,6 +23,7 @@ pub const METHODS: &[(&str, &str)] = &[
     ("fs", "multi_list"),
     ("fs", "multi_search"),
     ("fs", "multi_ast_search"),
+    ("fs", "lookup"),
     ("graph", "blast"),
     ("graph", "query"),
     ("graph", "multi_query"),
@@ -124,17 +125,16 @@ const TOKEN_SHELL_OPTIONS: &[(&str, TokenOptionType)] = &[
     ("background", TokenOptionType::Bool),
 ];
 
-/// Portable blob expand only. Query / node / file / path refs are not
-/// expand targets (they used to hit GraphZero/FSZero parsers and dump
-/// the payload into a garbled malformed-parse error).
-const EXPAND_BLOB_OWNERS: &[(&str, EngineIdentity, &str, &str)] = &[
-    ("fz://blob/", EngineIdentity::FsZero, "fs.expand", "ref"),
-    ("gz://blob/", EngineIdentity::GraphZero, "expand", "reference"),
-    ("tz://blob/", EngineIdentity::TokenZero, "expand", "ref"),
-];
-
-const EXPAND_SCHEMES_HELP: &str = "tz://blob, fz://blob, gz://blob";
-
+/// Shell requests whose effective timeout exceeds this bound are lowered to
+/// background jobs automatically (zerostack-620s): the dispatch returns the
+/// job receipt `{job, cursor, version}` immediately instead of blocking the
+/// model or TUI, and the caller polls `zero.token.job` for incremental
+/// progress. The bound matches the engine's foreground default shell timeout
+/// (60s), so a direct foreground call can never outlive it; anything
+/// explicitly longer is a long job by contract. An explicit `background`
+/// choice always wins, and argv-form commands stay foreground because the
+/// background seam accepts command strings only.
+pub const TOKEN_SHELL_AUTO_BACKGROUND_THRESHOLD_MS: u64 = 60_000;
 const COMPOUND_OPS: &[(&str, &str)] = &[
     ("read", "fs.read"),
     ("search", "fs.search"),
@@ -148,6 +148,7 @@ const COMPOUND_OPS: &[(&str, &str)] = &[
     ("verifiedEdit", "fs.edit"),
     ("write", "fs.write"),
     ("resolve", "fs.resolve"),
+    ("lookup", "fs.lookup"),
 ];
 
 const FS_VECTOR_METHODS: &[(&str, &str, &str)] = &[
@@ -811,6 +812,97 @@ fn compound_name_and_args(input: &Value) -> Result<(&str, Value), ConnectorError
     Ok((name, args))
 }
 
+fn normalize_lookup_args(input: Value) -> Result<Value, ConnectorError> {
+    let map = match input {
+        Value::Array(items) => {
+            let mut m = serde_json::Map::new();
+            if let Some(v) = items.first() {
+                m.insert("root".into(), v.clone());
+            }
+            if let Some(v) = items.get(1) {
+                m.insert("query".into(), v.clone());
+            }
+            if let Some(v) = items.get(2) {
+                m.insert("limit".into(), v.clone());
+            }
+            m
+        }
+        Value::Object(m) => m,
+        Value::String(s) => {
+            let mut m = serde_json::Map::new();
+            m.insert("root".into(), Value::String(s));
+            m
+        }
+        _ => return Err(ConnectorError::new("fs.lookup requires {root, query?, limit?}")),
+    };
+    let root_val = map
+        .get("root")
+        .or_else(|| map.get("path"))
+        .or_else(|| map.get("dir"))
+        .cloned();
+    let query_val = map
+        .get("query")
+        .or_else(|| map.get("pattern"))
+        .or_else(|| map.get("name"))
+        .or_else(|| map.get("filename"))
+        .or_else(|| map.get("glob"))
+        .or_else(|| map.get("q"))
+        .cloned();
+    let limit_val = map
+        .get("limit")
+        .or_else(|| map.get("max_results"))
+        .or_else(|| map.get("maxResults"))
+        .or_else(|| map.get("max"))
+        .cloned();
+    let Some(root) = root_val else {
+        return Err(ConnectorError::new("fs.lookup requires root"));
+    };
+    if root.as_str().is_some_and(|s| s.trim().is_empty()) {
+        return Err(ConnectorError::new("fs.lookup root must be non-empty"));
+    }
+    if !root.is_string() {
+        return Err(ConnectorError::new("fs.lookup root must be a string"));
+    }
+    if let Some(q) = &query_val {
+        if !q.is_string() && !q.is_null() {
+            return Err(ConnectorError::new("fs.lookup query must be a string"));
+        }
+    }
+    if let Some(limit) = &limit_val {
+        let ok = match limit {
+            Value::Number(n) => n.as_u64().is_some_and(|u| u >= 1 && u <= 100),
+            Value::String(s) => s.parse::<u64>().is_ok_and(|u| u >= 1 && u <= 100),
+            Value::Null => true,
+            _ => false,
+        };
+        if !ok {
+            return Err(ConnectorError::new("fs.lookup limit must be 1..=100"));
+        }
+    }
+    let mut out = serde_json::Map::new();
+    out.insert("root".into(), root);
+    if let Some(q) = query_val {
+        if !q.is_null() {
+            let s = q.as_str().unwrap_or("").trim();
+            if !s.is_empty() {
+                out.insert("query".into(), Value::String(s.to_owned()));
+            }
+        }
+    }
+    if let Some(l) = limit_val {
+        if !l.is_null() {
+            let n = if let Some(u) = l.as_u64() {
+                u
+            } else if let Some(s) = l.as_str() {
+                s.parse::<u64>().unwrap_or(20)
+            } else {
+                20
+            };
+            out.insert("limit".into(), Value::Number(n.into()));
+        }
+    }
+    Ok(Value::Object(out))
+}
 /// Lower one public `surface.method` call to its canonical domain operation.
 ///
 /// Returns `(engine, operation, args)` exactly as the process compatibility
@@ -919,6 +1011,10 @@ pub fn lower(
         }
         return Ok((engine, op.into(), compound_args));
     }
+    if surface == "fs" && method == "lookup" {
+        let args = normalize_lookup_args(input)?;
+        return Ok((engine, "fs.lookup".into(), args));
+    }
     if surface == "fs" && method == "world" {
         return Ok((engine, "fs.world".into(), lower_fs_world(input)?));
     }
@@ -991,6 +1087,30 @@ pub fn lower(
                 if object.get("command").is_some_and(Value::is_array) {
                     if let Some(argv) = object.remove("command") {
                         object.insert("argv".into(), argv);
+                    }
+                }
+                // Long-job path (zerostack-620s): an effective timeout above
+                // the documented foreground bound automatically runs the
+                // shell as a background job, so the call returns the job
+                // receipt immediately and the caller polls zero.token.job
+                // for progress. Short calls keep their direct semantics; an
+                // explicit `background` choice always wins; argv shells stay
+                // foreground because the background seam accepts command
+                // strings only.
+                if !object.contains_key("background") && !object.contains_key("argv") {
+                    let requested_ms = object
+                        .get("timeout_ms")
+                        .and_then(Value::as_u64)
+                        .or_else(|| {
+                            object
+                                .get("timeout_seconds")
+                                .and_then(Value::as_u64)
+                                .and_then(|seconds| seconds.saturating_mul(1_000))
+                        });
+                    if requested_ms
+                        .is_some_and(|ms| ms > TOKEN_SHELL_AUTO_BACKGROUND_THRESHOLD_MS)
+                    {
+                        object.insert("background".into(), Value::Bool(true));
                     }
                 }
             }

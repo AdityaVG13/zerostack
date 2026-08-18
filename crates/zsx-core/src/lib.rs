@@ -33,6 +33,7 @@ mod connector;
 mod continuation;
 mod dag_exec;
 mod help;
+mod lookup;
 mod lower;
 mod residency;
 mod envelope;

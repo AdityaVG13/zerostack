@@ -217,8 +217,8 @@ const HELP_ENTRIES: &[HelpEntry] = &[
         surface: "token",
         method: "shell",
         signature: "zero.token.shell(command: string | string[], { cwd?, mode?, timeoutMs?, timeout_seconds?, timeout_ms?, stdin?, rewrite?, no_rewrite?, background? })",
-        description: "Run one shell command with token-budgeted output",
-        keywords: &["shell", "command", "exec", "run"],
+        description: "Run one shell command with token-budgeted output; an effective timeout above 60000ms (or background: true) returns a job receipt {job, cursor, version} to poll with zero.token.job — background: false forces a direct foreground run",
+        keywords: &["shell", "command", "exec", "run", "background", "job"],
     },
     HelpEntry {
         surface: "help",
@@ -240,6 +240,13 @@ const HELP_ENTRIES: &[HelpEntry] = &[
         signature: r#"zero.fs.read(path: string | { path, start_line?, end_line? }) — direct alias for zero.fs.compound("read", args)"#,
         description: "Read one file directly; equivalent to fs.compound read",
         keywords: &["read", "file", "full file", "compound", "alias"],
+    },
+    HelpEntry {
+        surface: "fs",
+        method: "lookup",
+        signature: r#"zero.fs.lookup({ root: string, query?: string, pattern?: string, limit?: number }) — bounded indexed filename/path lookup; root is workspace-relative and must not escape; limit 1..=100 (default 20); deterministic lexicographic ordering; no file contents are read"#,
+        description: "Bounded indexed filename/path lookup without content reads; explicit root stays inside the approved workspace, explicit limit keeps results deterministic",
+        keywords: &["lookup", "filename", "path", "indexed", "bounded", "filename lookup", "path lookup", "glob", "find file"],
     },
 ];
 

@@ -1310,6 +1310,17 @@ impl Connector for ZsxConnector {
             return completion.complete(Ok(value.to_string()));
         }
         let (engine, op, args) = lower(&capability.surface, &capability.method, input)?;
+        // `fs.lookup` is a bounded indexed filename/path lookup executed
+        // directly by the connector: explicit workspace-relative `root`,
+        // bounded `limit`, deterministic ordering, no content reads, and
+        // no root escape. It reuses the FS surface patterns (METHODS +
+        // help + lower) but does not dispatch through FSZero's content
+        // search or a broad directory walker.
+        if engine == EngineIdentity::FsZero && op == "fs.lookup" {
+            let value = crate::lookup::lookup_search(&self.state.workspace_root, &args)
+                .map_err(|e| ConnectorError::new(e.to_string()))?;
+            return completion.complete(Ok(value.to_string()));
+        }
         let request_cancellation = self.request_cancellation()?;
         if context.is_expired() || request_cancellation.is_cancelled() {
             return Err(ConnectorError::new(
@@ -1317,7 +1328,6 @@ impl Connector for ZsxConnector {
             ));
         }
         let execution = self.execution_context()?;
-        let sequence = self.sequence.fetch_add(1, Ordering::Relaxed);
         let id = format!(
             "{}-g{}-r{}-{}",
             self.state.session_id, execution.generation, execution.request_id, sequence
