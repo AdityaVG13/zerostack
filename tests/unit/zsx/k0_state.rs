@@ -19,7 +19,7 @@
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde_json::json;
 use zero_abi::zerokernel::{
@@ -249,7 +249,7 @@ fn state_survives_multiple_fresh_executor_instances() {
                 sessionRoot: ctx.sessionRoot,
             };
         "#,
-            Some(root2),
+            Some(root2.clone()),
         ))
         .expect("final hydrated read executes");
     assert_eq!(response.kind, ZerokernelResultKind::Completed, "errors={:?}", failed_errors(&response));
@@ -640,7 +640,7 @@ fn no_delta_success_leaves_committed_root_unchanged() {
     let response = supervisor
         .execute(fixture.request_expected(
             "z.state.set('k', 1); return 1;",
-            Some(root1),
+            Some(root1.clone()),
         ))
         .expect("idempotent call executes");
     assert_eq!(response.kind, ZerokernelResultKind::Completed, "errors={:?}", failed_errors(&response));
