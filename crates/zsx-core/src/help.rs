@@ -209,14 +209,14 @@ const HELP_ENTRIES: &[HelpEntry] = &[
     HelpEntry {
         surface: "token",
         method: "job",
-        signature: "zero.token.job({ ... }) — background token job control",
+        signature: "zero.token.job(id: string, { waitMs?, since?, tailBytes? }) — poll a background token.shell job; waitMs max 30000",
         description: "Poll or control background token jobs",
         keywords: &["job", "background", "poll"],
     },
     HelpEntry {
         surface: "token",
         method: "shell",
-        signature: "zero.token.shell(command: string | string[], { cwd?, mode?, timeout_seconds?, timeout_ms?, stdin?, rewrite?, no_rewrite?, background? })",
+        signature: "zero.token.shell(command: string | string[], { cwd?, mode?, timeoutMs?, timeout_seconds?, timeout_ms?, stdin?, rewrite?, no_rewrite?, background? })",
         description: "Run one shell command with token-budgeted output",
         keywords: &["shell", "command", "exec", "run"],
     },
@@ -233,6 +233,13 @@ const HELP_ENTRIES: &[HelpEntry] = &[
         signature: "zero.help.catalog() — full method list with signatures (alias of help.search with empty query)",
         description: "List every registered surface method and its call signature",
         keywords: &["help", "catalog", "list", "methods", "meta", "introspection"],
+    },
+    HelpEntry {
+        surface: "fs",
+        method: "read",
+        signature: r#"zero.fs.read(path: string | { path, start_line?, end_line? }) — direct alias for zero.fs.compound("read", args)"#,
+        description: "Read one file directly; equivalent to fs.compound read",
+        keywords: &["read", "file", "full file", "compound", "alias"],
     },
 ];
 

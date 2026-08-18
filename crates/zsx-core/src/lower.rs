@@ -13,6 +13,7 @@ pub const METHODS: &[(&str, &str)] = &[
     ("fs", "plan"),
     ("fs", "structural"),
     ("fs", "compound"),
+    ("fs", "read"),
     ("fs", "world"),
     ("fs", "edit"),
     ("fs", "write"),
@@ -852,6 +853,10 @@ pub fn lower(
             "fs.search".into(),
             serde_json::json!({"query":query}),
         ));
+    }
+    if surface == "fs" && method == "read" {
+        let args = positional_args(&input, "path", None);
+        return Ok((engine, "fs.read".into(), args));
     }
     // Direct mutation surface: zero.fs.edit({...}) / zero.fs.write({...}).
     // One options object (positionally or bare) passed through unchanged so

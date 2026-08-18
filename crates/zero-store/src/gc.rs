@@ -23,6 +23,7 @@ use zero_abi::zbf::{
 };
 
 pub const GC_SCHEMA_VERSION_LEGACY: &str = "zerostack.cas-gc.legacy";
+const GC_SCHEMA_VERSION_V1: &str = "zerostack.cas-gc.v1";
 pub const GC_SCHEMA_VERSION: &str = "zerostack.cas-gc";
 /// Hard bounds keep malformed metadata from turning collection into an
 /// unbounded allocation or path traversal surface.
@@ -889,14 +890,14 @@ fn validate_record_common<R: GcRecord>(
         return Err(corrupt(path, format!("record_type {record_type}")));
     }
     match schema_version {
-        GC_SCHEMA_VERSION if contract_digest.is_none() => {}
+        GC_SCHEMA_VERSION_LEGACY | GC_SCHEMA_VERSION_V1 if contract_digest.is_none() => {}
         GC_SCHEMA_VERSION => {
             let expected = gc_contract_digest_hex();
             if contract_digest != Some(expected.as_str()) {
                 return Err(corrupt(path, "store_contract_digest mismatch".into()));
             }
         }
-        GC_SCHEMA_VERSION => {
+        GC_SCHEMA_VERSION_LEGACY | GC_SCHEMA_VERSION_V1 => {
             return Err(corrupt(
                 path,
                 "legacy record unexpectedly binds a v2 store contract".into(),

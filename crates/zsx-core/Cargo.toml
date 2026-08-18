@@ -41,3 +41,7 @@ serde_json.workspace = true
 [[test]]
 name = "residency"
 path = "../../tests/unit/zsx-core/residency.rs"
+
+[[test]]
+name = "lowering"
+path = "../../tests/unit/zsx-core/lowering.rs"
