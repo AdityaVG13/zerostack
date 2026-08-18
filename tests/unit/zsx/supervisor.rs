@@ -122,6 +122,17 @@ fn request_for(
     .expect("request")
 }
 
+#[cfg(unix)]
+fn is_socket_file(file_type: &std::fs::FileType) -> bool {
+    use std::os::unix::fs::FileTypeExt;
+    file_type.is_socket()
+}
+
+#[cfg(not(unix))]
+fn is_socket_file(_file_type: &std::fs::FileType) -> bool {
+    false
+}
+
 /// Recursively assert no socket file exists under `root` (a supervisor must
 /// never create a listener; the only IPC is stdio pipes).
 fn assert_no_sockets(root: &Path) {
@@ -141,7 +152,7 @@ fn assert_no_sockets(root: &Path) {
             }
             if file_type.is_dir() {
                 walk(&path, found);
-            } else if file_type.is_socket() {
+            } else if is_socket_file(&file_type) {
                 found.push(path);
             }
         }
@@ -193,7 +204,7 @@ fn syntax_error_failed_and_quiescent() {
     let fixture = Fixture::new("syntax");
     for supervisor in [fixture.embedded(), fixture.oneshot()] {
         let response = supervisor
-            .execute(fixture.request("return ;;;", WALL_MS))
+            .execute(fixture.request("return (", WALL_MS))
             .expect("syntax error is a protocol response");
         assert_eq!(response.kind, ZerokernelResultKind::Failed);
         assert!(!response.preflight.ok);
@@ -464,7 +475,12 @@ fn invalid_requests_fail_closed_without_spawn() {
         &fixture.state_root,
         &fixture.session,
     );
-    request.budget = FiniteBudget::new(0, CPU_MS, 64 * 1024 * 1024, 64).expect("budget");
+    request.budget = FiniteBudget {
+        wall_ms: 0,
+        cpu_ms: CPU_MS,
+        memory_bytes: 64 * 1024 * 1024,
+        max_calls: 64,
+    };
     let error = oneshot.execute(request).expect_err("zero budget refuses");
     assert!(matches!(error, SupervisorError::InvalidRequest(_)));
 
@@ -476,7 +492,12 @@ fn invalid_requests_fail_closed_without_spawn() {
         &fixture.state_root,
         &fixture.session,
     );
-    request.budget = FiniteBudget::new(10_000_000, CPU_MS, 64 * 1024 * 1024, 64).expect("budget");
+    request.budget = FiniteBudget {
+        wall_ms: 10_000_000,
+        cpu_ms: CPU_MS,
+        memory_bytes: 64 * 1024 * 1024,
+        max_calls: 64,
+    };
     let error = oneshot.execute(request).expect_err("unbounded budget refuses");
     assert!(matches!(error, SupervisorError::InvalidRequest(_)));
 
