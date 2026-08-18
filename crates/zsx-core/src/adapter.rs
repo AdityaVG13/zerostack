@@ -67,6 +67,9 @@
 //! - Approval-required operations must return `approval.state == Granted`
 //!   only when the request carries a validated grant; the core consumes the
 //!   grant before the call and fails `Required`/`Denied` results closed.
+//! - One-file read grants arrive in `read_grants` already consumed and
+//!   validated by the core; an adapter using them must re-verify the
+//!   canonical identity on its own thread and fail closed on mismatch.
 //! - Optional `engine_timeline` and `worker_token_accounting` payloads must
 //!   pass the zero-abi typed validators; the core validates them.
 
@@ -192,6 +195,12 @@ pub struct AdapterCall<'a> {
     /// request (or the session) stops the adapter call too; it is never a
     /// whole-session signal.
     pub cancellation: &'a CancellationSignal,
+    /// Consumed one-file read grants bound to this dispatch (empty for
+    /// relative reads and for every non-FSZero engine). The connector
+    /// validated each binding's canonical identity at take time; the FSZero
+    /// adapter re-verifies it fresh on the session thread and fails closed
+    /// on any symlink or path substitution.
+    pub read_grants: &'a [crate::read_grant::GrantedReadFile],
 }
 
 /// A validated in-process adapter result.

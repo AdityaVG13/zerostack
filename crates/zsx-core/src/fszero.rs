@@ -29,6 +29,19 @@
 //! consult the session request guard during kernel work
 //! (`request_expired` is only read by the MCP stdio/HTTP transports).
 //!
+//! # Granted external reads
+//!
+//! Relative reads stay under the session root. An explicit absolute
+//! `fs.read` / `fs.multiRead` path inside the session root is rewritten
+//! relative to the primary root; a path outside it is a *granted read*:
+//! the plan minted a one-file [`crate::read_grant::SessionReadGrant`] via
+//! `fs.readGrant` first, the connector consumed it and passed the binding
+//! in [`AdapterCall::read_grants`], and `run_session_call` re-verifies the
+//! canonical identity fresh on the session thread, re-roots to the granted
+//! file's own parent, rewrites only the granted file name, post-verifies
+//! after the engine read, and records the grant on the receipt. Any
+//! symlink or path substitution fails closed.
+//!
 //! # Ref bridge
 //!
 //! FSZero mints `fz://blob/<sha256>` refs into its recovery store. The
@@ -74,6 +87,10 @@ use zero_ref::ZeroRef;
 use zero_store::SharedCas;
 
 use crate::adapter::{AdapterBinding, AdapterCall, AdapterError, AdapterResponse, DomainAdapter};
+use crate::read_grant::{
+    GrantedReadFile, ReadPlan, absolute_read_paths, now_unix_ms, plan_granted_read,
+    post_verify_read,
+};
 use crate::session::{SESSION_SHUTDOWN_SETTLE_TIMEOUT, join_thread_within};
 
 /// Canonical FSZero ref scheme.
@@ -504,6 +521,9 @@ enum SessionCommand {
     Call {
         request: CallRequest,
         cancellation: CancellationSignal,
+        /// Consumed one-file read grants bound to this dispatch (empty for
+        /// relative reads). Re-verified fresh on the session thread.
+        read_grants: Vec<GrantedReadFile>,
         reply: SyncSender<Result<AdapterResponse, AdapterError>>,
     },
     Shutdown {
@@ -816,116 +836,10 @@ fn domain_error_to_adapter(error: &DomainError, request: &CallRequest) -> Adapte
     )
 }
 
-/// Return the narrow temporary workspace needed for explicit absolute reads.
-///
-/// The primary session root remains the project root. Relative reads stay there.
-/// Absolute `fs.read` / `fs.multiRead` paths may point elsewhere because the
-/// harness could open those same bytes natively. Re-rooting does not rebind the
-/// durable store, build an index, or widen mutation authority.
-fn explicit_external_read_root(
-    primary_root: Option<&Path>,
-    request: &CallRequest,
-) -> Result<Option<PathBuf>, AdapterError> {
-    let paths: Vec<&str> = match request.op.as_str() {
-        "fs.read" => request
-            .args
-            .get("path")
-            .or_else(|| request.args.get("arg"))
-            .and_then(Value::as_str)
-            .into_iter()
-            .collect(),
-        "fs.multiRead" => match request.args.get("paths").and_then(Value::as_array) {
-            Some(values) if values.iter().all(Value::is_string) => {
-                values.iter().filter_map(Value::as_str).collect()
-            }
-            _ => Vec::new(),
-        },
-        _ => Vec::new(),
-    };
-    if paths.is_empty() || paths.iter().all(|path| !Path::new(path).is_absolute()) {
-        return Ok(None);
-    }
-    if paths.iter().any(|path| !Path::new(path).is_absolute()) {
-        return Err(adapter_error(
-            "validation",
-            "fs.multiRead cannot mix project-relative and absolute paths",
-            request,
-        ));
-    }
-
-    let primary =
-        primary_root.map(|root| root.canonicalize().unwrap_or_else(|_| root.to_path_buf()));
-    let targets: Vec<PathBuf> = paths
-        .iter()
-        .map(|path| {
-            let path = Path::new(path);
-            path.canonicalize().unwrap_or_else(|_| path.to_path_buf())
-        })
-        .collect();
-    if let Some(root) = primary.as_deref()
-        && targets.iter().all(|path| path.starts_with(root))
-    {
-        return Ok(Some(root.to_path_buf()));
-    }
-
-    let mut parents = targets.iter().filter_map(|path| path.parent());
-    let Some(first) = parents.next() else {
-        return Err(adapter_error(
-            "validation",
-            "explicit absolute read path has no parent directory",
-            request,
-        ));
-    };
-    let mut common = first.to_path_buf();
-    for parent in parents {
-        while !parent.starts_with(&common) {
-            if !common.pop() {
-                return Err(adapter_error(
-                    "validation",
-                    "explicit absolute read paths have no common root",
-                    request,
-                ));
-            }
-        }
-    }
-    if common.as_os_str().is_empty() {
-        return Err(adapter_error(
-            "validation",
-            "explicit absolute read root is empty",
-            request,
-        ));
-    }
-    Ok(Some(common))
-}
-
-fn rewrite_external_read_request(
-    request: &CallRequest,
-    external_root: &Path,
-) -> Result<CallRequest, AdapterError> {
-    let relative_path = |path: &str| -> Result<Value, AdapterError> {
-        let path = Path::new(path);
-        let target = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
-        let relative = target.strip_prefix(external_root).map_err(|_| {
-            adapter_error(
-                "validation",
-                format!(
-                    "explicit read path {} is outside selected root {}",
-                    path.display(),
-                    external_root.display()
-                ),
-                request,
-            )
-        })?;
-        if relative.as_os_str().is_empty() {
-            return Err(adapter_error(
-                "validation",
-                "explicit read path must name a file below its selected root",
-                request,
-            ));
-        }
-        Ok(Value::String(relative.to_string_lossy().into_owned()))
-    };
-
+/// Rewrite the absolute read paths of one request to their root-relative
+/// forms from the granted read plan. Only the planned files are named; a
+/// request path that is not part of the plan fails closed.
+fn rewrite_read_request(request: &CallRequest, plan: &ReadPlan) -> Result<CallRequest, AdapterError> {
     let mut rewritten = request.clone();
     match request.op.as_str() {
         "fs.read" => {
@@ -937,41 +851,128 @@ fn rewrite_external_read_request(
             let Some(path) = request.args.get(key).and_then(Value::as_str) else {
                 return Ok(rewritten);
             };
-            rewritten.args[key] = relative_path(path)?;
+            let Some(rewrite) = plan
+                .rewrites
+                .iter()
+                .find(|rewrite| rewrite.requested_path == path)
+            else {
+                return Err(adapter_error(
+                    "policy",
+                    format!("explicit read path '{path}' is not part of the read plan"),
+                    request,
+                ));
+            };
+            rewritten.args[key] = Value::String(rewrite.relative_path.clone());
         }
         "fs.multiRead" => {
             let Some(paths) = request.args.get("paths").and_then(Value::as_array) else {
                 return Ok(rewritten);
             };
-            let paths = paths
-                .iter()
-                .filter_map(Value::as_str)
-                .map(relative_path)
-                .collect::<Result<Vec<_>, _>>()?;
-            rewritten.args["paths"] = Value::Array(paths);
+            let mut relative: Vec<Value> = Vec::with_capacity(paths.len());
+            for path in paths.iter().filter_map(Value::as_str) {
+                let Some(rewrite) = plan
+                    .rewrites
+                    .iter()
+                    .find(|rewrite| rewrite.requested_path == path)
+                else {
+                    return Err(adapter_error(
+                        "policy",
+                        format!("explicit read path '{path}' is not part of the read plan"),
+                        request,
+                    ));
+                };
+                relative.push(Value::String(rewrite.relative_path.clone()));
+            }
+            rewritten.args["paths"] = Value::Array(relative);
         }
         _ => {}
     }
     Ok(rewritten)
 }
 
+/// Record every consumed read grant on the result value so the receipt
+/// proves which exact canonical files this read was authorized for. Reads
+/// are not journaled; the result value IS the receipt.
+fn attach_read_grant_receipt(mut response: AdapterResponse, plan: &ReadPlan) -> AdapterResponse {
+    let consumed: Vec<Value> = plan
+        .rewrites
+        .iter()
+        .filter_map(|rewrite| {
+            let grant = rewrite.grant.as_ref()?;
+            Some(serde_json::json!({
+                "path": rewrite.requested_path,
+                "grant_id": grant.grant_id,
+                "canonical_path": grant.canonical_path.to_string_lossy(),
+                "issued_at_unix_ms": grant.issued_at_unix_ms,
+                "expires_at_unix_ms": grant.expires_at_unix_ms,
+            }))
+        })
+        .collect();
+    if consumed.is_empty() {
+        return response;
+    }
+    if let Some(map) = response.result.value.as_object_mut() {
+        if consumed.len() == 1 {
+            map.insert("read_grant".into(), consumed[0].clone());
+        } else {
+            map.insert("read_grants".into(), Value::Array(consumed));
+        }
+    }
+    response
+}
+
+/// Execute one dispatch, re-rooting the session only when the dispatch
+/// carries absolute read paths.
+///
+/// Absolute paths inside the primary root keep the existing behavior
+/// (re-root to the primary root, rewrite relative). Absolute paths outside
+/// the primary root are *granted reads*: every path must match a consumed
+/// [`GrantedReadFile`] from the connector byte-for-byte (fresh canonicalize
+/// on this thread), the temporary root is exactly the granted file's own
+/// parent directory (a granted `fs.multiRead` may only span files sharing
+/// that one parent), the rewritten request names exactly the granted files,
+/// and after the engine read every granted file must still resolve to its
+/// granted canonical path. Any symlink or path substitution at any stage
+/// fails closed and the response is discarded. Re-rooting never rebinds the
+/// durable store, builds an index, or widens mutation authority, and the
+/// primary root is always restored before the next dispatch.
 fn run_session_call(
     session: &mut FSZeroSession,
     request: &CallRequest,
     cancellation: &CancellationSignal,
     state_root: &Path,
     session_id: &str,
+    read_grants: &[GrantedReadFile],
 ) -> (Result<AdapterResponse, AdapterError>, bool) {
     let original_root = session.workspace_root().map(Path::to_path_buf);
-    let external_root = match explicit_external_read_root(original_root.as_deref(), request) {
-        Ok(Some(root)) => root,
+    let paths = match absolute_read_paths(&request.op, &request.args) {
+        Ok(paths) => paths,
+        Err(error) => return (Err(adapter_error("validation", error, request)), false),
+    };
+    let plan = match plan_granted_read(
+        original_root.as_deref(),
+        &request.op,
+        &paths,
+        read_grants,
+        now_unix_ms(),
+    ) {
+        Ok(Some(plan)) => plan,
         Ok(None) => {
             return (
                 run_call(session, request, cancellation, state_root, session_id),
                 false,
             );
         }
-        Err(error) => return (Err(error), false),
+        Err(error) => {
+            return (
+                Err(adapter_error(
+                    "policy",
+                    format!("explicit read rejected: {error}"),
+                    request,
+                )),
+                false,
+            );
+        }
     };
     let Some(original_root) = original_root else {
         return (
@@ -983,17 +984,17 @@ fn run_session_call(
             false,
         );
     };
-    let rewritten_request = match rewrite_external_read_request(request, &external_root) {
+    let rewritten_request = match rewrite_read_request(request, &plan) {
         Ok(request) => request,
         Err(error) => return (Err(error), false),
     };
-    if let Err(error) = session.set_workspace_root(&external_root) {
+    if let Err(error) = session.set_workspace_root(&plan.root) {
         return (
             Err(adapter_error(
                 "policy",
                 format!(
                     "cannot open explicit read root {}: {error}",
-                    external_root.display()
+                    plan.root.display()
                 ),
                 request,
             )),
@@ -1007,6 +1008,20 @@ fn run_session_call(
         state_root,
         session_id,
     );
+    let result = match result {
+        Ok(response) => {
+            if let Err(error) = post_verify_read(&plan) {
+                Err(adapter_error(
+                    "policy",
+                    format!("granted read failed post-verification: {error}"),
+                    request,
+                ))
+            } else {
+                Ok(attach_read_grant_receipt(response, &plan))
+            }
+        }
+        Err(error) => Err(error),
+    };
     if let Err(error) = session.set_workspace_root(&original_root) {
         return (
             Err(adapter_error(
@@ -1036,10 +1051,17 @@ fn session_loop(
             SessionCommand::Call {
                 request,
                 cancellation,
+                read_grants,
                 reply,
             } => {
-                let (response, terminate_session) =
-                    run_session_call(&mut session, &request, &cancellation, &root, &session_id);
+                let (response, terminate_session) = run_session_call(
+                    &mut session,
+                    &request,
+                    &cancellation,
+                    &root,
+                    &session_id,
+                    &read_grants,
+                );
                 let _ = reply.send(response);
                 if terminate_session {
                     break;
@@ -1292,6 +1314,7 @@ impl DomainAdapter for FsZeroAdapter {
         let command = SessionCommand::Call {
             request: request.clone(),
             cancellation: call.cancellation.clone(),
+            read_grants: call.read_grants.to_vec(),
             reply: reply_tx,
         };
         send_session_command(&self.sender, command, call.cancellation, request)?;

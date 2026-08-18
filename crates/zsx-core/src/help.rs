@@ -41,9 +41,9 @@ const HELP_ENTRIES: &[HelpEntry] = &[
     HelpEntry {
         surface: "fs",
         method: "compound",
-        signature: "zero.fs.compound(name: \"read\"|\"search\"|\"list\"|\"resolve\"|\"edit\"|\"mutate\"|\"write\", args: object) — search {query, path?} returns HIT path#Lstart-Lend (snap-to-file); mutate/edit {query, scope, uniqueness:\"exactly_one\", preimage, replacement} is snap-to-effect (one dispatch); write content must be a UTF-8 string",
-        description: "One named filesystem operation. Search snaps to a file+line window; mutate is fused search+edit when uniqueness is exactly_one.",
-        keywords: &["read", "search", "list", "grep", "resolve", "query", "snap", "snap-to-file", "snap-to-effect", "mutate"],
+        signature: r#"zero.fs.compound(name: \"read\"|\"readGrant\"|\"search\"|\"list\"|\"resolve\"|\"edit\"|\"mutate\"|\"write\", args: object) — search {query, path?} returns HIT path#Lstart-Lend (snap-to-file); mutate/edit {query, scope, uniqueness:\"exactly_one\", preimage, replacement} is snap-to-effect (one dispatch); write content must be a UTF-8 string; readGrant {path} mints a one-file read grant for an absolute path outside the session root"#,
+        description: "One named filesystem operation. Search snaps to a file+line window; mutate is fused search+edit when uniqueness is exactly_one; readGrant bounds one explicit absolute read to a single canonical file.",
+        keywords: &["read", "readGrant", "search", "list", "grep", "resolve", "query", "snap", "snap-to-file", "snap-to-effect", "mutate", "grant"],
     },
     HelpEntry {
         surface: "fs",
@@ -247,6 +247,13 @@ const HELP_ENTRIES: &[HelpEntry] = &[
         signature: r#"zero.fs.lookup({ root: string, query?: string, pattern?: string, limit?: number }) — bounded indexed filename/path lookup; root is workspace-relative and must not escape; limit 1..=100 (default 20); deterministic lexicographic ordering; no file contents are read"#,
         description: "Bounded indexed filename/path lookup without content reads; explicit root stays inside the approved workspace, explicit limit keeps results deterministic",
         keywords: &["lookup", "filename", "path", "indexed", "bounded", "filename lookup", "path lookup", "glob", "find file"],
+    },
+    HelpEntry {
+        surface: "fs",
+        method: "read_grant",
+        signature: r#"zero.fs.read_grant({ path: string }) — mint one bounded read grant for exactly one canonical file OUTSIDE the session root; returns { grant_id, path (canonical), issued_at_unix_ms, expires_at_unix_ms }; the file must exist and be a regular file; in-root files need no grant"#,
+        description: "Authorize one exact canonical file for read only. The grant is single-use, expires in 300s, and is recorded in the fs.read / fs.multiRead receipt. Every later read of that file re-verifies its canonical identity; a symlink or path substitution fails closed. Mutation, search, and list operations stay root-confined.",
+        keywords: &["read", "grant", "absolute", "external", "downloads", "outside root", "one file", "read-only"],
     },
 ];
 

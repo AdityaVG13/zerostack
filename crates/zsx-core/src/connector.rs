@@ -63,6 +63,7 @@ use zero_store::{
 };
 
 use crate::adapter::{AdapterCall, DomainAdapter};
+use crate::read_grant::{GrantedReadFile, SessionReadGrant};
 use crate::lower::{METHODS, lower};
 use crate::residency::{SessionQ99Report, SessionResidencyGate, tier_of_engine};
 use crate::verdict::{VerdictLoopEnvelope, VerdictLoopResult, VerdictMeter};
@@ -796,6 +797,9 @@ struct ZsxDispatch {
     cancellation: CancellationSignal,
     /// Mutation attempt journal, present only for journaled mutations.
     journal: Option<MutationJournal>,
+    /// Consumed one-file read grants bound to this dispatch (empty except
+    /// for `fs.read` / `fs.multiRead` with granted absolute paths).
+    read_grants: Vec<GrantedReadFile>,
 }
 
 pub(crate) struct ZsxState {
@@ -839,12 +843,21 @@ struct ActiveApprovals {
     grants: Vec<SessionApprovalGrant>,
 }
 
+/// Active one-file read grants minted by `fs.readGrant` during the current
+/// execution. Bounded (see [`MAX_SESSION_READ_GRANTS`]), expiring, and
+/// consumed once at dispatch take time, mirroring the approval ledger.
+#[derive(Default)]
+struct ActiveReadGrants {
+    grants: Vec<SessionReadGrant>,
+}
+
 pub(crate) struct ZsxConnector {
     state: Arc<ZsxState>,
     dispatch_sender: Option<SyncSender<ZsxDispatch>>,
     dispatchers: Vec<JoinHandle<()>>,
     sequence: AtomicU64,
     approvals: Mutex<ActiveApprovals>,
+    read_grants: Mutex<ActiveReadGrants>,
     execution_context: Mutex<Option<AggregateExecutionContext>>,
     /// Token of the request currently executing; every admitted dispatch
     /// clones it so cancellation is per request, not whole-session.
@@ -928,6 +941,7 @@ impl ZsxConnector {
             dispatchers,
             sequence: AtomicU64::new(sequence_seed),
             approvals: Mutex::new(ActiveApprovals::default()),
+            read_grants: Mutex::new(ActiveReadGrants::default()),
             execution_context: Mutex::new(None),
             request_cancellation: Mutex::new(None),
         })
@@ -1166,6 +1180,13 @@ impl ZsxConnector {
         if let Ok(mut active) = self.approvals.lock() {
             active.grants.clear();
         }
+        // One-file read grants are per-execution too: minted during the
+        // executing plan, consumed at dispatch take time, and cleared with
+        // the rest of the execution grants so a later execution never sees
+        // a stale grant.
+        if let Ok(mut active) = self.read_grants.lock() {
+            active.grants.clear();
+        }
     }
 
     fn take_approval(
@@ -1219,6 +1240,81 @@ impl ZsxConnector {
         }
         active.grants.push(grant);
         Ok(())
+    }
+
+    /// Mint one bounded read grant for one canonical file outside the
+    /// session root. Executed directly by the connector (like `fs.lookup`):
+    /// no engine dispatch, and mutation/search/list authority is untouched.
+    fn mint_read_grant(
+        &self,
+        execution: AggregateExecutionContext,
+        sequence: u64,
+        args: &Value,
+    ) -> Result<Value, ConnectorError> {
+        let path = args
+            .get("path")
+            .or_else(|| args.get("arg"))
+            .and_then(Value::as_str)
+            .ok_or_else(|| ConnectorError::new("fs.readGrant requires a path string"))?;
+        let now = crate::read_grant::now_unix_ms();
+        let mut active = self
+            .read_grants
+            .lock()
+            .map_err(|_| ConnectorError::new("read grant ledger lock poisoned"))?;
+        let grant = crate::read_grant::mint_read_grant(
+            &mut active.grants,
+            &self.state.workspace_root,
+            &self.state.session_id,
+            execution.generation,
+            execution.request_id,
+            sequence,
+            path,
+            now,
+        )
+        .map_err(ConnectorError::new)?;
+        Ok(json!({
+            "operation": "fs.readGrant",
+            "ok": true,
+            "grant_id": grant.grant_id,
+            "path": grant.canonical_path,
+            "issued_at_unix_ms": grant.issued_at_unix_ms,
+            "expires_at_unix_ms": grant.expires_at_unix_ms,
+        }))
+    }
+
+    /// Consume the read grants authorizing this dispatch's absolute read
+    /// paths (`fs.read` / `fs.multiRead` only; every other operation needs
+    /// none). Fail-closed and all-or-nothing: an absolute path outside the
+    /// session root without a matching active grant rejects the whole
+    /// dispatch and consumes nothing. Runs after journal preparation (reads
+    /// are never journaled) so a rejection never leaves an orphan journal.
+    fn take_dispatch_read_grants(
+        &self,
+        engine: EngineIdentity,
+        op: &str,
+        args: &Value,
+    ) -> Result<Vec<GrantedReadFile>, ConnectorError> {
+        if engine != EngineIdentity::FsZero || !matches!(op, "fs.read" | "fs.multiRead") {
+            return Ok(Vec::new());
+        }
+        let paths =
+            crate::read_grant::absolute_read_paths(op, args).map_err(ConnectorError::new)?;
+        if paths.is_empty() {
+            return Ok(Vec::new());
+        }
+        let mut active = self
+            .read_grants
+            .lock()
+            .map_err(|_| ConnectorError::new("read grant ledger lock poisoned"))?;
+        let entries = crate::read_grant::take_read_grants(
+            &mut active.grants,
+            &self.state.workspace_root,
+            op,
+            &paths,
+            crate::read_grant::now_unix_ms(),
+        )
+        .map_err(ConnectorError::new)?;
+        Ok(entries.into_iter().filter_map(|entry| entry.grant).collect())
     }
 
     pub(crate) fn publish_reachability(&self) -> Result<(), HostError> {
@@ -1328,6 +1424,16 @@ impl Connector for ZsxConnector {
             ));
         }
         let execution = self.execution_context()?;
+        let sequence = self.sequence.fetch_add(1, Ordering::Relaxed);
+        // `fs.readGrant` mints one bounded read grant for one exact
+        // canonical file outside the session root. Executed directly by the
+        // connector like `fs.lookup`: no engine dispatch, no widening of
+        // mutation/search/list authority, and the minted grant is what every
+        // later external `fs.read` / `fs.multiRead` must match.
+        if engine == EngineIdentity::FsZero && op == "fs.readGrant" {
+            let value = self.mint_read_grant(execution, sequence, &args)?;
+            return completion.complete(Ok(value.to_string()));
+        }
         let id = format!(
             "{}-g{}-r{}-{}",
             self.state.session_id, execution.generation, execution.request_id, sequence
@@ -1420,6 +1526,12 @@ impl Connector for ZsxConnector {
             }
             None => None,
         };
+        // Consume the read grants for this dispatch's absolute read paths
+        // (fs.read / fs.multiRead). Fail-closed: any external path without
+        // a matching active grant rejects the whole call, consuming
+        // nothing. Reads are never journaled, so this rejection cannot
+        // leave an orphan Prepared journal.
+        let read_grants = self.take_dispatch_read_grants(engine, &request.op, &request.args)?;
         let dispatch = ZsxDispatch {
             engine,
             request,
@@ -1428,6 +1540,7 @@ impl Connector for ZsxConnector {
             completion,
             cancellation: request_cancellation,
             journal,
+            read_grants,
         };
         self.state
             .outstanding_dispatches
@@ -1569,6 +1682,7 @@ fn run_dispatch(state: &ZsxState, dispatch: &ZsxDispatch) -> Result<String, Conn
             .call(AdapterCall {
                 request: &dispatch.request,
                 cancellation: &dispatch.cancellation,
+                read_grants: &dispatch.read_grants,
             })
             .map_err(|error| {
                 ConnectorError::new(format!("{} adapter: {error}", dispatch.engine.as_str()))

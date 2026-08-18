@@ -24,6 +24,7 @@ pub const METHODS: &[(&str, &str)] = &[
     ("fs", "multi_search"),
     ("fs", "multi_ast_search"),
     ("fs", "lookup"),
+    ("fs", "read_grant"),
     ("graph", "blast"),
     ("graph", "query"),
     ("graph", "multi_query"),
@@ -137,6 +138,7 @@ const TOKEN_SHELL_OPTIONS: &[(&str, TokenOptionType)] = &[
 pub const TOKEN_SHELL_AUTO_BACKGROUND_THRESHOLD_MS: u64 = 60_000;
 const COMPOUND_OPS: &[(&str, &str)] = &[
     ("read", "fs.read"),
+    ("readGrant", "fs.readGrant"),
     ("search", "fs.search"),
     ("find", "fs.search"),
     ("grep", "fs.search"),
@@ -949,6 +951,13 @@ pub fn lower(
     if surface == "fs" && method == "read" {
         let args = positional_args(&input, "path", None);
         return Ok((engine, "fs.read".into(), args));
+    }
+    if surface == "fs" && method == "read_grant" {
+        // Mint one bounded read grant for one canonical file outside the
+        // session root; the connector handles it in-process, no engine
+        // dispatch (mirrors fs.lookup).
+        let args = positional_args(&input, "path", None);
+        return Ok((engine, "fs.readGrant".into(), args));
     }
     // Direct mutation surface: zero.fs.edit({...}) / zero.fs.write({...}).
     // One options object (positionally or bare) passed through unchanged so

@@ -51,6 +51,11 @@ path = "../../tests/unit/zsx-core/lowering.rs"
 name = "fs_search_cancel_reusable"
 path = "../../tests/unit/zsx-core/fs_search_cancel_reusable.rs"
 required-features = ["fszero", "graphzero", "tokenzero"]
+
+[[test]]
+name = "read_grant"
+path = "../../tests/unit/zsx-core/read_grant.rs"
+
 [[test]]
 name = "promise_fanout"
 path = "../../tests/benches/promise_fanout.rs"
