@@ -7,6 +7,10 @@ license.workspace = true
 description = "Hub-owned process identity, owner-death, and verified child-tree lifecycle"
 autobins = false
 
+[[test]]
+name = "child"
+path = "../../tests/unit/zero-process/child.rs"
+
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
 

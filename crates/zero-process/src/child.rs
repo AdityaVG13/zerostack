@@ -27,6 +27,14 @@
 //!   handle to it immediately after spawn, so every descendant dies with the
 //!   job. Neither path ever authorizes a numeric PID from a detached identity
 //!   record followed by `kill`.
+//! - **Owner death** ([`VerifiedChild::spawn_tree`]): Linux binds
+//!   `PR_SET_PDEATHSIG(SIGKILL)` to the spawning owner on every tree root, so
+//!   a tree built by construction (each level spawn-tree spawned) collapses on
+//!   owner death: the root dies with its owner, and each descendant dies with
+//!   its parent. Darwin binds a forked kqueue watcher that SIGKILLs the tree
+//!   group instead (macOS has no PDEATHSIG). A Linux root whose owner died
+//!   before its pre-exec binding refuses to exec rather than run unbound
+//!   (zerostack-5bei).
 //! - **Detached process** (warm daemon stem): the primary teardown path is an
 //!   authenticated `Shutdown` RPC over the owned Unix socket. Escalation when
 //!   the RPC is unavailable uses a Linux `pidfd` (kernel-pinned to the captured
@@ -416,12 +424,16 @@ impl VerifiedChild {
             // owned Child until reap.
             command.process_group(0);
             // Linux: PR_SET_PDEATHSIG, fail-closed if prctl returns nonzero
-            // (xk4c). Darwin: kqueue watcher (hgni). macOS has no PDEATHSIG;
-            // the owner path remains that watcher plus kill_and_reap.
+            // (xk4c). The hook also proves the owner that forked us is still
+            // alive (zerostack-5bei): a child reparented to init or a
+            // subreaper before exec would carry a binding that can never fire.
+            // Darwin: kqueue watcher (hgni). macOS has no PDEATHSIG; the owner
+            // path remains that watcher plus kill_and_reap.
             #[cfg(target_os = "linux")]
             {
+                let expected_parent = std::process::id() as libc::pid_t;
                 unsafe {
-                    command.pre_exec(linux_bind_pdeathsig);
+                    command.pre_exec(move || linux_bind_pdeathsig(expected_parent));
                 }
             }
             #[cfg(target_os = "macos")]
@@ -892,8 +904,17 @@ fn linux_set_pdeathsig(signal: libc::c_int) -> io::Result<()> {
     }
 }
 
+/// Linux pre-exec owner-death binding for a spawn-tree root.
+///
+/// Binds `PR_SET_PDEATHSIG(SIGKILL)` to the process that forked us, verifies
+/// the bit stuck (xk4c), and refuses exec when `expected_parent` no longer
+/// names that process. A reparented child -- owner died between fork and this
+/// hook -- would hold a dead binding (the signal only fires on a future
+/// parent death), silently orphaning the whole tree. `getppid() == 1` alone
+/// cannot detect the orphan: init is not the only reparent target, any
+/// ancestor subreaper (systemd, session sidecar) adopts it. Fail closed.
 #[cfg(target_os = "linux")]
-fn linux_bind_pdeathsig() -> io::Result<()> {
+fn linux_bind_pdeathsig(expected_parent: libc::pid_t) -> io::Result<()> {
     linux_set_pdeathsig(libc::SIGKILL)?;
     let mut got: libc::c_int = 0;
     // SAFETY: PR_GET_PDEATHSIG writes one int; fail closed if the bit did not
@@ -904,9 +925,9 @@ fn linux_bind_pdeathsig() -> io::Result<()> {
             "PR_SET_PDEATHSIG did not stick; refusing exec",
         ));
     }
-    // SAFETY: getppid is async-signal-safe; orphan means the owner already
-    // died between fork and this hook.
-    if unsafe { libc::getppid() } == 1 {
+    // SAFETY: getppid is async-signal-safe; a parent mismatch means the owner
+    // died between fork and this hook, so the child must not exec unbound.
+    if unsafe { libc::getppid() } != expected_parent {
         unsafe { libc::_exit(1) };
     }
     Ok(())
