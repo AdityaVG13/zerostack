@@ -40,6 +40,7 @@ pub mod semantic_cut;
 pub mod snap_to_file;
 pub mod transaction;
 pub mod two_phase;
+pub mod verdict;
 pub mod verifier_registry;
 pub use aggregate::*;
 pub use asset::*;

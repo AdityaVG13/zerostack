@@ -1358,7 +1358,7 @@ pub enum RouteOutcome {
     },
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 struct SessionState {
     handle: SafeExpandHandle,
     plan: DemandPlan,
@@ -1815,6 +1815,7 @@ impl W9eRoute {
                 byte_len: state.atom_lens.get(atom).copied().unwrap_or(0),
             })
             .collect();
+        let new_atom_count = atoms.len();
         let visible_bytes_delta: u64 = atoms.iter().map(|atom| atom.byte_len).sum();
 
         let mut state = state;
@@ -1835,7 +1836,7 @@ impl W9eRoute {
         ledger.push("backend_work", state.backend_work, "lookups", "exact")?;
         ledger.push("retry_count", 0, "attempts", "exact")?;
         ledger.push("false_complete", 0, "bool", "exact")?;
-        ledger.push("new_atoms", atoms.len() as u64, "count", "exact")?;
+        ledger.push("new_atoms", new_atom_count as u64, "count", "exact")?;
         ledger.push("expanded_atoms", state.expanded.len() as u64, "count", "exact")?;
         ledger.push(
             "terminal",
@@ -1854,7 +1855,7 @@ impl W9eRoute {
             handle_id,
             delta_seq,
             atoms,
-            new_atoms: atoms.len(),
+            new_atoms: new_atom_count,
             visible_bytes_delta,
             visible_bytes_total: state.visible_bytes,
             certified_atoms: state.plan.certified_atoms(),
