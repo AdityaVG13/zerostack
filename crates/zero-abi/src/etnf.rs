@@ -480,7 +480,7 @@ impl ShadowCertificate {
         if !verdict.grants_authority() {
             return Err(EtnfError::NotSafe);
         }
-        let certificate = Self {
+        let mut certificate = Self {
             root: String::new(),
             evidence_root: evidence_root.into(),
             scope: scope.into(),
@@ -488,6 +488,13 @@ impl ShadowCertificate {
             checker: checker.clone(),
             resource_ledger_root: resource_ledger_root.into(),
         };
+        certificate.root = Self::root_of(
+            &certificate.evidence_root,
+            &certificate.scope,
+            &certificate.contract,
+            &certificate.checker,
+            &certificate.resource_ledger_root,
+        );
         certificate.validate()?;
         Ok(certificate)
     }
