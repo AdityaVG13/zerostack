@@ -15,6 +15,8 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use zero_abi::zerokernel::{
     FiniteBudget, ReturnKind, ReturnPolicy, RootBindings, ZerokernelExecuteRequest,
 };
+#[cfg(all(feature = "fszero", feature = "graphzero", feature = "tokenzero"))]
+use zero_abi::zerokernel::ZerokernelResultKind;
 use zsx_core::preflight::{
     BrokerOutcome, CAPABILITY_MANIFEST_SCHEMA, CAPABILITY_MANIFEST_VERSION,
     OBSERVATION_CLASS_CAPABILITY_RESOLVE, broker, scan_plan,
