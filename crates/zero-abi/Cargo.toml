@@ -37,6 +37,10 @@ name = "etnf"
 path = "../../tests/unit/zero-abi/etnf.rs"
 
 [[test]]
+name = "etnf_checks"
+path = "../../tests/unit/zero-abi/etnf_checks.rs"
+
+[[test]]
 name = "zbf_from_bytes_harness"
 path = "../../tests/unit/zero-abi/zbf_from_bytes_harness.rs"
 

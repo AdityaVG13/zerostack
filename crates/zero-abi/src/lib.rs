@@ -24,6 +24,7 @@ pub mod digest;
 pub mod dispatch;
 pub mod effect;
 pub mod etnf;
+pub mod etnf_checks;
 pub mod exec_dag;
 pub mod exec_stream;
 pub mod exec_trace;
@@ -124,6 +125,19 @@ pub use etnf::{
     EtnfError, EvidenceItem, ExplicitFallback, FallbackKind, FiniteWitness, Falsifier,
     ProposedAuthorityTransition, ProposedTransitionKind, ResourceLedger, RootedEvidence,
     ShadowCertificate, V7ShadowReport,
+};
+pub use etnf_checks::{
+    BaselineSegment, CausalClosureDocument, ClosureEdge, ClosureNode, KillMetrics,
+    SavingsCategory, SavingsEntry, SavingsProvenanceDocument, VCQK_CHECKER_CAUSAL_ID,
+    VCQK_CHECKER_CHAIN_ID, VCQK_CHECKER_SAVINGS_ID, VCQK_CHECKER_VERSION,
+    VCQK_CONTRACT_CAUSAL, VCQK_CONTRACT_CHAIN, VCQK_CONTRACT_SAVINGS,
+    VCQK_KILL_MAX_TRACKED_COUNTEREXAMPLES, VCQK_KILL_MAX_TRACKED_ROOTS,
+    VCQK_KILL_NONCONVERGENCE_MAX_ISSUES, VCQK_LEARNING_REFINEMENT_PUBLISH_AUTHORITY,
+    VCQK_MAX_BASELINE_SEGMENTS, VCQK_MAX_CHAIN_LINKS, VCQK_MAX_CLOSURE_EDGES,
+    VCQK_MAX_CLOSURE_NODES, VCQK_MAX_DEMANDED_OUTPUTS, VCQK_MAX_IDENTIFIER_BYTES,
+    VCQK_MAX_SAVINGS_ENTRIES, VCQK_SCOPE_CAUSAL, VCQK_SCOPE_CHAIN, VCQK_SCOPE_SAVINGS,
+    check_causal_closure, check_certificate_chain, check_savings_provenance,
+    savings_overhead_killed,
 };
 pub use exec_dag::{
     MAX_EXEC_DAG_DEPENDENCIES_PER_NODE, MAX_EXEC_DAG_NODES, ExecDagError, ExecDag,
