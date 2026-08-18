@@ -9,7 +9,11 @@
 //!   positional arrays — never evaluated);
 //! - **resolves** every capability mention against the existing V6
 //!   registration ([`crate::lower::METHODS`] plus the interpreter's
-//!   intrinsic `zero.decision.require`);
+//!   intrinsic `zero.decision.require`) and every `z.*` guest mention
+//!   against the read-only K0 guest catalog (zerostack-fhcj: `z.state.*`,
+//!   `z.capabilities.search`, `z.help`/`z.inspect`, `z.invoke`/
+//!   `z.parallel`, `z.resolve`/`z.expand`/`z.snap`/`z.view`, `z.return`/
+//!   `z.persistHandle`);
 //! - **normalizes** approved aliases / shorthand / defaults / units /
 //!   handle forms from the single lowering authority
 //!   ([`crate::lower`]'s published tables: compound operation names, search
@@ -35,13 +39,16 @@
 //!   [`DecisionRequired`] — the model answers, the kernel never guesses.
 //! - Deterministic structural refusals fail before any execution and before
 //!   any one-shot child spawn: approval-required `fs.write` (the kernel
-//!   installs no approval grants), the non-V6 `z.*` guest surface,
-//!   unqualified capability calls, conflicting timeout spellings, unknown
-//!   names without close candidates, ungranted pointed-at external reads,
-//!   and capability usage outside a rooted manifest.
+//!   installs no approval grants), `z.transaction` and every other name
+//!   absent from the K0 guest catalog, `z.invoke`/`z.parallel` targets
+//!   outside the read-only K0 reach, unqualified capability calls,
+//!   conflicting timeout spellings, unknown names without close candidates,
+//!   ungranted pointed-at external reads, and capability usage outside a
+//!   rooted manifest.
 //! - The broker adds **no capability and no authority**: every resolved
-//!   name is checked against the existing registration, a manifest can only
-//!   shrink the allowed set, and the only file the broker reads is the
+//!   name is checked against the existing registration or the guest catalog
+//!   (which lists no effect surface), a manifest can only shrink the
+//!   allowed set, and the only file the broker reads is the
 //!   caller-supplied capability manifest (bounded).
 //!
 //! # Honest scan boundary
@@ -65,7 +72,14 @@ use zero_abi::contract_digest_hex;
 use zero_abi::decision::{
     ContingentPolicy, DecisionRequired, ObservationClass, PolicyResolution, SemanticDecisionPoint,
 };
+use zero_abi::guest::{
+    K0_GUEST_ABSENT_MEMBERS, K0_GUEST_CAPABILITIES_MEMBERS, K0_GUEST_MEMBERS,
+    K0_GUEST_PROPERTIES, K0_GUEST_STATE_MEMBERS, K0_READ_ONLY_CAPABILITIES,
+    K0_READ_ONLY_COMPOUND_OPS, is_k0_guest_member, is_k0_guest_state_member,
+    is_k0_read_only_capability, is_k0_read_only_compound_op,
+};
 use zero_abi::zerokernel::{ZEROKERNEL_ABI_VERSION, ZerokernelExecuteRequest};
+use zero_codemode::guest::split_qualified;
 
 use crate::lower::{
     COMPOUND_OPS, LOOKUP_LIMIT_ALIAS_KEYS, LOOKUP_QUERY_ALIAS_KEYS, LOOKUP_ROOT_ALIAS_KEYS,
@@ -179,6 +193,9 @@ pub struct CapabilityMention {
     pub invoke: bool,
     /// `z.<member>(…)` form (no V6 `z` namespace).
     pub z_member: bool,
+    /// `z.<group>.<member>(…)` form (`z.state.get`, `z.capabilities.search`):
+    /// the group name (`state`/`capabilities`), `None` for direct members.
+    pub z_group: Option<String>,
     /// Surface text (`fs`, `graph`, `token`, `help`, `decision`, or any
     /// typed name for unregistered mentions).
     pub surface: String,
@@ -208,6 +225,179 @@ pub struct PlanScan {
     pub opaque_reason: Option<String>,
 }
 
+/// Resolve one `z.*` guest mention against the read-only K0 guest catalog.
+///
+/// Deterministic and fail-closed:
+/// - direct members and group members must exist in the catalog (`z.state.*`
+///   and `z.capabilities.search` only), else a typed refusal;
+/// - `z.transaction` and every other absent name fail typed;
+/// - `z.invoke("surface.method", …)` and the string specs of
+///   `z.parallel([…])` must name registered read-only V6 capabilities
+///   (or a read-only `fs.compound` op); unregistered targets with close
+///   candidates resolve through the decision API, never auto-selected;
+/// - resolved invoke/parallel targets join `resolved_callables` so a
+///   capability manifest can restrict them exactly like direct calls.
+///
+/// Object-form `z.parallel` specs and the batch size are enforced by the
+/// runtime guest surface (the scanner sees only first-level array strings);
+/// this check is the earlier deterministic boundary over what it can see.
+fn resolve_guest_mention(
+    mention: &CapabilityMention,
+    receipt: &mut BrokerReceipt,
+    resolved_callables: &mut Vec<String>,
+) -> Result<(), BrokerOutcome> {
+    if mention.invoke {
+        return resolve_guest_invoke(mention, receipt, resolved_callables);
+    }
+    if let Some(group) = &mention.z_group {
+        match (group.as_str(), mention.method.as_str()) {
+            ("state", method) if is_k0_guest_state_member(method) => {
+                receipt.resolved_mentions += 1;
+                Ok(())
+            }
+            ("state", method) => Err(BrokerOutcome::Refused(format!(
+                "z.state.{method} is not part of the K0 guest surface; members: {}",
+                K0_GUEST_STATE_MEMBERS.join(", ")
+            ))),
+            ("capabilities", "search") => {
+                receipt.resolved_mentions += 1;
+                Ok(())
+            }
+            ("capabilities", method) => Err(BrokerOutcome::Refused(format!(
+                "z.capabilities.{method} is not part of the K0 guest surface; members: {}",
+                K0_GUEST_CAPABILITIES_MEMBERS.join(", ")
+            ))),
+            (group, _) => Err(BrokerOutcome::Refused(format!(
+                "z.{group} is not part of the K0 guest surface; properties: {}",
+                K0_GUEST_PROPERTIES.join(", ")
+            ))),
+        }
+    } else if is_k0_guest_member(&mention.method) {
+        match mention.method.as_str() {
+            "invoke" => resolve_guest_invoke(mention, receipt, resolved_callables),
+            "parallel" => {
+                for spec in &mention.array_strings {
+                    let (surface, method) = split_qualified(spec).map_err(|detail| {
+                        BrokerOutcome::Refused(format!(
+                            "z.parallel spec '{spec}' is invalid: {detail}"
+                        ))
+                    })?;
+                    if !is_k0_read_only_capability(surface, method) {
+                        return Err(BrokerOutcome::Refused(format!(
+                            "{surface}.{method} is not in the read-only K0 reach of z.invoke/z.parallel; read-only capabilities: {}",
+                            read_only_capability_list()
+                        )));
+                    }
+                    resolved_callables.push(spec.clone());
+                }
+                receipt.resolved_mentions += 1;
+                Ok(())
+            }
+            _ => {
+                receipt.resolved_mentions += 1;
+                Ok(())
+            }
+        }
+    } else if K0_GUEST_ABSENT_MEMBERS.contains(&mention.method.as_str()) {
+        Err(BrokerOutcome::Refused(format!(
+            "z.{} is not part of the K0 guest surface: K0 has no effect or transaction authority",
+            mention.method
+        )))
+    } else {
+        Err(BrokerOutcome::Refused(format!(
+            "z.{} is not part of the K0 guest surface; members: {}",
+            mention.method,
+            K0_GUEST_MEMBERS.join(", ")
+        )))
+    }
+}
+
+/// Resolve one `z.invoke("surface.method", …)` target: registered, in the
+/// read-only K0 reach (or a read-only `fs.compound` op), and never
+/// auto-selected on ambiguity.
+fn resolve_guest_invoke(
+    mention: &CapabilityMention,
+    receipt: &mut BrokerReceipt,
+    resolved_callables: &mut Vec<String>,
+) -> Result<(), BrokerOutcome> {
+    let Some(target) = &mention.first_arg else {
+        return Err(BrokerOutcome::Refused(
+            "z.invoke expects (\"surface.method\", args?)".to_owned(),
+        ));
+    };
+    let (surface, method) = split_qualified(target).map_err(|detail| {
+        BrokerOutcome::Refused(format!("z.invoke target '{target}' is invalid: {detail}"))
+    })?;
+    if surface == "fs" && method == "compound" {
+        // The op rides the object `name` key or the positional first
+        // element, exactly like the lowering authority reads it.
+        let op = mention
+            .object_keys
+            .iter()
+            .find(|key| key.key == "name")
+            .and_then(|key| key.single.clone())
+            .or_else(|| mention.array_strings.first().cloned());
+        let Some(op) = op else {
+            return Err(BrokerOutcome::Refused(
+                "z.invoke('fs.compound', …) requires an operation name".to_owned(),
+            ));
+        };
+        if !is_k0_read_only_compound_op(&op) {
+            return Err(BrokerOutcome::Refused(format!(
+                "fs.compound operation '{op}' is not in the read-only K0 reach; read-only compound operations: {}",
+                K0_READ_ONLY_COMPOUND_OPS.join(", ")
+            )));
+        }
+        receipt.resolved_mentions += 1;
+        resolved_callables.push("fs.compound".to_owned());
+        return Ok(());
+    }
+    if !is_registered_capability(surface, method) {
+        // Never auto-select meaning: close candidates resolve through the
+        // decision API; nothing close is a structural refusal.
+        let qualified: Vec<String> = METHODS
+            .iter()
+            .map(|(s, m)| format!("{s}.{m}"))
+            .collect();
+        let candidates = closest_candidates(qualified.iter().map(String::as_str), target);
+        if candidates.is_empty() {
+            return Err(BrokerOutcome::Refused(format!(
+                "z.invoke target '{target}' is not a registered capability; call zero.<surface>.<method>(...) directly"
+            )));
+        }
+        let point = SemanticDecisionPoint::new(
+            DECISION_ID_METHOD,
+            ObservationClass::new(OBSERVATION_CLASS_CAPABILITY_RESOLVE)
+                .expect("observation class is valid"),
+            format!("capability '{target}' is not registered; which capability did you mean?"),
+            candidates,
+            Vec::new(),
+        )
+        .expect("decision point is valid");
+        return Err(BrokerOutcome::DecisionRequired(decision(&point, target)));
+    }
+    if !is_k0_read_only_capability(surface, method) {
+        return Err(BrokerOutcome::Refused(format!(
+            "{surface}.{method} is not in the read-only K0 reach of z.invoke/z.parallel; read-only capabilities: {}",
+            read_only_capability_list()
+        )));
+    }
+    receipt.resolved_mentions += 1;
+    resolved_callables.push(target.clone());
+    Ok(())
+}
+
+fn read_only_capability_list() -> String {
+    let mut list = String::new();
+    for (surface, method) in K0_READ_ONLY_CAPABILITIES {
+        if !list.is_empty() {
+            list.push_str(", ");
+        }
+        list.push_str(&format!("{surface}.{method}"));
+    }
+    list
+}
+
 /// Run the K0 capability broker over one execute request.
 ///
 /// `project_root` must be the supervisor's canonicalized project/workspace
@@ -230,18 +420,18 @@ pub fn broker(
     let root_text = project_root.to_string_lossy().into_owned();
 
     for mention in scan.mentions.iter().take(MAX_MENTIONS) {
-        // Shape refusals, deterministic and in plan order.
-        if mention.z_member {
-            return BrokerOutcome::Refused(format!(
-                "z.{} is not part of the V6 surface; call zero.<surface>.<method>(...) directly",
-                mention.method
-            ));
-        }
-        if mention.invoke {
-            return BrokerOutcome::Refused(
-                "z.invoke is not part of the V6 surface; call zero.<surface>.<method>(...) directly"
-                    .to_owned(),
-            );
+        // K0 guest `z` surface (zerostack-fhcj): every `z.*` mention is
+        // resolved against the read-only guest catalog. `z.transaction` and
+        // every other absent name fail typed; `z.invoke`/`z.parallel`
+        // targets must be registered read-only V6 capabilities, so the
+        // guest surface never widens the authority the broker guards.
+        if mention.z_member || mention.invoke || mention.z_group.is_some() {
+            if let Err(outcome) =
+                resolve_guest_mention(mention, &mut receipt, &mut resolved_callables)
+            {
+                return outcome;
+            }
+            continue;
         }
         if !mention.qualified {
             return BrokerOutcome::Refused(format!(
@@ -1141,6 +1331,18 @@ pub fn scan_plan(program: &str) -> PlanScan {
                                     }
                                     continue;
                                 }
+                                if ident == "z" && !shadowed.z {
+                                    // `z.state.get(...)` / `z.capabilities.search(...)`.
+                                    let mut mention =
+                                        mention_args("z", &member2, false, false, false);
+                                    mention.z_group = Some(member1.to_owned());
+                                    if let Some(mention) =
+                                        capture_mention(&mut scanner, a3, mention)
+                                    {
+                                        mentions.push(mention);
+                                    }
+                                    continue;
+                                }
                                 // Any other three-level member call
                                 // (JSON.parse, chained helpers).
                                 scanner.pos = a3 + 1;
@@ -1160,21 +1362,10 @@ pub fn scan_plan(program: &str) -> PlanScan {
                         }
                     }
                     if scanner.byte_at(a2) == Some(b'(') {
-                        if is_surface_name(&member1)
-                            && !shadowed.surface_shadowed(&member1)
-                            && !shadowed.zero
-                        {
-                            // Bare surface call without the zero root.
-                            if let Some(mention) = capture_mention(
-                                &mut scanner,
-                                a2,
-                                mention_args(&member1, ident, false, false, false),
-                            ) {
-                                mentions.push(mention);
-                            }
-                            continue;
-                        }
                         if ident == "z" && !shadowed.z {
+                            // The guest surface shadows surface names:
+                            // `z.help()` is a guest member call, never a
+                            // bare `help.z(...)` capability call.
                             if member1 == "invoke" {
                                 if let Some(mention) = capture_mention(
                                     &mut scanner,
@@ -1189,6 +1380,20 @@ pub fn scan_plan(program: &str) -> PlanScan {
                                 &mut scanner,
                                 a2,
                                 mention_args("z", &member1, false, false, true),
+                            ) {
+                                mentions.push(mention);
+                            }
+                            continue;
+                        }
+                        if is_surface_name(&member1)
+                            && !shadowed.surface_shadowed(&member1)
+                            && !shadowed.zero
+                        {
+                            // Bare surface call without the zero root.
+                            if let Some(mention) = capture_mention(
+                                &mut scanner,
+                                a2,
+                                mention_args(&member1, ident, false, false, false),
                             ) {
                                 mentions.push(mention);
                             }
@@ -1234,6 +1439,7 @@ fn mention_args(
         qualified,
         invoke,
         z_member,
+        z_group: None,
         surface: surface.to_owned(),
         method: method.to_owned(),
         first_arg: None,

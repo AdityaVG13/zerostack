@@ -195,6 +195,10 @@ pub struct Host {
     pub(crate) registration: GlobalRegistration,
     pub(crate) spill_root: Option<PathBuf>,
     pub(crate) max_visible_result_bytes: usize,
+    /// K0 guest `z` surface, installed only by the supervisor's per-call
+    /// runtime. `None` on the native path, so the native fallback never
+    /// exposes the guest global.
+    pub(crate) guest: Option<std::sync::Arc<crate::guest::GuestSurface>>,
     decision_gate: DecisionGate,
 }
 
@@ -221,8 +225,24 @@ impl Host {
             limits,
             registration,
             spill_root: None,
+            guest: None,
             decision_gate: DecisionGate::default(),
         })
+    }
+
+    /// Attach the K0 guest `z` surface to this runtime. Only the Wave 10
+    /// supervisor's per-call runtime calls this; the native path never does.
+    pub fn with_guest_surface(
+        mut self,
+        guest: std::sync::Arc<crate::guest::GuestSurface>,
+    ) -> Self {
+        self.guest = Some(guest);
+        self
+    }
+
+    /// The attached K0 guest surface, if this runtime is a K0 runtime.
+    pub fn guest_surface(&self) -> Option<&std::sync::Arc<crate::guest::GuestSurface>> {
+        self.guest.as_ref()
     }
 
     /// Attach a contingent policy to this host. With no gate attached the

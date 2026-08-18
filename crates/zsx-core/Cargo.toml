@@ -62,5 +62,10 @@ name = "read_grant"
 path = "../../tests/unit/zsx-core/read_grant.rs"
 
 [[test]]
+name = "guest_surface"
+path = "../../tests/unit/zsx-core/guest_surface.rs"
+required-features = ["fszero", "graphzero", "tokenzero"]
+
+[[test]]
 name = "promise_fanout"
 path = "../../tests/benches/promise_fanout.rs"

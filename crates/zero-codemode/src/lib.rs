@@ -20,6 +20,7 @@
 
 mod cancellation;
 mod decision_gate;
+pub mod guest;
 mod interpreter;
 
 mod edit_protocol;
@@ -28,6 +29,10 @@ mod limits;
 pub mod worker;
 mod wrap;
 pub use cancellation::CancellationSignal;
+
+pub use guest::{
+    GuestContext, GuestSurface, GuestWave9, parallel_spec, search_capabilities, split_qualified,
+};
 
 pub use decision_gate::{
     DECISION_REQUIRE_METHOD, DECISION_SURFACE, DecisionGate, GateResolution, GateRuleUsage,

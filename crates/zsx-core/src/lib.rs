@@ -39,6 +39,9 @@ mod adapter;
 mod connector;
 mod continuation;
 mod dag_exec;
+/// K0 W9-E live rooted evidence and the guest wave-9 route
+/// (`zerostack-fhcj`).
+pub mod guest_w9e;
 mod help;
 mod lookup;
 mod lower;
@@ -91,6 +94,7 @@ pub use dag_exec::{
     DagExecError, DagExecutionOutcome, DagExecutor, DagNodeOutcome, ScheduleMode,
     StreamError, StreamSink,
 };
+pub use guest_w9e::{SupervisorGuestWave9, W9eEvidence};
 pub use envelope::{
     ZSX_PROTOCOL, SessionEnvelopeContext, DecisionViewContext,
     legacy_envelope_value, legacy_kind_code,

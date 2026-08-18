@@ -266,16 +266,141 @@ fn fs_write_fails_closed_without_approval_grants() {
 }
 
 #[test]
-fn z_guest_surface_is_refused_not_auto_mapped() {
+fn z_guest_surface_resolves_against_the_catalog() {
+    let fixture = Fixture::new();
+    // The read-only guest surface proceeds: direct members, the state and
+    // capabilities groups, invoke of a read-only capability, parallel with
+    // read-only string specs, and the structured-return pass-through.
+    for program in [
+        "return await z.state.set('k', 1) + await z.state.get('k');",
+        "return await z.state.has('k');",
+        "return await z.state.list();",
+        "return await z.state.delete('k');",
+        "return await z.capabilities.search('read');",
+        "return await z.help();",
+        "return await z.inspect();",
+        "return await z.invoke('fs.read', {path: 'a'});",
+        "return await z.parallel(['fs.read', 'help.catalog']);",
+        "return await z.return(1);",
+        "return await z.resolve({scenario_id: 's', projection_atoms: ['aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa']});",
+        "return await z.snap({scenario_id: 's', projection_atoms: ['aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa']});",
+        "return await z.persistHandle({handle_id: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'});",
+    ] {
+        match broker_for(program, &fixture.root) {
+            BrokerOutcome::Proceed(receipt) => {
+                assert!(
+                    receipt.resolved_mentions >= 1,
+                    "plan {program:?} must resolve at least one mention: {receipt:?}"
+                );
+            }
+            other => panic!("plan {program:?} must proceed, got {other:?}"),
+        }
+    }
+}
+
+#[test]
+fn z_absent_and_unknown_members_fail_typed() {
     let fixture = Fixture::new();
     for program in [
-        "return await z.invoke('fs.read', {path: 'a'});",
-        "return await z.return(1);",
+        "return await z.transaction(async tx => tx);",
+        "return await z.definitelyNotAMember();",
+        "return await z.state.nope('k');",
+        "return await z.capabilities.brew('read');",
     ] {
         match broker_for(program, &fixture.root) {
             BrokerOutcome::Refused(detail) => {
                 assert!(
-                    detail.contains("not part of the V6 surface"),
+                    detail.contains("not part of the K0 guest surface"),
+                    "plan {program:?} detail: {detail}"
+                );
+                if program.contains("transaction") {
+                    assert!(
+                        detail.contains("no effect or transaction authority"),
+                        "plan {program:?} detail: {detail}"
+                    );
+                }
+            }
+            other => panic!("plan {program:?} must be refused, got {other:?}"),
+        }
+    }
+}
+
+#[test]
+fn z_invoke_targets_are_registered_read_only() {
+    let fixture = Fixture::new();
+    // Read-only registered targets proceed.
+    for program in [
+        "return await z.invoke('fs.read', {path: 'a'});",
+        "return await z.invoke('graph.query', {});",
+        "return await z.invoke('fs.compound', {name: 'list', paths: ['.']});",
+        "return await z.invoke('fs.compound', ['read', {path: 'a'}]);",
+    ] {
+        match broker_for(program, &fixture.root) {
+            BrokerOutcome::Proceed(_) => {}
+            other => panic!("plan {program:?} must proceed, got {other:?}"),
+        }
+    }
+    // Mutation targets are refused with the read-only reach message.
+    for program in [
+        "return await z.invoke('fs.write', {path: 'a', content: 'x'});",
+        "return await z.invoke('fs.edit', {path: 'a', find: 'x', replace: 'y'});",
+        "return await z.invoke('fs.transact', {});",
+        "return await z.invoke('graph.reserve', {});",
+        "return await z.invoke('token.shell', {command: 'echo hi'});",
+        "return await z.invoke('fs.compound', {name: 'write', path: 'a', content: 'x'});",
+        "return await z.invoke('fs.compound', {name: 'edit', path: 'a'});",
+        "return await z.invoke('fs.compound', ['mutate', {path: 'a'}]);",
+    ] {
+        match broker_for(program, &fixture.root) {
+            BrokerOutcome::Refused(detail) => {
+                assert!(
+                    detail.contains("read-only K0 reach"),
+                    "plan {program:?} detail: {detail}"
+                );
+            }
+            other => panic!("plan {program:?} must be refused, got {other:?}"),
+        }
+    }
+    // Unknown targets with close candidates resolve through the decision
+    // API; nothing close is a structural refusal.
+    match broker_for("return await z.invoke('fs.reade', {path: 'a'});", &fixture.root) {
+        BrokerOutcome::DecisionRequired(decision) => {
+            assert_eq!(decision.observed_value, "fs.reade");
+            assert!(
+                decision.choices.contains(&"fs.read".to_owned()),
+                "choices={:?}",
+                decision.choices
+            );
+        }
+        other => panic!("z.invoke('fs.reade') must be DecisionRequired, got {other:?}"),
+    }
+    match broker_for("return await z.invoke('process.env', {});", &fixture.root) {
+        BrokerOutcome::Refused(detail) => {
+            assert!(detail.contains("not a registered capability"), "detail: {detail}");
+        }
+        other => panic!("z.invoke('process.env') must be refused, got {other:?}"),
+    }
+}
+
+#[test]
+fn z_parallel_visible_specs_are_registered_read_only() {
+    let fixture = Fixture::new();
+    match broker_for(
+        "return await z.parallel(['fs.read', 'help.catalog']);",
+        &fixture.root,
+    ) {
+        BrokerOutcome::Proceed(_) => {}
+        other => panic!("read-only parallel must proceed, got {other:?}"),
+    }
+    for program in [
+        "return await z.parallel(['fs.read', 'fs.write']);",
+        "return await z.parallel(['token.shell']);",
+        "return await z.parallel(['nope.nope']);",
+    ] {
+        match broker_for(program, &fixture.root) {
+            BrokerOutcome::Refused(detail) => {
+                assert!(
+                    detail.contains("read-only K0 reach") || detail.contains("not a registered capability"),
                     "plan {program:?} detail: {detail}"
                 );
             }

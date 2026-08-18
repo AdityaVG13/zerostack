@@ -976,6 +976,19 @@ impl SnapToFileRoute {
         self.w9e.revalidate(handle, live)
     }
 
+    /// Exactly one first expansion of a trusted, live-revalidated handle
+    /// (passthrough to the W9-E route; the guest surface's `z.expand`).
+    pub fn expand_first(
+        &mut self,
+        handle: &SafeExpandHandle,
+        live: &LiveExpandState,
+        native: &NativeBaseline,
+    ) -> Result<FirstExpansion, SnapError> {
+        self.w9e
+            .expand_first(handle, live, native)
+            .map_err(SnapError::W9E)
+    }
+
     /// Build the live hub state that mirrors this gate's bindings for one
     /// issued handle (passthrough; tests mutate fields to exercise
     /// stale/mismatch paths).

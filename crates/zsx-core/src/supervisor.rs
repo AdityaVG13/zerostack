@@ -64,6 +64,17 @@
 //!   `DecisionRequired`, structural refusals fail before any execution (and
 //!   before any one-shot child spawn), and the original program is what the
 //!   interpreter runs.
+//! - **K0 guest surface** (zerostack-fhcj): every fresh runtime installs
+//!   the read-only `z` global ([`GuestSurface`]) bound to the injected
+//!   roots — context, small serializable per-call state, help/inspect,
+//!   capability search, read-only `z.invoke`/`z.parallel` (deterministic
+//!   input-order results, bounded fan-out), the W9-E wave-9 seam
+//!   (`z.resolve`/`z.expand`/`z.snap`/`z.view` — typed failures without
+//!   live rooted evidence, trusted host-minted handles only), `z.return`,
+//!   and `z.persistHandle` (exact-handle persistence into the response).
+//!   The surface adds no capability: the broker validates every `z.*`
+//!   mention, and the runtime surface enforces the same read-only reach.
+//!   The native path never installs `z`.
 //!
 //! # Honest accounting notes
 //!
@@ -91,19 +102,22 @@ use std::sync::{Arc, Condvar, Mutex};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 
+use zero_abi::guest::K0_PARALLEL_LIMIT;
 use zero_abi::raw_worker::EngineIdentity;
 use zero_abi::zerokernel::{
     ExactHandles, FiniteBudget, KernelResourceLedger, PreflightReport, ReturnPolicy,
-    RootEvidence, RootSnapshot, ZerokernelExecuteRequest, ZerokernelExecuteResponse,
+    RootEvidence, RootSnapshot, ZEROKERNEL_ABI_VERSION, ZerokernelExecuteRequest,
+    ZerokernelExecuteResponse,
 };
 use zero_codemode::{
-    CancellationSignal, Connector, ExecutionMetrics, Host, HostError, HostLimits,
-    MAX_INFLIGHT_CONNECTOR_CALLS, finalize_visible_error,
+    CancellationSignal, Connector, ExecutionMetrics, GuestContext, GuestSurface, Host,
+    HostError, HostLimits, MAX_INFLIGHT_CONNECTOR_CALLS, finalize_visible_error,
 };
 use zero_process::VerifiedChild;
 
 use crate::adapter::DomainAdapter;
 use crate::connector::{AggregateExecutionContext, ZsxConnector, registration};
+use crate::guest_w9e::W9eEvidence;
 use crate::preflight::BrokerOutcome;
 
 /// Subcommand the one-shot child runs in the same executable
@@ -299,6 +313,10 @@ pub struct Supervisor {
     state_root: PathBuf,
     session_id: String,
     adapters: BTreeMap<EngineIdentity, Arc<dyn DomainAdapter>>,
+    /// Optional live rooted W9-E evidence for the guest wave-9 seam
+    /// (`z.resolve`/`z.expand`/`z.snap`/`z.view`). Without it those calls
+    /// fail typed inside every fresh runtime.
+    w9e: Option<W9eEvidence>,
     child: OneShotChild,
     request_sequence: AtomicU64,
     live_executors: AtomicU64,
@@ -602,6 +620,11 @@ impl Supervisor {
             })?,
         );
         let limits = host_limits_for_budget(&request.budget)?;
+        // K0 guest surface (zerostack-fhcj): the fresh runtime installs the
+        // `z` global bound to the injected roots; the native path never
+        // does. The surface (including its per-call state) dies with this
+        // runtime.
+        let guest = guest_surface_for(&request, &self.session_id, &self.state_root)?;
         let mut host = Host::new(limits, registration())
             .map_err(|error| SupervisorError::Runtime(format!("cannot create host: {error}")))?;
         host = host
@@ -612,6 +635,23 @@ impl Supervisor {
         if self.state_root != self.root {
             host = host.with_result_spill(self.state_root.clone());
         }
+        let guest = match &self.w9e {
+            Some(evidence) => {
+                let w9e = crate::guest_w9e::SupervisorGuestWave9::new(evidence).map_err(
+                    |error| {
+                        SupervisorError::Runtime(format!(
+                            "cannot build the wave-9 route from live rooted evidence: {error}"
+                        ))
+                    },
+                )?;
+                let mut surface = guest;
+                surface.attach_w9e(Rc::new(w9e));
+                surface
+            }
+            None => guest,
+        };
+        let guest = Arc::new(guest);
+        host = host.with_guest_surface(Arc::clone(&guest));
         let signal = CancellationSignal::from_atomic(Arc::clone(cancel));
         connector
             .set_execution_context(AggregateExecutionContext {
@@ -640,7 +680,11 @@ impl Supervisor {
         connector.clear_request_cancellation();
         connector.clear_execution_context();
         drop(connector);
-        self.project_outcome(preflight, snapshot, outcome.metrics, outcome.result)
+        let handles = ExactHandles {
+            continuation_handle: guest.persisted_continuation(),
+            ..ExactHandles::default()
+        };
+        self.project_outcome(preflight, snapshot, outcome.metrics, outcome.result, handles)
     }
 
     /// One-shot profile: spawn exactly one sandboxed child, feed it the
@@ -911,13 +955,17 @@ impl Supervisor {
         response
     }
 
-    /// Map the measured embedded outcome onto the protocol envelope.
+    /// Map the measured embedded outcome onto the protocol envelope. The
+    /// exact handles carry the guest-persisted continuation handle of a
+    /// completed call (`z.persistHandle`); terminal failures never carry a
+    /// successor handle.
     fn project_outcome(
         &self,
         preflight: PreflightReport,
         snapshot: RootSnapshot,
         metrics: ExecutionMetrics,
         result: Result<serde_json::Value, HostError>,
+        handles: ExactHandles,
     ) -> Result<ZerokernelExecuteResponse, SupervisorError> {
         let ledger = KernelResourceLedger {
             wall_ms_used: nanos_to_ms_ceil(u128::from(metrics.wall_time_ns)),
@@ -937,7 +985,7 @@ impl Supervisor {
                     .unwrap_or(0)
                     .min(u32::MAX as usize) as u32;
                 ZerokernelExecuteResponse::completed(
-                    ExactHandles::default(),
+                    handles,
                     preflight,
                     KernelResourceLedger { bytes_out, ..ledger },
                     evidence,
@@ -980,6 +1028,7 @@ pub struct SupervisorBuilder {
     session_id: Option<String>,
     profile: SupervisorProfile,
     child: Option<OneShotChild>,
+    w9e: Option<W9eEvidence>,
     fszero: Option<Arc<dyn DomainAdapter>>,
     graphzero: Option<Arc<dyn DomainAdapter>>,
     tokenzero: Option<Arc<dyn DomainAdapter>>,
@@ -1015,6 +1064,7 @@ impl SupervisorBuilder {
             session_id: None,
             profile: SupervisorProfile::Embedded,
             child: None,
+            w9e: None,
             fszero: None,
             graphzero: None,
             tokenzero: None,
@@ -1047,6 +1097,14 @@ impl SupervisorBuilder {
     /// with the `kernel` subcommand).
     pub fn with_one_shot_child(mut self, child: OneShotChild) -> Self {
         self.child = Some(child);
+        self
+    }
+
+    /// Attach live rooted W9-E evidence so the guest wave-9 seam
+    /// (`z.resolve`/`z.expand`/`z.snap`/`z.view`) operates inside every
+    /// fresh runtime. Without it those calls fail typed.
+    pub fn with_w9e(mut self, evidence: W9eEvidence) -> Self {
+        self.w9e = Some(evidence);
         self
     }
 
@@ -1134,6 +1192,7 @@ impl SupervisorBuilder {
             state_root,
             session_id,
             adapters,
+            w9e: self.w9e,
             child,
             request_sequence: AtomicU64::new(1),
             live_executors: AtomicU64::new(0),
@@ -1370,6 +1429,32 @@ fn failed_response(
     preflight.errors.push(detail.to_owned());
     ZerokernelExecuteResponse::failed(ExactHandles::default(), preflight, ledger, evidence)
         .expect("a failed response with unchanged evidence is always valid")
+}
+
+/// Build the per-call K0 guest surface bound to the request's injected
+/// roots. Every root comes from the caller; the guest never retypes session
+/// or project identity. The parallel-spec bound is the catalog constant.
+fn guest_surface_for(
+    request: &ZerokernelExecuteRequest,
+    session_id: &str,
+    state_root: &Path,
+) -> Result<GuestSurface, SupervisorError> {
+    Ok(GuestSurface::new(
+        GuestContext {
+            project_root: request.roots.project_root.clone(),
+            workspace_root: request.roots.workspace_root.clone(),
+            request_root: request.roots.request_root.clone(),
+            session_root: request
+                .roots
+                .expected_session_root
+                .clone()
+                .or_else(|| Some(state_root.to_string_lossy().into_owned())),
+            capability_manifest_root: request.roots.capability_manifest_root.clone(),
+            session_id: session_id.to_owned(),
+            abi_version: ZEROKERNEL_ABI_VERSION.to_owned(),
+        },
+        K0_PARALLEL_LIMIT,
+    ))
 }
 
 fn is_directory(path: &Path) -> bool {

@@ -551,6 +551,12 @@ impl<'tree> Interpreter<'tree> {
             .insert("globalThis".into(), Value::Namespace("globalThis".into()));
         env.values
             .insert("ctx".into(), Value::Namespace("ctx".into()));
+        // K0 guest surface (zerostack-fhcj): only the supervisor's per-call
+        // runtime installs it; the native host never exposes `z`.
+        if self.host.guest.is_some() {
+            env.values
+                .insert("z".into(), Value::Namespace("z".into()));
+        }
     }
 
     fn attach_step_receipt(&self, result: JsonValue) -> Result<JsonValue, HostError> {
@@ -2144,6 +2150,9 @@ impl<'tree> Interpreter<'tree> {
             Value::Namespace(namespace) if namespace == "globalThis" => {
                 Ok(self.lookup(key).unwrap_or(Value::Undefined))
             }
+            Value::Namespace(namespace) if namespace == "z" => {
+                return self.z_property(key);
+            }
             Value::Namespace(namespace) => {
                 if matches!(key, "then" | "toJSON" | "toString") {
                     return Ok(Value::Undefined);
@@ -2454,10 +2463,394 @@ impl<'tree> Interpreter<'tree> {
                 args.first().and_then(number).unwrap_or(0.0).ceil(),
             )),
             ("console", _) => Ok(Value::Undefined),
+            ("z", name) => self.z_member(name, args),
+            ("z.state", name) => self.z_state_member(name, args),
+            ("z.capabilities", name) => self.z_capabilities_member(name, args),
             _ => Err(Fault::Host(HostError::UnsupportedSyntax(format!(
                 "global method {namespace}.{name} is not supported"
             )))),
         }
+    }
+
+    /// `z.<property>` resolution: the context data object, the two method
+    /// groups, or the default method fallthrough (an unknown member fails
+    /// typed at call time in [`Interpreter::z_member`]).
+    fn z_property(&mut self, key: &str) -> Result<Value<'tree>, Fault<'tree>> {
+        let Some(guest) = &self.host.guest else {
+            return Err(Fault::Host(HostError::Data(
+                "z is not part of this runtime; the K0 guest surface is not installed".into(),
+            )));
+        };
+        match key {
+            "context" => {
+                let json = guest.context_json();
+                self.convert_from_json(json, false).map_err(Fault::Host)
+            }
+            "state" => Ok(Value::Namespace("z.state".into())),
+            "capabilities" => Ok(Value::Namespace("z.capabilities".into())),
+            // Same promise-shape guard as every other namespace.
+            "then" | "toJSON" | "toString" => Ok(Value::Undefined),
+            _ => Ok(Value::Method(
+                Box::new(Value::Namespace("z".into())),
+                key.into(),
+            )),
+        }
+    }
+
+    /// Direct `z.<member>(...)` calls of the K0 guest surface.
+    fn z_member(
+        &mut self,
+        name: &str,
+        args: Vec<Value<'tree>>,
+    ) -> Result<Value<'tree>, Fault<'tree>> {
+        let Some(_guest) = &self.host.guest else {
+            return Err(Fault::Host(HostError::Data(
+                "z is not part of this runtime; the K0 guest surface is not installed".into(),
+            )));
+        };
+        if crate::guest::GuestSurface::is_absent_member(name) {
+            return Err(Fault::Host(HostError::Data(format!(
+                "z.{name} is not part of the K0 guest surface: K0 has no effect or transaction authority"
+            ))));
+        }
+        if !zero_abi::guest::is_k0_guest_member(name) {
+            return Err(Fault::Host(HostError::Data(format!(
+                "z.{name} is not part of the K0 guest surface; members: {}",
+                crate::guest::GuestSurface::member_list().join(", ")
+            ))));
+        }
+        match name {
+            "help" => self.z_help(),
+            "inspect" => self.z_inspect(),
+            "invoke" => self.z_invoke(args),
+            "parallel" => self.z_parallel(args),
+            "resolve" | "expand" | "snap" | "view" => self.z_w9e(name, args),
+            "return" => {
+                let value = args.into_iter().next().unwrap_or(Value::Undefined);
+                Ok(value)
+            }
+            "persistHandle" => self.z_persist_handle(args),
+            _ => unreachable!("guest members are matched above"),
+        }
+    }
+
+    /// `z.state.<member>(...)`: small serializable per-call state.
+    fn z_state_member(
+        &mut self,
+        name: &str,
+        args: Vec<Value<'tree>>,
+    ) -> Result<Value<'tree>, Fault<'tree>> {
+        let Some(guest) = &self.host.guest else {
+            return Err(Fault::Host(HostError::Data(
+                "z is not part of this runtime; the K0 guest surface is not installed".into(),
+            )));
+        };
+        if !zero_abi::guest::is_k0_guest_state_member(name) {
+            return Err(Fault::Host(HostError::Data(format!(
+                "z.state.{name} is not part of the K0 guest surface; members: {}",
+                zero_abi::guest::K0_GUEST_STATE_MEMBERS.join(", ")
+            ))));
+        }
+        match name {
+            "get" => {
+                let key = self.guest_state_key(&args)?;
+                match guest.state_get(&key) {
+                    Ok(Some(value)) => self.convert_from_json(value, false).map_err(Fault::Host),
+                    Ok(None) => Ok(Value::Undefined),
+                    Err(detail) => Err(Fault::Host(HostError::Data(detail))),
+                }
+            }
+            "has" => {
+                let key = self.guest_state_key(&args)?;
+                guest
+                    .state_has(&key)
+                    .map(Value::Bool)
+                    .map_err(|detail| Fault::Host(HostError::Data(detail)))
+            }
+            "set" => {
+                let key = self.guest_state_key(&args)?;
+                let value = args.get(1).cloned().unwrap_or(Value::Undefined);
+                let json = self.to_json(&value).map_err(Fault::Host)?;
+                guest
+                    .state_set(&key, json)
+                    .map(|()| Value::Undefined)
+                    .map_err(|detail| Fault::Host(HostError::Data(detail)))
+            }
+            "delete" => {
+                let key = self.guest_state_key(&args)?;
+                guest
+                    .state_delete(&key)
+                    .map(Value::Bool)
+                    .map_err(|detail| Fault::Host(HostError::Data(detail)))
+            }
+            "list" => {
+                let keys = guest.state_list();
+                Ok(new_array(
+                    keys.into_iter().map(Value::String).collect(),
+                ))
+            }
+            _ => unreachable!("state members are matched above"),
+        }
+    }
+
+    fn guest_state_key(&self, args: &[Value<'tree>]) -> Result<String, Fault<'tree>> {
+        match args.first() {
+            Some(Value::String(key)) => Ok(key.clone()),
+            _ => Err(Fault::Host(HostError::Data(
+                "z.state member expects a string key as its first argument".into(),
+            ))),
+        }
+    }
+
+    /// `z.capabilities.<member>(...)`: deterministic capability search.
+    fn z_capabilities_member(
+        &mut self,
+        name: &str,
+        args: Vec<Value<'tree>>,
+    ) -> Result<Value<'tree>, Fault<'tree>> {
+        if !zero_abi::guest::is_k0_guest_capabilities_member(name) {
+            return Err(Fault::Host(HostError::Data(format!(
+                "z.capabilities.{name} is not part of the K0 guest surface; members: {}",
+                zero_abi::guest::K0_GUEST_CAPABILITIES_MEMBERS.join(", ")
+            ))));
+        }
+        let query = match args.first() {
+            Some(Value::String(query)) => query.clone(),
+            _ => {
+                return Err(Fault::Host(HostError::Data(
+                    "z.capabilities.search expects a string query".into(),
+                )));
+            }
+        };
+        let registered: Vec<(String, String)> = self
+            .host
+            .registration
+            .capabilities
+            .iter()
+            .map(|capability| (capability.surface.clone(), capability.method.clone()))
+            .collect();
+        let hits = crate::guest::search_capabilities(&registered, &query);
+        Ok(new_array(hits.into_iter().map(Value::String).collect()))
+    }
+
+    /// `z.help()`: bounded catalog of the registered surface plus the guest
+    /// surface members.
+    fn z_help(&mut self) -> Result<Value<'tree>, Fault<'tree>> {
+        let capabilities: Vec<String> = self
+            .host
+            .registration
+            .capabilities
+            .iter()
+            .map(|capability| format!("{}.{}", capability.surface, capability.method))
+            .collect();
+        let json = serde_json::json!({
+            "surface": zero_abi::guest::K0_GUEST_SURFACE_ROOT,
+            "members": crate::guest::GuestSurface::member_list(),
+            "state": zero_abi::guest::K0_GUEST_STATE_MEMBERS,
+            "capabilities": zero_abi::guest::K0_GUEST_CAPABILITIES_MEMBERS,
+            "read_only_capabilities": zero_abi::guest::K0_READ_ONLY_CAPABILITIES
+                .iter()
+                .map(|(s, m)| format!("{s}.{m}"))
+                .collect::<Vec<_>>(),
+            "registered": capabilities,
+        });
+        self.convert_from_json(json, false).map_err(Fault::Host)
+    }
+
+    /// `z.inspect()`: bounded runtime introspection (context, session,
+    /// ABI, state keys/bytes, parallel limit).
+    fn z_inspect(&mut self) -> Result<Value<'tree>, Fault<'tree>> {
+        let Some(guest) = &self.host.guest else {
+            return Err(Fault::Host(HostError::Data(
+                "z is not part of this runtime; the K0 guest surface is not installed".into(),
+            )));
+        };
+        let json = serde_json::json!({
+            "context": guest.context_json(),
+            "session_id": guest.session_id(),
+            "abi_version": guest.abi_version(),
+            "state_keys": guest.state_list(),
+            "state_bytes": guest.state_bytes(),
+            "parallel_limit": guest.parallel_limit(),
+            "registered": self
+                .host
+                .registration
+                .capabilities
+                .iter()
+                .map(|capability| format!("{}.{}", capability.surface, capability.method))
+                .collect::<Vec<_>>(),
+        });
+        self.convert_from_json(json, false).map_err(Fault::Host)
+    }
+
+    /// `z.invoke("surface.method", args?)`: one read-only capability call
+    /// through the same connector (and call-scoped task group) as a direct
+    /// `zero.<surface>.<method>(...)` call.
+    fn z_invoke(&mut self, args: Vec<Value<'tree>>) -> Result<Value<'tree>, Fault<'tree>> {
+        let Some(guest) = &self.host.guest else {
+            return Err(Fault::Host(HostError::Data(
+                "z is not part of this runtime; the K0 guest surface is not installed".into(),
+            )));
+        };
+        let guest = std::sync::Arc::clone(guest);
+        let qualified = match args.first() {
+            Some(Value::String(qualified)) => qualified.clone(),
+            _ => {
+                return Err(Fault::Host(HostError::Data(
+                    "z.invoke expects (\"surface.method\", args?)".into(),
+                )));
+            }
+        };
+        let (surface, method) = crate::guest::split_qualified(&qualified)
+            .map_err(|detail| Fault::Host(HostError::Data(detail)))?;
+        let call_args = args.get(1).cloned().unwrap_or(Value::Undefined);
+        let call_json = self.to_json(&call_args).map_err(Fault::Host)?;
+        if !call_json.is_object() && !call_json.is_array() && !call_json.is_null() {
+            return Err(Fault::Host(HostError::Data(
+                "z.invoke args must be an object or array".into(),
+            )));
+        }
+        guest
+            .check_read_only_target(surface, method, &call_json)
+            .map_err(|detail| Fault::Host(HostError::Data(detail)))?;
+        let call_args = if call_json.is_null() {
+            self.empty_object_value()
+        } else {
+            call_args
+        };
+        self.call_tool(surface, method, vec![call_args])
+    }
+
+    /// `z.parallel([spec, ...])`: bounded deterministic parallel read-only
+    /// calls. All specs are validated (registered read-only capability,
+    /// count bound) before any dispatch; results come back in input order
+    /// through the interpreter's Promise.all machinery.
+    fn z_parallel(&mut self, args: Vec<Value<'tree>>) -> Result<Value<'tree>, Fault<'tree>> {
+        let Some(guest) = &self.host.guest else {
+            return Err(Fault::Host(HostError::Data(
+                "z is not part of this runtime; the K0 guest surface is not installed".into(),
+            )));
+        };
+        let guest = std::sync::Arc::clone(guest);
+        let specs = match args.into_iter().next().unwrap_or(Value::Undefined) {
+            Value::Array(specs) => specs.borrow().clone(),
+            _ => {
+                return Err(Fault::Host(HostError::Data(
+                    "z.parallel expects an array of \"surface.method\" strings or {surface, method, args?} objects".into(),
+                )));
+            }
+        };
+        if specs.is_empty() {
+            return Err(Fault::Host(HostError::Data(
+                "z.parallel expects at least one call spec".into(),
+            )));
+        }
+        if specs.len() > guest.parallel_limit() {
+            return Err(Fault::Host(HostError::Data(format!(
+                "z.parallel accepts at most {} call specs, got {}",
+                guest.parallel_limit(),
+                specs.len()
+            ))));
+        }
+        // Validate every spec before any dispatch: no partial fan-out.
+        let mut calls = Vec::with_capacity(specs.len());
+        for spec in specs {
+            let (surface, method, spec_args) = crate::guest::parallel_spec(
+                self.to_json(&spec).map_err(Fault::Host)?,
+            )
+            .map_err(|detail| Fault::Host(HostError::Data(detail)))?;
+            guest
+                .check_read_only_target(&surface, &method, &spec_args)
+                .map_err(|detail| Fault::Host(HostError::Data(detail)))?;
+            let spec_value = self
+                .convert_from_json(spec_args, false)
+                .map_err(Fault::Host)?;
+            calls.push((surface.to_owned(), method.to_owned(), spec_value));
+        }
+        // Fan out through the same dispatch path as direct calls, then
+        // combine with Promise.all (input-order results).
+        let mut ids = Vec::with_capacity(calls.len());
+        for (surface, method, spec_args) in calls {
+            let promise = self.call_tool(&surface, &method, vec![spec_args])?;
+            let Value::Promise(id) = promise else {
+                return Err(Fault::Host(HostError::Data(
+                    "z.parallel dispatch did not yield a promise".into(),
+                )));
+            };
+            ids.push(id);
+        }
+        Ok(self.new_promise(PromiseState::Pending(PromiseKind::All(ids))))
+    }
+
+    /// `z.resolve` / `z.expand` / `z.snap` / `z.view`: the W9-E wave-9
+    /// chain. Fails typed without live rooted evidence; consumes only
+    /// trusted host-minted handles.
+    fn z_w9e(
+        &mut self,
+        name: &str,
+        args: Vec<Value<'tree>>,
+    ) -> Result<Value<'tree>, Fault<'tree>> {
+        let Some(guest) = &self.host.guest else {
+            return Err(Fault::Host(HostError::Data(
+                "z is not part of this runtime; the K0 guest surface is not installed".into(),
+            )));
+        };
+        let Some(w9e) = guest.w9e() else {
+            return Err(Fault::Host(HostError::Data(format!(
+                "z.{name} cannot operate without live rooted evidence: no W9-E evidence is attached to this runtime"
+            ))));
+        };
+        let argument = args.into_iter().next().unwrap_or(Value::Undefined);
+        let json = self.to_json(&argument).map_err(Fault::Host)?;
+        let result = match name {
+            "resolve" => w9e.resolve(json),
+            "expand" => w9e.expand(json),
+            "snap" => w9e.snap(json),
+            "view" => w9e.view(json),
+            _ => unreachable!("wave-9 members are matched above"),
+        };
+        let result = result.map_err(|detail| Fault::Host(HostError::Data(detail)))?;
+        // The resolve wrapper mints the handle: record it so z.persistHandle
+        // can persist exactly this call's host-minted handles.
+        if name == "resolve" {
+            if let Some(handle_id) = result.get("handle_id").and_then(JsonValue::as_str) {
+                if let Some(handle) = result.get("handle") {
+                    guest.record_minted(handle_id, handle.clone());
+                }
+            }
+        }
+        self.convert_from_json(result, false).map_err(Fault::Host)
+    }
+
+    /// `z.persistHandle(handle)`: persist one host-minted handle of this
+    /// call into the response's exact-handle slot.
+    fn z_persist_handle(&mut self, args: Vec<Value<'tree>>) -> Result<Value<'tree>, Fault<'tree>> {
+        let Some(guest) = &self.host.guest else {
+            return Err(Fault::Host(HostError::Data(
+                "z is not part of this runtime; the K0 guest surface is not installed".into(),
+            )));
+        };
+        let handle_value = args.first().cloned().unwrap_or(Value::Undefined);
+        let handle_json = self.to_json(&handle_value).map_err(Fault::Host)?;
+        let handle_id = handle_json
+            .get("handle_id")
+            .and_then(JsonValue::as_str)
+            .ok_or_else(|| {
+                Fault::Host(HostError::Data(
+                    "z.persistHandle expects a handle object with a handle_id".into(),
+                ))
+            })?
+            .to_owned();
+        guest
+            .persist(&handle_id)
+            .map(Value::String)
+            .map_err(|detail| Fault::Host(HostError::Data(detail)))
+    }
+
+    /// A fresh empty object value (for invoke/parallel calls without args).
+    fn empty_object_value(&mut self) -> Value<'tree> {
+        self.convert_from_json(JsonValue::Object(Default::default()), false)
+            .expect("an empty JSON object always converts")
     }
 
     /// `Array.from`: resolve the source to (length, element producer) and run

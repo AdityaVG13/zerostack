@@ -29,6 +29,7 @@ pub mod exec_dag;
 pub mod exec_stream;
 pub mod exec_trace;
 pub mod freshness;
+pub mod guest;
 pub mod identity;
 pub mod job;
 pub mod raw_worker;
