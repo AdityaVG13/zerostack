@@ -39,3 +39,11 @@ path = "../../tests/unit/zero-abi/etnf.rs"
 [[test]]
 name = "zbf_from_bytes_harness"
 path = "../../tests/unit/zero-abi/zbf_from_bytes_harness.rs"
+
+[[test]]
+name = "raw_worker_unstructured_bytes"
+path = "../../tests/unit/zero-abi/raw_worker_unstructured_bytes.rs"
+
+[[test]]
+name = "raw_worker_response_golden"
+path = "../../tests/unit/zero-abi/raw_worker_response_golden.rs"

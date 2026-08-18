@@ -29,6 +29,9 @@ path = "../../tests/unit/zero-store/gc_schema.rs"
 [[test]]
 name = "quarantine_reap"
 path = "../../tests/unit/zero-store/quarantine_reap.rs"
+[[test]]
+name = "durable_journal"
+path = "../../tests/unit/zero-store/durable_journal.rs"
 
 [[test]]
 name = "zbf_refs_differential"
