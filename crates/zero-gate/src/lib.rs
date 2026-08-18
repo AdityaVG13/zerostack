@@ -47,11 +47,17 @@ pub use evidence::*;
 pub use invalidation::*;
 pub use program::*;
 pub use project_image::{
-    CausalGraphRef, DeclaredChange, DemandScenario, ExactObject, HypotheticalChildReport,
-    PerObjectLayers, ProjectImageError, ProjectImageManifest, ProofGraphRef,
-    RegisteredRepresentation, RepresentationKind, ShadowResourceLedger, ShadowResourceRow,
-    ValidityClass, hypothetical_child, validity_class_map, PROJECT_IMAGE_DOMAIN,
-    PROJECT_IMAGE_SCHEMA_VERSION, SHADOW_HAS_AUTHORITY,
+    ActionGuardOutcome, ActionGuardSimulation, CausalGraphRef, ChildWarmSwapReport,
+    CoverageDemandRow, DeclaredAddObject, DeclaredChange, DemandCoverageReport, DemandMassClass,
+    DemandScenario, ExactObject, ExactRational, HypotheticalChildReport, PerObjectLayers,
+    PrewarmLedgerRow, ProjectImageError, ProjectImageManifest, ProofGraphRef, ProposedAction,
+    Q99SlackReport, RegisteredRepresentation, RepresentationKind, ShadowResourceLedger,
+    ShadowResourceRow, ValidityClass, child_warm_swap_report, compute_demand_coverage,
+    compute_q99_slack, demand_coverage, hypothetical_child, simulate_action_guard,
+    validity_class_map, PROJECT_IMAGE_DOMAIN, PROJECT_IMAGE_Q99_SCHEMA_VERSION,
+    PROJECT_IMAGE_SCHEMA_VERSION, Q99_SHADOW_DENOMINATOR_LABEL_PREFIX,
+    Q99_SHADOW_RECOMPUTE_DENOMINATOR, Q99_SHADOW_RECOMPUTE_NUMERATOR,
+    Q99_SHADOW_THETA_DENOMINATOR, Q99_SHADOW_THETA_NUMERATOR, SHADOW_HAS_AUTHORITY,
 };
 pub use q99::*;
 pub use quality::*;

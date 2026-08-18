@@ -19,3 +19,7 @@ zero-store = { path = "../zero-store" }
 [[bin]]
 name = "zerostack-program-evidence"
 path = "src/bin/program-evidence.rs"
+
+[[test]]
+name = "project_image_q99"
+path = "../../tests/unit/zero-gate/project_image_q99.rs"
