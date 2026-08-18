@@ -16,6 +16,14 @@ tree-sitter-javascript = "0.25.0"
 sha2.workspace = true
 zero-process = { path = "../zero-process" }
 
+[dev-dependencies]
+proptest = "1"
+zero-ref = { path = "../zero-ref" }
+
+[[test]]
+name = "edit_protocol_conformance"
+path = "../../tests/unit/zero-codemode/edit_protocol_conformance.rs"
+
 [[test]]
 name = "limits"
 path = "../../tests/unit/zero-codemode/limits.rs"
