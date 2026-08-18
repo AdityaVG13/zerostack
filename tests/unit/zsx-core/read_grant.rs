@@ -302,7 +302,7 @@ fn take_rejects_repeated_granted_path_without_separate_grant() {
         &mut active,
         &fixture.root,
         "fs.multiRead",
-        &[path.clone(), path],
+        &[path.clone(), path.clone()],
         1_000_001,
     )
     .unwrap_err();

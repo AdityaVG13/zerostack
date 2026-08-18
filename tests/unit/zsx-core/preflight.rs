@@ -14,7 +14,6 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 use zero_abi::zerokernel::{
     FiniteBudget, ReturnKind, ReturnPolicy, RootBindings, ZerokernelExecuteRequest,
-    ZerokernelResultKind,
 };
 use zsx_core::preflight::{
     BrokerOutcome, CAPABILITY_MANIFEST_SCHEMA, CAPABILITY_MANIFEST_VERSION,
