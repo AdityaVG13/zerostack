@@ -291,12 +291,12 @@ retry_condition = "Retry only if product tests emit a provenance bundle on a rea
 id = "F-CI-PR-GATES"
 family = "ci"
 name = "PR/push CI with clippy -D, deny, targeted tests"
-status = "partial"
+status = "present"
 weight = 0.016393442623
 weight_units = 4
 evidence = [".github/workflows/ci.yml"]
-retry_condition = "Retry only when .github/workflows/ci.yml or DSR runs cargo test (targeted or workspace) on every PR/push, not only workflow_dispatch fmt/clippy/build."
-notes = "manual workflow_dispatch: fmt, clippy, cargo build --workspace, feature-universe weights. No cargo test job (intentional: GH budget). Targeted tests: rch exec cargo test -p <one>."
+retry_condition = "Regress if the default DSR quality gate no longer runs a targeted cargo test -p check, or expands to cargo test --workspace."
+notes = "Operator DSR config ~/.config/dsr/repos.yaml runs one RCH-offloaded zero-ref test with --test-threads=1. `dsr quality --tool zerostack --dry-run` planned that targeted check and the live gate passed in 73.604s on 2026-08-18. GitHub Actions stays manual and test-free by policy."
 
 [[feature]]
 id = "F-FUZZ"

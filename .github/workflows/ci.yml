@@ -4,11 +4,11 @@ name: ci
 # push, pull_request, or schedule: this repo receives many small commits and
 # automatic runs burn the GitHub Actions budget. Run from the Actions tab.
 #
-# Tests are NOT this workflow. DSR (`dsr quality`) is the repo-level
-# release/quality runner; as of 2026-08-17 it has zero checks configured
-# for zerostack. Targeted Cargo tests go through rch, never a GH job:
-#   rch exec -- env CARGO_TARGET_DIR="${RCH_TARGET_BASE:-${TMPDIR:-/tmp}}/rch_target_zerostack" \
-#     cargo test -p <one> -- --test-threads=1
+# Tests are NOT this workflow. DSR (`dsr quality --tool zerostack`) is the
+# repo-level release/quality runner. Operator config runs exactly one
+# RCH-offloaded targeted gate:
+#   cargo test -p zero-ref --test zeroref_api -- --test-threads=1
+# The DSR dry-run planned that command and the live gate passed on 2026-08-18.
 # Do not add a cargo test / cargo test --workspace job here: it hammers
 # the Actions budget and the host.
 #
