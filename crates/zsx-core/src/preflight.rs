@@ -1076,7 +1076,8 @@ pub fn scan_plan(program: &str) -> PlanScan {
                             && scanner.byte_at(index + 1) == Some(b'>')
                     });
                     if is_arrow {
-                        shadow_idents_in(&mut scanner, scanner.pos + 1, close, &mut shadowed);
+                        let params_start = scanner.pos + 1;
+                        shadow_idents_in(&mut scanner, params_start, close, &mut shadowed);
                         scanner.pos = close + 1;
                         continue;
                     }
@@ -1094,7 +1095,6 @@ pub fn scan_plan(program: &str) -> PlanScan {
                     continue;
                 }
                 let Some(a) = scanner.skip_trivia_from(scanner.pos) else {
-                    scanner.pos = scanner.end;
                     break;
                 };
                 if scanner.byte_at(a) == Some(b'.') {
@@ -1325,7 +1325,7 @@ fn analyze_args(source: &str, start: usize, end: usize) -> ArgsAnalysis {
                                     value_mode = 1;
                                     value_collect_depth = depth;
                                     if key.strings.len() < MAX_VALUE_STRINGS {
-                                        key.strings.push(text);
+                                        key.strings.push(text.clone());
                                     }
                                 }
                                 1 => {
@@ -1333,14 +1333,14 @@ fn analyze_args(source: &str, start: usize, end: usize) -> ArgsAnalysis {
                                     if depth == value_collect_depth
                                         && key.strings.len() < MAX_VALUE_STRINGS
                                     {
-                                        key.strings.push(text);
+                                        key.strings.push(text.clone());
                                     }
                                 }
                                 2 => {
                                     if depth == value_collect_depth
                                         && key.strings.len() < MAX_VALUE_STRINGS
                                     {
-                                        key.strings.push(text);
+                                        key.strings.push(text.clone());
                                     }
                                 }
                                 _ => {}

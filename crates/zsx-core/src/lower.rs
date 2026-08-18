@@ -8,6 +8,17 @@ use zero_abi::raw_worker::EngineIdentity;
 use zero_abi::{TOKEN_JOB_OPERATION, TokenJobPollRequest};
 use zero_codemode::ConnectorError;
 
+/// Owners of each portable blob scheme, used to route `token.expand` refs.
+/// Restored here after the lookup extraction (700fb56) dropped them while
+/// the references in `lower_token_expand` stayed.
+const EXPAND_BLOB_OWNERS: &[(&str, EngineIdentity, &str, &str)] = &[
+    ("fz://blob/", EngineIdentity::FsZero, "fs.expand", "ref"),
+    ("gz://blob/", EngineIdentity::GraphZero, "expand", "reference"),
+    ("tz://blob/", EngineIdentity::TokenZero, "expand", "ref"),
+];
+
+const EXPAND_SCHEMES_HELP: &str = "tz://blob, fz://blob, gz://blob";
+
 /// Every capability the aggregate ZSX surface registers, in stable order.
 pub const METHODS: &[(&str, &str)] = &[
     ("fs", "plan"),
@@ -785,7 +796,7 @@ fn normalize_compound_search_args(args: Value) -> Value {
             .and_then(Value::as_str)
             .is_some_and(|s| !s.is_empty());
     if !has_query {
-        for key in SEARCH_QUERY_ALIAS_KEYS {
+        for &key in SEARCH_QUERY_ALIAS_KEYS {
             if let Some(value) = map.get(key).cloned() {
                 if value.as_str().is_some_and(|s| !s.is_empty()) {
                     map.insert("query".into(), value);
@@ -1127,7 +1138,7 @@ pub fn lower(
                             object
                                 .get("timeout_seconds")
                                 .and_then(Value::as_u64)
-                                .and_then(|seconds| seconds.saturating_mul(1_000))
+                                .map(|seconds| seconds.saturating_mul(1_000))
                         });
                     if requested_ms
                         .is_some_and(|ms| ms > TOKEN_SHELL_AUTO_BACKGROUND_THRESHOLD_MS)
