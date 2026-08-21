@@ -8,9 +8,12 @@
 
 use serde_json::Value;
 use zero_abi::{
-    assembly_abi_contract_digest, assembly_abi_contract_manifest, canonical_json, sha256,
-    Sha256Digest,
+    ASSEMBLY_ABI_CONTRACT_VERSION, CWIR_CONTRACT_VERSION, MAX_ASSEMBLY_MANIFEST_BYTES,
+    Sha256Digest, assembly_abi_contract_digest, assembly_abi_contract_manifest, canonical_json,
+    sha256,
 };
+
+const ASSEMBLY_SRC: &str = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/src/assembly.rs"));
 
 fn digest_of(manifest: &Value) -> Sha256Digest {
     Sha256Digest::from_bytes(sha256(canonical_json(manifest).as_bytes()))
@@ -24,6 +27,40 @@ fn unmutated_manifest_digest_equals_published() {
     assert_eq!(
         computed, expected,
         "canonical manifest digest must equal published assembly_abi_contract_digest"
+    );
+}
+
+/// Pin constants, not JSON literals, must feed the hashed manifest.
+/// Hardcoding `1` next to `const X: u16 = 1` would let a const bump leave the digest stuck.
+#[test]
+fn hashed_manifest_binds_c23_c24_c26_pin_constants() {
+    let manifest = assembly_abi_contract_manifest();
+    assert_eq!(
+        manifest["contract_version"].as_u64(),
+        Some(u64::from(ASSEMBLY_ABI_CONTRACT_VERSION)),
+        "C-23: hashed contract_version must equal ASSEMBLY_ABI_CONTRACT_VERSION"
+    );
+    assert_eq!(
+        manifest["linked_contracts"]["cwir_contract_version"].as_u64(),
+        Some(u64::from(CWIR_CONTRACT_VERSION)),
+        "C-24: hashed cwir_contract_version must equal CWIR_CONTRACT_VERSION"
+    );
+    assert_eq!(
+        manifest["bounds"]["max_manifest_bytes"].as_u64(),
+        Some(MAX_ASSEMBLY_MANIFEST_BYTES as u64),
+        "C-26: hashed max_manifest_bytes must equal MAX_ASSEMBLY_MANIFEST_BYTES"
+    );
+    assert!(
+        ASSEMBLY_SRC.contains("\"contract_version\": ASSEMBLY_ABI_CONTRACT_VERSION"),
+        "C-23: assembly.rs must interpolate ASSEMBLY_ABI_CONTRACT_VERSION, not a numeric literal"
+    );
+    assert!(
+        ASSEMBLY_SRC.contains("\"cwir_contract_version\": CWIR_CONTRACT_VERSION"),
+        "C-24: assembly.rs must interpolate CWIR_CONTRACT_VERSION, not a numeric literal"
+    );
+    assert!(
+        ASSEMBLY_SRC.contains("\"max_manifest_bytes\": MAX_ASSEMBLY_MANIFEST_BYTES"),
+        "C-26: assembly.rs must interpolate MAX_ASSEMBLY_MANIFEST_BYTES, not a numeric literal"
     );
 }
 
