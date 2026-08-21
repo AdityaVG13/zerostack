@@ -29,7 +29,8 @@ under .bench-history/, plus the raw rch log. The seed
 Usage:
     python3 scripts/bench/savings_bench.py [--repeats 10] [--out PATH] [--keep-log]
 
-Exit codes: 0 = candidate written; 2 = fixture mismatch; 3 = repeat failed.
+Exit codes: 0 = candidate written; 2 = fixture mismatch; 3 = repeat failed;
+4 = crates/zsx is not a workspace member (post-ZeroKernel refuse).
 """
 
 from __future__ import annotations
@@ -40,6 +41,7 @@ import statistics
 import subprocess
 import sys
 import time
+import tomllib
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -70,15 +72,18 @@ def fail(message: str) -> int:
 
 
 def zsx_is_workspace_member(root: Path) -> bool:
-    """True only if Cargo.toml lists crates/zsx as a workspace member."""
+    """True only if Cargo.toml workspace.members lists crates/zsx."""
     cargo = root / "Cargo.toml"
     if not cargo.is_file():
         return False
-    for raw in cargo.read_text(encoding="utf-8").splitlines():
-        stripped = raw.strip().rstrip(",")
-        if stripped.strip('"').strip("'") == "crates/zsx":
-            return True
-    return False
+    try:
+        data = tomllib.loads(cargo.read_text(encoding="utf-8"))
+    except (OSError, tomllib.TOMLDecodeError):
+        return False
+    members = data.get("workspace", {}).get("members", [])
+    if not isinstance(members, list):
+        return False
+    return "crates/zsx" in members
 
 
 def sha256_hex(path: Path) -> str:
