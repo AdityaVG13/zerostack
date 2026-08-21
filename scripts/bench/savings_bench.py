@@ -17,6 +17,11 @@ The fixture must be byte-identical to the seed fixture
 (sha256 d7bd8d9611e6b4b02440ce8d5a2f462b70f36597c52cafab92540ea823b6db06,
 36,645 bytes) or the runner refuses to measure.
 
+Post-ZeroKernel cutover this runner **refuses** if `crates/zsx` is not a
+workspace member (it is not). It does not retarget `-p zero-kernel` and
+does not invent a keep. Historical record-only evidence:
+`.bench-history/savings-bench.candidate-20260818T142920-record-only.json`.
+
 Output: a v3 comprehensive-bench-report candidate JSON with numeric cv_pct
 under .bench-history/, plus the raw rch log. The seed
 (.bench-history/savings-bench.latest.json) is never overwritten.
@@ -62,6 +67,18 @@ SCHEMA_V3 = "zerostack.comprehensive-bench-report.v3"
 def fail(message: str) -> int:
     print(f"savings-bench: {message}", file=sys.stderr)
     return 2
+
+
+def zsx_is_workspace_member(root: Path) -> bool:
+    """True only if Cargo.toml lists crates/zsx as a workspace member."""
+    cargo = root / "Cargo.toml"
+    if not cargo.is_file():
+        return False
+    for raw in cargo.read_text(encoding="utf-8").splitlines():
+        stripped = raw.strip().rstrip(",")
+        if stripped.strip('"').strip("'") == "crates/zsx":
+            return True
+    return False
 
 
 def sha256_hex(path: Path) -> str:
@@ -147,6 +164,11 @@ def build_candidate(
         and isinstance(profile_self_time_pct, (int, float))
         and profile_self_time_pct >= 0.1
     )
+    # Exact billed/raw is a token-accounting ratio, not wall-clock. A
+    # deterministic 0.0 cv_pct is not runtime-stability. detect_environment
+    # hard-codes profile_first_self_time_pct=None (this runner captures no
+    # flame/samply). keep_eligible therefore stays false unless a caller
+    # forges a >=0.1% self-time -- which is not a keep.
     keep_eligible = bool(cv_pct is not None and cv_pct <= 5.0 and profile_first)
     ratchet_reasons = [
         f"cv_pct={cv_pct} (noise threshold 5.0)",
@@ -357,6 +379,18 @@ def main() -> int:
 
     if args.repeats < 1:
         return fail("--repeats must be >= 1")
+
+    if not zsx_is_workspace_member(REPO_ROOT):
+        print(
+            "savings-bench: refusing to `cargo build --profile release-perf -p zsx`.\n"
+            "  crates/zsx is not a workspace member after the ZeroKernel cutover\n"
+            "  (members include zero-kernel / zero-kernel-node; crates/zsx is absent).\n"
+            "  This runner does not retarget the product binary and is not a keep.\n"
+            "  Do not invent cv_pct. Historical record-only candidate:\n"
+            "  .bench-history/savings-bench.candidate-20260818T142920-record-only.json",
+            file=sys.stderr,
+        )
+        return 4
 
     fixture = Path(args.fixture)
     if not fixture.is_file():
