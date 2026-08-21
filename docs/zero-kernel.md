@@ -162,7 +162,8 @@ Foundation contracts and explicit compatibility packages may remain for non-mode
 
 ## Verification requirements
 
-A release must attach current evidence for:
+ZeroStack itself is not a published release. A shipped harness or engine
+that embeds ZeroKernel must attach current evidence for:
 
 - direct runtime lifecycle and terminal outcomes;
 - normal and large file turn behavior;
