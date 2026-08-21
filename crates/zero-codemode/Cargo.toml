@@ -20,3 +20,7 @@ path = "../../tests/unit/zero-codemode/limits.rs"
 [[test]]
 name = "connector_wait"
 path = "../../tests/unit/zero-codemode/connector_wait.rs"
+
+[[test]]
+name = "syntax"
+path = "../../tests/unit/zero-codemode/syntax.rs"

@@ -10,8 +10,8 @@ use windows_sys::Win32::Security::TOKEN_ACCESS_MASK;
 use windows_sys::Win32::Storage::FileSystem::SYNCHRONIZE;
 #[cfg(windows)]
 use windows_sys::Win32::System::Threading::{
-    CreateEventW, GetCurrentProcess, GetProcessTimes, OpenProcess, OpenProcessToken,
-    WaitForSingleObject, INFINITE, PROCESS_ACCESS_RIGHTS, PROCESS_QUERY_LIMITED_INFORMATION,
+    CreateEventW, GetCurrentProcess, GetProcessTimes, INFINITE, OpenProcess, OpenProcessToken,
+    PROCESS_ACCESS_RIGHTS, PROCESS_QUERY_LIMITED_INFORMATION, WaitForSingleObject,
 };
 
 #[cfg(unix)]
@@ -237,6 +237,9 @@ fn capture(pid: u32) -> io::Result<Option<ProcessIdentity>> {
     }
     // SAFETY: rc == expected means the kernel wrote every byte of proc_bsdinfo.
     let info = unsafe { info.assume_init() }; // ubs:ignore — FFI wrapper, invariants: proc_pidinfo returned the full sizeof(proc_bsdinfo)
+    if info.pbi_status == libc::SZOMB {
+        return Ok(None);
+    }
     Ok(Some(ProcessIdentity {
         pid,
         start_key: format!("{}:{}", info.pbi_start_tvsec, info.pbi_start_tvusec),

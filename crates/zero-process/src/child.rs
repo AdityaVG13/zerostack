@@ -793,6 +793,7 @@ impl VerifiedChild {
     /// it. Windows blocks on the retained process handle; Unix preserves the
     /// waitable root pin while checking within the bound.
     pub fn wait_for_exit(&self, timeout: Duration) -> bool {
+        #[cfg(not(target_os = "macos"))]
         let deadline = Instant::now()
             .checked_add(timeout)
             .unwrap_or_else(Instant::now);
@@ -831,7 +832,11 @@ impl VerifiedChild {
                 }
             }
         }
-        #[cfg(not(windows))]
+        #[cfg(target_os = "macos")]
+        {
+            return macos_child_exited(self.child_id(), timeout).unwrap_or(false);
+        }
+        #[cfg(all(not(windows), not(target_os = "macos")))]
         {
             loop {
                 // A concurrent exact-handle signal may reap and revoke between
@@ -840,7 +845,7 @@ impl VerifiedChild {
                 if self.terminal_status().is_some() {
                     return true;
                 }
-                if self.poll_exited() {
+                if self.poll_exited() && !self.binding().is_live() {
                     return true;
                 }
                 if Instant::now() >= deadline {
@@ -1037,7 +1042,11 @@ fn darwin_watch_owner_then_kill(
             libc::_exit(1);
         }
         let ready: libc::c_uchar = 1;
-        let _ = libc::write(ready_fd, &ready as *const libc::c_uchar as *const libc::c_void, 1);
+        let _ = libc::write(
+            ready_fd,
+            &ready as *const libc::c_uchar as *const libc::c_void,
+            1,
+        );
         libc::close(ready_fd);
         let mut event = libc::kevent {
             ident: 0,
@@ -1437,14 +1446,59 @@ fn terminate_tree_child(
     }
 }
 
-/// Observe whether the owned child is still waitable (running or a reaped
-/// zombie is fine) **without reaping it**, using `waitid(P_PID, ...,
-/// WEXITED|WNOHANG|WNOWAIT)`. Returns `Ok(false)` while running, `Ok(true)`
-/// once it has exited (zombie retained by `WNOWAIT`), or an error if the
-/// waitable root pin is lost (`ECHILD`: already reaped elsewhere). The pin is
-/// the proof that the numeric PGID is still ours; losing it is a loud error,
-/// never `Ok(true)`, so no later numeric group signal targets a recycled id.
-#[cfg(unix)]
+#[cfg(target_os = "macos")]
+fn child_exited_no_reap(child: &Child) -> io::Result<bool> {
+    macos_child_exited(child.id(), Duration::ZERO)
+}
+
+#[cfg(target_os = "macos")]
+fn macos_child_exited(pid: u32, timeout: Duration) -> io::Result<bool> {
+    // kqueue observes NOTE_EXIT without reaping the child, preserving the
+    // waitable root pin used to make process-group signaling exact.
+    let queue = unsafe { libc::kqueue() };
+    if queue < 0 {
+        return Err(io::Error::last_os_error());
+    }
+    let result = (|| {
+        let change = libc::kevent {
+            ident: pid as usize,
+            filter: libc::EVFILT_PROC,
+            flags: libc::EV_ADD | libc::EV_ONESHOT,
+            fflags: libc::NOTE_EXIT,
+            data: 0,
+            udata: std::ptr::null_mut(),
+        };
+        let registered =
+            unsafe { libc::kevent(queue, &change, 1, std::ptr::null_mut(), 0, std::ptr::null()) };
+        if registered < 0 {
+            return Err(io::Error::last_os_error());
+        }
+        let mut event = libc::kevent {
+            ident: 0,
+            filter: 0,
+            flags: 0,
+            fflags: 0,
+            data: 0,
+            udata: std::ptr::null_mut(),
+        };
+        let timespec = libc::timespec {
+            tv_sec: timeout.as_secs().min(i64::MAX as u64) as libc::time_t,
+            tv_nsec: timeout.subsec_nanos() as libc::c_long,
+        };
+        let observed =
+            unsafe { libc::kevent(queue, std::ptr::null(), 0, &mut event, 1, &timespec) };
+        if observed < 0 {
+            Err(io::Error::last_os_error())
+        } else {
+            Ok(observed > 0)
+        }
+    })();
+    let _ = unsafe { libc::close(queue) };
+    result
+}
+
+/// Observe whether the owned child is still waitable without reaping it.
+#[cfg(all(unix, not(target_os = "macos")))]
 fn child_exited_no_reap(child: &Child) -> io::Result<bool> {
     let mut info: libc::siginfo_t = unsafe { std::mem::zeroed() }; // ubs:ignore — FFI wrapper, invariants: siginfo_t is a C union; waitid requires a zeroed out-param and writes every field later read via si_pid()
     // SAFETY: `P_PID` targets only our owned child's pid; `WNOWAIT` observes
@@ -1458,12 +1512,19 @@ fn child_exited_no_reap(child: &Child) -> io::Result<bool> {
         )
     };
     if rc == 0 {
-        // POSIX specifies `si_pid == 0` when WNOHANG found no waitable status.
-        // `si_signo` is not a portable discriminator here (Darwin leaves it
-        // zero even when the exited child is reported).
-        // SAFETY: waitid returned 0, so `info` holds a kernel-written siginfo_t;
-        // POSIX defines si_pid == 0 for WNOHANG with no waitable status.
-        Ok(unsafe { info.si_pid() } != 0)
+        // WNOHANG leaves the status discriminator zero when no child changed
+        // state. Darwin's libc si_pid() accessor can report a nonzero union
+        // field for that zero-status result, causing false exits and defeating
+        // shell deadlines. si_code is the stable discriminator there.
+        #[cfg(target_os = "macos")]
+        {
+            Ok(info.si_code != 0)
+        }
+        #[cfg(not(target_os = "macos"))]
+        {
+            // POSIX specifies si_pid == 0 for WNOHANG with no waitable status.
+            Ok(unsafe { info.si_pid() } != 0)
+        }
     } else {
         // ECHILD means the waitable root pin is already gone: the numeric
         // PGID is no longer provably ours, so the caller must send no group

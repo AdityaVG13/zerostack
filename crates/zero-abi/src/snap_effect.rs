@@ -104,13 +104,13 @@ pub struct SnapByteRange {
 impl SnapRequest {
     pub fn validate(&self) -> Result<(), String> {
         match &self.target {
-            SnapTargetRequest::Path { path } => validate_relative_path(path)?,
+            SnapTargetRequest::Path { path } => validate_confined_path(path)?,
             SnapTargetRequest::Search { search } => {
                 if search.query.trim().is_empty() {
                     return Err("z.snap search query must not be empty".into());
                 }
                 if let Some(under) = &search.under {
-                    validate_relative_path(under)?;
+                    validate_confined_path(under)?;
                 }
             }
         }
@@ -161,17 +161,28 @@ impl SnapRequest {
     }
 }
 
-fn validate_relative_path(path: &Path) -> Result<(), String> {
-    if path.as_os_str().is_empty()
-        || path.is_absolute()
-        || path.components().any(|component| {
-            matches!(
-                component,
-                Component::ParentDir | Component::RootDir | Component::Prefix(_)
-            )
-        })
-    {
-        return Err("z.snap path must be non-empty and workspace-relative".into());
+fn validate_confined_path(path: &Path) -> Result<(), String> {
+    if path.as_os_str().is_empty() {
+        return Err("path must be workspace-relative or an absolute external path".into());
+    }
+    if path.is_absolute() {
+        // Absolute external paths are byte-authority only: no ParentDir components.
+        if path
+            .components()
+            .any(|component| matches!(component, Component::ParentDir))
+        {
+            return Err("path must be workspace-relative or an absolute external path".into());
+        }
+        return Ok(());
+    }
+    // Relative paths remain root-confined: no ParentDir, RootDir, or Prefix.
+    if path.components().any(|component| {
+        matches!(
+            component,
+            Component::ParentDir | Component::RootDir | Component::Prefix(_)
+        )
+    }) {
+        return Err("path must be workspace-relative or an absolute external path".into());
     }
     Ok(())
 }
@@ -275,7 +286,7 @@ impl SnapResult {
         if self.schema != SNAP_WORKSPACE_SCHEMA {
             return Err("z.snap result schema mismatch".into());
         }
-        validate_relative_path(&self.path)?;
+        validate_confined_path(&self.path)?;
         if self.source.content_digest != self.source.exact.digest()
             || self.source.content_digest.len() != 64
         {
@@ -465,7 +476,7 @@ impl EffectRequest {
             if name.trim().is_empty() || name.trim() != name {
                 return Err("z.effect target names must be non-empty and trimmed".into());
             }
-            validate_relative_path(&target.path)?;
+            validate_confined_path(&target.path)?;
             if !paths.insert(target.path.clone()) {
                 return Err("z.effect target paths must be unique".into());
             }
@@ -580,7 +591,7 @@ impl EffectResult {
             if !names.insert(target.name.as_str()) || !paths.insert(&target.path) {
                 return Err("z.effect result contains duplicate targets".into());
             }
-            validate_relative_path(&target.path)?;
+            validate_confined_path(&target.path)?;
             if !matches!(target.kind.as_str(), "edit" | "create" | "remove") {
                 return Err("z.effect result target kind is invalid".into());
             }

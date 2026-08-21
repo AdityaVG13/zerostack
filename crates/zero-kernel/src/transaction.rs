@@ -165,6 +165,15 @@ impl TransactionCoordinator {
                 continue;
             }
             let path = entry.path();
+            // Quarantined poisoned journals are evidence only; skip them so future
+            // cells recover. Filter on file name to avoid touching foreign roots.
+            if path
+                .file_name()
+                .and_then(|name| name.to_str())
+                .is_some_and(|name| name.ends_with(".poisoned.json"))
+            {
+                continue;
+            }
             let bytes = fs::read(&path).map_err(|error| {
                 TransactionError::Store(format!("read transaction record: {error}"))
             })?;
@@ -179,9 +188,16 @@ impl TransactionCoordinator {
             rollback_record(&*self.files, invocation, &mut record);
             persist_record(&path, &record)?;
             if record.state == TransactionState::RecoveryRequired {
-                return Err(TransactionError::RecoveryRequired(
-                    record.rollback_errors.clone(),
+                // Preserve evidence and quarantine so the next reconcile recovers.
+                let poisoned = poisoned_journal_path(&path);
+                // Best-effort rename; if it fails we still surface RecoveryRequired.
+                let _ = fs::rename(&path, &poisoned);
+                let mut errors = record.rollback_errors.clone();
+                errors.push(format!(
+                    "quarantined poisoned journal {}",
+                    poisoned.display()
                 ));
+                return Err(TransactionError::RecoveryRequired(errors));
             }
             recovered.push(path);
         }
@@ -377,4 +393,157 @@ fn persist_record(path: &Path, record: &TransactionRecord) -> Result<(), Transac
         serde_json::to_vec(record).map_err(|error| TransactionError::Store(error.to_string()))?;
     atomic_write_file_with_sync(path, &bytes, SyncPolicy::Required)
         .map_err(|error| TransactionError::Store(format!("publish transaction record: {error}")))
+}
+
+fn poisoned_journal_path(path: &Path) -> PathBuf {
+    // "<name>.poisoned.json" preserves evidence; caller ensures original ends with .json.
+    let file_name = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or("journal.json");
+    let stem = file_name.strip_suffix(".json").unwrap_or(file_name);
+    let poisoned_name = format!("{stem}.poisoned.json");
+    path.with_file_name(poisoned_name)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use zero_abi::{
+        EngineCallContext, EngineError, EngineErrorKind, EngineInvocation, FileEffectKind,
+        FileEffectRequest, ZeroHandle,
+    };
+    use zero_store::ZeroCas;
+
+    struct FailingFileEngine;
+    impl FileLease for FailingFileEngine {}
+    impl FileEngine for FailingFileEngine {
+        fn lease(&self, _: &EngineInvocation) -> Result<Box<dyn FileLease>, EngineError> {
+            Ok(Box::new(FailingFileEngine))
+        }
+        fn read(
+            &self,
+            _: &EngineInvocation,
+            _: zero_abi::FileReadRequest,
+        ) -> Result<zero_abi::FileSnapshot, EngineError> {
+            Err(EngineError::new(
+                EngineErrorKind::NotFound,
+                "not found",
+                false,
+            ))
+        }
+        fn lookup(
+            &self,
+            _: &EngineInvocation,
+            _: PathBuf,
+            _: zero_abi::LookupOptions,
+        ) -> Result<Vec<PathBuf>, EngineError> {
+            Ok(Vec::new())
+        }
+        fn apply(
+            &self,
+            _: &EngineInvocation,
+            _: FileEffectRequest,
+        ) -> Result<zero_abi::FileEffectReceipt, EngineError> {
+            Err(EngineError::new(EngineErrorKind::Internal, "apply", false))
+        }
+        fn restore(
+            &self,
+            _: &EngineInvocation,
+            _: &zero_abi::FileEffectReceipt,
+        ) -> Result<(), EngineError> {
+            Err(EngineError::new(
+                EngineErrorKind::Internal,
+                "restore failed",
+                false,
+            ))
+        }
+        fn reconcile(&self, _: &EngineInvocation) -> Result<Vec<ZeroHandle>, EngineError> {
+            Ok(Vec::new())
+        }
+    }
+
+    fn test_invocation(session_id: &str, cell_id: &str) -> EngineInvocation {
+        struct NoopCancel;
+        impl zero_abi::CancellationProbe for NoopCancel {
+            fn is_cancelled(&self) -> bool {
+                false
+            }
+        }
+        EngineInvocation {
+            context: EngineCallContext {
+                workspace_root: PathBuf::from("/tmp"),
+                project_root: PathBuf::from("/tmp"),
+                session_id: session_id.into(),
+                cell_id: cell_id.into(),
+                trace_id: format!("{session_id}-{cell_id}"),
+                deadline_unix_ms: u64::MAX,
+                budget: zero_abi::KernelBudget {
+                    wall_ms: 1_000,
+                    cpu_ms: 1_000,
+                    memory_bytes: 1024 * 1024,
+                    call_limit: 8,
+                    task_limit: 2,
+                    output_byte_limit: 4096,
+                },
+            },
+            cancellation: Arc::new(NoopCancel),
+        }
+    }
+
+    #[test]
+    fn reconcile_quarantines_poisoned_journal_and_recovers_on_next_pass() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let cas = ZeroCas::open(dir.path().join("cas"));
+        let files: Arc<dyn FileEngine> = Arc::new(FailingFileEngine);
+        let coordinator = TransactionCoordinator::new(dir.path().join("tx"), cas, files);
+        let session_id = "sess-poison";
+        let cell_id = "cell-1";
+        let invocation = test_invocation(session_id, cell_id);
+        let record_path = coordinator.record_path(session_id, cell_id);
+        fs::create_dir_all(record_path.parent().unwrap()).expect("mkdir");
+        let record = TransactionRecord {
+            session_id: session_id.into(),
+            cell_id: cell_id.into(),
+            trace_id: invocation.context.trace_id.clone(),
+            state: TransactionState::Prepared,
+            effects: vec![PreparedEffect {
+                request: FileEffectRequest {
+                    kind: FileEffectKind::Write,
+                    path: PathBuf::from("a.txt"),
+                    content: Some(b"hi".to_vec()),
+                    expected_preimage: None,
+                    patch: None,
+                    expect_absent: false,
+                },
+                before: None,
+                before_metadata: None,
+                preparation: ZeroHandle::from_digest(&"0".repeat(64)).unwrap(),
+                receipt: None,
+                restored: false,
+            }],
+            rollback_errors: Vec::new(),
+        };
+        persist_record(&record_path, &record).expect("persist");
+        let err = coordinator
+            .reconcile(&invocation)
+            .expect_err("first reconcile must error");
+        match err {
+            TransactionError::RecoveryRequired(messages) => {
+                assert!(
+                    messages.iter().any(|m| m.contains(".poisoned.json")),
+                    "error must name poisoned path: {messages:?}"
+                );
+            }
+            other => panic!("unexpected error {other:?}"),
+        }
+        let poisoned = poisoned_journal_path(&record_path);
+        assert!(poisoned.exists(), "poisoned file must exist");
+        assert!(!record_path.exists(), "original must be renamed");
+        let second = coordinator
+            .reconcile(&invocation)
+            .expect("second reconcile ok");
+        assert!(second.is_empty(), "second reconcile should recover");
+        assert!(poisoned.exists());
+    }
 }

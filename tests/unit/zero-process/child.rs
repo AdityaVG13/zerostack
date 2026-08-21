@@ -90,9 +90,8 @@ fn fixture_runner() {
             if let Ok(pid_file) = std::env::var(LEAF_PID_ENV) {
                 command.env(LEAF_PID_ENV, pid_file);
             }
-            let (owned, _stdin, _stdout) =
-                VerifiedChild::spawn_tree(command, "owner-session", 1)
-                    .expect("owner fixture spawn_tree");
+            let (owned, _stdin, _stdout) = VerifiedChild::spawn_tree(command, "owner-session", 1)
+                .expect("owner fixture spawn_tree");
             if let Ok(pid_file) = std::env::var(ROOT_PID_ENV) {
                 std::fs::write(&pid_file, owned.child_id().to_string())
                     .expect("write root pid file");
@@ -162,6 +161,19 @@ fn assert_process_gone(pid: u32, identity: &ProcessIdentity, what: &str) {
         std::thread::sleep(Duration::from_millis(50));
     }
     panic!("{what} {pid} stayed live after owner SIGKILL");
+}
+
+#[test]
+fn wait_for_exit_does_not_report_a_live_child_as_exited() {
+    let mut command = Command::new("sleep");
+    command.arg("2");
+    let (child, _, _) = VerifiedChild::spawn_tree(command, "wait-timeout", 1).expect("spawn sleep");
+    let started = Instant::now();
+    assert!(!child.wait_for_exit(Duration::from_millis(50)));
+    assert!(
+        started.elapsed() < Duration::from_secs(1),
+        "bounded wait must return before the child exits"
+    );
 }
 
 /// Linux/Darwin: SIGKILL of the spawn_tree owner must reap the tree root AND

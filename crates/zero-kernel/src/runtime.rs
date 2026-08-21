@@ -517,7 +517,22 @@ fn dispatch_direct(cell: &mut Cell, method: &str, args: Value) -> Result<Value, 
 fn value_bytes(value: Option<&Value>, label: &str) -> Result<Vec<u8>, ConnectorError> {
     match value {
         Some(Value::String(text)) => Ok(text.as_bytes().to_vec()),
-        Some(value) => serde_json::to_vec(value).map_err(json_error),
+        Some(Value::Array(values)) => values
+            .iter()
+            .map(|value| {
+                value
+                    .as_u64()
+                    .and_then(|num| u8::try_from(num).ok())
+                    .ok_or_else(|| {
+                        ConnectorError::new(format!(
+                            "{label} must be a string or an array of bytes (integers 0..=255)"
+                        ))
+                    })
+            })
+            .collect(),
+        Some(_) => Err(ConnectorError::new(format!(
+            "{label} must be a string or an array of bytes (integers 0..=255)"
+        ))),
         None => Err(ConnectorError::new(format!("{label} is required"))),
     }
 }

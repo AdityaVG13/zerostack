@@ -55,6 +55,15 @@ fn parse_source(source: &str) -> Result<tree_sitter::Tree, HostError> {
     })
 }
 
+/// First named child that is not a `comment` extra node. Tree-sitter attaches
+/// comments inside whatever node spans them, so field lookups skip them, but
+/// positional lookups (`named_child(0)`) do not.
+fn first_expression_child<'tree>(node: Node<'tree>) -> Option<Node<'tree>> {
+    let mut cursor = node.walk();
+    node.named_children(&mut cursor)
+        .find(|child| child.kind() != "comment")
+}
+
 pub(crate) fn interpreter_creation_count() -> u64 {
     INTERPRETER_CREATIONS.load(Ordering::Relaxed)
 }
@@ -529,6 +538,7 @@ impl<'tree> Interpreter<'tree> {
         match node.kind() {
             "program" | "statement_block" => self.exec(node),
             "empty_statement" => Ok(Control::Normal),
+            "comment" => Ok(Control::Normal),
             "expression_statement" => match node
                 .named_child(0)
                 .map(|child| self.eval(child))
@@ -536,8 +546,7 @@ impl<'tree> Interpreter<'tree> {
             {
                 Some(_) | None => Ok(Control::Normal),
             },
-            "return_statement" => match node
-                .named_child(0)
+            "return_statement" => match first_expression_child(node)
                 .map(|child| self.eval(child))
                 .transpose()
             {
@@ -571,7 +580,7 @@ impl<'tree> Interpreter<'tree> {
             "continue_statement" => Ok(Control::Continue),
             "throw_statement" => Ok(Control::Throw(
                 self.eval(
-                    node.named_child(0)
+                    first_expression_child(node)
                         .ok_or_else(|| self.unsupported("throw without argument"))?,
                 )?,
             )),
@@ -679,7 +688,12 @@ impl<'tree> Interpreter<'tree> {
             "array_pattern" => {
                 if let Value::Array(items) = value {
                     let mut cursor = node.walk();
-                    let parts: Vec<_> = node.named_children(&mut cursor).collect();
+                    // Comments inside the pattern are not elements; filtering
+                    // keeps each part aligned with its source index.
+                    let parts: Vec<_> = node
+                        .named_children(&mut cursor)
+                        .filter(|child| child.kind() != "comment")
+                        .collect();
                     let bindings: Vec<(Node<'tree>, Value<'tree>)> = {
                         let items = items.borrow();
                         parts
@@ -769,14 +783,19 @@ impl<'tree> Interpreter<'tree> {
             .child_by_field_name("left")
             .ok_or_else(|| self.unsupported("for-in without binding"))?;
         for item in items {
-            if left.kind().ends_with("declaration") {
-                self.bind(
-                    left.child_by_field_name("name")
-                        .ok_or_else(|| self.unsupported("for-in binding"))?,
-                    item,
-                )?;
-            } else {
-                self.assign(left, item)?;
+            match left.kind() {
+                // Tree-sitter-javascript attaches the binding pattern (or a
+                // bare identifier) directly as `left`; destructuring heads
+                // bind fresh, other left-hand sides assign.
+                "array_pattern" | "object_pattern" => self.bind(left, item)?,
+                kind if kind.ends_with("declaration") => {
+                    self.bind(
+                        left.child_by_field_name("name")
+                            .ok_or_else(|| self.unsupported("for-in binding"))?,
+                        item,
+                    )?;
+                }
+                _ => self.assign(left, item)?,
             }
             match self.statement(
                 node.child_by_field_name("body")
@@ -903,6 +922,7 @@ impl<'tree> Interpreter<'tree> {
             "false" => Ok(Value::Bool(false)),
             "null" => Ok(Value::Null),
             "undefined" => Ok(Value::Undefined),
+            "comment" => Ok(Value::Undefined),
             "number" => self
                 .text(node)
                 .parse()
@@ -914,7 +934,7 @@ impl<'tree> Interpreter<'tree> {
             "template_string" => self.eval_template(node),
             "regex" => Ok(Value::String(self.text(node).into())),
             "parenthesized_expression" => self.eval(
-                node.named_child(0)
+                first_expression_child(node)
                     .ok_or_else(|| Fault::Host(self.unsupported("empty parentheses")))?,
             ),
             "sequence_expression" => {
@@ -926,8 +946,7 @@ impl<'tree> Interpreter<'tree> {
                 Ok(result)
             }
             "await_expression" => {
-                let expression = node
-                    .named_child(0)
+                let expression = first_expression_child(node)
                     .ok_or_else(|| Fault::Host(self.unsupported("await without expression")))?;
                 let value = self.eval(expression)?;
                 let transient_promise = if expression.kind() == "call_expression" {
@@ -1007,7 +1026,7 @@ impl<'tree> Interpreter<'tree> {
                 )?;
                 let argument = node
                     .child_by_field_name("arguments")
-                    .and_then(|args| args.named_child(0))
+                    .and_then(first_expression_child)
                     .map(|argument| self.eval(argument))
                     .transpose()?;
                 match constructor {
@@ -1029,10 +1048,14 @@ impl<'tree> Interpreter<'tree> {
         let mut values = Vec::new();
         let mut cursor = node.walk();
         for child in node.named_children(&mut cursor) {
+            // Comments are extra nodes inside the literal; they are not
+            // elements and must not shift the element list.
+            if child.kind() == "comment" {
+                continue;
+            }
             if child.kind() == "spread_element" {
                 match self.eval(
-                    child
-                        .named_child(0)
+                    first_expression_child(child)
                         .ok_or_else(|| Fault::Host(self.unsupported("array spread")))?,
                 )? {
                     Value::Array(items) => values.extend(items.borrow().iter().cloned()),
@@ -1054,6 +1077,8 @@ impl<'tree> Interpreter<'tree> {
         let mut cursor = node.walk();
         for child in node.named_children(&mut cursor) {
             match child.kind() {
+                // Comments are extra nodes inside the literal; ignore them.
+                "comment" => {}
                 "pair" => {
                     let key = child
                         .child_by_field_name("key")
@@ -1073,8 +1098,7 @@ impl<'tree> Interpreter<'tree> {
                     fields.insert(key, value);
                 }
                 "spread_element" => match self.eval(
-                    child
-                        .named_child(0)
+                    first_expression_child(child)
                         .ok_or_else(|| Fault::Host(self.unsupported("object spread")))?,
                 )? {
                     Value::Object(object) => fields.extend(object.borrow().fields.clone()),
@@ -1120,8 +1144,7 @@ impl<'tree> Interpreter<'tree> {
         for child in node.named_children(&mut cursor) {
             if child.kind() == "template_substitution" {
                 let value = self.eval(
-                    child
-                        .named_child(0)
+                    first_expression_child(child)
                         .ok_or_else(|| Fault::Host(self.unsupported("template expression")))?,
                 )?;
                 output.push_str(&to_string(&value));
@@ -1161,7 +1184,10 @@ impl<'tree> Interpreter<'tree> {
         // recovery shape. This does not install an ambient `await` function.
         if function_node.kind() == "identifier" && self.text(function_node) == "await" {
             let mut cursor = arguments.walk();
-            let children = arguments.named_children(&mut cursor).collect::<Vec<_>>();
+            let children: Vec<_> = arguments
+                .named_children(&mut cursor)
+                .filter(|child| child.kind() != "comment")
+                .collect();
             if let [function] = children.as_slice()
                 && matches!(function.kind(), "arrow_function" | "function_expression")
             {
@@ -1178,10 +1204,14 @@ impl<'tree> Interpreter<'tree> {
         }
         let mut cursor = arguments.walk();
         for child in arguments.named_children(&mut cursor) {
+            // Comments are extra nodes in the argument list; they are not
+            // arguments and must not shift positions.
+            if child.kind() == "comment" {
+                continue;
+            }
             if child.kind() == "spread_element" {
                 match self.eval(
-                    child
-                        .named_child(0)
+                    first_expression_child(child)
                         .ok_or_else(|| Fault::Host(self.unsupported("call spread")))?,
                 )? {
                     Value::Array(items) => values.extend(items.borrow().iter().cloned()),
@@ -1298,7 +1328,11 @@ impl<'tree> Interpreter<'tree> {
         let parameters: Vec<_> = if function.parameters.kind() == "identifier" {
             vec![function.parameters]
         } else {
-            function.parameters.named_children(&mut cursor).collect()
+            function
+                .parameters
+                .named_children(&mut cursor)
+                .filter(|child| child.kind() != "comment")
+                .collect()
         };
         for (index, parameter) in parameters.into_iter().enumerate() {
             self.bind_in(
@@ -2331,6 +2365,14 @@ impl<'tree> Interpreter<'tree> {
             ("Math", "ceil") => Ok(Value::Number(
                 args.first().and_then(number).unwrap_or(0.0).ceil(),
             )),
+            // Wall-clock epoch milliseconds; a clock before the UNIX epoch
+            // (misconfigured host) yields 0 instead of failing the cell.
+            ("Date", "now") => Ok(Value::Number(
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map(|elapsed| elapsed.as_millis() as f64)
+                    .unwrap_or(0.0),
+            )),
             ("console", _) => Ok(Value::Undefined),
             ("z", name) => self.z_member(name, args),
             ("z.state", name) => self.z_state_member(name, args),
@@ -2616,10 +2658,10 @@ impl<'tree> Interpreter<'tree> {
                 "expand": "z.expand(handle | SnapResult, {bytes?|lines?|symbol?|next?|offset?|limit?|all?}) -> ExpandResult",
                 "edit": "z.edit(path, replacement, {expectedPreimage?}) | z.edit(selectedSnap, {find, replacement} | typed patch)",
                 "parallel": "z.parallel([async () => operation, ...]) -> results in input order",
-                "effect": "z.effect({targets, changes, verify?}) -> staged EffectResult",
+                "effect": "z.effect({targets: {name: {path, expect?: 'exists'|'absent'}}, changes: [{target, kind, old?, replacement?, content?, expectedCount?, anchor?}], verify?: {parse?, changedTargetsOnly?, command?: {argv, timeoutMs}}}) -> staged EffectResult",
             },
             "selectedEditPatches": [
-                "{find, replacement}",
+                "{find, replacement} (find must equal the entire snapped selection byte-for-byte including trailing newline)",
                 "{kind: 'replace_exact', old, replacement, expectedCount: 1}",
                 "{kind: 'replace_lines', content}",
                 "{kind: 'insert_before', content}",

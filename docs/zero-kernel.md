@@ -75,6 +75,10 @@ A larger file returns a bounded structural outline plus an opaque `z://blob/<dig
 
 Natural, pattern, and semantic modes use embedded ast-sgrep and Tree-sitter. Relationship modes use GraphZero's typed query router. Index construction and freshness repair happen inside GraphZero without a daemon or model-facing index command.
 
+### External paths
+
+Absolute paths are byte-authority only (`z.read`, `z.write`, `z.edit`, `z.effect`, `z.lookup`, `z.snap` byte ops). They are never indexed and never structural: GraphZero never indexes outside the kernel root and `z.asgrep` remains root-confined (absolute query paths error; structural search is root-only). Relative paths stay root-confined (`..` escape is rejected). This preserves determinism while allowing out-of-root byte operations without indexing foreign roots.
+
 ## Atomic effects
 
 Every file mutation lazily opens one host-owned transaction for the cell. FSZero supplies an exact lease, typed effect receipt, preimage handle, and restoration operation.
