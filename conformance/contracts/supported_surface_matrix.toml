@@ -171,7 +171,8 @@ status = "partial"
 weight = 0.032786885246
 weight_units = 8
 evidence = ["crates/zero-ref/src/lib.rs"]
-retry_condition = "Retry only when a hub gate fails a sibling engine that uses Reject instead of ClampEnd, evidenced by a live ZeroKernel cell receipt or an engine CI job — not a comment-only lockstep claim."
+rationale = "Hub defines CANONICAL_LINE_END_POLICY = ClampEnd. Sibling engines are out of this workspace; the hub cannot fail an engine that uses Reject. TokenZero sibling gauntlet found EmbeddedStore reject vs RecoveryStore clamp TrueDivergence."
+retry_condition = "Retry only when a hub gate fails a sibling engine that uses Reject instead of ClampEnd, evidenced by a live ZeroKernel cell receipt or an engine CI job -- not a comment-only lockstep claim."
 notes = "TokenZero sibling gauntlet found EmbeddedStore reject vs RecoveryStore clamp TrueDivergence; hub defines ClampEnd but cannot enforce engines"
 
 [[feature]]
