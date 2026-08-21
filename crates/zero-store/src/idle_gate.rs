@@ -168,7 +168,8 @@ impl IdleWindowEvidence {
 
     /// Wall-clock length of the window, ns.
     pub fn window_wall_ns(&self) -> u64 {
-        self.window_end_unix_ns.saturating_sub(self.window_start_unix_ns)
+        self.window_end_unix_ns
+            .saturating_sub(self.window_start_unix_ns)
     }
 
     /// Observed maximum CPU fraction over the window, parts per billion.
@@ -177,10 +178,10 @@ impl IdleWindowEvidence {
     pub fn observed_max_cpu_fraction_ppb(&self) -> u64 {
         let first = self.samples.first().expect("samples nonempty");
         let last = self.samples.last().expect("samples nonempty");
-        let wall = last
-            .elapsed_wall_ns
-            .saturating_sub(first.elapsed_wall_ns);
-        let cpu = last.cumulative_cpu_ns().saturating_sub(first.cumulative_cpu_ns());
+        let wall = last.elapsed_wall_ns.saturating_sub(first.elapsed_wall_ns);
+        let cpu = last
+            .cumulative_cpu_ns()
+            .saturating_sub(first.cumulative_cpu_ns());
         if wall == 0 {
             return 0;
         }
@@ -463,4 +464,3 @@ pub fn idle_gate_contract() -> serde_json::Value {
         "abi_version": IDLE_GATE_ABI_VERSION,
     })
 }
-

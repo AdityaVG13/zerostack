@@ -74,7 +74,10 @@ impl StoreFormatVersion {
     /// Deterministic format-state root digest: the domain digest of the
     /// canonical version record, used as the migration receipt's old/new root.
     pub fn state_digest(&self) -> Result<Sha256Digest, MigrationError> {
-        Ok(domain_digest(FORMAT_VERSION_DOMAIN, &self.canonical_bytes()?))
+        Ok(domain_digest(
+            FORMAT_VERSION_DOMAIN,
+            &self.canonical_bytes()?,
+        ))
     }
 }
 
@@ -175,7 +178,10 @@ impl MigrationStep {
     /// transform digest.
     pub fn descriptor_digest(&self) -> Result<Sha256Digest, MigrationError> {
         self.validate()?;
-        let descriptor = format!("{}|{}|{}", self.from_version, self.to_version, self.transform_name);
+        let descriptor = format!(
+            "{}|{}|{}",
+            self.from_version, self.to_version, self.transform_name
+        );
         Ok(domain_digest(MIGRATION_STEP_DOMAIN, descriptor.as_bytes()))
     }
     fn marker_path(&self, store_root: &Path) -> PathBuf {
@@ -183,7 +189,10 @@ impl MigrationStep {
             store_root,
             &[
                 "migrations",
-                &format!("{}-{}-{}.json", self.transform_name, self.from_version, self.to_version),
+                &format!(
+                    "{}-{}-{}.json",
+                    self.transform_name, self.from_version, self.to_version
+                ),
             ],
         )
     }
@@ -222,7 +231,10 @@ impl MigrationMarker {
         canonical_record_bytes(self)
     }
     pub fn digest(&self) -> Result<Sha256Digest, MigrationError> {
-        Ok(domain_digest(MIGRATION_MARKER_DOMAIN, &self.canonical_bytes()?))
+        Ok(domain_digest(
+            MIGRATION_MARKER_DOMAIN,
+            &self.canonical_bytes()?,
+        ))
     }
 }
 
@@ -285,7 +297,10 @@ impl MigrationReceipt {
         canonical_record_bytes(self)
     }
     pub fn digest(&self) -> Result<Sha256Digest, MigrationError> {
-        Ok(domain_digest(MIGRATION_RECEIPT_DOMAIN, &self.canonical_bytes()?))
+        Ok(domain_digest(
+            MIGRATION_RECEIPT_DOMAIN,
+            &self.canonical_bytes()?,
+        ))
     }
 }
 
@@ -388,10 +403,7 @@ pub fn run_store_migrations(
         ));
     }
 
-    let target = steps
-        .last()
-        .map(|step| step.to_version)
-        .unwrap_or(current);
+    let target = steps.last().map(|step| step.to_version).unwrap_or(current);
     let old_root = StoreFormatVersion::new(current).state_digest()?;
 
     let mut steps_applied: u32 = 0;
@@ -465,8 +477,11 @@ pub fn run_store_migrations(
     if new_version != current {
         let version = StoreFormatVersion::new(new_version);
         let version_bytes = version.canonical_bytes()?;
-        atomic_write_file(&store_root.join(STORE_FORMAT_VERSION_FILENAME), &version_bytes)
-            .map_err(|error| MigrationError::Io(error.to_string()))?;
+        atomic_write_file(
+            &store_root.join(STORE_FORMAT_VERSION_FILENAME),
+            &version_bytes,
+        )
+        .map_err(|error| MigrationError::Io(error.to_string()))?;
     }
 
     let receipt = MigrationReceipt {
@@ -547,4 +562,3 @@ fn domain_digest(domain: &[u8], bytes: &[u8]) -> Sha256Digest {
     bound.extend_from_slice(bytes);
     Sha256Digest::from_bytes(sha256(&bound))
 }
-

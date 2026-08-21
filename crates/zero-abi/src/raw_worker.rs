@@ -1168,4 +1168,3 @@ pub fn raw_worker_protocol_manifest() -> Value {
 pub fn raw_worker_protocol_digest_hex() -> String {
     contract_digest_hex(&raw_worker_protocol_manifest())
 }
-

@@ -70,7 +70,12 @@ impl ExecNode {
                 return Err(ExecDagError::SelfDependency { node: id.clone() });
             }
         }
-        Ok(ExecNode { id, kind, weight, deps })
+        Ok(ExecNode {
+            id,
+            kind,
+            weight,
+            deps,
+        })
     }
 }
 
@@ -101,10 +106,14 @@ impl ExecDag {
                 return Err(ExecDagError::EmptyNodeId);
             }
             if seen.insert(node.id.as_str(), ()).is_some() {
-                return Err(ExecDagError::DuplicateNodeId { id: node.id.clone() });
+                return Err(ExecDagError::DuplicateNodeId {
+                    id: node.id.clone(),
+                });
             }
             if node.deps.len() > MAX_EXEC_DAG_DEPENDENCIES_PER_NODE {
-                return Err(ExecDagError::TooManyDependencies { node: node.id.clone() });
+                return Err(ExecDagError::TooManyDependencies {
+                    node: node.id.clone(),
+                });
             }
             for dep in &node.deps {
                 if !seen.contains_key(dep.as_str()) && !self.nodes.iter().any(|n| n.id == *dep) {
@@ -114,7 +123,9 @@ impl ExecDag {
                     });
                 }
                 if dep == &node.id {
-                    return Err(ExecDagError::SelfDependency { node: node.id.clone() });
+                    return Err(ExecDagError::SelfDependency {
+                        node: node.id.clone(),
+                    });
                 }
             }
         }
@@ -133,7 +144,10 @@ impl ExecDag {
             remaining.insert(node.id.as_str(), node.deps.len());
             children.entry(node.id.as_str()).or_default();
             for dep in &node.deps {
-                children.entry(dep.as_str()).or_default().push(node.id.as_str());
+                children
+                    .entry(dep.as_str())
+                    .or_default()
+                    .push(node.id.as_str());
             }
         }
         let mut ready: BTreeSet<&str> = ids
@@ -178,7 +192,10 @@ impl ExecDag {
             remaining.insert(node.id.as_str(), node.deps.len());
             children.entry(node.id.as_str()).or_default();
             for dep in &node.deps {
-                children.entry(dep.as_str()).or_default().push(node.id.as_str());
+                children
+                    .entry(dep.as_str())
+                    .or_default()
+                    .push(node.id.as_str());
             }
         }
         let mut frontier: BTreeSet<&str> = self
@@ -229,8 +246,7 @@ impl ExecDag {
             for dep in &self.nodes[index[id.as_str()]].deps {
                 let dep_dist = dist[dep.as_str()];
                 if dep_dist > best
-                    || (dep_dist == best
-                        && best_dep.is_none_or(|bd| dep.as_str() < bd))
+                    || (dep_dist == best && best_dep.is_none_or(|bd| dep.as_str() < bd))
                 {
                     best = dep_dist;
                     best_dep = Some(dep.as_str());
@@ -243,7 +259,8 @@ impl ExecDag {
         }
         let mut end: &str = topo[0].as_str();
         for id in &topo {
-            if dist[id.as_str()] > dist[end] || (dist[id.as_str()] == dist[end] && id.as_str() < end)
+            if dist[id.as_str()] > dist[end]
+                || (dist[id.as_str()] == dist[end] && id.as_str() < end)
             {
                 end = id.as_str();
             }
@@ -258,7 +275,9 @@ impl ExecDag {
 
     /// Whether the plan contains any decision-boundary node.
     pub fn requires_policy(&self) -> bool {
-        self.nodes.iter().any(|n| n.kind == ExecNodeKind::DecisionBoundary)
+        self.nodes
+            .iter()
+            .any(|n| n.kind == ExecNodeKind::DecisionBoundary)
     }
 
     /// Hub-side contingent-policy crossing rule (ZS-EXEC-001): a plan with
@@ -267,10 +286,7 @@ impl ExecDag {
     /// first boundary in deterministic topological order. A policy must
     /// itself validate; per-observation resolution stays with the
     /// DecisionGate at runtime.
-    pub fn crossing_rule(
-        &self,
-        policy: Option<&ContingentPolicy>,
-    ) -> Result<(), ExecDagError> {
+    pub fn crossing_rule(&self, policy: Option<&ContingentPolicy>) -> Result<(), ExecDagError> {
         if !self.requires_policy() {
             return Ok(());
         }
@@ -287,7 +303,9 @@ impl ExecDag {
                 node_id: first_boundary.to_string(),
             });
         };
-        policy.validate().map_err(|error| ExecDagError::InvalidPolicy(error.to_string()))
+        policy
+            .validate()
+            .map_err(|error| ExecDagError::InvalidPolicy(error.to_string()))
     }
 
     /// Canonical plan digest: SHA-256 over canonical JSON of the nodes in
@@ -351,7 +369,10 @@ impl std::fmt::Display for ExecDagError {
                 "node {node} exceeds dependency cap {MAX_EXEC_DAG_DEPENDENCIES_PER_NODE}"
             ),
             ExecDagError::DecisionBoundaryUncovered { node_id } => {
-                write!(f, "decision boundary {node_id} uncovered: crossing requires a contingent policy")
+                write!(
+                    f,
+                    "decision boundary {node_id} uncovered: crossing requires a contingent policy"
+                )
             }
             ExecDagError::InvalidPolicy(detail) => {
                 write!(f, "invalid contingent policy: {detail}")
@@ -365,4 +386,3 @@ impl std::fmt::Display for ExecDagError {
 }
 
 impl std::error::Error for ExecDagError {}
-

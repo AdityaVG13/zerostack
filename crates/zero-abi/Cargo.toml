@@ -21,6 +21,10 @@ name = "abi_proptest"
 path = "../../tests/unit/zero-abi/abi_proptest.rs"
 
 [[test]]
+name = "zero_kernel"
+path = "../../tests/unit/zero-abi/zero_kernel.rs"
+
+[[test]]
 name = "zerokernel"
 path = "../../tests/unit/zero-abi/zerokernel.rs"
 

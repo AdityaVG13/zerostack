@@ -192,4 +192,3 @@ pub fn atomic_write_file_with_sync(
     }
     Ok(())
 }
-

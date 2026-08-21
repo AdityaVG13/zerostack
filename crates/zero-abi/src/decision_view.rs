@@ -24,7 +24,11 @@
 //!   [`DecisionViewBinding::expand_exact`] returns a typed miss for any
 //!   unbound handle (never a silent fabrication).
 
-use std::{collections::{BTreeMap, BTreeSet}, error::Error, fmt};
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    error::Error,
+    fmt,
+};
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -33,8 +37,7 @@ use crate::digest::sha256_hex;
 use crate::schema::canonical_json;
 
 /// Canonical schema id of the decision view contract.
-pub const DECISION_VIEW_SCHEMA_ID: &str =
-    "https://zerostack.dev/schemas/decision_view.schema.json";
+pub const DECISION_VIEW_SCHEMA_ID: &str = "https://zerostack.dev/schemas/decision_view.schema.json";
 
 /// Completeness grade of a decision view's evidence coverage, exactly as the
 /// schema enumerates it. `Observed` records a decision surface without any
@@ -117,7 +120,10 @@ impl fmt::Display for DecisionViewError {
                 write!(formatter, "a Proved claim must not declare omitted classes")
             }
             Self::MissingEvidenceClass { class } => {
-                write!(formatter, "Proved claim is missing needed evidence class {class}")
+                write!(
+                    formatter,
+                    "Proved claim is missing needed evidence class {class}"
+                )
             }
             Self::RootMismatch => write!(
                 formatter,
@@ -127,10 +133,16 @@ impl fmt::Display for DecisionViewError {
                 write!(formatter, "expansion handle {handle} is not bound")
             }
             Self::ExpansionHandleNotListed(handle) => {
-                write!(formatter, "expansion handle {handle} is not listed by the view")
+                write!(
+                    formatter,
+                    "expansion handle {handle} is not listed by the view"
+                )
             }
             Self::UnboundExpansionHandle(handle) => {
-                write!(formatter, "expansion handle {handle} is listed but not bound")
+                write!(
+                    formatter,
+                    "expansion handle {handle} is listed but not bound"
+                )
             }
         }
     }
@@ -201,11 +213,7 @@ impl DecisionView {
 
     /// Fail-closed validation of the schema-required structure.
     pub fn validate(&self) -> Result<(), DecisionViewError> {
-        for field in [
-            "task_contract_root",
-            "project_root",
-            "causal_lens_root",
-        ] {
+        for field in ["task_contract_root", "project_root", "causal_lens_root"] {
             match field {
                 "task_contract_root" if self.task_contract_root.is_empty() => {
                     return Err(DecisionViewError::EmptyRoot(field));
@@ -404,10 +412,11 @@ impl DecisionViewBinding {
             .expansions
             .get(handle)
             .ok_or_else(|| DecisionViewError::UnknownExpansionHandle(handle.to_owned()))?;
-        serde_json::from_str(canonical)
-            .map_err(|error| DecisionViewError::UnknownExpansionHandle(format!(
+        serde_json::from_str(canonical).map_err(|error| {
+            DecisionViewError::UnknownExpansionHandle(format!(
                 "{handle}: bound object failed to parse: {error}"
-            )))
+            ))
+        })
     }
 
     pub fn view(&self) -> &DecisionView {
@@ -419,4 +428,3 @@ impl DecisionViewBinding {
         self.view.root()
     }
 }
-

@@ -18,16 +18,16 @@ a new owner decision and a replacement policy. This document schedules neither.
 
 ## Execution policy
 
-CodeMode is the canonical and default execution mode. Engine MCP is an explicit
-compatibility alternative, never a layer beneath CodeMode. A deployment must
-select exactly one mode and must not register both.
+ZeroKernel is the only canonical model-facing execution runtime. Harnesses
+present one tool named `zero`. That tool runs a ZeroKernel cell (`z.*`).
+CodeMode remains a fallback interpreter for hosts that cannot load the native
+addon. Engine command catalogs (`zero.fs.*`, `zero_execute` / `zero_wait`,
+per-engine MCP) are noncanonical.
 
-- New local development configuration selects CodeMode by default.
-- Existing explicit MCP configuration remains MCP until its operator migrates.
-- Standard MCP registers only the selected engine catalogs.
+- New local development uses in-process ZeroKernel (`executeCell` or `zero mcp`).
+- The MCP carrier exposes exactly one tool: `zero`.
 - CodeMode does not register, discover, proxy, or call engine MCP catalogs.
-- A generic MCP carrier may expose only `zero_execute` and `zero_wait`; engine
-  calls still cross planner-free raw-worker boundaries.
+- Do not register FSZero, GraphZero, or TokenZero command catalogs beside `zero`.
 
 ## Compatibility maintenance
 

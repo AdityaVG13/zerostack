@@ -63,13 +63,21 @@ pub enum EtnfError {
     /// A required string field was empty.
     Empty { field: &'static str },
     /// A string field exceeded its byte bound.
-    TooLong { field: &'static str, actual: usize, maximum: usize },
+    TooLong {
+        field: &'static str,
+        actual: usize,
+        maximum: usize,
+    },
     /// A string field contained a control character.
     ControlCharacter { field: &'static str },
     /// A digest field was not 64 lowercase hex characters.
     InvalidHex { field: &'static str },
     /// A finite collection exceeded its item bound.
-    TooManyItems { field: &'static str, actual: usize, maximum: usize },
+    TooManyItems {
+        field: &'static str,
+        actual: usize,
+        maximum: usize,
+    },
     /// Certificate issuance was attempted for a non-Safe verdict.
     NotSafe,
     /// The document schema identity was not `ETNF_SCHEMA_ID`.
@@ -94,17 +102,31 @@ impl fmt::Display for EtnfError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Empty { field } => write!(formatter, "field `{field}` must be nonempty"),
-            Self::TooLong { field, actual, maximum } => {
-                write!(formatter, "field `{field}` is {actual} bytes, maximum {maximum}")
+            Self::TooLong {
+                field,
+                actual,
+                maximum,
+            } => {
+                write!(
+                    formatter,
+                    "field `{field}` is {actual} bytes, maximum {maximum}"
+                )
             }
             Self::ControlCharacter { field } => {
-                write!(formatter, "field `{field}` must be free of control characters")
+                write!(
+                    formatter,
+                    "field `{field}` must be free of control characters"
+                )
             }
             Self::InvalidHex { field } => write!(
                 formatter,
                 "field `{field}` must be {ETNF_HEX_DIGEST_LEN} lowercase hex characters"
             ),
-            Self::TooManyItems { field, actual, maximum } => write!(
+            Self::TooManyItems {
+                field,
+                actual,
+                maximum,
+            } => write!(
                 formatter,
                 "field `{field}` has {actual} items, maximum {maximum}"
             ),
@@ -130,7 +152,10 @@ impl fmt::Display for EtnfError {
                 write!(formatter, "certificate `{field}` disagrees with the report")
             }
             Self::NonCanonicalBytes => {
-                write!(formatter, "input bytes are not canonical (key order/whitespace)")
+                write!(
+                    formatter,
+                    "input bytes are not canonical (key order/whitespace)"
+                )
             }
             Self::BadJson { message } => write!(formatter, "invalid JSON: {message}"),
         }
@@ -152,7 +177,11 @@ fn check_string(value: &str, field: &'static str, maximum: usize) -> Result<(), 
         return Err(EtnfError::Empty { field });
     }
     if value.len() > maximum {
-        return Err(EtnfError::TooLong { field, actual: value.len(), maximum });
+        return Err(EtnfError::TooLong {
+            field,
+            actual: value.len(),
+            maximum,
+        });
     }
     if value.chars().any(char::is_control) {
         return Err(EtnfError::ControlCharacter { field });
@@ -185,7 +214,10 @@ pub struct CheckerIdentity {
 
 impl CheckerIdentity {
     pub fn new(id: impl Into<String>, version: impl Into<String>) -> Result<Self, EtnfError> {
-        let checker = Self { id: id.into(), version: version.into() };
+        let checker = Self {
+            id: id.into(),
+            version: version.into(),
+        };
         checker.validate()?;
         Ok(checker)
     }
@@ -210,7 +242,10 @@ pub struct EvidenceItem {
 
 impl EvidenceItem {
     pub fn new(name: impl Into<String>, digest: impl Into<String>) -> Result<Self, EtnfError> {
-        let item = Self { name: name.into(), digest: digest.into() };
+        let item = Self {
+            name: name.into(),
+            digest: digest.into(),
+        };
         item.validate()?;
         Ok(item)
     }
@@ -236,11 +271,11 @@ pub struct RootedEvidence {
 }
 
 impl RootedEvidence {
-    pub fn new(
-        anchor: impl Into<String>,
-        items: Vec<EvidenceItem>,
-    ) -> Result<Self, EtnfError> {
-        let evidence = Self { anchor: anchor.into(), items };
+    pub fn new(anchor: impl Into<String>, items: Vec<EvidenceItem>) -> Result<Self, EtnfError> {
+        let evidence = Self {
+            anchor: anchor.into(),
+            items,
+        };
         evidence.validate()?;
         Ok(evidence)
     }
@@ -342,11 +377,11 @@ pub struct ProposedAuthorityTransition {
 }
 
 impl ProposedAuthorityTransition {
-    pub fn new(
-        kind: ProposedTransitionKind,
-        target: impl Into<String>,
-    ) -> Result<Self, EtnfError> {
-        let transition = Self { kind, target: target.into() };
+    pub fn new(kind: ProposedTransitionKind, target: impl Into<String>) -> Result<Self, EtnfError> {
+        let transition = Self {
+            kind,
+            target: target.into(),
+        };
         transition.validate()?;
         Ok(transition)
     }
@@ -379,7 +414,10 @@ pub struct ExplicitFallback {
 
 impl ExplicitFallback {
     pub fn new(kind: FallbackKind, obligation: impl Into<String>) -> Result<Self, EtnfError> {
-        let fallback = Self { kind, obligation: obligation.into() };
+        let fallback = Self {
+            kind,
+            obligation: obligation.into(),
+        };
         fallback.validate()?;
         Ok(fallback)
     }
@@ -403,7 +441,10 @@ pub struct Falsifier {
 
 impl Falsifier {
     pub fn new(id: impl Into<String>, description: impl Into<String>) -> Result<Self, EtnfError> {
-        let falsifier = Self { id: id.into(), description: description.into() };
+        let falsifier = Self {
+            id: id.into(),
+            description: description.into(),
+        };
         falsifier.validate()?;
         Ok(falsifier)
     }
@@ -430,7 +471,12 @@ pub struct ResourceLedger {
 
 impl ResourceLedger {
     pub fn new(bytes_read: u64, items_checked: u64, checks: u64, complete: bool) -> Self {
-        Self { bytes_read, items_checked, checks, complete }
+        Self {
+            bytes_read,
+            items_checked,
+            checks,
+            complete,
+        }
     }
 
     /// Derived root over every ledger field (canonical JSON + SHA-256).
@@ -619,7 +665,9 @@ impl V7ShadowReport {
     /// recomputation over the bound fields.
     pub fn validate(&self) -> Result<(), EtnfError> {
         if self.schema != ETNF_SCHEMA_ID {
-            return Err(EtnfError::InvalidSchema { actual: self.schema.clone() });
+            return Err(EtnfError::InvalidSchema {
+                actual: self.schema.clone(),
+            });
         }
         if !self.shadow {
             return Err(EtnfError::ShadowMarkerFalse);
@@ -651,10 +699,14 @@ impl V7ShadowReport {
             (Some(certificate), true) => {
                 certificate.validate()?;
                 if certificate.evidence_root != self.evidence.root() {
-                    return Err(EtnfError::CertificateBindingMismatch { field: "evidence_root" });
+                    return Err(EtnfError::CertificateBindingMismatch {
+                        field: "evidence_root",
+                    });
                 }
                 if certificate.resource_ledger_root != self.ledger.root() {
-                    return Err(EtnfError::CertificateBindingMismatch { field: "resource_ledger_root" });
+                    return Err(EtnfError::CertificateBindingMismatch {
+                        field: "resource_ledger_root",
+                    });
                 }
                 if certificate.checker != self.checker {
                     return Err(EtnfError::CertificateBindingMismatch { field: "checker" });
@@ -677,8 +729,9 @@ impl V7ShadowReport {
     /// Canonical bytes (sorted keys, no whitespace, derived roots) for
     /// storage, comparison, and cross-checker auditing.
     pub fn to_canonical_bytes(&self) -> Result<Vec<u8>, EtnfError> {
-        let value = serde_json::to_value(self)
-            .map_err(|error| EtnfError::BadJson { message: error.to_string() })?;
+        let value = serde_json::to_value(self).map_err(|error| EtnfError::BadJson {
+            message: error.to_string(),
+        })?;
         Ok(canonical_json(&value).into_bytes())
     }
 
@@ -686,8 +739,10 @@ impl V7ShadowReport {
     /// wrong schema/shadow markers, certificates under non-Safe verdicts, and
     /// any root that does not bind its fields.
     pub fn from_canonical_bytes(bytes: &[u8]) -> Result<Self, EtnfError> {
-        let report: V7ShadowReport = serde_json::from_slice(bytes)
-            .map_err(|error| EtnfError::BadJson { message: error.to_string() })?;
+        let report: V7ShadowReport =
+            serde_json::from_slice(bytes).map_err(|error| EtnfError::BadJson {
+                message: error.to_string(),
+            })?;
         report.validate()?;
         if report.to_canonical_bytes()? != bytes {
             return Err(EtnfError::NonCanonicalBytes);

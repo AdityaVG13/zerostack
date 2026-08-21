@@ -23,15 +23,18 @@
 pub mod job_progress;
 pub mod mcp_transport;
 
-#[cfg(feature = "fastmcp")]
-pub use mcp_transport::FastMcpTransport;
 pub use mcp_transport::{
     DEFAULT_MCP_MAX_INFLIGHT, DEFAULT_MCP_TOOL_TIMEOUT, MAX_MCP_MAX_INFLIGHT, MAX_MCP_TOOL_TIMEOUT,
     McpAliasMetadata, McpCallContext, McpDispatchError, McpDispatchOutput, McpDispatcher,
     McpErrorPresentation, McpResourceOutput, McpResourceReader, McpServerIdentity, McpTextContent,
-    McpTransportConfig, McpTransportError, execute_call, execute_call_with_cancel,
-    validate_mcp_registration,
+    McpTransportConfig, McpTransportError, ZERO_CARRIER_MESSAGE_BYTE_LIMIT,
+    ZERO_CARRIER_PLAN_BYTE_LIMIT, ZERO_CARRIER_TOOL_NAME, ZeroCarrierCapabilities,
+    ZeroCarrierDispatcher, ZeroCarrierExecutor, ZeroCarrierRequest, ZeroCarrierSampling,
+    decode_zero_carrier_request, execute_call, execute_call_with_cancel,
+    render_zero_carrier_response, validate_mcp_registration, zero_carrier_catalog,
 };
+#[cfg(feature = "fastmcp")]
+pub use mcp_transport::{FastMcpTransport, FastMcpZeroCarrier};
 // Surface-registration contract authority, re-exported from zero-abi so engine
 // MCP adapters can consume registration and transport from one crate.
 pub use zero_abi::{

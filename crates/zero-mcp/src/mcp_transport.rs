@@ -16,7 +16,123 @@ use serde_json::Value;
 
 #[cfg(feature = "fastmcp")]
 use zero_abi::CanonicalResource;
-use zero_abi::{SurfaceContractError, SurfaceKind, SurfaceRegistration};
+use zero_abi::{
+    SurfaceContractError, SurfaceKind, SurfaceRegistration, ZeroKernelResponse, canonical_json,
+};
+
+pub const ZERO_CARRIER_TOOL_NAME: &str = "zero";
+pub const ZERO_CARRIER_PLAN_BYTE_LIMIT: usize = 64 * 1024;
+pub const ZERO_CARRIER_MESSAGE_BYTE_LIMIT: u64 = 16 * 1024 * 1024;
+
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ZeroCarrierSampling {
+    SameModel,
+    Unavailable,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+pub struct ZeroCarrierCapabilities {
+    pub cancellation: bool,
+    pub progress: bool,
+    pub sampling: ZeroCarrierSampling,
+    pub maximum_inbound_bytes: u64,
+    pub maximum_outbound_bytes: u64,
+    pub native_package_digest: String,
+}
+
+impl ZeroCarrierCapabilities {
+    pub fn validate(&self) -> Result<(), McpTransportError> {
+        if self.maximum_inbound_bytes == 0
+            || self.maximum_outbound_bytes == 0
+            || self.maximum_inbound_bytes > ZERO_CARRIER_MESSAGE_BYTE_LIMIT
+            || self.maximum_outbound_bytes > ZERO_CARRIER_MESSAGE_BYTE_LIMIT
+        {
+            return Err(McpTransportError::InvalidCarrier(
+                "carrier message bounds must be finite and within policy".into(),
+            ));
+        }
+        if self.native_package_digest.len() != 64
+            || !self
+                .native_package_digest
+                .bytes()
+                .all(|byte| byte.is_ascii_hexdigit())
+        {
+            return Err(McpTransportError::InvalidCarrier(
+                "native package digest must be 64 hexadecimal characters".into(),
+            ));
+        }
+        Ok(())
+    }
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct ZeroCarrierRequest {
+    pub plan: String,
+}
+
+pub fn zero_carrier_catalog() -> Value {
+    serde_json::json!([{
+        "name": ZERO_CARRIER_TOOL_NAME,
+        "description": "Run one bounded JavaScript or TypeScript cell with direct z.* methods.",
+        "inputSchema": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+                "plan": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": ZERO_CARRIER_PLAN_BYTE_LIMIT,
+                }
+            },
+            "required": ["plan"]
+        }
+    }])
+}
+
+pub fn decode_zero_carrier_request(
+    arguments: Value,
+    capabilities: &ZeroCarrierCapabilities,
+) -> Result<ZeroCarrierRequest, McpTransportError> {
+    capabilities.validate()?;
+    let encoded = serde_json::to_vec(&arguments)
+        .map_err(|error| McpTransportError::InvalidCarrier(error.to_string()))?;
+    if encoded.len() as u64 > capabilities.maximum_inbound_bytes {
+        return Err(McpTransportError::InvalidCarrier(
+            "carrier request exceeds the negotiated inbound bound".into(),
+        ));
+    }
+    let request: ZeroCarrierRequest = serde_json::from_value(arguments)
+        .map_err(|error| McpTransportError::InvalidCarrier(error.to_string()))?;
+    let bytes = request.plan.as_bytes().len();
+    if bytes == 0 || bytes > ZERO_CARRIER_PLAN_BYTE_LIMIT {
+        return Err(McpTransportError::InvalidCarrier(format!(
+            "carrier plan must contain 1..={ZERO_CARRIER_PLAN_BYTE_LIMIT} UTF-8 bytes"
+        )));
+    }
+    Ok(request)
+}
+
+pub fn render_zero_carrier_response(
+    response: &ZeroKernelResponse,
+    capabilities: &ZeroCarrierCapabilities,
+) -> Result<String, McpTransportError> {
+    capabilities.validate()?;
+    response
+        .validate()
+        .map_err(|error| McpTransportError::InvalidCarrier(error.to_string()))?;
+    let value = serde_json::to_value(response)
+        .map_err(|error| McpTransportError::InvalidCarrier(error.to_string()))?;
+    let rendered = canonical_json(&value);
+    if rendered.len() as u64 > capabilities.maximum_outbound_bytes {
+        return Err(McpTransportError::InvalidCarrier(
+            "canonical ZeroKernel response exceeds the negotiated outbound bound".into(),
+        ));
+    }
+    Ok(rendered)
+}
 
 /// Default compatibility behavior: no hub-imposed outer deadline. Domain
 /// operations retain their own declared deadlines and remain cancellable.
@@ -264,6 +380,95 @@ where
     }
 }
 
+pub trait ZeroCarrierExecutor: Send + Sync {
+    fn execute(
+        &self,
+        plan: &str,
+        context: &McpCallContext,
+    ) -> Result<ZeroKernelResponse, McpDispatchError>;
+}
+
+impl<F> ZeroCarrierExecutor for F
+where
+    F: Fn(&str, &McpCallContext) -> Result<ZeroKernelResponse, McpDispatchError> + Send + Sync,
+{
+    fn execute(
+        &self,
+        plan: &str,
+        context: &McpCallContext,
+    ) -> Result<ZeroKernelResponse, McpDispatchError> {
+        self(plan, context)
+    }
+}
+
+pub struct ZeroCarrierDispatcher {
+    executor: Arc<dyn ZeroCarrierExecutor>,
+    capabilities: ZeroCarrierCapabilities,
+}
+
+impl ZeroCarrierDispatcher {
+    pub fn new(
+        executor: Arc<dyn ZeroCarrierExecutor>,
+        capabilities: ZeroCarrierCapabilities,
+    ) -> Result<Self, McpTransportError> {
+        capabilities.validate()?;
+        Ok(Self {
+            executor,
+            capabilities,
+        })
+    }
+
+    fn execute(
+        &self,
+        tool: &str,
+        arguments: Value,
+        context: &McpCallContext,
+    ) -> Result<String, McpDispatchError> {
+        if tool != ZERO_CARRIER_TOOL_NAME {
+            return Err(McpDispatchError::new(
+                "unknown_tool",
+                format!("ZeroKernel carrier exposes only {ZERO_CARRIER_TOOL_NAME:?}"),
+                false,
+            )
+            .with_op(tool));
+        }
+        context.check()?;
+        let request =
+            decode_zero_carrier_request(arguments, &self.capabilities).map_err(|error| {
+                McpDispatchError::new("invalid_request", error.to_string(), false).with_op(tool)
+            })?;
+        let response = self.executor.execute(&request.plan, context)?;
+        context.check()?;
+        render_zero_carrier_response(&response, &self.capabilities).map_err(|error| {
+            McpDispatchError::new("invalid_response", error.to_string(), false).with_op(tool)
+        })
+    }
+}
+
+impl McpDispatcher for ZeroCarrierDispatcher {
+    fn dispatch(
+        &self,
+        tool: &str,
+        arguments: Value,
+        context: &McpCallContext,
+    ) -> Result<Value, McpDispatchError> {
+        let rendered = self.execute(tool, arguments, context)?;
+        serde_json::from_str(&rendered).map_err(|error| {
+            McpDispatchError::new("invalid_response", error.to_string(), false).with_op(tool)
+        })
+    }
+
+    fn dispatch_output(
+        &self,
+        tool: &str,
+        arguments: Value,
+        context: &McpCallContext,
+    ) -> Result<McpDispatchOutput, McpDispatchError> {
+        self.execute(tool, arguments, context)
+            .map(|text| McpDispatchOutput::Text(vec![McpTextContent::new(text)]))
+    }
+}
+
 /// Structured domain failure preserved in the MCP tool-result text.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -347,6 +552,7 @@ pub enum McpTransportError {
     InvalidConfig(String),
     InvalidAliasMetadata(String),
     InvalidServerIdentity(String),
+    InvalidCarrier(String),
     Surface(SurfaceContractError),
     WrongSurface(SurfaceKind),
     MissingResourceReader,
@@ -363,6 +569,9 @@ impl fmt::Display for McpTransportError {
             }
             Self::InvalidServerIdentity(message) => {
                 write!(formatter, "invalid MCP server identity: {message}")
+            }
+            Self::InvalidCarrier(message) => {
+                write!(formatter, "invalid ZeroKernel carrier: {message}")
             }
             Self::Surface(error) => write!(formatter, "invalid MCP surface registration: {error}"),
             Self::WrongSurface(surface) => write!(
@@ -634,9 +843,7 @@ where
         Err(error) if error.kind == "cancelled" || error.kind == "timeout" => {
             let late = match receiver.recv_timeout(LATE_RESULT_BOUND) {
                 Ok(late) => Some(late),
-                Err(mpsc::RecvTimeoutError::Timeout | mpsc::RecvTimeoutError::Disconnected) => {
-                    None
-                }
+                Err(mpsc::RecvTimeoutError::Timeout | mpsc::RecvTimeoutError::Disconnected) => None,
             };
             match late {
                 Some(Ok(value)) => {
@@ -680,6 +887,146 @@ mod fastmcp {
         config: McpTransportConfig,
         error_presentation: McpErrorPresentation,
         limiter: Arc<Inflight>,
+    }
+
+    struct RegisteredZeroCarrierTool {
+        definition: Tool,
+        dispatcher: Arc<ZeroCarrierDispatcher>,
+        config: McpTransportConfig,
+        limiter: Arc<Inflight>,
+    }
+
+    impl RegisteredZeroCarrierTool {
+        fn new(
+            dispatcher: Arc<ZeroCarrierDispatcher>,
+            config: McpTransportConfig,
+            limiter: Arc<Inflight>,
+        ) -> Self {
+            let catalog = zero_carrier_catalog();
+            let entry = &catalog.as_array().expect("carrier catalog is an array")[0];
+            Self {
+                definition: Tool {
+                    name: ZERO_CARRIER_TOOL_NAME.into(),
+                    description: entry["description"].as_str().map(str::to_owned),
+                    input_schema: entry["inputSchema"].clone(),
+                    output_schema: None,
+                    icon: None,
+                    version: None,
+                    tags: Vec::new(),
+                    annotations: Some(ToolAnnotations {
+                        destructive: Some(true),
+                        idempotent: None,
+                        read_only: Some(false),
+                        open_world_hint: Some(false),
+                    }),
+                },
+                dispatcher,
+                config,
+                limiter,
+            }
+        }
+    }
+
+    impl ToolHandler for RegisteredZeroCarrierTool {
+        fn definition(&self) -> Tool {
+            self.definition.clone()
+        }
+
+        fn call(
+            &self,
+            context: &McpContext,
+            arguments: Value,
+        ) -> fastmcp_rust::McpResult<Vec<Content>> {
+            context
+                .checkpoint()
+                .map_err(|_| McpError::request_cancelled())?;
+            let dispatcher: Arc<dyn McpDispatcher> = self.dispatcher.clone();
+            let result = execute_output_with_limiter(
+                dispatcher,
+                ZERO_CARRIER_TOOL_NAME,
+                arguments,
+                self.config,
+                Arc::clone(&self.limiter),
+                || context.is_cancelled(),
+            );
+            context
+                .checkpoint()
+                .map_err(|_| McpError::request_cancelled())?;
+            match result {
+                Ok(McpDispatchOutput::Text(items)) => Ok(items
+                    .into_iter()
+                    .map(|item| Content::text(item.text))
+                    .collect()),
+                Ok(McpDispatchOutput::Json(value)) => {
+                    Ok(vec![Content::text(canonical_json(&value))])
+                }
+                Err(error) => Err(present_dispatch_error(
+                    error,
+                    McpErrorPresentation::Structured,
+                )),
+            }
+        }
+    }
+
+    pub struct FastMcpZeroCarrier {
+        dispatcher: Arc<ZeroCarrierDispatcher>,
+        config: McpTransportConfig,
+        server_identity: McpServerIdentity,
+    }
+
+    impl FastMcpZeroCarrier {
+        pub fn new(
+            executor: Arc<dyn ZeroCarrierExecutor>,
+            capabilities: ZeroCarrierCapabilities,
+            config: McpTransportConfig,
+        ) -> Result<Self, McpTransportError> {
+            let config = config.validate()?;
+            let dispatcher = Arc::new(ZeroCarrierDispatcher::new(executor, capabilities)?);
+            Ok(Self {
+                dispatcher,
+                config,
+                server_identity: McpServerIdentity::new("zero", env!("CARGO_PKG_VERSION"))?,
+            })
+        }
+
+        pub fn with_server_identity(
+            mut self,
+            name: impl Into<String>,
+            version: impl Into<String>,
+        ) -> Result<Self, McpTransportError> {
+            self.server_identity = McpServerIdentity::new(name, version)?;
+            Ok(self)
+        }
+
+        pub fn catalog(&self) -> Vec<Tool> {
+            vec![
+                RegisteredZeroCarrierTool::new(
+                    Arc::clone(&self.dispatcher),
+                    self.config,
+                    Arc::new(Inflight::new(self.config.max_inflight)),
+                )
+                .definition,
+            ]
+        }
+
+        pub fn build_server(&self) -> Server {
+            Server::new(
+                self.server_identity.name.clone(),
+                self.server_identity.version.clone(),
+            )
+            .request_timeout(0)
+            .tool(RegisteredZeroCarrierTool::new(
+                Arc::clone(&self.dispatcher),
+                self.config,
+                Arc::new(Inflight::new(self.config.max_inflight)),
+            ))
+            .instructions("One canonical zero tool. The runtime is ZeroKernel.")
+            .build()
+        }
+
+        pub fn run_stdio(self) -> ! {
+            self.build_server().run_stdio()
+        }
     }
 
     pub(super) fn present_dispatch_error(
@@ -1183,4 +1530,4 @@ mod fastmcp {
 }
 
 #[cfg(feature = "fastmcp")]
-pub use fastmcp::FastMcpTransport;
+pub use fastmcp::{FastMcpTransport, FastMcpZeroCarrier};

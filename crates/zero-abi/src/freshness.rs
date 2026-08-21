@@ -742,4 +742,3 @@ fn compare_sets<T: Ord>(required: &[T], actual: &[T], label: &str) -> FreshnessD
         )
     }
 }
-

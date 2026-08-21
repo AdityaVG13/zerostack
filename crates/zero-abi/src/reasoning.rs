@@ -1098,4 +1098,3 @@ impl fmt::Display for ReasoningContractError {
 }
 
 impl Error for ReasoningContractError {}
-

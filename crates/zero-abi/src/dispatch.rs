@@ -962,4 +962,3 @@ fn validate_array_constraints(
     }
     Ok(())
 }
-

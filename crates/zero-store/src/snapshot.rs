@@ -79,8 +79,7 @@ pub struct SnapshotStalenessReceipt {
 
 impl SnapshotStalenessReceipt {
     pub fn canonical_bytes(&self) -> Vec<u8> {
-        let value =
-            serde_json::to_value(self).expect("staleness receipt is JSON-serializable");
+        let value = serde_json::to_value(self).expect("staleness receipt is JSON-serializable");
         canonical_json(&value).into_bytes()
     }
 
@@ -159,4 +158,3 @@ pub fn snapshot_isolation_contract() -> serde_json::Value {
         "abi_version": SNAPSHOT_ABI_VERSION,
     })
 }
-

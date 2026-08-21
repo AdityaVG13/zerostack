@@ -43,7 +43,11 @@ pub enum ExecStreamEvent {
     },
     /// Optional progress note from long-running execution (reserved for
     /// host wiring; the DAG executor itself emits step events only).
-    Progress { seq: u64, node_id: String, detail: String },
+    Progress {
+        seq: u64,
+        node_id: String,
+        detail: String,
+    },
     /// Terminal success: exactly one per stream, never followed by events.
     Completed {
         seq: u64,
@@ -64,7 +68,10 @@ pub enum ExecStreamEvent {
 impl ExecStreamEvent {
     /// Whether this event is terminal (Completed or Failed).
     pub fn is_terminal(&self) -> bool {
-        matches!(self, ExecStreamEvent::Completed { .. } | ExecStreamEvent::Failed { .. })
+        matches!(
+            self,
+            ExecStreamEvent::Completed { .. } | ExecStreamEvent::Failed { .. }
+        )
     }
 
     /// Monotonic stream sequence.
@@ -89,4 +96,3 @@ impl ExecStreamEvent {
         }
     }
 }
-

@@ -53,9 +53,9 @@ use serde_json::Value;
 
 use crate::digest::sha256_hex;
 use crate::etnf::{
-    CheckerIdentity, EtnfError, EvidenceItem, ExplicitFallback, FallbackKind, Falsifier,
-    FiniteWitness, ProposedAuthorityTransition, ProposedTransitionKind, ResourceLedger,
-    RootedEvidence, V7ShadowReport, ETNF_MAX_ID_BYTES,
+    CheckerIdentity, ETNF_MAX_ID_BYTES, EtnfError, EvidenceItem, ExplicitFallback, FallbackKind,
+    Falsifier, FiniteWitness, ProposedAuthorityTransition, ProposedTransitionKind, ResourceLedger,
+    RootedEvidence, V7ShadowReport,
 };
 use crate::verdict::SafetyVerdict;
 

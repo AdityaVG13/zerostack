@@ -80,7 +80,13 @@ crates/zerostack-harness/
 .zsx_patch.diff
 *.diff
 *.patch
-bindings/node/prebuilds/
+bindings/node/prebuilds/*
+!bindings/node/prebuilds/darwin-arm64/
+!bindings/node/prebuilds/linux-arm64-gnu/
+bindings/node/prebuilds/darwin-arm64/*
+bindings/node/prebuilds/linux-arm64-gnu/*
+!bindings/node/prebuilds/darwin-arm64/zero_kernel_product.node
+!bindings/node/prebuilds/linux-arm64-gnu/zero_kernel_product.node
 tests/scripts/
 tests/unit/zero-abi/fuzz_corpus_untrusted_bytes_20260815.rs
 scripts/bench/*

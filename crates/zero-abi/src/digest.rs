@@ -44,4 +44,3 @@ pub fn contract_digest_hex(manifest: &Value) -> String {
 pub fn contract_digest(manifest: &Value) -> [u8; 32] {
     sha256(canonical_json(manifest).as_bytes())
 }
-

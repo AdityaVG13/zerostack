@@ -608,11 +608,7 @@ impl SharedCas {
     /// Move a regular file occupying the verified `<hash>` slot aside.
     /// Verified prior bodies become `<hash>.N`; unverified ones become
     /// `<hash>.unverified` so the slot is not reused as if it were identity.
-    fn vacate_verified_quarantine_slot(
-        &self,
-        dest: &Path,
-        sha256: &str,
-    ) -> Result<(), CasError> {
+    fn vacate_verified_quarantine_slot(&self, dest: &Path, sha256: &str) -> Result<(), CasError> {
         let meta = match fs::symlink_metadata(dest) {
             Ok(meta) => meta,
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(()),
@@ -676,7 +672,6 @@ impl SharedCas {
         }
         Ok(path)
     }
-
 }
 
 /// Authorization gate for verified CAS reads (ZS-SEC-005). A capability
@@ -690,7 +685,6 @@ pub trait CasReadGate {
 }
 
 impl SharedCas {
-
     /// Open by full digest, enforce the regular-file/size policy, hash the
     /// complete bytes, and only then return data. Digest mismatch is loud and
     /// returns no bytes.

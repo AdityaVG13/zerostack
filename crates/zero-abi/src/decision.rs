@@ -87,11 +87,9 @@ impl ObservationClass {
                 self.class_id.len()
             )));
         }
-        if !self
-            .class_id
-            .bytes()
-            .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || matches!(b, b'.' | b'_' | b'-'))
-        {
+        if !self.class_id.bytes().all(|b| {
+            b.is_ascii_lowercase() || b.is_ascii_digit() || matches!(b, b'.' | b'_' | b'-')
+        }) {
             return Err(DecisionError::InvalidObservationClass(
                 "class_id must match lowercase [a-z0-9_.-]".into(),
             ));
@@ -169,7 +167,11 @@ impl SemanticDecisionPoint {
                 )));
             }
         }
-        if self.evidence_refs.iter().any(|reference| reference.is_empty()) {
+        if self
+            .evidence_refs
+            .iter()
+            .any(|reference| reference.is_empty())
+        {
             return Err(DecisionError::InvalidDecisionPoint(
                 "evidence_refs must not be empty strings".into(),
             ));
@@ -278,11 +280,7 @@ impl ContingentPolicy {
     ///    closed; it is never a silent selection.
     /// 3. No matching rule resolves to `Uncovered` with the full
     ///    `DecisionRequired` payload.
-    pub fn resolve(
-        &self,
-        point: &SemanticDecisionPoint,
-        observed_value: &str,
-    ) -> PolicyResolution {
+    pub fn resolve(&self, point: &SemanticDecisionPoint, observed_value: &str) -> PolicyResolution {
         for (rule_index, rule) in self.rules.iter().enumerate() {
             if rule.observation_class != point.observation_class {
                 continue;
@@ -334,7 +332,10 @@ pub enum PolicyResolution {
     /// of the matching rule (policy order) so callers can report usage
     /// honestly. This is the ONLY resolution that lets execution continue
     /// within one call.
-    Selected { alternative: String, rule_index: usize },
+    Selected {
+        alternative: String,
+        rule_index: usize,
+    },
     /// No rule covered the observation; the decision must be surfaced as
     /// `DecisionRequired` and execution must stop (no private selection).
     Uncovered { decision_required: DecisionRequired },
@@ -349,4 +350,3 @@ pub enum PolicyResolution {
 pub fn verdict_permits_selection(verdict: &SafetyVerdict) -> bool {
     matches!(verdict, SafetyVerdict::Safe)
 }
-

@@ -490,4 +490,3 @@ fn normalize_roots(roots: &mut Vec<CacheRoot>) {
     roots.sort();
     roots.dedup();
 }
-

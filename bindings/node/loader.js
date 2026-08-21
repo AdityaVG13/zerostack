@@ -1,10 +1,10 @@
 'use strict';
 
-// zsx-node loader.
+// ZeroKernel loader.
 //
 // Selects the native addon from, in order:
-//   1. an explicit ZSX_NATIVE_ADDON path, or
-//   2. a platform prebuild under bindings/node/prebuilds/<platform>-<arch>/zsx_node.node
+//   1. an explicit ZERO_KERNEL_NATIVE_ADDON path, or
+//   2. a platform prebuild under bindings/node/prebuilds/<platform>-<arch>/zero_kernel_product.node
 //
 // It never spawns a process, never downloads, and never builds at runtime:
 // a missing binary fails with one precise install/build error.
@@ -29,27 +29,27 @@ function platformDir() {
 function builtLibraryName() {
   switch (process.platform) {
     case 'win32':
-      return 'zsx_node.dll';
+      return 'zero_kernel_node.dll';
     case 'darwin':
-      return 'libzsx_node.dylib';
+      return 'libzero_kernel_node.dylib';
     default:
-      return 'libzsx_node.so';
+      return 'libzero_kernel_node.so';
   }
 }
 
 function missingAddonError(candidate, dir) {
-  const prebuildPath = path.join('bindings/node/prebuilds', dir, 'zsx_node.node');
+  const prebuildPath = path.join('bindings/node/prebuilds', dir, 'zero_kernel_product.node');
   return new Error(
-    'zsx-node: native addon not found at ' + candidate + '.\n' +
+    'ZeroKernel: native addon not found at ' + candidate + '.\n' +
     'Install a prebuild, or build it yourself:\n' +
-    '  cd <ZeroStack repo> && cargo build --profile release-node -p zsx-node\n' +
+    '  cd <ZeroStack repo> && cargo build --profile release-node -p zero-kernel-node\n' +
     '  cp target/release-node/' + builtLibraryName() + ' ' + prebuildPath + '\n' +
-    'or set ZSX_NATIVE_ADDON=/absolute/path/to/zsx_node.node'
+    'or set ZERO_KERNEL_NATIVE_ADDON=/absolute/path/to/zero_kernel_product.node'
   );
 }
 
 function resolveAddon() {
-  const explicit = process.env.ZSX_NATIVE_ADDON;
+  const explicit = process.env.ZERO_KERNEL_NATIVE_ADDON;
   if (explicit) {
     if (!fs.existsSync(explicit)) {
       throw missingAddonError(explicit, '');
@@ -59,11 +59,11 @@ function resolveAddon() {
   const dir = platformDir();
   if (dir === null) {
     throw new Error(
-      'zsx-node: unsupported platform "' + process.platform + '/' + process.arch +
-      '". Build the addon and set ZSX_NATIVE_ADDON=/absolute/path/to/zsx_node.node'
+      'ZeroKernel: unsupported platform "' + process.platform + '/' + process.arch +
+      '". Build the addon and set ZERO_KERNEL_NATIVE_ADDON=/absolute/path/to/zero_kernel_product.node'
     );
   }
-  const candidate = path.join(__dirname, 'prebuilds', dir, 'zsx_node.node');
+  const candidate = path.join(__dirname, 'prebuilds', dir, 'zero_kernel_product.node');
   if (!fs.existsSync(candidate)) {
     throw missingAddonError(candidate, dir);
   }

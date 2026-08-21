@@ -10,11 +10,14 @@ description = "Canonical ZeroRef content-addressed store layout and publish prot
 serde = { workspace = true }
 serde_json = { workspace = true }
 sha2 = { workspace = true }
+blake3 = { workspace = true }
+memmap2 = { workspace = true }
 thiserror = "2"
 zero-abi = { path = "../zero-abi" }
 zero-ref = { path = "../zero-ref" }
 
 [dev-dependencies]
+tempfile = "3"
 proptest = "1"
 sha2 = { workspace = true }
 
@@ -36,3 +39,15 @@ path = "../../tests/unit/zero-store/durable_journal.rs"
 [[test]]
 name = "zbf_refs_differential"
 path = "../../tests/unit/zero-store/zbf_refs_differential.rs"
+
+[[test]]
+name = "zero_cas"
+path = "../../tests/unit/zero-store/zero_cas.rs"
+
+[[test]]
+name = "event_log"
+path = "../../tests/unit/zero-store/event_log.rs"
+
+[[test]]
+name = "zero_migration"
+path = "../../tests/unit/zero-store/zero_migration.rs"

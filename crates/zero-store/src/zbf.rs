@@ -38,4 +38,3 @@ fn cas_error(error: CasError) -> ZbfError {
         message: error.to_string(),
     }
 }
-

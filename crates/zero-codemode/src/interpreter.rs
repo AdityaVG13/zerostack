@@ -15,12 +15,11 @@ use std::time::{Duration, Instant};
 use serde_json::{Map, Number, Value as JsonValue};
 use tree_sitter::{Node, Parser};
 use tree_sitter_javascript::LANGUAGE;
-use zero_abi::{CapabilityDescriptor, canonical_json, sha256_hex};
-
-use crate::host::{
-    ConnectorCompletionMessage, directly_expands_one_spill_ref, extract_useful_result_text,
-    is_terminal_exact_token_expansion, normalize_public_result, public_result_ack, spill_result,
+use zero_abi::{
+    CapabilityDescriptor, OPERATION_TRACE_LIMIT, ZeroOperationStatus, ZeroOperationTrace,
 };
+
+use crate::host::ConnectorCompletionMessage;
 use crate::{
     Connector, ConnectorCompletion, DispatchContext, ExecutionMetrics, ExecutionOutcome, Host,
     HostError,
@@ -31,7 +30,7 @@ static PARSER_CREATIONS: AtomicU64 = AtomicU64::new(0);
 
 thread_local! {
     /// Tree-sitter parsers are mutable but reusable. Keeping one per execution
-    /// thread removes grammar setup from every ZSX call without serializing
+    /// thread removes grammar setup from every ZeroKernel cell without serializing
     /// independent sessions behind a process-wide parser lock.
     static PARSER: RefCell<Option<Parser>> = const { RefCell::new(None) };
 }
@@ -128,7 +127,6 @@ enum Value<'tree> {
 enum ObjectAccess {
     Open,
     Strict,
-    CapabilityRoot,
 }
 
 #[derive(Clone, Debug)]
@@ -136,54 +134,6 @@ struct ObjectValue<'tree> {
     fields: BTreeMap<String, Value<'tree>>,
     getters: BTreeMap<String, Value<'tree>>,
     access: ObjectAccess,
-}
-
-fn unknown_property_message(key: &str, object: &ObjectValue<'_>) -> String {
-    let available = object.fields.keys().cloned().collect::<Vec<_>>().join(", ");
-    let suggestion = ["value", "content"].iter().find_map(|nest| {
-        let Value::Object(inner) = object.fields.get(*nest)? else {
-            return None;
-        };
-        let inner = inner.borrow();
-        if inner.fields.contains_key(key) {
-            return Some(format!("{nest}.{key}"));
-        }
-        let Value::Object(deeper) = inner.fields.get("value")? else {
-            return None;
-        };
-        deeper
-            .borrow()
-            .fields
-            .contains_key(key)
-            .then(|| format!("{nest}.value.{key}"))
-    });
-    match suggestion {
-        Some(path) => format!(
-            "unknown property '{key}' on object; available: {available} (did you mean {path}?)"
-        ),
-        None => format!("unknown property '{key}' on object; available: {available}"),
-    }
-}
-
-fn object_field<'tree>(value: &Value<'tree>, key: &str) -> Option<Value<'tree>> {
-    match value {
-        Value::Object(object) => object.borrow().fields.get(key).cloned(),
-        _ => None,
-    }
-}
-
-fn ergonomic_result<'tree>(value: Value<'tree>) -> Value<'tree> {
-    let Some(content) = object_field(&value, "content") else {
-        return value;
-    };
-    let Some(inline) = object_field(&content, "value") else {
-        return content;
-    };
-    if object_field(&inline, "metadata").is_some() {
-        object_field(&inline, "value").unwrap_or(inline)
-    } else {
-        inline
-    }
 }
 
 /// Human-readable kind label for destructure/type faults.
@@ -198,24 +148,6 @@ fn value_kind(value: &Value<'_>) -> &'static str {
         Value::Object(_) => "an object (connector result?)",
         _ => "this value",
     }
-}
-
-fn ergonomic_payload<'tree>(value: Value<'tree>) -> Value<'tree> {
-    let result = ergonomic_result(value);
-    object_field(&result, "value").unwrap_or(result)
-}
-
-fn ergonomic_refs<'tree>(value: Value<'tree>) -> Value<'tree> {
-    if let Some(content) = object_field(&value, "content")
-        && let Some(inline) = object_field(&content, "value")
-        && let Some(metadata) = object_field(&inline, "metadata")
-        && let Some(ownership) = object_field(&metadata, "ownership")
-        && let Some(refs) = object_field(&ownership, "refs")
-    {
-        return refs;
-    }
-    let result = ergonomic_result(value);
-    object_field(&result, "refs").unwrap_or_else(|| new_array(Vec::new()))
 }
 
 #[derive(Clone, Debug)]
@@ -280,19 +212,27 @@ enum Control<'tree> {
     Throw(Value<'tree>),
 }
 
+struct PendingOperation {
+    trace_index: usize,
+    started: Instant,
+}
+
+#[derive(Default)]
+struct OperationSummary {
+    target: Option<String>,
+    detail: Option<String>,
+    result_count: Option<u64>,
+    changed_files: Option<u32>,
+}
+
 pub(super) fn execute(
     host: &Host,
     source: &str,
     connector: Rc<dyn Connector>,
     cancelled: Arc<AtomicBool>,
     timeout: Duration,
-    generation: u64,
-    request_id: u64,
 ) -> Result<JsonValue, HostError> {
-    execute_measured(
-        host, source, connector, cancelled, timeout, generation, request_id,
-    )
-    .result
+    execute_measured(host, source, connector, cancelled, timeout).result
 }
 
 pub(super) fn execute_measured(
@@ -301,20 +241,20 @@ pub(super) fn execute_measured(
     connector: Rc<dyn Connector>,
     cancelled: Arc<AtomicBool>,
     timeout: Duration,
-    generation: u64,
-    request_id: u64,
 ) -> ExecutionOutcome {
     let started = Instant::now();
     let metrics = Rc::new(RefCell::new(ExecutionMetrics::default()));
+    let operations = Rc::new(RefCell::new(Vec::new()));
+    let operations_truncated = Rc::new(Cell::new(false));
     let result = execute_inner(
         host,
         source,
         connector,
         cancelled,
         timeout,
-        generation,
-        request_id,
         Rc::clone(&metrics),
+        Rc::clone(&operations),
+        Rc::clone(&operations_truncated),
     );
     let mut metrics = metrics.borrow().clone();
     metrics.wall_time_ns = started.elapsed().as_nanos().try_into().unwrap_or(u64::MAX);
@@ -325,26 +265,29 @@ pub(super) fn execute_measured(
             Err(HostError::MicrotaskLimit) => Some("microtask_budget".into()),
             Err(HostError::CallBudgetExceeded { .. }) => Some("call_budget".into()),
             Err(HostError::MemoryLimit { .. }) => Some("memory_budget".into()),
-            Err(HostError::ResultTooLarge { .. } | HostError::ResultSpill(_)) => {
-                Some("output_budget".into())
-            }
+            Err(HostError::ResultTooLarge { .. }) => Some("output_budget".into()),
             Err(HostError::Cancelled) => Some("cancellation".into()),
             _ => None,
         };
     }
-    ExecutionOutcome { result, metrics }
+    let operations = operations.borrow().clone();
+    ExecutionOutcome {
+        result,
+        metrics,
+        operations,
+        operations_truncated: operations_truncated.get(),
+    }
 }
 
-#[allow(clippy::too_many_arguments)]
 fn execute_inner(
     host: &Host,
     source: &str,
     connector: Rc<dyn Connector>,
     cancelled: Arc<AtomicBool>,
     timeout: Duration,
-    generation: u64,
-    request_id: u64,
     metrics: Rc<RefCell<ExecutionMetrics>>,
+    operations: Rc<RefCell<Vec<ZeroOperationTrace>>>,
+    operations_truncated: Rc<Cell<bool>>,
 ) -> Result<JsonValue, HostError> {
     crate::wrap::validate_plan(source, host.limits.max_plan_bytes).map_err(HostError::Plan)?;
     let tree = parse_source(source)?;
@@ -360,63 +303,22 @@ fn execute_inner(
         connector,
         cancelled,
         timeout,
-        generation,
-        request_id,
+        operations,
+        operations_truncated,
     );
     let value = interpreter.run();
+    interpreter.finalize_operation_trace();
     *metrics.borrow_mut() = interpreter.metrics_snapshot();
     let value = value?;
     let (serialized, degraded) = interpreter.serialize_public_json(&value)?;
-    let mut public: JsonValue = if degraded {
-        let refs = collect_refs(&serialized);
-        serde_json::json!({
-            "serialization_degraded": true,
+    if degraded {
+        Ok(serde_json::json!({
+            "serializationDegraded": true,
             "result": serialized,
-            "refs": refs,
-        })
+        }))
     } else {
-        serialized
-    };
-    public = interpreter.attach_step_receipt(public)?;
-    let encoded =
-        serde_json::to_string(&public).map_err(|error| HostError::Json(error.to_string()))?;
-    if encoded.len() > host.max_visible_result_bytes
-        && !(directly_expands_one_spill_ref(source) && is_terminal_exact_token_expansion(&public))
-    {
-        // Prefer the HIT list / payload / visible text when that fits the
-        // budget. Envelope metadata is why a 2 KiB search became a 19 KiB
-        // spill with a 512-byte preview of `ack`/`trace`.
-        if let Some(useful) = extract_useful_result_text(&public) {
-            let slim = serde_json::json!({
-                "ack": public_result_ack(&public),
-                "content": { "kind": "inline", "value": useful },
-            });
-            if let Ok(slim_encoded) = serde_json::to_string(&slim) {
-                if slim_encoded.len() <= host.max_visible_result_bytes {
-                    return Ok(slim);
-                }
-            }
-        }
-        return match host.spill_root.as_deref() {
-            Some(root)
-                if host
-                    .registration
-                    .capabilities
-                    .iter()
-                    .any(|cap| cap.surface == "token" && cap.method == "expand") =>
-            {
-                spill_result(root, &encoded)
-            }
-            Some(_) => Err(HostError::ResultSpill(
-                "token.expand capability is required before publishing a result ref".into(),
-            )),
-            None => Err(HostError::ResultTooLarge {
-                actual: encoded.len(),
-                maximum: host.max_visible_result_bytes,
-            }),
-        };
+        Ok(serialized)
     }
-    Ok(public)
 }
 
 struct Interpreter<'tree> {
@@ -429,18 +331,19 @@ struct Interpreter<'tree> {
     promises: BTreeMap<u64, PromiseState<'tree>>,
     inflight_connector_calls: usize,
     next_promise: u64,
+    operations: Rc<RefCell<Vec<ZeroOperationTrace>>>,
+    operations_truncated: Rc<Cell<bool>>,
+    pending_operations: BTreeMap<u64, PendingOperation>,
+    next_parallel_group: u64,
+    active_parallel_group: Option<u64>,
     env: EnvRef<'tree>,
     cancelled: Arc<AtomicBool>,
     deadline: Instant,
     instructions: u64,
     microtasks: usize,
+    microtask_streak: usize,
     depth: Rc<Cell<usize>>,
     max_depth: usize,
-    generation: u64,
-    request_id: u64,
-    step_entries: Vec<JsonValue>,
-    step_head: String,
-    step_bytes: usize,
     metrics: ExecutionMetrics,
 }
 
@@ -452,8 +355,8 @@ impl<'tree> Interpreter<'tree> {
         connector: Rc<dyn Connector>,
         cancelled: Arc<AtomicBool>,
         timeout: Duration,
-        generation: u64,
-        request_id: u64,
+        operations: Rc<RefCell<Vec<ZeroOperationTrace>>>,
+        operations_truncated: Rc<Cell<bool>>,
     ) -> Self {
         let (sender, receiver) =
             std::sync::mpsc::sync_channel(host.limits.max_inflight_connector_calls);
@@ -474,18 +377,19 @@ impl<'tree> Interpreter<'tree> {
             promises: BTreeMap::new(),
             inflight_connector_calls: 0,
             next_promise: 1,
+            operations,
+            operations_truncated,
+            pending_operations: BTreeMap::new(),
+            next_parallel_group: 1,
+            active_parallel_group: None,
             env,
             cancelled,
             deadline: Instant::now() + timeout,
             instructions: 0,
             microtasks: 0,
+            microtask_streak: 0,
             depth,
             max_depth,
-            generation,
-            request_id,
-            step_entries: Vec::new(),
-            step_head: "0".repeat(64),
-            step_bytes: 0,
             metrics: ExecutionMetrics::default(),
         };
         interpreter.install_globals();
@@ -494,20 +398,6 @@ impl<'tree> Interpreter<'tree> {
 
     fn install_globals(&mut self) {
         let mut env = self.env.borrow_mut();
-        let mut surfaces = BTreeMap::new();
-        for capability in &self.host.registration.capabilities {
-            surfaces
-                .entry(capability.surface.clone())
-                .or_insert_with(|| Value::Namespace(capability.surface.clone()));
-        }
-        env.values.insert(
-            self.host.registration.root.clone(),
-            Value::Object(Rc::new(RefCell::new(ObjectValue {
-                fields: surfaces,
-                getters: BTreeMap::new(),
-                access: ObjectAccess::CapabilityRoot,
-            }))),
-        );
         for name in [
             "Object",
             "Reflect",
@@ -550,37 +440,10 @@ impl<'tree> Interpreter<'tree> {
             .insert("Infinity".into(), Value::Number(f64::INFINITY));
         env.values
             .insert("globalThis".into(), Value::Namespace("globalThis".into()));
-        env.values
-            .insert("ctx".into(), Value::Namespace("ctx".into()));
-        // K0 guest surface (zerostack-fhcj): only the supervisor's per-call
-        // runtime installs it; the native host never exposes `z`.
+        // The host installs one direct `z` object for each fresh cell.
         if self.host.guest.is_some() {
-            env.values
-                .insert("z".into(), Value::Namespace("z".into()));
+            env.values.insert("z".into(), Value::Namespace("z".into()));
         }
-    }
-
-    fn attach_step_receipt(&self, result: JsonValue) -> Result<JsonValue, HostError> {
-        if self.step_entries.is_empty() {
-            return Ok(result);
-        }
-        let body = serde_json::json!({
-            "schema": "zerostack.codemode.step_receipt",
-            "generation": self.generation,
-            "request_id": self.request_id,
-            "step_count": self.step_entries.len(),
-            "head_sha256": self.step_head,
-            "steps": self.step_entries,
-        });
-        let receipt_sha256 = sha256_hex(canonical_json(&body).as_bytes());
-        let execution_id = format!("cm://exec/{}-{}", self.generation, &receipt_sha256[..12]);
-        let mut receipt = body;
-        receipt["receipt_sha256"] = JsonValue::String(receipt_sha256);
-        Ok(serde_json::json!({
-            "execution_id": execution_id,
-            "result": result,
-            "step_receipt": receipt,
-        }))
     }
 
     fn run(&mut self) -> Result<Value<'tree>, HostError> {
@@ -609,6 +472,7 @@ impl<'tree> Interpreter<'tree> {
                 break;
             }
             self.tick()?;
+            self.microtask_streak = 0;
             match self.receiver.recv_timeout(
                 self.deadline
                     .saturating_duration_since(Instant::now())
@@ -831,7 +695,7 @@ impl<'tree> Interpreter<'tree> {
                     }
                 } else {
                     return Err(Fault::Host(HostError::Data(format!(
-                        "cannot destructure {} with an array pattern; connector results are objects — bind to one name first (e.g. `const files = await zero.fs.multi_read([...]); files.content`)",
+                        "cannot destructure {} with an array pattern; bind the result to one name before selecting fields",
                         value_kind(&value),
                     ))));
                 }
@@ -1308,6 +1172,10 @@ impl<'tree> Interpreter<'tree> {
 
         let function = self.eval(function_node)?;
         let mut values = Vec::new();
+        if arguments.kind() == "template_string" {
+            values.push(self.eval_template(arguments)?);
+            return self.call(function, values);
+        }
         let mut cursor = arguments.walk();
         for child in arguments.named_children(&mut cursor) {
             if child.kind() == "spread_element" {
@@ -1381,12 +1249,6 @@ impl<'tree> Interpreter<'tree> {
         args: Vec<Value<'tree>>,
     ) -> Result<Value<'tree>, Fault<'tree>> {
         match function {
-            Value::Tool(surface, method)
-                if surface == crate::decision_gate::DECISION_SURFACE
-                    && method == crate::decision_gate::DECISION_REQUIRE_METHOD =>
-            {
-                self.call_decision_require(args)
-            }
             Value::Tool(surface, method) => self.call_tool(&surface, &method, args),
             Value::Method(receiver, name) => self.call_method(*receiver, &name, args),
             Value::Function(function) => self.call_function(function, args),
@@ -1416,11 +1278,8 @@ impl<'tree> Interpreter<'tree> {
             Value::Namespace(name) if name == "Boolean" => {
                 Ok(Value::Bool(args.first().is_some_and(truthy)))
             }
-            Value::Namespace(name) if name == "help" => {
-                self.call_tool("help", "search", args)
-            }
             Value::Namespace(name) => Err(Fault::Host(HostError::UnsupportedSyntax(format!(
-                "namespace '{name}' is not callable; try zero.help() or zero.help.search({{query}})"
+                "namespace '{name}' is not callable"
             )))),
             _ => Err(Fault::Host(HostError::Data("value is not callable".into()))),
         }
@@ -1478,7 +1337,10 @@ impl<'tree> Interpreter<'tree> {
                 .insert(self.text(node).into(), value);
             Ok(())
         } else {
-            self.bind(node, value)
+            let previous = std::mem::replace(&mut self.env, env);
+            let result = self.bind(node, value);
+            self.env = previous;
+            result
         }
     }
 
@@ -1518,43 +1380,83 @@ impl<'tree> Interpreter<'tree> {
             })
     }
 
-    fn call_decision_require(
-        &mut self,
-        args: Vec<Value<'tree>>,
-    ) -> Result<Value<'tree>, Fault<'tree>> {
-        let [point_value, observed_value] = args.as_slice() else {
-            return Err(Fault::Host(HostError::Data(
-                "decision.require expects (point, observed_value)".into(),
-            )));
+    fn start_operation(&mut self, sequence: u64, method: &str, args: &JsonValue) {
+        if method.starts_with("__") {
+            return;
+        }
+        let mut operations = self.operations.borrow_mut();
+        if operations.len() >= OPERATION_TRACE_LIMIT {
+            self.operations_truncated.set(true);
+            return;
+        }
+        let trace_index = operations.len();
+        operations.push(ZeroOperationTrace {
+            sequence,
+            method: method.to_owned(),
+            status: ZeroOperationStatus::Failed,
+            parallel_group: self.active_parallel_group,
+            target: operation_target(method, args),
+            detail: Some("operation did not complete".into()),
+            result_count: None,
+            changed_files: None,
+            duration_ns: 0,
+        });
+        drop(operations);
+        self.pending_operations.insert(
+            sequence,
+            PendingOperation {
+                trace_index,
+                started: Instant::now(),
+            },
+        );
+    }
+
+    fn operation_summary(&self, sequence: u64, value: &JsonValue) -> OperationSummary {
+        let Some(pending) = self.pending_operations.get(&sequence) else {
+            return OperationSummary::default();
         };
-        let point_json = self.to_json(point_value).map_err(Fault::Host)?;
-        let point: zero_abi::SemanticDecisionPoint =
-            serde_json::from_value(point_json).map_err(|error| {
-                Fault::Host(HostError::Data(format!(
-                    "decision.require point is not a valid SemanticDecisionPoint: {error}"
-                )))
-            })?;
-        let observed_json = self.to_json(observed_value).map_err(Fault::Host)?;
-        let observed = observed_json
-            .as_str()
-            .ok_or_else(|| {
-                Fault::Host(HostError::Data(
-                    "decision.require observed_value must be a string".into(),
-                ))
-            })?
-            .to_owned();
-        match self.host.decision_gate().resolve(&point, &observed) {
-            crate::decision_gate::GateResolution::Selected(alternative) => {
-                Ok(Value::String(alternative))
+        let operations = self.operations.borrow();
+        let Some(operation) = operations.get(pending.trace_index) else {
+            return OperationSummary::default();
+        };
+        operation_result_summary(&operation.method, value)
+    }
+
+    fn complete_operation(&mut self, sequence: u64, result: Result<OperationSummary, &str>) {
+        let Some(pending) = self.pending_operations.remove(&sequence) else {
+            return;
+        };
+        let mut operations = self.operations.borrow_mut();
+        let Some(operation) = operations.get_mut(pending.trace_index) else {
+            return;
+        };
+        operation.duration_ns = pending
+            .started
+            .elapsed()
+            .as_nanos()
+            .try_into()
+            .unwrap_or(u64::MAX);
+        match result {
+            Ok(summary) => {
+                operation.status = ZeroOperationStatus::Completed;
+                if let Some(target) = summary.target {
+                    operation.target = Some(target);
+                }
+                operation.detail = summary.detail;
+                operation.result_count = summary.result_count;
+                operation.changed_files = summary.changed_files;
             }
-            crate::decision_gate::GateResolution::DecisionRequired(payload) => {
-                // Never select a branch privately: abort with the typed
-                // decision payload (V6-C03/H03).
-                Err(Fault::Host(HostError::DecisionRequired(payload)))
+            Err(detail) => {
+                operation.status = ZeroOperationStatus::Failed;
+                operation.detail = Some(truncate_operation_text(detail));
             }
-            crate::decision_gate::GateResolution::PolicyError(error) => Err(Fault::Host(
-                HostError::Data(format!("decision policy error: {error}")),
-            )),
+        }
+    }
+
+    fn finalize_operation_trace(&mut self) {
+        let pending = self.pending_operations.keys().copied().collect::<Vec<_>>();
+        for sequence in pending {
+            self.complete_operation(sequence, Err("operation did not settle before cell end"));
         }
     }
 
@@ -1565,11 +1467,9 @@ impl<'tree> Interpreter<'tree> {
         args: Vec<Value<'tree>>,
     ) -> Result<Value<'tree>, Fault<'tree>> {
         let descriptor = self.resolve_capability(surface, method)?;
-        let value = if args.len() == 1 {
-            args.into_iter().next().unwrap_or(Value::Undefined)
-        } else {
-            new_array(args)
-        };
+        // Preserve the positional boundary even when the sole argument is
+        // itself an array (for example `z.shell(["printf", "ok"])`).
+        let value = new_array(args);
         let json = self.to_json(&value).map_err(Fault::Host)?;
         let encoded = serde_json::to_string(&json)
             .map_err(|error| Fault::Host(HostError::Data(error.to_string())))?;
@@ -1578,8 +1478,8 @@ impl<'tree> Interpreter<'tree> {
                 "arguments exceed JSON limit".into(),
             )));
         }
-        // Total host-call budget: every admitted dispatch (direct `zero.*`,
-        // `z.invoke`, and each `z.parallel` fan-out spec) counts against
+        // Total host-call budget: every admitted direct method and each
+        // `z.parallel` fan-out call counts against
         // the per-execution bound. The next dispatch past the bound fails
         // typed before any adapter work, so sequential or parallel call
         // floods are bounded by the budget, not by wall alone.
@@ -1625,6 +1525,7 @@ impl<'tree> Interpreter<'tree> {
             .metrics
             .peak_estimated_promise_bytes
             .max(estimated_promise_bytes);
+        self.start_operation(id, method, &json);
         let completion = ConnectorCompletion::new(id, self.sender.clone());
         if let Err(error) = self.connector.dispatch(
             &descriptor,
@@ -1636,6 +1537,7 @@ impl<'tree> Interpreter<'tree> {
             completion,
         ) {
             self.promises.remove(&id);
+            self.complete_operation(id, Err(error.message()));
             return Err(Fault::Throw(Value::Error(ErrorValue {
                 name: "TypeError".into(),
                 message: error.to_string(),
@@ -1666,6 +1568,7 @@ impl<'tree> Interpreter<'tree> {
                 break;
             }
             self.tick().map_err(Fault::Host)?;
+            self.microtask_streak = 0;
             match self.receiver.recv_timeout(
                 self.deadline
                     .saturating_duration_since(Instant::now())
@@ -1793,10 +1696,7 @@ impl<'tree> Interpreter<'tree> {
             match state {
                 PromiseState::Pending(PromiseKind::Connector) => {
                     self.tick()?;
-                    self.microtasks = self.microtasks.saturating_add(1);
-                    if self.microtasks > self.host.limits.microtask_ceiling {
-                        return Err(HostError::MicrotaskLimit);
-                    }
+                    self.microtask_streak = 0;
                     match self.receiver.recv_timeout(
                         self.deadline
                             .saturating_duration_since(Instant::now())
@@ -1836,10 +1736,7 @@ impl<'tree> Interpreter<'tree> {
                         // deadline and fails typed; it can never hang the
                         // call past the budget (zerostack-zksb).
                         self.tick()?;
-                        self.microtasks = self.microtasks.saturating_add(1);
-                        if self.microtasks > self.host.limits.microtask_ceiling {
-                            return Err(HostError::MicrotaskLimit);
-                        }
+                        self.microtask_streak = 0;
                         match self.receiver.recv_timeout(
                             self.deadline
                                 .saturating_duration_since(Instant::now())
@@ -1863,7 +1760,8 @@ impl<'tree> Interpreter<'tree> {
                     on_rejected,
                 }) => {
                     self.microtasks = self.microtasks.saturating_add(1);
-                    if self.microtasks > self.host.limits.microtask_ceiling {
+                    self.microtask_streak = self.microtask_streak.saturating_add(1);
+                    if self.microtask_streak > self.host.limits.microtask_ceiling {
                         return Err(HostError::MicrotaskLimit);
                     }
                     let state = match self.resolve(parent) {
@@ -1905,27 +1803,45 @@ impl<'tree> Interpreter<'tree> {
             )));
         }
         self.inflight_connector_calls = self.inflight_connector_calls.saturating_sub(1);
+        let sequence = completion.sequence;
         let state = match completion.result {
             Ok(encoded) if encoded.len() > self.host.limits.max_json_bytes => {
+                self.complete_operation(sequence, Err("connector result exceeds JSON limit"));
                 PromiseState::Rejected(Value::Error(ErrorValue {
                     name: "DataError".into(),
                     message: "connector result exceeds JSON limit".into(),
                 }))
             }
-            Ok(encoded) => match normalize_public_result(&encoded)
-                .and_then(|value| {
-                    serde_json::from_str::<JsonValue>(&value)
-                        .map_err(|error| HostError::Json(error.to_string()))
-                })
-                .and_then(|value| self.convert_from_json(value, true))
-            {
-                Ok(value) => PromiseState::Fulfilled(value),
-                Err(error) => PromiseState::Failed(error),
+            Ok(encoded) => match serde_json::from_str::<JsonValue>(&encoded) {
+                Ok(decoded) => {
+                    let summary = self.operation_summary(sequence, &decoded);
+                    match self.convert_from_json(decoded, true) {
+                        Ok(value) => {
+                            self.complete_operation(sequence, Ok(summary));
+                            PromiseState::Fulfilled(value)
+                        }
+                        Err(error) => {
+                            let detail = error.to_string();
+                            self.complete_operation(sequence, Err(&detail));
+                            PromiseState::Failed(error)
+                        }
+                    }
+                }
+                Err(error) => {
+                    let error = HostError::Json(error.to_string());
+                    let detail = error.to_string();
+                    self.complete_operation(sequence, Err(&detail));
+                    PromiseState::Failed(error)
+                }
             },
-            Err(error) => PromiseState::Rejected(Value::Error(ErrorValue {
-                name: "ToolError".into(),
-                message: error.to_string(),
-            })),
+            Err(error) => {
+                let detail = error.to_string();
+                self.complete_operation(sequence, Err(&detail));
+                PromiseState::Rejected(Value::Error(ErrorValue {
+                    name: "ToolError".into(),
+                    message: detail,
+                }))
+            }
         };
         self.promises.insert(completion.sequence, state);
         Ok(())
@@ -2077,6 +1993,7 @@ impl<'tree> Interpreter<'tree> {
                 continue;
             }
             self.tick()?;
+            self.microtask_streak = 0;
             match self.receiver.recv_timeout(
                 self.deadline
                     .saturating_duration_since(Instant::now())
@@ -2126,6 +2043,7 @@ impl<'tree> Interpreter<'tree> {
                 continue;
             }
             self.tick().map_err(Fault::Host)?;
+            self.microtask_streak = 0;
             match self.receiver.recv_timeout(
                 self.deadline
                     .saturating_duration_since(Instant::now())
@@ -2159,30 +2077,7 @@ impl<'tree> Interpreter<'tree> {
                     None => {
                         let object = value.borrow();
                         match object.access {
-                            ObjectAccess::Strict => Err(Fault::Throw(Value::Error(ErrorValue {
-                                name: "TypeError".into(),
-                                message: unknown_property_message(key, &object),
-                            }))),
-                            ObjectAccess::CapabilityRoot
-                                if matches!(key, "then" | "toJSON" | "toString") =>
-                            {
-                                Ok(Value::Undefined)
-                            }
-                            ObjectAccess::CapabilityRoot => {
-                                Err(Fault::Host(HostError::SurfaceNotFound(format!(
-                                    "surface_not_found: unknown surface '{key}' on {}; closest surfaces: {}",
-                                    self.host.registration.root,
-                                    closest_names(
-                                        key,
-                                        self.host
-                                            .registration
-                                            .capabilities
-                                            .iter()
-                                            .map(|capability| capability.surface.as_str())
-                                    )
-                                ))))
-                            }
-                            ObjectAccess::Open => Ok(Value::Undefined),
+                            ObjectAccess::Strict | ObjectAccess::Open => Ok(Value::Undefined),
                         }
                     }
                 }
@@ -2329,64 +2224,6 @@ impl<'tree> Interpreter<'tree> {
         }
     }
 
-    fn ctx_step(&mut self, args: Vec<Value<'tree>>) -> Result<Value<'tree>, Fault<'tree>> {
-        let name = match args.first() {
-            Some(Value::String(value)) if !value.is_empty() && value.len() <= 256 => value.clone(),
-            _ => {
-                return Err(Fault::Host(HostError::Data(
-                    "ctx.step expects a nonempty name of at most 256 bytes".into(),
-                )));
-            }
-        };
-        let callback = match args.get(1) {
-            Some(Value::Function(function)) => function.clone(),
-            _ => {
-                return Err(Fault::Host(HostError::Data(
-                    "ctx.step expects a callback function".into(),
-                )));
-            }
-        };
-        let invoked = self.call_function(callback, Vec::new())?;
-        let value = self.await_value(invoked)?;
-        let value_json = self.to_json(&value).map_err(Fault::Host)?;
-        let index = self.step_entries.len() as u64;
-        let body = serde_json::json!({
-            "index": index,
-            "name": name,
-            "generation": self.generation,
-            "request_id": self.request_id,
-            "previous_sha256": self.step_head,
-            "value": value_json,
-        });
-        let entry_sha256 = sha256_hex(canonical_json(&body).as_bytes());
-        let mut entry = body;
-        entry["entry_sha256"] = JsonValue::String(entry_sha256.clone());
-        let entry_bytes = canonical_json(&entry).len();
-        let next_bytes = self
-            .step_bytes
-            .checked_add(entry_bytes)
-            .ok_or_else(|| Fault::Host(HostError::Data("ctx.step receipt size overflow".into())))?;
-        let receipt_limit = self
-            .host
-            .limits
-            .max_json_bytes
-            .min(self.host.limits.memory_bytes / 4);
-        if next_bytes > receipt_limit {
-            return Err(Fault::Host(HostError::Data(format!(
-                "ctx.step receipt exceeds the {receipt_limit}-byte execution budget"
-            ))));
-        }
-        self.step_entries.try_reserve(1).map_err(|error| {
-            Fault::Host(HostError::Data(format!(
-                "ctx.step receipt allocation failed: {error}"
-            )))
-        })?;
-        self.step_entries.push(entry);
-        self.step_head = entry_sha256;
-        self.step_bytes = next_bytes;
-        Ok(value)
-    }
-
     fn namespace(
         &mut self,
         namespace: &str,
@@ -2394,22 +2231,14 @@ impl<'tree> Interpreter<'tree> {
         args: Vec<Value<'tree>>,
     ) -> Result<Value<'tree>, Fault<'tree>> {
         match (namespace, name) {
-            ("ctx", "step") => self.ctx_step(args),
-            ("ctx", "ref") => Ok(args.into_iter().next().unwrap_or(Value::Undefined)),
-            ("ctx", "result") => Ok(ergonomic_result(
-                args.into_iter().next().unwrap_or(Value::Undefined),
-            )),
-            ("ctx", "payload") => {
-                self.ctx_payload(args.into_iter().next().unwrap_or(Value::Undefined))
-            }
-            ("ctx", "refs") => Ok(ergonomic_refs(
-                args.into_iter().next().unwrap_or(Value::Undefined),
-            )),
             ("Promise", "resolve") => Ok(self.new_promise(PromiseState::Fulfilled(
                 args.into_iter().next().unwrap_or(Value::Undefined),
             ))),
             ("Promise", "reject") => Ok(self.new_promise(PromiseState::Rejected(
                 args.into_iter().next().unwrap_or(Value::Undefined),
+            ))),
+            ("String", "raw") => Ok(Value::String(to_string(
+                args.first().unwrap_or(&Value::Undefined),
             ))),
             ("Promise", name @ ("all" | "allSettled" | "race")) => {
                 let values = match args.into_iter().next().unwrap_or(Value::Undefined) {
@@ -2505,7 +2334,6 @@ impl<'tree> Interpreter<'tree> {
             ("console", _) => Ok(Value::Undefined),
             ("z", name) => self.z_member(name, args),
             ("z.state", name) => self.z_state_member(name, args),
-            ("z.capabilities", name) => self.z_capabilities_member(name, args),
             _ => Err(Fault::Host(HostError::UnsupportedSyntax(format!(
                 "global method {namespace}.{name} is not supported"
             )))),
@@ -2518,7 +2346,7 @@ impl<'tree> Interpreter<'tree> {
     fn z_property(&mut self, key: &str) -> Result<Value<'tree>, Fault<'tree>> {
         let Some(guest) = &self.host.guest else {
             return Err(Fault::Host(HostError::Data(
-                "z is not part of this runtime; the K0 guest surface is not installed".into(),
+                "ZeroKernel guest surface is not installed".into(),
             )));
         };
         match key {
@@ -2527,7 +2355,6 @@ impl<'tree> Interpreter<'tree> {
                 self.convert_from_json(json, false).map_err(Fault::Host)
             }
             "state" => Ok(Value::Namespace("z.state".into())),
-            "capabilities" => Ok(Value::Namespace("z.capabilities".into())),
             // Same promise-shape guard as every other namespace.
             "then" | "toJSON" | "toString" => Ok(Value::Undefined),
             _ => Ok(Value::Method(
@@ -2537,44 +2364,183 @@ impl<'tree> Interpreter<'tree> {
         }
     }
 
-    /// Direct `z.<member>(...)` calls of the K0 guest surface.
+    /// Direct `z.<member>(...)` calls.
     fn z_member(
         &mut self,
         name: &str,
         args: Vec<Value<'tree>>,
     ) -> Result<Value<'tree>, Fault<'tree>> {
-        let Some(_guest) = &self.host.guest else {
+        if self.host.guest.is_none() {
             return Err(Fault::Host(HostError::Data(
-                "z is not part of this runtime; the K0 guest surface is not installed".into(),
+                "ZeroKernel guest surface is not installed".into(),
             )));
-        };
-        if crate::guest::GuestSurface::is_absent_member(name) {
-            return Err(Fault::Host(HostError::Data(format!(
-                "z.{name} is not part of the K0 guest surface: K0 has no effect or transaction authority"
-            ))));
         }
-        if !zero_abi::guest::is_k0_guest_member(name) {
+        self.zero_kernel_member(name, args)
+    }
+
+    /// Canonical ZeroKernel direct-z surface. Method names map one-to-one to
+    /// typed host operations; no engine namespace or operation catalog exists.
+    fn zero_kernel_member(
+        &mut self,
+        name: &str,
+        args: Vec<Value<'tree>>,
+    ) -> Result<Value<'tree>, Fault<'tree>> {
+        const DIRECT: &[&str] = &[
+            "read", "snap", "write", "edit", "effect", "remove", "transact", "asgrep", "lookup",
+            "parallel", "pipeline", "shell", "measure", "project", "compress", "expand", "help",
+            "inspect",
+        ];
+        if !DIRECT.contains(&name) {
             return Err(Fault::Host(HostError::Data(format!(
-                "z.{name} is not part of the K0 guest surface; members: {}",
-                crate::guest::GuestSurface::member_list().join(", ")
+                "z.{name} is not a ZeroKernel method; methods: {}",
+                DIRECT.join(", ")
             ))));
         }
         match name {
             "help" => self.z_help(),
             "inspect" => self.z_inspect(),
-            "invoke" => self.z_invoke(args),
-            "parallel" => self.z_parallel(args),
-            "resolve" | "expand" | "snap" | "view" => self.z_w9e(name, args),
-            "return" => {
-                let value = args.into_iter().next().unwrap_or(Value::Undefined);
-                Ok(value)
+            "transact" => self.zero_kernel_transact(args),
+            "parallel" => self.zero_kernel_parallel(args),
+            "pipeline" => self.zero_kernel_pipeline(args),
+            "read" | "snap" | "write" | "edit" | "effect" | "remove" | "asgrep" | "lookup"
+            | "shell" | "measure" | "project" | "compress" | "expand" => {
+                self.call_tool("z", name, args)
             }
-            "persistHandle" => self.z_persist_handle(args),
-            _ => unreachable!("guest members are matched above"),
+            _ => unreachable!("direct methods are matched above"),
         }
     }
 
-    /// `z.state.<member>(...)`: small serializable per-call state.
+    fn zero_kernel_transact(
+        &mut self,
+        mut args: Vec<Value<'tree>>,
+    ) -> Result<Value<'tree>, Fault<'tree>> {
+        if args.len() != 1 {
+            return Err(Fault::Host(HostError::Data(
+                "z.transact expects exactly one async thunk".into(),
+            )));
+        }
+        let thunk = args.remove(0);
+        if !matches!(thunk, Value::Function(_)) {
+            return Err(Fault::Host(HostError::Data(
+                "z.transact expects a function".into(),
+            )));
+        }
+        let begin = self.call_tool("z", "__begin_transaction", Vec::new())?;
+        self.await_value(begin)?;
+        match self
+            .call(thunk, Vec::new())
+            .and_then(|value| self.await_value(value))
+        {
+            Ok(value) => {
+                let commit = self.call_tool("z", "__commit_transaction", Vec::new())?;
+                self.await_value(commit)?;
+                Ok(value)
+            }
+            Err(original) => {
+                let rollback = self.call_tool("z", "__rollback_transaction", Vec::new())?;
+                match self.await_value(rollback) {
+                    Ok(_) => Err(original),
+                    Err(rollback_error) => Err(rollback_error),
+                }
+            }
+        }
+    }
+
+    fn zero_kernel_parallel(
+        &mut self,
+        mut args: Vec<Value<'tree>>,
+    ) -> Result<Value<'tree>, Fault<'tree>> {
+        if args.len() != 1 {
+            return Err(Fault::Host(HostError::Data(
+                "z.parallel expects one array of thunks".into(),
+            )));
+        }
+        let thunks = match args.remove(0) {
+            Value::Array(values) => values.borrow().clone(),
+            _ => {
+                return Err(Fault::Host(HostError::Data(
+                    "z.parallel expects an array of thunks".into(),
+                )));
+            }
+        };
+        let limit = self
+            .host
+            .guest
+            .as_ref()
+            .map(|guest| guest.parallel_limit())
+            .unwrap_or(zero_abi::PARALLEL_TASK_LIMIT);
+        if thunks.is_empty() || thunks.len() > limit {
+            return Err(Fault::Host(HostError::Data(format!(
+                "z.parallel expects 1..={limit} thunks"
+            ))));
+        }
+        if thunks
+            .iter()
+            .any(|thunk| !matches!(thunk, Value::Function(_)))
+        {
+            return Err(Fault::Host(HostError::Data(
+                "every z.parallel item must be a function".into(),
+            )));
+        }
+        let group = self.next_parallel_group;
+        self.next_parallel_group = self.next_parallel_group.checked_add(1).ok_or_else(|| {
+            Fault::Host(HostError::Data("parallel group sequence exhausted".into()))
+        })?;
+        let previous_group = self.active_parallel_group.replace(group);
+        let dispatched = thunks
+            .into_iter()
+            .map(|thunk| self.call(thunk, Vec::new()))
+            .collect::<Result<Vec<_>, _>>();
+        self.active_parallel_group = previous_group;
+        let values = dispatched?;
+        let mut settled = Vec::with_capacity(values.len());
+        for value in values {
+            settled.push(self.await_value(value)?);
+        }
+        Ok(new_array(settled))
+    }
+
+    fn zero_kernel_pipeline(
+        &mut self,
+        mut args: Vec<Value<'tree>>,
+    ) -> Result<Value<'tree>, Fault<'tree>> {
+        if args.len() < 2 || args.len() - 1 > zero_abi::PIPELINE_STAGE_LIMIT {
+            return Err(Fault::Host(HostError::Data(format!(
+                "z.pipeline expects items and 1..={} stages",
+                zero_abi::PIPELINE_STAGE_LIMIT
+            ))));
+        }
+        let mut items = match args.remove(0) {
+            Value::Array(values) => values.borrow().clone(),
+            _ => {
+                return Err(Fault::Host(HostError::Data(
+                    "z.pipeline items must be an array".into(),
+                )));
+            }
+        };
+        if args
+            .iter()
+            .any(|stage| !matches!(stage, Value::Function(_)))
+        {
+            return Err(Fault::Host(HostError::Data(
+                "every z.pipeline stage must be a function".into(),
+            )));
+        }
+        for stage in args {
+            let mut pending = Vec::with_capacity(items.len());
+            for item in items {
+                pending.push(self.call(stage.clone(), vec![item])?);
+            }
+            let mut next = Vec::with_capacity(pending.len());
+            for value in pending {
+                next.push(self.await_value(value)?);
+            }
+            items = next;
+        }
+        Ok(new_array(items))
+    }
+
+    /// Bounded serializable cell state.
     fn z_state_member(
         &mut self,
         name: &str,
@@ -2582,13 +2548,13 @@ impl<'tree> Interpreter<'tree> {
     ) -> Result<Value<'tree>, Fault<'tree>> {
         let Some(guest) = &self.host.guest else {
             return Err(Fault::Host(HostError::Data(
-                "z is not part of this runtime; the K0 guest surface is not installed".into(),
+                "ZeroKernel guest surface is not installed".into(),
             )));
         };
-        if !zero_abi::guest::is_k0_guest_state_member(name) {
+        let qualified = format!("state.{name}");
+        if !zero_abi::GUEST_METHODS.contains(&qualified.as_str()) {
             return Err(Fault::Host(HostError::Data(format!(
-                "z.state.{name} is not part of the K0 guest surface; members: {}",
-                zero_abi::guest::K0_GUEST_STATE_MEMBERS.join(", ")
+                "z.state.{name} is not a ZeroKernel method"
             ))));
         }
         match name {
@@ -2625,9 +2591,7 @@ impl<'tree> Interpreter<'tree> {
             }
             "list" => {
                 let keys = guest.state_list();
-                Ok(new_array(
-                    keys.into_iter().map(Value::String).collect(),
-                ))
+                Ok(new_array(keys.into_iter().map(Value::String).collect()))
             }
             _ => unreachable!("state members are matched above"),
         }
@@ -2642,255 +2606,54 @@ impl<'tree> Interpreter<'tree> {
         }
     }
 
-    /// `z.capabilities.<member>(...)`: deterministic capability search.
-    fn z_capabilities_member(
-        &mut self,
-        name: &str,
-        args: Vec<Value<'tree>>,
-    ) -> Result<Value<'tree>, Fault<'tree>> {
-        if !zero_abi::guest::is_k0_guest_capabilities_member(name) {
-            return Err(Fault::Host(HostError::Data(format!(
-                "z.capabilities.{name} is not part of the K0 guest surface; members: {}",
-                zero_abi::guest::K0_GUEST_CAPABILITIES_MEMBERS.join(", ")
-            ))));
-        }
-        let query = match args.first() {
-            Some(Value::String(query)) => query.clone(),
-            _ => {
-                return Err(Fault::Host(HostError::Data(
-                    "z.capabilities.search expects a string query".into(),
-                )));
-            }
-        };
-        let registered: Vec<(String, String)> = self
-            .host
-            .registration
-            .capabilities
-            .iter()
-            .map(|capability| (capability.surface.clone(), capability.method.clone()))
-            .collect();
-        let hits = crate::guest::search_capabilities(&registered, &query);
-        Ok(new_array(hits.into_iter().map(Value::String).collect()))
-    }
-
-    /// `z.help()`: bounded catalog of the registered surface plus the guest
-    /// surface members.
     fn z_help(&mut self) -> Result<Value<'tree>, Fault<'tree>> {
-        let capabilities: Vec<String> = self
-            .host
-            .registration
-            .capabilities
-            .iter()
-            .map(|capability| format!("{}.{}", capability.surface, capability.method))
-            .collect();
         let json = serde_json::json!({
-            "surface": zero_abi::guest::K0_GUEST_SURFACE_ROOT,
-            "members": crate::guest::GuestSurface::member_list(),
-            "state": zero_abi::guest::K0_GUEST_STATE_MEMBERS,
-            "capabilities": zero_abi::guest::K0_GUEST_CAPABILITIES_MEMBERS,
-            "read_only_capabilities": zero_abi::guest::K0_READ_ONLY_CAPABILITIES
-                .iter()
-                .map(|(s, m)| format!("{s}.{m}"))
-                .collect::<Vec<_>>(),
-            "registered": capabilities,
+            "surface": "z",
+            "methods": zero_abi::GUEST_METHODS,
+            "signatures": {
+                "asgrep": "z.asgrep(query, {mode?, path?, language?, source?, sink?, limit?}) -> StructuralResult",
+                "snap": "z.snap(path | {path?, target?:{path|search}, cardinality?, selection?:{lines|bytes|symbol|exactText}, view?}) -> SnapResult",
+                "expand": "z.expand(handle | SnapResult, {bytes?|lines?|symbol?|next?|offset?|limit?|all?}) -> ExpandResult",
+                "edit": "z.edit(path, replacement, {expectedPreimage?}) | z.edit(selectedSnap, {find, replacement} | typed patch)",
+                "parallel": "z.parallel([async () => operation, ...]) -> results in input order",
+                "effect": "z.effect({targets, changes, verify?}) -> staged EffectResult",
+            },
+            "selectedEditPatches": [
+                "{find, replacement}",
+                "{kind: 'replace_exact', old, replacement, expectedCount: 1}",
+                "{kind: 'replace_lines', content}",
+                "{kind: 'insert_before', content}",
+                "{kind: 'insert_after', content}"
+            ],
+            "effectKinds": [
+                "replace_exact",
+                "replace_file",
+                "insert_before",
+                "insert_after",
+                "create_file",
+                "remove_file"
+            ],
+            "effectVerification": "changedTargetsOnly is enforced; use verify.command argv for language-specific checks",
+            "effectComposition": "z.effect must be the cell's only mutation family; use one z.effect or start a separate ZeroKernel call",
         });
         self.convert_from_json(json, false).map_err(Fault::Host)
     }
 
-    /// `z.inspect()`: bounded runtime introspection (context, session,
-    /// ABI, state keys/bytes, parallel limit).
     fn z_inspect(&mut self) -> Result<Value<'tree>, Fault<'tree>> {
         let Some(guest) = &self.host.guest else {
             return Err(Fault::Host(HostError::Data(
-                "z is not part of this runtime; the K0 guest surface is not installed".into(),
+                "ZeroKernel guest surface is not installed".into(),
             )));
         };
         let json = serde_json::json!({
+            "protocol": guest.protocol(),
             "context": guest.context_json(),
-            "session_id": guest.session_id(),
-            "abi_version": guest.abi_version(),
-            "state_keys": guest.state_list(),
-            "state_bytes": guest.state_bytes(),
-            "parallel_limit": guest.parallel_limit(),
-            "registered": self
-                .host
-                .registration
-                .capabilities
-                .iter()
-                .map(|capability| format!("{}.{}", capability.surface, capability.method))
-                .collect::<Vec<_>>(),
+            "sessionId": guest.session_id(),
+            "stateKeys": guest.state_list(),
+            "stateBytes": guest.state_bytes(),
+            "parallelLimit": guest.parallel_limit(),
         });
         self.convert_from_json(json, false).map_err(Fault::Host)
-    }
-
-    /// `z.invoke("surface.method", args?)`: one read-only capability call
-    /// through the same connector (and call-scoped task group) as a direct
-    /// `zero.<surface>.<method>(...)` call.
-    fn z_invoke(&mut self, args: Vec<Value<'tree>>) -> Result<Value<'tree>, Fault<'tree>> {
-        let Some(guest) = &self.host.guest else {
-            return Err(Fault::Host(HostError::Data(
-                "z is not part of this runtime; the K0 guest surface is not installed".into(),
-            )));
-        };
-        let guest = std::sync::Arc::clone(guest);
-        let qualified = match args.first() {
-            Some(Value::String(qualified)) => qualified.clone(),
-            _ => {
-                return Err(Fault::Host(HostError::Data(
-                    "z.invoke expects (\"surface.method\", args?)".into(),
-                )));
-            }
-        };
-        let (surface, method) = crate::guest::split_qualified(&qualified)
-            .map_err(|detail| Fault::Host(HostError::Data(detail)))?;
-        let call_args = args.get(1).cloned().unwrap_or(Value::Undefined);
-        let call_json = self.to_json(&call_args).map_err(Fault::Host)?;
-        if !call_json.is_object() && !call_json.is_array() && !call_json.is_null() {
-            return Err(Fault::Host(HostError::Data(
-                "z.invoke args must be an object or array".into(),
-            )));
-        }
-        guest
-            .check_read_only_target(surface, method, &call_json)
-            .map_err(|detail| Fault::Host(HostError::Data(detail)))?;
-        let call_args = if call_json.is_null() {
-            self.empty_object_value()
-        } else {
-            call_args
-        };
-        self.call_tool(surface, method, vec![call_args])
-    }
-
-    /// `z.parallel([spec, ...])`: bounded deterministic parallel read-only
-    /// calls. All specs are validated (registered read-only capability,
-    /// count bound) before any dispatch; results come back in input order
-    /// through the interpreter's Promise.all machinery.
-    fn z_parallel(&mut self, args: Vec<Value<'tree>>) -> Result<Value<'tree>, Fault<'tree>> {
-        let Some(guest) = &self.host.guest else {
-            return Err(Fault::Host(HostError::Data(
-                "z is not part of this runtime; the K0 guest surface is not installed".into(),
-            )));
-        };
-        let guest = std::sync::Arc::clone(guest);
-        let specs = match args.into_iter().next().unwrap_or(Value::Undefined) {
-            Value::Array(specs) => specs.borrow().clone(),
-            _ => {
-                return Err(Fault::Host(HostError::Data(
-                    "z.parallel expects an array of \"surface.method\" strings or {surface, method, args?} objects".into(),
-                )));
-            }
-        };
-        if specs.is_empty() {
-            return Err(Fault::Host(HostError::Data(
-                "z.parallel expects at least one call spec".into(),
-            )));
-        }
-        if specs.len() > guest.parallel_limit() {
-            return Err(Fault::Host(HostError::Data(format!(
-                "z.parallel accepts at most {} call specs, got {}",
-                guest.parallel_limit(),
-                specs.len()
-            ))));
-        }
-        // Validate every spec before any dispatch: no partial fan-out.
-        let mut calls = Vec::with_capacity(specs.len());
-        for spec in specs {
-            let (surface, method, spec_args) = crate::guest::parallel_spec(
-                self.to_json(&spec).map_err(Fault::Host)?,
-            )
-            .map_err(|detail| Fault::Host(HostError::Data(detail)))?;
-            guest
-                .check_read_only_target(&surface, &method, &spec_args)
-                .map_err(|detail| Fault::Host(HostError::Data(detail)))?;
-            let spec_value = self
-                .convert_from_json(spec_args, false)
-                .map_err(Fault::Host)?;
-            calls.push((surface.to_owned(), method.to_owned(), spec_value));
-        }
-        // Fan out through the same dispatch path as direct calls, then
-        // combine with Promise.all (input-order results).
-        let mut ids = Vec::with_capacity(calls.len());
-        for (surface, method, spec_args) in calls {
-            let promise = self.call_tool(&surface, &method, vec![spec_args])?;
-            let Value::Promise(id) = promise else {
-                return Err(Fault::Host(HostError::Data(
-                    "z.parallel dispatch did not yield a promise".into(),
-                )));
-            };
-            ids.push(id);
-        }
-        Ok(self.new_promise(PromiseState::Pending(PromiseKind::All(ids))))
-    }
-
-    /// `z.resolve` / `z.expand` / `z.snap` / `z.view`: the W9-E wave-9
-    /// chain. Fails typed without live rooted evidence; consumes only
-    /// trusted host-minted handles.
-    fn z_w9e(
-        &mut self,
-        name: &str,
-        args: Vec<Value<'tree>>,
-    ) -> Result<Value<'tree>, Fault<'tree>> {
-        let Some(guest) = &self.host.guest else {
-            return Err(Fault::Host(HostError::Data(
-                "z is not part of this runtime; the K0 guest surface is not installed".into(),
-            )));
-        };
-        let Some(w9e) = guest.w9e() else {
-            return Err(Fault::Host(HostError::Data(format!(
-                "z.{name} cannot operate without live rooted evidence: no W9-E evidence is attached to this runtime"
-            ))));
-        };
-        let argument = args.into_iter().next().unwrap_or(Value::Undefined);
-        let json = self.to_json(&argument).map_err(Fault::Host)?;
-        let result = match name {
-            "resolve" => w9e.resolve(json),
-            "expand" => w9e.expand(json),
-            "snap" => w9e.snap(json),
-            "view" => w9e.view(json),
-            _ => unreachable!("wave-9 members are matched above"),
-        };
-        let result = result.map_err(|detail| Fault::Host(HostError::Data(detail)))?;
-        // The resolve wrapper mints the handle: record it so z.persistHandle
-        // can persist exactly this call's host-minted handles.
-        if name == "resolve" {
-            if let Some(handle_id) = result.get("handle_id").and_then(JsonValue::as_str) {
-                if let Some(handle) = result.get("handle") {
-                    guest.record_minted(handle_id, handle.clone());
-                }
-            }
-        }
-        self.convert_from_json(result, false).map_err(Fault::Host)
-    }
-
-    /// `z.persistHandle(handle)`: persist one host-minted handle of this
-    /// call into the response's exact-handle slot.
-    fn z_persist_handle(&mut self, args: Vec<Value<'tree>>) -> Result<Value<'tree>, Fault<'tree>> {
-        let Some(guest) = &self.host.guest else {
-            return Err(Fault::Host(HostError::Data(
-                "z is not part of this runtime; the K0 guest surface is not installed".into(),
-            )));
-        };
-        let handle_value = args.first().cloned().unwrap_or(Value::Undefined);
-        let handle_json = self.to_json(&handle_value).map_err(Fault::Host)?;
-        let handle_id = handle_json
-            .get("handle_id")
-            .and_then(JsonValue::as_str)
-            .ok_or_else(|| {
-                Fault::Host(HostError::Data(
-                    "z.persistHandle expects a handle object with a handle_id".into(),
-                ))
-            })?
-            .to_owned();
-        guest
-            .persist(&handle_id)
-            .map(Value::String)
-            .map_err(|detail| Fault::Host(HostError::Data(detail)))
-    }
-
-    /// A fresh empty object value (for invoke/parallel calls without args).
-    fn empty_object_value(&mut self) -> Value<'tree> {
-        self.convert_from_json(JsonValue::Object(Default::default()), false)
-            .expect("an empty JSON object always converts")
     }
 
     /// `Array.from`: resolve the source to (length, element producer) and run
@@ -3418,9 +3181,6 @@ impl<'tree> Interpreter<'tree> {
                         ObjectAccess::Strict => Err(HostError::Data(format!(
                             "cannot write property '{key}' on a connector result"
                         ))),
-                        ObjectAccess::CapabilityRoot => Err(HostError::Data(format!(
-                            "cannot write property '{key}' on the capability root"
-                        ))),
                     }
                 }
                 _ => Err(self.unsupported("assignment target")),
@@ -3750,26 +3510,6 @@ impl<'tree> Interpreter<'tree> {
         ""
     }
 
-    /// `ctx.payload`: canonical exact-payload accessor. After the ergonomic
-    /// unwrap, one deterministic rule: a `payload_utf8` receipt yields the
-    /// exact payload text (never parsed — exact stays exact; callers
-    /// `JSON.parse` when they know the payload is JSON), then
-    /// `content.value.value` / `content.value` / `content`, then the
-    /// unwrapped value itself.
-    fn ctx_payload(&mut self, value: Value<'tree>) -> Result<Value<'tree>, Fault<'tree>> {
-        let base = ergonomic_payload(value);
-        if let Some(Value::String(encoded)) = object_field(&base, "payload_utf8") {
-            return Ok(Value::String(encoded));
-        }
-        if let Some(content) = object_field(&base, "content") {
-            if let Some(inner) = object_field(&content, "value") {
-                return Ok(object_field(&inner, "value").unwrap_or(inner));
-            }
-            return Ok(content);
-        }
-        Ok(base)
-    }
-
     fn unsupported(&self, kind: &str) -> HostError {
         HostError::UnsupportedSyntax(format!("Syntax '{kind}' is not supported in CodeMode"))
     }
@@ -3863,6 +3603,177 @@ fn object_values<'tree>(value: Value<'tree>) -> Vec<Value<'tree>> {
     }
 }
 
+fn operation_target(method: &str, args: &JsonValue) -> Option<String> {
+    let args = args.as_array()?;
+    let first = args.first()?;
+    let target = match method {
+        "asgrep" => first.as_str().map(str::to_owned),
+        "shell" => match first {
+            JsonValue::String(command) => Some(command.clone()),
+            JsonValue::Array(argv) => Some(
+                argv.iter()
+                    .filter_map(JsonValue::as_str)
+                    .take(6)
+                    .collect::<Vec<_>>()
+                    .join(" "),
+            ),
+            _ => None,
+        },
+        "effect" => first
+            .get("targets")
+            .and_then(JsonValue::as_object)
+            .map(|targets| {
+                targets
+                    .values()
+                    .filter_map(|target| target.get("path").and_then(JsonValue::as_str))
+                    .take(4)
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            }),
+        _ => operation_path(first),
+    }?;
+    (!target.is_empty()).then(|| truncate_operation_text(&target))
+}
+
+fn operation_path(value: &JsonValue) -> Option<String> {
+    if let Some(path) = value.as_str() {
+        return Some(path.to_owned());
+    }
+    value
+        .get("path")
+        .and_then(JsonValue::as_str)
+        .or_else(|| {
+            value
+                .get("target")
+                .and_then(|target| target.get("path"))
+                .and_then(JsonValue::as_str)
+        })
+        .or_else(|| {
+            value
+                .get("target")
+                .and_then(|target| target.get("search"))
+                .and_then(|search| search.get("query"))
+                .and_then(JsonValue::as_str)
+        })
+        .or_else(|| value.get("source").and_then(JsonValue::as_str))
+        .map(str::to_owned)
+}
+
+fn operation_result_summary(method: &str, value: &JsonValue) -> OperationSummary {
+    let mut summary = OperationSummary::default();
+    match method {
+        "read" => {
+            summary.detail = value
+                .as_str()
+                .map(|text| format!("{} bytes visible", text.len()));
+        }
+        "lookup" => {
+            summary.result_count = value.as_array().map(|items| items.len() as u64);
+            summary.detail = summary.result_count.map(|count| format!("{count} paths"));
+        }
+        "asgrep" => {
+            summary.result_count = value
+                .get("hits")
+                .and_then(JsonValue::as_array)
+                .map(|hits| hits.len() as u64);
+            let complete = value
+                .get("complete")
+                .and_then(JsonValue::as_bool)
+                .unwrap_or(false);
+            summary.detail = summary.result_count.map(|count| {
+                format!(
+                    "{count} hits · {}",
+                    if complete { "complete" } else { "incomplete" }
+                )
+            });
+        }
+        "snap" => {
+            summary.target = value
+                .get("path")
+                .and_then(JsonValue::as_str)
+                .map(str::to_owned);
+            let kind = value
+                .get("selection")
+                .and_then(|selection| selection.get("kind"))
+                .and_then(JsonValue::as_str)
+                .unwrap_or("full_file");
+            let visible = value
+                .get("view")
+                .and_then(|view| view.get("visibleBytes"))
+                .and_then(JsonValue::as_u64)
+                .unwrap_or(0);
+            summary.detail = Some(format!("{kind} · {visible} bytes visible"));
+        }
+        "write" | "edit" | "remove" => {
+            summary.target = value
+                .get("path")
+                .and_then(JsonValue::as_str)
+                .map(str::to_owned);
+            summary.detail = value
+                .get("kind")
+                .and_then(JsonValue::as_str)
+                .map(str::to_owned);
+            summary.changed_files = Some(1);
+        }
+        "effect" => {
+            summary.changed_files = value
+                .get("changedFiles")
+                .and_then(JsonValue::as_u64)
+                .and_then(|count| u32::try_from(count).ok());
+            summary.detail = summary.changed_files.map(|count| {
+                let verified = value
+                    .get("verification")
+                    .and_then(|verification| verification.get("changedTargetsOnly"))
+                    .and_then(JsonValue::as_bool)
+                    .unwrap_or(false);
+                format!(
+                    "{count} files · {}",
+                    if verified { "verified" } else { "unverified" }
+                )
+            });
+        }
+        "expand" => {
+            let start = value.get("byteStart").and_then(JsonValue::as_u64);
+            let end = value.get("byteEnd").and_then(JsonValue::as_u64);
+            if let (Some(start), Some(end)) = (start, end) {
+                summary.detail = Some(format!("bytes {start}..{end}"));
+            }
+        }
+        "shell" => {
+            summary.detail = value
+                .get("status")
+                .and_then(JsonValue::as_i64)
+                .map(|status| format!("exit {status}"));
+        }
+        "measure" => {
+            summary.detail = value
+                .get("billed")
+                .and_then(JsonValue::as_u64)
+                .map(|tokens| format!("{tokens} tokens"));
+        }
+        "project" | "compress" => {
+            summary.detail = value
+                .get("visible")
+                .and_then(JsonValue::as_str)
+                .map(|visible| format!("{} bytes visible", visible.len()));
+        }
+        _ => {}
+    }
+    summary
+}
+
+fn truncate_operation_text(text: &str) -> String {
+    const LIMIT: usize = 1_024;
+    if text.len() <= LIMIT {
+        return text.to_owned();
+    }
+    let mut end = LIMIT.saturating_sub(3);
+    while !text.is_char_boundary(end) {
+        end = end.saturating_sub(1);
+    }
+    format!("{}...", &text[..end])
+}
+
 fn object_entries<'tree>(value: Value<'tree>) -> Vec<Value<'tree>> {
     match value {
         Value::Object(value) => value
@@ -3872,32 +3783,6 @@ fn object_entries<'tree>(value: Value<'tree>) -> Vec<Value<'tree>> {
             .map(|(key, value)| new_array(vec![Value::String(key.clone()), value.clone()]))
             .collect(),
         _ => Vec::new(),
-    }
-}
-
-fn collect_refs(value: &JsonValue) -> Vec<String> {
-    let mut refs = Vec::new();
-    collect_refs_inner(value, &mut refs);
-    refs
-}
-
-fn collect_refs_inner(value: &JsonValue, refs: &mut Vec<String>) {
-    match value {
-        JsonValue::String(value) => {
-            if ["fz://", "gz://", "tz://", "cm://"]
-                .iter()
-                .any(|prefix| value.starts_with(prefix))
-            {
-                refs.push(value.clone());
-            }
-        }
-        JsonValue::Array(values) => values
-            .iter()
-            .for_each(|value| collect_refs_inner(value, refs)),
-        JsonValue::Object(map) => map
-            .values()
-            .for_each(|value| collect_refs_inner(value, refs)),
-        JsonValue::Null | JsonValue::Bool(_) | JsonValue::Number(_) => {}
     }
 }
 

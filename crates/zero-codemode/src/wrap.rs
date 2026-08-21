@@ -17,20 +17,11 @@ pub fn validate_plan(plan: &str, max_bytes: usize) -> Result<(), PlanError> {
     Ok(())
 }
 
-/// Compatibility helper retained for callers that used the old pre-runtime
-/// validation API. It returns validated source unchanged; execution never
-/// evaluates this string as host code.
-pub fn wrap_plan(plan: &str, max_bytes: usize) -> Result<String, PlanError> {
-    validate_plan(plan, max_bytes)?;
-    Ok(plan.to_owned())
-}
-
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum PlanError {
     Empty,
     TooLarge { actual: usize, maximum: usize },
     Nul,
-    Encoding(String),
 }
 impl fmt::Display for PlanError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -40,7 +31,6 @@ impl fmt::Display for PlanError {
                 write!(f, "plan is {actual} bytes; maximum is {maximum}")
             }
             Self::Nul => f.write_str("plan contains a NUL byte"),
-            Self::Encoding(message) => write!(f, "plan encoding failed: {message}"),
         }
     }
 }

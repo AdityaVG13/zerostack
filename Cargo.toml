@@ -8,14 +8,13 @@ members = [
     "crates/zero-gate",
     "crates/zero-gauge",
     "crates/zero-ledger",
+    "crates/zero-kernel",
+    "crates/zero-kernel-node",
     "crates/zero-mcp",
     "crates/zero-process",
     "crates/zero-ref",
     "crates/zero-store",
     "crates/zerostack-machine-permit",
-    "crates/zsx",
-    "crates/zsx-core",
-    "crates/zsx-node",
 ]
 
 [workspace.package]
@@ -27,17 +26,18 @@ license = "MIT"
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.151"
 sha2 = "0.11"
+blake3 = "1.8"
+memmap2 = "0.9"
 
-# GraphZero path dependencies (graphzero-query et al.) declare the hub crates
-# through the GraphZero workspace's git pin (rev fa25384). Resolve them onto
-# this local checkout, mirroring the GraphZero workspace's own patch, so the
-# single-process zsx-core graph stays local and deterministic.
+# Sibling engine crates resolve shared hub contracts through this checkout so
+# the in-process ZeroKernel dependency graph stays local and deterministic.
 [patch."https://github.com/AdityaVG13/zerostack"]
 zero-abi = { path = "crates/zero-abi" }
 zero-cert = { path = "crates/zero-cert" }
 zero-gate = { path = "crates/zero-gate" }
 zero-gauge = { path = "crates/zero-gauge" }
 zero-ledger = { path = "crates/zero-ledger" }
+zero-kernel = { path = "crates/zero-kernel" }
 zero-process = { path = "crates/zero-process" }
 zero-ref = { path = "crates/zero-ref" }
 zero-store = { path = "crates/zero-store" }

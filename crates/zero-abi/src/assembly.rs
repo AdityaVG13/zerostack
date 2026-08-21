@@ -359,9 +359,7 @@ impl AssemblyManifest {
                 .iter()
                 .any(|artifact| artifact.artifact_digest == worker.artifact_digest)
             {
-                return Err(AssemblyManifestError::UnlinkedWorkerArtifact(
-                    worker.engine,
-                ));
+                return Err(AssemblyManifestError::UnlinkedWorkerArtifact(worker.engine));
             }
         }
         Ok(())
@@ -376,8 +374,7 @@ impl AssemblyManifest {
 
     pub fn digest(&self) -> Result<Sha256Digest, AssemblyManifestError> {
         let canonical = self.canonical_bytes()?;
-        let mut domain_bound =
-            Vec::with_capacity(ASSEMBLY_MANIFEST_DOMAIN.len() + canonical.len());
+        let mut domain_bound = Vec::with_capacity(ASSEMBLY_MANIFEST_DOMAIN.len() + canonical.len());
         domain_bound.extend_from_slice(ASSEMBLY_MANIFEST_DOMAIN);
         domain_bound.extend_from_slice(&canonical);
         Ok(Sha256Digest::from_bytes(sha256(&domain_bound)))
@@ -574,11 +571,9 @@ pub fn validate_assembly_pre_dispatch(
             });
         }
         if actual.capability_catalog_digest != wanted.capability_catalog_digest {
-            return Err(
-                AssemblyPreDispatchError::CapabilityCatalogDigestMismatch {
-                    scope: actual.engine.as_str().to_owned(),
-                },
-            );
+            return Err(AssemblyPreDispatchError::CapabilityCatalogDigestMismatch {
+                scope: actual.engine.as_str().to_owned(),
+            });
         }
         if actual != wanted {
             return Err(AssemblyPreDispatchError::WorkerIdentityMismatch {
@@ -588,11 +583,9 @@ pub fn validate_assembly_pre_dispatch(
     }
     if manifest.aggregate_capability_catalog_digest != expected.aggregate_capability_catalog_digest
     {
-        return Err(
-            AssemblyPreDispatchError::CapabilityCatalogDigestMismatch {
-                scope: "aggregate".to_owned(),
-            },
-        );
+        return Err(AssemblyPreDispatchError::CapabilityCatalogDigestMismatch {
+            scope: "aggregate".to_owned(),
+        });
     }
     let actual_digest = manifest
         .digest()
@@ -834,4 +827,3 @@ pub fn assembly_abi_contract_digest() -> Sha256Digest {
     let canonical = canonical_json(&assembly_abi_contract_manifest());
     Sha256Digest::from_bytes(sha256(canonical.as_bytes()))
 }
-

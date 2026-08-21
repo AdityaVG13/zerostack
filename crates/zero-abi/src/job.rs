@@ -313,4 +313,3 @@ pub fn token_job_contract_manifest() -> Value {
 pub fn token_job_contract_digest() -> String {
     contract_digest_hex(&token_job_contract_manifest())
 }
-

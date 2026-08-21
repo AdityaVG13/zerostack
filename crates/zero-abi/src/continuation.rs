@@ -3,7 +3,7 @@
 //! An opaque [`ContinuationHandle`] binds the eight authority roots (task
 //! contract, project, evidence, candidate, verification, ledger, contracts,
 //! epoch) to one state of the D5 continuation machine
-//! ([`crate::zero_execute::ContinuationState`]). A handle is a self-verifying
+//! ([`ContinuationState`]). A handle is a self-verifying
 //! root: any tamper, stale root set, cross-project scope, or forged identity
 //! changes the handle id, so the fail-closed checks in
 //! [`ContinuationHandle::validate_against`] reject it before any mutation.
@@ -25,36 +25,105 @@ use std::{error::Error, fmt};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use crate::identity::{
-    ObjectClass, ROOTED_ABI_VERSION, canonical_object_bytes, object_root,
-};
-use crate::zero_execute::ContinuationState;
 use crate::Sha256Digest;
+use crate::identity::{ObjectClass, ROOTED_ABI_VERSION, canonical_object_bytes, object_root};
 
 pub const CONTINUATION_CONTRACT_VERSION: u16 = 1;
+
+/// State machine for durable continuation handles.
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ContinuationState {
+    Bound,
+    Snapshotted,
+    Resolved,
+    WaitingDecision,
+    Planned,
+    Executing,
+    DeltaSealed,
+    Verifying,
+    Authorized,
+    Committed,
+    Restored,
+    Rejected,
+    Unknown,
+    Cancelled,
+}
+
+impl ContinuationState {
+    pub fn allowed_transition(
+        from: ContinuationState,
+        to: ContinuationState,
+        policy_supplied: bool,
+    ) -> bool {
+        use ContinuationState::{
+            Authorized, Bound, Cancelled, Committed, DeltaSealed, Executing, Planned, Rejected,
+            Resolved, Restored, Snapshotted, Unknown, Verifying, WaitingDecision,
+        };
+        let direct = match (from, to) {
+            (Bound, Snapshotted)
+            | (Snapshotted, Resolved)
+            | (Resolved, Planned)
+            | (Resolved, WaitingDecision)
+            | (Planned, Executing)
+            | (Executing, DeltaSealed)
+            | (DeltaSealed, Verifying)
+            | (Verifying, Authorized)
+            | (Verifying, Rejected)
+            | (Verifying, Unknown)
+            | (Authorized, Committed)
+            | (Unknown, Restored) => true,
+            (WaitingDecision, Planned) => policy_supplied,
+            _ => false,
+        };
+        direct || (to == Cancelled && !Self::is_terminal(from))
+    }
+
+    pub fn is_terminal(self) -> bool {
+        matches!(
+            self,
+            Self::Committed | Self::Restored | Self::Rejected | Self::Cancelled
+        )
+    }
+}
 
 /// Fail-closed error for continuation construction and validation.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum ContinuationError {
     InvalidHandle(String),
     ForgedHandle,
-    WrongAbiVersion { actual: String },
-    ForbiddenTransition { from: ContinuationState, to: ContinuationState },
+    WrongAbiVersion {
+        actual: String,
+    },
+    ForbiddenTransition {
+        from: ContinuationState,
+        to: ContinuationState,
+    },
     IllegalBranch(ContinuationState),
-    CompactionNotPermitted { state: ContinuationState },
+    CompactionNotPermitted {
+        state: ContinuationState,
+    },
     CrossProjectScope,
     StaleRoots,
-    RevokedEpoch { expected: u64, actual: u64 },
+    RevokedEpoch {
+        expected: u64,
+        actual: u64,
+    },
     UnverifiedChild,
 }
 
 impl fmt::Display for ContinuationError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::InvalidHandle(detail) => write!(formatter, "invalid continuation handle: {detail}"),
+            Self::InvalidHandle(detail) => {
+                write!(formatter, "invalid continuation handle: {detail}")
+            }
             Self::ForgedHandle => write!(formatter, "continuation handle id is forged"),
             Self::WrongAbiVersion { actual } => {
-                write!(formatter, "continuation abi version must be {ROOTED_ABI_VERSION}, got {actual}")
+                write!(
+                    formatter,
+                    "continuation abi version must be {ROOTED_ABI_VERSION}, got {actual}"
+                )
             }
             Self::ForbiddenTransition { from, to } => write!(
                 formatter,
@@ -68,7 +137,10 @@ impl fmt::Display for ContinuationError {
                 "compaction requires a sealed snapshot and terminal state, got {state:?}"
             ),
             Self::CrossProjectScope => {
-                write!(formatter, "handle roots belong to a different project scope")
+                write!(
+                    formatter,
+                    "handle roots belong to a different project scope"
+                )
             }
             Self::StaleRoots => write!(formatter, "handle roots are stale"),
             Self::RevokedEpoch { expected, actual } => write!(
@@ -180,12 +252,8 @@ impl ContinuationHandle {
             &Value::Object(object),
         )
         .map_err(|error| ContinuationError::InvalidHandle(error.to_string()))?;
-        object_root(
-            ObjectClass::ContinuationHandle,
-            ROOTED_ABI_VERSION,
-            &bytes,
-        )
-        .map_err(|error| ContinuationError::InvalidHandle(error.to_string()))
+        object_root(ObjectClass::ContinuationHandle, ROOTED_ABI_VERSION, &bytes)
+            .map_err(|error| ContinuationError::InvalidHandle(error.to_string()))
     }
 
     /// Recompute and compare the handle id. A forged or tampered handle fails
@@ -286,8 +354,7 @@ impl ContinuationHandle {
     /// A child that reached `Committed` is the verified child; it carries its
     /// parent id so the branch tree can prove which child won.
     pub fn is_verified_child_of(&self, parent: Sha256Digest) -> bool {
-        self.state == ContinuationState::Committed
-            && self.parent_handle == Some(parent)
+        self.state == ContinuationState::Committed && self.parent_handle == Some(parent)
     }
 
     /// Whether compaction is permitted for this handle: a terminal
@@ -305,12 +372,8 @@ impl ContinuationHandle {
     pub fn canonical_bytes(&self) -> Result<Vec<u8>, ContinuationError> {
         let value = serde_json::to_value(self)
             .map_err(|error| ContinuationError::InvalidHandle(error.to_string()))?;
-        canonical_object_bytes(
-            ObjectClass::ContinuationHandle,
-            ROOTED_ABI_VERSION,
-            &value,
-        )
-        .map_err(|error| ContinuationError::InvalidHandle(error.to_string()))
+        canonical_object_bytes(ObjectClass::ContinuationHandle, ROOTED_ABI_VERSION, &value)
+            .map_err(|error| ContinuationError::InvalidHandle(error.to_string()))
     }
 }
 
@@ -367,10 +430,7 @@ impl ContinuationCompactRecord {
     /// Replay the compacted record against a resumed handle: the handle must
     /// be the recorded one and the sealed snapshot must match. This is the
     /// before/after-compaction equivalence check.
-    pub fn replay_against(
-        &self,
-        handle: &ContinuationHandle,
-    ) -> Result<(), ContinuationError> {
+    pub fn replay_against(&self, handle: &ContinuationHandle) -> Result<(), ContinuationError> {
         self.validate()?;
         if handle.handle_id() != self.handle_id {
             return Err(ContinuationError::ForgedHandle);
@@ -383,4 +443,3 @@ impl ContinuationCompactRecord {
         Ok(())
     }
 }
-

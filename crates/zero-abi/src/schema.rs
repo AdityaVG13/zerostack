@@ -5,7 +5,7 @@
 //! sets. Description/title text is ignored so prose edits do not mask real
 //! drift.
 
-use serde_json::{json, Map, Value};
+use serde_json::{Map, Value, json};
 use std::collections::BTreeSet;
 
 use crate::digest::sha256_hex;
@@ -230,4 +230,3 @@ pub fn schema_required_keys(schema: &Value) -> Vec<String> {
     keys.sort();
     keys
 }
-

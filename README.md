@@ -1,156 +1,145 @@
 # ZeroStack
 
-Context infrastructure for coding agents: three engines, one composition host, typed recoverable refs.
+ZeroStack is the composition hub for three independent engines:
 
-TokenZero compacts tool output. FSZero reads and changes the live tree. GraphZero answers structural questions. ZeroStack is the hub that defines their shared contracts and runs them in one process so agents keep evidence without stuffing every intermediate byte into the model context.
-
-## How it fits together
-
-| Piece | Job |
+| Engine | Authority |
 | --- | --- |
-| [TokenZero](https://github.com/AdityaVG13/tokenzero) | Compact, deduplicate, and selectively expand tool output (`tz://`) |
-| FSZero | Live filesystem read, search, and controlled mutation (`fz://`) |
-| GraphZero | Orientation, callers, impact, recall (`gz://`) |
-| This repo | Shared ABI, refs, store, process identity, CodeMode host, `zsx` |
+| [FSZero](https://github.com/AdityaVG13/fszero) | Live bytes, snapshots, bounded filesystem effects (`fz://`) |
+| [GraphZero](https://github.com/AdityaVG13/graphzero) | Code structure, callers, impact, freshness (`gz://`) |
+| [TokenZero](https://github.com/AdityaVG13/tokenzero) | Output measurement, projection, compaction, exact expansion (`tz://`) |
 
-The engines stay independent. They do not import each other. This hub composes them.
+The engines never import one another. ZeroStack owns their shared ABI, typed references, CAS, process control, transactional coordination, and the in-process runtime that composes them.
 
+## ZeroKernel
+
+`ZeroKernel` is the only canonical execution product. It is a reusable in-process host with a fresh bounded JavaScript/TypeScript frame for every cell.
+
+```mermaid
+graph LR
+  ZMP[ZMP zero tool] --> NAPI[ZeroKernel Node package]
+  NAPI --> K[Reusable ZeroKernel host]
+  K --> F[Fresh cell frame]
+  F --> FS[FSZero]
+  F --> G[GraphZero]
+  F --> T[TokenZero]
+  F --> P[zero-process shell]
+  F --> S[CAS state]
 ```
-FSZero  (bytes)     ─┐
-GraphZero (structure)─┼─> typed refs ─> agent context
-TokenZero (tokens)  ─┘
-```
 
-## RACC
-
-**Recovery-aware context compression.** A large tool result is stored and replaced with a short typed handle plus a bounded preview. The handle is not a summary. Later steps expand only the lines or symbols they need, or pass the ref onward.
-
-| Ref | Producer |
-| --- | --- |
-| `tz://` | TokenZero |
-| `fz://` | FSZero |
-| `gz://` | GraphZero |
-
-See [docs/racc/RACC.md](docs/racc/RACC.md).
-
-## CodeMode
-
-The canonical runtime is `zsx`. It embeds the three engines in-process and executes one JavaScript plan. There is no worker process and no session socket.
+A cell sees direct typed methods on `z`; it does not route through command catalogs:
 
 ```js
-const [files, graph] = await Promise.all([
-  zero.fs.compound("search", { query: "recoverable ref" }),
-  zero.graph.orient("context", "architecture"),
+const [source, callers] = await z.parallel([
+  () => z.read("src/lib.rs"),
+  () => z.asgrep("execute", { mode: "callers", path: "src" }),
 ]);
-
-return { files: files.content, graph: graph.content };
+return { source, callers };
 ```
 
-Every public `zero.*` call returns `zero-result`: `ack` plus `content`.
+Core methods:
 
-- `content.kind === "inline"` -- `content.value` is the **domain payload** (search hits, file bytes, shell `visible`, …), not the transport `{metadata, value}` wrapper.
-- `content.kind === "ref"` -- the payload spilled; expand `content.ref` (`tz://blob/…`). Oversized plan results use this same shape, never a separate spill schema.
+- filesystem: `z.read`, `z.snap`, `z.lookup`, `z.write`, snap-aware `z.edit`, `z.effect`, `z.remove`, `z.transact`
+- structure: `z.asgrep` with typed structural modes
+- output: `z.measure`, `z.project`, `z.compress`, structured `z.expand`
+- orchestration: `z.parallel`, `z.pipeline`, `z.shell`
+- durable state: `z.state.get`, `z.state.set`, `z.state.delete`, `z.state.list`
+
+Every completed call returns one canonical response containing the outcome, visible value, event digest, CAS state evidence, and zero-live-resource ledger. File mutations are staged under one host-owned transaction per cell. Failed or cancelled frames reverse effects in receipt order and cannot publish staged filesystem effects or state.
+
+## Rust host
+
+```rust
+use zero_abi::KernelBudget;
+use zero_kernel::ZeroKernel;
+
+let budget = KernelBudget {
+    wall_ms: 30_000,
+    cpu_ms: 30_000,
+    memory_bytes: 256 * 1024 * 1024,
+    call_limit: 64,
+    task_limit: 16,
+    output_byte_limit: 64 * 1024,
+};
+let kernel = ZeroKernel::canonical(root, store_root, session_id, budget)?;
+let response = kernel.execute_cell("return await z.read('README.md');")?;
+```
+
+The host is reusable. `execute_cell` creates and destroys a fresh interpreter frame. `shutdown` cancels outstanding work and prevents new frames.
+
+## Node package
+
+Build the platform addon once, then load the package without a daemon, listener, worker pool, or runtime compilation:
+
+```bash
+rch exec -- cargo build --profile release-node -p zero-kernel-node
+./scripts/build-node-prebuild.sh --stage-only
+```
 
 ```js
-const run = await zero.token.shell("echo hi");
-if (run.content.kind === "inline") {
-  return run.content.value; // domain payload (e.g. { visible, status })
-}
-return await zero.token.expand(run.content.ref);
+const { ZeroKernel } = require("@zerostack/zero-kernel");
+
+const kernel = new ZeroKernel({
+  root: process.cwd(),
+  sessionId: "example",
+});
+await kernel.initialize();
+const response = await kernel.executeCell("return await z.read('README.md');");
+await kernel.shutdown();
 ```
 
-`zsx mcp` is the one-catalog carrier (`zero_execute` / `zero_wait`). Do not also register engine MCP servers (fszero / graphzero / tokenzero) in the same harness. `zero-mcp` is an optional FastMCP crate and is not a second catalog on that path.
+The package accepts `ZERO_KERNEL_NATIVE_ADDON=/absolute/path/to/zero_kernel_product.node` for development. Production packages use platform prebuilds and never compile or download at runtime.
 
-Paths in plans are workspace-relative to `-C` / `root`. Absolute paths and `file://` are rejected even when `root` is set; that is intentional. `zero.help()` (or `zero.help.search({})`) lists every method and signature.
+## Operator CLI
 
-More: [docs/codemode.md](docs/codemode.md), [docs/architecture.md](docs/architecture.md).
-
-## `zsx`
-
-```text
-zsx exec -C ROOT [--file PLAN] [--timeout-ms N]
-```
-
-Plan from `--file` or stdin. JSON on stdout. Default timeout 30000 ms.
+The CLI is for diagnostics, direct stdin execution, and explicit store migration:
 
 ```bash
-cargo build -p zsx --release
-./target/release/zsx exec -C "$PWD" --file plan.js
+rch exec -- cargo build -p zero-kernel
+./target/debug/zero-kernel doctor -C "$PWD"
+printf '%s\n' 'return await z.read("README.md");' \
+  | ./target/debug/zero-kernel exec -C "$PWD"
 ```
+
+Legacy store import is offline and manifest-verified:
 
 ```bash
-printf '%s\n' 'return (await zero.fs.compound("read", { path: "README.md" })).content;' \
-  | ./target/release/zsx exec -C "$PWD"
+zero-kernel migrate \
+  --source OLD_STORE \
+  --destination NEW_STORE \
+  --manifest migration.json \
+  --key-hex 64_LOWERCASE_HEX_CHARACTERS
 ```
 
-## Build
+## ZMP integration
 
-Rust nightly as pinned in [`rust-toolchain.toml`](rust-toolchain.toml). License: [MIT](LICENSE).
+ZMP's built-in `zero` tool loads `@zerostack/zero-kernel` in-process and reuses a host per workspace/session/budget. Each tool call still receives a fresh frame. ZMP's `codemode` tool remains an independent fallback; ZeroKernel failures never execute the same source unsandboxed.
 
-```bash
-git clone https://github.com/AdityaVG13/zerostack.git
-cd zerostack
-cargo build -p zero-abi -p zero-ref -p zero-store
-```
+## Repository layout
 
-`zsx` links the three engines through `zsx-core`. That crate expects sibling checkouts:
+| Path | Purpose |
+| --- | --- |
+| `crates/zero-kernel` | Canonical Rust host, frame lifecycle, transactions, state, shell |
+| `crates/zero-kernel-node` | Asynchronous N-API binding |
+| `crates/zero-codemode` | Bounded JS/TS interpreter used inside each frame |
+| `crates/zero-abi` | Shared typed engine contracts and canonical response types |
+| `crates/zero-store` | CAS and migration primitives |
+| `crates/zero-process` | Verified child-process ownership and teardown |
+| `bindings/node` | Published Node package loader, types, and prebuilds |
+
+## Build topology
+
+The canonical host links the three engine checkouts as sibling repositories:
 
 ```text
 AI/
-  ZeroStack/     # this repo
-  FSZero/
-  GraphZero/
-  TokenZero/
+├── ZeroStack/
+├── FSZero/
+├── GraphZero/
+└── TokenZero/
 ```
 
-```bash
-cargo build -p zsx --release
-./target/release/zsx --help
-```
-
-Foundation crates (no engine source):
-
-| Crate | Role |
-| --- | --- |
-| `zero-abi` | JSON contract, schema normalize, operation digest, raw-worker |
-| `zero-ref` | ZeroRef parse, format, fragment select |
-| `zero-store` | Content-addressed blob layout and publish protocol |
-| `zero-process` | Process identity, owner-death, child-tree lifecycle |
-| `zero-codemode` | Restricted in-process CodeMode host |
-| `zero-gate` | Proof-carrying decision gate |
-| `zero-ledger` / `zero-gauge` / `zero-cert` | Accounting, ordinal refs, evidence certificates |
-| `zero-mcp` | Optional FastMCP stdio carrier |
-| `zsx` / `zsx-core` / `zsx-node` | Single-process executable, composition core, Node binding |
-
-## Layout
-
-| Path | What |
-| --- | --- |
-| [`crates/`](crates/) | Hub crates listed above |
-| [`docs/`](docs/) | Architecture, RACC, papers, Lean |
-| [`conformance/`](conformance/) | Product contract |
-| [`benchmarks/`](benchmarks/) | Measured savings and catalog |
-
-## Limitations
-
-- Building `zsx` needs the three engine checkouts on the paths `zsx-core` declares. The foundation crates build on their own.
-- CodeMode and MCP are alternative surfaces. Do not register both.
-- Intermediate results stay out of the model only if the agent keeps refs and expands on demand. Dumping payloads back into the prompt undoes RACC.
-
-## FAQ
-
-**Is this a replacement for the three engines?**
-No. The engines own their domains. This repo owns contracts, the store/ref/ABI, and the process that composes them.
-
-**Can I call one engine without the others?**
-Yes. Each engine is its own repository. TokenZero is at [AdityaVG13/tokenzero](https://github.com/AdityaVG13/tokenzero).
-
-**Why JavaScript plans instead of one tool call per step?**
-A plan can fan out, reuse refs, and return one small result. The bulky intermediates never have to re-enter the model.
-
-**Does `zsx` start a daemon?**
-No. `zsx exec` runs the session in that process and exits.
+Use DSR for repository gates and RCH for narrow Cargo probes. Do not run workspace-wide Cargo tests.
 
 ## License
 
-[MIT](LICENSE).
+MIT

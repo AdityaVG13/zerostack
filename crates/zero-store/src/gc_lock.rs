@@ -254,4 +254,3 @@ fn open_lock_file(store_root: &Path) -> io::Result<(PathBuf, File)> {
         .open(&path)?;
     Ok((path, file))
 }
-

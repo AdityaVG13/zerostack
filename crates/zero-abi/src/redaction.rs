@@ -55,7 +55,10 @@ pub struct RedactionPolicy {
 }
 
 impl RedactionPolicy {
-    pub fn new(secrets: Vec<String>, redaction_token: impl Into<String>) -> Result<Self, SecretsError> {
+    pub fn new(
+        secrets: Vec<String>,
+        redaction_token: impl Into<String>,
+    ) -> Result<Self, SecretsError> {
         let policy = Self {
             policy_version: SECRETS_CONTRACT_VERSION,
             secrets,
@@ -126,13 +129,13 @@ impl Redactor {
     pub fn redact(&self, value: &Value) -> Value {
         match value {
             Value::String(text) => Value::String(self.redact_text(text)),
-            Value::Array(items) => Value::Array(items.iter().map(|item| self.redact(item)).collect()),
+            Value::Array(items) => {
+                Value::Array(items.iter().map(|item| self.redact(item)).collect())
+            }
             Value::Object(fields) => {
                 let redacted = fields
                     .iter()
-                    .map(|(key, value)| {
-                        (self.redact_text(key), self.redact(value))
-                    })
+                    .map(|(key, value)| (self.redact_text(key), self.redact(value)))
                     .collect();
                 Value::Object(redacted)
             }
@@ -253,4 +256,3 @@ impl EffectTrace {
         }
     }
 }
-

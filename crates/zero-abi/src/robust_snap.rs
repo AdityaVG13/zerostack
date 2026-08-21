@@ -188,14 +188,14 @@ impl RobustSnapCertificate {
 
     pub fn canonical_bytes(&self) -> Result<Vec<u8>, RobustSnapError> {
         self.validate()?;
-        let value = serde_json::to_value(self)
-            .map_err(|error| RobustSnapError::Json(error.to_string()))?;
+        let value =
+            serde_json::to_value(self).map_err(|error| RobustSnapError::Json(error.to_string()))?;
         Ok(canonical_json(&value).into_bytes())
     }
 
     pub fn compute_digest(&self) -> Result<Sha256Digest, RobustSnapError> {
-        let mut body = serde_json::to_value(self)
-            .map_err(|error| RobustSnapError::Json(error.to_string()))?;
+        let mut body =
+            serde_json::to_value(self).map_err(|error| RobustSnapError::Json(error.to_string()))?;
         body.as_object_mut()
             .ok_or_else(|| RobustSnapError::Json("certificate must be an object".into()))?
             .remove("certificate_digest");
@@ -408,10 +408,7 @@ fn validate_protected_sets(
     Ok(())
 }
 
-fn require_strict_order<T: Ord>(
-    field: &'static str,
-    values: &[T],
-) -> Result<(), RobustSnapError> {
+fn require_strict_order<T: Ord>(field: &'static str, values: &[T]) -> Result<(), RobustSnapError> {
     if values.windows(2).any(|pair| pair[0] >= pair[1]) {
         Err(RobustSnapError::NonCanonicalOrder(field))
     } else {
@@ -554,4 +551,3 @@ pub fn robust_snap_contract_digest() -> Sha256Digest {
         canonical_json(&robust_snap_contract_manifest()).as_bytes(),
     ))
 }
-

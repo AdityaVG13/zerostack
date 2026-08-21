@@ -14,7 +14,7 @@ use std::{error::Error, fmt};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
-use crate::{ArtifactOwner, CwirVerifierClass, Sha256Digest, EffectClass, canonical_json, sha256};
+use crate::{ArtifactOwner, CwirVerifierClass, EffectClass, Sha256Digest, canonical_json, sha256};
 
 pub const EFFECT_IR_CONTRACT_VERSION: u16 = 1;
 pub const EFFECT_IR_ACTION_DOMAIN: &[u8] = b"zerostack.effect_ir.action\0";
@@ -1060,10 +1060,7 @@ fn digest_body<T: Serialize>(domain: &[u8], value: &T) -> Result<Sha256Digest, E
 }
 
 fn serialization_error(error: serde_json::Error) -> EffectIrError {
-    EffectIrError::new(
-        EffectIrFailureCode::SerializationFailure,
-        error.to_string(),
-    )
+    EffectIrError::new(EffectIrFailureCode::SerializationFailure, error.to_string())
 }
 
 fn validate_identity(label: &str, value: &str) -> Result<(), EffectIrError> {
@@ -1222,4 +1219,3 @@ const fn rollback_rank(rollback: EffectRollback) -> u8 {
         EffectRollback::RawFallback => 0,
     }
 }
-

@@ -334,12 +334,10 @@ fn encode_children(
             maximum: profile.max_children(),
         });
     }
-    let child_depth = parent_depth
-        .checked_add(1)
-        .ok_or(ZbfError::DepthExceeded {
-            actual: u16::MAX,
-            maximum: profile.max_depth(),
-        })?;
+    let child_depth = parent_depth.checked_add(1).ok_or(ZbfError::DepthExceeded {
+        actual: u16::MAX,
+        maximum: profile.max_depth(),
+    })?;
     require_depth(child_depth, profile)?;
     let mut payload = Vec::new();
     payload.extend_from_slice(&count.to_be_bytes());
@@ -383,8 +381,7 @@ fn decode_object(
             actual: header.assembly_manifest_digest,
         });
     }
-    let payload_len =
-        usize::try_from(header.payload_len).map_err(|_| ZbfError::LengthOverflow)?;
+    let payload_len = usize::try_from(header.payload_len).map_err(|_| ZbfError::LengthOverflow)?;
     if header.payload_len > profile.max_payload_bytes() {
         return Err(ZbfError::PayloadTooLarge {
             actual: header.payload_len,
@@ -435,12 +432,10 @@ fn decode_children(
             maximum: profile.max_children(),
         });
     }
-    let child_depth = parent_depth
-        .checked_add(1)
-        .ok_or(ZbfError::DepthExceeded {
-            actual: u16::MAX,
-            maximum: profile.max_depth(),
-        })?;
+    let child_depth = parent_depth.checked_add(1).ok_or(ZbfError::DepthExceeded {
+        actual: u16::MAX,
+        maximum: profile.max_depth(),
+    })?;
     require_depth(child_depth, profile)?;
     let capacity = usize::try_from(count).map_err(|_| ZbfError::LengthOverflow)?;
     let mut children = Vec::with_capacity(capacity);
@@ -463,10 +458,7 @@ fn decode_children(
     Ok(children)
 }
 
-fn validate_header_contract(
-    header: &ZbfHeader,
-    profile: DurableProfile,
-) -> Result<(), ZbfError> {
+fn validate_header_contract(header: &ZbfHeader, profile: DurableProfile) -> Result<(), ZbfError> {
     if header.schema_major != ZBF_SCHEMA_MAJOR || header.schema_minor != ZBF_SCHEMA_MINOR {
         return Err(ZbfError::UnsupportedVersion {
             major: header.schema_major,
@@ -759,8 +751,5 @@ pub fn zbf_contract_manifest() -> serde_json::Value {
 }
 
 pub fn zbf_contract_digest() -> Sha256Digest {
-    Sha256Digest::from_bytes(sha256(
-        canonical_json(&zbf_contract_manifest()).as_bytes(),
-    ))
+    Sha256Digest::from_bytes(sha256(canonical_json(&zbf_contract_manifest()).as_bytes()))
 }
-

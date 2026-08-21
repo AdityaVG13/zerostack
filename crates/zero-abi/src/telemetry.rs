@@ -80,4 +80,3 @@ pub enum TelemetryCounter {
 pub struct TelemetryOverflow {
     pub field: TelemetryCounter,
 }
-

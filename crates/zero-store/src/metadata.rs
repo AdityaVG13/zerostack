@@ -222,4 +222,3 @@ fn hash_hex(bytes: &[u8]) -> String {
 fn io_err(context: &str, error: impl std::fmt::Display) -> CasError {
     CasError::Io(format!("{context}: {error}"))
 }
-

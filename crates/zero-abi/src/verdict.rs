@@ -77,9 +77,14 @@ impl fmt::Display for VerdictBuildError {
         match self {
             Self::EmptyName => write!(formatter, "premise name must be nonempty"),
             Self::NameTooLong { actual, maximum } => {
-                write!(formatter, "premise name is {actual} bytes, maximum {maximum}")
+                write!(
+                    formatter,
+                    "premise name is {actual} bytes, maximum {maximum}"
+                )
             }
-            Self::ControlCharacter => write!(formatter, "premise name must be free of control characters"),
+            Self::ControlCharacter => {
+                write!(formatter, "premise name must be free of control characters")
+            }
         }
     }
 }
@@ -110,18 +115,18 @@ impl SafetyVerdict {
         use SafetyVerdict::{Safe, Unknown, Unsafe};
         match (self, other) {
             (Safe, Safe) => Safe,
-            (Unsafe { reasons: left }, Unsafe { reasons: right }) => {
-                Unsafe { reasons: merge_reasons(left, right) }
-            }
-            (Unsafe { reasons }, _) | (_, Unsafe { reasons }) => {
-                Unsafe { reasons: sort_dedup(reasons) }
-            }
-            (Unknown { reasons: left }, Unknown { reasons: right }) => {
-                Unknown { reasons: merge_reasons(left, right) }
-            }
-            (Unknown { reasons }, Safe) | (Safe, Unknown { reasons }) => {
-                Unknown { reasons: sort_dedup(reasons) }
-            }
+            (Unsafe { reasons: left }, Unsafe { reasons: right }) => Unsafe {
+                reasons: merge_reasons(left, right),
+            },
+            (Unsafe { reasons }, _) | (_, Unsafe { reasons }) => Unsafe {
+                reasons: sort_dedup(reasons),
+            },
+            (Unknown { reasons: left }, Unknown { reasons: right }) => Unknown {
+                reasons: merge_reasons(left, right),
+            },
+            (Unknown { reasons }, Safe) | (Safe, Unknown { reasons }) => Unknown {
+                reasons: sort_dedup(reasons),
+            },
         }
     }
 
@@ -193,4 +198,3 @@ fn merge_reasons(mut left: Vec<String>, right: Vec<String>) -> Vec<String> {
     let deduped: BTreeSet<String> = left.into_iter().collect();
     deduped.into_iter().collect()
 }
-

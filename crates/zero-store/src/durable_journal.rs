@@ -26,7 +26,7 @@ use serde_json::json;
 use zero_abi::{Sha256Digest, canonical_json, sha256};
 
 use crate::fs_replace::{replace_file, sync_dir};
-use crate::{DurableProfileId, DurableProfile};
+use crate::{DurableProfile, DurableProfileId};
 
 pub const DURABLE_JOURNAL_SCHEMA_VERSION: u16 = 2;
 pub const DURABLE_LEASE_JOURNAL_SCHEMA_VERSION: u16 = 3;
@@ -534,7 +534,10 @@ impl JournalLeaseBinding {
         canonical_bytes(self)
     }
     pub fn digest(&self) -> Result<Sha256Digest, JournalError> {
-        Ok(domain_digest(LEASE_BINDING_DOMAIN, &self.canonical_bytes()?))
+        Ok(domain_digest(
+            LEASE_BINDING_DOMAIN,
+            &self.canonical_bytes()?,
+        ))
     }
 }
 impl JournalBindingLike for JournalLeaseBinding {
@@ -749,10 +752,7 @@ pub type ContinuationCartridge = ContinuationCartridgeRecord<JournalBinding>;
 pub type ContinuationLeaseCartridge = ContinuationCartridgeRecord<JournalLeaseBinding>;
 
 impl<B: JournalBindingLike> ContinuationCartridgeRecord<B> {
-    fn new(
-        binding: &B,
-        prepared_record_digest: Sha256Digest,
-    ) -> Result<Self, JournalError> {
+    fn new(binding: &B, prepared_record_digest: Sha256Digest) -> Result<Self, JournalError> {
         Ok(Self {
             schema_version: DURABLE_RECEIPT_SCHEMA_VERSION,
             binding_digest: binding.binding_digest()?,
@@ -821,10 +821,7 @@ impl OwnerDeathReceipt {
         canonical_bytes(self)
     }
     pub fn digest(&self) -> Result<Sha256Digest, JournalError> {
-        Ok(domain_digest(
-            OWNER_DEATH_DOMAIN,
-            &self.canonical_bytes()?,
-        ))
+        Ok(domain_digest(OWNER_DEATH_DOMAIN, &self.canonical_bytes()?))
     }
 }
 
@@ -1495,7 +1492,8 @@ fn recover_bound_journal<B: JournalBindingLike>(
             } else {
                 AbortReason::RecoveryObservedOldRoot
             };
-            let aborted = DurableJournalRecord::<B>::aborted(&journal.value, journal.digest, reason);
+            let aborted =
+                DurableJournalRecord::<B>::aborted(&journal.value, journal.digest, reason);
             durable_replace(
                 paths.journal_record(),
                 &aborted.canonical_bytes()?,
@@ -1573,9 +1571,7 @@ fn recover_bound_journal<B: JournalBindingLike>(
     }
 }
 
-pub fn read_published_root(
-    paths: &JournalPaths,
-) -> Result<RootPublicationReceipt, JournalError> {
+pub fn read_published_root(paths: &JournalPaths) -> Result<RootPublicationReceipt, JournalError> {
     read_root(paths)
 }
 pub fn read_journal_record(paths: &JournalPaths) -> Result<DurableJournal, JournalError> {
@@ -1589,7 +1585,9 @@ pub fn read_continuation_cartridge(
 /// Read the committed five-term journal record. The returned record carries
 /// the full provenance binding (roots, session/ledger owner, nonce, protected
 /// scope, lease) exactly as it was committed.
-pub fn read_lease_journal_record(paths: &JournalPaths) -> Result<DurableLeaseJournal, JournalError> {
+pub fn read_lease_journal_record(
+    paths: &JournalPaths,
+) -> Result<DurableLeaseJournal, JournalError> {
     Ok(read_journal::<JournalLeaseBinding>(paths)?.value)
 }
 pub fn read_lease_continuation_cartridge(
@@ -2023,4 +2021,3 @@ pub fn durable_journal_contract() -> serde_json::Value {
             "indeterminate"]
     })
 }
-

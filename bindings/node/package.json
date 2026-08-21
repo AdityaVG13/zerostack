@@ -1,15 +1,16 @@
 {
-  "name": "@zerostack/zsx-native",
+  "name": "@zerostack/zero-kernel",
   "version": "0.1.0",
-  "description": "ZeroStack ZSX native binding. Loader-only package: selects ZSX_NATIVE_ADDON or a platform prebuild; never builds or spawns at runtime.",
+  "description": "Daemonless in-process ZeroKernel native binding for direct z.* cells.",
   "main": "loader.js",
   "files": [
     "loader.js",
-    "host-shutdown.js",
+    "zero-kernel.d.ts",
     "prebuilds/"
   ],
   "engines": {
     "node": ">=18.0.0"
   },
-  "license": "MIT"
+  "license": "MIT",
+  "types": "zero-kernel.d.ts"
 }

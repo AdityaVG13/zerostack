@@ -42,12 +42,10 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 
-use crate::identity::{
-    ObjectClass, ROOTED_ABI_VERSION, canonical_object_bytes, object_root,
-};
+use crate::Sha256Digest;
+use crate::identity::{ObjectClass, ROOTED_ABI_VERSION, canonical_object_bytes, object_root};
 use crate::schema::canonical_json;
 use crate::verdict::SafetyVerdict;
-use crate::Sha256Digest;
 
 /// Contract version of the handle wire form.
 pub const SAFE_EXPAND_CONTRACT_VERSION: u16 = 1;
@@ -97,7 +95,11 @@ pub enum SafeExpandError {
     /// A bound string field is empty.
     EmptyString(&'static str),
     /// A bound string field exceeds the byte bound.
-    StringTooLong { field: &'static str, actual: usize, maximum: usize },
+    StringTooLong {
+        field: &'static str,
+        actual: usize,
+        maximum: usize,
+    },
     /// A bound string field carries a control character.
     ControlCharacter { field: &'static str },
     /// The issuance nonce must be nonzero: every handle identifies one issue.
@@ -127,14 +129,17 @@ impl fmt::Display for SafeExpandError {
                 formatter,
                 "safe expand handle abi must be {ROOTED_ABI_VERSION}, got {actual}"
             ),
-            Self::ZeroRoot(field) => write!(
-                formatter,
-                "safe expand handle requires a nonzero {field}"
-            ),
+            Self::ZeroRoot(field) => {
+                write!(formatter, "safe expand handle requires a nonzero {field}")
+            }
             Self::EmptyString(field) => {
                 write!(formatter, "safe expand handle {field} must be nonempty")
             }
-            Self::StringTooLong { field, actual, maximum } => write!(
+            Self::StringTooLong {
+                field,
+                actual,
+                maximum,
+            } => write!(
                 formatter,
                 "safe expand handle {field} is {actual} bytes, maximum {maximum}"
             ),
@@ -560,12 +565,8 @@ impl SafeExpandHandle {
     pub fn canonical_bytes(&self) -> Result<Vec<u8>, SafeExpandError> {
         let value = serde_json::to_value(self)
             .map_err(|error| SafeExpandError::InvalidHandle(error.to_string()))?;
-        canonical_object_bytes(
-            ObjectClass::SafeExpandHandle,
-            ROOTED_ABI_VERSION,
-            &value,
-        )
-        .map_err(|error| SafeExpandError::InvalidHandle(error.to_string()))
+        canonical_object_bytes(ObjectClass::SafeExpandHandle, ROOTED_ABI_VERSION, &value)
+            .map_err(|error| SafeExpandError::InvalidHandle(error.to_string()))
     }
 
     fn canonical_value(&self) -> Result<Value, SafeExpandError> {
@@ -602,12 +603,8 @@ impl SafeExpandHandle {
             &Value::Object(object),
         )
         .map_err(|error| SafeExpandError::InvalidHandle(error.to_string()))?;
-        object_root(
-            ObjectClass::SafeExpandHandle,
-            ROOTED_ABI_VERSION,
-            &bytes,
-        )
-        .map_err(|error| SafeExpandError::InvalidHandle(error.to_string()))
+        object_root(ObjectClass::SafeExpandHandle, ROOTED_ABI_VERSION, &bytes)
+            .map_err(|error| SafeExpandError::InvalidHandle(error.to_string()))
     }
 }
 
@@ -658,10 +655,8 @@ impl SafeExpandIssuer {
             issuance_mac: Sha256Digest::ZERO,
         };
         let payload = handle.sealed_payload()?;
-        handle.issuance_mac = Sha256Digest::from_bytes(compute_issuance_mac(
-            &self.secret,
-            &payload,
-        ));
+        handle.issuance_mac =
+            Sha256Digest::from_bytes(compute_issuance_mac(&self.secret, &payload));
         handle.handle_id = handle.compute_id()?;
         Ok(handle)
     }
@@ -682,8 +677,7 @@ impl SafeExpandIssuer {
             )));
         }
         let payload = handle.sealed_payload()?;
-        let expected_mac =
-            Sha256Digest::from_bytes(compute_issuance_mac(&self.secret, &payload));
+        let expected_mac = Sha256Digest::from_bytes(compute_issuance_mac(&self.secret, &payload));
         if handle.issuance_mac != expected_mac {
             return Err(SafeExpandError::ForgedHandle);
         }
@@ -698,19 +692,13 @@ impl SafeExpandIssuer {
     /// failures, binding mismatches, stale/missing/Unknown evidence, and
     /// hidden retries all fold into a typed `Unsafe`/`Unknown` outcome;
     /// only full positive revalidation returns `Safe(permit)`.
-    pub fn revalidate(
-        &self,
-        handle: &SafeExpandHandle,
-        live: &LiveExpandState,
-    ) -> ExpandOutcome {
+    pub fn revalidate(&self, handle: &SafeExpandHandle, live: &LiveExpandState) -> ExpandOutcome {
         let mut unsafe_reasons: Vec<String> = Vec::new();
         let mut unknown_reasons: Vec<String> = Vec::new();
 
         if let Err(error) = self.verify(handle) {
             unsafe_reasons.push(match error {
-                SafeExpandError::WrongAbiVersion { .. } => {
-                    reasons::WRONG_ABI_VERSION.to_owned()
-                }
+                SafeExpandError::WrongAbiVersion { .. } => reasons::WRONG_ABI_VERSION.to_owned(),
                 SafeExpandError::ForgedHandle => reasons::FORGED_HANDLE.to_owned(),
                 SafeExpandError::TamperedHandle => reasons::TAMPERED_HANDLE.to_owned(),
                 SafeExpandError::InvalidHandle(_) => reasons::INVALID_HANDLE.to_owned(),

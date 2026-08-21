@@ -175,9 +175,7 @@ impl CwirEpistemicProduct {
                 "exact soundness requires complete or scoped-complete coverage",
             ));
         }
-        if self.soundness == CwirSoundness::Exact
-            && self.determinism == CwirDeterminism::Unknown
-        {
+        if self.soundness == CwirSoundness::Exact && self.determinism == CwirDeterminism::Unknown {
             return Err(CwirError::new(
                 CwirFailureCode::InvalidEpistemicProduct,
                 "exact soundness cannot have unknown determinism",
@@ -346,11 +344,7 @@ impl CwirNode {
             validate_digest("node required_snapshot", snapshot)?;
         }
         self.epistemic.validate()?;
-        validate_sorted_unique(
-            &self.provenance,
-            "node provenance",
-            CWIR_MAX_REFS_PER_ITEM,
-        )?;
+        validate_sorted_unique(&self.provenance, "node provenance", CWIR_MAX_REFS_PER_ITEM)?;
         validate_digest_slice("node provenance", &self.provenance)
     }
 
@@ -433,11 +427,7 @@ impl CwirHyperEdge {
                 "hyperedge sources must not be empty",
             ));
         }
-        validate_sorted_unique(
-            &self.sources,
-            "hyperedge sources",
-            CWIR_MAX_REFS_PER_ITEM,
-        )?;
+        validate_sorted_unique(&self.sources, "hyperedge sources", CWIR_MAX_REFS_PER_ITEM)?;
         validate_digest_slice("hyperedge sources", &self.sources)?;
         validate_digest("hyperedge target", self.target)?;
         if let Some(proof) = self.proof_node {
@@ -553,17 +543,10 @@ impl CwirObligation {
         self.validate()?;
         let allowed = matches!(
             (self.status, next),
-            (
-                CwirObligationStatus::Open,
-                CwirObligationStatus::InProgress
-            ) | (
-                CwirObligationStatus::Open,
-                CwirObligationStatus::Discharged
-            ) | (CwirObligationStatus::Open, CwirObligationStatus::Failed)
-                | (
-                    CwirObligationStatus::Open,
-                    CwirObligationStatus::Blocked
-                )
+            (CwirObligationStatus::Open, CwirObligationStatus::InProgress)
+                | (CwirObligationStatus::Open, CwirObligationStatus::Discharged)
+                | (CwirObligationStatus::Open, CwirObligationStatus::Failed)
+                | (CwirObligationStatus::Open, CwirObligationStatus::Blocked)
                 | (CwirObligationStatus::Open, CwirObligationStatus::Waived)
                 | (
                     CwirObligationStatus::InProgress,
@@ -1076,8 +1059,7 @@ impl CausalWorkIr {
                         ),
                     ));
                 }
-                if node.epistemic.soundness == CwirSoundness::Exact && node.provenance.is_empty()
-                {
+                if node.epistemic.soundness == CwirSoundness::Exact && node.provenance.is_empty() {
                     return Err(CwirError::new(
                         CwirFailureCode::MissingProvenance,
                         format!("exact evidence node {} has no provenance", node.id.to_hex()),
@@ -1236,9 +1218,7 @@ pub fn cwir_contract_manifest() -> Value {
     })
 }
 pub fn cwir_contract_digest() -> Sha256Digest {
-    Sha256Digest::from_bytes(sha256(
-        canonical_json(&cwir_contract_manifest()).as_bytes(),
-    ))
+    Sha256Digest::from_bytes(sha256(canonical_json(&cwir_contract_manifest()).as_bytes()))
 }
 
 fn digest_body<T: Serialize>(domain: &[u8], value: &T) -> Result<Sha256Digest, CwirError> {
@@ -1313,11 +1293,7 @@ fn normalize_unique<T: Ord>(values: &mut [T], label: &str) -> Result<(), CwirErr
     Ok(())
 }
 
-fn validate_sorted_unique<T: Ord>(
-    values: &[T],
-    label: &str,
-    max: usize,
-) -> Result<(), CwirError> {
+fn validate_sorted_unique<T: Ord>(values: &[T], label: &str, max: usize) -> Result<(), CwirError> {
     if values.len() > max {
         return Err(CwirError::new(
             CwirFailureCode::TooManyReferences,
@@ -1416,4 +1392,3 @@ fn require_proof_node(
         )),
     }
 }
-

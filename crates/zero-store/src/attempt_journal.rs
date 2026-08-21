@@ -65,10 +65,10 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
-use zero_abi::{Sha256Digest, EffectClass, canonical_json, sha256};
+use zero_abi::{EffectClass, Sha256Digest, canonical_json, sha256};
 
 use crate::fs_replace::{replace_file, sync_dir};
-use crate::{DurableProfileId, DurableProfile};
+use crate::{DurableProfile, DurableProfileId};
 
 pub const ATTEMPT_JOURNAL_SCHEMA_VERSION: u16 = 1;
 pub const ATTEMPT_BINDING_SCHEMA_VERSION: u16 = 1;
@@ -626,31 +626,35 @@ impl AttemptRecoveryReceipt {
             (
                 AttemptRecoveryOutcome::AlreadySucceeded,
                 AttemptState::Succeeded
-            ) | (
-                AttemptRecoveryOutcome::AlreadyFailed,
-                AttemptState::Failed
-            ) | (
-                AttemptRecoveryOutcome::AlreadyIndeterminate,
-                AttemptState::Indeterminate
-            ) | (
-                AttemptRecoveryOutcome::AlreadyAborted,
-                AttemptState::Aborted
-            ) | (
-                AttemptRecoveryOutcome::AlreadySafeToRetry,
-                AttemptState::SafeToRetry
-            ) | (
-                AttemptRecoveryOutcome::ClassifiedSucceeded,
-                AttemptState::Succeeded
-            ) | (
-                AttemptRecoveryOutcome::ClassifiedFailed,
-                AttemptState::Failed
-            ) | (
-                AttemptRecoveryOutcome::ClassifiedIndeterminate,
-                AttemptState::Indeterminate
-            ) | (
-                AttemptRecoveryOutcome::ClassifiedSafeToRetry,
-                AttemptState::SafeToRetry
-            )
+            ) | (AttemptRecoveryOutcome::AlreadyFailed, AttemptState::Failed)
+                | (
+                    AttemptRecoveryOutcome::AlreadyIndeterminate,
+                    AttemptState::Indeterminate
+                )
+                | (
+                    AttemptRecoveryOutcome::AlreadyAborted,
+                    AttemptState::Aborted
+                )
+                | (
+                    AttemptRecoveryOutcome::AlreadySafeToRetry,
+                    AttemptState::SafeToRetry
+                )
+                | (
+                    AttemptRecoveryOutcome::ClassifiedSucceeded,
+                    AttemptState::Succeeded
+                )
+                | (
+                    AttemptRecoveryOutcome::ClassifiedFailed,
+                    AttemptState::Failed
+                )
+                | (
+                    AttemptRecoveryOutcome::ClassifiedIndeterminate,
+                    AttemptState::Indeterminate
+                )
+                | (
+                    AttemptRecoveryOutcome::ClassifiedSafeToRetry,
+                    AttemptState::SafeToRetry
+                )
         );
         if !paired {
             return Err(AttemptJournalError::new(
@@ -949,11 +953,7 @@ pub fn mark_indeterminate(
     paths: &AttemptJournalPaths,
     dispatch_entry_digest: Sha256Digest,
 ) -> Result<AttemptEntry, AttemptJournalError> {
-    mark_indeterminate_with_fault(
-        paths,
-        dispatch_entry_digest,
-        &mut AttemptFaultPlan::none(),
-    )
+    mark_indeterminate_with_fault(paths, dispatch_entry_digest, &mut AttemptFaultPlan::none())
 }
 pub fn mark_indeterminate_with_fault(
     paths: &AttemptJournalPaths,
@@ -1069,11 +1069,7 @@ pub fn abort_attempt(
     paths: &AttemptJournalPaths,
     prepared_entry_digest: Sha256Digest,
 ) -> Result<AttemptEntry, AttemptJournalError> {
-    abort_attempt_with_fault(
-        paths,
-        prepared_entry_digest,
-        &mut AttemptFaultPlan::none(),
-    )
+    abort_attempt_with_fault(paths, prepared_entry_digest, &mut AttemptFaultPlan::none())
 }
 pub fn abort_attempt_with_fault(
     paths: &AttemptJournalPaths,
@@ -1263,10 +1259,7 @@ fn is_valid_transition(from: AttemptState, to: AttemptState) -> bool {
             | (AttemptState::Prepared, AttemptState::SafeToRetry)
             | (AttemptState::DispatchCrossed, AttemptState::Succeeded)
             | (AttemptState::DispatchCrossed, AttemptState::Failed)
-            | (
-                AttemptState::DispatchCrossed,
-                AttemptState::Indeterminate
-            )
+            | (AttemptState::DispatchCrossed, AttemptState::Indeterminate)
     )
 }
 
@@ -1573,4 +1566,3 @@ pub fn attempt_journal_contract() -> serde_json::Value {
             "io_before_publish", "directory_sync_failed_after_publish", "injected_crash"]
     })
 }
-

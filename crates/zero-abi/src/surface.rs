@@ -355,4 +355,3 @@ fn registry_matches_engine(registry: RegistryEngine, engine: EngineIdentity) -> 
             | (RegistryEngine::TokenZero, EngineIdentity::TokenZero)
     )
 }
-

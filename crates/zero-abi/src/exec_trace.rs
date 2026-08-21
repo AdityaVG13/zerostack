@@ -39,14 +39,10 @@ impl ProtectedDecisionView {
     /// observed and resolved values must be offered.
     pub fn validate(&self) -> Result<(), ExecTraceError> {
         if self.question.trim().is_empty() {
-            return Err(ExecTraceError::InvalidDecisionView(
-                "empty question".into(),
-            ));
+            return Err(ExecTraceError::InvalidDecisionView("empty question".into()));
         }
         if self.choices.is_empty() {
-            return Err(ExecTraceError::InvalidDecisionView(
-                "empty choices".into(),
-            ));
+            return Err(ExecTraceError::InvalidDecisionView("empty choices".into()));
         }
         if !self.choices.iter().any(|c| c == &self.observed_value) {
             return Err(ExecTraceError::InvalidDecisionView(format!(
@@ -108,7 +104,11 @@ pub struct ExecTrace {
 impl ExecTrace {
     /// New trace; records must already be in topological order (the
     /// executor guarantees this; `equivalence` compares order-sensitive).
-    pub fn new(plan_digest: impl Into<String>, input_digest: impl Into<String>, records: Vec<ExecTraceRecord>) -> Self {
+    pub fn new(
+        plan_digest: impl Into<String>,
+        input_digest: impl Into<String>,
+        records: Vec<ExecTraceRecord>,
+    ) -> Self {
         ExecTrace {
             plan_digest: plan_digest.into(),
             input_digest: input_digest.into(),
@@ -131,7 +131,13 @@ impl ExecTrace {
             return divergence(0, "", "plan_digest", &self.plan_digest, &other.plan_digest);
         }
         if self.input_digest != other.input_digest {
-            return divergence(0, "", "input_digest", &self.input_digest, &other.input_digest);
+            return divergence(
+                0,
+                "",
+                "input_digest",
+                &self.input_digest,
+                &other.input_digest,
+            );
         }
         if self.records.len() != other.records.len() {
             return divergence(
@@ -144,13 +150,25 @@ impl ExecTrace {
         }
         for (index, (left, right)) in self.records.iter().zip(other.records.iter()).enumerate() {
             if left.node_id != right.node_id {
-                return divergence(index, &left.node_id, "node_id", &left.node_id, &right.node_id);
+                return divergence(
+                    index,
+                    &left.node_id,
+                    "node_id",
+                    &left.node_id,
+                    &right.node_id,
+                );
             }
             if left.kind != right.kind {
                 return divergence(index, &left.node_id, "kind", &left.kind, &right.kind);
             }
             if left.outcome != right.outcome {
-                return divergence(index, &left.node_id, "outcome", &left.outcome, &right.outcome);
+                return divergence(
+                    index,
+                    &left.node_id,
+                    "outcome",
+                    &left.outcome,
+                    &right.outcome,
+                );
             }
             match (&left.protected_decision, &right.protected_decision) {
                 (Some(a), Some(b)) => {
@@ -292,4 +310,3 @@ impl std::fmt::Display for ExecTraceError {
 }
 
 impl std::error::Error for ExecTraceError {}
-

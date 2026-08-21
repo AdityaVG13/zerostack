@@ -1,0 +1,34 @@
+[package]
+name = "zero-kernel"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+description = "Daemonless in-process ZeroKernel runtime with direct z bindings"
+
+[dependencies]
+parking_lot = "0.12"
+tree-sitter = "0.26.12"
+tree-sitter-typescript = "0.23.2"
+zero-codemode = { path = "../zero-codemode" }
+tokenzero-kernel = { path = "../../../TokenZero/crates/tokenzero-kernel" }
+graphzero-kernel = { path = "../../../GraphZero/crates/graphzero-kernel" }
+fszero-kernel = { path = "../../../FSZero/crates/fszero-kernel" }
+blake3 = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = "2"
+zero-abi = { path = "../zero-abi" }
+zero-mcp = { path = "../zero-mcp", features = ["fastmcp"] }
+zero-process = { path = "../zero-process" }
+zero-store = { path = "../zero-store" }
+
+[dev-dependencies]
+tempfile = "3"
+
+[[test]]
+name = "direct_host"
+path = "../../tests/unit/zero-kernel/direct_host.rs"
+
+[[bin]]
+name = "zero-kernel"
+path = "src/bin/zero_kernel.rs"

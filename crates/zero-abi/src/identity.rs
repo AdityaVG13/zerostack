@@ -26,8 +26,8 @@ use std::{error::Error, fmt};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use crate::digest::sha256;
 use crate::Sha256Digest;
+use crate::digest::sha256;
 
 pub const ROOTED_ABI_VERSION: &str = "zerostack.racc";
 pub const ROOT_HASH_ALGORITHM: &str = "sha256";
@@ -38,14 +38,24 @@ pub const CONTRACT_VERSION: u16 = 1;
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum IdentityKernelError {
     UnknownObjectClass(String),
-    WrongAbiVersion { actual: String },
+    WrongAbiVersion {
+        actual: String,
+    },
     NonCanonicalBytes(String),
     InvalidTaskContract(String),
     InvalidProtectedScope(String),
     InvalidFormationReceipt(String),
     InvalidEventRecord(String),
-    TornEventLog { seq: u64, expected: Sha256Digest, actual: Sha256Digest },
-    ReorderedEventLog { seq: u64, expected_parent: Sha256Digest, actual_parent: Sha256Digest },
+    TornEventLog {
+        seq: u64,
+        expected: Sha256Digest,
+        actual: Sha256Digest,
+    },
+    ReorderedEventLog {
+        seq: u64,
+        expected_parent: Sha256Digest,
+        actual_parent: Sha256Digest,
+    },
     UncoveredObligation(String),
     EquivalentClaimForbidden(String),
     UnknownEventClass(String),
@@ -63,31 +73,52 @@ impl fmt::Display for IdentityKernelError {
                 write!(formatter, "unknown object class {class:?}")
             }
             Self::WrongAbiVersion { actual } => {
-                write!(formatter, "abi version must be {ROOTED_ABI_VERSION}, got {actual}")
+                write!(
+                    formatter,
+                    "abi version must be {ROOTED_ABI_VERSION}, got {actual}"
+                )
             }
             Self::NonCanonicalBytes(detail) => write!(formatter, "noncanonical bytes: {detail}"),
-            Self::InvalidTaskContract(detail) => write!(formatter, "invalid task contract: {detail}"),
-            Self::InvalidProtectedScope(detail) => write!(formatter, "invalid protected scope: {detail}"),
+            Self::InvalidTaskContract(detail) => {
+                write!(formatter, "invalid task contract: {detail}")
+            }
+            Self::InvalidProtectedScope(detail) => {
+                write!(formatter, "invalid protected scope: {detail}")
+            }
             Self::InvalidFormationReceipt(detail) => {
                 write!(formatter, "invalid formation receipt: {detail}")
             }
             Self::InvalidEventRecord(detail) => write!(formatter, "invalid event record: {detail}"),
-            Self::TornEventLog { seq, expected, actual } => write!(
+            Self::TornEventLog {
+                seq,
+                expected,
+                actual,
+            } => write!(
                 formatter,
                 "torn event log at seq {seq}: expected head {expected}, record chained to {actual}"
             ),
-            Self::ReorderedEventLog { seq, expected_parent, actual_parent } => write!(
+            Self::ReorderedEventLog {
+                seq,
+                expected_parent,
+                actual_parent,
+            } => write!(
                 formatter,
                 "reordered event log at seq {seq}: expected parent {expected_parent}, got {actual_parent}"
             ),
             Self::UncoveredObligation(dimension) => {
-                write!(formatter, "protected obligation {dimension} is uncovered (Unknown)")
+                write!(
+                    formatter,
+                    "protected obligation {dimension} is uncovered (Unknown)"
+                )
             }
             Self::EquivalentClaimForbidden(detail) => {
                 write!(formatter, "equivalent claim forbidden: {detail}")
             }
             Self::UnknownEventClass(class) => {
-                write!(formatter, "unknown event class {class:?} (not one of the nine authoritative classes)")
+                write!(
+                    formatter,
+                    "unknown event class {class:?} (not one of the nine authoritative classes)"
+                )
             }
             Self::InvalidMigrationReceipt(detail) => {
                 write!(formatter, "invalid rooted migration receipt: {detail}")
@@ -176,11 +207,7 @@ impl ObjectClass {
 /// `sha256 || domain || abi_version || canonical_payload`. The algorithm tag
 /// is structurally bound inside every root, so a root can never be replayed
 /// under a different digest algorithm.
-pub fn root_preimage(
-    class: ObjectClass,
-    abi_version: &str,
-    canonical_payload: &[u8],
-) -> Vec<u8> {
+pub fn root_preimage(class: ObjectClass, abi_version: &str, canonical_payload: &[u8]) -> Vec<u8> {
     let mut preimage = Vec::with_capacity(64 + canonical_payload.len());
     preimage.extend_from_slice(ROOT_HASH_ALGORITHM.as_bytes());
     preimage.push(0);
@@ -228,7 +255,9 @@ pub fn object_root(
         });
     }
     Ok(Sha256Digest::from_bytes(sha256(&root_preimage(
-        class, abi_version, canonical_payload,
+        class,
+        abi_version,
+        canonical_payload,
     ))))
 }
 
@@ -584,7 +613,11 @@ impl StructuredTaskContract {
                 "acceptance_criteria must be nonempty".into(),
             ));
         }
-        if self.acceptance_criteria.iter().any(|criterion| criterion.is_empty()) {
+        if self
+            .acceptance_criteria
+            .iter()
+            .any(|criterion| criterion.is_empty())
+        {
             return Err(IdentityKernelError::InvalidTaskContract(
                 "acceptance criteria must not be empty strings".into(),
             ));
@@ -605,7 +638,11 @@ impl StructuredTaskContract {
                 "environment_fixture_refs must not be empty strings".into(),
             ));
         }
-        if self.subjective_dimensions.iter().any(|name| name.is_empty()) {
+        if self
+            .subjective_dimensions
+            .iter()
+            .any(|name| name.is_empty())
+        {
             return Err(IdentityKernelError::InvalidTaskContract(
                 "subjective_dimensions must not be empty strings".into(),
             ));
@@ -728,7 +765,10 @@ impl PayloadFormationReceipt {
     /// dependency set is compared as a normalized set.
     pub fn verify_against(&self, current_dependency_roots: &[String]) -> bool {
         let mut recorded: Vec<&str> = self.dependency_roots.iter().map(String::as_str).collect();
-        let mut current: Vec<&str> = current_dependency_roots.iter().map(String::as_str).collect();
+        let mut current: Vec<&str> = current_dependency_roots
+            .iter()
+            .map(String::as_str)
+            .collect();
         recorded.sort_unstable();
         current.sort_unstable();
         recorded.dedup();
@@ -895,7 +935,9 @@ pub struct EventLog {
 
 impl EventLog {
     pub fn new() -> Self {
-        Self { records: Vec::new() }
+        Self {
+            records: Vec::new(),
+        }
     }
 
     pub fn from_records(records: Vec<EventRecord>) -> Self {
@@ -927,13 +969,7 @@ impl EventLog {
     ) -> Result<EventRecord, IdentityKernelError> {
         let parent_root = self.head()?;
         let seq = self.records.len() as u64;
-        let record = EventRecord::new(
-            seq,
-            parent_root,
-            event_type,
-            payload_root,
-            authority,
-        )?;
+        let record = EventRecord::new(seq, parent_root, event_type, payload_root, authority)?;
         self.records.push(record.clone());
         Ok(record)
     }
@@ -972,7 +1008,10 @@ impl EventLog {
     /// equals the replayed head -- this is how a torn tail is detected after
     /// a process kill: the persisted prefix replays to a head that does not
     /// match the sealed head.
-    pub fn verify_chain_against(&self, sealed_head: Sha256Digest) -> Result<(), IdentityKernelError> {
+    pub fn verify_chain_against(
+        &self,
+        sealed_head: Sha256Digest,
+    ) -> Result<(), IdentityKernelError> {
         let replayed = self.verify_chain()?;
         if replayed != sealed_head {
             return Err(IdentityKernelError::TornEventLog {
@@ -1328,8 +1367,7 @@ impl RootedAbiMigrationReceipt {
         }
         let target_canonical =
             canonical_object_bytes(target_class, ROOTED_ABI_VERSION, target_value)?;
-        let target_root =
-            object_root(target_class, ROOTED_ABI_VERSION, &target_canonical)?;
+        let target_root = object_root(target_class, ROOTED_ABI_VERSION, &target_canonical)?;
         let receipt = Self {
             receipt_version: CONTRACT_VERSION,
             source_class,
@@ -1379,9 +1417,7 @@ impl RootedAbiMigrationReceipt {
                 "source_canonical_bytes_hex is not valid hex".into(),
             )
         })?;
-        if source_bytes.is_empty()
-            || source_bytes.len() > MIGRATION_RECEIPT_MAX_CANONICAL_BYTES
-        {
+        if source_bytes.is_empty() || source_bytes.len() > MIGRATION_RECEIPT_MAX_CANONICAL_BYTES {
             return Err(IdentityKernelError::InvalidMigrationReceipt(
                 "source canonical bytes must be nonempty and bounded".into(),
             ));
@@ -1410,9 +1446,7 @@ impl RootedAbiMigrationReceipt {
                 "target canonical bytes must be nonempty and bounded".into(),
             ));
         }
-        if object_root(self.target_class, ROOTED_ABI_VERSION, &target_bytes)?
-            != self.target_root
-        {
+        if object_root(self.target_class, ROOTED_ABI_VERSION, &target_bytes)? != self.target_root {
             return Err(IdentityKernelError::TargetRootMismatch);
         }
         Ok(())
@@ -1437,9 +1471,8 @@ impl RootedAbiMigrationReceipt {
         }
         let value: Value = serde_json::from_slice(bytes)
             .map_err(|error| IdentityKernelError::InvalidMigrationReceipt(error.to_string()))?;
-        let receipt: Self = serde_json::from_value(value).map_err(|error| {
-            IdentityKernelError::InvalidMigrationReceipt(error.to_string())
-        })?;
+        let receipt: Self = serde_json::from_value(value)
+            .map_err(|error| IdentityKernelError::InvalidMigrationReceipt(error.to_string()))?;
         receipt.validate()?;
         let canonical = receipt.canonical_bytes()?;
         if canonical != bytes {
@@ -1468,4 +1501,3 @@ fn hex_decode(hex: &str) -> Option<Vec<u8>> {
         .map(|index| u8::from_str_radix(&hex[index..index + 2], 16).ok())
         .collect()
 }
-

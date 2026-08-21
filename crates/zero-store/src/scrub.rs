@@ -142,9 +142,8 @@ impl ScrubReceipt {
                 "scrub receipt counts do not add up to objects_scanned".into(),
             ));
         }
-        let expected_findings = self.objects_corrupt_quarantined
-            + self.objects_unavailable
-            + self.objects_io_error;
+        let expected_findings =
+            self.objects_corrupt_quarantined + self.objects_unavailable + self.objects_io_error;
         if self.findings.len() as u64 != expected_findings {
             return Err(ScrubError::SchemaViolation(
                 "scrub receipt finding count disagrees with its counters".into(),
@@ -176,7 +175,9 @@ pub enum ScrubError {
     /// The pass bound refused a store with more objects than `max`; raise the
     /// bound or page the pass. Loud by design: a bounded pass never silently
     /// scans a subset.
-    EnumerationExceedsBound { max: usize },
+    EnumerationExceedsBound {
+        max: usize,
+    },
     Io(String),
 }
 
@@ -186,7 +187,10 @@ impl std::fmt::Display for ScrubError {
             Self::SchemaViolation(message) => write!(f, "schema_violation: {message}"),
             Self::LockDenied(message) => write!(f, "lock_denied: {message}"),
             Self::EnumerationExceedsBound { max } => {
-                write!(f, "enumeration_exceeds_bound: store has more than {max} objects")
+                write!(
+                    f,
+                    "enumeration_exceeds_bound: store has more than {max} objects"
+                )
             }
             Self::Io(message) => write!(f, "io: {message}"),
         }
@@ -227,12 +231,16 @@ pub fn run_scrub(
     let mut skipped_idle: u64 = 0;
     let mut findings: Vec<ScrubFinding> = Vec::new();
 
-    let identities = cas.list_objects_bounded(max_objects).map_err(|error| match &error {
-        CasError::Malformed(message) if message.starts_with("CAS object enumeration exceeds") => {
-            ScrubError::EnumerationExceedsBound { max: max_objects }
-        }
-        _ => ScrubError::Io(error.to_string()),
-    })?;
+    let identities = cas
+        .list_objects_bounded(max_objects)
+        .map_err(|error| match &error {
+            CasError::Malformed(message)
+                if message.starts_with("CAS object enumeration exceeds") =>
+            {
+                ScrubError::EnumerationExceedsBound { max: max_objects }
+            }
+            _ => ScrubError::Io(error.to_string()),
+        })?;
     for identity in identities {
         if !is_full_lower_hex(&identity) {
             continue;
@@ -305,8 +313,7 @@ pub fn run_scrub(
         store_root,
         &["scrubs", producer_id, &format!("{operation_id}.json")],
     );
-    gc_atomic_write(&path, &bytes)
-        .map_err(|error| ScrubError::Io(error.to_string()))?;
+    gc_atomic_write(&path, &bytes).map_err(|error| ScrubError::Io(error.to_string()))?;
     Ok(receipt)
 }
 
@@ -325,10 +332,8 @@ pub fn read_scrub_receipt(
         &["scrubs", producer_id, &format!("{operation_id}.json")],
     );
     let bytes = fs::read(&path).map_err(|error| ScrubError::Io(error.to_string()))?;
-    let value: serde_json::Value =
-        serde_json::from_slice(&bytes).map_err(|error| {
-            ScrubError::SchemaViolation(format!("receipt decode failed: {error}"))
-        })?;
+    let value: serde_json::Value = serde_json::from_slice(&bytes)
+        .map_err(|error| ScrubError::SchemaViolation(format!("receipt decode failed: {error}")))?;
     let canonical = canonical_json(&value);
     if canonical.as_bytes() != bytes {
         return Err(ScrubError::SchemaViolation(
@@ -348,4 +353,3 @@ fn now_unix_ns() -> u64 {
         .map(|duration| duration.as_nanos() as u64)
         .unwrap_or(0)
 }
-

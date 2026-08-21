@@ -1491,10 +1491,7 @@ fn read_sweep_progress(path: &Path) -> Result<SweepProgress, GcError> {
         path,
         GC_RECORD_TYPE_SWEEP_PROGRESS,
     )?;
-    if !bound_gc_contract_matches(
-        &progress.schema_version,
-        &progress.store_contract_digest,
-    ) {
+    if !bound_gc_contract_matches(&progress.schema_version, &progress.store_contract_digest) {
         return Err(corrupt(path, "store_contract_digest mismatch".into()));
     }
     validate_run_id(&progress.run_id).map_err(|error| corrupt(path, error.to_string()))?;
@@ -1841,10 +1838,7 @@ fn validate_list(
 
 /// Validate one bounded, deduplicated hash list field (`planned` / `deleted`)
 /// and return its set. Cross-set invariants stay with the caller.
-fn validate_hash_list(
-    value: &serde_json::Value,
-    field: &str,
-) -> Result<BTreeSet<String>, GcError> {
+fn validate_hash_list(value: &serde_json::Value, field: &str) -> Result<BTreeSet<String>, GcError> {
     let items = value
         .get(field)
         .and_then(serde_json::Value::as_array)
@@ -1905,10 +1899,7 @@ pub fn validate_dry_run_report(value: &serde_json::Value) -> Result<(), GcError>
     {
         return Err(GcError::SchemaViolation("record_type".into()));
     }
-    if !bound_gc_contract_matches(
-        schema_version,
-        require_str(value, "store_contract_digest")?,
-    ) {
+    if !bound_gc_contract_matches(schema_version, require_str(value, "store_contract_digest")?) {
         return Err(GcError::SchemaViolation("store_contract_digest".into()));
     }
     validate_run_id(require_str(value, "run_id")?)?;
@@ -1997,10 +1988,7 @@ pub fn validate_repair_receipt(value: &serde_json::Value) -> Result<(), GcError>
     if require_str(value, "record_type")? != GC_RECORD_TYPE_REPAIR {
         return Err(GcError::SchemaViolation("record_type".into()));
     }
-    if !bound_gc_contract_matches(
-        schema_version,
-        require_str(value, "store_contract_digest")?,
-    ) {
+    if !bound_gc_contract_matches(schema_version, require_str(value, "store_contract_digest")?) {
         return Err(GcError::SchemaViolation("store_contract_digest".into()));
     }
     require_gc_producer(require_str(value, "producer_id")?)?;
@@ -2463,4 +2451,3 @@ fn repair_object_with_guard(
     }
     Ok((true, quarantined))
 }
-

@@ -391,4 +391,3 @@ fn read_frame(bytes: &[u8], offset: usize) -> Option<Frame<'_>> {
         next: offset + trailer_end,
     })
 }
-
