@@ -86,7 +86,7 @@ pub use decision_view::{
     CompletenessGrade, DECISION_VIEW_SCHEMA_ID, DecisionView, DecisionViewBinding,
     DecisionViewError,
 };
-pub use digest::{contract_digest, contract_digest_hex, sha256, sha256_hex};
+pub use digest::{contract_digest, contract_digest_hex, hex_lower_32, sha256, sha256_hex};
 pub use dispatch::{
     ALL_DISPATCH_ERROR_CLASSES, ApprovalGrant, ApprovalRequirement, CANONICAL_DISPATCH_VERSION,
     CanonicalOperation, CanonicalRegistry, CanonicalResource, DispatchContractError,
