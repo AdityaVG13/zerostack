@@ -71,7 +71,7 @@ The host is reusable. `execute_cell` creates and destroys a fresh interpreter fr
 Build the platform addon once, then load the package without a daemon, listener, worker pool, or runtime compilation:
 
 ```bash
-rch exec -- cargo build --profile release-node -p zero-kernel-node
+cargo build --profile release-node -p zero-kernel-node
 ./scripts/build-node-prebuild.sh --stage-only
 ```
 
@@ -94,7 +94,7 @@ The package accepts `ZERO_KERNEL_NATIVE_ADDON=/absolute/path/to/zero_kernel_prod
 The CLI is for diagnostics, direct stdin execution, and explicit store migration:
 
 ```bash
-rch exec -- cargo build -p zero-kernel
+cargo build -p zero-kernel
 ./target/debug/zero-kernel doctor -C "$PWD"
 printf '%s\n' 'return await z.read("README.md");' \
   | ./target/debug/zero-kernel exec -C "$PWD"
@@ -138,7 +138,25 @@ AI/
 └── TokenZero/
 ```
 
-Use DSR for repository gates and RCH for narrow Cargo probes. Do not run workspace-wide Cargo tests.
+### Build and test
+
+```bash
+cargo build --workspace
+cargo test -p zero-kernel --test direct_host
+cargo test -p zero-codemode --test syntax
+```
+
+Integration tests live under `tests/unit/<crate>/`. Run one crate's suite with `cargo test -p <crate>`; the four-engine topology requires sibling checkouts for the full matrix.
+
+## Status
+
+ZeroStack is in active development alongside FSZero, GraphZero, and TokenZero. The kernel surface is stable under dogfooding; APIs may evolve before 1.0.
+
+## Contributing and security
+
+- Contributing guide: [CONTRIBUTING.md](CONTRIBUTING.md)
+- Security policy: [SECURITY.md](SECURITY.md)
+- Changelog: [CHANGELOG.md](CHANGELOG.md)
 
 ## License
 
