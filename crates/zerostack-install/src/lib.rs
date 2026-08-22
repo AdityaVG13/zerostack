@@ -1,7 +1,7 @@
 #![forbid(unsafe_code)]
 #![recursion_limit = "2048"]
 
-mod package_audit;
+pub mod package_audit;
 
 use serde::{Deserialize, Serialize};
 
