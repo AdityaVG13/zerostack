@@ -16,6 +16,7 @@ members = [
     "crates/zero-store",
     "crates/zerostack-machine-permit",
     "crates/zerostack-test-support",
+    "crates/zerostack-install",
 ]
 
 [workspace.package]
@@ -24,6 +25,9 @@ rust-version = "1.85"
 license = "MIT"
 
 [workspace.dependencies]
+flate2 = "1"
+fs4 = "1.1.0"
+toml = "0.9"
 
 zerostack-test-support = { path = "crates/zerostack-test-support" }
 serde = { version = "1.0.229", features = ["derive"] }
