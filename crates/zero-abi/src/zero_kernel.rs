@@ -693,6 +693,15 @@ pub struct TokenAccounting {
     pub certified: bool,
 }
 
+/// Result of re-measuring bytes against a previously claimed accounting.
+/// `matches` is true only when every claimed field equals the recomputation.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+pub struct CertifyResult {
+    pub matches: bool,
+    pub recomputed: TokenAccounting,
+}
+
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct ProjectionRequest {
@@ -778,6 +787,16 @@ pub trait TokenEngine: Send + Sync {
         invocation: &EngineInvocation,
         bytes: &[u8],
     ) -> Result<TokenAccounting, EngineError>;
+
+    /// Re-measure `bytes` and compare against `claimed`. The kernel response
+    /// boundary uses this to prove that reported accounting equals reality
+    /// before an event may claim certified=true (RACC truthfulness).
+    fn certify(
+        &self,
+        invocation: &EngineInvocation,
+        bytes: &[u8],
+        claimed: &TokenAccounting,
+    ) -> Result<CertifyResult, EngineError>;
 
     fn project(
         &self,

@@ -145,18 +145,16 @@ impl DirectCallContext {
     pub fn read(&self, path: PathBuf, options: ReadOptions) -> Result<String, HostError> {
         let _task =
             LiveTaskGuard::acquire(Arc::clone(&self.live_tasks), Arc::clone(&self.frame_tasks));
-        let snapshot = self
-            .files
-            .read(&self.invocation, FileReadRequest { path, options })?;
+        let snapshot = self.files.read(
+            &self.invocation,
+            FileReadRequest {
+                path: path.clone(),
+                options,
+            },
+        )?;
         let value = match snapshot.inline_utf8 {
             Some(text) => text,
-            None => format!(
-                "{}\nexact: {}",
-                snapshot
-                    .outline
-                    .unwrap_or_else(|| format!("{} bytes", snapshot.byte_len)),
-                snapshot.content
-            ),
+            None => labeled_outline(&path, &snapshot),
         };
         let mut record = self.records.lock();
         record.calls = record.calls.saturating_add(1);
@@ -517,10 +515,11 @@ impl Cell {
         path: impl Into<PathBuf>,
         options: ReadOptions,
     ) -> Result<String, HostError> {
+        let path = path.into();
         let snapshot = self.files.read(
             &self.invocation,
             FileReadRequest {
-                path: path.into(),
+                path: path.clone(),
                 options,
             },
         )?;
@@ -530,13 +529,7 @@ impl Cell {
         if let Some(text) = snapshot.inline_utf8 {
             return Ok(text);
         }
-        Ok(format!(
-            "{}\nexact: {}",
-            snapshot
-                .outline
-                .unwrap_or_else(|| format!("{} bytes", snapshot.byte_len)),
-            snapshot.content
-        ))
+        Ok(labeled_outline(&path, &snapshot))
     }
 
     pub fn snap(&mut self, request: SnapRequest) -> Result<SnapResult, HostError> {
@@ -558,6 +551,20 @@ impl Cell {
 
         let (path, structural, derived_lines) = match target {
             SnapTargetRequest::Path { path } => {
+                // Directory targets are a first-touch trap: point the agent at
+                // z.lookup instead of an opaque engine error (pc_cf4c50f47270).
+                let candidate = if path.is_absolute() {
+                    path.clone()
+                } else {
+                    self.invocation.context.project_root.join(&path)
+                };
+                if candidate.is_dir() {
+                    return Err(HostError::InvalidRequest(format!(
+                        "z.snap requires a file but {} is a directory; use z.lookup({:?}) to list entries, then snap a file",
+                        path.display(),
+                        path.display()
+                    )));
+                }
                 if let Some(symbol) = selection
                     .as_ref()
                     .and_then(|selection| selection.symbol.as_ref())
@@ -1846,6 +1853,25 @@ fn store_recovery_manifest(
     })
     .map_err(|error| HostError::Serialization(error.to_string()))?;
     cas.put(&bytes).map_err(cas_host_error)
+}
+
+/// Large reads return a structural outline plus an exact handle. The outline
+/// MUST be impossible to mistake for file content (pc_821d2acdacfc): every
+/// outline read carries a machine-greppable header naming the path, the true
+/// byte length, and the exact-content handle for expansion.
+fn labeled_outline(path: &std::path::Path, snapshot: &FileSnapshot) -> String {
+    let outline = snapshot
+        .outline
+        .clone()
+        .unwrap_or_else(|| format!("{} bytes", snapshot.byte_len));
+    format!(
+        "[ZeroStack READ OUTLINE - not file content | path={} | {} bytes total | exact={} | expand with z.expand(\"{}\", selector)]\n{}\n",
+        path.display(),
+        snapshot.byte_len,
+        snapshot.content,
+        snapshot.content,
+        outline
+    )
 }
 
 fn source_newline(source: &[u8]) -> SnapNewline {

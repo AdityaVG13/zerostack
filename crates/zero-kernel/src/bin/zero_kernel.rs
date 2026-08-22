@@ -46,6 +46,25 @@ fn doctor(root: PathBuf) -> Result<(), String> {
         default_budget(),
     )
     .map_err(|error| error.to_string())?;
+    let transactions_dir = store.join("transactions");
+    let mut quarantined: Vec<String> = Vec::new();
+    if let Ok(sessions) = std::fs::read_dir(&transactions_dir) {
+        for session in sessions.flatten() {
+            let Ok(cells) = std::fs::read_dir(session.path()) else {
+                continue;
+            };
+            for cell in cells.flatten() {
+                if cell
+                    .file_name()
+                    .to_string_lossy()
+                    .ends_with(".poisoned.json")
+                {
+                    quarantined.push(cell.path().display().to_string());
+                }
+            }
+        }
+    }
+    quarantined.sort();
     println!(
         "{}",
         serde_json::to_string(&json!({
@@ -57,6 +76,8 @@ fn doctor(root: PathBuf) -> Result<(), String> {
             "live_frames": kernel.live_frames(),
             "live_tasks": kernel.live_tasks(),
             "live_processes": kernel.live_processes(),
+            "quarantined_journals": quarantined.len(),
+            "quarantined_paths_bounded": quarantined.iter().take(10).collect::<Vec<_>>(),
             "daemon": false,
             "listener": false,
             "kernel_child": false,

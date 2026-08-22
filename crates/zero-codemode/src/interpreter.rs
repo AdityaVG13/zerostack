@@ -928,7 +928,7 @@ impl<'tree> Interpreter<'tree> {
                 .parse()
                 .map(Value::Number)
                 .map_err(|_| Fault::Host(HostError::Parse("invalid number".into()))),
-            "string" => Ok(Value::String(unquote(self.text(node)))),
+            "string" => Ok(Value::String(unquote(self.text(node)).map_err(Fault::Host)?)),
             "array" => self.eval_array(node),
             "object" => self.eval_object(node),
             "template_string" => self.eval_template(node),
@@ -1088,7 +1088,7 @@ impl<'tree> Interpreter<'tree> {
                             .child_by_field_name("value")
                             .ok_or_else(|| Fault::Host(self.unsupported("object value")))?,
                     )?;
-                    fields.insert(unquote(self.text(key)), value);
+                    fields.insert(unquote(self.text(key)).map_err(Fault::Host)?, value);
                 }
                 "shorthand_property_identifier" => {
                     let key = self.text(child).to_owned();
@@ -1119,7 +1119,7 @@ impl<'tree> Interpreter<'tree> {
                         .child_by_field_name("body")
                         .ok_or_else(|| Fault::Host(self.unsupported("method body")))?;
                     fields.insert(
-                        unquote(self.text(name)),
+                        unquote(self.text(name)).map_err(Fault::Host)?,
                         Value::Function(FunctionValue {
                             parameters,
                             body,
@@ -1127,7 +1127,7 @@ impl<'tree> Interpreter<'tree> {
                             env: self.env.clone(),
                         }),
                     );
-                }
+                    }
                 _ => return Err(Fault::Host(self.unsupported("object member"))),
             }
         }
@@ -1148,6 +1148,11 @@ impl<'tree> Interpreter<'tree> {
                         .ok_or_else(|| Fault::Host(self.unsupported("template expression")))?,
                 )?;
                 output.push_str(&to_string(&value));
+            } else if child.kind() == "escape_sequence" {
+                let decoded = decode_escape_node(self.text(child)).map_err(Fault::Host)?;
+                if let Some(character) = decoded {
+                    output.push(character);
+                }
             } else {
                 output.push_str(self.text(child));
             }
@@ -1308,9 +1313,21 @@ impl<'tree> Interpreter<'tree> {
             Value::Namespace(name) if name == "Boolean" => {
                 Ok(Value::Bool(args.first().is_some_and(truthy)))
             }
-            Value::Namespace(name) => Err(Fault::Host(HostError::UnsupportedSyntax(format!(
-                "namespace '{name}' is not callable"
-            )))),
+            Value::Namespace(name) => {
+                let guidance = if name == "z.state" {
+                    ": z.state is a namespace - use z.state.get(key), z.state.set(key, value), z.state.has(key), z.state.delete(key), or z.state.list()".to_string()
+                } else if name.starts_with("z.") {
+                    format!(": z.{name} is a namespace - inspect z.help() for its members")
+                } else {
+                    String::new()
+                };
+                // JS semantics: calling a non-function raises TypeError,
+                // which guest try/catch can intercept.
+                Err(Fault::Throw(Value::Error(ErrorValue {
+                    name: "TypeError".into(),
+                    message: format!("namespace '{name}' is not callable{guidance}"),
+                })))
+            }
             _ => Err(Fault::Host(HostError::Data("value is not callable".into()))),
         }
     }
@@ -2656,12 +2673,14 @@ impl<'tree> Interpreter<'tree> {
                 "asgrep": "z.asgrep(query, {mode?, path?, language?, source?, sink?, limit?}) -> StructuralResult",
                 "snap": "z.snap(path | {path?, target?:{path|search}, cardinality?, selection?:{lines|bytes|symbol|exactText}, view?}) -> SnapResult",
                 "expand": "z.expand(handle | SnapResult, {bytes?|lines?|symbol?|next?|offset?|limit?|all?}) -> ExpandResult",
-                "edit": "z.edit(path, replacement, {expectedPreimage?}) | z.edit(selectedSnap, {find, replacement} | typed patch)",
+                "edit": "z.edit(path | selectedSnap, {find, replacement} | {kind, ...} patch, {expectedPreimage?}) - bare replacement strings are refused",
                 "parallel": "z.parallel([async () => operation, ...]) -> results in input order",
                 "effect": "z.effect({targets: {name: {path, expect?: 'exists'|'absent'}}, changes: [{target, kind, old?, replacement?, content?, expectedCount?, anchor?}], verify?: {parse?, changedTargetsOnly?, command?: {argv, timeoutMs}}}) -> staged EffectResult",
             },
             "selectedEditPatches": [
-                "{find, replacement} (find must equal the entire snapped selection byte-for-byte including trailing newline)",
+                "{find, replacement} on a path target: replaces the first unique occurrence",
+                "{find, replacement} on a snap: find must equal the entire snapped selection byte-for-byte including trailing newline",
+                "{kind: 'replace_file', content} deliberately replaces a whole file",
                 "{kind: 'replace_exact', old, replacement, expectedCount: 1}",
                 "{kind: 'replace_lines', content}",
                 "{kind: 'insert_before', content}",
@@ -4041,19 +4060,120 @@ fn relational<'tree>(
     ordering.is_some_and(predicate)
 }
 
-fn unquote(value: &str) -> String {
+/// Decode a quoted string literal body, processing every JavaScript escape
+/// sequence exactly once, left to right. Every possible character after a
+/// backslash is handled explicitly, so no escape can silently pass through
+/// as raw text (the corruption class behind pc_78f6e48133fb).
+fn unquote(value: &str) -> Result<String, HostError> {
     if value.len() >= 2 {
         let bytes = value.as_bytes();
         if (bytes[0] == b'"' && bytes[value.len() - 1] == b'"')
             || (bytes[0] == b'\'' && bytes[value.len() - 1] == b'\'')
         {
-            return value[1..value.len() - 1]
-                .replace("\\'", "'")
-                .replace("\\\"", "\"")
-                .replace("\\n", "\n")
-                .replace("\\t", "\t")
-                .replace("\\\\", "\\");
+            return decode_string_body(&value[1..value.len() - 1]);
         }
     }
-    value.into()
+    Ok(value.into())
+}
+
+/// Build the typed error for an escape sequence CodeMode refuses to decode.
+fn unsupported_escape(escape: &str) -> HostError {
+    HostError::UnsupportedSyntax(format!(
+        "escape sequence '{escape}' is not supported in CodeMode"
+    ))
+}
+
+/// Scan a string body and decode every backslash escape in one pass.
+fn decode_string_body(body: &str) -> Result<String, HostError> {
+    let mut out = String::with_capacity(body.len());
+    let mut rest = body;
+    while let Some(slash) = rest.find('\\') {
+        out.push_str(&rest[..slash]);
+        let after = &rest[slash + 1..];
+        let (decoded, consumed) = apply_escape(after)?;
+        if let Some(character) = decoded {
+            out.push(character);
+        }
+        rest = &after[consumed..];
+    }
+    out.push_str(rest);
+    Ok(out)
+}
+
+/// Decode one escape sequence given the text after its leading backslash.
+/// Returns the decoded character (None for line continuations) and how many
+/// characters of `after` were consumed.
+fn apply_escape(after: &str) -> Result<(Option<char>, usize), HostError> {
+    let mut characters = after.chars();
+    let first = characters
+        .next()
+        .ok_or_else(|| HostError::UnsupportedSyntax("string ends with a lone backslash".into()))?;
+    let single = |character: char| Ok((Some(character), 1));
+    match first {
+        '\'' | '"' | '\\' | '`' => single(first),
+        'n' => single('\n'),
+        'r' => single('\r'),
+        't' => single('\t'),
+        'b' => single('\u{8}'),
+        '0' => {
+            if characters.as_str().starts_with(|c: char| c.is_ascii_digit()) {
+                let shown: String = after.chars().take(4).collect();
+                Err(unsupported_escape(&shown))
+            } else {
+                single('\0')
+            }
+        }
+        digit @ '1'..='9' => {
+            // Strict-mode JS rejects \\1-\\9 and legacy octal; so do we,
+            // rather than silently emitting the digit as text.
+            let _ = digit;
+            let shown: String = after.chars().take(2).collect();
+            Err(unsupported_escape(&shown))
+        }
+        'x' => {
+            let hex = after.get(1..3).ok_or_else(|| unsupported_escape("\\x"))?;
+            let code = parse_hex(hex).ok_or_else(|| unsupported_escape(&format!("\\x{hex}")))?;
+            let decoded = char::from_u32(code).ok_or_else(|| unsupported_escape(&format!("\\x{hex}")))?;
+            Ok((Some(decoded), 3))
+        }
+        'u' => {
+            let rest = characters.as_str();
+            if let Some(braced) = rest.strip_prefix('{') {
+                let inner = braced
+                    .split_once('}')
+                    .ok_or_else(|| unsupported_escape(&format!("\\u{rest}")))?;
+                if inner.0.is_empty() || inner.0.len() > 6 {
+                    return Err(unsupported_escape(&format!("\\u{{{}}}", inner.0)));
+                }
+                let code = parse_hex(inner.0)
+                    .ok_or_else(|| unsupported_escape(&format!("\\u{{{}}}", inner.0)))?;
+                let decoded = char::from_u32(code)
+                    .ok_or_else(|| unsupported_escape(&format!("\\u{{{}}}", inner.0)))?;
+                let consumed = 1 + inner.0.len() + 2;
+                Ok((Some(decoded), consumed))
+            } else {
+                let hex = after.get(1..5).ok_or_else(|| unsupported_escape("\\u"))?;
+                let code = parse_hex(hex).ok_or_else(|| unsupported_escape(&format!("\\u{hex}")))?;
+                let decoded = char::from_u32(code).ok_or_else(|| unsupported_escape(&format!("\\u{hex}")))?;
+                Ok((Some(decoded), 5))
+            }
+        }
+        // ECMA-262 NonEscapeCharacter: the escaped character itself.
+        other => single(other),
+    }
+}
+
+/// Decode one complete escape_sequence node body, including its backslash.
+fn decode_escape_node(text: &str) -> Result<Option<char>, HostError> {
+    let after = text
+        .strip_prefix('\\')
+        .ok_or_else(|| HostError::UnsupportedSyntax(format!("invalid escape sequence '{text}'")))?;
+    apply_escape(after).map(|(decoded, _)| decoded)
+}
+
+fn parse_hex(text: &str) -> Option<u32> {
+    if text.is_empty() || !text.chars().all(|c| c.is_ascii_hexdigit()) {
+        return None;
+    }
+    u32::from_str_radix(text, 16).ok()
 }

@@ -152,10 +152,32 @@ fn dispatch_concurrent(
             ))
         }
         "asgrep" => {
-            let query = string_arg(&positional, 0, "z.asgrep query")?;
-            let options = positional
-                .get(1)
-                .cloned()
+            // Accept both calling conventions: z.asgrep(query, {options}) and
+            // the single-object form z.asgrep({query, path, ...}) that new
+            // agents naturally try first (pc_cf4c50f47270).
+            let (query, options_source): (Value, Option<Value>) =
+                match positional.first() {
+                    Some(Value::Object(first)) if positional.len() == 1 => {
+                        let mut object = first.clone();
+                        let query = object
+                            .remove("query")
+                            .ok_or_else(|| {
+                                ConnectorError::new(
+                                    "z.asgrep object form requires a query field",
+                                )
+                            })?;
+                        (query, Some(Value::Object(object)))
+                    }
+                    _ => (
+                        Value::String(string_arg(&positional, 0, "z.asgrep query")?),
+                        positional.get(1).cloned(),
+                    ),
+                };
+            let query = query
+                .as_str()
+                .ok_or_else(|| ConnectorError::new("z.asgrep query must be a string"))?
+                .to_owned();
+            let options = options_source
                 .map(normalize_keys)
                 .map(serde_json::from_value::<AsgrepOptions>)
                 .transpose()
@@ -693,12 +715,12 @@ fn apply_edit_patch(
 ) -> Result<(Vec<u8>, Option<String>), ConnectorError> {
     let selection = validate_snap_selection(target, source)?;
     let Some(values) = patch.as_object() else {
-        if selection.is_some() {
-            return Err(ConnectorError::new(
-                "selection_scope_mismatch: selected SnapResult requires a typed patch object",
-            ));
-        }
-        return apply_patch(source, patch);
+        // pc_b1050fe2d6fd: a bare replacement string on a path target used to
+        // replace the ENTIRE file silently. Whole-file replacement stays
+        // available only as a deliberate typed operation.
+        return Err(ConnectorError::new(
+            "z.edit refuses a bare replacement string (it would replace the entire file): use {find, replacement} for substitution, {kind: 'replace_file', content} to replace a whole file deliberately, or z.write to overwrite explicitly",
+        ));
     };
     let patch_text = Some(patch.to_string());
     let kind = values.get("kind").and_then(Value::as_str);
@@ -1047,7 +1069,6 @@ fn normalize_keys(value: Value) -> Value {
 
 fn apply_patch(source: &[u8], patch: Value) -> Result<(Vec<u8>, Option<String>), ConnectorError> {
     match patch {
-        Value::String(postimage) => Ok((postimage.as_bytes().to_vec(), Some(postimage))),
         Value::Object(values) => {
             let find = values
                 .get("find")
@@ -1079,9 +1100,7 @@ fn apply_patch(source: &[u8], patch: Value) -> Result<(Vec<u8>, Option<String>),
                 Some(Value::Object(values).to_string()),
             ))
         }
-        _ => Err(ConnectorError::new(
-            "z.edit patch must be a replacement string or patch object",
-        )),
+        _ => Err(ConnectorError::new("z.edit patch must be a patch object")),
     }
 }
 

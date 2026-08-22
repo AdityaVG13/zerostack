@@ -452,6 +452,7 @@ impl VerifiedChild {
             // function returns; a suspended root is never handed back.
             command.creation_flags(0x0000_0004); // CREATE_SUSPENDED
         }
+        let spawn_started = std::time::Instant::now();
         let mut child = command.spawn()?;
         let pid = child.id();
         let start_key = ProcessIdentity::capture(pid)
@@ -974,6 +975,22 @@ fn darwin_bind_tree_to_owner() -> io::Result<()> {
                 Err(io::Error::last_os_error())
             }
             0 => {
+                // The watcher never execs, so every inherited fd -- including
+                // std's internal spawn error pipe whose EOF is what makes
+                // Command::spawn return -- would stay open for the watcher's
+                // whole lifetime and block spawn until the tree root exited
+                // (pc_45b6d2d66fee family). Close everything above stderr
+                // except the ready-byte fd before becoming the watcher.
+                let table_size = unsafe { libc::getdtablesize() };
+                let mut closed = 0usize;
+                for fd in 3..table_size {
+                    if fd != write_fd {
+                        unsafe { libc::close(fd) };
+                        closed += 1;
+                    }
+                }
+                debug_assert!(closed >= 2, "watcher inherited no fds to close");
+                let _ = closed;
                 libc::close(read_fd);
                 let _ = libc::setpgid(0, 0);
                 darwin_watch_owner_then_kill(owner, tree_root, write_fd);
@@ -1453,6 +1470,35 @@ fn child_exited_no_reap(child: &Child) -> io::Result<bool> {
 
 #[cfg(target_os = "macos")]
 fn macos_child_exited(pid: u32, timeout: Duration) -> io::Result<bool> {
+    // Race guard: if the child exited BEFORE this poll began, a fresh
+    // EVFILT_PROC NOTE_EXIT registration on XNU never fires and the caller
+    // would spin forever. waitid(WNOHANG|WNOWAIT|WEXITED) observes exit state
+    // without reaping, preserving the waitable root pin for the final wait().
+    // SAFETY: P_PID targets only our owned child's pid; the out-param is a
+    // fully zeroed siginfo_t that waitid fills on success.
+    let mut info: libc::siginfo_t = unsafe { std::mem::zeroed() };
+    let probe = unsafe {
+        libc::waitid(
+            libc::P_PID,
+            pid as libc::id_t,
+            &mut info,
+            libc::WEXITED | libc::WNOWAIT | libc::WNOHANG,
+        )
+    };
+    if probe == 0 {
+        if info.si_pid != 0 {
+            return Ok(true);
+        }
+    } else {
+        let probe_error = io::Error::last_os_error();
+        match probe_error.raw_os_error() {
+            // No waitable child at all (already reaped elsewhere): treat as
+            // exited so callers terminate instead of spinning.
+            Some(libc::ECHILD) => return Ok(true),
+            Some(libc::EINTR) => {}
+            _ => return Err(probe_error),
+        }
+    }
     // kqueue observes NOTE_EXIT without reaping the child, preserving the
     // waitable root pin used to make process-group signaling exact.
     let queue = unsafe { libc::kqueue() };

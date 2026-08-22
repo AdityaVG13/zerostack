@@ -13,11 +13,12 @@ use tokenzero_kernel::ZeroTokenEngine;
 use zero_abi::{
     AsgrepOptions, CompressionRequest, CompressionResult, EngineError, EngineErrorKind,
     EngineInvocation, FileEffectKind, FileEffectReceipt, FileEffectRequest, FileEngine, FileLease,
-    FileReadRequest, FileSnapshot, KernelBudget, KernelContext, LookupOptions, ProjectionRequest,
+    FileReadRequest, FileSnapshot, KernelBudget, KernelContext, LookupOptions,
+    ProjectionRequest, ReadOptions,
     ProjectionResult, ShellOptions, StructuralEngine, StructuralHit, StructuralQuery,
     StructuralResult, TokenAccounting, TokenEngine, ZeroHandle,
 };
-use zero_kernel::{AtomicCancellation, ShellCommand, ZeroKernel};
+use zero_kernel::{AtomicCancellation, HostError, ShellCommand, TransactionError, ZeroKernel};
 
 fn handle(bytes: &[u8]) -> ZeroHandle {
     ZeroHandle::from_digest(blake3::hash(bytes).to_hex().as_str()).unwrap()
@@ -43,14 +44,29 @@ impl FileEngine for Files {
         let bytes = files
             .get(&request.path)
             .ok_or_else(|| EngineError::new(EngineErrorKind::NotFound, "missing", false))?;
+        // Files named "outline-only.*" simulate oversized sources whose bytes
+        // exceed the inline envelope: engine returns outline + digest only.
+        let (inline_utf8, outline) =
+            if request
+                .path
+                .file_name()
+                .is_some_and(|name| name.to_string_lossy().starts_with("outline-only."))
+            {
+                (None, Some("L7: pub struct OutlineOnly;\n".to_string()))
+            } else {
+                (
+                    Some(String::from_utf8(bytes.clone()).unwrap()),
+                    None,
+                )
+            };
         Ok(FileSnapshot {
             path: request.path,
             content: handle(bytes),
             byte_len: bytes.len() as u64,
             modified_unix_ns: 0,
             mode: 0,
-            inline_utf8: Some(String::from_utf8(bytes.clone()).unwrap()),
-            outline: None,
+            inline_utf8,
+            outline,
         })
     }
 
@@ -72,7 +88,14 @@ impl FileEngine for Files {
         let before = files.get(&request.path).map(|bytes| handle(bytes));
         let after = match request.kind {
             FileEffectKind::Remove => {
-                files.remove(&request.path);
+                // Mirror real engines: removing an absent path is a NotFound.
+                if files.remove(&request.path).is_none() {
+                    return Err(EngineError::new(
+                        EngineErrorKind::NotFound,
+                        "remove target does not exist",
+                        false,
+                    ));
+                }
                 None
             }
             _ => {
@@ -246,6 +269,25 @@ impl TokenEngine for Tokens {
         })
     }
 
+    fn certify(
+        &self,
+        _invocation: &EngineInvocation,
+        bytes: &[u8],
+        claimed: &TokenAccounting,
+    ) -> Result<zero_abi::CertifyResult, EngineError> {
+        let recomputed = TokenAccounting {
+            tokenizer: "bytes".into(),
+            billed: bytes.len() as u64,
+            visible: bytes.len() as u64,
+            cached: 0,
+            certified: true,
+        };
+        Ok(zero_abi::CertifyResult {
+            matches: recomputed == *claimed,
+            recomputed,
+        })
+    }
+
     fn project(
         &self,
         invocation: &EngineInvocation,
@@ -353,6 +395,38 @@ fn production_kernel(root: &std::path::Path) -> ZeroKernel {
     )
     .unwrap()
 }
+/// production_kernel with a relaxed wall budget: full-suite parallel runs
+/// contend for CPU and can exceed the default 1s deadline mid-cell.
+fn production_kernel_relaxed(root: &std::path::Path) -> ZeroKernel {
+    let store_root = root.join(".zerostack");
+    let files = Arc::new(
+        ZeroFileEngine::open(root, &store_root, "contract").expect("open production file engine"),
+    );
+    let tokens = Arc::new(ZeroTokenEngine::open(&store_root, None));
+    ZeroKernel::new(
+        KernelContext {
+            workspace_root: root.to_path_buf(),
+            project_root: root.to_path_buf(),
+            session_id: "session".into(),
+            expected_state_root: None,
+            contract_digest: "contract".into(),
+        },
+        KernelBudget {
+            wall_ms: 20_000,
+            cpu_ms: 1_000,
+            memory_bytes: 64 * 1024 * 1024,
+            call_limit: 64,
+            task_limit: 8,
+            output_byte_limit: 64 * 1024,
+        },
+        files,
+        Arc::new(Graph),
+        Arc::new(Tokens),
+        root.join(".zerostack"),
+    )
+    .unwrap()
+}
+
 
 fn model_json(response: &zero_abi::ZeroKernelResponse) -> Value {
     let value = response.value.as_ref().expect("model-visible value");
@@ -421,6 +495,65 @@ fn transaction_rolls_back_created_file() {
     cell.write("new.txt", b"new".to_vec(), None).unwrap();
     cell.rollback_transaction().unwrap();
     assert!(!files.0.lock().contains_key(&PathBuf::from("new.txt")));
+    drop(cell);
+    assert_eq!(kernel.live_frames(), 0);
+}
+
+#[cfg(unix)]
+#[test]
+#[test]
+#[test]
+fn outline_read_is_explicitly_labeled() {
+    let root = tempdir().unwrap();
+    let files = Arc::new(Files::default());
+    let kernel = kernel(root.path(), Arc::clone(&files) as Arc<dyn FileEngine>);
+    let mut cell = kernel.begin_cell("outline-read").unwrap();
+    files.0.lock().insert(
+        PathBuf::from("crates/outline-only.rs"),
+        b"pub struct OutlineOnly;\n".to_vec(),
+    );
+    let text = cell
+        .read("crates/outline-only.rs", ReadOptions::default())
+        .unwrap();
+    assert!(
+        text.starts_with("[ZeroStack READ OUTLINE - not file content"),
+        "outline must carry the unambiguous header: {text}"
+    );
+    assert!(text.contains("path=crates/outline-only.rs"), "{text}");
+    assert!(text.contains("exact="), "{text}");
+    drop(cell);
+    assert_eq!(kernel.live_frames(), 0);
+}
+
+#[test]
+fn remove_missing_path_keeps_transaction_alive() {
+    let root = tempdir().unwrap();
+    let files = Arc::new(Files::default());
+    let kernel = kernel(root.path(), Arc::clone(&files) as Arc<dyn FileEngine>);
+    let mut cell = kernel.begin_cell("transaction-remove").unwrap();
+    cell.begin_transaction().unwrap();
+    cell.write("kept.txt", b"kept".to_vec(), None).unwrap();
+    let error = cell
+        .remove("missing.txt", None)
+        .expect_err("remove of missing path must fail");
+    let not_found = match &error {
+        HostError::Engine(engine_error) => engine_error.kind == EngineErrorKind::NotFound,
+        HostError::Transaction(transaction_error) => matches!(
+            transaction_error,
+            TransactionError::Engine(engine_error)
+                if engine_error.kind == EngineErrorKind::NotFound
+        ),
+        _ => false,
+    };
+    assert!(not_found, "expected engine NotFound, got {error:?}");
+    // The earlier write must still commit; one failed effect cannot poison
+    // the whole transaction (pc_2ed8bb7745f4).
+    cell.commit_transaction().unwrap();
+    let files = files.0.lock();
+    assert_eq!(
+        files.get(&PathBuf::from("kept.txt")).map(Vec::as_slice),
+        Some(&b"kept"[..])
+    );
     drop(cell);
     assert_eq!(kernel.live_frames(), 0);
 }
@@ -957,7 +1090,7 @@ fn snap_search_uses_structural_engine_and_exact_file_snapshot() {
 fn snap_and_edit_commit_exactly_once_in_one_cell() {
     let root = tempdir().unwrap();
     write_fixture(root.path(), "edit.ts", "const before = 1;\n");
-    let kernel = production_kernel(root.path());
+    let kernel = production_kernel_relaxed(root.path());
 
     let response = kernel
         .execute_cell(
@@ -1429,7 +1562,7 @@ fn snap_reports_bom_and_mixed_newlines() {
 fn snap_edit_supports_line_replacement_and_anchored_insertion() {
     let root = tempdir().unwrap();
     write_fixture(root.path(), "typed.txt", "alpha\nbeta\ngamma\n");
-    let kernel = production_kernel(root.path());
+    let kernel = production_kernel_relaxed(root.path());
 
     let response = kernel
         .execute_cell(
@@ -1461,7 +1594,7 @@ fn snap_edit_supports_line_replacement_and_anchored_insertion() {
 fn snap_edit_replace_file_requires_unselected_snap() {
     let root = tempdir().unwrap();
     write_fixture(root.path(), "whole.txt", "old\n");
-    let kernel = production_kernel(root.path());
+    let kernel = production_kernel_relaxed(root.path());
 
     let response = kernel
         .execute_cell(
@@ -1482,7 +1615,7 @@ fn snap_edit_replace_exact_requires_explicit_single_match() {
     let root = tempdir().unwrap();
     let original = "const alpha = 1;\n";
     write_fixture(root.path(), "count.ts", original);
-    let kernel = production_kernel(root.path());
+    let kernel = production_kernel_relaxed(root.path());
 
     let response = kernel
         .execute_cell(
@@ -1521,7 +1654,7 @@ fn effect_existing_absence_target_rolls_back_related_edit() {
     let index = "mod old;\n";
     write_fixture(root.path(), "src/mod.rs", index);
     write_fixture(root.path(), "src/new.rs", "already here\n");
-    let kernel = production_kernel(root.path());
+    let kernel = production_kernel_relaxed(root.path());
 
     let response = kernel
         .execute_cell(
@@ -1855,4 +1988,176 @@ fn optional_connector_properties_follow_javascript_undefined_semantics() {
     assert_eq!(value["snapTextMissing"], true);
     assert_eq!(value["expandedTextMissing"], true);
     assert_eq!(value["expandedBytes"], "00ff");
+}
+
+#[test]
+fn edit_path_rejects_whole_file_replacement_string() {
+    let root = tempdir().unwrap();
+    let kernel = production_kernel_relaxed(root.path());
+    let response = kernel
+        .execute_cell(r#"
+            const p = 'guard-edit.txt';
+            await z.write(p, 'v1\nv2\nv3\n');
+            let caught = null;
+            try { await z.edit(p, 'WHOLE-FILE-REPLACEMENT'); }
+            catch (e) { caught = String(e.message || e); }
+            const after = await z.read(p);
+            return [caught, after];
+        "#)
+        .unwrap();
+    if response.outcome != zero_abi::ZeroKernelOutcome::Completed || response.value.is_none() {
+        panic!("response: {response:?}");
+    }
+    // Cell returns serialize to a JSON-encoded string in the response value.
+    let raw = response.value.unwrap();
+    let raw = raw.as_str().expect("cell return must serialize to a string");
+    let pair: Value = serde_json::from_str(raw).unwrap();
+    let caught = pair
+        .get(0)
+        .and_then(|v| v.as_str())
+        .unwrap_or_default()
+        .to_owned();
+    assert!(
+        caught.contains("refuses a bare replacement string"),
+        "{caught}"
+    );
+    assert_eq!(
+        pair.get(1).and_then(Value::as_str),
+        Some("v1\nv2\nv3\n"),
+        "file must be untouched"
+    );
+}
+
+#[test]
+fn edit_path_find_replacement_substitutes_first_unique_match() {
+    let root = tempdir().unwrap();
+    let kernel = production_kernel_relaxed(root.path());
+    let response = kernel
+        .execute_cell(r#"
+            const p = 'guard-edit-sub.txt';
+            await z.write(p, 'v1\nv2\nv3\n');
+            await z.edit(p, { find: 'v2', replacement: 'V2-DONE' });
+            return await z.read(p);
+        "#)
+        .unwrap();
+    if response.outcome != zero_abi::ZeroKernelOutcome::Completed {
+        panic!("cell failed under load: {response:?}");
+    }
+    let returned = response.value.unwrap();
+    assert_eq!(
+        returned.as_str(),
+        // execute_cell returns the TokenZero projection of the cell value:
+        // a plain string return arrives JSON-quoted.
+        Some("\"v1\\nV2-DONE\\nv3\\n\""),
+        "substituted content must round-trip"
+    );
+}
+
+#[test]
+fn edit_path_replace_file_kind_replaces_deliberately() {
+    let root = tempdir().unwrap();
+    let kernel = production_kernel_relaxed(root.path());
+    let response = kernel
+        .execute_cell(r#"
+            const p = 'guard-edit-rf.txt';
+            await z.write(p, 'old content\n');
+            await z.edit(p, { kind: 'replace_file', content: 'fresh\n' });
+            return await z.read(p);
+        "#)
+        .unwrap();
+    assert_eq!(response.outcome, zero_abi::ZeroKernelOutcome::Completed);
+    let returned = response.value.unwrap();
+    assert_eq!(
+        returned.as_str(),
+        Some("\"fresh\\n\""),
+        "deliberate replace_file content must round-trip"
+    );
+}
+
+#[test]
+fn snap_directory_error_guides_to_lookup() {
+    let root = tempdir().unwrap();
+    std::fs::create_dir_all(root.path().join("crates")).unwrap();
+    let kernel = production_kernel(root.path());
+    let response = kernel
+        .execute_cell(r#"
+            try { await z.snap({ path: 'crates' }); return 'NO-ERROR'; }
+            catch (e) { return String(e.message || e); }
+        "#)
+        .unwrap();
+    assert_eq!(response.outcome, zero_abi::ZeroKernelOutcome::Completed);
+    let message = response.value.unwrap().as_str().unwrap().to_owned();
+    assert!(
+        message.contains("is a directory") && message.contains("z.lookup"),
+        "{message}"
+    );
+}
+
+#[test]
+fn asgrep_accepts_single_object_form() {
+    let root = tempdir().unwrap();
+    std::fs::write(
+        root.path().join("probe.rs"),
+        "pub struct AsgrepProbeMarker;\n",
+    )
+    .unwrap();
+    let files = Arc::new(Files::default());
+    let kernel = kernel(root.path(), files);
+    let object_form = kernel
+        .execute_cell(r#"
+            const r = await z.asgrep({ query: "AsgrepProbeMarker", mode: "natural" });
+            return r.hits.length;
+        "#)
+        .unwrap();
+    assert_eq!(object_form.outcome, zero_abi::ZeroKernelOutcome::Completed);
+    let positional = kernel
+        .execute_cell(r#"
+            const r = await z.asgrep("AsgrepProbeMarker", { mode: "natural" });
+            return r.hits.length;
+        "#)
+        .unwrap();
+    assert_eq!(positional.outcome, zero_abi::ZeroKernelOutcome::Completed);
+}
+
+#[test]
+fn state_namespace_call_carries_guidance() {
+    let root = tempdir().unwrap();
+    let kernel = kernel(root.path(), Arc::new(Files::default()));
+    let response = kernel
+        .execute_cell(r#"
+            try { z.state(); return 'NO-ERROR'; }
+            catch (e) { return String(e.message || e); }
+        "#)
+        .unwrap();
+    let message = response.value.unwrap().as_str().unwrap().to_owned();
+    assert!(message.contains("z.state.get"), "{message}");
+}
+
+#[test]
+fn shell_output_accounting_is_truthful_against_visible_bytes() {
+    // RACC truthfulness at the shell boundary: reported visible tokens must
+    // equal a fresh measurement over the exact stdout bytes the model saw.
+    let root = tempdir().unwrap();
+    // The byte-faithful token engine makes the truthfulness property exact.
+    let files = Arc::new(Files::default());
+    let kernel = kernel(root.path(), files);
+    let payload = "SHELL_OK accounting probe";
+    let response = kernel
+        .execute_cell(&format!(
+            "return await z.shell([\"printf\", {payload:?}]);"
+        ))
+        .unwrap();
+    assert_eq!(response.outcome, zero_abi::ZeroKernelOutcome::Completed);
+    let raw = response.value.unwrap();
+    let raw = raw.as_str().expect("shell result serializes to a string");
+    let shell: Value = serde_json::from_str(raw).unwrap();
+    let stdout = shell["stdout"].as_str().unwrap();
+    assert_eq!(stdout, payload);
+    let accounting = &shell["accounting"];
+    let visible = accounting["visible"].as_u64().unwrap();
+    let billed = accounting["billed"].as_u64().unwrap();
+    // Byte-faithful estimator: visible tokens must track the exact stdout
+    // byte length the model received (production_kernel counts bytes).
+    assert_eq!(visible as usize, stdout.len(), "visible must match bytes");
+    assert_eq!(billed as usize, stdout.len(), "billed must match bytes");
 }

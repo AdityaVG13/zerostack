@@ -166,3 +166,78 @@ fn comments_in_expressions_do_not_become_values() {
         json!(true),
     );
 }
+
+fn run_err(plan: &str) -> String {
+    let limits = HostLimits::new(
+        8 * 1024 * 1024,
+        256 * 1024,
+        Duration::from_secs(5),
+        50_000,
+        1,
+        2,
+        4,
+        4 * 1024,
+        1024 * 1024,
+    )
+    .unwrap();
+    let registration = GlobalRegistration {
+        root: "z".into(),
+        capabilities: vec![CapabilityDescriptor::new("z", "read")],
+    };
+    Host::new_zero_kernel(limits, registration)
+        .unwrap()
+        .execute(plan, Rc::new(UnusedConnector))
+        .unwrap_err()
+        .to_string()
+}
+
+#[test]
+fn carriage_return_escape_decodes_to_carriage_return() {
+    // pc_78f6e48133fb: \r previously survived as literal backslash-r bytes.
+    assert_eq!(
+        run(r#"
+            return "a\rb";
+            "#,),
+        json!("a\rb"),
+    );
+}
+
+#[test]
+fn full_standard_escape_battery_decodes() {
+    assert_eq!(
+        run(r#"
+            return ["\'", "\"", "\\n", "\t", "\r\n", "\0", "\x41", "\u0041", "\u{1F680}", "\q"];
+            "#,),
+        json!([
+            "'", "\"", "\\n", "\t", "\r\n", "\u{0}", "A", "A", "🚀", "q",
+        ]),
+    );
+}
+
+#[test]
+fn escaped_backslash_then_n_is_not_a_newline() {
+    // Sequential-replace regression: backslash backslash n must stay backslash n.
+    assert_eq!(
+        run(r#"
+            const value = "\\n";
+            return [value.length, value];
+            "#,),
+        json!([2, "\\n"]),
+    );
+}
+
+#[test]
+fn template_literal_escapes_decode() {
+    assert_eq!(
+        run(r#"
+            return `a\rb\tc${1 + 1}\u{41}`;
+            "#,),
+        json!("a\rb\tc2A"),
+    );
+}
+
+#[test]
+fn legacy_octal_escape_is_rejected_not_corrupted() {
+    let message = run_err(r#"return "\101";"#);
+    assert!(message.contains("not supported"), "{message}");
+}

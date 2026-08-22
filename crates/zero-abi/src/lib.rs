@@ -226,7 +226,8 @@ pub use zbf::{
     zbf_contract_digest, zbf_contract_manifest,
 };
 pub use zero_kernel::{
-    AsgrepMode, AsgrepOptions, CancellationProbe, CompressionRequest, CompressionResult,
+    AsgrepMode, AsgrepOptions, CancellationProbe, CertifyResult, CompressionRequest,
+    CompressionResult,
     EngineCallContext, EngineError, EngineErrorKind, EngineInvocation, ExpandOptions,
     FileEffectKind, FileEffectReceipt, FileEffectRequest, FileEngine, FileLease, FileMetadata,
     FileReadRequest, FileSnapshot, GUEST_METHODS, HANDLE_DIGEST_BYTES, KernelBudget, KernelContext,

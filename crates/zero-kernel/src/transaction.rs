@@ -153,6 +153,7 @@ impl TransactionCoordinator {
             }
         };
         let mut recovered = Vec::new();
+        let mut recovery_details: Vec<String> = Vec::new();
         for entry in entries {
             let entry = entry.map_err(|error| {
                 TransactionError::Store(format!("read transaction entry: {error}"))
@@ -188,18 +189,29 @@ impl TransactionCoordinator {
             rollback_record(&*self.files, invocation, &mut record);
             persist_record(&path, &record)?;
             if record.state == TransactionState::RecoveryRequired {
-                // Preserve evidence and quarantine so the next reconcile recovers.
+                // Preserve evidence and quarantine so future reconciles recover.
+                // Quarantine EVERY failing record in this pass rather than
+                // aborting at the first: one poisoned journal must not hide
+                // the rest nor cost one cell per journal.
                 let poisoned = poisoned_journal_path(&path);
                 // Best-effort rename; if it fails we still surface RecoveryRequired.
                 let _ = fs::rename(&path, &poisoned);
-                let mut errors = record.rollback_errors.clone();
-                errors.push(format!(
+                recovery_details.extend(record.rollback_errors.clone());
+                recovery_details.push(format!(
                     "quarantined poisoned journal {}",
                     poisoned.display()
                 ));
-                return Err(TransactionError::RecoveryRequired(errors));
+                continue;
             }
             recovered.push(path);
+        }
+        if !recovery_details.is_empty() {
+            let mut details = vec![format!(
+                "{} poisoned journal(s) quarantined this pass",
+                recovery_details.len()
+            )];
+            details.extend(recovery_details);
+            return Err(TransactionError::RecoveryRequired(details));
         }
         Ok(recovered)
     }
@@ -301,6 +313,16 @@ impl Transaction {
                 Ok(receipt)
             }
             Err(error) => {
+                // A NotFound from the engine means the target object does not
+                // exist: nothing was mutated, so the transaction survives this
+                // effect. Drop only the unaplicable preparation and keep the
+                // cell alive (pc_2ed8bb7745f4: remove of a missing path used to
+                // settle the whole transaction and crash the cell at commit).
+                if error.kind == EngineErrorKind::NotFound {
+                    self.record.effects.pop();
+                    persist_record(&self.path, &self.record)?;
+                    return Err(error.into());
+                }
                 rollback_record(&*self.coordinator.files, &self.invocation, &mut self.record);
                 persist_record(&self.path, &self.record)?;
                 self.settled = true;
