@@ -452,7 +452,6 @@ impl VerifiedChild {
             // function returns; a suspended root is never handed back.
             command.creation_flags(0x0000_0004); // CREATE_SUSPENDED
         }
-        let spawn_started = std::time::Instant::now();
         let mut child = command.spawn()?;
         let pid = child.id();
         let start_key = ProcessIdentity::capture(pid)
@@ -981,11 +980,11 @@ fn darwin_bind_tree_to_owner() -> io::Result<()> {
                 // whole lifetime and block spawn until the tree root exited
                 // (pc_45b6d2d66fee family). Close everything above stderr
                 // except the ready-byte fd before becoming the watcher.
-                let table_size = unsafe { libc::getdtablesize() };
+                let table_size = libc::getdtablesize();
                 let mut closed = 0usize;
                 for fd in 3..table_size {
                     if fd != write_fd {
-                        unsafe { libc::close(fd) };
+                        libc::close(fd);
                         closed += 1;
                     }
                 }
