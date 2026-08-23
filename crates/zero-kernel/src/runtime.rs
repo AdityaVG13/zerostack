@@ -479,6 +479,7 @@ fn dispatch_direct(cell: &mut Cell, method: &str, args: Value) -> Result<Value, 
 
             // Shape inference: create / remove / substitute / replace_file
             if let Some(values) = patch.as_object() {
+                validate_edit_patch_fields(values)?;
                 // {remove: true} -> delete file
                 if values
                     .get("remove")
@@ -1027,6 +1028,60 @@ fn simplified_apply_request(
         "verify": verify,
     }))
     .map_err(json_error)
+}
+
+fn validate_edit_patch_fields(values: &Map<String, Value>) -> Result<(), ConnectorError> {
+    const ALLOWED: &[&str] = &[
+        "remove",
+        "create",
+        "kind",
+        "find",
+        "old",
+        "pattern",
+        "replace",
+        "new",
+        "replacement",
+        "expectedCount",
+        "content",
+    ];
+    if let Some(key) = values.keys().find(|key| !ALLOWED.contains(&key.as_str())) {
+        return Err(ConnectorError::new(format!(
+            "z.edit patch has unknown field {key:?}; accepted fields: {}",
+            ALLOWED.join(", ")
+        )));
+    }
+
+    let remove = values.get("remove").and_then(Value::as_bool) == Some(true);
+    if values.contains_key("remove") && !remove {
+        return Err(ConnectorError::new(
+            "z.edit remove field must be exactly true",
+        ));
+    }
+    if values.contains_key("create") && values.get("create").and_then(Value::as_str).is_none() {
+        return Err(ConnectorError::new("z.edit create field must be a string"));
+    }
+    let edit = values.keys().any(|key| {
+        matches!(
+            key.as_str(),
+            "kind"
+                | "find"
+                | "old"
+                | "pattern"
+                | "replace"
+                | "new"
+                | "replacement"
+                | "expectedCount"
+                | "content"
+        )
+    });
+    let action_count =
+        usize::from(remove) + usize::from(values.contains_key("create")) + usize::from(edit);
+    if action_count != 1 {
+        return Err(ConnectorError::new(format!(
+            "z.edit patch requires exactly one action, found {action_count}"
+        )));
+    }
+    Ok(())
 }
 
 fn apply_edit_patch(

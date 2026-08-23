@@ -1929,6 +1929,20 @@ fn canonical_kernel_binds_graph_hits_without_repository_indexes() {
             ]);
             const hits = ast[0];
             const expandedHit = await z.read(hits.hits[0].source);
+            const exactModes = await z.parallel([
+              async () => await z.asgrep("alpha", {
+                mode: "word",
+                path: "src/lib.rs",
+                language: "rust",
+                limit: 1,
+              }),
+              async () => await z.asgrep("alpha", {
+                mode: "literal",
+                path: "src/lib.rs",
+                language: "rust",
+                limit: 1,
+              }),
+            ]);
             const graph = await z.parallel([
               async () => await z.asgrep("alpha", {
                 mode: "symbols",
@@ -1952,7 +1966,7 @@ fn canonical_kernel_binds_graph_hits_without_repository_indexes() {
               cardinality: "exactly_one",
               selection: {symbol: "alpha"},
             });
-            return {hits, expandedHit, snap, symbol, graph, astCount: ast.length};
+            return {hits, exactModes, expandedHit, snap, symbol, graph, astCount: ast.length};
             "#,
         )
         .unwrap();
@@ -1966,6 +1980,9 @@ fn canonical_kernel_binds_graph_hits_without_repository_indexes() {
     let value = model_json(&response);
     assert_eq!(value["graph"].as_array().map(Vec::len), Some(2));
     assert_eq!(value["astCount"], 2);
+    for result in value["exactModes"].as_array().unwrap() {
+        assert_eq!(result["hits"][0]["path"], "src/lib.rs");
+    }
     assert_eq!(
         value["hits"]["coverage"]["freshnessVerified"],
         serde_json::Value::Bool(true)
@@ -2325,6 +2342,20 @@ fn caught_create_conflict_keeps_cell_committable() {
     assert_eq!(
         std::fs::read_to_string(root.path().join("existing.txt")).unwrap(),
         "original"
+    );
+
+    let unknown = kernel
+        .execute_cell(
+            "return await z.edit('existing.txt', {find:'original', replacement:'original', surprise:true});",
+        )
+        .unwrap();
+    assert_eq!(unknown.outcome, zero_abi::ZeroKernelOutcome::Failed);
+    assert!(
+        unknown
+            .error
+            .as_ref()
+            .is_some_and(|error| error.detail.contains("unknown field \"surprise\"")),
+        "{unknown:?}"
     );
 }
 
