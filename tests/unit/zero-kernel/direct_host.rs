@@ -1960,6 +1960,23 @@ fn canonical_kernel_binds_graph_hits_without_repository_indexes() {
     let value = model_json(&response);
     assert_eq!(value["graph"].as_array().map(Vec::len), Some(2));
     assert_eq!(value["astCount"], 2);
+    assert_eq!(
+        value["hits"]["coverage"]["freshnessVerified"],
+        serde_json::Value::Bool(true)
+    );
+    assert_eq!(
+        value["hits"]["coverage"]["tierAPct"].as_f64(),
+        Some(100.0)
+    );
+    assert_eq!(
+        value["graph"][0]["coverage"]["freshnessVerified"],
+        serde_json::Value::Bool(true)
+    );
+    assert!(
+        value["graph"][0]["coverage"]["tierAPct"]
+            .as_f64()
+            .is_some_and(|coverage| coverage >= 99.0)
+    );
     assert_eq!(value["hits"]["hits"][0]["path"], "src/lib.rs");
     assert_eq!(
         value["hits"]["hits"][0]["source"],
