@@ -31,9 +31,14 @@ pub const OPERATION_TRACE_LIMIT: usize = 128;
 /// introspection; it is not an engine operation registry.
 pub const GUEST_METHODS: &[&str] = &[
     "read",
+    "find",
+    "edit",
+    "apply",
+    "run",
+    // Compatibility aliases: kept callable but omitted from z.help()'s
+    // canonical six-operation surface.
     "snap",
     "write",
-    "edit",
     "effect",
     "remove",
     "transact",

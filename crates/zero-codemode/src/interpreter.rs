@@ -2444,15 +2444,12 @@ impl<'tree> Interpreter<'tree> {
         name: &str,
         args: Vec<Value<'tree>>,
     ) -> Result<Value<'tree>, Fault<'tree>> {
-        const DIRECT: &[&str] = &[
-            "read", "snap", "write", "edit", "effect", "remove", "transact", "asgrep", "lookup",
-            "parallel", "pipeline", "shell", "measure", "project", "compress", "expand", "help",
-            "inspect",
-        ];
-        if !DIRECT.contains(&name) {
+        // zero-abi is the single method catalog. Never mirror it here:
+        // duplicated catalogs are how the final six-operation aliases were
+        // registered by the kernel but rejected before dispatch.
+        if !zero_abi::GUEST_METHODS.contains(&name) {
             return Err(Fault::Host(HostError::Data(format!(
-                "z.{name} is not a ZeroKernel method; methods: {}",
-                DIRECT.join(", ")
+                "z.{name} is not a ZeroKernel method; use one of read, find, edit, apply, run, state (see z.help())"
             ))));
         }
         match name {
@@ -2461,7 +2458,8 @@ impl<'tree> Interpreter<'tree> {
             "transact" => self.zero_kernel_transact(args),
             "parallel" => self.zero_kernel_parallel(args),
             "pipeline" => self.zero_kernel_pipeline(args),
-            "read" | "snap" | "write" | "edit" | "effect" | "remove" | "asgrep" | "lookup"
+            "read" | "find" | "edit" | "apply" | "run"
+            | "snap" | "write" | "effect" | "remove" | "asgrep" | "lookup"
             | "shell" | "measure" | "project" | "compress" | "expand" => {
                 self.call_tool("z", name, args)
             }
@@ -2668,34 +2666,36 @@ impl<'tree> Interpreter<'tree> {
     fn z_help(&mut self) -> Result<Value<'tree>, Fault<'tree>> {
         let json = serde_json::json!({
             "surface": "z",
-            "methods": zero_abi::GUEST_METHODS,
+            "methods": ["read", "find", "edit", "apply", "run", "state"],
             "signatures": {
-                "asgrep": "z.asgrep(query, {mode?, path?, language?, source?, sink?, limit?}) -> StructuralResult",
-                "snap": "z.snap(path | {path?, target?:{path|search}, cardinality?, selection?:{lines|bytes|symbol|exactText}, view?}) -> SnapResult",
-                "expand": "z.expand(handle | SnapResult, {bytes?|lines?|symbol?|next?|offset?|limit?|all?}) -> ExpandResult",
-                "edit": "z.edit(path | selectedSnap, {find, replacement} | {kind, ...} patch, {expectedPreimage?}) - bare replacement strings are refused",
-                "parallel": "z.parallel([async () => operation, ...]) -> results in input order",
-                "effect": "z.effect({targets: {name: {path, expect?: 'exists'|'absent'}}, changes: [{target, kind, old?, replacement?, content?, expectedCount?, anchor?}], verify?: {parse?, changedTargetsOnly?, command?: {argv, timeoutMs}}}) -> staged EffectResult",
+                "read": "z.read(target, options?) - file content, directory listing, or exact-handle expansion",
+                "find": "z.find(query | {query, mode?, path?, language?, source?, sink?, limit?}, options?)",
+                "edit": "z.edit(path | snap, {find, replacement} | {create} | {remove:true} | {kind:'replace_file', content})",
+                "apply": "z.apply([{path, edit:{find,replacement}} | {path,create} | {path,replace} | {path,remove:true} | {path,before|after,content}], verify?)",
+                "run": "z.run(argv | script, {cwd?, timeout_ms?, stdin?, env?})",
+                "state": "z.state.get/set/has/delete/list"
             },
-            "selectedEditPatches": [
-                "{find, replacement} on a path target: replaces the first unique occurrence",
-                "{find, replacement} on a snap: find must equal the entire snapped selection byte-for-byte including trailing newline",
-                "{kind: 'replace_file', content} deliberately replaces a whole file",
-                "{kind: 'replace_exact', old, replacement, expectedCount: 1}",
-                "{kind: 'replace_lines', content}",
-                "{kind: 'insert_before', content}",
-                "{kind: 'insert_after', content}"
+            "examples": {
+                "read_file": "await z.read('src/lib.rs')",
+                "read_directory": "await z.read('src/')",
+                "find_callers": "await z.find({query:'executeCell', mode:'callers', path:'src'})",
+                "edit_substitute": "await z.edit('src/lib.rs', {find:'old', replacement:'new'})",
+                "edit_create": "await z.edit('new.txt', {create:'content'})",
+                "edit_remove": "await z.edit('old.txt', {remove:true})",
+                "apply_atomic": "await z.apply([{path:'a.rs',edit:{find:'old',replacement:'new'}},{path:'b.rs',create:'new'}])",
+                "run": "await z.run(['cargo','test','-p','my-crate'])"
+            },
+            "rules": [
+                "read/find/run are read-only and may run in parallel",
+                "edit is one-file mutation; apply is atomic multi-file mutation",
+                "apply cannot mix with edit in the same cell; failure rolls back everything",
+                "when edit find does not match, re-read or re-snap before retrying"
             ],
-            "effectKinds": [
-                "replace_exact",
-                "replace_file",
-                "insert_before",
-                "insert_after",
-                "create_file",
-                "remove_file"
-            ],
-            "effectVerification": "changedTargetsOnly is enforced; use verify.command argv for language-specific checks",
-            "effectComposition": "z.effect must be the cell's only mutation family; use one z.effect or start a separate ZeroKernel call",
+            "compatibilityAliases": [
+                "snap", "expand", "lookup", "asgrep", "write", "remove",
+                "effect", "shell", "parallel", "pipeline", "transact",
+                "measure", "project", "compress", "inspect"
+            ]
         });
         self.convert_from_json(json, false).map_err(Fault::Host)
     }

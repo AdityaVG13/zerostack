@@ -651,9 +651,9 @@ fn typescript_cell_uses_only_direct_z_methods() {
     let visible = response.value.unwrap().as_str().unwrap().to_owned();
     assert!(visible.contains("content"), "{visible}");
     assert!(visible.contains("read"), "{visible}");
-    assert!(visible.contains("selectedEditPatches"), "{visible}");
-    assert!(visible.contains("asgrep"), "{visible}");
-    assert!(visible.contains("parallel"), "{visible}");
+    assert!(visible.contains("apply_atomic"), "{visible}");
+    assert!(visible.contains("find_callers"), "{visible}");
+    assert!(visible.contains("compatibilityAliases"), "{visible}");
     assert!(!visible.contains("invoke"), "{visible}");
     assert!(!visible.contains("zero.fs"), "{visible}");
     assert_eq!(kernel.live_frames(), 0);
@@ -929,7 +929,7 @@ fn snap_full_view_expands_exact_source_and_is_listed() {
               view: {mode: "full"},
             });
             const expanded = await z.expand(snap);
-            return {methods: help.methods, snap, expanded};
+            return {methods: help.methods, aliases: help.compatibilityAliases, snap, expanded};
             "#,
         )
         .unwrap();
@@ -941,8 +941,14 @@ fn snap_full_view_expands_exact_source_and_is_listed() {
         response.error
     );
     let value = model_json(&response);
-    let methods = value["methods"].as_array().unwrap();
-    assert!(methods.iter().any(|method| method == "snap"));
+    assert_eq!(
+        value["methods"],
+        json!(["read", "find", "edit", "apply", "run", "state"])
+    );
+    let aliases = value["aliases"]
+        .as_array()
+        .expect("compatibilityAliases array");
+    assert!(aliases.iter().any(|method| method == "snap"));
     assert_eq!(value["snap"]["schema"], "zerostack.snap.workspace");
     assert_eq!(value["snap"]["path"], "src/lib.rs");
     assert_eq!(value["snap"]["view"]["mode"], "full");
@@ -2160,4 +2166,86 @@ fn shell_output_accounting_is_truthful_against_visible_bytes() {
     // byte length the model received (production_kernel counts bytes).
     assert_eq!(visible as usize, stdout.len(), "visible must match bytes");
     assert_eq!(billed as usize, stdout.len(), "billed must match bytes");
+}
+
+#[test]
+fn final_surface_read_lists_directories() {
+    let root = tempdir().unwrap();
+    std::fs::create_dir_all(root.path().join("src")).unwrap();
+    std::fs::write(root.path().join("src/a.rs"), "a").unwrap();
+    std::fs::write(root.path().join("src/b.rs"), "b").unwrap();
+    let kernel = production_kernel_relaxed(root.path());
+    let response = kernel.execute_cell("return await z.read('src');").unwrap();
+    assert_eq!(response.outcome, zero_abi::ZeroKernelOutcome::Completed);
+    let raw = response.value.unwrap();
+    let listing: Value = serde_json::from_str(raw.as_str().unwrap()).unwrap();
+    let entries = listing.as_array().unwrap();
+    assert_eq!(entries.len(), 2, "directory read must list both entries");
+    assert!(entries.iter().any(|v| v.as_str().unwrap().ends_with("a.rs")));
+}
+
+#[test]
+fn final_surface_edit_creates_and_removes() {
+    let root = tempdir().unwrap();
+    let kernel = production_kernel_relaxed(root.path());
+    let created = kernel
+        .execute_cell("return await z.edit('created.txt', {create:'payload'});")
+        .unwrap();
+    assert_eq!(created.outcome, zero_abi::ZeroKernelOutcome::Completed);
+    assert_eq!(std::fs::read_to_string(root.path().join("created.txt")).unwrap(), "payload");
+
+    let removed = kernel
+        .execute_cell("return await z.edit('created.txt', {remove:true});")
+        .unwrap();
+    assert_eq!(removed.outcome, zero_abi::ZeroKernelOutcome::Completed);
+    assert!(!root.path().join("created.txt").exists());
+}
+
+#[test]
+fn final_surface_apply_is_atomic_and_flat() {
+    let root = tempdir().unwrap();
+    std::fs::write(root.path().join("a.txt"), "old").unwrap();
+    let kernel = production_kernel_relaxed(root.path());
+    let response = kernel
+        .execute_cell(
+            r#"return await z.apply([
+                {path:'a.txt', edit:{find:'old', replacement:'new'}},
+                {path:'b.txt', create:'created'}
+            ]);"#,
+        )
+        .unwrap();
+    assert_eq!(response.outcome, zero_abi::ZeroKernelOutcome::Completed, "{response:?}");
+    assert_eq!(std::fs::read_to_string(root.path().join("a.txt")).unwrap(), "new");
+    assert_eq!(std::fs::read_to_string(root.path().join("b.txt")).unwrap(), "created");
+}
+
+#[test]
+fn final_surface_find_and_run_aliases_work() {
+    let root = tempdir().unwrap();
+    let files = Arc::new(Files::default());
+    let kernel = kernel(root.path(), files);
+    let find = kernel
+        .execute_cell("const r = await z.find({query:'alpha', mode:'natural'}); return r.hits.length;")
+        .unwrap();
+    assert_eq!(find.outcome, zero_abi::ZeroKernelOutcome::Completed, "{find:?}");
+
+    let run = kernel
+        .execute_cell("const r = await z.run(['printf','RUN_OK']); return r.stdout;")
+        .unwrap();
+    assert_eq!(run.outcome, zero_abi::ZeroKernelOutcome::Completed, "{run:?}");
+    assert_eq!(run.value.unwrap().as_str(), Some("\"RUN_OK\""));
+}
+
+#[test]
+fn final_surface_help_teaches_only_six_operations() {
+    let root = tempdir().unwrap();
+    let kernel = kernel(root.path(), Arc::new(Files::default()));
+    let response = kernel.execute_cell("return await z.help();").unwrap();
+    let raw = response.value.unwrap();
+    let help: Value = serde_json::from_str(raw.as_str().unwrap()).unwrap();
+    assert_eq!(
+        help["methods"],
+        json!(["read", "find", "edit", "apply", "run", "state"])
+    );
+    assert!(help["examples"]["apply_atomic"].as_str().unwrap().contains("z.apply"));
 }

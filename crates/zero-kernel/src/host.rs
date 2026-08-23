@@ -142,6 +142,10 @@ impl DirectCallContext {
         self.output_byte_limit
     }
 
+    pub(crate) fn project_root(&self) -> &std::path::Path {
+        &self.invocation.context.project_root
+    }
+
     pub fn read(&self, path: PathBuf, options: ReadOptions) -> Result<String, HostError> {
         let _task =
             LiveTaskGuard::acquire(Arc::clone(&self.live_tasks), Arc::clone(&self.frame_tasks));

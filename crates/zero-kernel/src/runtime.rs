@@ -46,7 +46,7 @@ impl Connector for CellConnector {
             .map_err(|error| ConnectorError::new(error.to_string()))?;
         if matches!(
             capability.method.as_str(),
-            "read" | "lookup" | "asgrep" | "shell" | "measure" | "project" | "compress" | "expand"
+            "read" | "lookup" | "asgrep" | "find" | "shell" | "run" | "measure" | "project" | "compress" | "expand"
         ) {
             let readonly = {
                 let slot = self.cell.borrow();
@@ -117,19 +117,43 @@ fn dispatch_concurrent(
     let positional = positional(args);
     match method {
         "read" => {
-            let path = string_arg(&positional, 0, "z.read path")?;
-            let options = positional
-                .get(1)
-                .cloned()
-                .map(normalize_keys)
-                .map(serde_json::from_value::<ReadOptions>)
-                .transpose()
-                .map_err(json_error)?
-                .unwrap_or_default();
-            context
-                .read(PathBuf::from(path), options)
-                .map(Value::String)
-                .map_err(host_error)
+            let path = string_arg(&positional, 0, "z.read target")?;
+            let path_buf = PathBuf::from(&path);
+            let full_path = if path_buf.is_absolute() {
+                path_buf.clone()
+            } else {
+                context.project_root().join(&path_buf)
+            };
+            if full_path.is_dir() {
+                let options = positional
+                    .get(1)
+                    .cloned()
+                    .map(normalize_keys)
+                    .map(serde_json::from_value::<LookupOptions>)
+                    .transpose()
+                    .map_err(json_error)?
+                    .unwrap_or_default();
+                let paths = context.lookup(path_buf, options).map_err(host_error)?;
+                Ok(Value::Array(
+                    paths
+                        .into_iter()
+                        .map(|p| Value::String(p.to_string_lossy().into_owned()))
+                        .collect(),
+                ))
+            } else {
+                let options = positional
+                    .get(1)
+                    .cloned()
+                    .map(normalize_keys)
+                    .map(serde_json::from_value::<ReadOptions>)
+                    .transpose()
+                    .map_err(json_error)?
+                    .unwrap_or_default();
+                context
+                    .read(path_buf, options)
+                    .map(Value::String)
+                    .map_err(host_error)
+            }
         }
         "lookup" => {
             let path = positional.first().and_then(Value::as_str).unwrap_or(".");
@@ -151,7 +175,7 @@ fn dispatch_concurrent(
                     .collect(),
             ))
         }
-        "asgrep" => {
+        "asgrep" | "find" => {
             // Accept both calling conventions: z.asgrep(query, {options}) and
             // the single-object form z.asgrep({query, path, ...}) that new
             // agents naturally try first (pc_cf4c50f47270).
@@ -186,7 +210,7 @@ fn dispatch_concurrent(
             serde_json::to_value(context.asgrep(query, options).map_err(host_error)?)
                 .map_err(json_error)
         }
-        "shell" => {
+        "shell" | "run" => {
             let (command, options) = shell_arguments(&positional)?;
             serde_json::to_value(context.shell(command, options).map_err(host_error)?)
                 .map_err(json_error)
@@ -422,9 +446,7 @@ fn dispatch_direct(cell: &mut Cell, method: &str, args: Value) -> Result<Value, 
             let target = positional
                 .first()
                 .ok_or_else(|| ConnectorError::new("z.edit target is required"))?;
-            let path = target.as_str().map(|s| s.to_owned()).unwrap_or_else(|| {
-                target.get("path").and_then(Value::as_str).unwrap_or_default().to_owned()
-            });
+            let (path, expected) = edit_target(target, positional.get(2))?;
             let patch = positional
                 .get(1)
                 .cloned()
@@ -434,26 +456,26 @@ fn dispatch_direct(cell: &mut Cell, method: &str, args: Value) -> Result<Value, 
             if let Some(values) = patch.as_object() {
                 // {remove: true} -> delete file
                 if values.get("remove").and_then(Value::as_bool).unwrap_or(false) {
-                    let expected = expected_preimage(positional.get(2))?;
                     serde_json::to_value(cell.remove(path, expected).map_err(host_error)?)
-                        .map_err(json_error)?
+                        .map_err(json_error)
                 }
-                // {create: content} or {kind: 'replace_file', content} -> write file
-                else if let Some(content) = values.get("create").or_else(|| values.get("content")).and_then(Value::as_str) {
+                // Only the explicit create key bypasses read/preimage lookup.
+                // Typed patches carrying content (replace_file/replace_lines/
+                // insert_before/after) MUST stay on the verified edit path.
+                else if let Some(content) = values.get("create").and_then(Value::as_str) {
                     serde_json::to_value(
-                        cell.write(path, content.into_bytes(), None).map_err(host_error)?,
+                        cell.write(path, content.as_bytes().to_vec(), None).map_err(host_error)?,
                     )
-                    .map_err(json_error)?
+                    .map_err(json_error)
                 }
                 else {
                     // Fall through to standard edit path below
-                    let expected = expected_preimage(positional.get(2))?;
                     let source = cell.read_exact(&path).map_err(host_error)?;
                     let (postimage, patch_text) = apply_edit_patch(&source, target, patch)?;
                     serde_json::to_value(
                         cell.edit(path, postimage, patch_text, expected).map_err(host_error)?,
                     )
-                    .map_err(json_error)?
+                    .map_err(json_error)
                 }
             }
             else if patch.is_string() {
@@ -468,7 +490,7 @@ fn dispatch_direct(cell: &mut Cell, method: &str, args: Value) -> Result<Value, 
                     cell.write(path, patch.as_str().unwrap_or("").as_bytes().to_vec(), None)
                         .map_err(host_error)?,
                 )
-                .map_err(json_error)?
+                .map_err(json_error)
             }
             else {
                 return Err(ConnectorError::new(
@@ -476,7 +498,16 @@ fn dispatch_direct(cell: &mut Cell, method: &str, args: Value) -> Result<Value, 
                 ));
             }
         }
-        "find" => dispatch_direct(cell, "asgrep", args),
+        "apply" => {
+            let request = simplified_apply_request(
+                positional
+                    .first()
+                    .cloned()
+                    .ok_or_else(|| ConnectorError::new("z.apply operations are required"))?,
+                positional.get(1).cloned(),
+            )?;
+            serde_json::to_value(cell.effect(request).map_err(host_error)?).map_err(json_error)
+        }
         "effect" => {
             let request = positional
                 .first()
@@ -748,6 +779,153 @@ fn edit_target(
             "z.edit target must be a path string or SnapResult",
         )),
     }
+}
+
+
+/// Compile the final ergonomic z.apply array into the strict EffectRequest IR.
+/// The model supplies flat path-local operations; target indirection and effect
+/// kinds stay internal to the kernel.
+fn simplified_apply_request(
+    operations: Value,
+    verify: Option<Value>,
+) -> Result<EffectRequest, ConnectorError> {
+    let ops = operations.as_array().ok_or_else(|| {
+        ConnectorError::new(
+            "z.apply expects an array, e.g. [{path: 'a.rs', edit: {find: 'old', replacement: 'new'}}]",
+        )
+    })?;
+    if ops.is_empty() {
+        return Err(ConnectorError::new("z.apply requires at least one operation"));
+    }
+
+    let mut targets = Map::new();
+    let mut changes = Vec::with_capacity(ops.len());
+    for (index, operation) in ops.iter().enumerate() {
+        let op = operation.as_object().ok_or_else(|| {
+            ConnectorError::new(format!(
+                "z.apply operation {index} must be an object with path + edit/create/remove"
+            ))
+        })?;
+        let path = op.get("path").and_then(Value::as_str).ok_or_else(|| {
+            ConnectorError::new(format!("z.apply operation {index} requires a string path"))
+        })?;
+        let target = format!("t{index}");
+
+        let (expect, change) = if let Some(content) = op.get("create").and_then(Value::as_str) {
+            (
+                "absent",
+                serde_json::json!({
+                    "target": target,
+                    "kind": "create_file",
+                    "content": content,
+                }),
+            )
+        } else if op.get("remove").and_then(Value::as_bool) == Some(true) {
+            (
+                "exists",
+                serde_json::json!({"target": target, "kind": "remove_file"}),
+            )
+        } else if let Some(content) = op.get("replace").and_then(Value::as_str) {
+            (
+                "exists",
+                serde_json::json!({
+                    "target": target,
+                    "kind": "replace_file",
+                    "content": content,
+                }),
+            )
+        } else if let Some(edit) = op.get("edit").and_then(Value::as_object) {
+            let old = edit
+                .get("find")
+                .or_else(|| edit.get("old"))
+                .and_then(Value::as_str)
+                .ok_or_else(|| {
+                    ConnectorError::new(format!(
+                        "z.apply operation {index} edit requires find + replacement"
+                    ))
+                })?;
+            let replacement = edit
+                .get("replacement")
+                .or_else(|| edit.get("replace"))
+                .or_else(|| edit.get("new"))
+                .and_then(Value::as_str)
+                .ok_or_else(|| {
+                    ConnectorError::new(format!(
+                        "z.apply operation {index} edit requires replacement"
+                    ))
+                })?;
+            (
+                "exists",
+                serde_json::json!({
+                    "target": target,
+                    "kind": "replace_exact",
+                    "old": old,
+                    "replacement": replacement,
+                    "expectedCount": 1,
+                }),
+            )
+        } else if let (Some(old), Some(replacement)) = (
+            op.get("find").or_else(|| op.get("old")).and_then(Value::as_str),
+            op.get("replacement").or_else(|| op.get("new")).and_then(Value::as_str),
+        ) {
+            (
+                "exists",
+                serde_json::json!({
+                    "target": target,
+                    "kind": "replace_exact",
+                    "old": old,
+                    "replacement": replacement,
+                    "expectedCount": 1,
+                }),
+            )
+        } else if let (Some(after), Some(content)) = (
+            op.get("after").and_then(Value::as_str),
+            op.get("content").and_then(Value::as_str),
+        ) {
+            (
+                "exists",
+                serde_json::json!({
+                    "target": target,
+                    "kind": "insert_after",
+                    "anchor": {"exactText": after},
+                    "content": content,
+                }),
+            )
+        } else if let (Some(before), Some(content)) = (
+            op.get("before").and_then(Value::as_str),
+            op.get("content").and_then(Value::as_str),
+        ) {
+            (
+                "exists",
+                serde_json::json!({
+                    "target": target,
+                    "kind": "insert_before",
+                    "anchor": {"exactText": before},
+                    "content": content,
+                }),
+            )
+        } else {
+            return Err(ConnectorError::new(format!(
+                "z.apply operation {index} must use one of: edit, create, replace, remove, before+content, after+content"
+            )));
+        };
+
+        targets.insert(
+            target.clone(),
+            serde_json::json!({"path": path, "expect": expect}),
+        );
+        changes.push(change);
+    }
+
+    let verify = verify.unwrap_or_else(|| {
+        serde_json::json!({"changedTargetsOnly": true, "parse": false})
+    });
+    serde_json::from_value::<EffectRequest>(serde_json::json!({
+        "targets": targets,
+        "changes": changes,
+        "verify": verify,
+    }))
+    .map_err(json_error)
 }
 
 fn apply_edit_patch(
