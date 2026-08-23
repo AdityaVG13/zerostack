@@ -163,6 +163,25 @@ fn assert_process_gone(pid: u32, identity: &ProcessIdentity, what: &str) {
     panic!("{what} {pid} stayed live after owner SIGKILL");
 }
 
+#[cfg(unix)]
+#[test]
+fn wait_for_exit_reports_an_exited_tree_root() {
+    let command = Command::new("true");
+    let (child, _, _) = VerifiedChild::spawn_tree(command, "wait-exited", 1).expect("spawn true");
+    assert!(
+        child.wait_for_exit(Duration::from_secs(2)),
+        "an exited waitable root must not be mistaken for a live process"
+    );
+    child
+        .wait(
+            "wait-exited",
+            1,
+            Duration::from_secs(1),
+            Duration::from_secs(1),
+        )
+        .expect("settle exited tree");
+}
+
 #[test]
 fn wait_for_exit_does_not_report_a_live_child_as_exited() {
     let mut command = Command::new("sleep");

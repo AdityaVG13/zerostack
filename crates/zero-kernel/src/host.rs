@@ -157,8 +157,8 @@ impl DirectCallContext {
             },
         )?;
         let value = match snapshot.inline_utf8 {
-            Some(text) => text,
-            None => labeled_outline(&path, &snapshot),
+            Some(text) if !text.as_bytes().contains(&0) => text,
+            _ => labeled_outline(&path, &snapshot),
         };
         let mut record = self.records.lock();
         record.calls = record.calls.saturating_add(1);
@@ -520,7 +520,7 @@ impl Cell {
         options: ReadOptions,
     ) -> Result<String, HostError> {
         let path = path.into();
-        let snapshot = self.files.read(
+        let mut snapshot = self.files.read(
             &self.invocation,
             FileReadRequest {
                 path: path.clone(),
@@ -530,8 +530,10 @@ impl Cell {
         self.ledger.calls = self.ledger.calls.saturating_add(1);
         self.ledger.bytes_read = self.ledger.bytes_read.saturating_add(snapshot.byte_len);
         self.handles.push(snapshot.content.clone());
-        if let Some(text) = snapshot.inline_utf8 {
-            return Ok(text);
+        match snapshot.inline_utf8.take() {
+            Some(text) if !text.as_bytes().contains(&0) => return Ok(text),
+            Some(text) => snapshot.inline_utf8 = Some(text),
+            None => {}
         }
         Ok(labeled_outline(&path, &snapshot))
     }
@@ -1614,7 +1616,7 @@ fn plan_effect_change(
                         "insert_before/insert_after requires anchor.exactText".into(),
                     )
                 })?;
-            let content = change.content.ok_or_else(|| {
+            let mut content = change.content.ok_or_else(|| {
                 HostError::InvalidRequest("insert_before/insert_after requires content".into())
             })?;
             let mut text = target_text(target)?;
@@ -1622,6 +1624,14 @@ fn plan_effect_change(
             let offset = if matches!(change.kind, EffectChangeKind::InsertBefore) {
                 start
             } else {
+                if text[end..].starts_with("\r\n")
+                    && !content.starts_with('\r')
+                    && !content.starts_with('\n')
+                {
+                    content.insert_str(0, "\r\n");
+                } else if text[end..].starts_with('\n') && !content.starts_with('\n') {
+                    content.insert(0, '\n');
+                }
                 end
             };
             text.insert_str(offset, &content);
@@ -1667,9 +1677,13 @@ fn exact_structural_hit(
     result: zero_abi::StructuralResult,
 ) -> Result<(SnapStructuralEvidence, (u32, u32)), HostError> {
     if !result.complete {
+        let detail = result
+            .diagnostic
+            .as_deref()
+            .unwrap_or("structural coverage is partial or stale; absence is not certified");
         return Err(HostError::Engine(EngineError::new(
             EngineErrorKind::InvalidInput,
-            "z.snap structural result is incomplete",
+            format!("z.snap structural result is incomplete: {detail}"),
             false,
         )));
     }
@@ -1677,8 +1691,20 @@ fn exact_structural_hit(
         let detail = if result.hits.is_empty() {
             "z.snap structural target was not found".into()
         } else {
+            let candidates = result
+                .hits
+                .iter()
+                .take(8)
+                .map(|hit| match (hit.line_start, hit.line_end) {
+                    (Some(start), Some(end)) => {
+                        format!("{}:{start}-{end}", hit.path.display())
+                    }
+                    _ => hit.path.display().to_string(),
+                })
+                .collect::<Vec<_>>()
+                .join(", ");
             format!(
-                "z.snap structural target is ambiguous: {} candidates",
+                "z.snap structural target is ambiguous: {} candidates ({candidates})",
                 result.hits.len()
             )
         };

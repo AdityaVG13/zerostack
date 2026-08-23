@@ -12,6 +12,7 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::mpsc::{Receiver, RecvTimeoutError, SyncSender, TryRecvError};
 use std::time::{Duration, Instant};
 
+use regex::{Regex, RegexBuilder};
 use serde_json::{Map, Number, Value as JsonValue};
 use tree_sitter::{Node, Parser};
 use tree_sitter_javascript::LANGUAGE;
@@ -126,6 +127,7 @@ enum Value<'tree> {
     Tool(String, String),
     Method(Box<Value<'tree>>, String),
     Function(FunctionValue<'tree>),
+    BoundFunction(FunctionValue<'tree>, Rc<RefCell<ObjectValue<'tree>>>),
     Promise(u64),
     Resolver { promise: u64, reject: bool },
     Error(ErrorValue),
@@ -586,6 +588,10 @@ impl<'tree> Interpreter<'tree> {
             )),
             "try_statement" => self.try_statement(node),
             "switch_statement" => self.switch_statement(node),
+            "class_declaration" => {
+                self.declare_class(node)?;
+                Ok(Control::Normal)
+            }
             "function_declaration" => {
                 let name = node
                     .child_by_field_name("name")
@@ -608,6 +614,55 @@ impl<'tree> Interpreter<'tree> {
             }
             _ => Err(self.unsupported(node.kind()).into()),
         }
+    }
+
+    fn declare_class(&mut self, node: Node<'tree>) -> Result<(), Fault<'tree>> {
+        if node.child_by_field_name("heritage").is_some() {
+            return Err(Fault::Host(self.unsupported("class extends")));
+        }
+        let name = node
+            .child_by_field_name("name")
+            .ok_or_else(|| self.unsupported("anonymous class declaration"))?;
+        let body = node
+            .child_by_field_name("body")
+            .ok_or_else(|| self.unsupported("class body"))?;
+        let mut fields = BTreeMap::new();
+        let mut cursor = body.walk();
+        for member in body.named_children(&mut cursor) {
+            if member.kind() != "method_definition" {
+                return Err(Fault::Host(self.unsupported("class member")));
+            }
+            if self.text(member).trim_start().starts_with("static ") {
+                return Err(Fault::Host(self.unsupported("static class method")));
+            }
+            let method_name = member
+                .child_by_field_name("name")
+                .ok_or_else(|| self.unsupported("class method name"))?;
+            let parameters = member
+                .child_by_field_name("parameters")
+                .ok_or_else(|| self.unsupported("class method parameters"))?;
+            let method_body = member
+                .child_by_field_name("body")
+                .ok_or_else(|| self.unsupported("class method body"))?;
+            fields.insert(
+                unquote(self.text(method_name)).map_err(Fault::Host)?,
+                Value::Function(FunctionValue {
+                    parameters,
+                    body: method_body,
+                    expression: false,
+                    env: self.env.clone(),
+                }),
+            );
+        }
+        self.env.borrow_mut().values.insert(
+            self.text(name).to_owned(),
+            Value::Object(Rc::new(RefCell::new(ObjectValue {
+                fields,
+                getters: BTreeMap::new(),
+                access: ObjectAccess::Strict,
+            }))),
+        );
+        Ok(())
     }
 
     fn declare(&mut self, node: Node<'tree>) -> Result<(), Fault<'tree>> {
@@ -922,13 +977,18 @@ impl<'tree> Interpreter<'tree> {
             "false" => Ok(Value::Bool(false)),
             "null" => Ok(Value::Null),
             "undefined" => Ok(Value::Undefined),
+            "this" => self
+                .lookup("this")
+                .ok_or_else(|| Fault::Host(HostError::Data("this is not bound".into()))),
             "comment" => Ok(Value::Undefined),
             "number" => self
                 .text(node)
                 .parse()
                 .map(Value::Number)
                 .map_err(|_| Fault::Host(HostError::Parse("invalid number".into()))),
-            "string" => Ok(Value::String(unquote(self.text(node)).map_err(Fault::Host)?)),
+            "string" => Ok(Value::String(
+                unquote(self.text(node)).map_err(Fault::Host)?,
+            )),
             "array" => self.eval_array(node),
             "object" => self.eval_object(node),
             "template_string" => self.eval_template(node),
@@ -1019,27 +1079,7 @@ impl<'tree> Interpreter<'tree> {
                     .is_some_and(|body| body.kind() != "statement_block"),
                 env: self.env.clone(),
             })),
-            "new_expression" => {
-                let constructor = self.eval(
-                    node.child_by_field_name("constructor")
-                        .ok_or_else(|| Fault::Host(self.unsupported("new constructor")))?,
-                )?;
-                let argument = node
-                    .child_by_field_name("arguments")
-                    .and_then(first_expression_child)
-                    .map(|argument| self.eval(argument))
-                    .transpose()?;
-                match constructor {
-                    Value::Namespace(name) if name == "Promise" => {
-                        self.new_manual_promise(argument.unwrap_or(Value::Undefined))
-                    }
-                    Value::Namespace(name) => Ok(Value::Error(ErrorValue {
-                        name,
-                        message: argument.map(|value| to_string(&value)).unwrap_or_default(),
-                    })),
-                    _ => Err(Fault::Host(self.unsupported("constructor"))),
-                }
-            }
+            "new_expression" => self.eval_new(node),
             _ => Err(Fault::Host(self.unsupported(node.kind()))),
         }
     }
@@ -1127,7 +1167,7 @@ impl<'tree> Interpreter<'tree> {
                             env: self.env.clone(),
                         }),
                     );
-                    }
+                }
                 _ => return Err(Fault::Host(self.unsupported("object member"))),
             }
         }
@@ -1173,6 +1213,60 @@ impl<'tree> Interpreter<'tree> {
             return Err(Fault::Host(self.unsupported("member key")));
         };
         self.property(object, &key)
+    }
+
+    fn eval_new(&mut self, node: Node<'tree>) -> Result<Value<'tree>, Fault<'tree>> {
+        let constructor = self.eval(
+            node.child_by_field_name("constructor")
+                .ok_or_else(|| Fault::Host(self.unsupported("new constructor")))?,
+        )?;
+        let mut args = Vec::new();
+        if let Some(arguments) = node.child_by_field_name("arguments") {
+            let mut cursor = arguments.walk();
+            for child in arguments.named_children(&mut cursor) {
+                if child.kind() == "comment" {
+                    continue;
+                }
+                if child.kind() == "spread_element" {
+                    match self.eval(
+                        first_expression_child(child)
+                            .ok_or_else(|| Fault::Host(self.unsupported("new spread")))?,
+                    )? {
+                        Value::Array(items) => args.extend(items.borrow().iter().cloned()),
+                        _ => {
+                            return Err(Fault::Host(HostError::Data(
+                                "constructor spread requires an array".into(),
+                            )));
+                        }
+                    }
+                } else {
+                    args.push(self.eval(child)?);
+                }
+            }
+        }
+        match constructor {
+            Value::Object(class) => {
+                let mut fields = class.borrow().fields.clone();
+                let constructor = fields.remove("constructor");
+                let instance = Rc::new(RefCell::new(ObjectValue {
+                    fields,
+                    getters: BTreeMap::new(),
+                    access: ObjectAccess::Open,
+                }));
+                if let Some(Value::Function(function)) = constructor {
+                    self.call_function(function, args, Some(Value::Object(Rc::clone(&instance))))?;
+                }
+                Ok(Value::Object(instance))
+            }
+            Value::Namespace(name) if name == "Promise" => {
+                self.new_manual_promise(args.into_iter().next().unwrap_or(Value::Undefined))
+            }
+            Value::Namespace(name) => Ok(Value::Error(ErrorValue {
+                name,
+                message: args.first().map(to_string).unwrap_or_default(),
+            })),
+            _ => Err(Fault::Host(self.unsupported("constructor"))),
+        }
     }
 
     fn eval_call(&mut self, node: Node<'tree>) -> Result<Value<'tree>, Fault<'tree>> {
@@ -1286,7 +1380,10 @@ impl<'tree> Interpreter<'tree> {
         match function {
             Value::Tool(surface, method) => self.call_tool(&surface, &method, args),
             Value::Method(receiver, name) => self.call_method(*receiver, &name, args),
-            Value::Function(function) => self.call_function(function, args),
+            Value::Function(function) => self.call_function(function, args, None),
+            Value::BoundFunction(function, receiver) => {
+                self.call_function(function, args, Some(Value::Object(receiver)))
+            }
             Value::Resolver { promise, reject } => {
                 let value = args.into_iter().next().unwrap_or(Value::Undefined);
                 if matches!(
@@ -1336,9 +1433,14 @@ impl<'tree> Interpreter<'tree> {
         &mut self,
         function: FunctionValue<'tree>,
         args: Vec<Value<'tree>>,
+        this_value: Option<Value<'tree>>,
     ) -> Result<Value<'tree>, Fault<'tree>> {
+        let mut values = BTreeMap::new();
+        if let Some(this_value) = this_value {
+            values.insert("this".into(), this_value);
+        }
         let env = Rc::new(RefCell::new(Env {
-            values: BTreeMap::new(),
+            values,
             parent: Some(function.env.clone()),
         }));
         let mut cursor = function.parameters.walk();
@@ -2123,7 +2225,14 @@ impl<'tree> Interpreter<'tree> {
                     }
                 };
                 match found {
+                    Some(Ok(Value::Function(function))) => {
+                        Ok(Value::BoundFunction(function, Rc::clone(&value)))
+                    }
                     Some(Ok(result)) => Ok(result),
+                    Some(Err(Value::Function(function))) => self.call(
+                        Value::BoundFunction(function, Rc::clone(&value)),
+                        Vec::new(),
+                    ),
                     Some(Err(getter)) => self.call(getter, Vec::new()),
                     None => {
                         let object = value.borrow();
@@ -2458,9 +2567,8 @@ impl<'tree> Interpreter<'tree> {
             "transact" => self.zero_kernel_transact(args),
             "parallel" => self.zero_kernel_parallel(args),
             "pipeline" => self.zero_kernel_pipeline(args),
-            "read" | "find" | "edit" | "apply" | "run"
-            | "snap" | "write" | "effect" | "remove" | "asgrep" | "lookup"
-            | "shell" | "measure" | "project" | "compress" | "expand" => {
+            "read" | "find" | "edit" | "apply" | "run" | "snap" | "write" | "effect" | "remove"
+            | "asgrep" | "lookup" | "shell" | "measure" | "project" | "compress" | "expand" => {
                 self.call_tool("z", name, args)
             }
             _ => unreachable!("direct methods are matched above"),
@@ -2919,6 +3027,42 @@ impl<'tree> Interpreter<'tree> {
             "map" | "filter" | "find" | "findIndex" | "some" | "every" | "forEach" => {
                 self.array_callback_method(&snapshot, name, args)
             }
+            "concat" => {
+                let mut output = snapshot;
+                for value in args {
+                    match value {
+                        Value::Array(values) => output.extend(values.borrow().iter().cloned()),
+                        value => output.push(value),
+                    }
+                }
+                Ok(new_array(output))
+            }
+            "reduce" => {
+                let callback = args.first().cloned().ok_or_else(|| {
+                    Fault::Host(HostError::Data("Array.reduce callback is required".into()))
+                })?;
+                let (mut accumulator, start) = match args.get(1).cloned() {
+                    Some(initial) => (initial, 0),
+                    None if !snapshot.is_empty() => (snapshot[0].clone(), 1),
+                    None => {
+                        return Err(Fault::Host(HostError::Data(
+                            "Array.reduce of an empty array requires an initial value".into(),
+                        )));
+                    }
+                };
+                for (index, item) in snapshot.iter().cloned().enumerate().skip(start) {
+                    accumulator = self.call(
+                        callback.clone(),
+                        vec![
+                            accumulator,
+                            item,
+                            Value::Number(index as f64),
+                            new_array(snapshot.clone()),
+                        ],
+                    )?;
+                }
+                Ok(accumulator)
+            }
             "push" => {
                 let mut target = items.borrow_mut();
                 target.extend(args);
@@ -3008,6 +3152,49 @@ impl<'tree> Interpreter<'tree> {
             "endsWith" => Ok(Value::Bool(
                 value.ends_with(&to_string(args.first().unwrap_or(&Value::Undefined))),
             )),
+            "replace" | "replaceAll" => {
+                let pattern = to_string(args.first().unwrap_or(&Value::Undefined));
+                let replacement = to_string(args.get(1).unwrap_or(&Value::Undefined));
+                if let Some((regex, global)) =
+                    compile_regex_literal(&pattern).map_err(Fault::Host)?
+                {
+                    let replaced = if name == "replaceAll" || global {
+                        regex.replace_all(value, replacement.as_str())
+                    } else {
+                        regex.replace(value, replacement.as_str())
+                    };
+                    Ok(Value::String(replaced.into_owned()))
+                } else if name == "replaceAll" {
+                    Ok(Value::String(value.replace(&pattern, &replacement)))
+                } else {
+                    Ok(Value::String(value.replacen(&pattern, &replacement, 1)))
+                }
+            }
+            "test" | "exec" => {
+                let Some((regex, _)) = compile_regex_literal(value).map_err(Fault::Host)? else {
+                    return Err(Fault::Host(self.unsupported_name(name, "string method")));
+                };
+                if name == "test" {
+                    Ok(Value::Bool(regex.is_match(&to_string(
+                        args.first().unwrap_or(&Value::Undefined),
+                    ))))
+                } else {
+                    let input = to_string(args.first().unwrap_or(&Value::Undefined));
+                    Ok(match regex.captures(&input) {
+                        Some(captures) => new_array(
+                            captures
+                                .iter()
+                                .map(|capture| {
+                                    capture
+                                        .map(|value| Value::String(value.as_str().to_owned()))
+                                        .unwrap_or(Value::Undefined)
+                                })
+                                .collect(),
+                        ),
+                        None => Value::Null,
+                    })
+                }
+            }
             "split" => {
                 let separator = args.first().map(to_string).unwrap_or_default();
                 Ok(new_array(if separator.is_empty() {
@@ -3038,7 +3225,7 @@ impl<'tree> Interpreter<'tree> {
                 ))
             }
             _ => Err(Fault::Host(HostError::UnsupportedSyntax(format!(
-                "string method '{name}' is not supported in CodeMode (supported: includes, indexOf, startsWith, endsWith, split, slice, substring, trim, toLowerCase, toUpperCase, repeat, padStart; compose these instead of match/replace)"
+                "string method '{name}' is not supported in CodeMode (supported: includes, indexOf, startsWith, endsWith, replace, replaceAll, split, slice, substring, trim, toLowerCase, toUpperCase, repeat, padStart, plus test/exec on regex literals)"
             )))),
         }
     }
@@ -3181,7 +3368,7 @@ impl<'tree> Interpreter<'tree> {
             promise: id,
             reject: true,
         };
-        match self.call_function(function, vec![resolve, reject]) {
+        match self.call_function(function, vec![resolve, reject], None) {
             Ok(_) => {}
             Err(Fault::Throw(value)) => {
                 if matches!(
@@ -3403,7 +3590,8 @@ impl<'tree> Interpreter<'tree> {
             | Value::Namespace(_)
             | Value::Tool(_, _)
             | Value::Method(_, _)
-            | Value::Function(_) => {
+            | Value::Function(_)
+            | Value::BoundFunction(_, _) => {
                 return Err(HostError::Data(
                     "runtime value cannot cross the data boundary; use await and return data"
                         .into(),
@@ -3489,7 +3677,8 @@ impl<'tree> Interpreter<'tree> {
             | Value::Namespace(_)
             | Value::Tool(_, _)
             | Value::Method(_, _)
-            | Value::Function(_) => {
+            | Value::Function(_)
+            | Value::BoundFunction(_, _) => {
                 return Err(HostError::Data(
                     "runtime value cannot cross the data boundary; use await and return data"
                         .into(),
@@ -3580,12 +3769,52 @@ impl<'tree> Interpreter<'tree> {
     }
 }
 
+fn compile_regex_literal(value: &str) -> Result<Option<(Regex, bool)>, HostError> {
+    if !value.starts_with('/') {
+        return Ok(None);
+    }
+    let mut escaped = false;
+    let mut closing = None;
+    for (index, character) in value.char_indices().skip(1) {
+        if character == '/' && !escaped {
+            closing = Some(index);
+        }
+        escaped = character == '\\' && !escaped;
+        if character != '\\' {
+            escaped = false;
+        }
+    }
+    let Some(closing) = closing else {
+        return Err(HostError::Data("invalid regular-expression literal".into()));
+    };
+    let pattern = &value[1..closing];
+    let flags = &value[closing + 1..];
+    if let Some(flag) = flags
+        .chars()
+        .find(|flag| !matches!(flag, 'g' | 'i' | 'm' | 's' | 'u' | 'y'))
+    {
+        return Err(HostError::Data(format!(
+            "unsupported regular-expression flag {flag:?}"
+        )));
+    }
+    let mut builder = RegexBuilder::new(pattern);
+    builder
+        .case_insensitive(flags.contains('i'))
+        .multi_line(flags.contains('m'))
+        .dot_matches_new_line(flags.contains('s'))
+        .unicode(flags.contains('u'));
+    let regex = builder
+        .build()
+        .map_err(|error| HostError::Data(format!("invalid regular expression: {error}")))?;
+    Ok(Some((regex, flags.contains('g'))))
+}
+
 fn optional_promise_callback<'tree>(
     value: Value<'tree>,
     method: &str,
 ) -> Result<Option<Value<'tree>>, Fault<'tree>> {
     match value {
-        Value::Function(_) => Ok(Some(value)),
+        Value::Function(_) | Value::BoundFunction(_, _) => Ok(Some(value)),
         Value::Undefined | Value::Null => Ok(None),
         _ => Err(Fault::Host(HostError::Data(format!(
             "Promise.{method} expects a function"
@@ -3986,7 +4215,10 @@ fn unary<'tree>(operator: &str, value: Value<'tree>) -> Result<Value<'tree>, Hos
                 Value::Bool(_) => "boolean",
                 Value::Number(_) => "number",
                 Value::String(_) => "string",
-                Value::Function(_) | Value::Tool(_, _) | Value::Method(_, _) => "function",
+                Value::Function(_)
+                | Value::BoundFunction(_, _)
+                | Value::Tool(_, _)
+                | Value::Method(_, _) => "function",
                 _ => "object",
             }
             .into(),
@@ -4116,7 +4348,10 @@ fn apply_escape(after: &str) -> Result<(Option<char>, usize), HostError> {
         't' => single('\t'),
         'b' => single('\u{8}'),
         '0' => {
-            if characters.as_str().starts_with(|c: char| c.is_ascii_digit()) {
+            if characters
+                .as_str()
+                .starts_with(|c: char| c.is_ascii_digit())
+            {
                 let shown: String = after.chars().take(4).collect();
                 Err(unsupported_escape(&shown))
             } else {
@@ -4133,7 +4368,8 @@ fn apply_escape(after: &str) -> Result<(Option<char>, usize), HostError> {
         'x' => {
             let hex = after.get(1..3).ok_or_else(|| unsupported_escape("\\x"))?;
             let code = parse_hex(hex).ok_or_else(|| unsupported_escape(&format!("\\x{hex}")))?;
-            let decoded = char::from_u32(code).ok_or_else(|| unsupported_escape(&format!("\\x{hex}")))?;
+            let decoded =
+                char::from_u32(code).ok_or_else(|| unsupported_escape(&format!("\\x{hex}")))?;
             Ok((Some(decoded), 3))
         }
         'u' => {
@@ -4153,8 +4389,10 @@ fn apply_escape(after: &str) -> Result<(Option<char>, usize), HostError> {
                 Ok((Some(decoded), consumed))
             } else {
                 let hex = after.get(1..5).ok_or_else(|| unsupported_escape("\\u"))?;
-                let code = parse_hex(hex).ok_or_else(|| unsupported_escape(&format!("\\u{hex}")))?;
-                let decoded = char::from_u32(code).ok_or_else(|| unsupported_escape(&format!("\\u{hex}")))?;
+                let code =
+                    parse_hex(hex).ok_or_else(|| unsupported_escape(&format!("\\u{hex}")))?;
+                let decoded =
+                    char::from_u32(code).ok_or_else(|| unsupported_escape(&format!("\\u{hex}")))?;
                 Ok((Some(decoded), 5))
             }
         }

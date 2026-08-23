@@ -208,9 +208,7 @@ fn full_standard_escape_battery_decodes() {
         run(r#"
             return ["\'", "\"", "\\n", "\t", "\r\n", "\0", "\x41", "\u0041", "\u{1F680}", "\q"];
             "#,),
-        json!([
-            "'", "\"", "\\n", "\t", "\r\n", "\u{0}", "A", "A", "🚀", "q",
-        ]),
+        json!(["'", "\"", "\\n", "\t", "\r\n", "\u{0}", "A", "A", "🚀", "q",]),
     );
 }
 
@@ -240,4 +238,42 @@ fn template_literal_escapes_decode() {
 fn legacy_octal_escape_is_rejected_not_corrupted() {
     let message = run_err(r#"return "\101";"#);
     assert!(message.contains("not supported"), "{message}");
+}
+
+#[test]
+fn classes_bind_constructor_and_method_this() {
+    assert_eq!(
+        run(r#"
+            class Counter {
+                constructor(start) { this.value = start; }
+                add(delta) { this.value += delta; return this.value; }
+            }
+            const counter = new Counter(4);
+            return [counter.add(3), counter.value];
+            "#),
+        json!([7, 7]),
+    );
+}
+
+#[test]
+fn common_string_and_regex_methods_work() {
+    assert_eq!(
+        run(r#"
+            const normalized = "a-b-b".replace("b", "B").replaceAll("b", "B");
+            const match = /([A-Z]+)-(\d+)/i.exec("tag-42");
+            return [normalized, /TAG/i.test("tag-42"), match[1], match[2]];
+            "#),
+        json!(["a-B-B", true, "tag", "42"]),
+    );
+}
+
+#[test]
+fn common_array_composition_methods_work() {
+    assert_eq!(
+        run(r#"
+            const values = [1, 2].concat([3, 4], 5);
+            return values.reduce((sum, value) => sum + value, 0);
+            "#),
+        json!(15),
+    );
 }

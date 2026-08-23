@@ -845,7 +845,11 @@ impl VerifiedChild {
                 if self.terminal_status().is_some() {
                     return true;
                 }
-                if self.poll_exited() && !self.binding().is_live() {
+                // poll_exited observes the owned Child directly. In Unix tree mode
+                // waitid(WNOWAIT) intentionally leaves an exited root as a zombie
+                // to pin its PGID; /proc-based identity remains live for that zombie,
+                // so gating on binding liveness turns every successful child into a timeout.
+                if self.poll_exited() {
                     return true;
                 }
                 if Instant::now() >= deadline {

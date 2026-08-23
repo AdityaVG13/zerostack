@@ -13,9 +13,8 @@ use tokenzero_kernel::ZeroTokenEngine;
 use zero_abi::{
     AsgrepOptions, CompressionRequest, CompressionResult, EngineError, EngineErrorKind,
     EngineInvocation, FileEffectKind, FileEffectReceipt, FileEffectRequest, FileEngine, FileLease,
-    FileReadRequest, FileSnapshot, KernelBudget, KernelContext, LookupOptions,
-    ProjectionRequest, ReadOptions,
-    ProjectionResult, ShellOptions, StructuralEngine, StructuralHit, StructuralQuery,
+    FileReadRequest, FileSnapshot, KernelBudget, KernelContext, LookupOptions, ProjectionRequest,
+    ProjectionResult, ReadOptions, ShellOptions, StructuralEngine, StructuralHit, StructuralQuery,
     StructuralResult, TokenAccounting, TokenEngine, ZeroHandle,
 };
 use zero_kernel::{AtomicCancellation, HostError, ShellCommand, TransactionError, ZeroKernel};
@@ -46,19 +45,15 @@ impl FileEngine for Files {
             .ok_or_else(|| EngineError::new(EngineErrorKind::NotFound, "missing", false))?;
         // Files named "outline-only.*" simulate oversized sources whose bytes
         // exceed the inline envelope: engine returns outline + digest only.
-        let (inline_utf8, outline) =
-            if request
-                .path
-                .file_name()
-                .is_some_and(|name| name.to_string_lossy().starts_with("outline-only."))
-            {
-                (None, Some("L7: pub struct OutlineOnly;\n".to_string()))
-            } else {
-                (
-                    Some(String::from_utf8(bytes.clone()).unwrap()),
-                    None,
-                )
-            };
+        let (inline_utf8, outline) = if request
+            .path
+            .file_name()
+            .is_some_and(|name| name.to_string_lossy().starts_with("outline-only."))
+        {
+            (None, Some("L7: pub struct OutlineOnly;\n".to_string()))
+        } else {
+            (Some(String::from_utf8(bytes.clone()).unwrap()), None)
+        };
         Ok(FileSnapshot {
             path: request.path,
             content: handle(bytes),
@@ -248,6 +243,7 @@ impl StructuralEngine for Graph {
             hits,
             index_digest: "index".into(),
             complete: true,
+            diagnostic: None,
             continuation: None,
         })
     }
@@ -402,7 +398,6 @@ fn production_kernel_relaxed(root: &std::path::Path) -> ZeroKernel {
     let files = Arc::new(
         ZeroFileEngine::open(root, &store_root, "contract").expect("open production file engine"),
     );
-    let tokens = Arc::new(ZeroTokenEngine::open(&store_root, None));
     ZeroKernel::new(
         KernelContext {
             workspace_root: root.to_path_buf(),
@@ -426,7 +421,6 @@ fn production_kernel_relaxed(root: &std::path::Path) -> ZeroKernel {
     )
     .unwrap()
 }
-
 
 fn model_json(response: &zero_abi::ZeroKernelResponse) -> Value {
     let value = response.value.as_ref().expect("model-visible value");
@@ -486,6 +480,25 @@ fn direct_methods_and_state_finalize_through_event_log() {
 }
 
 #[test]
+fn read_labels_nul_content_as_non_text() {
+    let root = tempdir().unwrap();
+    let files = Arc::new(Files::default());
+    files
+        .0
+        .lock()
+        .insert(PathBuf::from("binary.dat"), b"prefix\0suffix".to_vec());
+    let kernel = kernel(root.path(), files);
+    let mut cell = kernel.begin_cell("return z.read('binary.dat')").unwrap();
+    let visible = cell.read("binary.dat", Default::default()).unwrap();
+    assert!(visible.contains("READ OUTLINE"), "{visible:?}");
+    assert!(visible.contains("exact=z://blob/"), "{visible:?}");
+    assert!(
+        !visible.contains('\0'),
+        "NUL bytes must not reach model text"
+    );
+}
+
+#[test]
 fn transaction_rolls_back_created_file() {
     let root = tempdir().unwrap();
     let files = Arc::new(Files::default());
@@ -500,8 +513,6 @@ fn transaction_rolls_back_created_file() {
 }
 
 #[cfg(unix)]
-#[test]
-#[test]
 #[test]
 fn outline_read_is_explicitly_labeled() {
     let root = tempdir().unwrap();
@@ -1329,7 +1340,7 @@ fn effect_creates_file_and_updates_module_index_atomically() {
                   target: "moduleIndex",
                   kind: "insert_after",
                   anchor: {exactText: "mod old;"},
-                  content: "\nmod new;",
+                  content: "mod new;",
                 },
               ],
               verify: {changedTargetsOnly: true},
@@ -1776,14 +1787,9 @@ fn snap_search_refuses_ambiguous_exact_target() {
         response.error.as_ref().map(|error| &error.kind),
         Some(&EngineErrorKind::Conflict)
     );
-    assert!(
-        response
-            .error
-            .as_ref()
-            .unwrap()
-            .detail
-            .contains("ambiguous")
-    );
+    let detail = &response.error.as_ref().unwrap().detail;
+    assert!(detail.contains("ambiguous"), "{detail}");
+    assert!(detail.contains("src/lib.rs:1-1"), "{detail}");
 }
 
 #[test]
@@ -2001,7 +2007,8 @@ fn edit_path_rejects_whole_file_replacement_string() {
     let root = tempdir().unwrap();
     let kernel = production_kernel_relaxed(root.path());
     let response = kernel
-        .execute_cell(r#"
+        .execute_cell(
+            r#"
             const p = 'guard-edit.txt';
             await z.write(p, 'v1\nv2\nv3\n');
             let caught = null;
@@ -2009,14 +2016,17 @@ fn edit_path_rejects_whole_file_replacement_string() {
             catch (e) { caught = String(e.message || e); }
             const after = await z.read(p);
             return [caught, after];
-        "#)
+        "#,
+        )
         .unwrap();
     if response.outcome != zero_abi::ZeroKernelOutcome::Completed || response.value.is_none() {
         panic!("response: {response:?}");
     }
     // Cell returns serialize to a JSON-encoded string in the response value.
     let raw = response.value.unwrap();
-    let raw = raw.as_str().expect("cell return must serialize to a string");
+    let raw = raw
+        .as_str()
+        .expect("cell return must serialize to a string");
     let pair: Value = serde_json::from_str(raw).unwrap();
     let caught = pair
         .get(0)
@@ -2039,12 +2049,14 @@ fn edit_path_find_replacement_substitutes_first_unique_match() {
     let root = tempdir().unwrap();
     let kernel = production_kernel_relaxed(root.path());
     let response = kernel
-        .execute_cell(r#"
+        .execute_cell(
+            r#"
             const p = 'guard-edit-sub.txt';
             await z.write(p, 'v1\nv2\nv3\n');
             await z.edit(p, { find: 'v2', replacement: 'V2-DONE' });
             return await z.read(p);
-        "#)
+        "#,
+        )
         .unwrap();
     if response.outcome != zero_abi::ZeroKernelOutcome::Completed {
         panic!("cell failed under load: {response:?}");
@@ -2060,16 +2072,38 @@ fn edit_path_find_replacement_substitutes_first_unique_match() {
 }
 
 #[test]
+fn edit_path_mismatch_reports_context_and_recovery() {
+    let root = tempdir().unwrap();
+    let kernel = production_kernel_relaxed(root.path());
+    let response = kernel
+        .execute_cell(
+            r#"
+            const p = 'guard-edit-mismatch.txt';
+            await z.write(p, 'alpha\nbeta\ngamma\n');
+            return await z.edit(p, { find: 'delta', replacement: 'DELTA' });
+        "#,
+        )
+        .unwrap();
+    assert_eq!(response.outcome, zero_abi::ZeroKernelOutcome::Failed);
+    let detail = &response.error.as_ref().unwrap().detail;
+    assert!(detail.contains("mismatch=not_found"), "{detail}");
+    assert!(detail.contains("alpha\\nbeta\\ngamma"), "{detail}");
+    assert!(detail.contains("re-read with z.read(path)"), "{detail}");
+}
+
+#[test]
 fn edit_path_replace_file_kind_replaces_deliberately() {
     let root = tempdir().unwrap();
     let kernel = production_kernel_relaxed(root.path());
     let response = kernel
-        .execute_cell(r#"
+        .execute_cell(
+            r#"
             const p = 'guard-edit-rf.txt';
             await z.write(p, 'old content\n');
             await z.edit(p, { kind: 'replace_file', content: 'fresh\n' });
             return await z.read(p);
-        "#)
+        "#,
+        )
         .unwrap();
     assert_eq!(response.outcome, zero_abi::ZeroKernelOutcome::Completed);
     let returned = response.value.unwrap();
@@ -2086,10 +2120,12 @@ fn snap_directory_error_guides_to_lookup() {
     std::fs::create_dir_all(root.path().join("crates")).unwrap();
     let kernel = production_kernel(root.path());
     let response = kernel
-        .execute_cell(r#"
+        .execute_cell(
+            r#"
             try { await z.snap({ path: 'crates' }); return 'NO-ERROR'; }
             catch (e) { return String(e.message || e); }
-        "#)
+        "#,
+        )
         .unwrap();
     assert_eq!(response.outcome, zero_abi::ZeroKernelOutcome::Completed);
     let message = response.value.unwrap().as_str().unwrap().to_owned();
@@ -2110,17 +2146,21 @@ fn asgrep_accepts_single_object_form() {
     let files = Arc::new(Files::default());
     let kernel = kernel(root.path(), files);
     let object_form = kernel
-        .execute_cell(r#"
+        .execute_cell(
+            r#"
             const r = await z.asgrep({ query: "AsgrepProbeMarker", mode: "natural" });
             return r.hits.length;
-        "#)
+        "#,
+        )
         .unwrap();
     assert_eq!(object_form.outcome, zero_abi::ZeroKernelOutcome::Completed);
     let positional = kernel
-        .execute_cell(r#"
+        .execute_cell(
+            r#"
             const r = await z.asgrep("AsgrepProbeMarker", { mode: "natural" });
             return r.hits.length;
-        "#)
+        "#,
+        )
         .unwrap();
     assert_eq!(positional.outcome, zero_abi::ZeroKernelOutcome::Completed);
 }
@@ -2130,10 +2170,12 @@ fn state_namespace_call_carries_guidance() {
     let root = tempdir().unwrap();
     let kernel = kernel(root.path(), Arc::new(Files::default()));
     let response = kernel
-        .execute_cell(r#"
+        .execute_cell(
+            r#"
             try { z.state(); return 'NO-ERROR'; }
             catch (e) { return String(e.message || e); }
-        "#)
+        "#,
+        )
         .unwrap();
     let message = response.value.unwrap().as_str().unwrap().to_owned();
     assert!(message.contains("z.state.get"), "{message}");
@@ -2149,9 +2191,7 @@ fn shell_output_accounting_is_truthful_against_visible_bytes() {
     let kernel = kernel(root.path(), files);
     let payload = "SHELL_OK accounting probe";
     let response = kernel
-        .execute_cell(&format!(
-            "return await z.shell([\"printf\", {payload:?}]);"
-        ))
+        .execute_cell(&format!("return await z.shell([\"printf\", {payload:?}]);"))
         .unwrap();
     assert_eq!(response.outcome, zero_abi::ZeroKernelOutcome::Completed);
     let raw = response.value.unwrap();
@@ -2181,7 +2221,28 @@ fn final_surface_read_lists_directories() {
     let listing: Value = serde_json::from_str(raw.as_str().unwrap()).unwrap();
     let entries = listing.as_array().unwrap();
     assert_eq!(entries.len(), 2, "directory read must list both entries");
-    assert!(entries.iter().any(|v| v.as_str().unwrap().ends_with("a.rs")));
+    assert!(
+        entries
+            .iter()
+            .any(|v| v.as_str().unwrap().ends_with("a.rs"))
+    );
+}
+
+#[test]
+fn final_surface_read_expands_exact_handles_to_text() {
+    let root = tempdir().unwrap();
+    std::fs::write(root.path().join("blob.txt"), "handle payload\n").unwrap();
+    let kernel = production_kernel_relaxed(root.path());
+    let response = kernel
+        .execute_cell(
+            "const snap = await z.snap('blob.txt'); return await z.read(snap.source.exact);",
+        )
+        .unwrap();
+    assert_eq!(response.outcome, zero_abi::ZeroKernelOutcome::Completed);
+    assert_eq!(
+        response.value.unwrap().as_str(),
+        Some("\"handle payload\\n\"")
+    );
 }
 
 #[test]
@@ -2192,7 +2253,10 @@ fn final_surface_edit_creates_and_removes() {
         .execute_cell("return await z.edit('created.txt', {create:'payload'});")
         .unwrap();
     assert_eq!(created.outcome, zero_abi::ZeroKernelOutcome::Completed);
-    assert_eq!(std::fs::read_to_string(root.path().join("created.txt")).unwrap(), "payload");
+    assert_eq!(
+        std::fs::read_to_string(root.path().join("created.txt")).unwrap(),
+        "payload"
+    );
 
     let removed = kernel
         .execute_cell("return await z.edit('created.txt', {remove:true});")
@@ -2214,25 +2278,87 @@ fn final_surface_apply_is_atomic_and_flat() {
             ]);"#,
         )
         .unwrap();
-    assert_eq!(response.outcome, zero_abi::ZeroKernelOutcome::Completed, "{response:?}");
-    assert_eq!(std::fs::read_to_string(root.path().join("a.txt")).unwrap(), "new");
-    assert_eq!(std::fs::read_to_string(root.path().join("b.txt")).unwrap(), "created");
+    assert_eq!(
+        response.outcome,
+        zero_abi::ZeroKernelOutcome::Completed,
+        "{response:?}"
+    );
+    assert_eq!(
+        std::fs::read_to_string(root.path().join("a.txt")).unwrap(),
+        "new"
+    );
+    assert_eq!(
+        std::fs::read_to_string(root.path().join("b.txt")).unwrap(),
+        "created"
+    );
+}
+
+#[test]
+fn final_surface_apply_sequences_multiple_edits_on_one_file() {
+    let root = tempdir().unwrap();
+    std::fs::write(root.path().join("same.txt"), "alpha beta gamma").unwrap();
+    let kernel = production_kernel_relaxed(root.path());
+    let response = kernel
+        .execute_cell(
+            r#"return await z.apply([
+                {path:'same.txt', edit:{find:'alpha', replacement:'ALPHA'}},
+                {path:'same.txt', edit:{find:'gamma', replacement:'GAMMA'}}
+            ]);"#,
+        )
+        .unwrap();
+    assert_eq!(
+        response.outcome,
+        zero_abi::ZeroKernelOutcome::Completed,
+        "{response:?}"
+    );
+    assert_eq!(
+        std::fs::read_to_string(root.path().join("same.txt")).unwrap(),
+        "ALPHA beta GAMMA"
+    );
+
+    let rejected = kernel
+        .execute_cell(
+            "return await z.apply([{path:'same.txt', edit:{find:'ALPHA', replacement:'alpha'}, remove:true}]);",
+        )
+        .unwrap();
+    assert_eq!(rejected.outcome, zero_abi::ZeroKernelOutcome::Failed);
+    assert!(
+        rejected
+            .error
+            .as_ref()
+            .unwrap()
+            .detail
+            .contains("exactly one action")
+    );
+    assert_eq!(
+        std::fs::read_to_string(root.path().join("same.txt")).unwrap(),
+        "ALPHA beta GAMMA"
+    );
 }
 
 #[test]
 fn final_surface_find_and_run_aliases_work() {
     let root = tempdir().unwrap();
-    let files = Arc::new(Files::default());
-    let kernel = kernel(root.path(), files);
+    let kernel = production_kernel_relaxed(root.path());
     let find = kernel
-        .execute_cell("const r = await z.find({query:'alpha', mode:'natural'}); return r.hits.length;")
+        .execute_cell(
+            "const out = [(await z.find({query:'alpha'})).hits.length]; for (const mode of ['natural','word','literal','regex','imports','defs']) { const r = await z.find({query:'alpha', mode}); out.push(r.hits.length); } return out;",
+        )
         .unwrap();
-    assert_eq!(find.outcome, zero_abi::ZeroKernelOutcome::Completed, "{find:?}");
+    assert_eq!(
+        find.outcome,
+        zero_abi::ZeroKernelOutcome::Completed,
+        "{find:?}"
+    );
 
     let run = kernel
         .execute_cell("const r = await z.run(['printf','RUN_OK']); return r.stdout;")
         .unwrap();
-    assert_eq!(run.outcome, zero_abi::ZeroKernelOutcome::Completed, "{run:?}");
+    assert_eq!(
+        run.outcome,
+        zero_abi::ZeroKernelOutcome::Completed,
+        "{run:?}"
+    );
     assert_eq!(run.value.unwrap().as_str(), Some("\"RUN_OK\""));
 }
 
@@ -2247,5 +2373,10 @@ fn final_surface_help_teaches_only_six_operations() {
         help["methods"],
         json!(["read", "find", "edit", "apply", "run", "state"])
     );
-    assert!(help["examples"]["apply_atomic"].as_str().unwrap().contains("z.apply"));
+    assert!(
+        help["examples"]["apply_atomic"]
+            .as_str()
+            .unwrap()
+            .contains("z.apply")
+    );
 }

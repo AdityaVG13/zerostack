@@ -619,11 +619,17 @@ pub trait FileEngine: Send + Sync {
 pub enum AsgrepMode {
     Natural,
     Pattern,
+    Word,
+    Literal,
+    Regex,
+    Imports,
     Symbols,
+    #[serde(alias = "defs")]
     Definition,
     References,
     Callers,
     Callees,
+    #[serde(alias = "call-path")]
     CallPath,
     Semantic,
 }
@@ -676,6 +682,8 @@ pub struct StructuralResult {
     pub hits: Vec<StructuralHit>,
     pub index_digest: String,
     pub complete: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub diagnostic: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub continuation: Option<ZeroHandle>,
 }

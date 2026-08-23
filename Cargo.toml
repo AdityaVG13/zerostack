@@ -29,6 +29,7 @@ license = "MIT"
 flate2 = "1"
 fs4 = "1.1.0"
 toml = "0.9"
+regex = "1"
 
 zerostack-test-support = { path = "crates/zerostack-test-support" }
 serde = { version = "1.0.229", features = ["derive"] }

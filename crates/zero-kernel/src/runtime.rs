@@ -1,4 +1,5 @@
 use std::cell::RefCell;
+use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::rc::Rc;
 use std::sync::Arc;
@@ -46,7 +47,16 @@ impl Connector for CellConnector {
             .map_err(|error| ConnectorError::new(error.to_string()))?;
         if matches!(
             capability.method.as_str(),
-            "read" | "lookup" | "asgrep" | "find" | "shell" | "run" | "measure" | "project" | "compress" | "expand"
+            "read"
+                | "lookup"
+                | "asgrep"
+                | "find"
+                | "shell"
+                | "run"
+                | "measure"
+                | "project"
+                | "compress"
+                | "expand"
         ) {
             let readonly = {
                 let slot = self.cell.borrow();
@@ -118,6 +128,17 @@ fn dispatch_concurrent(
     match method {
         "read" => {
             let path = string_arg(&positional, 0, "z.read target")?;
+            if path.starts_with("z://") {
+                let handle = ZeroHandle::parse(&path)
+                    .map_err(|error| ConnectorError::new(error.to_string()))?;
+                let expanded = context
+                    .expand(&handle, ExpandOptions::default())
+                    .map_err(host_error)?;
+                let text = expanded.text.ok_or_else(|| {
+                    ConnectorError::new("z.read exact handle does not contain UTF-8 text")
+                })?;
+                return Ok(Value::String(text));
+            }
             let path_buf = PathBuf::from(&path);
             let full_path = if path_buf.is_absolute() {
                 path_buf.clone()
@@ -179,33 +200,26 @@ fn dispatch_concurrent(
             // Accept both calling conventions: z.asgrep(query, {options}) and
             // the single-object form z.asgrep({query, path, ...}) that new
             // agents naturally try first (pc_cf4c50f47270).
-            let (query, options_source): (Value, Option<Value>) =
-                match positional.first() {
-                    Some(Value::Object(first)) if positional.len() == 1 => {
-                        let mut object = first.clone();
-                        let query = object
-                            .remove("query")
-                            .ok_or_else(|| {
-                                ConnectorError::new(
-                                    "z.asgrep object form requires a query field",
-                                )
-                            })?;
-                        (query, Some(Value::Object(object)))
-                    }
-                    _ => (
-                        Value::String(string_arg(&positional, 0, "z.asgrep query")?),
-                        positional.get(1).cloned(),
-                    ),
-                };
+            let (query, options_source): (Value, Option<Value>) = match positional.first() {
+                Some(Value::Object(first)) if positional.len() == 1 => {
+                    let mut object = first.clone();
+                    let query = object.remove("query").ok_or_else(|| {
+                        ConnectorError::new("z.asgrep object form requires a query field")
+                    })?;
+                    (query, Some(Value::Object(object)))
+                }
+                _ => (
+                    Value::String(string_arg(&positional, 0, "z.asgrep query")?),
+                    positional.get(1).cloned(),
+                ),
+            };
             let query = query
                 .as_str()
                 .ok_or_else(|| ConnectorError::new("z.asgrep query must be a string"))?
                 .to_owned();
             let options = options_source
-                .map(normalize_keys)
-                .map(serde_json::from_value::<AsgrepOptions>)
-                .transpose()
-                .map_err(json_error)?
+                .map(parse_asgrep_options)
+                .transpose()?
                 .unwrap_or_else(default_asgrep_options);
             serde_json::to_value(context.asgrep(query, options).map_err(host_error)?)
                 .map_err(json_error)
@@ -416,6 +430,17 @@ fn dispatch_direct(cell: &mut Cell, method: &str, args: Value) -> Result<Value, 
     match method {
         "read" => {
             let path = string_arg(&positional, 0, "z.read path")?;
+            if path.starts_with("z://") {
+                let handle = ZeroHandle::parse(&path)
+                    .map_err(|error| ConnectorError::new(error.to_string()))?;
+                let expanded = cell
+                    .expand(&handle, ExpandOptions::default())
+                    .map_err(host_error)?;
+                let text = expanded.text.ok_or_else(|| {
+                    ConnectorError::new("z.read exact handle does not contain UTF-8 text")
+                })?;
+                return Ok(Value::String(text));
+            }
             let options = positional
                 .get(1)
                 .cloned()
@@ -455,7 +480,11 @@ fn dispatch_direct(cell: &mut Cell, method: &str, args: Value) -> Result<Value, 
             // Shape inference: create / remove / substitute / replace_file
             if let Some(values) = patch.as_object() {
                 // {remove: true} -> delete file
-                if values.get("remove").and_then(Value::as_bool).unwrap_or(false) {
+                if values
+                    .get("remove")
+                    .and_then(Value::as_bool)
+                    .unwrap_or(false)
+                {
                     serde_json::to_value(cell.remove(path, expected).map_err(host_error)?)
                         .map_err(json_error)
                 }
@@ -464,21 +493,21 @@ fn dispatch_direct(cell: &mut Cell, method: &str, args: Value) -> Result<Value, 
                 // insert_before/after) MUST stay on the verified edit path.
                 else if let Some(content) = values.get("create").and_then(Value::as_str) {
                     serde_json::to_value(
-                        cell.write(path, content.as_bytes().to_vec(), None).map_err(host_error)?,
+                        cell.write(path, content.as_bytes().to_vec(), None)
+                            .map_err(host_error)?,
                     )
                     .map_err(json_error)
-                }
-                else {
+                } else {
                     // Fall through to standard edit path below
                     let source = cell.read_exact(&path).map_err(host_error)?;
                     let (postimage, patch_text) = apply_edit_patch(&source, target, patch)?;
                     serde_json::to_value(
-                        cell.edit(path, postimage, patch_text, expected).map_err(host_error)?,
+                        cell.edit(path, postimage, patch_text, expected)
+                            .map_err(host_error)?,
                     )
                     .map_err(json_error)
                 }
-            }
-            else if patch.is_string() {
+            } else if patch.is_string() {
                 // Whole-file replacement via string: allowed when file doesn't exist yet
                 let exists = cell.read_exact(&path).is_ok();
                 if exists {
@@ -491,8 +520,7 @@ fn dispatch_direct(cell: &mut Cell, method: &str, args: Value) -> Result<Value, 
                         .map_err(host_error)?,
                 )
                 .map_err(json_error)
-            }
-            else {
+            } else {
                 return Err(ConnectorError::new(
                     "z.edit accepts {find, replacement}, {create: content}, {remove: true}, or {kind: 'replace_file', content}",
                 ));
@@ -547,10 +575,8 @@ fn dispatch_direct(cell: &mut Cell, method: &str, args: Value) -> Result<Value, 
             let options = positional
                 .get(1)
                 .cloned()
-                .map(normalize_keys)
-                .map(serde_json::from_value::<AsgrepOptions>)
-                .transpose()
-                .map_err(json_error)?
+                .map(parse_asgrep_options)
+                .transpose()?
                 .unwrap_or_else(default_asgrep_options);
             serde_json::to_value(cell.asgrep(query, options).map_err(host_error)?)
                 .map_err(json_error)
@@ -657,6 +683,17 @@ fn option_u32(
         return Err(ConnectorError::new(format!("{camel} must be positive")));
     }
     Ok(Some(value))
+}
+
+fn parse_asgrep_options(value: Value) -> Result<AsgrepOptions, ConnectorError> {
+    let mut value = normalize_keys(value);
+    let options = value
+        .as_object_mut()
+        .ok_or_else(|| ConnectorError::new("z.find options must be an object"))?;
+    options
+        .entry("mode")
+        .or_insert_with(|| Value::String("natural".into()));
+    serde_json::from_value(value).map_err(json_error)
 }
 
 fn shell_arguments(positional: &[Value]) -> Result<(ShellCommand, ShellOptions), ConnectorError> {
@@ -781,7 +818,6 @@ fn edit_target(
     }
 }
 
-
 /// Compile the final ergonomic z.apply array into the strict EffectRequest IR.
 /// The model supplies flat path-local operations; target indirection and effect
 /// kinds stay internal to the kernel.
@@ -795,10 +831,13 @@ fn simplified_apply_request(
         )
     })?;
     if ops.is_empty() {
-        return Err(ConnectorError::new("z.apply requires at least one operation"));
+        return Err(ConnectorError::new(
+            "z.apply requires at least one operation",
+        ));
     }
 
     let mut targets = Map::new();
+    let mut path_targets: BTreeMap<String, (String, String)> = BTreeMap::new();
     let mut changes = Vec::with_capacity(ops.len());
     for (index, operation) in ops.iter().enumerate() {
         let op = operation.as_object().ok_or_else(|| {
@@ -809,7 +848,57 @@ fn simplified_apply_request(
         let path = op.get("path").and_then(Value::as_str).ok_or_else(|| {
             ConnectorError::new(format!("z.apply operation {index} requires a string path"))
         })?;
-        let target = format!("t{index}");
+        const ALLOWED: &[&str] = &[
+            "path",
+            "edit",
+            "create",
+            "replace",
+            "remove",
+            "find",
+            "old",
+            "replacement",
+            "new",
+            "before",
+            "after",
+            "content",
+        ];
+        if let Some(key) = op.keys().find(|key| !ALLOWED.contains(&key.as_str())) {
+            return Err(ConnectorError::new(format!(
+                "z.apply operation {index} has unknown field {key:?}; accepted fields: {}",
+                ALLOWED.join(", ")
+            )));
+        }
+        let action_count = usize::from(op.contains_key("edit"))
+            + usize::from(op.contains_key("create"))
+            + usize::from(op.contains_key("replace"))
+            + usize::from(op.get("remove").and_then(Value::as_bool) == Some(true))
+            + usize::from(
+                op.get("find").or_else(|| op.get("old")).is_some()
+                    && op.get("replacement").or_else(|| op.get("new")).is_some(),
+            )
+            + usize::from(op.contains_key("before") && op.contains_key("content"))
+            + usize::from(op.contains_key("after") && op.contains_key("content"));
+        if action_count != 1 {
+            return Err(ConnectorError::new(format!(
+                "z.apply operation {index} requires exactly one action, found {action_count}"
+            )));
+        }
+        if let Some(edit) = op.get("edit").and_then(Value::as_object)
+            && let Some(key) = edit.keys().find(|key| {
+                !matches!(
+                    key.as_str(),
+                    "find" | "old" | "replacement" | "replace" | "new"
+                )
+            })
+        {
+            return Err(ConnectorError::new(format!(
+                "z.apply operation {index} edit has unknown field {key:?}"
+            )));
+        }
+        let target = path_targets
+            .get(path)
+            .map(|(target, _)| target.clone())
+            .unwrap_or_else(|| format!("t{index}"));
 
         let (expect, change) = if let Some(content) = op.get("create").and_then(Value::as_str) {
             (
@@ -865,8 +954,12 @@ fn simplified_apply_request(
                 }),
             )
         } else if let (Some(old), Some(replacement)) = (
-            op.get("find").or_else(|| op.get("old")).and_then(Value::as_str),
-            op.get("replacement").or_else(|| op.get("new")).and_then(Value::as_str),
+            op.get("find")
+                .or_else(|| op.get("old"))
+                .and_then(Value::as_str),
+            op.get("replacement")
+                .or_else(|| op.get("new"))
+                .and_then(Value::as_str),
         ) {
             (
                 "exists",
@@ -910,16 +1003,24 @@ fn simplified_apply_request(
             )));
         };
 
-        targets.insert(
-            target.clone(),
-            serde_json::json!({"path": path, "expect": expect}),
-        );
+        if let Some((_, existing_expect)) = path_targets.get(path) {
+            if existing_expect != expect {
+                return Err(ConnectorError::new(format!(
+                    "z.apply operations for {path:?} disagree on whether the path must exist"
+                )));
+            }
+        } else {
+            path_targets.insert(path.to_owned(), (target.clone(), expect.to_owned()));
+            targets.insert(
+                target.clone(),
+                serde_json::json!({"path": path, "expect": expect}),
+            );
+        }
         changes.push(change);
     }
 
-    let verify = verify.unwrap_or_else(|| {
-        serde_json::json!({"changedTargetsOnly": true, "parse": false})
-    });
+    let verify =
+        verify.unwrap_or_else(|| serde_json::json!({"changedTargetsOnly": true, "parse": false}));
     serde_json::from_value::<EffectRequest>(serde_json::json!({
         "targets": targets,
         "changes": changes,
@@ -946,15 +1047,16 @@ fn apply_edit_patch(
     let kind = values.get("kind").and_then(Value::as_str);
     match kind {
         None => {
-            if let Some(range) = selection {
-                let find = patch_find(values)?;
-                if &source[range] != find.as_bytes() {
-                    return Err(ConnectorError::new(
-                        "selection_scope_mismatch: patch find must equal the snapped selection",
-                    ));
-                }
+            let find = patch_find(values)?;
+            if let Some(range) = selection
+                && &source[range] != find.as_bytes()
+            {
+                return Err(ConnectorError::new(
+                    "selection_scope_mismatch: patch find must equal the snapped selection",
+                ));
             }
-            apply_patch(source, patch)
+            let replacement = patch_replacement(values)?;
+            replace_exact(source, find, replacement).map(|postimage| (postimage, patch_text))
         }
         Some("replace_exact") => {
             if values.get("expectedCount").and_then(Value::as_u64) != Some(1) {
@@ -1101,7 +1203,7 @@ fn replace_exact(source: &[u8], old: &str, replacement: &str) -> Result<Vec<u8>,
     let mut matches = text.match_indices(old);
     let first = matches
         .next()
-        .ok_or_else(|| ConnectorError::new("z.edit patch did not match"))?;
+        .ok_or_else(|| edit_mismatch_error(text, old))?;
     if matches.next().is_some() {
         return Err(ConnectorError::new("z.edit patch is ambiguous"));
     }
@@ -1109,6 +1211,25 @@ fn replace_exact(source: &[u8], old: &str, replacement: &str) -> Result<Vec<u8>,
         source,
         first.0..first.0 + old.len(),
         replacement.as_bytes(),
+    ))
+}
+
+fn edit_mismatch_error(source: &str, expected: &str) -> ConnectorError {
+    const CONTEXT_BYTES: usize = 160;
+    let anchor = expected.lines().find(|line| !line.trim().is_empty());
+    let center = anchor.and_then(|line| source.find(line)).unwrap_or(0);
+    let mut start = center.saturating_sub(CONTEXT_BYTES / 2);
+    while start < source.len() && !source.is_char_boundary(start) {
+        start += 1;
+    }
+    let mut end = (start + CONTEXT_BYTES).min(source.len());
+    while end > start && !source.is_char_boundary(end) {
+        end -= 1;
+    }
+    let context = &source[start..end];
+    ConnectorError::new(format!(
+        "z.edit patch did not match (mismatch=not_found, expected_bytes={}): closest source context at byte {start}: {context:?}; the source may have changed, re-read with z.read(path) before retrying",
+        expected.len()
     ))
 }
 
@@ -1285,43 +1406,6 @@ fn normalize_keys(value: Value) -> Value {
         normalized.insert(key.into(), value);
     }
     Value::Object(normalized)
-}
-
-fn apply_patch(source: &[u8], patch: Value) -> Result<(Vec<u8>, Option<String>), ConnectorError> {
-    match patch {
-        Value::Object(values) => {
-            let find = values
-                .get("find")
-                .or_else(|| values.get("old"))
-                .or_else(|| values.get("pattern"))
-                .and_then(Value::as_str)
-                .ok_or_else(|| ConnectorError::new("z.edit patch requires find or pattern"))?;
-            let replacement = values
-                .get("replace")
-                .or_else(|| values.get("new"))
-                .or_else(|| values.get("replacement"))
-                .and_then(Value::as_str)
-                .ok_or_else(|| ConnectorError::new("z.edit patch requires replacement"))?;
-            let text = std::str::from_utf8(source)
-                .map_err(|_| ConnectorError::new("z.edit target is not UTF-8"))?;
-            let mut matches = text.match_indices(find);
-            let first = matches
-                .next()
-                .ok_or_else(|| ConnectorError::new("z.edit patch did not match"))?;
-            if matches.next().is_some() {
-                return Err(ConnectorError::new("z.edit patch is ambiguous"));
-            }
-            let mut postimage = String::with_capacity(text.len() - find.len() + replacement.len());
-            postimage.push_str(&text[..first.0]);
-            postimage.push_str(replacement);
-            postimage.push_str(&text[first.0 + find.len()..]);
-            Ok((
-                postimage.into_bytes(),
-                Some(Value::Object(values).to_string()),
-            ))
-        }
-        _ => Err(ConnectorError::new("z.edit patch must be a patch object")),
-    }
 }
 
 fn default_asgrep_options() -> AsgrepOptions {

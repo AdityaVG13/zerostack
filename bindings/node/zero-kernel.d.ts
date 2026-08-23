@@ -1,12 +1,18 @@
 export type AsgrepMode =
   | "natural"
   | "pattern"
+  | "word"
+  | "literal"
+  | "regex"
+  | "imports"
+  | "defs"
   | "symbols"
   | "definition"
   | "references"
   | "callers"
   | "callees"
   | "call_path"
+  | "call-path"
   | "semantic";
 
 export interface ReadOptions {
@@ -29,6 +35,27 @@ export interface AstPatch {
   language: string;
   pattern: string;
   replacement: string;
+}
+
+export type EditPatch =
+  | { find: string; replacement: string }
+  | { create: string }
+  | { remove: true }
+  | { kind: "replace_file"; content: string };
+
+export type ApplyOperation =
+  | { path: string; edit: { find: string; replacement: string } }
+  | { path: string; create: string }
+  | { path: string; replace: string }
+  | { path: string; remove: true }
+  | { path: string; before: string; content: string }
+  | { path: string; after: string; content: string };
+
+export interface ApplyResult {
+  schema: "zerostack.effect";
+  outcome: "staged";
+  changedFiles: number;
+  delta: string;
 }
 
 export interface AsgrepOptions {
@@ -94,6 +121,7 @@ export interface AsgrepResult {
   hits: AsgrepHit[];
   indexDigest: string;
   complete: boolean;
+  diagnostic?: string;
   continuation?: string;
 }
 
@@ -147,9 +175,15 @@ export interface ZeroKernelInspection {
 }
 
 export interface ZeroKernelSurface {
-  read(path: string, options?: ReadOptions): Promise<string>;
+  read(target: string, options?: ReadOptions): Promise<string | string[]>;
+  find(query: string | ({ query: string } & AsgrepOptions), options?: AsgrepOptions): Promise<AsgrepResult>;
+  edit(path: string, patch: EditPatch, options?: EditOptions): Promise<FileEffectReceipt>;
+  apply(operations: ApplyOperation[]): Promise<ApplyResult>;
+  run(command: string | string[], options?: ShellOptions): Promise<ShellResult>;
+  readonly state: ZeroKernelState;
+
+  /** Compatibility aliases. New plans use the six operations above. */
   write(path: string, content: string, options?: WriteOptions): Promise<FileEffectReceipt>;
-  edit(path: string, patch: string | AstPatch, options?: EditOptions): Promise<FileEffectReceipt>;
   remove(path: string, options?: RemoveOptions): Promise<FileEffectReceipt>;
   transact<T>(operation: () => Promise<T>): Promise<T>;
   asgrep(query: string, options?: AsgrepOptions): Promise<AsgrepResult>;
@@ -161,7 +195,6 @@ export interface ZeroKernelSurface {
   project(value: unknown, options?: ProjectOptions): Promise<ProjectionResult>;
   compress(value: unknown, options?: CompressionOptions): Promise<CompressionResult>;
   expand(handle: string, options?: ExpandOptions): Promise<string>;
-  readonly state: ZeroKernelState;
   help(query?: string): Promise<ZeroKernelHelp>;
   inspect(): Promise<ZeroKernelInspection>;
 }
