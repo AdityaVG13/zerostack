@@ -22,8 +22,12 @@ TAG="$PLATFORM-$ARCH"
 echo "==> building release prebuild ($TAG)"
 (cd "$ZERO_STACK" && RUSTC_WRAPPER= cargo build --profile release-node -p zero-kernel-node)
 
-SRC_LIB=$(ls "$ZERO_STACK"/target/release-node/libzero_kernel_node.* 2>/dev/null | head -1)
-[ -n "$SRC_LIB" ] || { echo "ERROR: no built addon found under target/release-node"; exit 1; }
+case "$PLATFORM" in
+  darwin) SRC_LIB="$ZERO_STACK/target/release-node/libzero_kernel_node.dylib" ;;
+  linux) SRC_LIB="$ZERO_STACK/target/release-node/libzero_kernel_node.so" ;;
+  *) echo "ERROR: unsupported addon platform: $PLATFORM"; exit 1 ;;
+esac
+[ -f "$SRC_LIB" ] || { echo "ERROR: built addon not found: $SRC_LIB"; exit 1; }
 
 NATIVE_DIR="$HARNESS/packages/zero-kernel/native"
 DST="$NATIVE_DIR/zero_kernel_product.$TAG.node"
