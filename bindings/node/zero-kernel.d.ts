@@ -65,6 +65,7 @@ export interface AsgrepOptions {
   source?: string;
   sink?: string;
   limit?: number;
+  budgetTokens?: number;
 }
 
 export interface LookupOptions {
@@ -117,10 +118,37 @@ export interface AsgrepHit {
   score: number;
 }
 
+export interface StructuralCoverage {
+  tierAPct: number;
+  tierBPct: number;
+  tierCPct: number;
+  freshnessVerified: boolean;
+  snapshotId: number;
+}
+
+export interface StructuralAbsence {
+  class: "verified_empty" | "unknown" | "stale_index" | "low_coverage";
+  reason: string;
+  coverage?: StructuralCoverage;
+  suggestion: string;
+}
+
+export interface StructuralBudget {
+  requested: number;
+  used: number;
+  actualUsed: number;
+  remaining: number;
+  exceeded: boolean;
+  truncated: boolean;
+}
+
 export interface AsgrepResult {
   hits: AsgrepHit[];
   indexDigest: string;
   complete: boolean;
+  coverage?: StructuralCoverage;
+  absence?: StructuralAbsence;
+  budget?: StructuralBudget;
   diagnostic?: string;
   continuation?: string;
 }
@@ -142,6 +170,8 @@ export interface ProjectionResult {
 export interface CompressionResult {
   visible: string;
   exact: string;
+  truncated: boolean;
+  omittedTokens: number;
   accounting: TokenAccounting;
 }
 

@@ -493,7 +493,7 @@ fn dispatch_direct(cell: &mut Cell, method: &str, args: Value) -> Result<Value, 
                 // insert_before/after) MUST stay on the verified edit path.
                 else if let Some(content) = values.get("create").and_then(Value::as_str) {
                     serde_json::to_value(
-                        cell.write(path, content.as_bytes().to_vec(), None)
+                        cell.create(path, content.as_bytes().to_vec())
                             .map_err(host_error)?,
                     )
                     .map_err(json_error)
@@ -516,7 +516,7 @@ fn dispatch_direct(cell: &mut Cell, method: &str, args: Value) -> Result<Value, 
                     ));
                 }
                 serde_json::to_value(
-                    cell.write(path, patch.as_str().unwrap_or("").as_bytes().to_vec(), None)
+                    cell.create(path, patch.as_str().unwrap_or("").as_bytes().to_vec())
                         .map_err(host_error)?,
                 )
                 .map_err(json_error)
@@ -1397,6 +1397,7 @@ fn normalize_keys(value: Value) -> Value {
             "maxBytes" => "max_bytes",
             "maxVisibleBytes" => "max_visible_bytes",
             "timeoutMs" => "timeout_ms",
+            "budgetTokens" => "budget_tokens",
             "lineStart" => "line_start",
             "lineEnd" => "line_end",
             "next" => "offset",
@@ -1416,6 +1417,7 @@ fn default_asgrep_options() -> AsgrepOptions {
         source: None,
         sink: None,
         limit: None,
+        budget_tokens: None,
     }
 }
 

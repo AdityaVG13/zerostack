@@ -241,6 +241,26 @@ fn legacy_octal_escape_is_rejected_not_corrupted() {
 }
 
 #[test]
+fn switch_and_finally_execute_statement_bodies_only() {
+    assert_eq!(
+        run(r#"
+            let branch = "";
+            let finalized = false;
+            try {
+                switch (10) {
+                    case 10: branch = "ten"; break;
+                    default: branch = "other";
+                }
+            } finally {
+                finalized = true;
+            }
+            return [branch, finalized];
+            "#),
+        json!(["ten", true]),
+    );
+}
+
+#[test]
 fn classes_bind_constructor_and_method_this() {
     assert_eq!(
         run(r#"

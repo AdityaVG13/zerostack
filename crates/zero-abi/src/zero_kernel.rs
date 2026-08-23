@@ -648,6 +648,8 @@ pub struct AsgrepOptions {
     pub sink: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub limit: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub budget_tokens: Option<u32>,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -678,10 +680,47 @@ pub struct StructuralHit {
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
+pub struct StructuralCoverage {
+    pub tier_a_pct: f64,
+    pub tier_b_pct: f64,
+    pub tier_c_pct: f64,
+    pub freshness_verified: bool,
+    pub snapshot_id: u64,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+pub struct StructuralAbsence {
+    pub class: String,
+    pub reason: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub coverage: Option<StructuralCoverage>,
+    pub suggestion: String,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+pub struct StructuralBudget {
+    pub requested: u32,
+    pub used: u32,
+    pub actual_used: u32,
+    pub remaining: u32,
+    pub exceeded: bool,
+    pub truncated: bool,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
 pub struct StructuralResult {
     pub hits: Vec<StructuralHit>,
     pub index_digest: String,
     pub complete: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub coverage: Option<StructuralCoverage>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub absence: Option<StructuralAbsence>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub budget: Option<StructuralBudget>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub diagnostic: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -750,6 +789,8 @@ pub struct CompressionRequest {
 pub struct CompressionResult {
     pub visible: String,
     pub exact: ZeroHandle,
+    pub truncated: bool,
+    pub omitted_tokens: u64,
     pub accounting: TokenAccounting,
 }
 

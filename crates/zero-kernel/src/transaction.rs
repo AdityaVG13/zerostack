@@ -313,12 +313,13 @@ impl Transaction {
                 Ok(receipt)
             }
             Err(error) => {
-                // A NotFound from the engine means the target object does not
-                // exist: nothing was mutated, so the transaction survives this
-                // effect. Drop only the unaplicable preparation and keep the
-                // cell alive (pc_2ed8bb7745f4: remove of a missing path used to
-                // settle the whole transaction and crash the cell at commit).
-                if error.kind == EngineErrorKind::NotFound {
+                // NotFound and Conflict are precondition failures: the engine
+                // must not mutate on either. Drop only the unapplied preparation
+                // so guest try/catch can recover and the cell remains committable.
+                if matches!(
+                    error.kind,
+                    EngineErrorKind::NotFound | EngineErrorKind::Conflict
+                ) {
                     self.record.effects.pop();
                     persist_record(&self.path, &self.record)?;
                     return Err(error.into());

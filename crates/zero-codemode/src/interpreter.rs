@@ -916,7 +916,8 @@ impl<'tree> Interpreter<'tree> {
             }
         }
         if let Some(finalizer) = node.child_by_field_name("finalizer") {
-            let final_result = self.statement(finalizer)?;
+            let body = finalizer.child_by_field_name("body").unwrap_or(finalizer);
+            let final_result = self.statement(body)?;
             if !matches!(final_result, Control::Normal) {
                 result = final_result;
             }
@@ -947,7 +948,7 @@ impl<'tree> Interpreter<'tree> {
             if matched {
                 let mut inner = case.walk();
                 for statement in case.named_children(&mut inner) {
-                    if statement.kind() == "switch_case" || statement.kind() == "switch_default" {
+                    if case.child_by_field_name("value") == Some(statement) {
                         continue;
                     }
                     match self.statement(statement)? {

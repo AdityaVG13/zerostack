@@ -584,6 +584,7 @@ impl Cell {
                             source: None,
                             sink: None,
                             limit: Some(2),
+                            budget_tokens: None,
                         },
                     )?;
                     let (structural, lines) = exact_structural_hit(result)?;
@@ -602,6 +603,7 @@ impl Cell {
                         source: None,
                         sink: None,
                         limit: Some(2),
+                        budget_tokens: None,
                     },
                 )?;
                 let path = result
@@ -1119,6 +1121,25 @@ impl Cell {
         }
         self.handles.push(receipt.journal.clone());
         Ok(receipt)
+    }
+
+    pub fn create(
+        &mut self,
+        path: impl Into<PathBuf>,
+        content: Vec<u8>,
+    ) -> Result<FileEffectReceipt, HostError> {
+        self.ledger.bytes_written = self
+            .ledger
+            .bytes_written
+            .saturating_add(content.len() as u64);
+        self.apply_file_effect(FileEffectRequest {
+            kind: FileEffectKind::Write,
+            path: path.into(),
+            content: Some(content),
+            patch: None,
+            expected_preimage: None,
+            expect_absent: true,
+        })
     }
 
     pub fn write(

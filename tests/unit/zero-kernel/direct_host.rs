@@ -243,6 +243,9 @@ impl StructuralEngine for Graph {
             hits,
             index_digest: "index".into(),
             complete: true,
+            coverage: None,
+            absence: None,
+            budget: None,
             diagnostic: None,
             continuation: None,
         })
@@ -319,6 +322,8 @@ impl TokenEngine for Tokens {
         Ok(CompressionResult {
             visible: String::from_utf8(request.bytes.clone()).unwrap(),
             exact: handle(&request.bytes),
+            truncated: false,
+            omitted_tokens: 0,
             accounting,
         })
     }
@@ -460,6 +465,7 @@ fn direct_methods_and_state_finalize_through_event_log() {
                 source: None,
                 sink: None,
                 limit: Some(10),
+                budget_tokens: None,
             }
         )
         .unwrap()
@@ -2258,11 +2264,44 @@ fn final_surface_edit_creates_and_removes() {
         "payload"
     );
 
+    let duplicate = kernel
+        .execute_cell("return await z.edit('created.txt', {create:'overwrite'});")
+        .unwrap();
+    assert_eq!(duplicate.outcome, zero_abi::ZeroKernelOutcome::Failed);
+    assert_eq!(
+        std::fs::read_to_string(root.path().join("created.txt")).unwrap(),
+        "payload"
+    );
+
     let removed = kernel
         .execute_cell("return await z.edit('created.txt', {remove:true});")
         .unwrap();
     assert_eq!(removed.outcome, zero_abi::ZeroKernelOutcome::Completed);
     assert!(!root.path().join("created.txt").exists());
+}
+
+#[test]
+fn caught_create_conflict_keeps_cell_committable() {
+    let root = tempdir().unwrap();
+    std::fs::write(root.path().join("existing.txt"), "original").unwrap();
+    let kernel = production_kernel_relaxed(root.path());
+    let response = kernel
+        .execute_cell(
+            r#"
+            try {
+                await z.edit('existing.txt', {create:'overwrite'});
+                return 'MISSED';
+            } catch (error) {
+                return String(error.message || error);
+            }
+            "#,
+        )
+        .unwrap();
+    assert_eq!(response.outcome, zero_abi::ZeroKernelOutcome::Completed);
+    assert_eq!(
+        std::fs::read_to_string(root.path().join("existing.txt")).unwrap(),
+        "original"
+    );
 }
 
 #[test]
