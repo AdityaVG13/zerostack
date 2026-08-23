@@ -1889,6 +1889,11 @@ fn canonical_kernel_binds_graph_hits_without_repository_indexes() {
     let root = tempdir().unwrap();
     let source = "pub fn alpha() {}\n";
     write_fixture(root.path(), "src/lib.rs", source);
+    write_fixture(
+        root.path(),
+        "decoy.rs",
+        "pub fn alpha() { alpha(); alpha(); alpha(); alpha(); }\n",
+    );
     let store = root.path().join(".state");
     let kernel = ZeroKernel::canonical(
         root.path(),
@@ -1913,16 +1918,17 @@ fn canonical_kernel_binds_graph_hits_without_repository_indexes() {
                 mode: "natural",
                 path: "src/lib.rs",
                 language: "rust",
-                limit: 2,
+                limit: 1,
               }),
               async () => await z.asgrep("alpha", {
                 mode: "natural",
                 path: "src/lib.rs",
                 language: "rust",
-                limit: 2,
+                limit: 1,
               }),
             ]);
             const hits = ast[0];
+            const expandedHit = await z.read(hits.hits[0].source);
             const graph = await z.parallel([
               async () => await z.asgrep("alpha", {
                 mode: "symbols",
@@ -1946,7 +1952,7 @@ fn canonical_kernel_binds_graph_hits_without_repository_indexes() {
               cardinality: "exactly_one",
               selection: {symbol: "alpha"},
             });
-            return {hits, snap, symbol, graph, astCount: ast.length};
+            return {hits, expandedHit, snap, symbol, graph, astCount: ast.length};
             "#,
         )
         .unwrap();
@@ -1982,6 +1988,7 @@ fn canonical_kernel_binds_graph_hits_without_repository_indexes() {
         value["hits"]["hits"][0]["source"],
         value["snap"]["source"]["exact"]
     );
+    assert_eq!(value["expandedHit"], source);
     assert_eq!(
         value["snap"]["structural"]["source"],
         value["snap"]["source"]["exact"]
