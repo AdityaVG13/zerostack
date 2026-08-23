@@ -20,7 +20,7 @@ PLATFORM="$(uname -s | tr '[:upper:]' '[:lower:]')"
 TAG="$PLATFORM-$ARCH"
 
 echo "==> building release prebuild ($TAG)"
-(cd "$ZERO_STACK" && RUSTC_WRAPPER= cargo build --release --profile release-node -p zero-kernel-node)
+(cd "$ZERO_STACK" && RUSTC_WRAPPER= cargo build --profile release-node -p zero-kernel-node)
 
 SRC_LIB=$(ls "$ZERO_STACK"/target/release-node/libzero_kernel_node.* 2>/dev/null | head -1)
 [ -n "$SRC_LIB" ] || { echo "ERROR: no built addon found under target/release-node"; exit 1; }
