@@ -17,6 +17,7 @@ members = [
     "crates/zerostack-machine-permit",
     "crates/zerostack-test-support",
     "crates/zerostack-install",
+    "crates/zerostack-conformance",
 ]
 
 [workspace.package]
