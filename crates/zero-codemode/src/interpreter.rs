@@ -122,6 +122,8 @@ enum Value<'tree> {
     Number(f64),
     String(String),
     Array(Rc<RefCell<Vec<Value<'tree>>>>),
+    Map(Rc<RefCell<Vec<(Value<'tree>, Value<'tree>)>>>),
+    Set(Rc<RefCell<Vec<Value<'tree>>>>),
     Object(Rc<RefCell<ObjectValue<'tree>>>),
     Namespace(String),
     Tool(String, String),
@@ -156,6 +158,8 @@ fn value_kind(value: &Value<'_>) -> &'static str {
         Value::Number(_) => "a number",
         Value::String(_) => "a string",
         Value::Array(_) => "an array",
+        Value::Map(_) => "a map",
+        Value::Set(_) => "a set",
         Value::Object(_) => "an object (connector result?)",
         _ => "this value",
     }
@@ -415,6 +419,8 @@ impl<'tree> Interpreter<'tree> {
             "Math",
             "JSON",
             "Array",
+            "Map",
+            "Set",
             "Date",
             "RegExp",
             "URL",
@@ -820,6 +826,13 @@ impl<'tree> Interpreter<'tree> {
         let is_of = self.text(node).contains(" of ");
         let items = match (is_of, source) {
             (true, Value::Array(items)) => items.borrow().clone(),
+            (true, Value::Map(entries)) => entries
+                .borrow()
+                .iter()
+                .map(|(key, value)| new_array(vec![key.clone(), value.clone()]))
+                .collect(),
+            (true, Value::Set(values)) => values.borrow().clone(),
+            (false, Value::Map(_) | Value::Set(_)) => Vec::new(),
             (false, Value::Array(items)) => (0..items.borrow().len())
                 .map(|index| Value::String(index.to_string()))
                 .collect(),
@@ -1259,6 +1272,8 @@ impl<'tree> Interpreter<'tree> {
                 }
                 Ok(Value::Object(instance))
             }
+            Value::Namespace(name) if name == "Map" => self.new_map(args),
+            Value::Namespace(name) if name == "Set" => self.new_set(args),
             Value::Namespace(name) if name == "Promise" => {
                 self.new_manual_promise(args.into_iter().next().unwrap_or(Value::Undefined))
             }
@@ -2301,6 +2316,20 @@ impl<'tree> Interpreter<'tree> {
                     Ok(Value::Method(Box::new(Value::Array(items)), key.into()))
                 }
             }
+            Value::Map(entries) => {
+                if key == "size" {
+                    Ok(Value::Number(entries.borrow().len() as f64))
+                } else {
+                    Ok(Value::Method(Box::new(Value::Map(entries)), key.into()))
+                }
+            }
+            Value::Set(values) => {
+                if key == "size" {
+                    Ok(Value::Number(values.borrow().len() as f64))
+                } else {
+                    Ok(Value::Method(Box::new(Value::Set(values)), key.into()))
+                }
+            }
             Value::String(value) => {
                 if key == "length" {
                     Ok(Value::Number(value.chars().count() as f64))
@@ -2335,6 +2364,8 @@ impl<'tree> Interpreter<'tree> {
         match receiver {
             Value::Namespace(namespace) => self.namespace(&namespace, name, args),
             Value::Array(items) => self.array_method(items, name, args),
+            Value::Map(entries) => self.map_method(entries, name, args),
+            Value::Set(values) => self.set_method(values, name, args),
             Value::String(value) => self.string_method(&value, name, args),
             Value::Object(object) if name == "hasOwnProperty" => {
                 let key = to_key(args.first().unwrap_or(&Value::Undefined));
@@ -2824,6 +2855,241 @@ impl<'tree> Interpreter<'tree> {
             "parallelLimit": guest.parallel_limit(),
         });
         self.convert_from_json(json, false).map_err(Fault::Host)
+    }
+
+    fn new_map(&mut self, args: Vec<Value<'tree>>) -> Result<Value<'tree>, Fault<'tree>> {
+        let source = args.into_iter().next().unwrap_or(Value::Undefined);
+        let items = match source {
+            Value::Undefined | Value::Null => Vec::new(),
+            Value::Array(items) => items.borrow().clone(),
+            _ => {
+                return Err(Fault::Throw(Value::Error(ErrorValue {
+                    name: "TypeError".into(),
+                    message: "Map constructor expects an array of [key, value] entries".into(),
+                })));
+            }
+        };
+        let mut entries = Vec::new();
+        entries.try_reserve(items.len()).map_err(|error| {
+            Fault::Host(HostError::Data(format!(
+                "Map constructor allocation could not be reserved: {error}"
+            )))
+        })?;
+        for item in items {
+            self.tick()?;
+            let Value::Array(pair) = item else {
+                return Err(Fault::Throw(Value::Error(ErrorValue {
+                    name: "TypeError".into(),
+                    message: "Map constructor entry must be a [key, value] array".into(),
+                })));
+            };
+            let pair = pair.borrow();
+            let key = pair.first().cloned().unwrap_or(Value::Undefined);
+            let value = pair.get(1).cloned().unwrap_or(Value::Undefined);
+            if let Some((_, current)) = entries
+                .iter_mut()
+                .find(|(current, _)| collection_key_eq(current, &key))
+            {
+                *current = value;
+            } else {
+                entries.push((key, value));
+            }
+        }
+        Ok(Value::Map(Rc::new(RefCell::new(entries))))
+    }
+
+    fn new_set(&mut self, args: Vec<Value<'tree>>) -> Result<Value<'tree>, Fault<'tree>> {
+        let source = args.into_iter().next().unwrap_or(Value::Undefined);
+        let items = match source {
+            Value::Undefined | Value::Null => Vec::new(),
+            Value::Array(items) => items.borrow().clone(),
+            _ => {
+                return Err(Fault::Throw(Value::Error(ErrorValue {
+                    name: "TypeError".into(),
+                    message: "Set constructor expects an array".into(),
+                })));
+            }
+        };
+        let mut values = Vec::new();
+        values.try_reserve(items.len()).map_err(|error| {
+            Fault::Host(HostError::Data(format!(
+                "Set constructor allocation could not be reserved: {error}"
+            )))
+        })?;
+        for item in items {
+            self.tick()?;
+            if !values
+                .iter()
+                .any(|current| collection_key_eq(current, &item))
+            {
+                values.push(item);
+            }
+        }
+        Ok(Value::Set(Rc::new(RefCell::new(values))))
+    }
+
+    fn map_method(
+        &mut self,
+        entries: Rc<RefCell<Vec<(Value<'tree>, Value<'tree>)>>>,
+        name: &str,
+        args: Vec<Value<'tree>>,
+    ) -> Result<Value<'tree>, Fault<'tree>> {
+        let key = args.first().cloned().unwrap_or(Value::Undefined);
+        match name {
+            "get" => Ok(entries
+                .borrow()
+                .iter()
+                .find(|(current, _)| collection_key_eq(current, &key))
+                .map(|(_, value)| value.clone())
+                .unwrap_or(Value::Undefined)),
+            "has" => Ok(Value::Bool(
+                entries
+                    .borrow()
+                    .iter()
+                    .any(|(current, _)| collection_key_eq(current, &key)),
+            )),
+            "set" => {
+                let value = args.get(1).cloned().unwrap_or(Value::Undefined);
+                {
+                    let mut target = entries.borrow_mut();
+                    if let Some((_, current)) = target
+                        .iter_mut()
+                        .find(|(current, _)| collection_key_eq(current, &key))
+                    {
+                        *current = value;
+                    } else {
+                        target.push((key, value));
+                    }
+                }
+                Ok(Value::Map(entries))
+            }
+            "delete" => {
+                let removed = {
+                    let mut target = entries.borrow_mut();
+                    target
+                        .iter()
+                        .position(|(current, _)| collection_key_eq(current, &key))
+                        .map(|index| {
+                            target.remove(index);
+                        })
+                        .is_some()
+                };
+                Ok(Value::Bool(removed))
+            }
+            "clear" => {
+                entries.borrow_mut().clear();
+                Ok(Value::Undefined)
+            }
+            "keys" => Ok(new_array(
+                entries
+                    .borrow()
+                    .iter()
+                    .map(|(key, _)| key.clone())
+                    .collect(),
+            )),
+            "values" => Ok(new_array(
+                entries
+                    .borrow()
+                    .iter()
+                    .map(|(_, value)| value.clone())
+                    .collect(),
+            )),
+            "entries" => Ok(new_array(
+                entries
+                    .borrow()
+                    .iter()
+                    .map(|(key, value)| new_array(vec![key.clone(), value.clone()]))
+                    .collect(),
+            )),
+            "forEach" => {
+                let callback = args.first().cloned().ok_or_else(|| {
+                    Fault::Throw(Value::Error(ErrorValue {
+                        name: "TypeError".into(),
+                        message: "Map.forEach callback is required".into(),
+                    }))
+                })?;
+                let snapshot = entries.borrow().clone();
+                for (key, value) in snapshot {
+                    self.tick()?;
+                    self.call(
+                        callback.clone(),
+                        vec![value, key, Value::Map(Rc::clone(&entries))],
+                    )?;
+                }
+                Ok(Value::Undefined)
+            }
+            _ => Err(Fault::Host(self.unsupported_name(name, "Map method"))),
+        }
+    }
+
+    fn set_method(
+        &mut self,
+        values: Rc<RefCell<Vec<Value<'tree>>>>,
+        name: &str,
+        args: Vec<Value<'tree>>,
+    ) -> Result<Value<'tree>, Fault<'tree>> {
+        let value = args.first().cloned().unwrap_or(Value::Undefined);
+        match name {
+            "add" => {
+                if !values
+                    .borrow()
+                    .iter()
+                    .any(|current| collection_key_eq(current, &value))
+                {
+                    values.borrow_mut().push(value);
+                }
+                Ok(Value::Set(values))
+            }
+            "has" => Ok(Value::Bool(
+                values
+                    .borrow()
+                    .iter()
+                    .any(|current| collection_key_eq(current, &value)),
+            )),
+            "delete" => {
+                let removed = {
+                    let mut target = values.borrow_mut();
+                    target
+                        .iter()
+                        .position(|current| collection_key_eq(current, &value))
+                        .map(|index| {
+                            target.remove(index);
+                        })
+                        .is_some()
+                };
+                Ok(Value::Bool(removed))
+            }
+            "clear" => {
+                values.borrow_mut().clear();
+                Ok(Value::Undefined)
+            }
+            "keys" | "values" => Ok(new_array(values.borrow().clone())),
+            "entries" => Ok(new_array(
+                values
+                    .borrow()
+                    .iter()
+                    .map(|value| new_array(vec![value.clone(), value.clone()]))
+                    .collect(),
+            )),
+            "forEach" => {
+                let callback = args.first().cloned().ok_or_else(|| {
+                    Fault::Throw(Value::Error(ErrorValue {
+                        name: "TypeError".into(),
+                        message: "Set.forEach callback is required".into(),
+                    }))
+                })?;
+                let snapshot = values.borrow().clone();
+                for value in snapshot {
+                    self.tick()?;
+                    self.call(
+                        callback.clone(),
+                        vec![value.clone(), value, Value::Set(Rc::clone(&values))],
+                    )?;
+                }
+                Ok(Value::Undefined)
+            }
+            _ => Err(Fault::Host(self.unsupported_name(name, "Set method"))),
+        }
     }
 
     /// `Array.from`: resolve the source to (length, element producer) and run
@@ -3574,6 +3840,9 @@ impl<'tree> Interpreter<'tree> {
                 active.remove(&pointer);
                 result
             }
+            // Native JSON.stringify serializes Map and Set as empty objects
+            // because their entries are not enumerable own properties.
+            Value::Map(_) | Value::Set(_) => JsonValue::Object(Map::new()),
             Value::Error(value) => JsonValue::Object(
                 [
                     (String::from("name"), JsonValue::String(value.name.clone())),
@@ -3662,6 +3931,7 @@ impl<'tree> Interpreter<'tree> {
                 }
             }
             Value::Object(value) => self.serialize_public_object(value, depth, seen, degraded)?,
+            Value::Map(_) | Value::Set(_) => JsonValue::Object(Map::new()),
             Value::Error(value) => JsonValue::Object(
                 [
                     (String::from("name"), JsonValue::String(value.name.clone())),
@@ -4195,14 +4465,23 @@ fn object_define_property<'tree>(args: Vec<Value<'tree>>) -> Result<Value<'tree>
     Ok(Value::Object(target))
 }
 
-fn same_value(left: &Value<'_>, right: &Value<'_>) -> bool {
+fn same_value<'tree>(left: &Value<'tree>, right: &Value<'tree>) -> bool {
     match (left, right) {
         (Value::Null, Value::Null) | (Value::Undefined, Value::Undefined) => true,
         (Value::Bool(left), Value::Bool(right)) => left == right,
         (Value::Number(left), Value::Number(right)) => left == right,
         (Value::String(left), Value::String(right)) => left == right,
+        (Value::Array(left), Value::Array(right)) => Rc::ptr_eq(left, right),
+        (Value::Map(left), Value::Map(right)) => Rc::ptr_eq(left, right),
+        (Value::Set(left), Value::Set(right)) => Rc::ptr_eq(left, right),
+        (Value::Object(left), Value::Object(right)) => Rc::ptr_eq(left, right),
         _ => false,
     }
+}
+
+fn collection_key_eq<'tree>(left: &Value<'tree>, right: &Value<'tree>) -> bool {
+    matches!((left, right), (Value::Number(left), Value::Number(right)) if left.is_nan() && right.is_nan())
+        || same_value(left, right)
 }
 
 fn unary<'tree>(operator: &str, value: Value<'tree>) -> Result<Value<'tree>, HostError> {

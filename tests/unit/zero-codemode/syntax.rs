@@ -297,3 +297,43 @@ fn common_array_composition_methods_work() {
         json!(15),
     );
 }
+
+#[test]
+fn map_and_set_support_mutation_iteration_and_callbacks() {
+    assert_eq!(
+        run(r#"
+            const set = new Set(["a", "a", "b"]);
+            set.add("c").add("d");
+            const removedSet = set.delete("a");
+            let setValues = "";
+            for (const value of set) {
+                setValues += value;
+            }
+
+            const map = new Map([["k", 7], ["k", 8]]);
+            map.set("z", 9);
+            let mapEntries = "";
+            for (const [key, value] of map) {
+                mapEntries += key + value;
+            }
+            let visited = "";
+            map.forEach((value, key) => { visited += key + value; });
+            const removedMap = map.delete("z");
+
+            return [
+                set.size,
+                set.has("b"),
+                removedSet,
+                setValues,
+                map.size,
+                map.get("k"),
+                map.has("z"),
+                removedMap,
+                mapEntries,
+                visited,
+                JSON.stringify(map),
+            ];
+            "#),
+        json!([3, true, true, "bcd", 1, 8, false, true, "k8z9", "k8z9", "{}"]),
+    );
+}
