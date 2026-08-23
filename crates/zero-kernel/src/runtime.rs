@@ -422,19 +422,61 @@ fn dispatch_direct(cell: &mut Cell, method: &str, args: Value) -> Result<Value, 
             let target = positional
                 .first()
                 .ok_or_else(|| ConnectorError::new("z.edit target is required"))?;
+            let path = target.as_str().map(|s| s.to_owned()).unwrap_or_else(|| {
+                target.get("path").and_then(Value::as_str).unwrap_or_default().to_owned()
+            });
             let patch = positional
                 .get(1)
                 .cloned()
                 .ok_or_else(|| ConnectorError::new("z.edit patch is required"))?;
-            let (path, expected) = edit_target(target, positional.get(2))?;
-            let source = cell.read_exact(&path).map_err(host_error)?;
-            let (postimage, patch_text) = apply_edit_patch(&source, target, patch)?;
-            serde_json::to_value(
-                cell.edit(path, postimage, patch_text, expected)
-                    .map_err(host_error)?,
-            )
-            .map_err(json_error)
+
+            // Shape inference: create / remove / substitute / replace_file
+            if let Some(values) = patch.as_object() {
+                // {remove: true} -> delete file
+                if values.get("remove").and_then(Value::as_bool).unwrap_or(false) {
+                    let expected = expected_preimage(positional.get(2))?;
+                    serde_json::to_value(cell.remove(path, expected).map_err(host_error)?)
+                        .map_err(json_error)?
+                }
+                // {create: content} or {kind: 'replace_file', content} -> write file
+                else if let Some(content) = values.get("create").or_else(|| values.get("content")).and_then(Value::as_str) {
+                    serde_json::to_value(
+                        cell.write(path, content.into_bytes(), None).map_err(host_error)?,
+                    )
+                    .map_err(json_error)?
+                }
+                else {
+                    // Fall through to standard edit path below
+                    let expected = expected_preimage(positional.get(2))?;
+                    let source = cell.read_exact(&path).map_err(host_error)?;
+                    let (postimage, patch_text) = apply_edit_patch(&source, target, patch)?;
+                    serde_json::to_value(
+                        cell.edit(path, postimage, patch_text, expected).map_err(host_error)?,
+                    )
+                    .map_err(json_error)?
+                }
+            }
+            else if patch.is_string() {
+                // Whole-file replacement via string: allowed when file doesn't exist yet
+                let exists = cell.read_exact(&path).is_ok();
+                if exists {
+                    return Err(ConnectorError::new(
+                        "z.edit refuses a bare replacement string on an existing file (it would replace everything). Use {find, replacement} to substitute, {kind: 'replace_file', content} to overwrite deliberately, or z.write(path, content) to create.",
+                    ));
+                }
+                serde_json::to_value(
+                    cell.write(path, patch.as_str().unwrap_or("").as_bytes().to_vec(), None)
+                        .map_err(host_error)?,
+                )
+                .map_err(json_error)?
+            }
+            else {
+                return Err(ConnectorError::new(
+                    "z.edit accepts {find, replacement}, {create: content}, {remove: true}, or {kind: 'replace_file', content}",
+                ));
+            }
         }
+        "find" => dispatch_direct(cell, "asgrep", args),
         "effect" => {
             let request = positional
                 .first()
