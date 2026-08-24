@@ -80,17 +80,10 @@ crates/zerostack-harness/
 .zsx_patch.diff
 *.diff
 *.patch
-bindings/node/prebuilds/*
-!bindings/node/prebuilds/darwin-arm64/
-!bindings/node/prebuilds/linux-arm64-gnu/
-bindings/node/prebuilds/darwin-arm64/*
-bindings/node/prebuilds/linux-arm64-gnu/*
-!bindings/node/prebuilds/darwin-arm64/zero_kernel_product.node
-!bindings/node/prebuilds/linux-arm64-gnu/zero_kernel_product.node
+bindings/node/prebuilds/
+scripts/bench/
 tests/scripts/
 tests/unit/zero-abi/fuzz_corpus_untrusted_bytes_20260815.rs
-scripts/bench/*
-!scripts/bench/savings_bench.py
 scripts/bless-golden.sh
 scripts/capture_golden.py
 scripts/check_bench_history.py
@@ -148,11 +141,12 @@ tests/artifacts/
 tests/reports/
 .ubs-loop/
 
-# Benchmarks catalog only (no measured dumps)
+# Published benchmark harnesses and claim artifacts
 benchmarks/**
 !benchmarks/
 !benchmarks/README.md
-!benchmarks/benchmarks.md
+!benchmarks/zero-kernel-reference.cjs
+!benchmarks/zero-kernel-reference.json
 
 # Private local runtime evidence; not a repository/CI attestation.
 conformance/reports/
@@ -164,22 +158,17 @@ conformance/Cargo.toml
 conformance/Cargo.lock
 conformance/ATTESTATION.md
 
-# Conformance allowlist: what a clone needs to understand the product
-# and run the FeatureUniverse weight gate. Everything else stays local.
+# Conformance fragments retained for current typed contracts. Historical surface
+# matrices and topology catalogs live in Git history.
 conformance/*
 !conformance/
-!conformance/README.md
-!conformance/CONTRACT.md
-!conformance/engine-topology.json
 !conformance/contracts/
 conformance/contracts/*
 !conformance/contracts/cache-entry.md
 !conformance/contracts/fresh-work-vector.md
 !conformance/contracts/zero-edit-protocol.md
-!conformance/contracts/supported_surface_matrix.toml
 !conformance/schemas/
 conformance/schemas/*
-!conformance/schemas/engine-topology.schema.json
 !conformance/schemas/zero-result.schema.json
 
 # Local bench-history ratchet (dotfile, not public).

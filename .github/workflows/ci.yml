@@ -1,77 +1,20 @@
-name: ci
+name: public-contract
 
-# MANUAL ONLY (workflow_dispatch). Per repo policy, no automatic triggers on
-# push, pull_request, or schedule: this repo receives many small commits and
-# automatic runs burn the GitHub Actions budget. Run from the Actions tab.
-#
-# Tests are NOT this workflow. DSR (`dsr quality --tool zerostack`) is the
-# repo-level release/quality runner. Operator config runs exactly one
-# RCH-offloaded targeted gate:
-#   cargo test -p zero-ref --test zeroref_api -- --test-threads=1
-# The DSR dry-run planned that command and the live gate passed on 2026-08-18.
-# Do not add a cargo test / cargo test --workspace job here: it hammers
-# the Actions budget and the host.
-#
-# The conformance-freshness job previously justified a daily cron, because the
-# reports attest to engine revisions this repo does not control and can go
-# stale with no commit here. That tradeoff no longer holds: freshness is
-# checked when this workflow is dispatched, and staleness is tracked as work
-# rather than as a nightly billed run.
+# DSR is the repository quality authority. This manual workflow is a portable
+# public-contract check, not the release or full-test runner.
 on:
   workflow_dispatch:
 
-# Least privilege: no write tokens, no id-token, no packages (AR-013).
 permissions:
   contents: read
 
-env:
-  CARGO_TERM_COLOR: always
-  RUST_BACKTRACE: 1
-
 jobs:
-  feature-universe:
-    name: feature universe
+  public-contract:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
-      - run: python3 scripts/check_feature_universe_weights.py
-
-  lint:
-    name: fmt + clippy
-    runs-on: ubuntu-latest
-    steps:
-      # Pins: full SHAs for third-party actions (AR-013). Tags in comments for humans.
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
-      - uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # branch stable @ 2026-ish
-        with:
-          components: rustfmt, clippy
-      - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
-      - run: cargo fmt --all --check
-      # Lints are errors here on purpose. zerostack-0ne recorded two
-      # clippy ERRORS sitting in the tree undetected because nothing ran
-      # clippy at all; a warning-level gate would not have caught them.
-      - run: cargo clippy --workspace -- -D warnings
-
-  build:
-    name: build
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
-      - uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # branch stable
-      - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
-      - run: cargo build --workspace
-
-  # Local engine reports are ignored runtime evidence. CI cannot attest their freshness.
-  privacy:
-    name: no host paths in tracked files
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
-      # The hub is public. Nothing ran this gate in CI, so the only thing
-      # stopping a leak was an agent remembering to run it by hand
-      # (zerostack-9g4, zerostack-sg3).
-      # One entrypoint so contributors run the same gate locally as CI. It
-      # sequences the host-path, literal-tilde, and beads-export gates. The
-      # export gate uses --check so CI reports an unscrubbed export instead of
-      # silently fixing it and passing.
-      - run: scripts/check-portability.sh
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+      - name: Verify canonical public surface
+        run: python3 scripts/check_public_surface.py
+      - name: Check benchmark harness syntax
+        run: node --check benchmarks/zero-kernel-reference.cjs

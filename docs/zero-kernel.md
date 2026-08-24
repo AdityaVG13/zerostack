@@ -1,7 +1,7 @@
 # ZeroKernel
 
 **Status:** Canonical runtime architecture  
-**Scope:** ZeroStack, ZMP, OMP, Pi-compatible harnesses
+**Scope:** ZeroStack and embedding agent harnesses
 
 ZeroKernel is the only canonical model-facing ZeroStack execution surface. It is a daemonless, reusable in-process host that creates a fresh bounded JavaScript or TypeScript frame for every cell.
 
@@ -179,7 +179,7 @@ The Node package is `@zerostack/zero-kernel`. It exports an asynchronous N-API c
 
 The package selects an exact platform prebuild or the explicit `ZERO_KERNEL_NATIVE_ADDON` development path. It never builds, downloads, or starts a service at runtime.
 
-ZMP embeds the native package through `@oh-my-pi/zerostack-runtime`. The built-in `zero` tool calls `executeCell` and reuses one host per workspace, session, and budget. ZMP's `codemode` tool remains a separate fallback. A ZeroKernel failure never reruns the same source unsandboxed.
+Embedding harnesses load the native package in-process and may reuse one host per workspace, session, and budget. A ZeroKernel failure must remain a structured terminal outcome; the same source must never be rerun through an unsandboxed fallback.
 
 ## Operator surface
 
@@ -192,8 +192,6 @@ The `zero-kernel` CLI is outside the model path:
 Migration is offline. Operators freeze writers, snapshot the source store, run the importer, verify every source and destination digest plus manifest signature, switch the harness root, and retain the snapshot until a restore drill passes.
 
 ## Noncanonical surfaces
-
-The retired `zsx`, `zsx-core`, and `zsx-node` composition layers are not workspace members or package exports. Standalone per-engine CodeMode and MCP wrappers are not canonical execution paths. Git history and internal migration records preserve their provenance.
 
 Foundation contracts and explicit compatibility packages may remain for non-model conformance, but they must not register a second model-facing catalog beside ZeroKernel.
 
@@ -210,7 +208,7 @@ that embeds ZeroKernel must attach current evidence for:
 - structural search plus freshness repair;
 - shell timeout, cancellation, exact output, and zero live resources;
 - Node package loading, lifecycle, durable state, and cancellation;
-- ZMP primary `zero` routing and independent `codemode` fallback;
+- primary harness routing through the six-operation ZeroKernel surface;
 - offline migration and restore.
 
 Performance numbers require a named host, exact command, corpus, sample count, and observed distribution. This specification makes no unmeasured latency, memory, or compression claim.

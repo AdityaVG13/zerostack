@@ -33,7 +33,7 @@ The engines never import one another. ZeroStack owns composition and the only mo
 
 Normal JavaScript provides orchestration. Independent calls use `Promise.all`; dependent work stays in the same bounded cell.
 
-```
+```javascript
 const [source, callers] = await Promise.all([
   z.read("src/lib.rs"),
   z.find("execute_cell", { mode: "callers", path: "src" }),
@@ -91,7 +91,7 @@ ZeroKernel creates no listener, socket, daemon, idle worker, kernel child, or ma
 
 ZeroStack currently builds from source with the four repositories checked out beside one another. The parent directory name and location are entirely up to you.
 
-```
+```bash
 mkdir zerostack-workspace
 cd zerostack-workspace
 git clone https://github.com/AdityaVG13/ZeroStack.git
@@ -103,19 +103,19 @@ cd ZeroStack
 
 ### Rust host
 
-```
+```bash
 cargo build -p zero-kernel
 cargo test -p zero-kernel --test direct_host
 ```
 
 ### Node package
 
-```
+```bash
 cargo build --profile release-node -p zero-kernel-node
 ./scripts/build-node-prebuild.sh --stage-only
 ```
 
-```
+```javascript
 const { ZeroKernel } = require("@zerostack/zero-kernel");
 const kernel = new ZeroKernel({ root: process.cwd(), sessionId: "example" });
 await kernel.initialize();
@@ -142,7 +142,7 @@ There is no guest transaction method. Every mutation in a cell already shares th
 
 ## One terminal response
 
-```
+```typescript
 interface ZeroKernelResponse {
   protocol: "ZeroKernel";
   outcome: "Completed" | "Cancelled" | "Failed";
