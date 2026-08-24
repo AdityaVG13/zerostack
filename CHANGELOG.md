@@ -31,5 +31,3 @@ TokenZero, and ZeroStack release in lockstep because they share the
 - Calling `z.state()` or other namespaces returns a catchable `TypeError` with
   sub-method guidance.
 - `zero-kernel doctor` reports quarantined transaction journals.
-- `scripts/refresh-harness-addon.sh`: one-command propagation of kernel
-  changes into harness binaries.

@@ -1,6 +1,6 @@
 //! Fresh-work accounting vector and the eta_action efficiency metric.
 //!
-//! Normative prose: conformance/contracts/fresh-work-vector.md.
+//! The accounting contract and invariants are defined by this module.
 //!
 //! Token savings alone cannot show that redundant work is disappearing: a
 //! cheap action that re-derives information the session already paid for still

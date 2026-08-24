@@ -1,6 +1,6 @@
 //! Canonical cache-entry schema shared by GraphZero witness caches and FSZero memoization.
 //!
-//! Normative prose: conformance/contracts/cache-entry.md.
+//! The wire contract and validation rules are defined by this module.
 //!
 //! A cache hit can only be built from a key carrying a completeness witness.
 //! Constructors and deserializers validate that witness before accepting an

@@ -1,7 +1,7 @@
 //! Zero Edit Protocol v1: the compact, ref-based edit contract shared by
 //! FSZero, GraphZero and TokenZero surfaces.
 //!
-//! Normative prose: `conformance/contracts/zero-edit-protocol.md`.
+//! The wire contract and validation rules are defined by this module.
 //!
 //! Schema budget: the protocol is exposed as ONE generic `EDIT` operation whose
 //! argument is a list of [`EditOp`] values. Verbs live in the payload (`v`

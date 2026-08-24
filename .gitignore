@@ -74,7 +74,6 @@ docs/CHARTER.md
 docs/lean/
 docs/papers/
 docs/authority-boundaries.md
-conformance/golden/
 fuzz/
 crates/zerostack-harness/
 .zsx_patch.diff
@@ -148,28 +147,8 @@ benchmarks/**
 !benchmarks/zero-kernel-reference.cjs
 !benchmarks/zero-kernel-reference.json
 
-# Private local runtime evidence; not a repository/CI attestation.
-conformance/reports/
-conformance/fixtures/
-conformance/scripts/
-conformance/src/
-conformance/tests/
-conformance/Cargo.toml
-conformance/Cargo.lock
-conformance/ATTESTATION.md
-
-# Conformance fragments retained for current typed contracts. Historical surface
-# matrices and topology catalogs live in Git history.
-conformance/*
-!conformance/
-!conformance/contracts/
-conformance/contracts/*
-!conformance/contracts/cache-entry.md
-!conformance/contracts/fresh-work-vector.md
-!conformance/contracts/zero-edit-protocol.md
-!conformance/schemas/
-conformance/schemas/*
-!conformance/schemas/zero-result.schema.json
+# Historical root conformance workspace; live contracts are owned by crates.
+conformance/
 
 # Local bench-history ratchet (dotfile, not public).
 .bench-history/
