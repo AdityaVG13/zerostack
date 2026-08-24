@@ -24,41 +24,10 @@ pub const STATE_KEY_BYTE_LIMIT: usize = 128;
 pub const STATE_VALUE_BYTE_LIMIT: usize = 4 * 1024;
 pub const STATE_TOTAL_BYTE_LIMIT: usize = 16 * 1024;
 pub const PARALLEL_TASK_LIMIT: usize = 16;
-pub const PIPELINE_STAGE_LIMIT: usize = 16;
 pub const OPERATION_TRACE_LIMIT: usize = 128;
 
-/// The complete direct guest catalog. This list drives declarations and
-/// introspection; it is not an engine operation registry.
-pub const GUEST_METHODS: &[&str] = &[
-    "read",
-    "find",
-    "edit",
-    "apply",
-    "run",
-    // Compatibility aliases: kept callable but omitted from z.help()'s
-    // canonical six-operation surface.
-    "snap",
-    "write",
-    "effect",
-    "remove",
-    "transact",
-    "asgrep",
-    "lookup",
-    "parallel",
-    "pipeline",
-    "shell",
-    "measure",
-    "project",
-    "compress",
-    "expand",
-    "state.get",
-    "state.set",
-    "state.has",
-    "state.delete",
-    "state.list",
-    "help",
-    "inspect",
-];
+/// The complete model-facing ZeroKernel surface.
+pub const GUEST_METHODS: &[&str] = &["read", "find", "edit", "apply", "run", "state"];
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
@@ -125,8 +94,8 @@ impl KernelContext {
     }
 }
 
-/// Opaque BLAKE3 content handle. Models pass this value to `z.expand`; they do
-/// not inspect or route by producer.
+/// Opaque BLAKE3 content handle. Models pass this value back to `z.read`; they
+/// do not inspect or route it by producer.
 #[derive(Clone, Debug, Deserialize, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize)]
 #[serde(transparent)]
 pub struct ZeroHandle(String);

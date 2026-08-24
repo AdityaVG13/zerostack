@@ -349,8 +349,6 @@ struct Interpreter<'tree> {
     operations: Rc<RefCell<Vec<ZeroOperationTrace>>>,
     operations_truncated: Rc<Cell<bool>>,
     pending_operations: BTreeMap<u64, PendingOperation>,
-    next_parallel_group: u64,
-    active_parallel_group: Option<u64>,
     env: EnvRef<'tree>,
     cancelled: Arc<AtomicBool>,
     deadline: Instant,
@@ -395,8 +393,6 @@ impl<'tree> Interpreter<'tree> {
             operations,
             operations_truncated,
             pending_operations: BTreeMap::new(),
-            next_parallel_group: 1,
-            active_parallel_group: None,
             env,
             cancelled,
             deadline: Instant::now() + timeout,
@@ -1430,7 +1426,7 @@ impl<'tree> Interpreter<'tree> {
                 let guidance = if name == "z.state" {
                     ": z.state is a namespace - use z.state.get(key), z.state.set(key, value), z.state.has(key), z.state.delete(key), or z.state.list()".to_string()
                 } else if name.starts_with("z.") {
-                    format!(": z.{name} is a namespace - inspect z.help() for its members")
+                    format!(": z.{name} is a namespace, not a callable operation")
                 } else {
                     String::new()
                 };
@@ -1563,7 +1559,7 @@ impl<'tree> Interpreter<'tree> {
             sequence,
             method: method.to_owned(),
             status: ZeroOperationStatus::Failed,
-            parallel_group: self.active_parallel_group,
+            parallel_group: None,
             target: operation_target(method, args),
             detail: Some("operation did not complete".into()),
             result_count: None,
@@ -1637,7 +1633,7 @@ impl<'tree> Interpreter<'tree> {
     ) -> Result<Value<'tree>, Fault<'tree>> {
         let descriptor = self.resolve_capability(surface, method)?;
         // Preserve the positional boundary even when the sole argument is
-        // itself an array (for example `z.shell(["printf", "ok"])`).
+        // itself an array (for example `z.run(["printf", "ok"])`).
         let value = new_array(args);
         let json = self.to_json(&value).map_err(Fault::Host)?;
         let encoded = serde_json::to_string(&json)
@@ -1647,11 +1643,10 @@ impl<'tree> Interpreter<'tree> {
                 "arguments exceed JSON limit".into(),
             )));
         }
-        // Total host-call budget: every admitted direct method and each
-        // `z.parallel` fan-out call counts against
-        // the per-execution bound. The next dispatch past the bound fails
-        // typed before any adapter work, so sequential or parallel call
-        // floods are bounded by the budget, not by wall alone.
+        // Total host-call budget: every admitted operation counts against the
+        // per-execution bound. The next dispatch past the bound fails typed
+        // before any adapter work, so sequential or concurrent call floods are
+        // bounded by the budget, not by wall time alone.
         if self.metrics.connector_dispatches >= self.host.limits.max_connector_calls {
             self.metrics
                 .first_saturation_cause
@@ -2578,163 +2573,24 @@ impl<'tree> Interpreter<'tree> {
         self.zero_kernel_member(name, args)
     }
 
-    /// Canonical ZeroKernel direct-z surface. Method names map one-to-one to
-    /// typed host operations; no engine namespace or operation catalog exists.
+    /// Canonical ZeroKernel direct-z surface.
     fn zero_kernel_member(
         &mut self,
         name: &str,
         args: Vec<Value<'tree>>,
     ) -> Result<Value<'tree>, Fault<'tree>> {
-        // zero-abi is the single method catalog. Never mirror it here:
-        // duplicated catalogs are how the final six-operation aliases were
-        // registered by the kernel but rejected before dispatch.
         if !zero_abi::GUEST_METHODS.contains(&name) {
             return Err(Fault::Host(HostError::Data(format!(
-                "z.{name} is not a ZeroKernel method; use one of read, find, edit, apply, run, state (see z.help())"
+                "z.{name} is not a ZeroKernel method; use read, find, edit, apply, run, or state"
             ))));
         }
         match name {
-            "help" => self.z_help(),
-            "inspect" => self.z_inspect(),
-            "transact" => self.zero_kernel_transact(args),
-            "parallel" => self.zero_kernel_parallel(args),
-            "pipeline" => self.zero_kernel_pipeline(args),
-            "read" | "find" | "edit" | "apply" | "run" | "snap" | "write" | "effect" | "remove"
-            | "asgrep" | "lookup" | "shell" | "measure" | "project" | "compress" | "expand" => {
-                self.call_tool("z", name, args)
-            }
-            _ => unreachable!("direct methods are matched above"),
+            "read" | "find" | "edit" | "apply" | "run" => self.call_tool("z", name, args),
+            "state" => Err(Fault::Host(HostError::Data(
+                "z.state is a namespace; use get, set, has, delete, or list".into(),
+            ))),
+            _ => unreachable!("GUEST_METHODS contains only the six canonical operations"),
         }
-    }
-
-    fn zero_kernel_transact(
-        &mut self,
-        mut args: Vec<Value<'tree>>,
-    ) -> Result<Value<'tree>, Fault<'tree>> {
-        if args.len() != 1 {
-            return Err(Fault::Host(HostError::Data(
-                "z.transact expects exactly one async thunk".into(),
-            )));
-        }
-        let thunk = args.remove(0);
-        if !matches!(thunk, Value::Function(_)) {
-            return Err(Fault::Host(HostError::Data(
-                "z.transact expects a function".into(),
-            )));
-        }
-        let begin = self.call_tool("z", "__begin_transaction", Vec::new())?;
-        self.await_value(begin)?;
-        match self
-            .call(thunk, Vec::new())
-            .and_then(|value| self.await_value(value))
-        {
-            Ok(value) => {
-                let commit = self.call_tool("z", "__commit_transaction", Vec::new())?;
-                self.await_value(commit)?;
-                Ok(value)
-            }
-            Err(original) => {
-                let rollback = self.call_tool("z", "__rollback_transaction", Vec::new())?;
-                match self.await_value(rollback) {
-                    Ok(_) => Err(original),
-                    Err(rollback_error) => Err(rollback_error),
-                }
-            }
-        }
-    }
-
-    fn zero_kernel_parallel(
-        &mut self,
-        mut args: Vec<Value<'tree>>,
-    ) -> Result<Value<'tree>, Fault<'tree>> {
-        if args.len() != 1 {
-            return Err(Fault::Host(HostError::Data(
-                "z.parallel expects one array of thunks".into(),
-            )));
-        }
-        let thunks = match args.remove(0) {
-            Value::Array(values) => values.borrow().clone(),
-            _ => {
-                return Err(Fault::Host(HostError::Data(
-                    "z.parallel expects an array of thunks".into(),
-                )));
-            }
-        };
-        let limit = self
-            .host
-            .guest
-            .as_ref()
-            .map(|guest| guest.parallel_limit())
-            .unwrap_or(zero_abi::PARALLEL_TASK_LIMIT);
-        if thunks.is_empty() || thunks.len() > limit {
-            return Err(Fault::Host(HostError::Data(format!(
-                "z.parallel expects 1..={limit} thunks"
-            ))));
-        }
-        if thunks
-            .iter()
-            .any(|thunk| !matches!(thunk, Value::Function(_)))
-        {
-            return Err(Fault::Host(HostError::Data(
-                "every z.parallel item must be a function".into(),
-            )));
-        }
-        let group = self.next_parallel_group;
-        self.next_parallel_group = self.next_parallel_group.checked_add(1).ok_or_else(|| {
-            Fault::Host(HostError::Data("parallel group sequence exhausted".into()))
-        })?;
-        let previous_group = self.active_parallel_group.replace(group);
-        let dispatched = thunks
-            .into_iter()
-            .map(|thunk| self.call(thunk, Vec::new()))
-            .collect::<Result<Vec<_>, _>>();
-        self.active_parallel_group = previous_group;
-        let values = dispatched?;
-        let mut settled = Vec::with_capacity(values.len());
-        for value in values {
-            settled.push(self.await_value(value)?);
-        }
-        Ok(new_array(settled))
-    }
-
-    fn zero_kernel_pipeline(
-        &mut self,
-        mut args: Vec<Value<'tree>>,
-    ) -> Result<Value<'tree>, Fault<'tree>> {
-        if args.len() < 2 || args.len() - 1 > zero_abi::PIPELINE_STAGE_LIMIT {
-            return Err(Fault::Host(HostError::Data(format!(
-                "z.pipeline expects items and 1..={} stages",
-                zero_abi::PIPELINE_STAGE_LIMIT
-            ))));
-        }
-        let mut items = match args.remove(0) {
-            Value::Array(values) => values.borrow().clone(),
-            _ => {
-                return Err(Fault::Host(HostError::Data(
-                    "z.pipeline items must be an array".into(),
-                )));
-            }
-        };
-        if args
-            .iter()
-            .any(|stage| !matches!(stage, Value::Function(_)))
-        {
-            return Err(Fault::Host(HostError::Data(
-                "every z.pipeline stage must be a function".into(),
-            )));
-        }
-        for stage in args {
-            let mut pending = Vec::with_capacity(items.len());
-            for item in items {
-                pending.push(self.call(stage.clone(), vec![item])?);
-            }
-            let mut next = Vec::with_capacity(pending.len());
-            for value in pending {
-                next.push(self.await_value(value)?);
-            }
-            items = next;
-        }
-        Ok(new_array(items))
     }
 
     /// Bounded serializable cell state.
@@ -2748,8 +2604,7 @@ impl<'tree> Interpreter<'tree> {
                 "ZeroKernel guest surface is not installed".into(),
             )));
         };
-        let qualified = format!("state.{name}");
-        if !zero_abi::GUEST_METHODS.contains(&qualified.as_str()) {
+        if !matches!(name, "get" | "set" | "has" | "delete" | "list") {
             return Err(Fault::Host(HostError::Data(format!(
                 "z.state.{name} is not a ZeroKernel method"
             ))));
@@ -2801,60 +2656,6 @@ impl<'tree> Interpreter<'tree> {
                 "z.state member expects a string key as its first argument".into(),
             ))),
         }
-    }
-
-    fn z_help(&mut self) -> Result<Value<'tree>, Fault<'tree>> {
-        let json = serde_json::json!({
-            "surface": "z",
-            "methods": ["read", "find", "edit", "apply", "run", "state"],
-            "signatures": {
-                "read": "z.read(target, options?) - file content, directory listing, or exact-handle expansion",
-                "find": "z.find(query | {query, mode?, path?, language?, source?, sink?, limit?}, options?)",
-                "edit": "z.edit(path | snap, {find, replacement} | {create} | {remove:true} | {kind:'replace_file', content})",
-                "apply": "z.apply([{path, edit:{find,replacement}} | {path,create} | {path,replace} | {path,remove:true} | {path,before|after,content}], verify?)",
-                "run": "z.run(argv | script, {cwd?, timeout_ms?, stdin?, env?})",
-                "state": "z.state.get/set/has/delete/list"
-            },
-            "examples": {
-                "read_file": "await z.read('src/lib.rs')",
-                "read_directory": "await z.read('src/')",
-                "find_callers": "await z.find({query:'executeCell', mode:'callers', path:'src'})",
-                "edit_substitute": "await z.edit('src/lib.rs', {find:'old', replacement:'new'})",
-                "edit_create": "await z.edit('new.txt', {create:'content'})",
-                "edit_remove": "await z.edit('old.txt', {remove:true})",
-                "apply_atomic": "await z.apply([{path:'a.rs',edit:{find:'old',replacement:'new'}},{path:'b.rs',create:'new'}])",
-                "run": "await z.run(['cargo','test','-p','my-crate'])"
-            },
-            "rules": [
-                "read/find/run are read-only and may run in parallel",
-                "edit is one-file mutation; apply is atomic multi-file mutation",
-                "apply cannot mix with edit in the same cell; failure rolls back everything",
-                "when edit find does not match, re-read or re-snap before retrying"
-            ],
-            "compatibilityAliases": [
-                "snap", "expand", "lookup", "asgrep", "write", "remove",
-                "effect", "shell", "parallel", "pipeline", "transact",
-                "measure", "project", "compress", "inspect"
-            ]
-        });
-        self.convert_from_json(json, false).map_err(Fault::Host)
-    }
-
-    fn z_inspect(&mut self) -> Result<Value<'tree>, Fault<'tree>> {
-        let Some(guest) = &self.host.guest else {
-            return Err(Fault::Host(HostError::Data(
-                "ZeroKernel guest surface is not installed".into(),
-            )));
-        };
-        let json = serde_json::json!({
-            "protocol": guest.protocol(),
-            "context": guest.context_json(),
-            "sessionId": guest.session_id(),
-            "stateKeys": guest.state_list(),
-            "stateBytes": guest.state_bytes(),
-            "parallelLimit": guest.parallel_limit(),
-        });
-        self.convert_from_json(json, false).map_err(Fault::Host)
     }
 
     fn new_map(&mut self, args: Vec<Value<'tree>>) -> Result<Value<'tree>, Fault<'tree>> {
@@ -4168,8 +3969,13 @@ fn operation_target(method: &str, args: &JsonValue) -> Option<String> {
     let args = args.as_array()?;
     let first = args.first()?;
     let target = match method {
-        "asgrep" => first.as_str().map(str::to_owned),
-        "shell" => match first {
+        "find" => first.as_str().map(str::to_owned).or_else(|| {
+            first
+                .get("query")
+                .and_then(JsonValue::as_str)
+                .map(str::to_owned)
+        }),
+        "run" => match first {
             JsonValue::String(command) => Some(command.clone()),
             JsonValue::Array(argv) => Some(
                 argv.iter()
@@ -4180,17 +3986,30 @@ fn operation_target(method: &str, args: &JsonValue) -> Option<String> {
             ),
             _ => None,
         },
-        "effect" => first
-            .get("targets")
-            .and_then(JsonValue::as_object)
-            .map(|targets| {
-                targets
-                    .values()
-                    .filter_map(|target| target.get("path").and_then(JsonValue::as_str))
-                    .take(4)
-                    .collect::<Vec<_>>()
-                    .join(", ")
-            }),
+        "apply" => {
+            if let Some(operations) = first.as_array() {
+                Some(
+                    operations
+                        .iter()
+                        .filter_map(|operation| operation.get("path").and_then(JsonValue::as_str))
+                        .take(4)
+                        .collect::<Vec<_>>()
+                        .join(", "),
+                )
+            } else {
+                first
+                    .get("targets")
+                    .and_then(JsonValue::as_object)
+                    .map(|targets| {
+                        targets
+                            .values()
+                            .filter_map(|target| target.get("path").and_then(JsonValue::as_str))
+                            .take(4)
+                            .collect::<Vec<_>>()
+                            .join(", ")
+                    })
+            }
+        }
         _ => operation_path(first),
     }?;
     (!target.is_empty()).then(|| truncate_operation_text(&target))
@@ -4224,15 +4043,30 @@ fn operation_result_summary(method: &str, value: &JsonValue) -> OperationSummary
     let mut summary = OperationSummary::default();
     match method {
         "read" => {
-            summary.detail = value
-                .as_str()
-                .map(|text| format!("{} bytes visible", text.len()));
+            if let Some(text) = value.as_str() {
+                summary.detail = Some(format!("{} bytes visible", text.len()));
+            } else if let Some(items) = value.as_array() {
+                summary.result_count = Some(items.len() as u64);
+                summary.detail = Some(format!("{} paths", items.len()));
+            } else {
+                summary.target = value
+                    .get("path")
+                    .and_then(JsonValue::as_str)
+                    .map(str::to_owned);
+                let visible = value
+                    .get("view")
+                    .and_then(|view| view.get("visibleBytes"))
+                    .and_then(JsonValue::as_u64);
+                let range = value
+                    .get("byteStart")
+                    .and_then(JsonValue::as_u64)
+                    .zip(value.get("byteEnd").and_then(JsonValue::as_u64));
+                summary.detail = visible
+                    .map(|bytes| format!("{bytes} bytes visible"))
+                    .or_else(|| range.map(|(start, end)| format!("bytes {start}..{end}")));
+            }
         }
-        "lookup" => {
-            summary.result_count = value.as_array().map(|items| items.len() as u64);
-            summary.detail = summary.result_count.map(|count| format!("{count} paths"));
-        }
-        "asgrep" => {
+        "find" => {
             summary.result_count = value
                 .get("hits")
                 .and_then(JsonValue::as_array)
@@ -4248,24 +4082,7 @@ fn operation_result_summary(method: &str, value: &JsonValue) -> OperationSummary
                 )
             });
         }
-        "snap" => {
-            summary.target = value
-                .get("path")
-                .and_then(JsonValue::as_str)
-                .map(str::to_owned);
-            let kind = value
-                .get("selection")
-                .and_then(|selection| selection.get("kind"))
-                .and_then(JsonValue::as_str)
-                .unwrap_or("full_file");
-            let visible = value
-                .get("view")
-                .and_then(|view| view.get("visibleBytes"))
-                .and_then(JsonValue::as_u64)
-                .unwrap_or(0);
-            summary.detail = Some(format!("{kind} · {visible} bytes visible"));
-        }
-        "write" | "edit" | "remove" => {
+        "edit" => {
             summary.target = value
                 .get("path")
                 .and_then(JsonValue::as_str)
@@ -4276,7 +4093,7 @@ fn operation_result_summary(method: &str, value: &JsonValue) -> OperationSummary
                 .map(str::to_owned);
             summary.changed_files = Some(1);
         }
-        "effect" => {
+        "apply" => {
             summary.changed_files = value
                 .get("changedFiles")
                 .and_then(JsonValue::as_u64)
@@ -4293,30 +4110,11 @@ fn operation_result_summary(method: &str, value: &JsonValue) -> OperationSummary
                 )
             });
         }
-        "expand" => {
-            let start = value.get("byteStart").and_then(JsonValue::as_u64);
-            let end = value.get("byteEnd").and_then(JsonValue::as_u64);
-            if let (Some(start), Some(end)) = (start, end) {
-                summary.detail = Some(format!("bytes {start}..{end}"));
-            }
-        }
-        "shell" => {
+        "run" => {
             summary.detail = value
                 .get("status")
                 .and_then(JsonValue::as_i64)
                 .map(|status| format!("exit {status}"));
-        }
-        "measure" => {
-            summary.detail = value
-                .get("billed")
-                .and_then(JsonValue::as_u64)
-                .map(|tokens| format!("{tokens} tokens"));
-        }
-        "project" | "compress" => {
-            summary.detail = value
-                .get("visible")
-                .and_then(JsonValue::as_str)
-                .map(|visible| format!("{} bytes visible", visible.len()));
         }
         _ => {}
     }

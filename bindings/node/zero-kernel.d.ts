@@ -1,4 +1,4 @@
-export type AsgrepMode =
+export type FindMode =
   | "natural"
   | "pattern"
   | "word"
@@ -58,8 +58,8 @@ export interface ApplyResult {
   delta: string;
 }
 
-export interface AsgrepOptions {
-  mode?: AsgrepMode;
+export interface FindOptions {
+  mode?: FindMode;
   path?: string;
   language?: string;
   source?: string;
@@ -89,6 +89,36 @@ export interface ExpandOptions {
   symbol?: string;
 }
 
+export interface ReadSnapshotRequest {
+  path?: string;
+  target?: Record<string, unknown>;
+  cardinality?: "exactly_one";
+  selection?: Record<string, unknown>;
+  view?: Record<string, unknown>;
+}
+
+export interface ReadSnapshot {
+  schema: "zerostack.snap.workspace";
+  path: string;
+  source: { exact: string; [key: string]: unknown };
+  recovery: { exact: string; [key: string]: unknown };
+  [key: string]: unknown;
+}
+
+export interface ExpandResult {
+  schema: "zerostack.expand";
+  source: string;
+  text?: string;
+  bytes?: string;
+  encoding: string;
+  byteStart: number;
+  byteEnd: number;
+  byteLength: number;
+  complete: boolean;
+  next?: number;
+  accounting: TokenAccounting;
+}
+
 export interface ProjectOptions {
   visibleBytes?: number;
   mediaType?: string;
@@ -108,7 +138,7 @@ export interface FileEffectReceipt {
   journal: string;
 }
 
-export interface AsgrepHit {
+export interface FindHit {
   path: string;
   symbol?: string;
   lineStart?: number;
@@ -142,8 +172,8 @@ export interface StructuralBudget {
   truncated: boolean;
 }
 
-export interface AsgrepResult {
-  hits: AsgrepHit[];
+export interface FindResult {
+  hits: FindHit[];
   indexDigest: string;
   complete: boolean;
   coverage?: StructuralCoverage;
@@ -191,42 +221,17 @@ export interface ZeroKernelState {
   list(): Promise<string[]>;
 }
 
-export interface ZeroKernelHelp {
-  methods: readonly string[];
-}
-
-export interface ZeroKernelInspection {
-  sessionId: string;
-  stateRoot?: string;
-  liveFrames: number;
-  liveTasks: number;
-  liveProcesses: number;
-  recoveryRequired: boolean;
-}
 
 export interface ZeroKernelSurface {
-  read(target: string, options?: ReadOptions): Promise<string | string[]>;
-  find(query: string | ({ query: string } & AsgrepOptions), options?: AsgrepOptions): Promise<AsgrepResult>;
-  edit(path: string, patch: EditPatch, options?: EditOptions): Promise<FileEffectReceipt>;
-  apply(operations: ApplyOperation[]): Promise<ApplyResult>;
+  read(
+    target: string | ReadSnapshotRequest | ReadSnapshot,
+    options?: ReadOptions | LookupOptions | ExpandOptions | Record<string, unknown>,
+  ): Promise<string | string[] | ReadSnapshot | ExpandResult>;
+  find(query: string | ({ query: string } & FindOptions), options?: FindOptions): Promise<FindResult>;
+  edit(path: string | ReadSnapshot, patch: EditPatch, options?: EditOptions): Promise<FileEffectReceipt>;
+  apply(operations: ApplyOperation[] | Record<string, unknown>): Promise<ApplyResult>;
   run(command: string | string[], options?: ShellOptions): Promise<ShellResult>;
   readonly state: ZeroKernelState;
-
-  /** Compatibility aliases. New plans use the six operations above. */
-  write(path: string, content: string, options?: WriteOptions): Promise<FileEffectReceipt>;
-  remove(path: string, options?: RemoveOptions): Promise<FileEffectReceipt>;
-  transact<T>(operation: () => Promise<T>): Promise<T>;
-  asgrep(query: string, options?: AsgrepOptions): Promise<AsgrepResult>;
-  lookup(path?: string, options?: LookupOptions): Promise<string[]>;
-  parallel<T>(operations: Array<() => Promise<T>>): Promise<T[]>;
-  pipeline<T>(items: T[], ...stages: Array<(item: unknown) => Promise<unknown>>): Promise<unknown[]>;
-  shell(command: string | string[], options?: ShellOptions): Promise<ShellResult>;
-  measure(value: unknown): Promise<TokenAccounting>;
-  project(value: unknown, options?: ProjectOptions): Promise<ProjectionResult>;
-  compress(value: unknown, options?: CompressionOptions): Promise<CompressionResult>;
-  expand(handle: string, options?: ExpandOptions): Promise<string>;
-  help(query?: string): Promise<ZeroKernelHelp>;
-  inspect(): Promise<ZeroKernelInspection>;
 }
 
 export interface ZeroKernelOptions {

@@ -1,9 +1,7 @@
-//! Canonical typed ABI for session-owned TokenZero background jobs.
+//! Compatibility ABI for session-owned TokenZero background jobs.
 //!
-//! Aggregate CodeMode owns the public `zero.token.job` surface. TokenZero owns
-//! execution and polling. These types freeze the value exchanged in raw-worker
-//! v2 `call.request.args` and `result.value` without adding a planner, JavaScript,
-//! MCP, or nested-CodeMode concept to the worker protocol.
+//! ZeroKernel has no model-facing background-job operation. These types remain
+//! only for non-model transport conformance and legacy artifact decoding.
 
 use std::fmt;
 

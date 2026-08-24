@@ -577,12 +577,12 @@ fn remove_missing_path_keeps_transaction_alive() {
 
 #[cfg(unix)]
 #[test]
-fn shell_argv_is_call_scoped_and_reaped() {
+fn run_argv_is_call_scoped_and_reaped() {
     let root = tempdir().unwrap();
     let files = Arc::new(Files::default());
     let kernel = kernel(root.path(), files);
     let response = kernel
-        .execute_cell(r#"return await z.shell(["printf", "hello"]);"#)
+        .execute_cell(r#"return await z.run(["printf", "hello"]);"#)
         .unwrap();
     assert_eq!(response.outcome, zero_abi::ZeroKernelOutcome::Completed);
     let visible = response.value.unwrap().as_str().unwrap().to_owned();
@@ -625,13 +625,11 @@ fn shell_large_output_returns_bounded_head_tail_previews() {
 
 #[cfg(unix)]
 #[test]
-fn shell_timeout_kills_exact_tree() {
+fn run_timeout_kills_exact_tree() {
     let root = tempdir().unwrap();
     let files = Arc::new(Files::default());
     let kernel = kernel(root.path(), files);
-    let mut cell = kernel
-        .begin_cell("return await z.shell('sleep 5')")
-        .unwrap();
+    let mut cell = kernel.begin_cell("return await z.run('sleep 5')").unwrap();
     let error = cell
         .shell(
             ShellCommand::Script("sleep 5".into()),
@@ -659,25 +657,19 @@ fn typescript_cell_uses_only_direct_z_methods() {
         .execute_cell(
             r#"
             const path: string = "src/lib.rs";
-            const text = await z.read(path);
-            const help = await z.help();
-            return { text, help };
+            return await z.read(path);
             "#,
         )
         .unwrap();
-    let visible = response.value.unwrap().as_str().unwrap().to_owned();
-    assert!(visible.contains("content"), "{visible}");
-    assert!(visible.contains("read"), "{visible}");
-    assert!(visible.contains("apply_atomic"), "{visible}");
-    assert!(visible.contains("find_callers"), "{visible}");
-    assert!(visible.contains("compatibilityAliases"), "{visible}");
-    assert!(!visible.contains("invoke"), "{visible}");
-    assert!(!visible.contains("zero.fs"), "{visible}");
+    assert_eq!(response.outcome, zero_abi::ZeroKernelOutcome::Completed);
+    assert_eq!(response.operations.len(), 1);
+    assert_eq!(response.operations[0].method, "read");
+    assert_eq!(response.value, Some(json!("\"content\"")));
     assert_eq!(kernel.live_frames(), 0);
 }
 
 #[test]
-fn direct_parallel_and_pipeline_accept_thunks() {
+fn promise_all_and_array_map_replace_legacy_orchestration() {
     let root = tempdir().unwrap();
     let files = Arc::new(Files::default());
     files.0.lock().insert(PathBuf::from("a.txt"), b"a".to_vec());
@@ -686,12 +678,11 @@ fn direct_parallel_and_pipeline_accept_thunks() {
     let response = kernel
         .execute_cell(
             r#"
-            const pair = await z.parallel([
-              () => z.read("a.txt"),
-              () => z.read("b.txt"),
+            const pair = await Promise.all([
+              z.read("a.txt"),
+              z.read("b.txt"),
             ]);
-            const upper = await z.pipeline(pair, async value => value + "!");
-            return upper;
+            return pair.map(value => value + "!");
             "#,
         )
         .unwrap();
@@ -702,7 +693,7 @@ fn direct_parallel_and_pipeline_accept_thunks() {
 }
 
 #[test]
-fn parallel_preserves_destructured_callback_captures() {
+fn promise_all_preserves_destructured_callback_captures() {
     let root = tempdir().unwrap();
     let files = Arc::new(Files::default());
     files.0.lock().insert(PathBuf::from("a.txt"), b"a".to_vec());
@@ -712,7 +703,7 @@ fn parallel_preserves_destructured_callback_captures() {
         .execute_cell(
             r#"
             const cases = [["left", "a.txt"], ["right", "b.txt"]];
-            return await z.parallel(cases.map(([name, path]) => async () => {
+            return await Promise.all(cases.map(async ([name, path]) => {
               const text = await z.read(path);
               return name + ":" + text;
             }));
@@ -724,7 +715,7 @@ fn parallel_preserves_destructured_callback_captures() {
     assert!(response.operations.iter().all(|operation| {
         operation.method == "read"
             && operation.status == zero_abi::ZeroOperationStatus::Completed
-            && operation.parallel_group == Some(1)
+            && operation.parallel_group.is_none()
             && operation.duration_ns > 0
     }));
     let visible = response.value.unwrap().as_str().unwrap().to_owned();
@@ -735,17 +726,15 @@ fn parallel_preserves_destructured_callback_captures() {
 }
 
 #[test]
-fn failed_transaction_restores_created_file() {
+fn failed_cell_restores_created_file() {
     let root = tempdir().unwrap();
     let files = Arc::new(Files::default());
     let kernel = kernel(root.path(), Arc::clone(&files) as Arc<dyn FileEngine>);
     let response = kernel
         .execute_cell(
             r#"
-            return await z.transact(async () => {
-              await z.write("created.txt", "new");
-              throw new Error("stop");
-            });
+            await z.edit("created.txt", {create: "new"});
+            throw new Error("stop");
             "#,
         )
         .unwrap();
@@ -772,9 +761,9 @@ fn parallel_reads_overlap_in_real_time() {
     let response = kernel
         .execute_cell(
             r#"
-            return await z.parallel([
-              () => z.read("a.txt"),
-              () => z.read("b.txt"),
+            return await Promise.all([
+              z.read("a.txt"),
+              z.read("b.txt"),
             ]);
             "#,
         )
@@ -785,25 +774,25 @@ fn parallel_reads_overlap_in_real_time() {
 }
 
 #[test]
-fn direct_token_methods_are_bound_on_z() {
+fn token_projection_is_automatic_at_the_cell_boundary() {
     let root = tempdir().unwrap();
-    let kernel = kernel(root.path(), Arc::new(Files::default()));
+    let files = Arc::new(Files::default());
+    files
+        .0
+        .lock()
+        .insert(PathBuf::from("token.txt"), b"alpha beta".to_vec());
+    let kernel = kernel(root.path(), files);
     let response = kernel
-        .execute_cell(
-            r#"
-            return await z.parallel([
-              () => z.measure("alpha beta"),
-              () => z.project("alpha beta", {visibleBytes: 128}),
-              () => z.compress("alpha beta", {maxTokens: 32, mode: "structured"}),
-            ]);
-            "#,
-        )
+        .execute_cell(r#"return await z.read("token.txt");"#)
         .unwrap();
     assert_eq!(response.outcome, zero_abi::ZeroKernelOutcome::Completed);
-    let visible = response.value.unwrap().as_str().unwrap().to_owned();
-    assert!(visible.contains("tokenizer"), "{visible}");
-    assert!(visible.contains("visible"), "{visible}");
-    assert!(visible.contains("exact"), "{visible}");
+    assert!(
+        response
+            .value
+            .as_ref()
+            .is_some_and(|value| value == "\"alpha beta\"")
+    );
+    assert!(response.ledger.bytes_visible > 0);
     assert_eq!(kernel.live_tasks(), 0);
 }
 
@@ -834,7 +823,7 @@ fn failed_cell_rolls_back_unscoped_write_and_logs_once() {
     let response = kernel
         .execute_cell(
             r#"
-            await z.write("unscoped.txt", "temporary");
+            await z.edit("unscoped.txt", {create: "temporary"});
             throw new Error("stop after write");
             "#,
         )
@@ -863,7 +852,7 @@ fn projection_failure_rolls_back_file_and_state() {
     let response = kernel
         .execute_cell(
             r#"
-            await z.write("projection.txt", "temporary");
+            await z.edit("projection.txt", {create: "temporary"});
             z.state.set("staged", true);
             return "force projection failure";
             "#,
@@ -894,14 +883,14 @@ fn fresh_kernel_continues_transaction_cell_sequence() {
     let files = Arc::new(Files::default());
     let first = kernel(root.path(), Arc::clone(&files) as Arc<dyn FileEngine>);
     let response = first
-        .execute_cell(r#"return await z.write("first.txt", "first");"#)
+        .execute_cell(r#"return await z.edit("first.txt", {create: "first"});"#)
         .unwrap();
     assert_eq!(response.outcome, zero_abi::ZeroKernelOutcome::Completed);
     drop(first);
 
     let second = kernel(root.path(), Arc::clone(&files) as Arc<dyn FileEngine>);
     let response = second
-        .execute_cell(r#"return await z.write("second.txt", "second");"#)
+        .execute_cell(r#"return await z.edit("second.txt", {create: "second"});"#)
         .unwrap();
     assert_eq!(response.outcome, zero_abi::ZeroKernelOutcome::Completed);
     let files = files.0.lock();
@@ -911,7 +900,7 @@ fn fresh_kernel_continues_transaction_cell_sequence() {
 
 #[cfg(unix)]
 #[test]
-fn cancelled_shell_frame_drains_before_response() {
+fn cancelled_run_frame_drains_before_response() {
     let root = tempdir().unwrap();
     let kernel = kernel(root.path(), Arc::new(Files::default()));
     let cancellation = AtomicCancellation::new();
@@ -921,7 +910,7 @@ fn cancelled_shell_frame_drains_before_response() {
         trigger.cancel();
     });
     let response = kernel
-        .execute_cell_with_cancellation("return await z.shell('sleep 5');", cancellation)
+        .execute_cell_with_cancellation("return await z.run('sleep 5');", cancellation)
         .unwrap();
     canceller.join().unwrap();
     assert_eq!(response.outcome, zero_abi::ZeroKernelOutcome::Cancelled);
@@ -931,7 +920,7 @@ fn cancelled_shell_frame_drains_before_response() {
 }
 
 #[test]
-fn snap_full_view_expands_exact_source_and_is_listed() {
+fn read_full_view_expands_exact_source() {
     let root = tempdir().unwrap();
     let source = "pub fn alpha() -> u32 {\n    42\n}\n";
     write_fixture(root.path(), "src/lib.rs", source);
@@ -940,13 +929,12 @@ fn snap_full_view_expands_exact_source_and_is_listed() {
     let response = kernel
         .execute_cell(
             r#"
-            const help = await z.help();
-            const snap = await z.snap({
+            const snap = await z.read({
               target: {path: "src/lib.rs"},
               view: {mode: "full"},
             });
-            const expanded = await z.expand(snap);
-            return {methods: help.methods, aliases: help.compatibilityAliases, snap, expanded};
+            const expanded = await z.read(snap, {all: true});
+            return {snap, expanded};
             "#,
         )
         .unwrap();
@@ -958,14 +946,6 @@ fn snap_full_view_expands_exact_source_and_is_listed() {
         response.error
     );
     let value = model_json(&response);
-    assert_eq!(
-        value["methods"],
-        json!(["read", "find", "edit", "apply", "run", "state"])
-    );
-    let aliases = value["aliases"]
-        .as_array()
-        .expect("compatibilityAliases array");
-    assert!(aliases.iter().any(|method| method == "snap"));
     assert_eq!(value["snap"]["schema"], "zerostack.snap.workspace");
     assert_eq!(value["snap"]["path"], "src/lib.rs");
     assert_eq!(value["snap"]["view"]["mode"], "full");
@@ -1037,14 +1017,14 @@ fn snap_full_view_expands_exact_source_and_is_listed() {
 }
 
 #[test]
-fn snap_decision_view_retains_large_exact_source() {
+fn read_decision_view_retains_large_exact_source() {
     let root = tempdir().unwrap();
     let source = "0123456789abcdef\n".repeat(2_500);
     write_fixture(root.path(), "large.txt", &source);
     let kernel = production_kernel(root.path());
 
     let response = kernel
-        .execute_cell(r#"return await z.snap("large.txt");"#)
+        .execute_cell(r#"return await z.read({path: "large.txt"});"#)
         .unwrap();
     assert_eq!(response.outcome, zero_abi::ZeroKernelOutcome::Completed);
     let snap = model_json(&response);
@@ -1063,7 +1043,7 @@ fn snap_decision_view_retains_large_exact_source() {
 
     let exact = serde_json::to_string(snap["source"]["exact"].as_str().unwrap()).unwrap();
     let response = kernel
-        .execute_cell(&format!("return await z.expand({exact});"))
+        .execute_cell(&format!("return await z.read({exact}, {{all: true}});"))
         .unwrap();
     assert_eq!(response.outcome, zero_abi::ZeroKernelOutcome::Completed);
     let expanded = model_json(&response);
@@ -1073,7 +1053,7 @@ fn snap_decision_view_retains_large_exact_source() {
 }
 
 #[test]
-fn snap_search_uses_structural_engine_and_exact_file_snapshot() {
+fn read_search_uses_structural_engine_and_exact_file_snapshot() {
     let root = tempdir().unwrap();
     let source = "pub fn alpha() {}\n";
     write_fixture(root.path(), "src/lib.rs", source);
@@ -1082,7 +1062,7 @@ fn snap_search_uses_structural_engine_and_exact_file_snapshot() {
     let response = kernel
         .execute_cell(
             r#"
-            return await z.snap({
+            return await z.read({
               target: {
                 search: {
                   query: "alpha",
@@ -1110,7 +1090,7 @@ fn snap_search_uses_structural_engine_and_exact_file_snapshot() {
 }
 
 #[test]
-fn snap_and_edit_commit_exactly_once_in_one_cell() {
+fn read_snapshot_and_edit_commit_exactly_once_in_one_cell() {
     let root = tempdir().unwrap();
     write_fixture(root.path(), "edit.ts", "const before = 1;\n");
     let kernel = production_kernel_relaxed(root.path());
@@ -1118,7 +1098,7 @@ fn snap_and_edit_commit_exactly_once_in_one_cell() {
     let response = kernel
         .execute_cell(
             r#"
-            const snap = await z.snap({
+            const snap = await z.read({
               target: {path: "edit.ts"},
               selection: {exactText: "before"},
             });
@@ -1152,12 +1132,12 @@ fn snap_and_edit_commit_exactly_once_in_one_cell() {
 }
 
 #[test]
-fn snap_aware_edit_rejects_stale_preimage_without_mutation() {
+fn read_snapshot_edit_rejects_stale_preimage_without_mutation() {
     let root = tempdir().unwrap();
     write_fixture(root.path(), "stale.ts", "const before = 1;\n");
     let kernel = production_kernel(root.path());
     let response = kernel
-        .execute_cell(r#"return await z.snap("stale.ts");"#)
+        .execute_cell(r#"return await z.read({path: "stale.ts"});"#)
         .unwrap();
     assert_eq!(response.outcome, zero_abi::ZeroKernelOutcome::Completed);
     let snap = model_json(&response);
@@ -1181,7 +1161,7 @@ fn snap_aware_edit_rejects_stale_preimage_without_mutation() {
 }
 
 #[test]
-fn failed_cell_restores_snap_aware_edit() {
+fn failed_cell_restores_snapshot_aware_edit() {
     let root = tempdir().unwrap();
     let original = "const before = 1;\n";
     write_fixture(root.path(), "rollback.ts", original);
@@ -1190,7 +1170,7 @@ fn failed_cell_restores_snap_aware_edit() {
     let response = kernel
         .execute_cell(
             r#"
-            const snap = await z.snap("rollback.ts");
+            const snap = await z.read({path: "rollback.ts"});
             await z.edit(snap, {find: "before", replace: "after"});
             throw new Error("stop after snap-aware edit");
             "#,
@@ -1210,7 +1190,7 @@ fn failed_cell_restores_snap_aware_edit() {
 }
 
 #[test]
-fn snap_shorthand_preserves_selection_and_view() {
+fn read_shorthand_preserves_selection_and_view() {
     let root = tempdir().unwrap();
     let source = "pub fn alpha() {}\n";
     write_fixture(root.path(), "src/lib.rs", source);
@@ -1219,7 +1199,7 @@ fn snap_shorthand_preserves_selection_and_view() {
     let response = kernel
         .execute_cell(
             r#"
-            return await z.snap({
+            return await z.read({
               path: "src/lib.rs",
               selection: {exactText: "alpha"},
               view: {mode: "full"},
@@ -1236,7 +1216,7 @@ fn snap_shorthand_preserves_selection_and_view() {
 }
 
 #[test]
-fn expand_accepts_next_as_its_byte_cursor() {
+fn read_accepts_next_as_its_byte_cursor() {
     let root = tempdir().unwrap();
     write_fixture(root.path(), "cursor.txt", "abcdefghij");
     let kernel = production_kernel(root.path());
@@ -1244,8 +1224,8 @@ fn expand_accepts_next_as_its_byte_cursor() {
     let response = kernel
         .execute_cell(
             r#"
-            const snap = await z.snap("cursor.txt");
-            return await z.expand(snap, {next: 2, limit: 3});
+            const snap = await z.read({path: "cursor.txt"});
+            return await z.read(snap, {next: 2, limit: 3});
             "#,
         )
         .unwrap();
@@ -1260,7 +1240,7 @@ fn expand_accepts_next_as_its_byte_cursor() {
 }
 
 #[test]
-fn snap_symbol_selection_uses_in_process_structural_search() {
+fn read_symbol_selection_uses_in_process_structural_search() {
     let root = tempdir().unwrap();
     write_fixture(root.path(), "src/lib.rs", "pub fn alpha() {}\n");
     let kernel = production_kernel(root.path());
@@ -1268,7 +1248,7 @@ fn snap_symbol_selection_uses_in_process_structural_search() {
     let response = kernel
         .execute_cell(
             r#"
-            return await z.snap({
+            return await z.read({
               path: "src/lib.rs",
               selection: {symbol: "alpha"},
               view: {mode: "structure"},
@@ -1285,7 +1265,7 @@ fn snap_symbol_selection_uses_in_process_structural_search() {
 }
 
 #[test]
-fn snap_aware_edit_rejects_patch_outside_selection() {
+fn snapshot_aware_edit_rejects_patch_outside_selection() {
     let root = tempdir().unwrap();
     let original = "const before = 1; const elsewhere = 2;\n";
     write_fixture(root.path(), "scope.ts", original);
@@ -1294,7 +1274,7 @@ fn snap_aware_edit_rejects_patch_outside_selection() {
     let response = kernel
         .execute_cell(
             r#"
-            const snap = await z.snap({
+            const snap = await z.read({
               path: "scope.ts",
               selection: {exactText: "before"},
             });
@@ -1323,7 +1303,7 @@ fn snap_aware_edit_rejects_patch_outside_selection() {
 }
 
 #[test]
-fn effect_creates_file_and_updates_module_index_atomically() {
+fn apply_creates_file_and_updates_module_index_atomically() {
     let root = tempdir().unwrap();
     write_fixture(root.path(), "src/mod.rs", "mod old;\n");
     let kernel = production_kernel(root.path());
@@ -1331,7 +1311,7 @@ fn effect_creates_file_and_updates_module_index_atomically() {
     let response = kernel
         .execute_cell(
             r#"
-            return await z.effect({
+            return await z.apply({
               targets: {
                 newModule: {path: "src/new.rs", expect: "absent"},
                 moduleIndex: {path: "src/mod.rs", expect: "exists"},
@@ -1363,7 +1343,7 @@ fn effect_creates_file_and_updates_module_index_atomically() {
     assert!(effect["delta"].as_str().unwrap().starts_with("z://blob/"));
     let delta = serde_json::to_string(effect["delta"].as_str().unwrap()).unwrap();
     let expanded = kernel
-        .execute_cell(&format!("return await z.expand({delta});"))
+        .execute_cell(&format!("return await z.read({delta}, {{all: true}});"))
         .unwrap();
     assert_eq!(
         model_json(&expanded)["text"]
@@ -1379,7 +1359,7 @@ fn effect_creates_file_and_updates_module_index_atomically() {
         .unwrap();
     let new_after = serde_json::to_string(new_module["after"].as_str().unwrap()).unwrap();
     let expanded = kernel
-        .execute_cell(&format!("return await z.expand({new_after});"))
+        .execute_cell(&format!("return await z.read({new_after}, {{all: true}});"))
         .unwrap();
     assert_eq!(model_json(&expanded)["text"], "pub fn created() {}\n");
     let module_index = targets
@@ -1388,7 +1368,9 @@ fn effect_creates_file_and_updates_module_index_atomically() {
         .unwrap();
     let index_before = serde_json::to_string(module_index["before"].as_str().unwrap()).unwrap();
     let expanded = kernel
-        .execute_cell(&format!("return await z.expand({index_before});"))
+        .execute_cell(&format!(
+            "return await z.read({index_before}, {{all: true}});"
+        ))
         .unwrap();
     assert_eq!(model_json(&expanded)["text"], "mod old;\n");
     assert_eq!(
@@ -1403,7 +1385,7 @@ fn effect_creates_file_and_updates_module_index_atomically() {
 }
 
 #[test]
-fn effect_rejects_unconfined_verification_command_without_mutation() {
+fn apply_rejects_unconfined_verification_command_without_mutation() {
     let root = tempdir().unwrap();
     let first = "const first = 1;\n";
     let second = "const second = 2;\n";
@@ -1414,7 +1396,7 @@ fn effect_rejects_unconfined_verification_command_without_mutation() {
     let response = kernel
         .execute_cell(
             r#"
-            return await z.effect({
+            return await z.apply({
               targets: {
                 first: {path: "first.ts"},
                 second: {path: "second.ts"},
@@ -1467,7 +1449,7 @@ fn effect_rejects_unconfined_verification_command_without_mutation() {
 }
 
 #[test]
-fn snap_rejects_structural_evidence_for_another_source() {
+fn read_rejects_structural_evidence_for_another_source() {
     let root = tempdir().unwrap();
     write_fixture(root.path(), "src/lib.rs", "pub fn beta() {}\n");
     let kernel = production_kernel(root.path());
@@ -1475,7 +1457,7 @@ fn snap_rejects_structural_evidence_for_another_source() {
     let response = kernel
         .execute_cell(
             r#"
-            return await z.snap({
+            return await z.read({
               target: {search: {query: "alpha", under: "src", mode: "natural"}},
               cardinality: "exactly_one",
             });
@@ -1499,7 +1481,7 @@ fn snap_rejects_structural_evidence_for_another_source() {
 }
 
 #[test]
-fn expand_accepts_nested_byte_line_and_all_selectors() {
+fn read_accepts_nested_byte_line_and_all_selectors() {
     let root = tempdir().unwrap();
     write_fixture(root.path(), "selectors.txt", "alpha\nbeta\ngamma\n");
     let kernel = production_kernel(root.path());
@@ -1507,10 +1489,10 @@ fn expand_accepts_nested_byte_line_and_all_selectors() {
     let response = kernel
         .execute_cell(
             r#"
-            const snap = await z.snap("selectors.txt");
-            const bytes = await z.expand(snap, {bytes: {start: 6, end: 10}});
-            const lines = await z.expand(snap, {lines: {start: 2, end: 2}});
-            const all = await z.expand(snap, {all: true});
+            const snap = await z.read({path: "selectors.txt"});
+            const bytes = await z.read(snap, {bytes: {start: 6, end: 10}});
+            const lines = await z.read(snap, {lines: {start: 2, end: 2}});
+            const all = await z.read(snap, {all: true});
             return {bytes, lines, all};
             "#,
         )
@@ -1529,7 +1511,7 @@ fn expand_accepts_nested_byte_line_and_all_selectors() {
 }
 
 #[test]
-fn snap_binary_file_returns_exact_recovery_without_text_claims() {
+fn read_binary_file_returns_exact_recovery_without_text_claims() {
     let root = tempdir().unwrap();
     let binary = [0, 0xff, b'\r', b'\n', b'\n'];
     fs::write(root.path().join("binary.bin"), binary).unwrap();
@@ -1538,8 +1520,8 @@ fn snap_binary_file_returns_exact_recovery_without_text_claims() {
     let response = kernel
         .execute_cell(
             r#"
-            const snap = await z.snap("binary.bin");
-            const expanded = await z.expand(snap, {all: true});
+            const snap = await z.read({path: "binary.bin"});
+            const expanded = await z.read(snap, {all: true});
             return {snap, expanded};
             "#,
         )
@@ -1565,14 +1547,14 @@ fn snap_binary_file_returns_exact_recovery_without_text_claims() {
 }
 
 #[test]
-fn snap_reports_bom_and_mixed_newlines() {
+fn read_reports_bom_and_mixed_newlines() {
     let root = tempdir().unwrap();
     let source = "\u{feff}alpha\r\nbeta\n";
     write_fixture(root.path(), "mixed.txt", source);
     let kernel = production_kernel(root.path());
 
     let response = kernel
-        .execute_cell(r#"return await z.snap({target:{path:"mixed.txt"},view:{mode:"full"}});"#)
+        .execute_cell(r#"return await z.read({target:{path:"mixed.txt"},view:{mode:"full"}});"#)
         .unwrap();
     assert_eq!(response.outcome, zero_abi::ZeroKernelOutcome::Completed);
     let snap = model_json(&response);
@@ -1582,7 +1564,7 @@ fn snap_reports_bom_and_mixed_newlines() {
 }
 
 #[test]
-fn snap_edit_supports_line_replacement_and_anchored_insertion() {
+fn snapshot_edit_supports_line_replacement_and_anchored_insertion() {
     let root = tempdir().unwrap();
     write_fixture(root.path(), "typed.txt", "alpha\nbeta\ngamma\n");
     let kernel = production_kernel_relaxed(root.path());
@@ -1590,12 +1572,12 @@ fn snap_edit_supports_line_replacement_and_anchored_insertion() {
     let response = kernel
         .execute_cell(
             r#"
-            const line = await z.snap({
+            const line = await z.read({
               path: "typed.txt",
               selection: {lines: {start: 2, end: 2}},
             });
             await z.edit(line, {kind: "replace_lines", content: "BETA\n"});
-            const anchor = await z.snap({
+            const anchor = await z.read({
               path: "typed.txt",
               selection: {exactText: "gamma"},
             });
@@ -1614,7 +1596,7 @@ fn snap_edit_supports_line_replacement_and_anchored_insertion() {
 }
 
 #[test]
-fn snap_edit_replace_file_requires_unselected_snap() {
+fn snapshot_edit_replace_file_requires_unselected_snapshot() {
     let root = tempdir().unwrap();
     write_fixture(root.path(), "whole.txt", "old\n");
     let kernel = production_kernel_relaxed(root.path());
@@ -1622,7 +1604,7 @@ fn snap_edit_replace_file_requires_unselected_snap() {
     let response = kernel
         .execute_cell(
             r#"
-            const snap = await z.snap("whole.txt");
+            const snap = await z.read({path: "whole.txt"});
             await z.edit(snap, {kind: "replace_file", content: "new\n"});
             return await z.read("whole.txt");
             "#,
@@ -1634,7 +1616,7 @@ fn snap_edit_replace_file_requires_unselected_snap() {
 }
 
 #[test]
-fn snap_edit_replace_exact_requires_explicit_single_match() {
+fn snapshot_edit_replace_exact_requires_explicit_single_match() {
     let root = tempdir().unwrap();
     let original = "const alpha = 1;\n";
     write_fixture(root.path(), "count.ts", original);
@@ -1643,7 +1625,7 @@ fn snap_edit_replace_exact_requires_explicit_single_match() {
     let response = kernel
         .execute_cell(
             r#"
-            const snap = await z.snap({
+            const snap = await z.read({
               path: "count.ts",
               selection: {exactText: "alpha"},
             });
@@ -1672,7 +1654,7 @@ fn snap_edit_replace_exact_requires_explicit_single_match() {
 }
 
 #[test]
-fn effect_existing_absence_target_rolls_back_related_edit() {
+fn apply_existing_absence_target_rolls_back_related_edit() {
     let root = tempdir().unwrap();
     let index = "mod old;\n";
     write_fixture(root.path(), "src/mod.rs", index);
@@ -1682,7 +1664,7 @@ fn effect_existing_absence_target_rolls_back_related_edit() {
     let response = kernel
         .execute_cell(
             r#"
-            return await z.effect({
+            return await z.apply({
               targets: {
                 moduleIndex: {path: "src/mod.rs", expect: "exists"},
                 newModule: {path: "src/new.rs", expect: "absent"},
@@ -1719,7 +1701,7 @@ fn effect_existing_absence_target_rolls_back_related_edit() {
 
 #[cfg(unix)]
 #[test]
-fn effect_refuses_symlink_substituted_parent() {
+fn apply_refuses_symlink_substituted_parent() {
     use std::os::unix::fs::symlink;
 
     let root = tempdir().unwrap();
@@ -1730,7 +1712,7 @@ fn effect_refuses_symlink_substituted_parent() {
     let response = kernel
         .execute_cell(
             r#"
-            return await z.effect({
+            return await z.apply({
               targets: {target: {path: "escape/new.rs", expect: "absent"}},
               changes: [{
                 target: "target",
@@ -1748,7 +1730,7 @@ fn effect_refuses_symlink_substituted_parent() {
 }
 
 #[test]
-fn full_snap_fails_typed_instead_of_truncating() {
+fn full_read_view_fails_typed_instead_of_truncating() {
     let root = tempdir().unwrap();
     let source = "0123456789abcdef\n".repeat(2_500);
     write_fixture(root.path(), "large-full.txt", &source);
@@ -1756,7 +1738,7 @@ fn full_snap_fails_typed_instead_of_truncating() {
 
     let response = kernel
         .execute_cell(
-            r#"return await z.snap({target:{path:"large-full.txt"},view:{mode:"full"}});"#,
+            r#"return await z.read({target:{path:"large-full.txt"},view:{mode:"full"}});"#,
         )
         .unwrap();
 
@@ -1772,7 +1754,7 @@ fn full_snap_fails_typed_instead_of_truncating() {
 }
 
 #[test]
-fn snap_search_refuses_ambiguous_exact_target() {
+fn read_search_refuses_ambiguous_exact_target() {
     let root = tempdir().unwrap();
     write_fixture(root.path(), "src/lib.rs", "pub fn alpha() {}\n");
     let kernel = production_kernel(root.path());
@@ -1780,7 +1762,7 @@ fn snap_search_refuses_ambiguous_exact_target() {
     let response = kernel
         .execute_cell(
             r#"
-            return await z.snap({
+            return await z.read({
               target: {search: {query: "ambiguous", under: "src", mode: "natural"}},
               cardinality: "exactly_one",
             });
@@ -1799,7 +1781,7 @@ fn snap_search_refuses_ambiguous_exact_target() {
 }
 
 #[test]
-fn effect_rejects_replace_file_after_prior_change() {
+fn apply_rejects_replace_file_after_prior_change() {
     let root = tempdir().unwrap();
     let original = "const alpha = 1;\n";
     write_fixture(root.path(), "overwrite.ts", original);
@@ -1808,7 +1790,7 @@ fn effect_rejects_replace_file_after_prior_change() {
     let response = kernel
         .execute_cell(
             r#"
-            return await z.effect({
+            return await z.apply({
               targets: {target: {path: "overwrite.ts"}},
               changes: [
                 {
@@ -1846,13 +1828,13 @@ fn effect_rejects_replace_file_after_prior_change() {
 }
 
 #[test]
-fn repeated_expand_cursors_reconstruct_exact_source() {
+fn repeated_read_cursors_reconstruct_exact_source() {
     let root = tempdir().unwrap();
     let source = "0123456789".repeat(25);
     write_fixture(root.path(), "paged.txt", &source);
     let kernel = production_kernel(root.path());
     let response = kernel
-        .execute_cell(r#"return await z.snap("paged.txt");"#)
+        .execute_cell(r#"return await z.read({path: "paged.txt"});"#)
         .unwrap();
     let snap = model_json(&response);
     let exact = snap["source"]["exact"].as_str().unwrap();
@@ -1861,7 +1843,7 @@ fn repeated_expand_cursors_reconstruct_exact_source() {
     loop {
         let response = kernel
             .execute_cell(&format!(
-                "return await z.expand({:?}, {{next: {}, limit: 17}});",
+                "return await z.read({:?}, {{next: {}, limit: 17}});",
                 exact, next
             ))
             .unwrap();
@@ -1913,14 +1895,14 @@ fn canonical_kernel_binds_graph_hits_without_repository_indexes() {
     let response = kernel
         .execute_cell(
             r#"
-            const ast = await z.parallel([
-              async () => await z.asgrep("alpha", {
+            const ast = await Promise.all([
+              z.find("alpha", {
                 mode: "natural",
                 path: "src/lib.rs",
                 language: "rust",
                 limit: 1,
               }),
-              async () => await z.asgrep("alpha", {
+              z.find("alpha", {
                 mode: "natural",
                 path: "src/lib.rs",
                 language: "rust",
@@ -1929,39 +1911,39 @@ fn canonical_kernel_binds_graph_hits_without_repository_indexes() {
             ]);
             const hits = ast[0];
             const expandedHit = await z.read(hits.hits[0].source);
-            const exactModes = await z.parallel([
-              async () => await z.asgrep("alpha", {
+            const exactModes = await Promise.all([
+              z.find("alpha", {
                 mode: "word",
                 path: "src/lib.rs",
                 language: "rust",
                 limit: 1,
               }),
-              async () => await z.asgrep("alpha", {
+              z.find("alpha", {
                 mode: "literal",
                 path: "src/lib.rs",
                 language: "rust",
                 limit: 1,
               }),
             ]);
-            const graph = await z.parallel([
-              async () => await z.asgrep("alpha", {
+            const graph = await Promise.all([
+              z.find("alpha", {
                 mode: "symbols",
                 path: "src/lib.rs",
                 language: "rust",
                 limit: 2,
               }),
-              async () => await z.asgrep("alpha", {
+              z.find("alpha", {
                 mode: "symbols",
                 path: "src/lib.rs",
                 language: "rust",
                 limit: 2,
               }),
             ]);
-            const snap = await z.snap({
+            const snap = await z.read({
               target: {search: {query: "alpha", under: "src/lib.rs", mode: "natural"}},
               cardinality: "exactly_one",
             });
-            const symbol = await z.snap({
+            const symbol = await z.read({
               target: {path: "src/lib.rs"},
               cardinality: "exactly_one",
               selection: {symbol: "alpha"},
@@ -1987,10 +1969,7 @@ fn canonical_kernel_binds_graph_hits_without_repository_indexes() {
         value["hits"]["coverage"]["freshnessVerified"],
         serde_json::Value::Bool(true)
     );
-    assert_eq!(
-        value["hits"]["coverage"]["tierAPct"].as_f64(),
-        Some(100.0)
-    );
+    assert_eq!(value["hits"]["coverage"]["tierAPct"].as_f64(), Some(100.0));
     assert_eq!(
         value["graph"][0]["coverage"]["freshnessVerified"],
         serde_json::Value::Bool(true)
@@ -2031,8 +2010,8 @@ fn optional_connector_properties_follow_javascript_undefined_semantics() {
     let response = kernel
         .execute_cell(
             r#"
-            const snap = await z.snap("binary.bin");
-            const expanded = await z.expand(snap, {all: true});
+            const snap = await z.read({path: "binary.bin"});
+            const expanded = await z.read(snap, {all: true});
             return {
               snapTextMissing: snap.view.text === undefined,
               expandedTextMissing: expanded.text === undefined,
@@ -2057,7 +2036,7 @@ fn edit_path_rejects_whole_file_replacement_string() {
         .execute_cell(
             r#"
             const p = 'guard-edit.txt';
-            await z.write(p, 'v1\nv2\nv3\n');
+            await z.edit(p, {create: 'v1\nv2\nv3\n'});
             let caught = null;
             try { await z.edit(p, 'WHOLE-FILE-REPLACEMENT'); }
             catch (e) { caught = String(e.message || e); }
@@ -2099,7 +2078,7 @@ fn edit_path_find_replacement_substitutes_first_unique_match() {
         .execute_cell(
             r#"
             const p = 'guard-edit-sub.txt';
-            await z.write(p, 'v1\nv2\nv3\n');
+            await z.edit(p, {create: 'v1\nv2\nv3\n'});
             await z.edit(p, { find: 'v2', replacement: 'V2-DONE' });
             return await z.read(p);
         "#,
@@ -2126,7 +2105,7 @@ fn edit_path_mismatch_reports_context_and_recovery() {
         .execute_cell(
             r#"
             const p = 'guard-edit-mismatch.txt';
-            await z.write(p, 'alpha\nbeta\ngamma\n');
+            await z.edit(p, {create: 'alpha\nbeta\ngamma\n'});
             return await z.edit(p, { find: 'delta', replacement: 'DELTA' });
         "#,
         )
@@ -2146,7 +2125,7 @@ fn edit_path_replace_file_kind_replaces_deliberately() {
         .execute_cell(
             r#"
             const p = 'guard-edit-rf.txt';
-            await z.write(p, 'old content\n');
+            await z.edit(p, {create: 'old content\n'});
             await z.edit(p, { kind: 'replace_file', content: 'fresh\n' });
             return await z.read(p);
         "#,
@@ -2162,28 +2141,34 @@ fn edit_path_replace_file_kind_replaces_deliberately() {
 }
 
 #[test]
-fn snap_directory_error_guides_to_lookup() {
+fn noncanonical_methods_are_rejected() {
     let root = tempdir().unwrap();
-    std::fs::create_dir_all(root.path().join("crates")).unwrap();
     let kernel = production_kernel(root.path());
-    let response = kernel
-        .execute_cell(
-            r#"
-            try { await z.snap({ path: 'crates' }); return 'NO-ERROR'; }
-            catch (e) { return String(e.message || e); }
-        "#,
-        )
-        .unwrap();
-    assert_eq!(response.outcome, zero_abi::ZeroKernelOutcome::Completed);
-    let message = response.value.unwrap().as_str().unwrap().to_owned();
-    assert!(
-        message.contains("is a directory") && message.contains("z.lookup"),
-        "{message}"
-    );
+    for name in [
+        "snap", "expand", "lookup", "asgrep", "write", "remove", "effect", "shell", "parallel",
+        "pipeline", "transact", "measure", "project", "compress", "inspect", "help",
+    ] {
+        let response = kernel
+            .execute_cell(&format!("return await z.{name}();"))
+            .unwrap();
+        assert_eq!(
+            response.outcome,
+            zero_abi::ZeroKernelOutcome::Failed,
+            "{name} unexpectedly remained callable"
+        );
+        assert!(
+            response
+                .error
+                .as_ref()
+                .is_some_and(|error| error.detail.contains("is not a ZeroKernel method")),
+            "{name}: {:?}",
+            response.error
+        );
+    }
 }
 
 #[test]
-fn asgrep_accepts_single_object_form() {
+fn find_accepts_single_object_and_positional_forms() {
     let root = tempdir().unwrap();
     std::fs::write(
         root.path().join("probe.rs"),
@@ -2195,7 +2180,7 @@ fn asgrep_accepts_single_object_form() {
     let object_form = kernel
         .execute_cell(
             r#"
-            const r = await z.asgrep({ query: "AsgrepProbeMarker", mode: "natural" });
+            const r = await z.find({ query: "AsgrepProbeMarker", mode: "natural" });
             return r.hits.length;
         "#,
         )
@@ -2204,7 +2189,7 @@ fn asgrep_accepts_single_object_form() {
     let positional = kernel
         .execute_cell(
             r#"
-            const r = await z.asgrep("AsgrepProbeMarker", { mode: "natural" });
+            const r = await z.find("AsgrepProbeMarker", { mode: "natural" });
             return r.hits.length;
         "#,
         )
@@ -2229,7 +2214,7 @@ fn state_namespace_call_carries_guidance() {
 }
 
 #[test]
-fn shell_output_accounting_is_truthful_against_visible_bytes() {
+fn run_output_accounting_is_truthful_against_visible_bytes() {
     // RACC truthfulness at the shell boundary: reported visible tokens must
     // equal a fresh measurement over the exact stdout bytes the model saw.
     let root = tempdir().unwrap();
@@ -2238,7 +2223,7 @@ fn shell_output_accounting_is_truthful_against_visible_bytes() {
     let kernel = kernel(root.path(), files);
     let payload = "SHELL_OK accounting probe";
     let response = kernel
-        .execute_cell(&format!("return await z.shell([\"printf\", {payload:?}]);"))
+        .execute_cell(&format!("return await z.run([\"printf\", {payload:?}]);"))
         .unwrap();
     assert_eq!(response.outcome, zero_abi::ZeroKernelOutcome::Completed);
     let raw = response.value.unwrap();
@@ -2282,7 +2267,7 @@ fn final_surface_read_expands_exact_handles_to_text() {
     let kernel = production_kernel_relaxed(root.path());
     let response = kernel
         .execute_cell(
-            "const snap = await z.snap('blob.txt'); return await z.read(snap.source.exact);",
+            "const snap = await z.read({path: 'blob.txt'}); return await z.read(snap.source.exact);",
         )
         .unwrap();
     assert_eq!(response.outcome, zero_abi::ZeroKernelOutcome::Completed);
@@ -2431,7 +2416,7 @@ fn final_surface_apply_sequences_multiple_edits_on_one_file() {
 }
 
 #[test]
-fn final_surface_find_and_run_aliases_work() {
+fn canonical_find_and_run_work() {
     let root = tempdir().unwrap();
     let kernel = production_kernel_relaxed(root.path());
     let find = kernel
@@ -2457,20 +2442,9 @@ fn final_surface_find_and_run_aliases_work() {
 }
 
 #[test]
-fn final_surface_help_teaches_only_six_operations() {
-    let root = tempdir().unwrap();
-    let kernel = kernel(root.path(), Arc::new(Files::default()));
-    let response = kernel.execute_cell("return await z.help();").unwrap();
-    let raw = response.value.unwrap();
-    let help: Value = serde_json::from_str(raw.as_str().unwrap()).unwrap();
+fn canonical_method_table_has_only_six_operations() {
     assert_eq!(
-        help["methods"],
-        json!(["read", "find", "edit", "apply", "run", "state"])
-    );
-    assert!(
-        help["examples"]["apply_atomic"]
-            .as_str()
-            .unwrap()
-            .contains("z.apply")
+        zero_abi::GUEST_METHODS,
+        ["read", "find", "edit", "apply", "run", "state"]
     );
 }

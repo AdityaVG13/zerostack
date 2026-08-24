@@ -47,17 +47,14 @@ fn idle_connector_wait_does_not_consume_microtask_budget() {
         root: "z".into(),
         capabilities: vec![CapabilityDescriptor::new("z", "read")],
     };
-    let guest = Arc::new(GuestSurface::new(
-        GuestContext {
-            project_root: "/project".into(),
-            workspace_root: Some("/project".into()),
-            request_root: Some("/project".into()),
-            session_root: None,
-            session_id: "connector-wait".into(),
-            protocol: "ZeroKernel".into(),
-        },
-        2,
-    ));
+    let guest = Arc::new(GuestSurface::new(GuestContext {
+        project_root: "/project".into(),
+        workspace_root: Some("/project".into()),
+        request_root: Some("/project".into()),
+        session_root: None,
+        session_id: "connector-wait".into(),
+        protocol: "ZeroKernel".into(),
+    }));
     let host = Host::new_zero_kernel(limits, registration)
         .unwrap()
         .with_guest_surface(guest);

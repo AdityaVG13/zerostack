@@ -7,18 +7,16 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use parking_lot::Mutex;
 use serde_json::Value;
 use zero_abi::{
-    AsgrepMode, AsgrepOptions, CompressionRequest, CompressionResult, EFFECT_RESULT_SCHEMA,
-    EXPAND_RESULT_SCHEMA, EffectChangeKind, EffectChangeRequest, EffectRequest, EffectResult,
-    EffectTargetResult, EffectVerificationResult, EngineCallContext, EngineError, EngineErrorKind,
-    EngineInvocation, ExpandOptions, ExpandResult, FileEffectKind, FileEffectReceipt,
-    FileEffectRequest, FileEngine, FileReadRequest, FileSnapshot, KernelBudget, KernelContext,
-    KernelLedger, LookupOptions, ProjectionRequest, ProjectionResult, ReadOptions,
-    SNAP_WORKSPACE_SCHEMA, ShellOptions, ShellResult, SnapAccounting, SnapByteRange, SnapNewline,
-    SnapRecovery, SnapRequest, SnapResult, SnapSelection, SnapSelectionRequest, SnapSource,
-    SnapStructuralEvidence, SnapTargetRequest, SnapView, SnapViewMode, StateEvidence,
-    StructuralEngine, StructuralQuery, TokenAccounting, TokenEngine, ZERO_KERNEL_PROTOCOL,
-    ZeroHandle, ZeroKernelEvent, ZeroKernelOutcome, ZeroKernelRequest, ZeroKernelResponse,
-    ZeroOperationTrace,
+    AsgrepMode, AsgrepOptions, EFFECT_RESULT_SCHEMA, EXPAND_RESULT_SCHEMA, EffectChangeKind,
+    EffectChangeRequest, EffectRequest, EffectResult, EffectTargetResult, EffectVerificationResult,
+    EngineCallContext, EngineError, EngineErrorKind, EngineInvocation, ExpandOptions, ExpandResult,
+    FileEffectKind, FileEffectReceipt, FileEffectRequest, FileEngine, FileReadRequest,
+    FileSnapshot, KernelBudget, KernelContext, KernelLedger, LookupOptions, ProjectionRequest,
+    ReadOptions, SNAP_WORKSPACE_SCHEMA, ShellOptions, ShellResult, SnapAccounting, SnapByteRange,
+    SnapNewline, SnapRecovery, SnapRequest, SnapResult, SnapSelection, SnapSelectionRequest,
+    SnapSource, SnapStructuralEvidence, SnapTargetRequest, SnapView, SnapViewMode, StateEvidence,
+    StructuralEngine, StructuralQuery, TokenEngine, ZERO_KERNEL_PROTOCOL, ZeroHandle,
+    ZeroKernelEvent, ZeroKernelOutcome, ZeroKernelRequest, ZeroKernelResponse, ZeroOperationTrace,
 };
 use zero_store::{EventLog, ZeroCas};
 
@@ -99,7 +97,6 @@ pub(crate) struct DirectCallContext {
     live_processes: Arc<AtomicU64>,
     frame_tasks: Arc<AtomicU64>,
     frame_processes: Arc<AtomicU64>,
-    output_byte_limit: u32,
 }
 
 struct LiveTaskGuard {
@@ -138,10 +135,6 @@ impl Drop for FrameProcessGuard {
 }
 
 impl DirectCallContext {
-    pub(crate) fn output_byte_limit(&self) -> u32 {
-        self.output_byte_limit
-    }
-
     pub(crate) fn project_root(&self) -> &std::path::Path {
         &self.invocation.context.project_root
     }
@@ -218,52 +211,6 @@ impl DirectCallContext {
             .saturating_add(result.byte_end.saturating_sub(result.byte_start));
         if !record.handles.contains(handle) {
             record.handles.push(handle.clone());
-        }
-        Ok(result)
-    }
-
-    pub fn measure(&self, bytes: Vec<u8>) -> Result<TokenAccounting, HostError> {
-        let _task =
-            LiveTaskGuard::acquire(Arc::clone(&self.live_tasks), Arc::clone(&self.frame_tasks));
-        let result = self.tokens.measure(&self.invocation, &bytes)?;
-        let mut record = self.records.lock();
-        record.calls = record.calls.saturating_add(1);
-        record.bytes_read = record.bytes_read.saturating_add(bytes.len() as u64);
-        Ok(result)
-    }
-
-    pub fn project(&self, request: ProjectionRequest) -> Result<ProjectionResult, HostError> {
-        let _task =
-            LiveTaskGuard::acquire(Arc::clone(&self.live_tasks), Arc::clone(&self.frame_tasks));
-        let input_bytes = request.bytes.len() as u64;
-        let result = self.tokens.project(&self.invocation, request)?;
-        let mut record = self.records.lock();
-        record.calls = record.calls.saturating_add(1);
-        record.bytes_read = record.bytes_read.saturating_add(input_bytes);
-        record.bytes_visible = record
-            .bytes_visible
-            .saturating_add(result.visible.len() as u64);
-        if let Some(handle) = result.exact.clone()
-            && !record.handles.contains(&handle)
-        {
-            record.handles.push(handle);
-        }
-        Ok(result)
-    }
-
-    pub fn compress(&self, request: CompressionRequest) -> Result<CompressionResult, HostError> {
-        let _task =
-            LiveTaskGuard::acquire(Arc::clone(&self.live_tasks), Arc::clone(&self.frame_tasks));
-        let input_bytes = request.bytes.len() as u64;
-        let result = self.tokens.compress(&self.invocation, request)?;
-        let mut record = self.records.lock();
-        record.calls = record.calls.saturating_add(1);
-        record.bytes_read = record.bytes_read.saturating_add(input_bytes);
-        record.bytes_visible = record
-            .bytes_visible
-            .saturating_add(result.visible.len() as u64);
-        if !record.handles.contains(&result.exact) {
-            record.handles.push(result.exact.clone());
         }
         Ok(result)
     }
@@ -551,14 +498,13 @@ impl Cell {
             .is_some_and(|value| value != "exactly_one")
         {
             return Err(HostError::InvalidRequest(
-                "z.snap mutation-grade discovery requires cardinality exactly_one".into(),
+                "structured z.read discovery requires cardinality exactly_one".into(),
             ));
         }
 
         let (path, structural, derived_lines) = match target {
             SnapTargetRequest::Path { path } => {
-                // Directory targets are a first-touch trap: point the agent at
-                // z.lookup instead of an opaque engine error (pc_cf4c50f47270).
+                // Directory targets use the simple z.read(path) form.
                 let candidate = if path.is_absolute() {
                     path.clone()
                 } else {
@@ -566,7 +512,7 @@ impl Cell {
                 };
                 if candidate.is_dir() {
                     return Err(HostError::InvalidRequest(format!(
-                        "z.snap requires a file but {} is a directory; use z.lookup({:?}) to list entries, then snap a file",
+                        "structured z.read requires a file but {} is a directory; use z.read({:?}) to list entries",
                         path.display(),
                         path.display()
                     )));
@@ -613,7 +559,7 @@ impl Cell {
                     .ok_or_else(|| {
                         HostError::Engine(EngineError::new(
                             EngineErrorKind::NotFound,
-                            "z.snap search found no target",
+                            "structured z.read search found no target",
                             false,
                         ))
                     })?;
@@ -675,7 +621,7 @@ impl Cell {
             let text = utf8.ok_or_else(|| {
                 HostError::Engine(EngineError::new(
                     EngineErrorKind::InvalidInput,
-                    "z.snap full view requires UTF-8 source",
+                    "z.read full view requires UTF-8 source",
                     false,
                 ))
             })?;
@@ -864,29 +810,29 @@ impl Cell {
         request.validate().map_err(HostError::InvalidRequest)?;
         if self.transaction.is_some() {
             return Err(HostError::InvalidRequest(
-                "z.effect cannot follow z.write, z.edit, z.remove, or z.transact in one cell; express all mutations in z.effect or start a separate ZeroKernel call"
+                "z.apply cannot follow z.edit in one cell; express all mutations in z.apply or start a separate ZeroKernel call"
                     .into(),
             ));
         }
         if request.targets.is_empty() || request.changes.is_empty() {
             return Err(HostError::InvalidRequest(
-                "z.effect requires at least one target and one change".into(),
+                "z.apply requires at least one target and one change".into(),
             ));
         }
         if request.verify.parse {
             return Err(HostError::InvalidRequest(
-                "verification_unavailable: z.effect parse verification requires a confined child image"
+                "verification_unavailable: z.apply parse verification requires a confined child image"
                     .into(),
             ));
         }
         if !request.verify.changed_targets_only {
             return Err(HostError::InvalidRequest(
-                "z.effect requires verify.changedTargetsOnly=true".into(),
+                "z.apply requires verify.changedTargetsOnly=true".into(),
             ));
         }
         if request.verify.command.is_some() {
             return Err(HostError::InvalidRequest(
-                "verification_unavailable: z.effect commands require child-image confinement and exact delta verification"
+                "verification_unavailable: z.apply commands require child-image confinement and exact delta verification"
                     .into(),
             ));
         }
@@ -895,7 +841,7 @@ impl Cell {
         for (name, target) in request.targets {
             if name.is_empty() {
                 return Err(HostError::InvalidRequest(
-                    "z.effect target names must not be empty".into(),
+                    "z.apply target names must not be empty".into(),
                 ));
             }
             let expectation = target.expect.as_deref().unwrap_or("exists");
@@ -918,7 +864,7 @@ impl Cell {
                 "absent" => (None, None),
                 other => {
                     return Err(HostError::InvalidRequest(format!(
-                        "z.effect target {name:?} has unknown expectation {other:?}"
+                        "z.apply target {name:?} has unknown expectation {other:?}"
                     )));
                 }
             };
@@ -938,7 +884,7 @@ impl Cell {
         for change in request.changes {
             let target = planned.get_mut(&change.target).ok_or_else(|| {
                 HostError::InvalidRequest(format!(
-                    "z.effect change names unknown target {:?}",
+                    "z.apply change names unknown target {:?}",
                     change.target
                 ))
             })?;
@@ -946,7 +892,7 @@ impl Cell {
         }
         if planned.values().any(|target| !target.changed) {
             return Err(HostError::InvalidRequest(
-                "every z.effect target must receive at least one change".into(),
+                "every z.apply target must receive at least one change".into(),
             ));
         }
 
@@ -1257,7 +1203,6 @@ impl Cell {
             live_processes: Arc::clone(&self.live_processes),
             frame_tasks: Arc::clone(&self.frame_tasks),
             frame_processes: Arc::clone(&self.frame_processes),
-            output_byte_limit: self.budget.output_byte_limit,
         }
     }
 
@@ -1575,7 +1520,7 @@ fn plan_effect_change(
 ) -> Result<(), HostError> {
     if target.sealed {
         return Err(HostError::InvalidRequest(
-            "z.effect cannot apply another change after replace_file or remove_file".into(),
+            "z.apply cannot apply another change after replace_file or remove_file".into(),
         ));
     }
     match change.kind {
@@ -1704,13 +1649,13 @@ fn exact_structural_hit(
             .unwrap_or("structural coverage is partial or stale; absence is not certified");
         return Err(HostError::Engine(EngineError::new(
             EngineErrorKind::InvalidInput,
-            format!("z.snap structural result is incomplete: {detail}"),
+            format!("structured z.read result is incomplete: {detail}"),
             false,
         )));
     }
     if result.hits.len() != 1 {
         let detail = if result.hits.is_empty() {
-            "z.snap structural target was not found".into()
+            "structured z.read target was not found".into()
         } else {
             let candidates = result
                 .hits
@@ -1725,7 +1670,7 @@ fn exact_structural_hit(
                 .collect::<Vec<_>>()
                 .join(", ");
             format!(
-                "z.snap structural target is ambiguous: {} candidates ({candidates})",
+                "structured z.read target is ambiguous: {} candidates ({candidates})",
                 result.hits.len()
             )
         };
@@ -1743,11 +1688,11 @@ fn exact_structural_hit(
     let lines = hit
         .line_start
         .zip(hit.line_end)
-        .ok_or_else(|| HostError::InvalidRequest("z.snap hit has no exact line span".into()))?;
+        .ok_or_else(|| HostError::InvalidRequest("z.read hit has no exact line span".into()))?;
     let source = hit
         .source
         .clone()
-        .ok_or_else(|| HostError::InvalidRequest("z.snap hit has no exact source handle".into()))?;
+        .ok_or_else(|| HostError::InvalidRequest("z.read hit has no exact source handle".into()))?;
     let evidence = hit.evidence.clone();
     Ok((
         SnapStructuralEvidence {
@@ -1778,7 +1723,7 @@ fn snap_selection(
         + usize::from(request.exact_text.is_some());
     if count != 1 {
         return Err(HostError::InvalidRequest(
-            "z.snap selection requires exactly one of lines, bytes, symbol, or exactText".into(),
+            "z.read selection requires exactly one of lines, bytes, symbol, or exactText".into(),
         ));
     }
     if let Some(lines) = &request.lines {
@@ -1792,7 +1737,7 @@ fn snap_selection(
             .map_err(|_| HostError::InvalidRequest("byte end does not fit platform".into()))?;
         if start >= end || end > bytes.len() {
             return Err(HostError::InvalidRequest(
-                "z.snap byte selection is outside the source".into(),
+                "z.read byte selection is outside the source".into(),
             ));
         }
         return Ok(Some(SnapSelection {
@@ -1807,7 +1752,7 @@ fn snap_selection(
     if let Some(exact) = &request.exact_text {
         if exact.is_empty() {
             return Err(HostError::InvalidRequest(
-                "z.snap exactText must not be empty".into(),
+                "z.read exactText must not be empty".into(),
             ));
         }
         let text = std::str::from_utf8(bytes)
@@ -1815,10 +1760,10 @@ fn snap_selection(
         let mut matches = text.match_indices(exact);
         let first = matches
             .next()
-            .ok_or_else(|| HostError::InvalidRequest("z.snap exactText was not found".into()))?;
+            .ok_or_else(|| HostError::InvalidRequest("z.read exactText was not found".into()))?;
         if matches.next().is_some() {
             return Err(HostError::InvalidRequest(
-                "z.snap exactText is ambiguous".into(),
+                "z.read exactText is ambiguous".into(),
             ));
         }
         let end = first.0 + exact.len();
@@ -1833,7 +1778,7 @@ fn snap_selection(
     }
     let (start, end) = derived_lines.ok_or_else(|| {
         HostError::InvalidRequest(
-            "z.snap symbol selection requires structural discovery evidence".into(),
+            "z.read symbol selection requires structural discovery evidence".into(),
         )
     })?;
     selection_from_expansion(
@@ -1916,7 +1861,7 @@ fn labeled_outline(path: &std::path::Path, snapshot: &FileSnapshot) -> String {
         .clone()
         .unwrap_or_else(|| format!("{} bytes", snapshot.byte_len));
     format!(
-        "[ZeroStack READ OUTLINE - not file content | path={} | {} bytes total | exact={} | expand with z.expand(\"{}\", selector)]\n{}\n",
+        "[ZeroStack READ OUTLINE - not file content | path={} | {} bytes total | exact={} | recover with z.read(\"{}\", selectors)]\n{}\n",
         path.display(),
         snapshot.byte_len,
         snapshot.content,

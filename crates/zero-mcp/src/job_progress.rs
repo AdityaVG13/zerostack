@@ -1,12 +1,9 @@
-//! Capability-aware MCP progress / logging for background jobs (tokenzero-1c5y).
+//! Capability-aware MCP progress and logging for compatibility jobs.
 //!
 //! Clients that send a progress token or advertise logging get a bounded start
-//! event, optional short progress, and exactly one terminal event. Everyone
-//! else keeps `zero.token.job` long-poll. Notifications never include raw job
-//! logs.
-//!
-//! Received from
-//! `TokenZero/crates/tokenzero-mcp-compat/src/job_progress.rs` on 2026-08-17.
+//! event, optional short progress, and exactly one terminal event. Other
+//! compatibility clients poll through their transport-specific contract.
+//! ZeroKernel exposes no model-facing job namespace or polling operation.
 //! This module owns transport notification policy only; TokenZero keeps job
 //! execution, rendered model content, token accounting, and `tz://` handles.
 
@@ -34,7 +31,7 @@ pub enum NotifyMode {
     Progress,
     /// `notifications/message` (MCP logging).
     Logging,
-    /// No push; client must long-poll `zero.token.job`.
+    /// No push; the compatibility client must poll its transport contract.
     PollOnly,
 }
 

@@ -111,11 +111,11 @@ fn carrier_catalog_exposes_exactly_one_closed_zero_tool() {
 fn carrier_request_is_closed_and_bounded() {
     let capabilities = carrier_capabilities();
     let request = decode_zero_carrier_request(
-        serde_json::json!({"plan": "return await z.help();"}),
+        serde_json::json!({"plan": "return await z.read('Cargo.toml');"}),
         &capabilities,
     )
     .unwrap();
-    assert_eq!(request.plan, "return await z.help();");
+    assert_eq!(request.plan, "return await z.read('Cargo.toml');");
     assert!(
         decode_zero_carrier_request(
             serde_json::json!({"plan": "return 1;", "root": "/private"}),

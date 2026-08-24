@@ -1,9 +1,8 @@
 //! Direct ZeroKernel guest state and context.
 //!
 //! The reusable host installs one `GuestSurface` per fresh cell. It carries
-//! only immutable operational context, bounded serializable state, and the
-//! cell's parallelism limit. Engine calls are bound directly by the
-//! interpreter and never pass through a model-facing command catalog.
+//! only immutable operational context and bounded serializable state. Engine
+//! calls are bound directly by the interpreter.
 
 use std::cell::{Cell, RefCell};
 use std::collections::BTreeMap;
@@ -29,16 +28,14 @@ pub struct GuestSurface {
     context: GuestContext,
     state: RefCell<BTreeMap<String, JsonValue>>,
     state_bytes: Cell<usize>,
-    parallel_limit: usize,
 }
 
 impl GuestSurface {
-    pub fn new(context: GuestContext, parallel_limit: usize) -> Self {
+    pub fn new(context: GuestContext) -> Self {
         Self {
             context,
             state: RefCell::new(BTreeMap::new()),
             state_bytes: Cell::new(0),
-            parallel_limit,
         }
     }
 
@@ -57,10 +54,6 @@ impl GuestSurface {
 
     pub fn protocol(&self) -> &str {
         &self.context.protocol
-    }
-
-    pub fn parallel_limit(&self) -> usize {
-        self.parallel_limit
     }
 
     pub fn state_get(&self, key: &str) -> Result<Option<JsonValue>, String> {
@@ -178,7 +171,6 @@ impl std::fmt::Debug for GuestSurface {
             .field("context", &self.context)
             .field("state_keys", &self.state.borrow().len())
             .field("state_bytes", &self.state_bytes.get())
-            .field("parallel_limit", &self.parallel_limit)
             .finish()
     }
 }

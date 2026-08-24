@@ -7,10 +7,10 @@ use std::time::Duration;
 
 use serde_json::{Map, Value};
 use zero_abi::{
-    AsgrepMode, AsgrepOptions, CapabilityDescriptor, CompressionRequest, EffectRequest,
-    EngineError, EngineErrorKind, ExpandOptions, GUEST_METHODS, GlobalRegistration, LookupOptions,
-    ProjectionRequest, ReadOptions, ShellOptions, SnapRequest, SnapTargetRequest, SnapViewRequest,
-    ZERO_KERNEL_PROTOCOL, ZeroHandle, ZeroKernelResponse,
+    AsgrepMode, AsgrepOptions, CapabilityDescriptor, EffectRequest, EngineError, EngineErrorKind,
+    ExpandOptions, GUEST_METHODS, GlobalRegistration, LookupOptions, ReadOptions, ShellOptions,
+    SnapRequest, SnapTargetRequest, SnapViewRequest, ZERO_KERNEL_PROTOCOL, ZeroHandle,
+    ZeroKernelResponse,
 };
 use zero_codemode::{
     Connector, ConnectorCompletion, ConnectorError, DispatchContext, GuestContext, GuestSurface,
@@ -21,9 +21,6 @@ use crate::host::{Cell, ZeroKernel};
 use crate::shell::ShellCommand;
 use crate::typescript::{TypeScriptError, erase_typescript};
 
-const INTERNAL_BEGIN: &str = "__begin_transaction";
-const INTERNAL_COMMIT: &str = "__commit_transaction";
-const INTERNAL_ROLLBACK: &str = "__rollback_transaction";
 const FRAME_SETTLE_GRACE: Duration = Duration::from_millis(1_500);
 
 struct CellConnector {
@@ -45,19 +42,13 @@ impl Connector for CellConnector {
         }
         let args: Value = serde_json::from_str(args_json)
             .map_err(|error| ConnectorError::new(error.to_string()))?;
-        if matches!(
-            capability.method.as_str(),
-            "read"
-                | "lookup"
-                | "asgrep"
-                | "find"
-                | "shell"
-                | "run"
-                | "measure"
-                | "project"
-                | "compress"
-                | "expand"
-        ) {
+        let concurrent = matches!(capability.method.as_str(), "find" | "run")
+            || (capability.method == "read"
+                && args
+                    .as_array()
+                    .and_then(|values| values.first())
+                    .is_some_and(Value::is_string));
+        if concurrent {
             let readonly = {
                 let slot = self.cell.borrow();
                 slot.as_ref()
@@ -131,9 +122,13 @@ fn dispatch_concurrent(
             if path.starts_with("z://") {
                 let handle = ZeroHandle::parse(&path)
                     .map_err(|error| ConnectorError::new(error.to_string()))?;
+                let selectors_requested = positional.get(1).is_some_and(|value| !value.is_null());
                 let expanded = context
-                    .expand(&handle, ExpandOptions::default())
+                    .expand(&handle, expand_options(positional.get(1))?)
                     .map_err(host_error)?;
+                if selectors_requested {
+                    return serde_json::to_value(expanded).map_err(json_error);
+                }
                 let text = expanded.text.ok_or_else(|| {
                     ConnectorError::new("z.read exact handle does not contain UTF-8 text")
                 })?;
@@ -176,46 +171,23 @@ fn dispatch_concurrent(
                     .map_err(host_error)
             }
         }
-        "lookup" => {
-            let path = positional.first().and_then(Value::as_str).unwrap_or(".");
-            let options = positional
-                .get(1)
-                .cloned()
-                .map(normalize_keys)
-                .map(serde_json::from_value::<LookupOptions>)
-                .transpose()
-                .map_err(json_error)?
-                .unwrap_or_default();
-            let paths = context
-                .lookup(PathBuf::from(path), options)
-                .map_err(host_error)?;
-            Ok(Value::Array(
-                paths
-                    .into_iter()
-                    .map(|path| Value::String(path.to_string_lossy().into_owned()))
-                    .collect(),
-            ))
-        }
-        "asgrep" | "find" => {
-            // Accept both calling conventions: z.asgrep(query, {options}) and
-            // the single-object form z.asgrep({query, path, ...}) that new
-            // agents naturally try first (pc_cf4c50f47270).
+        "find" => {
             let (query, options_source): (Value, Option<Value>) = match positional.first() {
                 Some(Value::Object(first)) if positional.len() == 1 => {
                     let mut object = first.clone();
                     let query = object.remove("query").ok_or_else(|| {
-                        ConnectorError::new("z.asgrep object form requires a query field")
+                        ConnectorError::new("z.find object form requires a query field")
                     })?;
                     (query, Some(Value::Object(object)))
                 }
                 _ => (
-                    Value::String(string_arg(&positional, 0, "z.asgrep query")?),
+                    Value::String(string_arg(&positional, 0, "z.find query")?),
                     positional.get(1).cloned(),
                 ),
             };
             let query = query
                 .as_str()
-                .ok_or_else(|| ConnectorError::new("z.asgrep query must be a string"))?
+                .ok_or_else(|| ConnectorError::new("z.find query must be a string"))?
                 .to_owned();
             let options = options_source
                 .map(parse_asgrep_options)
@@ -224,58 +196,9 @@ fn dispatch_concurrent(
             serde_json::to_value(context.asgrep(query, options).map_err(host_error)?)
                 .map_err(json_error)
         }
-        "shell" | "run" => {
+        "run" => {
             let (command, options) = shell_arguments(&positional)?;
             serde_json::to_value(context.shell(command, options).map_err(host_error)?)
-                .map_err(json_error)
-        }
-        "measure" => {
-            let bytes = value_bytes(positional.first(), "z.measure value")?;
-            serde_json::to_value(context.measure(bytes).map_err(host_error)?).map_err(json_error)
-        }
-        "project" => {
-            let bytes = value_bytes(positional.first(), "z.project value")?;
-            let options = positional.get(1).and_then(Value::as_object);
-            let visible_byte_limit = option_u32(options, "visibleBytes", "visible_bytes")?
-                .unwrap_or_else(|| context.output_byte_limit());
-            let media_type = option_string(options, "mediaType", "media_type")
-                .unwrap_or_else(|| "text/plain".into());
-            serde_json::to_value(
-                context
-                    .project(ProjectionRequest {
-                        bytes,
-                        visible_byte_limit,
-                        media_type,
-                    })
-                    .map_err(host_error)?,
-            )
-            .map_err(json_error)
-        }
-        "compress" => {
-            let bytes = value_bytes(positional.first(), "z.compress value")?;
-            let options = positional.get(1).and_then(Value::as_object);
-            let max_tokens = option_u32(options, "maxTokens", "max_tokens")?.unwrap_or(1_024);
-            let mode = option_string(options, "mode", "mode").unwrap_or_default();
-            let label = option_string(options, "label", "label");
-            let media_type = option_string(options, "mediaType", "media_type")
-                .unwrap_or_else(|| "text/plain".into());
-            serde_json::to_value(
-                context
-                    .compress(CompressionRequest {
-                        bytes,
-                        max_tokens,
-                        mode,
-                        label,
-                        media_type,
-                    })
-                    .map_err(host_error)?,
-            )
-            .map_err(json_error)
-        }
-        "expand" => {
-            let handle = expand_handle_arg(positional.first(), "z.expand handle")?;
-            let options = expand_options(positional.get(1))?;
-            serde_json::to_value(context.expand(&handle, options).map_err(host_error)?)
                 .map_err(json_error)
         }
         _ => Err(ConnectorError::new("not a read-only direct method")),
@@ -300,17 +223,14 @@ impl ZeroKernel {
         };
         let context = cell.context().clone();
         let budget = cell.budget().clone();
-        let guest = Arc::new(GuestSurface::new(
-            GuestContext {
-                project_root: context.project_root.to_string_lossy().into_owned(),
-                workspace_root: Some(context.workspace_root.to_string_lossy().into_owned()),
-                request_root: Some(context.project_root.to_string_lossy().into_owned()),
-                session_root: context.expected_state_root.clone(),
-                session_id: context.session_id.clone(),
-                protocol: ZERO_KERNEL_PROTOCOL.into(),
-            },
-            zero_abi::PARALLEL_TASK_LIMIT,
-        ));
+        let guest = Arc::new(GuestSurface::new(GuestContext {
+            project_root: context.project_root.to_string_lossy().into_owned(),
+            workspace_root: Some(context.workspace_root.to_string_lossy().into_owned()),
+            request_root: Some(context.project_root.to_string_lossy().into_owned()),
+            session_root: context.expected_state_root.clone(),
+            session_id: context.session_id.clone(),
+            protocol: ZERO_KERNEL_PROTOCOL.into(),
+        }));
         if let Err(error) = guest.state_hydrate(cell.state_values()) {
             return cell.fail(EngineError::new(
                 EngineErrorKind::InvalidInput,
@@ -390,24 +310,12 @@ impl ZeroKernel {
 }
 
 fn direct_capabilities() -> Vec<CapabilityDescriptor> {
-    let mut methods = GUEST_METHODS
+    GUEST_METHODS
         .iter()
         .copied()
-        .filter(|method| {
-            !method.starts_with("state.")
-                && !matches!(
-                    *method,
-                    "help" | "inspect" | "parallel" | "pipeline" | "transact"
-                )
-        })
+        .filter(|method| *method != "state")
         .map(|method| CapabilityDescriptor::new("z", method))
-        .collect::<Vec<_>>();
-    methods.extend([
-        CapabilityDescriptor::new("z", INTERNAL_BEGIN),
-        CapabilityDescriptor::new("z", INTERNAL_COMMIT),
-        CapabilityDescriptor::new("z", INTERNAL_ROLLBACK),
-    ]);
-    methods
+        .collect()
 }
 
 fn host_limits(budget: &zero_abi::KernelBudget) -> Result<HostLimits, crate::HostError> {
@@ -429,43 +337,60 @@ fn dispatch_direct(cell: &mut Cell, method: &str, args: Value) -> Result<Value, 
     let positional = positional(args);
     match method {
         "read" => {
-            let path = string_arg(&positional, 0, "z.read path")?;
-            if path.starts_with("z://") {
-                let handle = ZeroHandle::parse(&path)
-                    .map_err(|error| ConnectorError::new(error.to_string()))?;
-                let expanded = cell
-                    .expand(&handle, ExpandOptions::default())
-                    .map_err(host_error)?;
-                let text = expanded.text.ok_or_else(|| {
-                    ConnectorError::new("z.read exact handle does not contain UTF-8 text")
-                })?;
-                return Ok(Value::String(text));
+            let target = positional
+                .first()
+                .ok_or_else(|| ConnectorError::new("z.read target is required"))?;
+            if let Some(object) = target.as_object() {
+                let is_snapshot = object.contains_key("source") && object.contains_key("recovery");
+                if is_snapshot {
+                    let handle = expand_handle_arg(Some(target), "z.read snapshot")?;
+                    let selectors_requested =
+                        positional.get(1).is_some_and(|value| !value.is_null());
+                    let expanded = cell
+                        .expand(&handle, expand_options(positional.get(1))?)
+                        .map_err(host_error)?;
+                    if selectors_requested {
+                        serde_json::to_value(expanded).map_err(json_error)
+                    } else {
+                        expanded.text.map(Value::String).ok_or_else(|| {
+                            ConnectorError::new("z.read exact handle does not contain UTF-8 text")
+                        })
+                    }
+                } else {
+                    let request = snap_request(&positional)?;
+                    serde_json::to_value(cell.snap(request).map_err(host_error)?)
+                        .map_err(json_error)
+                }
+            } else {
+                let path = string_arg(&positional, 0, "z.read path")?;
+                if path.starts_with("z://") {
+                    let handle = ZeroHandle::parse(&path)
+                        .map_err(|error| ConnectorError::new(error.to_string()))?;
+                    let selectors_requested =
+                        positional.get(1).is_some_and(|value| !value.is_null());
+                    let expanded = cell
+                        .expand(&handle, expand_options(positional.get(1))?)
+                        .map_err(host_error)?;
+                    if selectors_requested {
+                        return serde_json::to_value(expanded).map_err(json_error);
+                    }
+                    let text = expanded.text.ok_or_else(|| {
+                        ConnectorError::new("z.read exact handle does not contain UTF-8 text")
+                    })?;
+                    return Ok(Value::String(text));
+                }
+                let options = positional
+                    .get(1)
+                    .cloned()
+                    .map(normalize_keys)
+                    .map(serde_json::from_value::<ReadOptions>)
+                    .transpose()
+                    .map_err(json_error)?
+                    .unwrap_or_default();
+                cell.read(path, options)
+                    .map(Value::String)
+                    .map_err(host_error)
             }
-            let options = positional
-                .get(1)
-                .cloned()
-                .map(normalize_keys)
-                .map(serde_json::from_value::<ReadOptions>)
-                .transpose()
-                .map_err(json_error)?
-                .unwrap_or_default();
-            cell.read(path, options)
-                .map(Value::String)
-                .map_err(host_error)
-        }
-        "snap" => {
-            let request = snap_request(&positional)?;
-            serde_json::to_value(cell.snap(request).map_err(host_error)?).map_err(json_error)
-        }
-        "write" => {
-            let path = string_arg(&positional, 0, "z.write path")?;
-            let content = string_arg(&positional, 1, "z.write content")?;
-            let expected = expected_preimage(positional.get(2))?;
-            serde_json::to_value(
-                cell.write(path, content.into_bytes(), expected)
-                    .map_err(host_error)?,
-            )
-            .map_err(json_error)
         }
         "edit" => {
             let target = positional
@@ -513,7 +438,7 @@ fn dispatch_direct(cell: &mut Cell, method: &str, args: Value) -> Result<Value, 
                 let exists = cell.read_exact(&path).is_ok();
                 if exists {
                     return Err(ConnectorError::new(
-                        "z.edit refuses a bare replacement string on an existing file (it would replace everything). Use {find, replacement} to substitute, {kind: 'replace_file', content} to overwrite deliberately, or z.write(path, content) to create.",
+                        "z.edit refuses a bare replacement string on an existing file (it would replace everything). Use {find, replacement} to substitute or {kind: 'replace_file', content} to overwrite deliberately.",
                     ));
                 }
                 serde_json::to_value(
@@ -528,162 +453,25 @@ fn dispatch_direct(cell: &mut Cell, method: &str, args: Value) -> Result<Value, 
             }
         }
         "apply" => {
-            let request = simplified_apply_request(
-                positional
-                    .first()
-                    .cloned()
-                    .ok_or_else(|| ConnectorError::new("z.apply operations are required"))?,
-                positional.get(1).cloned(),
-            )?;
-            serde_json::to_value(cell.effect(request).map_err(host_error)?).map_err(json_error)
-        }
-        "effect" => {
-            let request = positional
+            let value = positional
                 .first()
                 .cloned()
-                .ok_or_else(|| ConnectorError::new("z.effect request is required"))
-                .and_then(|value| {
-                    serde_json::from_value::<EffectRequest>(value).map_err(json_error)
-                })?;
-            serde_json::to_value(cell.effect(request).map_err(host_error)?).map_err(json_error)
-        }
-        "remove" => {
-            let path = string_arg(&positional, 0, "z.remove path")?;
-            let expected = expected_preimage(positional.get(1))?;
-            serde_json::to_value(cell.remove(path, expected).map_err(host_error)?)
-                .map_err(json_error)
-        }
-        "lookup" => {
-            let path = positional.first().and_then(Value::as_str).unwrap_or(".");
-            let options = positional
-                .get(1)
-                .cloned()
-                .map(normalize_keys)
-                .map(serde_json::from_value::<LookupOptions>)
-                .transpose()
-                .map_err(json_error)?
-                .unwrap_or_default();
-            let paths = cell.lookup(path, options).map_err(host_error)?;
-            Ok(Value::Array(
-                paths
-                    .into_iter()
-                    .map(|path| Value::String(path.to_string_lossy().into_owned()))
-                    .collect(),
-            ))
-        }
-        "asgrep" => {
-            let query = string_arg(&positional, 0, "z.asgrep query")?;
-            let options = positional
-                .get(1)
-                .cloned()
-                .map(parse_asgrep_options)
-                .transpose()?
-                .unwrap_or_else(default_asgrep_options);
-            serde_json::to_value(cell.asgrep(query, options).map_err(host_error)?)
-                .map_err(json_error)
-        }
-        "shell" => {
-            let command = match positional.first() {
-                Some(Value::String(command)) => ShellCommand::Script(command.clone()),
-                Some(Value::Array(values)) => ShellCommand::Argv(
-                    values
-                        .iter()
-                        .map(|value| {
-                            value.as_str().map(str::to_owned).ok_or_else(|| {
-                                ConnectorError::new("z.shell argv values must be strings")
-                            })
-                        })
-                        .collect::<Result<Vec<_>, _>>()?,
-                ),
-                _ => {
-                    return Err(ConnectorError::new(
-                        "z.shell expects a string or string array",
-                    ));
-                }
+                .ok_or_else(|| ConnectorError::new("z.apply request is required"))?;
+            let request = if value.is_array() {
+                simplified_apply_request(value, positional.get(1).cloned())?
+            } else if value.is_object() {
+                serde_json::from_value::<EffectRequest>(value).map_err(json_error)?
+            } else {
+                return Err(ConnectorError::new(
+                    "z.apply expects an operation array or a full effect request object",
+                ));
             };
-            let options = positional
-                .get(1)
-                .cloned()
-                .map(normalize_keys)
-                .map(serde_json::from_value::<ShellOptions>)
-                .transpose()
-                .map_err(json_error)?
-                .unwrap_or_default();
-            serde_json::to_value(cell.shell(command, options).map_err(host_error)?)
-                .map_err(json_error)
-        }
-        "expand" => {
-            let handle = expand_handle_arg(positional.first(), "z.expand handle")?;
-            let options = expand_options(positional.get(1))?;
-            serde_json::to_value(cell.expand(&handle, options).map_err(host_error)?)
-                .map_err(json_error)
-        }
-        INTERNAL_BEGIN => {
-            cell.begin_transaction().map_err(host_error)?;
-            Ok(Value::Null)
-        }
-        // A successful z.transact scope remains staged until the cell's one
-        // terminal commit. This prevents a later frame failure from publishing
-        // effects that the model can no longer observe.
-        INTERNAL_COMMIT => Ok(Value::Null),
-        INTERNAL_ROLLBACK => {
-            cell.rollback_transaction().map_err(host_error)?;
-            Ok(Value::Null)
+            serde_json::to_value(cell.effect(request).map_err(host_error)?).map_err(json_error)
         }
         _ => Err(ConnectorError::new(format!(
             "unknown direct ZeroKernel method z.{method}"
         ))),
     }
-}
-
-fn value_bytes(value: Option<&Value>, label: &str) -> Result<Vec<u8>, ConnectorError> {
-    match value {
-        Some(Value::String(text)) => Ok(text.as_bytes().to_vec()),
-        Some(Value::Array(values)) => values
-            .iter()
-            .map(|value| {
-                value
-                    .as_u64()
-                    .and_then(|num| u8::try_from(num).ok())
-                    .ok_or_else(|| {
-                        ConnectorError::new(format!(
-                            "{label} must be a string or an array of bytes (integers 0..=255)"
-                        ))
-                    })
-            })
-            .collect(),
-        Some(_) => Err(ConnectorError::new(format!(
-            "{label} must be a string or an array of bytes (integers 0..=255)"
-        ))),
-        None => Err(ConnectorError::new(format!("{label} is required"))),
-    }
-}
-
-fn option_string(options: Option<&Map<String, Value>>, camel: &str, snake: &str) -> Option<String> {
-    options
-        .and_then(|options| options.get(camel).or_else(|| options.get(snake)))
-        .and_then(Value::as_str)
-        .map(str::to_owned)
-}
-
-fn option_u32(
-    options: Option<&Map<String, Value>>,
-    camel: &str,
-    snake: &str,
-) -> Result<Option<u32>, ConnectorError> {
-    let Some(value) = options.and_then(|options| options.get(camel).or_else(|| options.get(snake)))
-    else {
-        return Ok(None);
-    };
-    let value = value
-        .as_u64()
-        .ok_or_else(|| ConnectorError::new(format!("{camel} must be a positive integer")))?;
-    let value =
-        u32::try_from(value).map_err(|_| ConnectorError::new(format!("{camel} exceeds u32")))?;
-    if value == 0 {
-        return Err(ConnectorError::new(format!("{camel} must be positive")));
-    }
-    Ok(Some(value))
 }
 
 fn parse_asgrep_options(value: Value) -> Result<AsgrepOptions, ConnectorError> {
@@ -707,13 +495,13 @@ fn shell_arguments(positional: &[Value]) -> Result<(ShellCommand, ShellOptions),
                     value
                         .as_str()
                         .map(str::to_owned)
-                        .ok_or_else(|| ConnectorError::new("z.shell argv values must be strings"))
+                        .ok_or_else(|| ConnectorError::new("z.run argv values must be strings"))
                 })
                 .collect::<Result<Vec<_>, _>>()?,
         ),
         _ => {
             return Err(ConnectorError::new(
-                "z.shell expects a string or string array",
+                "z.run expects a string or string array",
             ));
         }
     };
@@ -747,7 +535,7 @@ fn snap_request(args: &[Value]) -> Result<SnapRequest, ConnectorError> {
     let value = args
         .first()
         .cloned()
-        .ok_or_else(|| ConnectorError::new("z.snap target is required"))?;
+        .ok_or_else(|| ConnectorError::new("z.read snapshot target is required"))?;
     match value {
         Value::String(path) => Ok(SnapRequest {
             target: SnapTargetRequest::Path {
@@ -766,7 +554,7 @@ fn snap_request(args: &[Value]) -> Result<SnapRequest, ConnectorError> {
                 .and_then(|value| value.as_str().map(str::to_owned))
                 .ok_or_else(|| {
                     ConnectorError::new(
-                        "z.snap expects a path string or {target:{path|search}, ...}",
+                        "z.read snapshot expects a path or {target:{path|search}, ...}",
                     )
                 })?;
             let mut target = Map::new();
@@ -775,7 +563,7 @@ fn snap_request(args: &[Value]) -> Result<SnapRequest, ConnectorError> {
             serde_json::from_value(Value::Object(values)).map_err(json_error)
         }
         _ => Err(ConnectorError::new(
-            "z.snap expects a path string or request object",
+            "z.read snapshot expects a path or request object",
         )),
     }
 }
@@ -1095,7 +883,7 @@ fn apply_edit_patch(
         // replace the ENTIRE file silently. Whole-file replacement stays
         // available only as a deliberate typed operation.
         return Err(ConnectorError::new(
-            "z.edit refuses a bare replacement string (it would replace the entire file): use {find, replacement} for substitution, {kind: 'replace_file', content} to replace a whole file deliberately, or z.write to overwrite explicitly",
+            "z.edit refuses a bare replacement string (it would replace the entire file): use {find, replacement} for substitution or {kind: 'replace_file', content} to replace a whole file deliberately",
         ));
     };
     let patch_text = Some(patch.to_string());
@@ -1316,28 +1104,28 @@ fn expand_options(value: Option<&Value>) -> Result<ExpandOptions, ConnectorError
         + usize::from(values.contains_key("all"));
     if selectors > 1 {
         return Err(ConnectorError::new(
-            "z.expand accepts exactly one bytes, lines, symbol, next, offset, or all selector",
+            "z.read accepts exactly one bytes, lines, symbol, next, offset, or all selector",
         ));
     }
     if let Some(bytes) = values.get("bytes") {
         if values.len() != 1 {
             return Err(ConnectorError::new(
-                "z.expand bytes selector does not accept sibling options",
+                "z.read bytes selector does not accept sibling options",
             ));
         }
         let bytes = bytes
             .as_object()
-            .ok_or_else(|| ConnectorError::new("z.expand bytes must be an object"))?;
+            .ok_or_else(|| ConnectorError::new("z.read bytes must be an object"))?;
         if bytes.len() != 2 {
             return Err(ConnectorError::new(
-                "z.expand bytes requires only start and end",
+                "z.read bytes requires only start and end",
             ));
         }
-        let start = required_u64(bytes.get("start"), "z.expand bytes.start")?;
-        let end = required_u64(bytes.get("end"), "z.expand bytes.end")?;
+        let start = required_u64(bytes.get("start"), "z.read bytes.start")?;
+        let end = required_u64(bytes.get("end"), "z.read bytes.end")?;
         if end <= start {
             return Err(ConnectorError::new(
-                "z.expand bytes.end must exceed bytes.start",
+                "z.read bytes.end must exceed bytes.start",
             ));
         }
         return Ok(ExpandOptions {
@@ -1349,19 +1137,19 @@ fn expand_options(value: Option<&Value>) -> Result<ExpandOptions, ConnectorError
     if let Some(lines) = values.get("lines") {
         if values.len() != 1 {
             return Err(ConnectorError::new(
-                "z.expand lines selector does not accept sibling options",
+                "z.read lines selector does not accept sibling options",
             ));
         }
         let lines = lines
             .as_object()
-            .ok_or_else(|| ConnectorError::new("z.expand lines must be an object"))?;
+            .ok_or_else(|| ConnectorError::new("z.read lines must be an object"))?;
         if lines.len() != 2 {
             return Err(ConnectorError::new(
-                "z.expand lines requires only start and end",
+                "z.read lines requires only start and end",
             ));
         }
-        let start = required_u64(lines.get("start"), "z.expand lines.start")?;
-        let end = required_u64(lines.get("end"), "z.expand lines.end")?;
+        let start = required_u64(lines.get("start"), "z.read lines.start")?;
+        let end = required_u64(lines.get("end"), "z.read lines.end")?;
         return Ok(ExpandOptions {
             line_start: Some(u32::try_from(start).map_err(json_error)?),
             line_end: Some(u32::try_from(end).map_err(json_error)?),
@@ -1370,27 +1158,25 @@ fn expand_options(value: Option<&Value>) -> Result<ExpandOptions, ConnectorError
     }
     if let Some(all) = values.get("all") {
         if values.len() != 1 || all.as_bool() != Some(true) {
-            return Err(ConnectorError::new(
-                "z.expand all must be exactly {all:true}",
-            ));
+            return Err(ConnectorError::new("z.read all must be exactly {all:true}"));
         }
         return Ok(ExpandOptions::default());
     }
     if let Some(next) = values.get("next") {
         if values.keys().any(|key| key != "next" && key != "limit") {
             return Err(ConnectorError::new(
-                "z.expand next accepts only an optional limit",
+                "z.read next accepts only an optional limit",
             ));
         }
         let offset = match next {
             Value::String(next) => next
                 .parse::<u64>()
-                .map_err(|error| ConnectorError::new(format!("invalid z.expand next: {error}")))?,
-            value => required_u64(Some(value), "z.expand next")?,
+                .map_err(|error| ConnectorError::new(format!("invalid z.read next: {error}")))?,
+            value => required_u64(Some(value), "z.read next")?,
         };
         let limit = values
             .get("limit")
-            .map(|value| required_u64(Some(value), "z.expand limit"))
+            .map(|value| required_u64(Some(value), "z.read limit"))
             .transpose()?;
         return Ok(ExpandOptions {
             offset: Some(offset),

@@ -107,7 +107,7 @@ impl SnapRequest {
             SnapTargetRequest::Path { path } => validate_confined_path(path)?,
             SnapTargetRequest::Search { search } => {
                 if search.query.trim().is_empty() {
-                    return Err("z.snap search query must not be empty".into());
+                    return Err("z.read search query must not be empty".into());
                 }
                 if let Some(under) = &search.under {
                     validate_confined_path(under)?;
@@ -119,7 +119,7 @@ impl SnapRequest {
             .as_deref()
             .is_some_and(|cardinality| cardinality != "exactly_one")
         {
-            return Err("mutation-grade z.snap supports only cardinality exactly_one".into());
+            return Err("structured z.read supports only cardinality exactly_one".into());
         }
         if let Some(selection) = &self.selection {
             let count = usize::from(selection.lines.is_some())
@@ -128,7 +128,7 @@ impl SnapRequest {
                 + usize::from(selection.exact_text.is_some());
             if count != 1 {
                 return Err(
-                    "z.snap selection requires exactly one lines, bytes, symbol, or exactText"
+                    "z.read selection requires exactly one lines, bytes, symbol, or exactText"
                         .into(),
                 );
             }
@@ -137,24 +137,24 @@ impl SnapRequest {
                 .as_ref()
                 .is_some_and(|lines| lines.start == 0 || lines.end < lines.start)
             {
-                return Err("z.snap lines must be one-based and inclusive".into());
+                return Err("z.read lines must be one-based and inclusive".into());
             }
             if selection
                 .bytes
                 .as_ref()
                 .is_some_and(|bytes| bytes.end <= bytes.start)
             {
-                return Err("z.snap byte end must exceed byte start".into());
+                return Err("z.read byte end must exceed byte start".into());
             }
             if selection
                 .symbol
                 .as_deref()
                 .is_some_and(|symbol| symbol.trim().is_empty())
             {
-                return Err("z.snap symbol must not be empty".into());
+                return Err("z.read symbol must not be empty".into());
             }
             if selection.exact_text.as_deref().is_some_and(str::is_empty) {
-                return Err("z.snap exactText must not be empty".into());
+                return Err("z.read exactText must not be empty".into());
             }
         }
         Ok(())
@@ -284,19 +284,19 @@ pub struct SnapResult {
 impl SnapResult {
     pub fn validate(&self) -> Result<(), String> {
         if self.schema != SNAP_WORKSPACE_SCHEMA {
-            return Err("z.snap result schema mismatch".into());
+            return Err("z.read snapshot result schema mismatch".into());
         }
         validate_confined_path(&self.path)?;
         if self.source.content_digest != self.source.exact.digest()
             || self.source.content_digest.len() != 64
         {
-            return Err("z.snap source digest does not match its exact handle".into());
+            return Err("z.read source digest does not match its exact handle".into());
         }
         if self.source.modified_unix_ns.parse::<u128>().is_err() {
-            return Err("z.snap modifiedUnixNs must be an unsigned decimal string".into());
+            return Err("z.read modifiedUnixNs must be an unsigned decimal string".into());
         }
         if !matches!(self.source.encoding.as_str(), "utf8" | "binary") {
-            return Err("z.snap source encoding is unsupported".into());
+            return Err("z.read source encoding is unsupported".into());
         }
         if let Some(selection) = &self.selection {
             if selection.byte_start >= selection.byte_end
@@ -304,7 +304,7 @@ impl SnapResult {
                 || selection.selected_digest.len() != 64
             {
                 return Err(
-                    "z.snap selection is outside its source or has an invalid digest".into(),
+                    "z.read selection is outside its source or has an invalid digest".into(),
                 );
             }
         }
@@ -315,13 +315,13 @@ impl SnapResult {
                 || range.byte_start < previous_end
                 || range.byte_end > self.source.byte_length
             {
-                return Err("z.snap visible ranges are invalid or overlap".into());
+                return Err("z.read visible ranges are invalid or overlap".into());
             }
             covered = covered.saturating_add(range.byte_end - range.byte_start);
             previous_end = range.byte_end;
         }
         if covered.saturating_add(self.view.omitted_bytes) != self.source.byte_length {
-            return Err("z.snap visible and omitted source coverage is not exact".into());
+            return Err("z.read visible and omitted source coverage is not exact".into());
         }
         if self.view.full_file_visible {
             if self.view.omitted_bytes != 0
@@ -332,27 +332,27 @@ impl SnapResult {
                     .as_ref()
                     .is_none_or(|text| text.len() as u64 != self.source.byte_length)
             {
-                return Err("z.snap full view is not byte-for-byte complete".into());
+                return Err("z.read full view is not byte-for-byte complete".into());
             }
         }
         if self.source.encoding == "binary"
             && (self.view.text.is_some() || !self.view.visible_ranges.is_empty())
         {
-            return Err("z.snap binary source must not claim a text view".into());
+            return Err("z.read binary source must not claim a text view".into());
         }
         if self.recovery.exact != self.source.exact
             || !self.recovery.complete
             || self.recovery.recoverable_bytes != self.source.byte_length
             || self.recovery.unrecoverable_bytes != 0
         {
-            return Err("z.snap recovery does not cover the exact source".into());
+            return Err("z.read recovery does not cover the exact source".into());
         }
         if self
             .structural
             .as_ref()
             .is_some_and(|structural| structural.source != self.source.exact)
         {
-            return Err("z.snap structural evidence is bound to another source".into());
+            return Err("z.read structural evidence is bound to another source".into());
         }
         if self.accounting.visible_tokens > self.accounting.source_tokens
             || self.accounting.omitted_tokens
@@ -363,7 +363,7 @@ impl SnapResult {
             || self.accounting.saved_tokens_now != self.accounting.omitted_tokens
             || self.accounting.recovered_tokens != 0
         {
-            return Err("z.snap token accounting is inconsistent".into());
+            return Err("z.read token accounting is inconsistent".into());
         }
         Ok(())
     }
@@ -463,35 +463,35 @@ impl EffectRequest {
     pub fn validate(&self) -> Result<(), String> {
         if self.targets.is_empty() || self.targets.len() > EFFECT_TARGET_LIMIT {
             return Err(format!(
-                "z.effect requires 1..={EFFECT_TARGET_LIMIT} targets"
+                "z.apply requires 1..={EFFECT_TARGET_LIMIT} targets"
             ));
         }
         if self.changes.is_empty() || self.changes.len() > EFFECT_CHANGE_LIMIT {
             return Err(format!(
-                "z.effect requires 1..={EFFECT_CHANGE_LIMIT} changes"
+                "z.apply requires 1..={EFFECT_CHANGE_LIMIT} changes"
             ));
         }
         let mut paths = BTreeSet::new();
         for (name, target) in &self.targets {
             if name.trim().is_empty() || name.trim() != name {
-                return Err("z.effect target names must be non-empty and trimmed".into());
+                return Err("z.apply target names must be non-empty and trimmed".into());
             }
             validate_confined_path(&target.path)?;
             if !paths.insert(target.path.clone()) {
-                return Err("z.effect target paths must be unique".into());
+                return Err("z.apply target paths must be unique".into());
             }
             if target
                 .expect
                 .as_deref()
                 .is_some_and(|expect| !matches!(expect, "exists" | "absent"))
             {
-                return Err("z.effect expect must be exists or absent".into());
+                return Err("z.apply expect must be exists or absent".into());
             }
         }
         for change in &self.changes {
             if !self.targets.contains_key(&change.target) {
                 return Err(format!(
-                    "z.effect change names unknown target {:?}",
+                    "z.apply change names unknown target {:?}",
                     change.target
                 ));
             }
@@ -549,7 +549,7 @@ impl EffectRequest {
         }
         for name in self.targets.keys() {
             if !self.changes.iter().any(|change| &change.target == name) {
-                return Err(format!("z.effect target {name:?} has no change"));
+                return Err(format!("z.apply target {name:?} has no change"));
             }
         }
         Ok(())
@@ -580,36 +580,36 @@ pub struct EffectVerificationResult {
 impl EffectResult {
     pub fn validate(&self) -> Result<(), String> {
         if self.schema != EFFECT_RESULT_SCHEMA || self.outcome != "staged" {
-            return Err("z.effect result schema or outcome is invalid".into());
+            return Err("z.apply result schema or outcome is invalid".into());
         }
         if self.changed_files as usize != self.targets.len() || self.targets.is_empty() {
-            return Err("z.effect changedFiles does not match its targets".into());
+            return Err("z.apply changedFiles does not match its targets".into());
         }
         let mut names = BTreeSet::new();
         let mut paths = BTreeSet::new();
         for target in &self.targets {
             if !names.insert(target.name.as_str()) || !paths.insert(&target.path) {
-                return Err("z.effect result contains duplicate targets".into());
+                return Err("z.apply result contains duplicate targets".into());
             }
             validate_confined_path(&target.path)?;
             if !matches!(target.kind.as_str(), "edit" | "create" | "remove") {
-                return Err("z.effect result target kind is invalid".into());
+                return Err("z.apply result target kind is invalid".into());
             }
             match target.kind.as_str() {
                 "edit" if target.before.is_none() || target.after.is_none() => {
-                    return Err("z.effect edit target requires before and after handles".into());
+                    return Err("z.apply edit target requires before and after handles".into());
                 }
                 "create" if target.before.is_some() || target.after.is_none() => {
-                    return Err("z.effect create target has invalid handles".into());
+                    return Err("z.apply create target has invalid handles".into());
                 }
                 "remove" if target.before.is_none() || target.after.is_some() => {
-                    return Err("z.effect remove target has invalid handles".into());
+                    return Err("z.apply remove target has invalid handles".into());
                 }
                 _ => {}
             }
         }
         if !self.verification.changed_targets_only {
-            return Err("z.effect result must prove changedTargetsOnly".into());
+            return Err("z.apply result must prove changedTargetsOnly".into());
         }
         Ok(())
     }

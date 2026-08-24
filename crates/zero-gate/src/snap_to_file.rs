@@ -4,7 +4,7 @@
 //!
 //! Integrates the one-family W9-E exact-scenario-closure route
 //! (`zerostack-rybb` + `zerostack-qg2a`) as the read-only
-//! `z.snap`/Snap-to-File gate for K0:
+//! structured `z.read` Snap-to-File gate for K0:
 //!
 //! - **One target-ref grammar.** The request is the W9-E [`DemandRequest`]
 //!   (scenario id plus projection atom roots). There is no second grammar.
@@ -619,10 +619,16 @@ pub enum SnapOutcome {
     /// Unknown coverage: escaped to the frozen native baseline with the
     /// strategy preserved. Nothing was issued and nothing was labeled
     /// complete.
-    Escaped { packet: SnapPacket, view: DecisionView },
+    Escaped {
+        packet: SnapPacket,
+        view: DecisionView,
+    },
     /// Unsafe demand: refused with typed reasons. Nothing was issued and
     /// nothing was labeled complete.
-    Refused { packet: SnapPacket, view: DecisionView },
+    Refused {
+        packet: SnapPacket,
+        view: DecisionView,
+    },
 }
 
 impl SnapOutcome {
@@ -778,9 +784,9 @@ impl SnapToFileRoute {
                 "project root must be nonzero".into(),
             ));
         }
-        request.validate().map_err(|error| {
-            SnapError::InvalidInput(format!("request: {error}"))
-        })?;
+        request
+            .validate()
+            .map_err(|error| SnapError::InvalidInput(format!("request: {error}")))?;
         scope
             .validate()
             .map_err(|error| SnapError::InvalidInput(format!("scope: {error}")))?;
@@ -838,9 +844,7 @@ impl SnapToFileRoute {
                 match view.certificate(&snap_evidence_classes(), &present_classes) {
                     Ok(CompletenessGrade::Proved) => {}
                     Ok(_) => {
-                        return Err(SnapError::Internal(
-                            "snapped view failed to certify Proved",
-                        ))
+                        return Err(SnapError::Internal("snapped view failed to certify Proved"));
                     }
                     Err(error) => return Err(SnapError::View(error)),
                 }
@@ -912,9 +916,7 @@ impl SnapToFileRoute {
                         ],
                     ),
                     SafetyVerdict::Safe => {
-                        return Err(SnapError::Internal(
-                            "route refused with a Safe verdict",
-                        ))
+                        return Err(SnapError::Internal("route refused with a Safe verdict"));
                     }
                 };
 
@@ -968,16 +970,12 @@ impl SnapToFileRoute {
 
     /// Live revalidation of one read-only handle (passthrough to the W9-E
     /// route; typed outcome).
-    pub fn revalidate(
-        &self,
-        handle: &SafeExpandHandle,
-        live: &LiveExpandState,
-    ) -> ExpandOutcome {
+    pub fn revalidate(&self, handle: &SafeExpandHandle, live: &LiveExpandState) -> ExpandOutcome {
         self.w9e.revalidate(handle, live)
     }
 
     /// Exactly one first expansion of a trusted, live-revalidated handle
-    /// (passthrough to the W9-E route; the guest surface's `z.expand`).
+    /// (passthrough to the W9-E route behind canonical `z.read`).
     pub fn expand_first(
         &mut self,
         handle: &SafeExpandHandle,

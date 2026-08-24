@@ -4,27 +4,28 @@ ZeroKernel executes JavaScript or TypeScript cells inside a restricted Rust inte
 
 ## Direct surface
 
-A fresh frame receives one `z` global. Every callable member maps directly to a typed engine or host method:
+A fresh frame receives one `z` global with exactly six operations:
 
 ```js
-const [files, callers] = await z.parallel([
-  () => z.lookup("src", { pattern: "*.rs" }),
-  () => z.asgrep("execute", { mode: "callers", path: "src" }),
+const [files, callers] = await Promise.all([
+  z.read("src"),
+  z.find("execute", { mode: "callers", path: "src" }),
 ]);
 return { files, callers };
 ```
 
-The direct surface includes:
-
-| Area | Methods |
+| Operation | Purpose |
 | --- | --- |
-| Filesystem | `read`, `lookup`, `write`, `edit`, `remove`, `transact` |
-| Structure | `asgrep` with typed structural modes |
-| Token output | `measure`, `project`, `compress`, `expand` |
-| Orchestration | `parallel`, `pipeline`, `shell` |
-| Durable state | `state.get`, `state.set`, `state.delete`, `state.list` |
+| `read` | Files, directories, structured snapshots, and exact-handle recovery |
+| `find` | Text, AST, symbol, relationship, and semantic search |
+| `edit` | One-file create, substitute, replace, or remove |
+| `apply` | Atomic multi-file effects and optional bounded verification |
+| `run` | Supervised argv or script execution |
+| `state` | Bounded JSON-serializable session facts |
 
-There is no `zero.fs.compound`, `token.shell`, `graph.orient`, method catalog lookup, operation string dispatch, or transport envelope on this path.
+Token accounting, output projection, compression, and exact recovery are host
+behavior behind these operations. Engine selection, method catalogs, operation
+string dispatch, and compatibility aliases are not model-facing.
 
 ## Frame and host lifecycle
 
@@ -40,35 +41,40 @@ The host is reusable; the interpreter is not. Each call:
 
 A failed or cancelled call rolls back an open filesystem transaction and discards staged state. The canonical response reports the terminal outcome, visible value, event digest, state evidence, and live-resource ledger.
 
-## Parallel and pipeline execution
+## Concurrency and staged work
 
-`z.parallel` accepts thunks and starts independent calls concurrently:
+Use normal JavaScript for orchestration:
 
 ```js
-return await z.parallel([
-  () => z.read("a.txt"),
-  () => z.read("b.txt"),
+const values = await Promise.all([
+  z.read("a.txt"),
+  z.read("b.txt"),
+]);
+return values.map(value => value.toUpperCase());
+```
+
+Filesystem effects are automatically staged under one host-owned transaction
+per cell. Use `z.edit` for one file and `z.apply` for an atomic multi-file
+request:
+
+```js
+await z.edit("generated.txt", { create: "content" });
+return await z.apply([
+  { path: "src/a.rs", edit: { find: "old", replacement: "new" } },
+  { path: "src/b.rs", create: "pub fn created() {}\n" },
 ]);
 ```
 
-`z.pipeline` is stage-ordered. Thunks within one stage may run concurrently; the next stage starts only after the prior stage settles. Rejection cancels siblings and drains every task before the frame returns.
+A failed or cancelled frame rolls back automatically. Effects use FSZero
+receipts and reverse-order restoration; no best-effort path guessing is
+accepted.
 
-## Transactions
+## Process execution
 
-Filesystem effects are automatically staged under one host-owned transaction per cell. `z.transact` scopes a mutation callback, but its successful effects commit only with the cell terminal:
-
-```js
-return await z.transact(async () => {
-  await z.write("generated.txt", "content");
-  return "committed";
-});
-```
-
-A failed or cancelled frame rolls back automatically. Effects use FSZero receipts and reverse-order restoration; no best-effort path guessing is accepted.
-
-## Shell
-
-`z.shell(command, options?)` delegates to the hub-owned `zero-process` implementation. It captures bounded stdout/stderr, owns the exact child tree, and terminates and reaps that tree on timeout, cancellation, frame failure, or host shutdown. TokenZero does not spawn processes.
+`z.run(command, options?)` delegates to the hub-owned `zero-process`
+implementation. It captures bounded stdout and stderr, owns the exact child
+tree, and terminates and reaps that tree on timeout, cancellation, frame
+failure, or host shutdown. TokenZero does not spawn processes.
 
 ## TypeScript
 
@@ -76,9 +82,13 @@ TypeScript syntax is erased before evaluation while preserving byte and line lay
 
 ## Node and ZMP
 
-`@zerostack/zero-kernel` exposes the reusable host through an asynchronous N-API class. The package selects an exact platform prebuild or the explicit `ZERO_KERNEL_NATIVE_ADDON` development path. It never invokes Cargo, Git, a shell, a daemon, or a downloader at runtime.
+`@oh-my-pi/zero-kernel` exposes the reusable host through an asynchronous N-API
+class. Harness builds compile and atomically install the target-native addon.
+Runtime loading pins the addon by digest and does not invoke Cargo, Git, a
+daemon, or a downloader.
 
-ZMP's built-in `zero` tool calls this native package in-process. ZMP keeps `codemode` as a separate fallback tool; ZeroKernel does not automatically rerun failed source in CodeMode.
+ZMP's built-in `zero` tool calls this native package in-process. The separate
+`codemode` tool is not a fallback execution path for ZeroKernel failures.
 
 ## Compatibility boundary
 

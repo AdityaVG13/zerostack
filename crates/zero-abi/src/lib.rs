@@ -1,17 +1,11 @@
 #![forbid(unsafe_code)]
 
-//! Engine-agnostic operation ABI contract machinery shared by ZeroStack engines.
+//! Engine-agnostic contracts shared by ZeroKernel and its domain engines.
 //!
-//! Each engine (TokenZero, FSZero, GraphZero) keeps its own operation
-//! registry, enums, and catalogs. This crate owns the parts that must never
-//! drift between engines:
-//!
-//! - canonical JSON encoding with deterministic key order
-//! - JSON Schema normalization and structural comparison
-//! - schema fingerprints and the contract digest hash
-//!
-//! Engines wrap these primitives with their own registry types and parity
-//! assertions, so adopting this crate changes no digests and no behavior.
+//! FSZero, GraphZero, and TokenZero implement typed traits. They do not expose
+//! model-facing operation registries or catalogs. This crate owns the shared
+//! wire invariants: canonical encoding, schema normalization, contract
+//! digests, bounded requests, typed receipts, and direct ZeroKernel results.
 
 pub mod assembly;
 pub mod cache_entry;
@@ -231,11 +225,11 @@ pub use zero_kernel::{
     ExpandOptions, FileEffectKind, FileEffectReceipt, FileEffectRequest, FileEngine, FileLease,
     FileMetadata, FileReadRequest, FileSnapshot, GUEST_METHODS, HANDLE_DIGEST_BYTES, KernelBudget,
     KernelContext, KernelLedger, LookupOptions, OPERATION_TRACE_LIMIT, PARALLEL_TASK_LIMIT,
-    PIPELINE_STAGE_LIMIT, ProjectionRequest, ProjectionResult, ReadOptions, SOURCE_BYTE_LIMIT,
-    STATE_KEY_BYTE_LIMIT, STATE_KEY_LIMIT, STATE_TOTAL_BYTE_LIMIT, STATE_VALUE_BYTE_LIMIT,
-    ShellOptions, ShellResult, StateEvidence, StructuralAbsence, StructuralBudget,
-    StructuralCoverage, StructuralEngine, StructuralHit, StructuralQuery, StructuralResult,
-    TokenAccounting, TokenEngine, ZERO_HANDLE_PREFIX, ZERO_KERNEL_PROTOCOL, ZeroHandle,
-    ZeroKernelError, ZeroKernelEvent, ZeroKernelOutcome, ZeroKernelRequest, ZeroKernelResponse,
-    ZeroOperationStatus, ZeroOperationTrace,
+    ProjectionRequest, ProjectionResult, ReadOptions, SOURCE_BYTE_LIMIT, STATE_KEY_BYTE_LIMIT,
+    STATE_KEY_LIMIT, STATE_TOTAL_BYTE_LIMIT, STATE_VALUE_BYTE_LIMIT, ShellOptions, ShellResult,
+    StateEvidence, StructuralAbsence, StructuralBudget, StructuralCoverage, StructuralEngine,
+    StructuralHit, StructuralQuery, StructuralResult, TokenAccounting, TokenEngine,
+    ZERO_HANDLE_PREFIX, ZERO_KERNEL_PROTOCOL, ZeroHandle, ZeroKernelError, ZeroKernelEvent,
+    ZeroKernelOutcome, ZeroKernelRequest, ZeroKernelResponse, ZeroOperationStatus,
+    ZeroOperationTrace,
 };

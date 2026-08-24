@@ -27,30 +27,23 @@ ZeroKernel does not create a listener, socket, daemon, idle worker, kernel child
 
 ## Direct guest surface
 
-A cell receives one `z` global. Calls map directly to typed host methods; the model does not select an engine, transport, operation registry, or compatibility profile.
+A cell receives one `z` global with exactly six operations. Calls map directly
+to typed host methods; the model does not select an engine, transport,
+operation registry, or compatibility profile.
 
 ```typescript
 interface ZeroKernelSurface {
-  read(path: string, options?: ReadOptions): Promise<string>;
-  snap(target: string | SnapRequest): Promise<SnapResult>;
-  lookup(path?: string, options?: LookupOptions): Promise<string[]>;
-  write(path: string, content: string, options?: WriteOptions): Promise<FileEffectReceipt>;
-  edit(target: string | SnapResult, patch: string | ExactPatch, options?: WriteOptions): Promise<FileEffectReceipt>;
-  effect(request: EffectRequest): Promise<EffectResult>;
-  remove(path: string, options?: WriteOptions): Promise<FileEffectReceipt>;
-  transact<T>(operation: () => Promise<T>): Promise<T>;
-
-  asgrep(query: string, options?: AsgrepOptions): Promise<AsgrepResult>;
-
-  measure(value: unknown): Promise<TokenAccounting>;
-  project(value: unknown, options?: ProjectOptions): Promise<ProjectionResult>;
-  compress(value: unknown, options?: CompressionOptions): Promise<CompressionResult>;
-  expand(handle: string | SnapResult, options?: ExpandOptions): Promise<ExpandResult>;
-
-  parallel<T>(operations: Array<() => Promise<T>>): Promise<T[]>;
-  pipeline<T>(items: T[], ...stages: Array<(item: unknown) => Promise<unknown>>): Promise<unknown[]>;
-  shell(command: string | string[], options?: ShellOptions): Promise<ShellResult>;
-
+  read(
+    target: string | ReadSnapshotRequest | ReadSnapshot,
+    options?: ReadOptions | LookupOptions | ExpandOptions,
+  ): Promise<string | string[] | ReadSnapshot | ExpandResult>;
+  find(query: string | FindRequest, options?: FindOptions): Promise<FindResult>;
+  edit(
+    target: string | ReadSnapshot,
+    patch: ExactPatch | CreatePatch | RemovePatch | ReplaceFilePatch,
+  ): Promise<FileEffectReceipt>;
+  apply(request: ApplyOperation[] | EffectRequest): Promise<EffectResult>;
+  run(command: string | string[], options?: RunOptions): Promise<RunResult>;
   state: {
     get<T>(key: string): T | undefined;
     set<T>(key: string, value: T): void;
@@ -61,35 +54,60 @@ interface ZeroKernelSurface {
 }
 ```
 
-`z.help()` reports this direct surface. It is introspection over the installed methods, not an engine command catalog.
+Normal JavaScript supplies orchestration. Use `Promise.all` for independent
+calls and loops or array methods for staged pipelines. Every mutation in a
+cell already shares one transaction, so there is no guest transaction method.
+TokenZero measurement, projection, compression, and exact recovery run
+automatically at operation and response boundaries.
 
 ## File turn law
 
-A normal UTF-8 file within the inline byte limit returns complete content from `z.read`.
+A normal UTF-8 file within the inline byte limit returns complete content from
+`z.read`. A directory path returns a bounded deterministic listing.
 
-A larger file returns a bounded structural outline plus an opaque `z://blob/<digest>` handle. `z.snap` retains the exact file, returns a bounded decision view and recovery manifest, and can bind an exact selection. `z.expand` accepts a handle or snap plus byte, line, or symbol selectors and returns the exact range with byte offsets, total length, completion, and continuation metadata. Callers never route a handle by producer.
+A larger file returns a bounded structural outline plus an opaque
+`z://blob/<digest>` handle. Passing that handle back to `z.read` recovers exact
+text. Selector options return exact byte or line ranges with offsets,
+completion, and continuation metadata. A structured `z.read` request can bind
+a search, selection, or decision view and returns a snapshot object whose
+exact handle is accepted by later `z.read` and `z.edit` calls.
 
 ## Structural queries
 
-`z.asgrep` is the single structural entry point. `AsgrepOptions.mode` selects natural, pattern, symbols, definition, references, callers, callees, call path, or semantic behavior.
+`z.find` is the single structural entry point. Its mode selects natural,
+pattern, word, literal, regex, imports, definitions, symbols, references,
+callers, callees, call path, or semantic behavior.
 
-Natural, pattern, and semantic modes use embedded ast-sgrep and Tree-sitter. Relationship modes use GraphZero's typed query router. Index construction and freshness repair happen inside GraphZero without a daemon or model-facing index command.
+Natural, pattern, and semantic modes use embedded ast-sgrep and Tree-sitter.
+Relationship modes use GraphZero's typed query router. Index construction and
+freshness repair happen inside GraphZero without a daemon or model-facing
+index command.
 
 ### External paths
 
-Absolute paths are byte-authority only (`z.read`, `z.write`, `z.edit`, `z.effect`, `z.lookup`, `z.snap` byte ops). They are never indexed and never structural: GraphZero never indexes outside the kernel root and `z.asgrep` remains root-confined (absolute query paths error; structural search is root-only). Relative paths stay root-confined (`..` escape is rejected). This preserves determinism while allowing out-of-root byte operations without indexing foreign roots.
+Absolute paths are byte-authority only through `z.read` and `z.edit`. They are
+never indexed or structurally queried. `z.find` remains root-confined.
+Relative `..` escape is rejected.
 
 ## Atomic effects
 
-Every file mutation lazily opens one host-owned transaction for the cell. FSZero supplies an exact lease, typed effect receipt, preimage handle, and restoration operation.
+Every file mutation lazily opens one host-owned transaction for the cell.
+FSZero supplies an exact lease, typed effect receipt, preimage handle, and
+restoration operation.
 
-A completed cell commits the transaction only at its terminal boundary. A failed or cancelled cell restores applied effects in reverse receipt order. Projection or state-publication failure also rolls back file effects and leaves the prior durable state root authoritative.
+A completed cell commits only at its terminal boundary. A failed or cancelled
+cell restores applied effects in reverse receipt order. Projection or state
+publication failure also rolls back file effects and leaves the prior durable
+state root authoritative.
 
-`z.transact` scopes a mutation callback, but successful effects remain staged until the containing cell completes. `z.effect` owns one transaction, resolves every target before mutation, constructs deterministic postimages, applies exact preimage or absence guards, optionally runs one bounded argv verification command, and rolls back internally on any failure. Snap-aware `z.edit` inherits its preimage from `SnapResult`.
+`z.edit` handles one file. `z.apply` handles atomic multi-file changes, exact
+preimage or absence guards, optional bounded verification, and internal
+rollback. A snapshot returned by structured `z.read` carries the preimage used
+by a later `z.edit`.
 
 ## Cancellation and quiescence
 
-One cancellation token reaches the interpreter, engine calls, parallel siblings, pipeline stages, and shell process tree.
+One cancellation token reaches the interpreter, engine calls, concurrent promises, and the owned process tree.
 
 On failure or cancellation, ZeroKernel:
 
@@ -102,17 +120,32 @@ On failure or cancellation, ZeroKernel:
 
 A response cannot report completion while that frame still owns tasks or child processes.
 
-## Shell ownership
+## Process ownership
 
-`z.shell` is implemented by ZeroStack's process layer, not TokenZero. It accepts script or argv form, validates the working directory, captures bounded stdout and stderr, asks TokenZero to project the combined output, and preserves an exact handle when projection omits bytes.
+`z.run` is implemented by ZeroStack's process layer, not TokenZero. It accepts
+script or argv form, validates the working directory, captures bounded stdout
+and stderr, asks TokenZero to project combined output, and preserves an exact
+handle when projection omits bytes.
 
-Timeout, abort, frame failure, host shutdown, and object destruction all signal and reap the exact owned process tree.
+Timeout, abort, frame failure, host shutdown, and object destruction all
+signal and reap the exact owned process tree.
 
 ## Durable state
 
-`z.state` exposes a bounded serializable map. The host hydrates it from the session's committed CAS root before evaluation. A completed dirty cell commits one successor root with compare-and-set semantics. Failed and cancelled cells leave the prior root unchanged.
+`z.state` is a bounded session-scoped JSON map for small facts that must
+survive fresh interpreter frames. Good uses include a selected path, a cursor,
+a workflow checkpoint, or a user decision needed by the next cell. It is not
+repository data, a cache for large results, a secret store, or a replacement
+for files and opaque handles.
 
-Interpreter heap objects, imports, variables, and promises never persist across cells.
+The current limits are 64 keys, 128 bytes per key, 4 KiB per value, and 16 KiB
+total. The host hydrates state from the session's committed CAS root before
+evaluation. A completed dirty cell commits one successor root with
+compare-and-set semantics. Failed and cancelled cells leave the prior root
+unchanged.
+
+Interpreter heap objects, imports, variables, and promises never persist
+across cells.
 
 ## Canonical response and event log
 
