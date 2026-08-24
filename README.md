@@ -1,163 +1,286 @@
 # ZeroStack
 
-ZeroStack is the composition hub for three independent engines:
+A daemonless, in-process agent kernel that composes filesystem, structure, and output authority behind six operations.
 
-| Engine | Authority |
-| --- | --- |
-| [FSZero](https://github.com/AdityaVG13/fszero) | Live bytes, snapshots, bounded filesystem effects (`fz://`) |
-| [GraphZero](https://github.com/AdityaVG13/graphzero) | Code structure, callers, impact, freshness (`gz://`) |
-| [TokenZero](https://github.com/AdityaVG13/tokenzero) | Output measurement, projection, compaction, exact expansion (`tz://`) |
+**Status:** active development · Rust 2024 · six operations · MIT
 
-The engines never import one another. ZeroStack owns their shared ABI, typed references, CAS, process control, transactional coordination, and the in-process runtime that composes them.
+---
 
-## ZeroKernel
+## TL;DR
 
-`ZeroKernel` is the only canonical execution product. It is a reusable in-process host with a fresh bounded JavaScript/TypeScript frame for every cell.
+### The problem
 
-```mermaid
-graph LR
-  ZMP[ZMP zero tool] --> NAPI[ZeroKernel Node package]
-  NAPI --> K[Reusable ZeroKernel host]
-  K --> F[Fresh cell frame]
-  F --> FS[FSZero]
-  F --> G[GraphZero]
-  F --> T[TokenZero]
-  F --> P[zero-process shell]
-  F --> S[CAS state]
+Agent harnesses often expose separate filesystem, search, shell, state, and compression catalogs. The model has to choose transports and operation families before it can do the work. Failed cells can also leave partial effects or live processes behind.
+
+### The answer
+
+ZeroKernel gives each cell one fresh JavaScript or TypeScript frame and one `z` global with exactly six operations: `read`, `find`, `edit`, `apply`, `run`, and `state`. ZeroStack composes three typed engines behind that surface and owns the transaction, cancellation, process, and response boundary.
+
+> **Status:** ZeroStack is the source-only composition hub for the Zero family. It will not publish standalone releases. The six-operation surface is canonical under active dogfooding, while package and engine contracts may still change.
+
+## What exists now
+
+- A reusable Rust `ZeroKernel` host with a fresh bounded frame per cell.
+- An asynchronous Node/N-API package for embedding the same host without a daemon or runtime compiler.
+- Direct adapters for FSZero byte authority, GraphZero structural queries, and TokenZero output control.
+- Cell-scoped filesystem transactions with rollback on failure, cancellation, state publication failure, or output publication failure.
+- Owned process-tree cancellation and a terminal ledger that cannot report completion while resources remain live.
+- Session-scoped CAS state for small JSON facts across otherwise fresh frames.
+
+The engines never import one another. ZeroStack owns composition and the only model-facing execution surface.
+
+## A complete turn in 30 seconds
+
+Normal JavaScript provides orchestration. Independent calls use `Promise.all`; dependent work stays in the same bounded cell.
+
 ```
-
-A cell sees direct typed methods on `z`; it does not route through command catalogs:
-
-```js
-const [source, callers] = await z.parallel([
-  () => z.read("src/lib.rs"),
-  () => z.asgrep("execute", { mode: "callers", path: "src" }),
+const [source, callers] = await Promise.all([
+  z.read("src/lib.rs"),
+  z.find("execute_cell", { mode: "callers", path: "src" }),
 ]);
+
+if (callers.items.length === 0) {
+  return { source, decision: "No callers found" };
+}
+
 return { source, callers };
 ```
 
-Core methods:
+A normal UTF-8 file returns complete content. Large values return a bounded view plus an exact handle that `z.read` can recover later.
 
-- filesystem: `z.read`, `z.snap`, `z.lookup`, `z.write`, snap-aware `z.edit`, `z.effect`, `z.remove`, `z.transact`
-- structure: `z.asgrep` with typed structural modes
-- output: `z.measure`, `z.project`, `z.compress`, structured `z.expand`
-- orchestration: `z.parallel`, `z.pipeline`, `z.shell`
-- durable state: `z.state.get`, `z.state.set`, `z.state.delete`, `z.state.list`
+## What this repository owns
 
-Every completed call returns one canonical response containing the outcome, visible value, event digest, CAS state evidence, and zero-live-resource ledger. File mutations are staged under one host-owned transaction per cell. Failed or cancelled frames reverse effects in receipt order and cannot publish staged filesystem effects or state.
+| Boundary | ZeroStack responsibility |
+| --- | --- |
+| Execution | Reusable host, fresh frame lifecycle, budgets, cancellation, and terminal outcomes. |
+| Composition | Typed contracts joining the three engines without engine-to-engine imports. |
+| Effects | One host-owned transaction per cell, staged publication, reverse-order restoration. |
+| Processes | Validated working directories, bounded output, exact child-tree ownership and reaping. |
+| State | Small session facts committed through CAS compare-and-set. |
+| Response | One canonical outcome, value or error, exact handles, event, state evidence, and resource ledger. |
 
-## Rust host
+**Not owned here:** filesystem semantics belong to FSZero, structural truth belongs to GraphZero, and output economics belong to TokenZero.
 
-```rust
-use zero_abi::KernelBudget;
-use zero_kernel::ZeroKernel;
+## Four repositories, four authorities
 
-let budget = KernelBudget {
-    wall_ms: 30_000,
-    cpu_ms: 30_000,
-    memory_bytes: 256 * 1024 * 1024,
-    call_limit: 64,
-    task_limit: 16,
-    output_byte_limit: 64 * 1024,
-};
-let kernel = ZeroKernel::canonical(root, store_root, session_id, budget)?;
-let response = kernel.execute_cell("return await z.read('README.md');")?;
+| Repository | Authority | Visible through ZeroKernel |
+| --- | --- | --- |
+| **ZeroStack** | Composition, lifecycle, transactions, processes, durable state. | One bounded frame and one canonical response. |
+| [FSZero](https://github.com/AdityaVG13/FSZero) | Bytes, snapshots, guarded file effects, exact restoration. | `z.read`, `z.edit`, `z.apply`. |
+| [GraphZero](https://github.com/AdityaVG13/GraphZero) | Structure, relationships, freshness, blast radius. | `z.find`. |
+| [TokenZero](https://github.com/AdityaVG13/TokenZero) | Measurement, projection, compression, exact expansion. | Automatic operation and response boundaries. |
+
+## Architecture
+
+```mermaid
+graph LR
+  H[Agent harness] --> K[Reusable ZeroKernel host]
+  K --> F[Fresh bounded frame]
+  F --> FS[FSZero]
+  F --> G[GraphZero]
+  F --> T[TokenZero]
+  F --> P[Owned processes]
+  F --> S[CAS state]
 ```
 
-The host is reusable. `execute_cell` creates and destroys a fresh interpreter frame. `shutdown` cancels outstanding work and prevents new frames.
+The host retains initialized engine adapters and durable roots. A frame retains only one cell's interpreter values, promises, cancellation token, transactions, child processes, and staged state. Every terminal path destroys that frame.
 
-## Node package
+ZeroKernel creates no listener, socket, daemon, idle worker, kernel child, or machine-wide service.
 
-Build the platform addon once, then load the package without a daemon, listener, worker pool, or runtime compilation:
+## Build and embed
 
-```bash
+ZeroStack currently builds from source with the four repositories checked out beside one another. The parent directory name and location are entirely up to you.
+
+```
+mkdir zerostack-workspace
+cd zerostack-workspace
+git clone https://github.com/AdityaVG13/ZeroStack.git
+git clone https://github.com/AdityaVG13/FSZero.git
+git clone https://github.com/AdityaVG13/GraphZero.git
+git clone https://github.com/AdityaVG13/TokenZero.git
+cd ZeroStack
+```
+
+### Rust host
+
+```
+cargo build -p zero-kernel
+cargo test -p zero-kernel --test direct_host
+```
+
+### Node package
+
+```
 cargo build --profile release-node -p zero-kernel-node
 ./scripts/build-node-prebuild.sh --stage-only
 ```
 
-```js
+```
 const { ZeroKernel } = require("@zerostack/zero-kernel");
-
-const kernel = new ZeroKernel({
-  root: process.cwd(),
-  sessionId: "example",
-});
+const kernel = new ZeroKernel({ root: process.cwd(), sessionId: "example" });
 await kernel.initialize();
-const response = await kernel.executeCell("return await z.read('README.md');");
+const response = await kernel.executeCell(
+  "return await z.read('README.md');"
+);
 await kernel.shutdown();
 ```
 
-The package accepts `ZERO_KERNEL_NATIVE_ADDON=/absolute/path/to/zero_kernel_product.node` for development. Production packages use platform prebuilds and never compile or download at runtime.
+Production packages select an exact platform prebuild. They do not compile, download, or start a service at runtime.
 
-## Operator CLI
+## The six operations
 
-The CLI is for diagnostics, direct stdin execution, and explicit store migration:
-
-```bash
-cargo build -p zero-kernel
-./target/debug/zero-kernel doctor -C "$PWD"
-printf '%s\n' 'return await z.read("README.md");' \
-  | ./target/debug/zero-kernel exec -C "$PWD"
-```
-
-Legacy store import is offline and manifest-verified:
-
-```bash
-zero-kernel migrate \
-  --source OLD_STORE \
-  --destination NEW_STORE \
-  --manifest migration.json \
-  --key-hex 64_LOWERCASE_HEX_CHARACTERS
-```
-
-## ZMP integration
-
-ZMP's built-in `zero` tool loads `@zerostack/zero-kernel` in-process and reuses a host per workspace/session/budget. Each tool call still receives a fresh frame. ZMP's `codemode` tool remains an independent fallback; ZeroKernel failures never execute the same source unsandboxed.
-
-## Repository layout
-
-| Path | Purpose |
+| Operation | Contract |
 | --- | --- |
-| `crates/zero-kernel` | Canonical Rust host, frame lifecycle, transactions, state, shell |
-| `crates/zero-kernel-node` | Asynchronous N-API binding |
-| `crates/zero-codemode` | Bounded JS/TS interpreter used inside each frame |
-| `crates/zero-abi` | Shared typed engine contracts and canonical response types |
-| `crates/zero-store` | CAS and migration primitives |
-| `crates/zero-process` | Verified child-process ownership and teardown |
-| `bindings/node` | Published Node package loader, types, and prebuilds |
+| `z.read` | Read files, directories, snapshots, exact handles, and bounded selections. |
+| `z.find` | Search text or structure; query definitions, references, callers, imports, paths, and semantics. |
+| `z.edit` | Create, replace, remove, or patch one file with exact preimage guards. |
+| `z.apply` | Apply atomic multi-file operations or a typed effect request. |
+| `z.run` | Run one bounded process with owned cancellation and recoverable output. |
+| `z.state` | Get, set, list, test, or delete small session-scoped JSON facts. |
 
-## Build topology
+There is no guest transaction method. Every mutation in a cell already shares the same host-owned transaction.
 
-The canonical host links the three engine checkouts as sibling repositories:
+## One terminal response
 
-```text
-AI/
-├── ZeroStack/
-├── FSZero/
-├── GraphZero/
-└── TokenZero/
+```
+interface ZeroKernelResponse {
+  protocol: "ZeroKernel";
+  outcome: "Completed" | "Cancelled" | "Failed";
+  value?: unknown;
+  error?: { kind: string; detail: string; retryable: boolean };
+  handles: string[];
+  event: string;
+  state: { before?: string; after?: string; unchanged: boolean };
+  ledger: ResourceLedger;
+}
 ```
 
-### Build and test
+A response cannot report completion while its frame still owns tasks or child processes. Completed output is the exact TokenZero projection recorded by the terminal event.
 
-```bash
-cargo build --workspace
-cargo test -p zero-kernel --test direct_host
-cargo test -p zero-codemode --test syntax
-```
+## Benchmarks
 
-Integration tests live under `tests/unit/<crate>/`. Run one crate's suite with `cargo test -p <crate>`; the four-engine topology requires sibling checkouts for the full matrix.
+This reference run measures the current daemonless Node host with one initialization and a fresh bounded frame for every cell. It uses the packaged darwin-arm64 prebuild, Node.js v26.7.0, and 20 sequential measured runs after one warm-up.
 
-## Status
+| Measurement | p50 | p95 |
+| --- | --- | --- |
+| Host initialization | 21.867 ms | Single observation |
+| Fresh no-op frame | 12.934 ms | 13.864 ms |
+| Read 2,865-byte Cargo.toml | 20.728 ms | 21.229 ms |
 
-ZeroStack is in active development alongside FSZero, GraphZero, and TokenZero. The kernel surface is stable under dogfooding; APIs may evolve before 1.0.
+Reference hardware: Apple M5 Max, 48 GB RAM. Source: `benchmarks/zero-kernel-reference.json`. Reproduce the same host lifecycle and fixtures with `node benchmarks/zero-kernel-reference.cjs`. The artifact retains every sample and reports the runtime, hardware class, method, and dropped-sample count.
+
+### Verification lanes
+
+| Area | Focused command |
+| --- | --- |
+| Host contract | `cargo test -p zero-kernel --test direct_host` |
+| Frame syntax | `cargo test -p zero-codemode --test syntax` |
+| Repository gate | `dsr quality --tool zerostack` |
+
+These measurements describe one host and fixture. They do not claim cross-machine latency, throughput under concurrency, or memory use.
+
+## Troubleshooting
+
+Start with the terminal response rather than the visible symptom. Its outcome, structured error, event handle, state transition, and resource ledger describe which boundary failed and whether effects were committed, restored, or never admitted.
+
+<details>
+<summary><strong>A large read returned an outline instead of full text</strong></summary>
+
+This is the normal large-value path, not truncation. ZeroKernel keeps the exact bytes in content-addressed storage and returns a bounded structural view plus an opaque handle. The view is intended for orientation: it identifies useful regions without pretending to be the file.
+
+Pass the handle back to `z.read` for exact recovery, or request the required line or byte range. If the next step is an edit, use a structured read that returns a snapshot so the later `z.edit` carries the correct preimage. Never copy an outline into a write request; omitted regions would be lost.
+
+</details>
+
+<details>
+<summary><strong>A structural query cannot access an absolute path</strong></summary>
+
+`z.find` is confined to the configured workspace root because GraphZero's index, freshness guarantees, and coverage claims are meaningful only inside that boundary. An arbitrary absolute path has byte identity, but it does not automatically belong to the repository graph.
+
+If the target is part of the project, configure the kernel root to include it. If it is an external file, use `z.read` for explicit byte access and do not infer definitions, callers, or certified absence from that read alone. Relative `..` escape remains rejected.
+
+</details>
+
+<details>
+<summary><strong>A cell failed after writing files</strong></summary>
+
+A write receipt means the effect was staged under the cell transaction; it does not mean the final state was published. Evaluation failure, cancellation, verification failure, state publication failure, or output publication failure can still trigger restoration.
+
+Inspect the response outcome and terminal event. A failed or cancelled cell should show restoration in reverse receipt order and an unchanged durable state root. Do not manually undo files until you have checked that evidence, because a second reversal can reapply unwanted content. A completion ledger with live tasks or processes is a kernel defect.
+
+</details>
+
+<details>
+<summary><strong>The Node package cannot find its addon</strong></summary>
+
+The loader selects an exact prebuild for the current operating system and architecture. Failures usually mean the prebuild was not staged, the package was copied without `prebuilds/`, or the binary targets a different Node ABI or CPU.
+
+For a source checkout, build `zero-kernel-node` with the documented profile and run `scripts/build-node-prebuild.sh --stage-only`. For development only, `ZERO_KERNEL_NATIVE_ADDON` may point to an explicit addon file. Production packages should ship the prebuild and should not compile or download one at runtime.
+
+</details>
+
+## FAQ
+
+These answers focus on boundaries that affect harness design. ZeroKernel keeps model choices small while making byte identity, structural evidence, output projection, effects, and cleanup explicit inside the host.
+
+<details>
+<summary><strong>Why exactly six operations?</strong></summary>
+
+The six operations describe the durable decisions an agent must make: retrieve data, locate relevant structure, change one file, apply a coordinated set, run a bounded process, and retain a small fact for the next frame. They avoid exposing transport names, engine catalogs, transaction opcodes, or projection internals.
+
+Normal JavaScript handles composition. `Promise.all` expresses independent work, loops express bounded pipelines, and values connect dependent steps. Adding model-facing methods for every engine feature would create multiple ways to express the same action.
+
+</details>
+
+<details>
+<summary><strong>Does a JavaScript variable survive the next cell?</strong></summary>
+
+No. Variables, imports, closures, promises, and heap objects disappear at the terminal boundary. This prevents accidental cross-turn authority, stale handles hidden inside closures, and resource ownership that the host cannot attribute to one cell.
+
+Use `z.state` for small facts such as a selected path, cursor, or user decision. Repository data belongs in files, and large or exact results belong behind handles. If a value must survive a host restart or be reviewed by humans, a file is usually the better authority.
+
+</details>
+
+<details>
+<summary><strong>Can the engines import one another?</strong></summary>
+
+No. FSZero, GraphZero, and TokenZero each own a different truth boundary and expose typed Rust contracts to the hub. The one-way dependency graph prevents filesystem behavior from depending silently on graph freshness or output projection from changing mutation semantics.
+
+ZeroStack performs composition and remains responsible for ordering, cancellation, transactions, and the terminal response. Cross-engine behavior therefore has one place to audit instead of hidden cycles across three repositories.
+
+</details>
+
+<details>
+<summary><strong>What happens when a cell is cancelled?</strong></summary>
+
+The cancellation token reaches the interpreter, engine calls, concurrent promises, and owned process tree. ZeroKernel requests sibling cancellation, terminates exact children, waits for bounded settlement, restores staged effects and state, records one terminal event, and destroys the frame.
+
+Cancellation is a distinct outcome, not a generic failure string. A retry receives a fresh frame and the last committed state root; it does not resume partially evaluated JavaScript.
+
+</details>
+
+<details>
+<summary><strong>Why not expose each engine's complete catalog?</strong></summary>
+
+Separate catalogs force the model to decide whether a task is filesystem, graph, or token work before it has enough evidence. They also expose overlapping read, search, expand, and batch concepts.
+
+ZeroKernel keeps those decisions inside typed host routing. The model asks to read or find; the host selects byte retrieval, structural evidence, freshness repair, projection, and recovery. Operator CLIs may expose engine diagnostics without creating a second canonical model surface.
+
+</details>
+
+<details>
+<summary><strong>Is the CLI the product surface?</strong></summary>
+
+No. The reusable in-process host is the product surface. It retains initialized adapters and durable roots while creating a fresh bounded frame for each cell.
+
+The CLI exists for health checks, one-cell stdin diagnostics, and offline migration. Its latency includes process startup and should not be presented as reusable-host latency. Production integrations should load the Rust or Node host directly.
+
+</details>
 
 ## Contributing and security
 
-- Contributing guide: [CONTRIBUTING.md](CONTRIBUTING.md)
-- Security policy: [SECURITY.md](SECURITY.md)
-- Changelog: [CHANGELOG.md](CHANGELOG.md)
+Read `CONTRIBUTING.md` before changing engine contracts or the six-operation surface. Report vulnerabilities through `SECURITY.md`. Integration tests live under `tests/unit/<crate>/`; use the narrowest relevant test target.
 
 ## License
 
-MIT
+MIT.
