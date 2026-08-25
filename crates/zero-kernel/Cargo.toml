@@ -18,9 +18,16 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = "2"
 zero-abi = { path = "../zero-abi" }
-zero-mcp = { path = "../zero-mcp", features = ["fastmcp"] }
+zero-mcp = { path = "../zero-mcp", optional = true, features = ["fastmcp"] }
 zero-process = { path = "../zero-process" }
 zero-store = { path = "../zero-store" }
+
+[features]
+# The FastMCP stdio carrier (the `zero-kernel mcp` command) is transport, not
+# the canonical surface; embedders that call the direct `z` API in-process can
+# drop it and its nightly-gated asupersync dependency chain.
+default = ["mcp-carrier"]
+mcp-carrier = ["dep:zero-mcp"]
 
 [dev-dependencies]
 tempfile = "3"

@@ -6,6 +6,7 @@ use std::time::Duration;
 use serde_json::json;
 use zero_abi::KernelBudget;
 use zero_kernel::{ZeroKernel, direct_contract_digest};
+#[cfg(feature = "mcp-carrier")]
 use zero_mcp::{
     FastMcpZeroCarrier, McpDispatchError, McpTransportConfig, ZeroCarrierCapabilities,
     ZeroCarrierExecutor, ZeroCarrierSampling,
@@ -36,7 +37,10 @@ fn run() -> Result<(), String> {
             doctor(parse_path_flag(&remaining, "-C").unwrap_or_else(|| PathBuf::from(".")))
         }
         "exec" => execute(parse_path_flag(&remaining, "-C").unwrap_or_else(|| PathBuf::from("."))),
+        #[cfg(feature = "mcp-carrier")]
         "mcp" => mcp(parse_path_flag(&remaining, "-C").unwrap_or_else(|| PathBuf::from("."))),
+        #[cfg(not(feature = "mcp-carrier"))]
+        "mcp" => Err("mcp command requires the `mcp-carrier` feature".into()),
         "migrate" => migrate(&remaining),
         _ => Err(format!(
             "unknown command {command:?}; use doctor, health, exec, mcp, or migrate"
@@ -135,6 +139,7 @@ fn execute(root: PathBuf) -> Result<(), String> {
     Ok(())
 }
 
+#[cfg(feature = "mcp-carrier")]
 fn mcp(root: PathBuf) -> Result<(), String> {
     let root = std::fs::canonicalize(root).map_err(|error| error.to_string())?;
     let kernel = ZeroKernel::canonical(
@@ -168,10 +173,12 @@ fn mcp(root: PathBuf) -> Result<(), String> {
     carrier.run_stdio()
 }
 
+#[cfg(feature = "mcp-carrier")]
 struct KernelStdioExecutor {
     kernel: ZeroKernel,
 }
 
+#[cfg(feature = "mcp-carrier")]
 impl ZeroCarrierExecutor for KernelStdioExecutor {
     fn execute(
         &self,
