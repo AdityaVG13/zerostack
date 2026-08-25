@@ -145,11 +145,32 @@ fn dispatch_concurrent(
                     .get(1)
                     .cloned()
                     .map(normalize_keys)
-                    .map(serde_json::from_value::<LookupOptions>)
+                    .map(serde_json::from_value::<ReadOptions>)
                     .transpose()
                     .map_err(json_error)?
                     .unwrap_or_default();
-                let paths = context.lookup(path_buf, options).map_err(host_error)?;
+                let paths = context
+                    .lookup(
+                        path_buf,
+                        LookupOptions {
+                            filter: None,
+                            limit: None,
+                            recursive: options.recursive,
+                        },
+                    )
+                    .map_err(host_error)?;
+                if options.offset.is_some() || options.limit.is_some() {
+                    let start = usize::try_from(options.offset.unwrap_or(0)).unwrap_or(usize::MAX);
+                    let limit = usize::try_from(options.limit.unwrap_or(100)).unwrap_or(usize::MAX);
+                    let start = start.min(paths.len());
+                    let end = start.saturating_add(limit).min(paths.len());
+                    let next = (end < paths.len()).then_some(end as u32);
+                    return Ok(serde_json::json!({
+                        "entries": &paths[start..end],
+                        "next": next,
+                        "complete": next.is_none(),
+                    }));
+                }
                 Ok(Value::Array(
                     paths
                         .into_iter()
