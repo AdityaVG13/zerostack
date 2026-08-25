@@ -18,23 +18,15 @@ export type FindMode =
 export interface ReadOptions {
   range?: string;
   maxBytes?: number;
+  recursive?: boolean;
+  limit?: number;
+  offset?: number;
 }
 
-export interface WriteOptions {
+export interface EditOptions {
   expectedPreimage?: string;
-}
-
-export interface EditOptions extends WriteOptions {
   startLine?: number;
   endLine?: number;
-}
-
-export interface RemoveOptions extends WriteOptions {}
-
-export interface AstPatch {
-  language: string;
-  pattern: string;
-  replacement: string;
 }
 
 export type EditPatch =
@@ -71,6 +63,7 @@ export interface FindOptions {
 export interface LookupOptions {
   filter?: string;
   limit?: number;
+  recursive?: boolean;
 }
 
 export interface ShellOptions {
@@ -117,18 +110,6 @@ export interface ExpandResult {
   complete: boolean;
   next?: number;
   accounting: TokenAccounting;
-}
-
-export interface ProjectOptions {
-  visibleBytes?: number;
-  mediaType?: string;
-}
-
-export interface CompressionOptions {
-  maxTokens?: number;
-  mode?: "auto" | "passthrough" | "diagnostic" | "structured" | "dedupe" | "diff-aware" | "exact" | "lossy";
-  label?: string;
-  mediaType?: string;
 }
 
 export interface FileEffectReceipt {
@@ -185,24 +166,10 @@ export interface FindResult {
 
 export interface TokenAccounting {
   tokenizer: string;
-  billed: number;
-  visible: number;
-  cached: number;
+  sourceTokens: number;
+  visibleTokens: number;
+  recoveredTokens: number;
   certified: boolean;
-}
-
-export interface ProjectionResult {
-  visible: string;
-  exact?: string;
-  accounting: TokenAccounting;
-}
-
-export interface CompressionResult {
-  visible: string;
-  exact: string;
-  truncated: boolean;
-  omittedTokens: number;
-  accounting: TokenAccounting;
 }
 
 export interface ShellResult {
@@ -214,11 +181,11 @@ export interface ShellResult {
 }
 
 export interface ZeroKernelState {
-  get<T>(key: string): Promise<T | null>;
-  set<T>(key: string, value: T): Promise<void>;
-  has(key: string): Promise<boolean>;
-  delete(key: string): Promise<boolean>;
-  list(): Promise<string[]>;
+  get<T>(key: string): T | undefined;
+  set<T>(key: string, value: T): void;
+  has(key: string): boolean;
+  delete(key: string): boolean;
+  list(): string[];
 }
 
 
@@ -238,6 +205,7 @@ export interface ZeroKernelOptions {
   root: string;
   sessionId?: string;
   stateRoot?: string;
+  tokenizerModel?: string;
   wallMs?: number;
   cpuMs?: number;
   memoryBytes?: number;

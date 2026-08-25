@@ -23,7 +23,7 @@ use std::cmp::Ordering;
 use std::error::Error;
 use std::fmt;
 
-use crate::solver::{widen_mul, Rational};
+use crate::solver::{Rational, widen_mul};
 
 /// Fixed-point scale `2^64`: values in `[0, 1]` are stored as `value * SCALE`.
 const SCALE: u128 = 1 << 64;
@@ -94,7 +94,10 @@ impl fmt::Display for BoundsError {
                 formatter.write_str("failure count exceeds the trial count")
             }
             Self::NonZeroFailures { failures } => {
-                write!(formatter, "{failures} failures: the zero-failure bound does not apply")
+                write!(
+                    formatter,
+                    "{failures} failures: the zero-failure bound does not apply"
+                )
             }
             Self::ParameterOutOfUnitInterval { parameter } => {
                 write!(formatter, "{parameter} must lie strictly inside (0, 1)")
@@ -102,9 +105,7 @@ impl fmt::Display for BoundsError {
             Self::DependentTrace => {
                 formatter.write_str("warm/dependent trace: no universal Q99 certification")
             }
-            Self::InvalidDesignEffect => {
-                formatter.write_str("design effect must be >= 1")
-            }
+            Self::InvalidDesignEffect => formatter.write_str("design effect must be >= 1"),
             Self::InsufficientEffectiveSample { effective } => {
                 write!(formatter, "effective trial count {effective} is zero")
             }
@@ -115,9 +116,7 @@ impl fmt::Display for BoundsError {
             Self::AmbiguousBound => {
                 formatter.write_str("fixed-point bounds straddle the target: certification refused")
             }
-            Self::TrialsOverflow => {
-                formatter.write_str("required trial count exceeds u64")
-            }
+            Self::TrialsOverflow => formatter.write_str("required trial count exceeds u64"),
         }
     }
 }
@@ -217,7 +216,10 @@ fn power_le(q: Rational, n: u64, alpha: Rational) -> Result<bool, BoundsError> {
     }
     let target = scale_rational(alpha);
     let base = scale_rational_interval(q);
-    let mut power = Interval { lo: SCALE, hi: SCALE };
+    let mut power = Interval {
+        lo: SCALE,
+        hi: SCALE,
+    };
     let mut factor = base;
     let mut remaining = n;
     while remaining > 0 {
@@ -229,13 +231,13 @@ fn power_le(q: Rational, n: u64, alpha: Rational) -> Result<bool, BoundsError> {
             factor = interval_mul(&factor, &factor);
         }
     }
-    let upper_le = cmp_u256(widen_mul(power.hi, target.1), widen_mul(target.0, SCALE))
-        != Ordering::Greater;
+    let upper_le =
+        cmp_u256(widen_mul(power.hi, target.1), widen_mul(target.0, SCALE)) != Ordering::Greater;
     if upper_le {
         return Ok(true);
     }
-    let lower_gt = cmp_u256(widen_mul(power.lo, target.1), widen_mul(target.0, SCALE))
-        == Ordering::Greater;
+    let lower_gt =
+        cmp_u256(widen_mul(power.lo, target.1), widen_mul(target.0, SCALE)) == Ordering::Greater;
     if lower_gt {
         return Ok(false);
     }
@@ -347,4 +349,3 @@ fn validate_unit_open(rate: Rational, parameter: &'static str) -> Result<(), Bou
     }
     Ok(())
 }
-

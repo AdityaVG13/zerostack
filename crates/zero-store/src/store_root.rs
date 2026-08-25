@@ -67,8 +67,8 @@ pub const BLOBS_DIR: &str = "blobs";
 /// Hex characters retained from the sha256 project key.
 pub const PROJECT_KEY_HEX_LEN: usize = 16;
 
-/// Which engine is asking. Owns the engine subdirectory name and the legacy
-/// per-repository directory, so no engine can spell either inconsistently.
+/// Which engine is asking. Owns the engine namespace under `.zerostack/` and
+/// the legacy directory recognized only for migration-safe compatibility.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Engine {
     TokenZero,
@@ -86,7 +86,7 @@ impl Engine {
         }
     }
 
-    /// Legacy per-repository directory, used when no unified store resolves.
+    /// Legacy per-repository directory, recognized only when it already exists.
     pub const fn legacy_dir_name(self) -> &'static str {
         match self {
             Self::TokenZero => ".tokenzero",
@@ -158,14 +158,16 @@ impl StoreEnv {
 /// label vocabularies with one wire-stable set.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum StoreMode {
-    /// A project-local `.zerostack` directory exists and takes precedence.
+    /// The project-local `.zerostack` directory, existing or selected as the
+    /// default for a new repository.
     LocalUnified,
     /// The pin was accepted and resolves inside the project root.
     PinnedInsideProject,
     /// The pin was accepted and lives outside the project root, so this
     /// engine's mutable data is namespaced by project key.
     SharedNamespaced,
-    /// No unified store: the engine uses its legacy per-repository directory.
+    /// An existing legacy per-repository directory retained until explicit
+    /// migration. New repositories never select this mode.
     Legacy,
 }
 
@@ -181,12 +183,9 @@ impl StoreMode {
     }
 }
 
-/// A resolved store root plus every path an engine derives from it.
-///
-/// Construction performs only the `.zerostack` existence probe and path
-/// normalization; it never creates directories. Use [ensure_layout] for that,
-/// so resolution stays free of side effects and safe to call from reporting
-/// and diagnostic paths.
+/// Construction probes `.zerostack` and the requesting engine's legacy
+/// directory, then normalizes paths. It never creates directories. Use
+/// [ensure_layout] after resolution.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ResolvedStore {
     repo_root: PathBuf,
@@ -202,17 +201,13 @@ impl ResolvedStore {
     /// The single resolution entry point.
     ///
     /// Order:
-    /// 1. `<repo_root>/.zerostack`, when it is a directory, wins
-    ///    unconditionally. A project-local marker is an explicit per-repository
-    ///    declaration, whereas the pin is ambient process state, so a stray
-    ///    variable in an agent harness must not relocate one engine's store.
-    /// 2. Otherwise, when opted in and the pin is non-empty: the pin, used
-    ///    as-is when absolute and joined to `repo_root` when relative.
-    ///    Existence is deliberately not required, so a store can be pinned
-    ///    before it is created.
-    /// 3. Otherwise the engine's legacy per-repository directory.
+    /// 1. An existing real `<repo_root>/.zerostack` wins unconditionally.
+    /// 2. Otherwise, an explicitly opted-in non-empty pin is selected.
+    /// 3. Otherwise, an existing engine legacy directory remains selected so
+    ///    authoritative data is never stranded or overwritten.
+    /// 4. Otherwise, `<repo_root>/.zerostack` is the default for a new store.
     ///
-    /// `repo_root` is normalized, so `R` and `R/../<basename>` resolve
+    /// `repo_root` is normalized, so equivalent path spellings resolve
     /// identically and containment checks cannot be defeated by spelling.
     pub fn resolve(repo_root: &Path, engine: Engine, env: &StoreEnv) -> Self {
         let repo_root = absolutize(repo_root);
@@ -260,10 +255,23 @@ impl ResolvedStore {
             };
         }
 
+        let legacy = repo_root.join(engine.legacy_dir_name());
+        if is_real_dir(&legacy) {
+            return Self {
+                engine_dir: legacy,
+                unified_root: None,
+                mode: StoreMode::Legacy,
+                project_key: None,
+                repo_root,
+                engine,
+                pin_value,
+            };
+        }
+
         Self {
-            engine_dir: repo_root.join(engine.legacy_dir_name()),
-            unified_root: None,
-            mode: StoreMode::Legacy,
+            engine_dir: local.clone().join(engine.dir_name()),
+            unified_root: Some(local),
+            mode: StoreMode::LocalUnified,
             project_key: None,
             repo_root,
             engine,
@@ -299,8 +307,8 @@ impl ResolvedStore {
         self.pin_value.as_deref()
     }
 
-    /// The store root itself, never the engine subdirectory. `None` in
-    /// [StoreMode::Legacy].
+    /// The store root itself, never the engine subdirectory. `None` only while
+    /// preserving an existing legacy directory before migration.
     pub fn unified_root(&self) -> Option<&Path> {
         self.unified_root.as_deref()
     }
@@ -355,16 +363,21 @@ impl ResolvedStore {
                     .to_string(),
             );
         } else {
-            match self.mode {
-                StoreMode::Legacy if self.pin_set() && !env.shared_opt_in => {
-                    warnings.push(format!(
-                        "store root pin ignored: set {SHARED_STORE_OPT_IN_ENV} or the engine alias to opt in"
-                    ));
-                }
-                StoreMode::LocalUnified if self.pin_set() => warnings.push(format!(
+            if self.mode == StoreMode::Legacy {
+                warnings.push(format!(
+                    "existing legacy store {} is still authoritative; migrate it into {LOCAL_STORE_DIR}/{} before deleting it",
+                    self.engine_dir.display(),
+                    self.engine.dir_name(),
+                ));
+            }
+            if self.pin_set() && !env.shared_opt_in {
+                warnings.push(format!(
+                    "store root pin ignored: set {SHARED_STORE_OPT_IN_ENV} or the engine alias to opt in"
+                ));
+            } else if self.mode == StoreMode::LocalUnified && self.pin_set() {
+                warnings.push(format!(
                     "store root pin ignored: project-local {LOCAL_STORE_DIR} takes precedence"
-                )),
-                _ => {}
+                ));
             }
         }
         if local_marker_is_symlink(&self.repo_root) {
@@ -417,16 +430,12 @@ pub struct StoreResolutionReport {
 }
 
 /// Create the directories implied by a resolved store. Separate from
-/// resolution so resolution never has side effects.
 pub fn ensure_layout(resolved: &ResolvedStore) -> std::io::Result<()> {
     if resolved.pin_value().is_some_and(literal_tilde_root) {
         return Err(std::io::Error::new(
             std::io::ErrorKind::InvalidInput,
             "configured store root must not start with a literal '~' path component",
         ));
-    }
-    if let Some(root) = resolved.unified_root() {
-        std::fs::create_dir_all(root)?;
     }
     if local_marker_is_symlink(resolved.repo_root()) {
         return Err(std::io::Error::new(
@@ -436,28 +445,25 @@ pub fn ensure_layout(resolved: &ResolvedStore) -> std::io::Result<()> {
             ),
         ));
     }
+    if let Some(root) = resolved.unified_root() {
+        std::fs::create_dir_all(root)?;
+    }
     std::fs::create_dir_all(resolved.engine_dir())?;
     std::fs::create_dir_all(resolved.blobs_dir())?;
     std::fs::create_dir_all(resolved.gc_dir())?;
     Ok(())
 }
 
-/// True only for a real directory: a symlinked `.zerostack` is refused.
-///
-/// `Path::is_dir` follows symlinks, so a symlink dropped into a repository
-/// would silently redirect every engine's store — including publishes and
-/// collections — to a root the repository never declared. The marker is a
-/// security-relevant declaration, so the policy is fail-closed: a symlinked
-/// marker is not a local unified store, and resolution falls through to the pin
-/// or legacy path instead of following the link.
+/// A symlinked `.zerostack` is never followed. Resolution still selects the
+/// project-local path for a new store, and [ensure_layout] then fails closed
+/// before creating engine data through the symlink.
 fn is_real_dir(path: &Path) -> bool {
     std::fs::symlink_metadata(path)
         .map(|m| m.file_type().is_dir())
         .unwrap_or(false)
 }
-
-/// True when a `.zerostack` marker exists but is a symlink, which [ResolvedStore]
-/// refuses to adopt.
+/// True when a `.zerostack` path exists as a symlink. Layout creation refuses
+/// this path before writing any engine state.
 fn local_marker_is_symlink(repo_root: &Path) -> bool {
     std::fs::symlink_metadata(repo_root.join(LOCAL_STORE_DIR))
         .map(|m| m.file_type().is_symlink())

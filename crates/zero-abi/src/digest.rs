@@ -45,7 +45,6 @@ pub fn contract_digest(manifest: &Value) -> [u8; 32] {
     sha256(canonical_json(manifest).as_bytes())
 }
 
-
 /// Lowercase-hex encode a 32-byte digest without rehashing. Complements
 /// [`sha256_hex`] for callers that compute digests incrementally.
 pub fn hex_lower_32(digest: [u8; 32]) -> String {

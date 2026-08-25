@@ -59,6 +59,73 @@ fn parse_source(source: &str) -> Result<tree_sitter::Tree, HostError> {
 /// First named child that is not a `comment` extra node. Tree-sitter attaches
 /// comments inside whatever node spans them, so field lookups skip them, but
 /// positional lookups (`named_child(0)`) do not.
+fn collect_call_expressions<'tree>(node: Node<'tree>, output: &mut Vec<Node<'tree>>) {
+    if node.kind() == "call_expression" {
+        output.push(node);
+    }
+    let mut cursor = node.walk();
+    for child in node.named_children(&mut cursor) {
+        collect_call_expressions(child, output);
+    }
+}
+
+fn direct_zero_method<'a>(source: &'a str, function: Node<'_>) -> Option<&'a str> {
+    if function.kind() != "member_expression" {
+        return None;
+    }
+    let object = function.child_by_field_name("object")?;
+    let property = function.child_by_field_name("property")?;
+    let object_text = source.get(object.byte_range())?;
+    (object_text == "z")
+        .then(|| source.get(property.byte_range()))
+        .flatten()
+}
+
+fn is_guaranteed_top_level_call(mut node: Node<'_>) -> bool {
+    while let Some(parent) = node.parent() {
+        match parent.kind() {
+            "await_expression" | "parenthesized_expression" | "variable_declarator" => {
+                node = parent;
+            }
+            "lexical_declaration"
+            | "variable_declaration"
+            | "expression_statement"
+            | "return_statement" => {
+                return parent
+                    .parent()
+                    .is_some_and(|ancestor| ancestor.kind() == "program");
+            }
+            _ => return false,
+        }
+    }
+    false
+}
+
+fn is_static_expression(node: Node<'_>) -> bool {
+    match node.kind() {
+        "string" | "number" | "true" | "false" | "null" | "undefined" | "regex" => true,
+        "parenthesized_expression" => {
+            first_expression_child(node).is_some_and(is_static_expression)
+        }
+        "array" => {
+            let mut cursor = node.walk();
+            node.named_children(&mut cursor)
+                .filter(|child| child.kind() != "comment")
+                .all(is_static_expression)
+        }
+        "object" => {
+            let mut cursor = node.walk();
+            node.named_children(&mut cursor)
+                .filter(|child| child.kind() != "comment")
+                .all(is_static_expression)
+        }
+        "pair" => node
+            .child_by_field_name("value")
+            .is_some_and(is_static_expression),
+        _ => false,
+    }
+}
+
 fn first_expression_child<'tree>(node: Node<'tree>) -> Option<Node<'tree>> {
     let mut cursor = node.walk();
     node.named_children(&mut cursor)
@@ -349,6 +416,7 @@ struct Interpreter<'tree> {
     operations: Rc<RefCell<Vec<ZeroOperationTrace>>>,
     operations_truncated: Rc<Cell<bool>>,
     pending_operations: BTreeMap<u64, PendingOperation>,
+    prefetched_calls: BTreeMap<usize, u64>,
     env: EnvRef<'tree>,
     cancelled: Arc<AtomicBool>,
     deadline: Instant,
@@ -393,6 +461,7 @@ impl<'tree> Interpreter<'tree> {
             operations,
             operations_truncated,
             pending_operations: BTreeMap::new(),
+            prefetched_calls: BTreeMap::new(),
             env,
             cancelled,
             deadline: Instant::now() + timeout,
@@ -460,6 +529,7 @@ impl<'tree> Interpreter<'tree> {
     }
 
     fn run(&mut self) -> Result<Value<'tree>, HostError> {
+        self.prefetch_top_level_pure_calls();
         let result = match self.exec(self.root) {
             Ok(Control::Return(value)) => {
                 self.await_value(value).map_err(|fault| self.fault(fault))
@@ -475,6 +545,60 @@ impl<'tree> Interpreter<'tree> {
             self.finish_inflight()?;
         }
         result
+    }
+
+    fn prefetch_top_level_pure_calls(&mut self) {
+        let mut calls = Vec::new();
+        collect_call_expressions(self.root, &mut calls);
+        for call in calls {
+            if !is_guaranteed_top_level_call(call)
+                || self.prefetched_calls.contains_key(&call.start_byte())
+            {
+                continue;
+            }
+            let Some(function) = call.child_by_field_name("function") else {
+                continue;
+            };
+            let Some(method) = direct_zero_method(self.source, function) else {
+                continue;
+            };
+            if !matches!(method, "read" | "find") {
+                continue;
+            }
+            let Some(arguments) = call.child_by_field_name("arguments") else {
+                continue;
+            };
+            let mut cursor = arguments.walk();
+            let argument_nodes: Vec<_> = arguments
+                .named_children(&mut cursor)
+                .filter(|child| child.kind() != "comment")
+                .collect();
+            if argument_nodes.iter().any(|argument| {
+                argument.kind() == "spread_element" || !is_static_expression(*argument)
+            }) {
+                continue;
+            }
+            let Ok(function_value) = self.eval(function) else {
+                continue;
+            };
+            let mut values = Vec::with_capacity(argument_nodes.len());
+            let mut valid = true;
+            for argument in argument_nodes {
+                match self.eval(argument) {
+                    Ok(value) => values.push(value),
+                    Err(_) => {
+                        valid = false;
+                        break;
+                    }
+                }
+            }
+            if !valid {
+                continue;
+            }
+            if let Ok(Value::Promise(id)) = self.call(function_value, values) {
+                self.prefetched_calls.insert(call.start_byte(), id);
+            }
+        }
     }
 
     fn finish_inflight(&mut self) -> Result<(), HostError> {
@@ -1041,10 +1165,19 @@ impl<'tree> Interpreter<'tree> {
             "binary_expression" | "logical_expression" => self.eval_binary(node),
             "unary_expression" => {
                 let operator = self.operator(node).to_owned();
-                let value = self.eval(
-                    node.child_by_field_name("argument")
-                        .ok_or_else(|| Fault::Host(self.unsupported("unary argument")))?,
-                )?;
+                let argument = node
+                    .child_by_field_name("argument")
+                    .ok_or_else(|| Fault::Host(self.unsupported("unary argument")))?;
+                if operator == "typeof"
+                    && matches!(
+                        argument.kind(),
+                        "identifier" | "property_identifier" | "shorthand_property_identifier"
+                    )
+                    && self.lookup(self.text(argument)).is_none()
+                {
+                    return Ok(Value::String("undefined".into()));
+                }
+                let value = self.eval(argument)?;
                 unary(&operator, value).map_err(Fault::Host)
             }
             "update_expression" => {
@@ -1282,6 +1415,9 @@ impl<'tree> Interpreter<'tree> {
     }
 
     fn eval_call(&mut self, node: Node<'tree>) -> Result<Value<'tree>, Fault<'tree>> {
+        if let Some(id) = self.prefetched_calls.remove(&node.start_byte()) {
+            return Ok(Value::Promise(id));
+        }
         let function_node = node
             .child_by_field_name("function")
             .ok_or_else(|| Fault::Host(self.unsupported("call function")))?;
@@ -2580,9 +2716,12 @@ impl<'tree> Interpreter<'tree> {
         args: Vec<Value<'tree>>,
     ) -> Result<Value<'tree>, Fault<'tree>> {
         if !zero_abi::GUEST_METHODS.contains(&name) {
-            return Err(Fault::Host(HostError::Data(format!(
-                "z.{name} is not a ZeroKernel method; use read, find, edit, apply, run, or state"
-            ))));
+            return Err(Fault::Throw(Value::Error(ErrorValue {
+                name: "TypeError".into(),
+                message: format!(
+                    "z.{name} is not a ZeroKernel method; use read, find, edit, apply, run, or state"
+                ),
+            })));
         }
         match name {
             "read" | "find" | "edit" | "apply" | "run" => self.call_tool("z", name, args),

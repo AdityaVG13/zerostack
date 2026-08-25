@@ -14,6 +14,7 @@ use std::fmt;
 use std::num::NonZeroU64;
 use std::str::FromStr;
 
+pub mod adaptive_eval;
 pub mod bounds;
 pub mod solver;
 pub mod theorems;
@@ -392,4 +393,3 @@ impl fmt::Display for CertificationError {
     }
 }
 impl Error for CertificationError {}
-

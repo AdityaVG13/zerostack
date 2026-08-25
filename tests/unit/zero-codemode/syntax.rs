@@ -47,6 +47,14 @@ fn run(plan: &str) -> JsonValue {
 }
 
 #[test]
+fn typeof_missing_identifier_returns_undefined() {
+    assert_eq!(
+        run("return [typeof Buffer, typeof structuredClone];"),
+        json!(["undefined", "undefined"]),
+    );
+}
+
+#[test]
 fn line_comments_are_ignored() {
     assert_eq!(
         run(r#"
@@ -334,6 +342,8 @@ fn map_and_set_support_mutation_iteration_and_callbacks() {
                 JSON.stringify(map),
             ];
             "#),
-        json!([3, true, true, "bcd", 1, 8, false, true, "k8z9", "k8z9", "{}"]),
+        json!([
+            3, true, true, "bcd", 1, 8, false, true, "k8z9", "k8z9", "{}"
+        ]),
     );
 }

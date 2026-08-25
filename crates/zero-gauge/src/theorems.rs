@@ -148,15 +148,17 @@ fn verify_expandable_omission(
     bound_artifact: Option<&String>,
 ) -> Result<(), TheoremViolation> {
     let handle = claim.expansion_handle.as_ref().ok_or_else(|| {
-        TheoremViolation::OmittedEvidenceNotExpandable { id: claim.id.clone() }
-    })?;
-    let resolved = view
-        .expansions
-        .get(handle)
-        .ok_or_else(|| TheoremViolation::UnresolvableExpansion {
+        TheoremViolation::OmittedEvidenceNotExpandable {
             id: claim.id.clone(),
-            handle: handle.clone(),
-        })?;
+        }
+    })?;
+    let resolved =
+        view.expansions
+            .get(handle)
+            .ok_or_else(|| TheoremViolation::UnresolvableExpansion {
+                id: claim.id.clone(),
+                handle: handle.clone(),
+            })?;
     if let Some(bound) = bound_artifact
         && resolved != bound
     {
@@ -471,7 +473,11 @@ pub enum TheoremViolation {
     /// `d + 1` overflowed the integer width.
     DecisionCountOverflow { id: String },
     /// The observed call count differs from `d + 1`.
-    CallCountMismatch { id: String, expected: u64, actual: u64 },
+    CallCountMismatch {
+        id: String,
+        expected: u64,
+        actual: u64,
+    },
     // Thm 7.1.
     /// No obligations were declared, so nothing can be certified.
     NoDeclaredObligations,
@@ -516,7 +522,10 @@ impl fmt::Display for TheoremViolation {
                 "claim {id} omits evidence but carries no expansion handle"
             ),
             Self::UnresolvableExpansion { id, handle } => {
-                write!(formatter, "claim {id} expansion handle {handle} does not resolve")
+                write!(
+                    formatter,
+                    "claim {id} expansion handle {handle} does not resolve"
+                )
             }
             Self::ExpansionMismatch {
                 id,
@@ -538,13 +547,16 @@ impl fmt::Display for TheoremViolation {
             Self::NotPrivatelyComposable => formatter.write_str(
                 "other operations are not privately composable: the d+1 bound does not apply",
             ),
-            Self::NotVerifiable => formatter.write_str(
-                "other operations are not verifiable: the d+1 bound does not apply",
-            ),
+            Self::NotVerifiable => formatter
+                .write_str("other operations are not verifiable: the d+1 bound does not apply"),
             Self::DecisionCountOverflow { id } => {
                 write!(formatter, "handle {id}: d + 1 overflowed the integer width")
             }
-            Self::CallCountMismatch { id, expected, actual } => write!(
+            Self::CallCountMismatch {
+                id,
+                expected,
+                actual,
+            } => write!(
                 formatter,
                 "handle {id}: expected exactly {expected} Zero Execute calls, observed {actual}"
             ),
@@ -586,4 +598,3 @@ impl fmt::Display for TheoremViolation {
 }
 
 impl Error for TheoremViolation {}
-

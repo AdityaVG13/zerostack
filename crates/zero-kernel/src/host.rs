@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
@@ -467,6 +467,41 @@ impl Cell {
         options: ReadOptions,
     ) -> Result<String, HostError> {
         let path = path.into();
+        let candidate = if path.is_absolute() {
+            path.clone()
+        } else {
+            self.context.project_root.join(&path)
+        };
+        if candidate.is_dir() {
+            if options.range.is_some() || options.max_bytes.is_some() {
+                return Err(HostError::InvalidRequest(
+                    "directory reads do not accept file range or byte-limit options".into(),
+                ));
+            }
+            let paths = self.lookup(
+                path.clone(),
+                LookupOptions {
+                    filter: None,
+                    limit: None,
+                    recursive: options.recursive,
+                },
+            )?;
+            if options.offset.is_some() || options.limit.is_some() {
+                let start = usize::try_from(options.offset.unwrap_or(0)).unwrap_or(usize::MAX);
+                let limit = usize::try_from(options.limit.unwrap_or(100)).unwrap_or(usize::MAX);
+                let start = start.min(paths.len());
+                let end = start.saturating_add(limit).min(paths.len());
+                let next = (end < paths.len()).then_some(end as u32);
+                return serde_json::to_string(&serde_json::json!({
+                    "entries": &paths[start..end],
+                    "next": next,
+                    "complete": next.is_none(),
+                }))
+                .map_err(|error| HostError::Serialization(error.to_string()));
+            }
+            return serde_json::to_string(&paths)
+                .map_err(|error| HostError::Serialization(error.to_string()));
+        }
         let mut snapshot = self.files.read(
             &self.invocation,
             FileReadRequest {
@@ -1304,8 +1339,15 @@ impl Cell {
         self.state.values.keys().cloned().collect()
     }
 
+    fn dedup_handles(&mut self) {
+        let mut seen = BTreeSet::new();
+        self.handles
+            .retain(|handle| seen.insert(handle.to_string()));
+    }
+
     pub fn fail(mut self, mut error: EngineError) -> Result<ZeroKernelResponse, HostError> {
         self.merge_async_records();
+        self.dedup_handles();
         if let Some(transaction) = self.transaction.take()
             && let Err(rollback) = transaction.rollback()
         {
@@ -1366,6 +1408,7 @@ impl Cell {
 
     pub fn finish(mut self, value: Value) -> Result<ZeroKernelResponse, HostError> {
         self.merge_async_records();
+        self.dedup_handles();
         let raw = match serde_json::to_vec(&value) {
             Ok(raw) => raw,
             Err(error) => {
@@ -1424,6 +1467,7 @@ impl Cell {
             },
             None => Vec::new(),
         };
+        self.dedup_handles();
         let visible_bytes = projection.visible.as_bytes();
         let visible_digest = blake3::hash(visible_bytes).to_hex().to_string();
         let event = ZeroKernelEvent {

@@ -20,6 +20,7 @@ pub struct ZeroKernelOptions {
     pub root: String,
     pub session_id: Option<String>,
     pub state_root: Option<String>,
+    pub tokenizer_model: Option<String>,
     pub wall_ms: Option<u32>,
     pub cpu_ms: Option<u32>,
     pub memory_bytes: Option<i64>,
@@ -32,6 +33,7 @@ struct KernelConfig {
     root: String,
     session_id: String,
     state_root: String,
+    tokenizer_model: Option<String>,
     budget: KernelBudget,
 }
 
@@ -58,11 +60,12 @@ impl KernelCore {
         if let Some(kernel) = slot.as_ref() {
             return Ok(Arc::clone(kernel));
         }
-        let kernel = CoreZeroKernel::canonical(
+        let kernel = CoreZeroKernel::canonical_with_tokenizer(
             &self.config.root,
             &self.config.state_root,
             &self.config.session_id,
             self.config.budget.clone(),
+            self.config.tokenizer_model.clone(),
         )
         .map_err(|error| Error::from_reason(error.to_string()))?;
         let kernel = Arc::new(kernel);
@@ -135,6 +138,7 @@ impl ZeroKernel {
                         .session_id
                         .unwrap_or_else(|| "zero-kernel-session".into()),
                     state_root,
+                    tokenizer_model: options.tokenizer_model,
                     budget,
                 },
                 kernel: Mutex::new(None),

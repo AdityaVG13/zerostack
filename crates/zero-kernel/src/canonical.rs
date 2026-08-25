@@ -17,6 +17,19 @@ impl ZeroKernel {
         session_id: impl Into<String>,
         budget: KernelBudget,
     ) -> Result<Self, HostError> {
+        Self::canonical_with_tokenizer(project_root, store_root, session_id, budget, None)
+    }
+
+    /// Build ZeroKernel with an explicit tokenizer model identity supplied by
+    /// the embedding harness. Recognized bundled tokenizers certify counts;
+    /// unknown models remain honestly labeled estimators.
+    pub fn canonical_with_tokenizer(
+        project_root: impl AsRef<Path>,
+        store_root: impl Into<PathBuf>,
+        session_id: impl Into<String>,
+        budget: KernelBudget,
+        tokenizer_model: Option<String>,
+    ) -> Result<Self, HostError> {
         let project_root = std::fs::canonicalize(project_root.as_ref()).map_err(|error| {
             HostError::InvalidRequest(format!("canonicalize project root: {error}"))
         })?;
@@ -30,7 +43,7 @@ impl ZeroKernel {
             ZeroStructuralEngine::open(&project_root, store_root.join("graph"), &store_root)
                 .map_err(HostError::Engine)?,
         );
-        let tokens = Arc::new(ZeroTokenEngine::open(&store_root, None));
+        let tokens = Arc::new(ZeroTokenEngine::open(&store_root, tokenizer_model));
         Self::new(
             KernelContext {
                 workspace_root: project_root.clone(),

@@ -224,20 +224,12 @@ impl Rational {
 
     /// Exact maximum of two rationals.
     pub fn max(self, other: Self) -> Self {
-        if self >= other {
-            self
-        } else {
-            other
-        }
+        if self >= other { self } else { other }
     }
 
     /// Exact minimum of two rationals.
     pub fn min(self, other: Self) -> Self {
-        if self <= other {
-            self
-        } else {
-            other
-        }
+        if self <= other { self } else { other }
     }
 
     /// Exact three-way comparison, never rounding.
@@ -679,4 +671,3 @@ pub(crate) fn widen_mul(a: u128, b: u128) -> (u128, u128) {
     let hi = hh + m_hi + (mid >> 64);
     (hi, lo)
 }
-

@@ -18,6 +18,7 @@ use serde_json::Value;
 use zero_abi::CanonicalResource;
 use zero_abi::{
     SurfaceContractError, SurfaceKind, SurfaceRegistration, ZeroKernelResponse, canonical_json,
+    zero_kernel_response_schema,
 };
 
 pub const ZERO_CARRIER_TOOL_NAME: &str = "zero";
@@ -76,7 +77,7 @@ pub struct ZeroCarrierRequest {
 pub fn zero_carrier_catalog() -> Value {
     serde_json::json!([{
         "name": ZERO_CARRIER_TOOL_NAME,
-        "description": "Run one bounded JavaScript or TypeScript cell with direct z.* methods.",
+        "description": "Run one bounded JavaScript or TypeScript cell with the complete ZeroKernel surface: z.read, z.find, z.edit, z.apply, z.run, and z.state. Keep dependent work in one cell and use Promise.all for independent calls. z.find is workspace-root confined and has no files mode; use z.read for directory listings and exact bytes. No other z.* methods exist.",
         "inputSchema": {
             "type": "object",
             "additionalProperties": false,
@@ -88,7 +89,8 @@ pub fn zero_carrier_catalog() -> Value {
                 }
             },
             "required": ["plan"]
-        }
+        },
+        "outputSchema": zero_kernel_response_schema()
     }])
 }
 
@@ -909,7 +911,7 @@ mod fastmcp {
                     name: ZERO_CARRIER_TOOL_NAME.into(),
                     description: entry["description"].as_str().map(str::to_owned),
                     input_schema: entry["inputSchema"].clone(),
-                    output_schema: None,
+                    output_schema: Some(entry["outputSchema"].clone()),
                     icon: None,
                     version: None,
                     tags: Vec::new(),
@@ -1020,7 +1022,7 @@ mod fastmcp {
                 self.config,
                 Arc::new(Inflight::new(self.config.max_inflight)),
             ))
-            .instructions("One canonical zero tool. The runtime is ZeroKernel.")
+            .instructions("ZeroKernel exposes one zero tool whose cell has exactly z.read, z.find, z.edit, z.apply, z.run, and z.state.")
             .build()
         }
 

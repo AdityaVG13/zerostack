@@ -8,6 +8,7 @@
 
 mod canonical;
 mod host;
+mod preparation;
 mod runtime;
 mod shell;
 mod state;
@@ -16,6 +17,7 @@ mod typescript;
 
 pub use canonical::direct_contract_digest;
 pub use host::{AtomicCancellation, Cell, HostError, ZeroKernel, typed_error};
+pub use preparation::{CellPreparation, PreparedCell};
 pub use shell::ShellCommand;
 pub use state::{StateError, StateSnapshot, StateStore};
 pub use transaction::{

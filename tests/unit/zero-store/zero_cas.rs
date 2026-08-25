@@ -65,6 +65,26 @@ fn line_and_symbol_expansion_use_published_metadata() {
 }
 
 #[test]
+fn line_expansion_derives_offsets_for_plain_exact_handles() {
+    let root = tempdir().unwrap();
+    let cas = ZeroCas::open(root.path());
+    let handle = cas.put(b"alpha\nbeta\ngamma\n").unwrap();
+
+    let lines = cas
+        .expand(
+            &handle,
+            &ExpandOptions {
+                line_start: Some(2),
+                line_end: Some(2),
+                ..ExpandOptions::default()
+            },
+        )
+        .unwrap();
+
+    assert_eq!(lines, b"beta\n");
+}
+
+#[test]
 fn corruption_is_refused_before_bytes_escape() {
     let root = tempdir().unwrap();
     let cas = ZeroCas::open(root.path());

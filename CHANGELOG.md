@@ -26,8 +26,8 @@ TokenZero, and ZeroStack release in lockstep because they share the
 ### Added
 - `TokenEngine::certify`: re-measure bytes against a claimed accounting so the
   response boundary can prove reported numbers equal reality.
-- `z.asgrep({query, ...})` single-object calling convention.
-- `z.snap` on a directory returns guidance pointing at `z.lookup`.
+- `z.find({query, ...})` single-object calling convention.
+- `z.read` on a directory returns a deterministic listing; use `z.find` for structural search.
 - Calling `z.state()` or other namespaces returns a catchable `TypeError` with
   sub-method guidance.
 - `zero-kernel doctor` reports quarantined transaction journals.

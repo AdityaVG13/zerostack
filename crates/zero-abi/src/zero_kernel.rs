@@ -29,6 +29,63 @@ pub const OPERATION_TRACE_LIMIT: usize = 128;
 /// The complete model-facing ZeroKernel surface.
 pub const GUEST_METHODS: &[&str] = &["read", "find", "edit", "apply", "run", "state"];
 
+fn is_false(value: &bool) -> bool {
+    !*value
+}
+
+/// Authoritative JSON Schema for the one model-facing tool response. Harnesses
+/// publish this schema directly instead of learning result shapes from values.
+pub fn zero_kernel_response_schema() -> Value {
+    serde_json::json!({
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+            "protocol": { "const": ZERO_KERNEL_PROTOCOL },
+            "outcome": { "enum": ["Completed", "Cancelled", "Failed"] },
+            "value": {},
+            "error": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                    "kind": { "type": "string" },
+                    "detail": { "type": "string" },
+                    "retryable": { "type": "boolean" }
+                },
+                "required": ["kind", "detail", "retryable"]
+            },
+            "handles": { "type": "array", "items": { "type": "string", "pattern": "^z://blob/" } },
+            "event": { "type": "string", "pattern": "^z://blob/" },
+            "state": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                    "before": { "type": "string" },
+                    "after": { "type": "string" },
+                    "unchanged": { "type": "boolean" }
+                },
+                "required": ["unchanged"]
+            },
+            "ledger": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                    "wallNs": { "type": "integer", "minimum": 0 },
+                    "cpuNsUpperBound": { "type": "integer", "minimum": 0 },
+                    "calls": { "type": "integer", "minimum": 0 },
+                    "tasks": { "type": "integer", "minimum": 0 },
+                    "bytesRead": { "type": "integer", "minimum": 0 },
+                    "bytesWritten": { "type": "integer", "minimum": 0 },
+                    "bytesVisible": { "type": "integer", "minimum": 0 }
+                },
+                "required": ["wallNs", "cpuNsUpperBound", "calls", "tasks", "bytesRead", "bytesWritten", "bytesVisible"]
+            },
+            "operations": { "type": "array", "items": { "type": "object" } },
+            "operationsTruncated": { "type": "boolean" }
+        },
+        "required": ["protocol", "outcome", "event", "state", "ledger"]
+    })
+}
+
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct KernelBudget {
@@ -286,9 +343,9 @@ pub struct ZeroKernelResponse {
     pub error: Option<EngineError>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub operations: Vec<ZeroOperationTrace>,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "is_false")]
     pub operations_truncated: bool,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub handles: Vec<ZeroHandle>,
     pub event: ZeroHandle,
     pub state: StateEvidence,
@@ -473,6 +530,12 @@ pub struct ReadOptions {
     pub range: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub max_bytes: Option<u64>,
+    #[serde(default)]
+    pub recursive: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub limit: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub offset: Option<u32>,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -548,6 +611,8 @@ pub struct LookupOptions {
     pub filter: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub limit: Option<u32>,
+    #[serde(default)]
+    pub recursive: bool,
 }
 
 pub trait FileLease: Send {}
@@ -708,8 +773,11 @@ pub trait StructuralEngine: Send + Sync {
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
 pub struct TokenAccounting {
     pub tokenizer: String,
+    #[serde(rename = "sourceTokens")]
     pub billed: u64,
+    #[serde(rename = "visibleTokens")]
     pub visible: u64,
+    #[serde(rename = "recoveredTokens")]
     pub cached: u64,
     pub certified: bool,
 }

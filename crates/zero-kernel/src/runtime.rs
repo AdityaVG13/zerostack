@@ -206,6 +206,19 @@ fn dispatch_concurrent(
 }
 
 impl ZeroKernel {
+    /// Begin collecting streamed source without tying ZeroKernel to a harness protocol.
+    pub fn begin_preparation(&self) -> crate::CellPreparation {
+        crate::CellPreparation::new()
+    }
+
+    /// Execute a completed streamed cell through the same canonical path.
+    pub fn execute_prepared(
+        &self,
+        prepared: &crate::PreparedCell,
+    ) -> Result<ZeroKernelResponse, crate::HostError> {
+        self.execute_cell(prepared.source())
+    }
+
     /// Execute one TypeScript/JavaScript cell in a fresh bounded frame.
     pub fn execute_cell(&self, source: &str) -> Result<ZeroKernelResponse, crate::HostError> {
         self.execute_cell_with_cancellation(source, crate::AtomicCancellation::new())
@@ -1275,27 +1288,44 @@ fn type_engine_error(error: TypeScriptError) -> EngineError {
 }
 
 fn map_interpreter_error(error: zero_codemode::HostError) -> EngineError {
+    use zero_codemode::HostError;
+
     let text = error.to_string();
-    let kind = if text.contains("cancel") {
-        EngineErrorKind::Cancelled
-    } else if text.contains("deadline") || text.contains("timed out") {
-        EngineErrorKind::Deadline
-    } else if text.contains("budget")
-        || text.contains("limit")
-        || text.contains("full_view_unavailable")
-    {
-        EngineErrorKind::Budget
-    } else if text.contains("preimage")
-        || text.contains("selection_")
-        || text.contains("structural source")
-        || text.contains("ambiguous")
-    {
-        EngineErrorKind::Conflict
-    } else if text.contains("invalid request") || text.contains("parse") || text.contains("syntax")
-    {
-        EngineErrorKind::InvalidInput
-    } else {
-        EngineErrorKind::Internal
+    let kind = match &error {
+        HostError::Cancelled => EngineErrorKind::Cancelled,
+        HostError::DeadlineExceeded => EngineErrorKind::Deadline,
+        HostError::ResultTooLarge { .. }
+        | HostError::MemoryLimit { .. }
+        | HostError::MicrotaskLimit
+        | HostError::CallBudgetExceeded { .. }
+        | HostError::FuelExhausted => EngineErrorKind::Budget,
+        HostError::Parse(_)
+        | HostError::UnsupportedSyntax(_)
+        | HostError::Data(_)
+        | HostError::Execution(_)
+        | HostError::MethodNotFound(_)
+        | HostError::SurfaceNotFound(_)
+        | HostError::Json(_)
+        | HostError::Plan(_)
+        | HostError::Registration(_)
+        | HostError::Limits(_) => EngineErrorKind::InvalidInput,
+        HostError::Connector(_)
+            if text.contains("preimage")
+                || text.contains("selection_")
+                || text.contains("structural source")
+                || text.contains("ambiguous") =>
+        {
+            EngineErrorKind::Conflict
+        }
+        HostError::Connector(_)
+            if text.contains("budget") || text.contains("full_view_unavailable") =>
+        {
+            EngineErrorKind::Budget
+        }
+        HostError::Connector(_) if text.contains("invalid request") => {
+            EngineErrorKind::InvalidInput
+        }
+        HostError::Runtime(_) | HostError::Connector(_) => EngineErrorKind::Internal,
     };
     EngineError::new(kind, text, false)
 }

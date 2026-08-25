@@ -2241,23 +2241,97 @@ fn run_output_accounting_is_truthful_against_visible_bytes() {
 }
 
 #[test]
+fn unknown_zero_member_is_a_catchable_type_error() {
+    let root = tempdir().unwrap();
+    let kernel = production_kernel_relaxed(root.path());
+    let response = kernel
+        .execute_cell(
+            r#"
+            try {
+                z.shell("ls");
+                return false;
+            } catch (error) {
+                return error.name === "TypeError" && error.message.includes("not a ZeroKernel method");
+            }
+            "#,
+        )
+        .unwrap();
+    assert_eq!(response.outcome, zero_abi::ZeroKernelOutcome::Completed);
+    assert_eq!(model_json(&response), json!(true));
+}
+
+#[test]
+fn guest_throw_is_invalid_input_not_internal() {
+    let root = tempdir().unwrap();
+    let kernel = production_kernel_relaxed(root.path());
+    let response = kernel
+        .execute_cell("throw new Error('bad input');")
+        .unwrap();
+    assert_eq!(response.outcome, zero_abi::ZeroKernelOutcome::Failed);
+    assert_eq!(
+        response.error.as_ref().map(|error| &error.kind),
+        Some(&EngineErrorKind::InvalidInput)
+    );
+}
+
+#[test]
 fn final_surface_read_lists_directories() {
     let root = tempdir().unwrap();
     std::fs::create_dir_all(root.path().join("src")).unwrap();
     std::fs::write(root.path().join("src/a.rs"), "a").unwrap();
     std::fs::write(root.path().join("src/b.rs"), "b").unwrap();
+    std::fs::create_dir_all(root.path().join("src/nested")).unwrap();
+    std::fs::write(root.path().join("src/nested/deep.rs"), "deep").unwrap();
     let kernel = production_kernel_relaxed(root.path());
     let response = kernel.execute_cell("return await z.read('src');").unwrap();
     assert_eq!(response.outcome, zero_abi::ZeroKernelOutcome::Completed);
     let raw = response.value.unwrap();
     let listing: Value = serde_json::from_str(raw.as_str().unwrap()).unwrap();
     let entries = listing.as_array().unwrap();
-    assert_eq!(entries.len(), 2, "directory read must list both entries");
+    assert!(
+        entries.len() >= 3,
+        "directory read must include immediate children"
+    );
     assert!(
         entries
             .iter()
             .any(|v| v.as_str().unwrap().ends_with("a.rs"))
     );
+    assert!(
+        entries
+            .iter()
+            .all(|v| !v.as_str().unwrap().ends_with("deep.rs")),
+        "default directory reads must not recurse"
+    );
+
+    let response = kernel
+        .execute_cell("return await z.read('src', {recursive: true});")
+        .unwrap();
+    let raw = response.value.unwrap();
+    let recursive: Value = serde_json::from_str(raw.as_str().unwrap()).unwrap();
+    assert!(
+        recursive
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|v| v.as_str().unwrap().ends_with("deep.rs")),
+        "recursive directory reads must include descendants"
+    );
+
+    let response = kernel
+        .execute_cell("return await z.read('src', {limit: 2});")
+        .unwrap();
+    let page: Value = serde_json::from_str(response.value.unwrap().as_str().unwrap()).unwrap();
+    assert_eq!(page["entries"].as_array().unwrap().len(), 2);
+    assert_eq!(page["next"], 2);
+    assert_eq!(page["complete"], false);
+
+    let response = kernel
+        .execute_cell("return await z.read('src', {offset: 2, limit: 2});")
+        .unwrap();
+    let last: Value = serde_json::from_str(response.value.unwrap().as_str().unwrap()).unwrap();
+    assert_eq!(last["complete"], true);
+    assert!(last["next"].is_null());
 }
 
 #[test]

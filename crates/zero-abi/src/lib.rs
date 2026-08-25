@@ -231,5 +231,5 @@ pub use zero_kernel::{
     StructuralHit, StructuralQuery, StructuralResult, TokenAccounting, TokenEngine,
     ZERO_HANDLE_PREFIX, ZERO_KERNEL_PROTOCOL, ZeroHandle, ZeroKernelError, ZeroKernelEvent,
     ZeroKernelOutcome, ZeroKernelRequest, ZeroKernelResponse, ZeroOperationStatus,
-    ZeroOperationTrace,
+    ZeroOperationTrace, zero_kernel_response_schema,
 };

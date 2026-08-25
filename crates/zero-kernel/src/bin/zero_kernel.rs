@@ -7,8 +7,8 @@ use serde_json::json;
 use zero_abi::KernelBudget;
 use zero_kernel::{ZeroKernel, direct_contract_digest};
 use zero_mcp::{
-    McpDispatchError, McpTransportConfig, ZeroCarrierCapabilities, ZeroCarrierExecutor,
-    ZeroCarrierSampling, FastMcpZeroCarrier,
+    FastMcpZeroCarrier, McpDispatchError, McpTransportConfig, ZeroCarrierCapabilities,
+    ZeroCarrierExecutor, ZeroCarrierSampling,
 };
 use zero_store::{import_legacy_store, read_and_verify_manifest};
 
@@ -23,6 +23,14 @@ fn run() -> Result<(), String> {
     let mut args = std::env::args().skip(1);
     let command = args.next().unwrap_or_else(|| "doctor".into());
     let remaining = args.collect::<Vec<_>>();
+    if matches!(command.as_str(), "help" | "--help" | "-h")
+        || remaining
+            .iter()
+            .any(|argument| matches!(argument.as_str(), "--help" | "-h"))
+    {
+        print_help();
+        return Ok(());
+    }
     match command.as_str() {
         "doctor" | "health" => {
             doctor(parse_path_flag(&remaining, "-C").unwrap_or_else(|| PathBuf::from(".")))
@@ -33,6 +41,23 @@ fn run() -> Result<(), String> {
         _ => Err(format!(
             "unknown command {command:?}; use doctor, health, exec, mcp, or migrate"
         )),
+    }
+}
+
+const HELP: &str = "ZeroKernel\n\nUsage:\n  zero-kernel doctor|health [-C <workspace>]\n  zero-kernel exec [-C <workspace>]\n  zero-kernel mcp [-C <workspace>]\n  zero-kernel migrate <options>\n\nOptions:\n  -h, --help  Show this help and exit";
+
+fn print_help() {
+    println!("{HELP}");
+}
+
+#[cfg(test)]
+mod cli_tests {
+    use super::HELP;
+
+    #[test]
+    fn help_names_commands_without_starting_one() {
+        assert!(HELP.contains("zero-kernel mcp [-C <workspace>]"));
+        assert!(HELP.contains("-h, --help"));
     }
 }
 

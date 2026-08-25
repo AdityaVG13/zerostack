@@ -439,13 +439,17 @@ impl ZeroCas {
             })?;
             start.min(total)..end.min(total)
         } else if let (Some(start), Some(end)) = (options.line_start, options.line_end) {
-            let metadata = self.metadata(handle)?.ok_or_else(|| {
-                ZeroCasError::InvalidSelection("line expansion requires metadata".into())
-            })?;
-            metadata
-                .selection
-                .ok_or_else(|| ZeroCasError::InvalidSelection("missing line index".into()))?
-                .line_range(start, end, total)?
+            if let Some(index) = self
+                .metadata(handle)?
+                .and_then(|metadata| metadata.selection)
+            {
+                index.line_range(start, end, total)?
+            } else {
+                let text = std::str::from_utf8(&mapped).map_err(|_| {
+                    ZeroCasError::InvalidSelection("line expansion requires UTF-8 bytes".into())
+                })?;
+                SelectionIndex::from_utf8(text).line_range(start, end, total)?
+            }
         } else {
             let start = usize::try_from(options.offset.unwrap_or(0)).map_err(|_| {
                 ZeroCasError::InvalidSelection("offset does not fit platform".into())

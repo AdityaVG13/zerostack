@@ -30,6 +30,55 @@ impl Connector for DelayedConnector {
 }
 
 #[test]
+fn top_level_literal_reads_are_prefetched_concurrently() {
+    let limits = HostLimits::new(
+        8 * 1024 * 1024,
+        256 * 1024,
+        Duration::from_secs(1),
+        10_000,
+        1,
+        2,
+        4,
+        4 * 1024,
+        1024 * 1024,
+    )
+    .unwrap();
+    let registration = GlobalRegistration {
+        root: "z".into(),
+        capabilities: vec![CapabilityDescriptor::new("z", "read")],
+    };
+    let guest = Arc::new(GuestSurface::new(GuestContext {
+        project_root: "/project".into(),
+        workspace_root: Some("/project".into()),
+        request_root: Some("/project".into()),
+        session_root: None,
+        session_id: "prefetch".into(),
+        protocol: "ZeroKernel".into(),
+    }));
+    let host = Host::new_zero_kernel(limits, registration)
+        .unwrap()
+        .with_guest_surface(guest);
+
+    let started = std::time::Instant::now();
+    let result = host
+        .execute(
+            r#"
+            const first = await z.read("first");
+            const second = await z.read("second");
+            return [first, second];
+            "#,
+            Rc::new(DelayedConnector),
+        )
+        .unwrap();
+    assert_eq!(result, json!(["ok", "ok"]));
+    assert!(
+        started.elapsed() < Duration::from_millis(140),
+        "independent 75ms reads must overlap: {:?}",
+        started.elapsed()
+    );
+}
+
+#[test]
 fn idle_connector_wait_does_not_consume_microtask_budget() {
     let limits = HostLimits::new(
         8 * 1024 * 1024,

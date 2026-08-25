@@ -100,6 +100,14 @@ fn carrier_catalog_exposes_exactly_one_closed_zero_tool() {
     assert_eq!(tools[0]["name"], "zero");
     assert_eq!(tools[0]["inputSchema"]["additionalProperties"], false);
     assert_eq!(
+        tools[0]["outputSchema"]["properties"]["protocol"]["const"],
+        "ZeroKernel"
+    );
+    assert_eq!(tools[0]["outputSchema"]["additionalProperties"], false);
+    let description = tools[0]["description"].as_str().unwrap();
+    assert!(description.contains("z.read"));
+    assert!(description.contains("No other z.* methods exist"));
+    assert_eq!(
         tools[0]["inputSchema"]["required"],
         serde_json::json!(["plan"])
     );
