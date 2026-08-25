@@ -427,6 +427,39 @@ fn production_kernel_relaxed(root: &std::path::Path) -> ZeroKernel {
     .unwrap()
 }
 
+fn production_kernel_relaxed_with_graph(root: &std::path::Path) -> ZeroKernel {
+    let store_root = root.join(".zerostack");
+    let files = Arc::new(
+        ZeroFileEngine::open(root, &store_root, "contract").expect("open production file engine"),
+    );
+    let graph = Arc::new(
+        graphzero_kernel::ZeroStructuralEngine::open(root, store_root.join("graph"), &store_root)
+            .expect("open production structural engine"),
+    );
+    ZeroKernel::new(
+        KernelContext {
+            workspace_root: root.to_path_buf(),
+            project_root: root.to_path_buf(),
+            session_id: "session".into(),
+            expected_state_root: None,
+            contract_digest: "contract".into(),
+        },
+        KernelBudget {
+            wall_ms: 20_000,
+            cpu_ms: 20_000,
+            memory_bytes: 128 * 1024 * 1024,
+            call_limit: 64,
+            task_limit: 8,
+            output_byte_limit: 64 * 1024,
+        },
+        files,
+        graph,
+        Arc::new(Tokens),
+        store_root,
+    )
+    .unwrap()
+}
+
 fn model_json(response: &zero_abi::ZeroKernelResponse) -> Value {
     let value = response.value.as_ref().expect("model-visible value");
     match value {
@@ -925,6 +958,23 @@ fn cancelled_run_frame_drains_before_response() {
 }
 
 #[test]
+fn read_accepts_parent_relative_constellation_path() {
+    let constellation = tempdir().unwrap();
+    let workspace = constellation.path().join("ZeroStack");
+    let sibling = constellation.path().join("TokenZero");
+    fs::create_dir_all(&workspace).unwrap();
+    fs::create_dir_all(&sibling).unwrap();
+    fs::write(sibling.join("contract.txt"), "sibling contract").unwrap();
+    let kernel = production_kernel(&workspace);
+
+    let response = kernel
+        .execute_cell(r#"return await z.read("../TokenZero/contract.txt");"#)
+        .unwrap();
+    assert_eq!(response.outcome, zero_abi::ZeroKernelOutcome::Completed);
+    assert_eq!(model_json(&response), json!("sibling contract"));
+}
+
+#[test]
 fn read_full_view_expands_exact_source() {
     let root = tempdir().unwrap();
     let source = "pub fn alpha() -> u32 {\n    42\n}\n";
@@ -1134,6 +1184,57 @@ fn read_snapshot_and_edit_commit_exactly_once_in_one_cell() {
         "const after = 1;\n"
     );
     assert_eq!(kernel.live_frames(), 0);
+}
+
+#[test]
+fn one_cell_find_snap_edit_verify_returns_only_final_ack() {
+    let root = tempdir().unwrap();
+    write_fixture(root.path(), "src/needle.rs", "pub const BEFORE: u32 = 1;\n");
+    let kernel = production_kernel_relaxed_with_graph(root.path());
+
+    let response = kernel
+        .execute_cell(
+            r#"
+            const snap = await z.read({
+              target: {
+                search: {
+                  query: "BEFORE",
+                  under: "src",
+                  language: "rust",
+                  mode: "literal",
+                },
+              },
+              cardinality: "exactly_one",
+              selection: {exactText: "pub const BEFORE: u32 = 1;"},
+            });
+            await z.edit(snap, {
+              find: "pub const BEFORE: u32 = 1;",
+              replace: "pub const AFTER: u32 = 1;",
+            });
+            return await z.read("src/needle.rs");
+            "#,
+        )
+        .unwrap();
+
+    assert_eq!(
+        fs::read_to_string(root.path().join("src/needle.rs")).unwrap(),
+        "pub const AFTER: u32 = 1;\n"
+    );
+    assert_eq!(
+        response.outcome,
+        zero_abi::ZeroKernelOutcome::Completed,
+        "error={:?}",
+        response.error
+    );
+    assert_eq!(model_json(&response), json!("pub const AFTER: u32 = 1;\n"));
+    assert_eq!(
+        response
+            .operations
+            .iter()
+            .map(|operation| operation.method.as_str())
+            .collect::<Vec<_>>(),
+        vec!["read", "edit", "read"]
+    );
 }
 
 #[test]

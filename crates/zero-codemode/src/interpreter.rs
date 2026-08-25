@@ -550,6 +550,13 @@ impl<'tree> Interpreter<'tree> {
     fn prefetch_top_level_pure_calls(&mut self) {
         let mut calls = Vec::new();
         collect_call_expressions(self.root, &mut calls);
+        if calls.iter().any(|call| {
+            call.child_by_field_name("function")
+                .and_then(|function| direct_zero_method(self.source, function))
+                .is_some_and(|method| matches!(method, "edit" | "apply"))
+        }) {
+            return;
+        }
         for call in calls {
             if !is_guaranteed_top_level_call(call)
                 || self.prefetched_calls.contains_key(&call.start_byte())

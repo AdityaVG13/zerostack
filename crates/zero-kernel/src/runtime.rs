@@ -42,12 +42,21 @@ impl Connector for CellConnector {
         }
         let args: Value = serde_json::from_str(args_json)
             .map_err(|error| ConnectorError::new(error.to_string()))?;
-        let concurrent = matches!(capability.method.as_str(), "find" | "run")
-            || (capability.method == "read"
-                && args
-                    .as_array()
-                    .and_then(|values| values.first())
-                    .is_some_and(Value::is_string));
+        let read_string = capability.method == "read"
+            && args
+                .as_array()
+                .and_then(|values| values.first())
+                .is_some_and(Value::is_string);
+        let concurrent_read = if read_string {
+            let slot = self.cell.borrow();
+            !slot
+                .as_ref()
+                .ok_or_else(|| ConnectorError::new("ZeroKernel cell already settled"))?
+                .has_active_transaction()
+        } else {
+            false
+        };
+        let concurrent = matches!(capability.method.as_str(), "find" | "run") || concurrent_read;
         if concurrent {
             let readonly = {
                 let slot = self.cell.borrow();

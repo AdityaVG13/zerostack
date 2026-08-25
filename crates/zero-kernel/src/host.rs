@@ -1,5 +1,5 @@
 use std::collections::{BTreeMap, BTreeSet};
-use std::path::PathBuf;
+use std::path::{Component, Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
@@ -23,7 +23,9 @@ use zero_store::{EventLog, ZeroCas};
 
 use crate::shell::{ShellCommand, run_shell};
 use crate::state::{StateError, StateSnapshot, StateStore};
-use crate::transaction::{Transaction, TransactionCoordinator, TransactionError};
+use crate::transaction::{
+    PendingFileContent, Transaction, TransactionCoordinator, TransactionError,
+};
 
 #[derive(Clone, Debug)]
 pub struct AtomicCancellation(Arc<AtomicBool>);
@@ -140,7 +142,25 @@ impl DirectCallContext {
         &self.invocation.context.project_root
     }
 
+    fn normalize_explicit_external_read(&self, path: PathBuf) -> Result<PathBuf, HostError> {
+        if path.is_absolute()
+            || !path
+                .components()
+                .any(|component| matches!(component, Component::ParentDir))
+        {
+            return Ok(path);
+        }
+        std::fs::canonicalize(self.project_root().join(&path)).map_err(|error| {
+            HostError::InvalidRequest(format!(
+                "resolve explicit external read {}: {error}",
+                path.display()
+            ))
+        })
+    }
+
     pub fn read(&self, path: PathBuf, options: ReadOptions) -> Result<String, HostError> {
+        let request_path = path;
+        let path = self.normalize_explicit_external_read(request_path.clone())?;
         let _task =
             LiveTaskGuard::acquire(Arc::clone(&self.live_tasks), Arc::clone(&self.frame_tasks));
         let snapshot = self.files.read(
@@ -152,7 +172,7 @@ impl DirectCallContext {
         )?;
         let value = match snapshot.inline_utf8 {
             Some(text) if !text.as_bytes().contains(&0) => text,
-            _ => labeled_outline(&path, &snapshot),
+            _ => labeled_outline(&request_path, &snapshot),
         };
         let mut record = self.records.lock();
         record.calls = record.calls.saturating_add(1);
@@ -164,6 +184,7 @@ impl DirectCallContext {
     }
 
     pub fn lookup(&self, root: PathBuf, options: LookupOptions) -> Result<Vec<PathBuf>, HostError> {
+        let root = self.normalize_explicit_external_read(root)?;
         let _task =
             LiveTaskGuard::acquire(Arc::clone(&self.live_tasks), Arc::clone(&self.frame_tasks));
         let paths = self.files.lookup(&self.invocation, root, options)?;
@@ -464,6 +485,10 @@ impl Cell {
         self.cancellation.clone()
     }
 
+    pub(crate) fn has_active_transaction(&self) -> bool {
+        self.transaction.is_some()
+    }
+
     pub fn read(
         &mut self,
         path: impl Into<PathBuf>,
@@ -475,6 +500,19 @@ impl Cell {
         } else {
             self.context.project_root.join(&path)
         };
+        if let Some(pending) = self.pending_file_bytes(&path)? {
+            let bytes = Self::project_read_bytes(pending, &options)?;
+            self.ledger.calls = self.ledger.calls.saturating_add(1);
+            self.ledger.bytes_read = self
+                .ledger
+                .bytes_read
+                .saturating_add(u64::try_from(bytes.len()).unwrap_or(u64::MAX));
+            if let Ok(text) = String::from_utf8(bytes.clone())
+                && !text.as_bytes().contains(&0)
+            {
+                return Ok(text);
+            }
+        }
         if candidate.is_dir() {
             if options.range.is_some() || options.max_bytes.is_some() {
                 return Err(HostError::InvalidRequest(
@@ -1298,10 +1336,19 @@ impl Cell {
     }
 
     pub fn read_exact(&mut self, path: impl Into<PathBuf>) -> Result<Vec<u8>, HostError> {
+        let path = path.into();
+        if let Some(bytes) = self.pending_file_bytes(&path)? {
+            self.ledger.calls = self.ledger.calls.saturating_add(1);
+            self.ledger.bytes_read = self
+                .ledger
+                .bytes_read
+                .saturating_add(u64::try_from(bytes.len()).unwrap_or(u64::MAX));
+            return Ok(bytes);
+        }
         let snapshot = self.files.read(
             &self.invocation,
             FileReadRequest {
-                path: path.into(),
+                path,
                 options: ReadOptions::default(),
             },
         )?;
@@ -1317,6 +1364,25 @@ impl Cell {
                 false,
             ))
         })
+    }
+
+    fn pending_file_bytes(&self, path: &Path) -> Result<Option<Vec<u8>>, HostError> {
+        let Some(content) = self
+            .transaction
+            .as_ref()
+            .and_then(|transaction| transaction.pending_content(path))
+        else {
+            return Ok(None);
+        };
+        match content {
+            PendingFileContent::Present(bytes) => Ok(Some(bytes.to_vec())),
+            PendingFileContent::Removed => Err(HostError::Engine(EngineError::new(
+                EngineErrorKind::NotFound,
+                format!("file removed by active transaction: {}", path.display()),
+                false,
+            ))),
+            PendingFileContent::Unavailable => Ok(None),
+        }
     }
 
     pub fn state_get(&self, key: &str) -> Option<&Value> {
@@ -1556,6 +1622,42 @@ impl Cell {
             .validate()
             .map_err(|error| HostError::Serialization(error.to_string()))?;
         Ok(response)
+    }
+    fn project_read_bytes(mut bytes: Vec<u8>, options: &ReadOptions) -> Result<Vec<u8>, HostError> {
+        if let Some(range) = options.range.as_deref() {
+            let (start, end) = range.split_once(':').ok_or_else(|| {
+                HostError::InvalidRequest(
+                    "read range must be START:END with inclusive positive line numbers".into(),
+                )
+            })?;
+            let start = start.parse::<usize>().ok().filter(|line| *line > 0);
+            let end = end.parse::<usize>().ok().filter(|line| *line > 0);
+            let (Some(start), Some(end)) = (start, end) else {
+                return Err(HostError::InvalidRequest(
+                    "read range must be START:END with inclusive positive line numbers".into(),
+                ));
+            };
+            if end < start {
+                return Err(HostError::InvalidRequest(
+                    "read range end must be greater than or equal to start".into(),
+                ));
+            }
+            let text = std::str::from_utf8(&bytes).map_err(|_| {
+                HostError::InvalidRequest("line ranges require a UTF-8 file".into())
+            })?;
+            let lines = text.split_inclusive('\n').collect::<Vec<_>>();
+            if start > lines.len() {
+                return Err(HostError::InvalidRequest(format!(
+                    "read range start {start} exceeds file line count {}",
+                    lines.len()
+                )));
+            }
+            bytes = lines[start - 1..end.min(lines.len())].concat().into_bytes();
+        }
+        if let Some(limit) = options.max_bytes {
+            bytes.truncate(usize::try_from(limit).unwrap_or(usize::MAX));
+        }
+        Ok(bytes)
     }
 }
 

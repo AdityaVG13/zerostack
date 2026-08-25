@@ -1,11 +1,12 @@
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
 use zero_abi::{
-    EngineError, EngineErrorKind, EngineInvocation, FileEffectReceipt, FileEffectRequest,
-    FileEngine, FileLease, FileMetadata, FileReadRequest, ReadOptions, ZeroHandle,
+    EngineError, EngineErrorKind, EngineInvocation, FileEffectKind, FileEffectReceipt,
+    FileEffectRequest, FileEngine, FileLease, FileMetadata, FileReadRequest, ReadOptions,
+    ZeroHandle,
 };
 use zero_store::{SyncPolicy, ZeroCas, atomic_write_file_with_sync};
 
@@ -245,7 +246,36 @@ pub struct Transaction {
     _lease: Box<dyn FileLease>,
 }
 
+pub(crate) enum PendingFileContent<'a> {
+    Present(&'a [u8]),
+    Removed,
+    Unavailable,
+}
+
 impl Transaction {
+    pub(crate) fn pending_content(&self, path: &Path) -> Option<PendingFileContent<'_>> {
+        let requested = logical_path(&self.invocation.context.project_root, path);
+        let effect = self.record.effects.iter().rev().find(|effect| {
+            let receipt_path = effect
+                .receipt
+                .as_ref()
+                .map(|receipt| logical_path(&self.invocation.context.project_root, &receipt.path));
+            receipt_path.as_ref() == Some(&requested)
+                || logical_path(&self.invocation.context.project_root, &effect.request.path)
+                    == requested
+        })?;
+        Some(match effect.request.kind {
+            FileEffectKind::Remove => PendingFileContent::Removed,
+            FileEffectKind::Write | FileEffectKind::Edit => effect
+                .request
+                .content
+                .as_deref()
+                .map(PendingFileContent::Present)
+                .unwrap_or(PendingFileContent::Unavailable),
+            FileEffectKind::Restore => PendingFileContent::Unavailable,
+        })
+    }
+
     pub fn apply(
         &mut self,
         mut request: FileEffectRequest,
@@ -367,6 +397,29 @@ impl Transaction {
             Ok(())
         }
     }
+}
+fn logical_path(root: &Path, path: &Path) -> PathBuf {
+    let joined = if path.is_absolute() {
+        path.to_path_buf()
+    } else {
+        root.join(path)
+    };
+    if let Ok(canonical) = fs::canonicalize(&joined) {
+        return canonical;
+    }
+    let mut normalized = PathBuf::new();
+    for component in joined.components() {
+        match component {
+            Component::CurDir => {}
+            Component::ParentDir => {
+                normalized.pop();
+            }
+            Component::Prefix(_) | Component::RootDir | Component::Normal(_) => {
+                normalized.push(component.as_os_str());
+            }
+        }
+    }
+    normalized
 }
 
 impl Drop for Transaction {
