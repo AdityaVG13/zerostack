@@ -33,9 +33,11 @@ pub mod robust_snap;
 pub mod safe_expand;
 pub mod schema;
 pub mod snap_effect;
+pub mod speculation;
 pub mod surface;
 pub mod telemetry;
 pub mod verdict;
+pub mod work_capsule;
 pub mod zbf;
 pub mod zero_kernel;
 
@@ -207,12 +209,24 @@ pub use snap_effect::{
     SnapSearchRequest, SnapSelection, SnapSelectionRequest, SnapSource, SnapStructuralEvidence,
     SnapTargetRequest, SnapView, SnapViewMode, SnapViewRequest,
 };
+pub use speculation::{
+    DEFAULT_SPECULATION_LIMIT, SPECULATION_CONTRACT, FinalizedCallProof,
+    FinalizedSpeculationPlan, SpeculationAdmission, SpeculationBinding, SpeculationCandidate,
+    SpeculationLedger, SpeculationPermit, SpeculationState, SpeculativeOperation,
+    compile_finalized_speculation_plan,
+};
 pub use surface::{
     CapabilityDescriptor, DomainAdapterRegistration, GlobalRegistration, RegistrationError,
     SURFACE_CONTRACT_VERSION, SurfaceContractError, SurfaceKind, SurfaceRegistration,
 };
 pub use telemetry::{TelemetryCounter, TelemetryOverflow, TelemetrySchema, ZeroTelemetry};
 pub use verdict::{Premise, SafetyVerdict, VERDICT_MAX_PREMISE_NAME_BYTES, VerdictBuildError};
+pub use work_capsule::{
+    CapsuleRoots, CapsuleState, GovernorDecision, GovernorInput, GovernorRegime, InterruptSchedule,
+    MechanicalEvidence, MechanicalVerdict, PromotionEvidence, PromotionInputs, ScheduleAction,
+    SemanticInterrupt, SemanticInterruptKind, TurnClass, TurnMetadata, TurnRecord, WorkCapsule,
+    ZeroDominanceProof, choose_regime, schedule_next,
+};
 pub use zbf::{
     DurableProfile, DurableProfileId, ZBF_CONTAINER_FLAG, ZBF_CONTRACT_VERSION, ZBF_HEADER_LEN,
     ZBF_MAGIC, ZBF_MAX_CHILDREN, ZBF_MAX_DEPTH, ZBF_MAX_OBJECT_BYTES, ZBF_SCHEMA_MAJOR,

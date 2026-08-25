@@ -36,6 +36,10 @@ tempfile = "3"
 name = "direct_host"
 path = "../../tests/unit/zero-kernel/direct_host.rs"
 
+[[test]]
+name = "speculation"
+path = "../../tests/unit/zero-kernel/speculation.rs"
+
 [[bin]]
 name = "zero-kernel"
 path = "src/bin/zero_kernel.rs"

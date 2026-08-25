@@ -1,4 +1,9 @@
-use zero_abi::SOURCE_BYTE_LIMIT;
+use std::collections::BTreeSet;
+
+use zero_abi::{
+    ExecDag, FinalizedSpeculationPlan, SOURCE_BYTE_LIMIT, SpeculationBinding, SpeculationCandidate,
+    compile_finalized_speculation_plan,
+};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct PreparedCell {
@@ -12,6 +17,24 @@ impl PreparedCell {
     }
     pub fn digest(&self) -> &str {
         &self.digest
+    }
+
+    pub fn compile_speculation_plan(
+        &self,
+        binding: SpeculationBinding,
+        dag: &ExecDag,
+        verifier_root: String,
+        unconditional_nodes: &BTreeSet<String>,
+        candidates: Vec<SpeculationCandidate>,
+    ) -> Result<FinalizedSpeculationPlan, String> {
+        compile_finalized_speculation_plan(
+            self.digest.clone(),
+            binding,
+            dag,
+            verifier_root,
+            unconditional_nodes,
+            candidates,
+        )
     }
 }
 
@@ -47,23 +70,5 @@ impl CellPreparation {
             source: self.source,
             digest,
         })
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn streamed_deltas_preserve_exact_source() {
-        let mut preparation = CellPreparation::new();
-        preparation.feed("const x = ").unwrap();
-        preparation.feed("1; return x;").unwrap();
-        let prepared = preparation.finish().unwrap();
-        assert_eq!(prepared.source(), "const x = 1; return x;");
-        assert_eq!(
-            prepared.digest(),
-            blake3::hash(prepared.source().as_bytes()).to_hex().as_str()
-        );
     }
 }

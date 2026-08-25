@@ -15,8 +15,9 @@ use zero_abi::{
     ReadOptions, SNAP_WORKSPACE_SCHEMA, ShellOptions, ShellResult, SnapAccounting, SnapByteRange,
     SnapNewline, SnapRecovery, SnapRequest, SnapResult, SnapSelection, SnapSelectionRequest,
     SnapSource, SnapStructuralEvidence, SnapTargetRequest, SnapView, SnapViewMode, StateEvidence,
-    StructuralEngine, StructuralQuery, TokenEngine, ZERO_KERNEL_PROTOCOL, ZeroHandle,
-    ZeroKernelEvent, ZeroKernelOutcome, ZeroKernelRequest, ZeroKernelResponse, ZeroOperationTrace,
+    StructuralEngine, StructuralQuery, TokenEngine, TurnMetadata, TurnRecord, ZERO_KERNEL_PROTOCOL,
+    ZeroHandle, ZeroKernelEvent, ZeroKernelOutcome, ZeroKernelRequest, ZeroKernelResponse,
+    ZeroOperationTrace, canonical_json, sha256_hex,
 };
 use zero_store::{EventLog, ZeroCas};
 
@@ -406,6 +407,7 @@ impl ZeroKernel {
             frame_tasks: Arc::new(AtomicU64::new(0)),
             frame_processes: Arc::new(AtomicU64::new(0)),
             async_records: Arc::new(Mutex::new(AsyncRecord::default())),
+            turn_metadata: request.turn.unwrap_or_else(TurnMetadata::native),
             settled: false,
         })
     }
@@ -453,6 +455,7 @@ pub struct Cell {
     frame_tasks: Arc<AtomicU64>,
     frame_processes: Arc<AtomicU64>,
     async_records: Arc<Mutex<AsyncRecord>>,
+    turn_metadata: TurnMetadata,
     settled: bool,
 }
 
@@ -1345,6 +1348,31 @@ impl Cell {
             .retain(|handle| seen.insert(handle.to_string()));
     }
 
+    fn turn_record(&self, outcome: &ZeroKernelOutcome) -> Result<TurnRecord, HostError> {
+        let sequence = cell_sequence(&self.invocation.context.cell_id).ok_or_else(|| {
+            HostError::Serialization("cell id does not carry a positive sequence".into())
+        })?;
+        let ledger = serde_json::to_value(&self.ledger)
+            .map_err(|error| HostError::Serialization(error.to_string()))?;
+        let trace = serde_json::json!({
+            "cellId": self.invocation.context.cell_id,
+            "sourceDigest": source_digest(&self.source),
+            "outcome": outcome,
+            "operations": self.operations,
+            "operationsTruncated": self.operations_truncated,
+        });
+        let record = TurnRecord {
+            sequence,
+            class: self.turn_metadata.class,
+            operation_count: u32::try_from(self.operations.len()).unwrap_or(u32::MAX),
+            retry_count: self.turn_metadata.retry_count,
+            resource_ledger_root: sha256_hex(canonical_json(&ledger).as_bytes()),
+            trace_root: sha256_hex(canonical_json(&trace).as_bytes()),
+        };
+        record.validate().map_err(HostError::Serialization)?;
+        Ok(record)
+    }
+
     pub fn fail(mut self, mut error: EngineError) -> Result<ZeroKernelResponse, HostError> {
         self.merge_async_records();
         self.dedup_handles();
@@ -1362,6 +1390,7 @@ impl Cell {
         } else {
             ZeroKernelOutcome::Failed
         };
+        let turn = self.turn_record(&outcome)?;
         let visible = error.detail.clone();
         let visible_digest = blake3::hash(visible.as_bytes()).to_hex().to_string();
         let event = ZeroKernelEvent {
@@ -1378,6 +1407,7 @@ impl Cell {
             outcome: outcome.clone(),
             ledger: self.ledger.clone(),
             model_visible_digest: visible_digest,
+            turn: Some(turn.clone()),
         };
         let publication = self
             .events
@@ -1399,6 +1429,7 @@ impl Cell {
                 unchanged: true,
             },
             ledger: self.ledger.clone(),
+            turn: Some(turn),
         };
         response
             .validate()
@@ -1435,6 +1466,7 @@ impl Cell {
         if let Some(handle) = projection.exact.clone() {
             self.handles.push(handle);
         }
+        let turn = self.turn_record(&ZeroKernelOutcome::Completed)?;
         let before = self.state.root.clone();
         let after = if self.state_dirty {
             match self.state_store.commit(before.as_ref(), &self.state.values) {
@@ -1484,6 +1516,7 @@ impl Cell {
             outcome: ZeroKernelOutcome::Completed,
             ledger: self.ledger.clone(),
             model_visible_digest: visible_digest,
+            turn: Some(turn.clone()),
         };
         let publication = match self.events.publish(&event, visible_bytes) {
             Ok(publication) => publication,
@@ -1517,6 +1550,7 @@ impl Cell {
                 unchanged: before == after,
             },
             ledger: self.ledger.clone(),
+            turn: Some(turn),
         };
         response
             .validate()

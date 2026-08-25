@@ -56,6 +56,7 @@ pub mod charging_maps;
 pub mod fresh_work;
 pub mod frontier;
 pub mod resource_classes;
+pub mod usage;
 
 pub use campaign::{CampaignError, ReuseCampaign};
 

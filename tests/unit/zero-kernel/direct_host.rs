@@ -665,6 +665,11 @@ fn typescript_cell_uses_only_direct_z_methods() {
     assert_eq!(response.operations.len(), 1);
     assert_eq!(response.operations[0].method, "read");
     assert_eq!(response.value, Some(json!("\"content\"")));
+    let turn = response.turn.as_ref().expect("native turn record");
+    assert_eq!(turn.sequence, 1);
+    assert_eq!(turn.class, zero_abi::TurnClass::Mechanical);
+    assert_eq!(turn.operation_count, 1);
+    assert_eq!(turn.retry_count, None);
     assert_eq!(kernel.live_frames(), 0);
 }
 

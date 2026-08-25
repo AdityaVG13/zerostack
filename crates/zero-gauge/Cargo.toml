@@ -9,3 +9,7 @@ description = "Canonical ZeroStack ordinal references and provider-locked token 
 serde.workspace = true
 serde_json.workspace = true
 zero-abi = { path = "../zero-abi" }
+
+[[test]]
+name = "hundredfold"
+path = "../../tests/unit/zero-gauge/hundredfold.rs"

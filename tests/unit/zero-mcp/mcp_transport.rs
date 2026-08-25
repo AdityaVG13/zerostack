@@ -182,6 +182,7 @@ fn completed_response() -> zero_abi::ZeroKernelResponse {
             bytes_written: 0,
             bytes_visible: 11,
         },
+        turn: None,
     }
 }
 

@@ -13,6 +13,8 @@ use std::sync::atomic::AtomicBool;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
+use crate::work_capsule::{TurnMetadata, TurnRecord};
+
 /// Stable wire identity. Evolution is bound by `contract_digest`, never by a
 /// numeric suffix in a symbol or operation name.
 pub const ZERO_KERNEL_PROTOCOL: &str = "ZeroKernel";
@@ -55,6 +57,7 @@ pub fn zero_kernel_response_schema() -> Value {
             },
             "handles": { "type": "array", "items": { "type": "string", "pattern": "^z://blob/" } },
             "event": { "type": "string", "pattern": "^z://blob/" },
+            "turn": { "type": "object" },
             "state": {
                 "type": "object",
                 "additionalProperties": false,
@@ -250,6 +253,8 @@ pub struct ZeroKernelRequest {
     pub source: String,
     pub context: KernelContext,
     pub budget: KernelBudget,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub turn: Option<TurnMetadata>,
 }
 
 impl ZeroKernelRequest {
@@ -263,9 +268,16 @@ impl ZeroKernelRequest {
             source,
             context,
             budget,
+            turn: None,
         };
         request.validate()?;
         Ok(request)
+    }
+
+    pub fn with_turn_metadata(mut self, turn: TurnMetadata) -> Result<Self, ZeroKernelError> {
+        self.turn = Some(turn);
+        self.validate()?;
+        Ok(self)
     }
 
     pub fn validate(&self) -> Result<(), ZeroKernelError> {
@@ -350,6 +362,8 @@ pub struct ZeroKernelResponse {
     pub event: ZeroHandle,
     pub state: StateEvidence,
     pub ledger: KernelLedger,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub turn: Option<TurnRecord>,
 }
 
 impl ZeroKernelResponse {
@@ -393,6 +407,9 @@ impl ZeroKernelResponse {
             }
             previous_sequence = operation.sequence;
         }
+        if let Some(turn) = &self.turn {
+            turn.validate().map_err(ZeroKernelError::InvalidResponse)?;
+        }
         self.state.validate(&self.outcome)
     }
 }
@@ -418,6 +435,8 @@ pub struct ZeroKernelEvent {
     pub outcome: ZeroKernelOutcome,
     pub ledger: KernelLedger,
     pub model_visible_digest: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub turn: Option<TurnRecord>,
 }
 
 impl ZeroKernelEvent {
@@ -438,6 +457,9 @@ impl ZeroKernelEvent {
                     "{name} must not be empty"
                 )));
             }
+        }
+        if let Some(turn) = &self.turn {
+            turn.validate().map_err(ZeroKernelError::InvalidEvent)?;
         }
         Ok(())
     }

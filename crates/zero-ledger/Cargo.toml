@@ -11,3 +11,7 @@ description = "RACC resource gauge, T8 exposure/replay identity, and exact-phase
 serde = { workspace = true }
 serde_json = { workspace = true }
 zero-abi = { path = "../zero-abi" }
+
+[[test]]
+name = "usage"
+path = "../../tests/unit/zero-ledger/usage.rs"

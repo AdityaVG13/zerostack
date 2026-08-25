@@ -17,6 +17,7 @@ fn event(visible: &[u8]) -> ZeroKernelEvent {
         outcome: ZeroKernelOutcome::Completed,
         ledger: KernelLedger::default(),
         model_visible_digest: blake3::hash(visible).to_hex().to_string(),
+        turn: None,
     }
 }
 

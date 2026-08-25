@@ -46,6 +46,26 @@ The first file mutation lazily opens one cell transaction. FSZero returns exact 
 
 TokenZero measures the serialized value at operation and response boundaries. Small values pass through. Larger values may return a bounded projection and exact handles. Recovering a handle returns original bytes and contributes to recovery-aware accounting.
 
+## Zero-miss speculative scheduling
+
+ZeroKernel admits speculative work only after `CellPreparation` seals the full
+source and a rooted verifier proves an unconditional node in the exact
+execution DAG. The permit binds the Work Capsule, state, contract, source,
+DAG, node, inputs, epoch, arguments, occurrence, cancellation bound, work
+budget, and provider-token budget.
+
+Only `z.read`, `z.find`, and named certified-pure extensions are eligible.
+`z.edit`, `z.apply`, `z.run`, and `z.state` remain ordinary, dependency-ordered
+operations. Capacity refusal chooses ordinary execution before launch. Once a
+speculative call is admitted, the exact call must claim that result; a missing
+claim is an invariant failure and never triggers a duplicate call.
+
+Cancellation drains and joins unclaimed work. The speculation ledger records
+claimed work and conservative provider-token waste. Speculation is a latency
+optimization and is not counted as token savings. A
+`find -> exact snap -> edit -> verify` workflow still fits in one model-facing
+`zero` call, with intermediate evidence kept behind exact handles.
+
 ## Process ownership
 
 `z.run` belongs to the hub. It validates the working directory, starts the exact child tree, captures bounded output, and terminates and reaps descendants on timeout, cancellation, frame failure, shutdown, or object destruction. TokenZero projects captured output but never owns the process lifecycle.

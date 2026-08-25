@@ -76,6 +76,7 @@ fn failed_response_must_carry_error_and_unchanged_state() {
             unchanged: true,
         },
         ledger: KernelLedger::default(),
+        turn: None,
     };
     response.validate().expect("valid failure");
 
@@ -107,6 +108,7 @@ fn completed_response_rejects_error_or_decision() {
             unchanged: true,
         },
         ledger: KernelLedger::default(),
+        turn: None,
     };
     response.validate().expect("valid completion");
     response.decision = Some(json!({"choose": true}));
