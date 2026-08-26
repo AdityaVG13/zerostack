@@ -13,13 +13,33 @@ ZeroStack composes three independent engines behind one reusable in-process host
 
 Authority is deliberately narrow. A graph result does not become file content. A compact output does not become the source bytes. A successful file receipt does not commit the cell by itself.
 
+## Harness independence
+
+ZeroStack is developed and accepted as a standalone product. Coding harnesses
+are external embedding applications, not architecture participants.
+
+- Product code, public contracts, release identity, configuration, validation,
+  and optimization criteria do not depend on a harness name, path, package,
+  adapter, cache, fallback, or lifecycle.
+- A harness-provided tool can transport development work, but its success is
+  dogfood evidence only. Standalone Rust APIs, targeted tests, the
+  `zero-kernel` CLI, and the canonical Node binding are the acceptance
+  surfaces.
+- If a harness succeeds while the equivalent standalone path fails, the
+  product is broken. The fix belongs in ZeroStack, never in a harness-specific
+  shortcut or compatibility path.
+- Harness integration and release packaging remain in the harness repository.
+  Ordinary ZeroStack implementation and review do not inspect or modify them.
+- Performance claims use standalone measured workloads and product invariants,
+  never harness retries, caches, or presentation.
+
 ## Host and frame lifecycle
 
 The host retains initialized adapters, durable roots, and session identity. Every call creates a fresh bounded JavaScript or TypeScript frame.
 
 ```mermaid
 graph LR
-  H[Agent harness] --> K[Reusable ZeroKernel host]
+  H[Embedding application] --> K[Reusable ZeroKernel host]
   K --> F[Fresh bounded frame]
   F --> FS[FSZero]
   F --> G[GraphZero]
