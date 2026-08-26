@@ -70,3 +70,6 @@ path = "../../tests/unit/zero-abi/work_capsule.rs"
 [[test]]
 name = "provider_usage"
 path = "../../tests/unit/zero-abi/provider_usage.rs"
+[[test]]
+name = "task_lens"
+path = "../../tests/unit/zero-abi/task_lens.rs"

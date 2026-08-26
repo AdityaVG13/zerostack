@@ -35,6 +35,8 @@ pub mod schema;
 pub mod snap_effect;
 pub mod speculation;
 pub mod surface;
+#[doc(hidden)]
+pub mod task_lens;
 pub mod telemetry;
 pub mod verdict;
 pub mod work_capsule;
@@ -217,6 +219,11 @@ pub use speculation::{
 pub use surface::{
     CapabilityDescriptor, DomainAdapterRegistration, GlobalRegistration, RegistrationError,
     SURFACE_CONTRACT_VERSION, SurfaceContractError, SurfaceKind, SurfaceRegistration,
+};
+#[doc(hidden)]
+pub use task_lens::{
+    TASK_LENS_CONTRACT_VERSION, TaskLensCompilerImpact, TaskLensError, TaskLensRequest,
+    TaskLensResult,
 };
 pub use telemetry::{TelemetryCounter, TelemetryOverflow, TelemetrySchema, ZeroTelemetry};
 pub use verdict::{Premise, SafetyVerdict, VERDICT_MAX_PREMISE_NAME_BYTES, VerdictBuildError};

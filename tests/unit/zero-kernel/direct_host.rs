@@ -14,8 +14,9 @@ use zero_abi::{
     AsgrepOptions, CompressionRequest, CompressionResult, EngineError, EngineErrorKind,
     EngineInvocation, FileEffectKind, FileEffectReceipt, FileEffectRequest, FileEngine, FileLease,
     FileReadRequest, FileSnapshot, KernelBudget, KernelContext, LookupOptions, ProjectionRequest,
-    ProjectionResult, ReadOptions, ShellOptions, StructuralEngine, StructuralHit, StructuralQuery,
-    StructuralResult, TokenAccounting, TokenEngine, ZeroHandle,
+    ProjectionResult, ReadOptions, SafetyVerdict, ShellOptions, StructuralCoverage,
+    StructuralEngine, StructuralHit, StructuralQuery, StructuralResult, TaskLensCompilerImpact,
+    TaskLensRequest, TaskLensResult, TokenAccounting, TokenEngine, ZeroHandle,
 };
 use zero_kernel::{AtomicCancellation, HostError, ShellCommand, TransactionError, ZeroKernel};
 
@@ -252,6 +253,109 @@ impl StructuralEngine for Graph {
     }
 }
 
+/// A complete, valid task-lens Safe result honoring the requested roots.
+fn complete_lens_result(request: &TaskLensRequest) -> TaskLensResult {
+    let mut evidence_roots = Vec::new();
+    if let Some(root) = &request.capsule_root {
+        evidence_roots.push(root.clone());
+    }
+    if let Some(root) = &request.required_snapshot {
+        evidence_roots.push(root.clone());
+    }
+    TaskLensResult {
+        verdict: SafetyVerdict::Safe,
+        locus: Some(StructuralHit {
+            path: PathBuf::from("src/lib.rs"),
+            symbol: Some(request.query.clone()),
+            line_start: Some(1),
+            line_end: Some(1),
+            preview: Some("pub fn alpha() {}".into()),
+            evidence: Some(handle(b"lens-locus")),
+            source: None,
+            score: 1.0,
+        }),
+        impact: TaskLensCompilerImpact {
+            complete: true,
+            edge_roots: vec![handle(b"lens-edge")],
+            reverse_roots: vec![handle(b"lens-reverse")],
+        },
+        proof_support: vec![handle(b"lens-proof")],
+        evidence_roots,
+        coverage: Some(StructuralCoverage {
+            tier_a_pct: 99.5,
+            tier_b_pct: 40.0,
+            tier_c_pct: 10.0,
+            freshness_verified: true,
+            snapshot_id: 7,
+        }),
+        index_digest: "a".repeat(64),
+        reasons: Vec::new(),
+    }
+}
+
+/// Structural engine whose task lens returns a complete Safe result that
+/// satisfies every Safe law against the request.
+struct SafeLensGraph;
+impl StructuralEngine for SafeLensGraph {
+    fn query(
+        &self,
+        _invocation: &EngineInvocation,
+        query: StructuralQuery,
+    ) -> Result<StructuralResult, EngineError> {
+        let hit = StructuralHit {
+            path: PathBuf::from("src/lib.rs"),
+            symbol: Some(query.query.clone()),
+            line_start: Some(1),
+            line_end: Some(1),
+            preview: Some("hit".into()),
+            evidence: None,
+            source: Some(handle(b"pub fn alpha() {}\n")),
+            score: 1.0,
+        };
+        Ok(StructuralResult {
+            hits: vec![hit],
+            index_digest: "index".into(),
+            complete: true,
+            coverage: None,
+            absence: None,
+            budget: None,
+            diagnostic: None,
+            continuation: None,
+        })
+    }
+
+    fn task_lens(
+        &self,
+        _invocation: &EngineInvocation,
+        request: TaskLensRequest,
+    ) -> Result<TaskLensResult, EngineError> {
+        Ok(complete_lens_result(&request))
+    }
+}
+
+/// Structural engine whose task lens claims Safe while violating a Safe law;
+/// the kernel must degrade the invalid would-be Safe to Unknown.
+struct BrokenLensGraph;
+impl StructuralEngine for BrokenLensGraph {
+    fn query(
+        &self,
+        invocation: &EngineInvocation,
+        query: StructuralQuery,
+    ) -> Result<StructuralResult, EngineError> {
+        SafeLensGraph.query(invocation, query)
+    }
+
+    fn task_lens(
+        &self,
+        _invocation: &EngineInvocation,
+        request: TaskLensRequest,
+    ) -> Result<TaskLensResult, EngineError> {
+        let mut result = complete_lens_result(&request);
+        result.impact.complete = false;
+        Ok(result)
+    }
+}
+
 struct Tokens;
 impl TokenEngine for Tokens {
     fn measure(
@@ -343,6 +447,14 @@ impl TokenEngine for Tokens {
 }
 
 fn kernel(root: &std::path::Path, files: Arc<dyn FileEngine>) -> ZeroKernel {
+    kernel_with_structural(root, files, Arc::new(Graph))
+}
+
+fn kernel_with_structural(
+    root: &std::path::Path,
+    files: Arc<dyn FileEngine>,
+    structural: Arc<dyn StructuralEngine>,
+) -> ZeroKernel {
     ZeroKernel::new(
         KernelContext {
             workspace_root: root.to_path_buf(),
@@ -360,7 +472,7 @@ fn kernel(root: &std::path::Path, files: Arc<dyn FileEngine>) -> ZeroKernel {
             output_byte_limit: 64 * 1024,
         },
         files,
-        Arc::new(Graph),
+        structural,
         Arc::new(Tokens),
         root.join(".zerostack"),
     )
@@ -2311,6 +2423,199 @@ fn find_accepts_single_object_and_positional_forms() {
         )
         .unwrap();
     assert_eq!(positional.outcome, zero_abi::ZeroKernelOutcome::Completed);
+}
+
+#[test]
+fn task_lens_with_query_only_engine_returns_canonical_unknown_without_effects() {
+    let root = tempdir().unwrap();
+    // The Graph mock implements only `query`; the default task_lens is
+    // Unsupported, which must surface as a canonical Unknown verdict.
+    let kernel = kernel(root.path(), Arc::new(Files::default()));
+    let response = kernel
+        .execute_cell(
+            r#"
+            const lens = await z.find({query: "alpha", taskLens: {}});
+            return lens;
+            "#,
+        )
+        .unwrap();
+    assert_eq!(response.outcome, zero_abi::ZeroKernelOutcome::Completed);
+    let lens = model_json(&response);
+    assert_eq!(
+        lens["verdict"]["unknown"]["reasons"],
+        json!(["task_lens_unsupported"])
+    );
+    assert_eq!(lens["reasons"], json!(["task_lens_unsupported"]));
+    assert!(lens.get("locus").is_none());
+    assert_eq!(lens["impact"]["complete"], false);
+    assert_eq!(lens["proofSupport"], json!([]));
+    assert_eq!(lens["evidenceRoots"], json!([]));
+    // Query-only engines leave no content handles and no effects behind.
+    assert_eq!(response.handles, vec![]);
+    assert_eq!(response.ledger.bytes_read, 0);
+    assert_eq!(response.ledger.bytes_written, 0);
+}
+
+#[test]
+fn task_lens_safe_result_flows_after_validate() {
+    let root = tempdir().unwrap();
+    let kernel = kernel_with_structural(
+        root.path(),
+        Arc::new(Files::default()),
+        Arc::new(SafeLensGraph),
+    );
+    let capsule = handle(b"capsule-root");
+    let snapshot = handle(b"snapshot-root");
+    let response = kernel
+        .execute_cell(&format!(
+            r#"
+            const lens = await z.find({{
+              query: "alpha",
+              mode: "natural",
+              limit: 3,
+              taskLens: {{
+                capsuleRoot: {:?},
+                requiredSnapshot: {:?},
+              }},
+            }});
+            return lens;
+            "#,
+            capsule.as_str(),
+            snapshot.as_str(),
+        ))
+        .unwrap();
+    assert_eq!(response.outcome, zero_abi::ZeroKernelOutcome::Completed);
+    let lens = model_json(&response);
+    assert_eq!(lens["verdict"], "safe");
+    assert_eq!(lens["reasons"], json!([]));
+    assert_eq!(lens["locus"]["symbol"], "alpha");
+    assert_eq!(lens["impact"]["complete"], true);
+    assert_eq!(lens["indexDigest"], "a".repeat(64));
+    assert_eq!(
+        lens["proofSupport"],
+        json!([handle(b"lens-proof").as_str()])
+    );
+    // Safe law 5: the requested roots appear among the evidence roots.
+    assert_eq!(
+        lens["evidenceRoots"],
+        json!([capsule.as_str(), snapshot.as_str()])
+    );
+    assert_eq!(lens["coverage"]["tierAPct"], 99.5);
+    assert_eq!(lens["coverage"]["freshnessVerified"], true);
+    // The lens evidence binds its content handles into the cell.
+    assert!(response.handles.contains(&handle(b"lens-proof")));
+    assert!(response.handles.contains(&capsule));
+    assert!(response.handles.contains(&snapshot));
+}
+
+#[test]
+fn task_lens_invalid_safe_degrades_to_canonical_unknown() {
+    let root = tempdir().unwrap();
+    // BrokenLensGraph claims Safe while leaving the impact closure
+    // incomplete; the kernel must never surface that invalid authority.
+    let kernel = kernel_with_structural(
+        root.path(),
+        Arc::new(Files::default()),
+        Arc::new(BrokenLensGraph),
+    );
+    let response = kernel
+        .execute_cell(
+            r#"
+            const lens = await z.find({query: "alpha", taskLens: {}});
+            return lens;
+            "#,
+        )
+        .unwrap();
+    assert_eq!(response.outcome, zero_abi::ZeroKernelOutcome::Completed);
+    let lens = model_json(&response);
+    assert_eq!(
+        lens["verdict"]["unknown"]["reasons"],
+        json!(["incomplete_impact"])
+    );
+    assert_eq!(lens["reasons"], json!(["incomplete_impact"]));
+    assert!(lens.get("locus").is_none());
+    assert_eq!(lens["impact"]["complete"], false);
+}
+
+#[test]
+fn malformed_task_lens_slot_is_rejected() {
+    let root = tempdir().unwrap();
+    let kernel = kernel(root.path(), Arc::new(Files::default()));
+    let cases: &[(&str, &str)] = &[
+        (
+            r#"z.find({query: "alpha", taskLens: "capsule"})"#,
+            "must be an object",
+        ),
+        (
+            r#"z.find({query: "alpha", taskLens: {capsuleRoot: "not-a-handle"}})"#,
+            "invalid ZeroHandle",
+        ),
+        (
+            r#"z.find({query: "alpha", taskLens: {capsuleRoot: 7}})"#,
+            "expected a string",
+        ),
+        (
+            r#"z.find({query: "alpha", taskLens: {bogus: "z://blob/0000000000000000000000000000000000000000000000000000000000000000"}})"#,
+            "unknown z.find taskLens field",
+        ),
+        (
+            r#"z.find({query: "alpha", taskLens: {capsuleRoot: "z://blob/abcd"}})"#,
+            "invalid ZeroHandle",
+        ),
+    ];
+    for (call, needle) in cases {
+        let response = kernel
+            .execute_cell(&format!("return await {call};"))
+            .unwrap();
+        assert_eq!(
+            response.outcome,
+            zero_abi::ZeroKernelOutcome::Failed,
+            "{call}"
+        );
+        let detail = response
+            .error
+            .as_ref()
+            .expect("failed response carries a typed error")
+            .detail
+            .clone();
+        assert!(detail.contains(needle), "{call}: {detail}");
+    }
+    // A rejected slot cannot publish content or effects.
+    let response = kernel
+        .execute_cell(&format!("return await {};", cases[1].0))
+        .unwrap();
+    assert_eq!(response.handles, vec![]);
+    assert_eq!(response.ledger.bytes_written, 0);
+}
+
+#[test]
+fn object_find_without_task_lens_is_unchanged() {
+    let root = tempdir().unwrap();
+    let kernel = kernel(root.path(), Arc::new(Files::default()));
+    let object = kernel
+        .execute_cell(
+            r#"
+            const r = await z.find({query: "alpha", mode: "natural", limit: 1});
+            return r;
+            "#,
+        )
+        .unwrap();
+    assert_eq!(object.outcome, zero_abi::ZeroKernelOutcome::Completed);
+    let object_json = model_json(&object);
+    let positional = kernel
+        .execute_cell(
+            r#"
+            const r = await z.find("alpha", {mode: "natural", limit: 1});
+            return r;
+            "#,
+        )
+        .unwrap();
+    assert_eq!(positional.outcome, zero_abi::ZeroKernelOutcome::Completed);
+    assert_eq!(model_json(&positional), object_json);
+    // Ordinary object find returns the StructuralResult, not a lens verdict.
+    assert_eq!(object_json["hits"][0]["symbol"], "alpha");
+    assert!(object_json.get("verdict").is_none());
+    assert!(object_json.get("taskLens").is_none());
 }
 
 #[test]

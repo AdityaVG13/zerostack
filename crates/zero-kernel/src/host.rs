@@ -12,10 +12,11 @@ use zero_abi::{
     EngineCallContext, EngineError, EngineErrorKind, EngineInvocation, ExpandOptions, ExpandResult,
     FileEffectKind, FileEffectReceipt, FileEffectRequest, FileEngine, FileReadRequest,
     FileSnapshot, KernelBudget, KernelContext, KernelLedger, LookupOptions, ProjectionRequest,
-    ProviderUsageObservation, ReadOptions, SNAP_WORKSPACE_SCHEMA, ShellOptions, ShellResult,
-    SnapAccounting, SnapByteRange, SnapNewline, SnapRecovery, SnapRequest, SnapResult,
+    ProviderUsageObservation, ReadOptions, SNAP_WORKSPACE_SCHEMA, SafetyVerdict, ShellOptions,
+    ShellResult, SnapAccounting, SnapByteRange, SnapNewline, SnapRecovery, SnapRequest, SnapResult,
     SnapSelection, SnapSelectionRequest, SnapSource, SnapStructuralEvidence, SnapTargetRequest,
-    SnapView, SnapViewMode, StateEvidence, StructuralEngine, StructuralQuery, TokenEngine,
+    SnapView, SnapViewMode, StateEvidence, StructuralEngine, StructuralQuery,
+    TaskLensCompilerImpact, TaskLensError, TaskLensRequest, TaskLensResult, TokenEngine,
     TurnMetadata, TurnRecord, ZERO_KERNEL_PROTOCOL, ZeroHandle, ZeroKernelEvent, ZeroKernelOutcome,
     ZeroKernelRequest, ZeroKernelResponse, ZeroOperationTrace, canonical_json, sha256_hex,
 };
@@ -211,6 +212,40 @@ impl DirectCallContext {
             .filter_map(|hit| hit.evidence.clone())
             .chain(result.continuation.clone())
         {
+            if !record.handles.contains(&handle) {
+                record.handles.push(handle);
+            }
+        }
+        Ok(result)
+    }
+
+    pub fn task_lens(&self, request: TaskLensRequest) -> Result<TaskLensResult, HostError> {
+        let _task =
+            LiveTaskGuard::acquire(Arc::clone(&self.live_tasks), Arc::clone(&self.frame_tasks));
+        let result = match self.structural.task_lens(&self.invocation, request.clone()) {
+            // An engine without task-lens support degrades to a canonical
+            // Unknown verdict, never a Safe-looking or error result.
+            Err(error) if error.kind == EngineErrorKind::Unsupported => {
+                task_lens_unknown("task_lens_unsupported")
+            }
+            Err(error) => return Err(HostError::from(error)),
+            Ok(result) => match result.validate(&request) {
+                Ok(()) => result,
+                // An invalid would-be Safe must never surface as authority:
+                // degrade to Unknown with the canonical contract reason.
+                Err(error) if result.verdict == SafetyVerdict::Safe => {
+                    task_lens_unknown(&task_lens_reason(&error))
+                }
+                Err(error) => {
+                    return Err(HostError::InvalidRequest(format!(
+                        "task lens result failed validation: {error}"
+                    )));
+                }
+            },
+        };
+        let mut record = self.records.lock();
+        record.calls = record.calls.saturating_add(1);
+        for handle in task_lens_handles(&result) {
             if !record.handles.contains(&handle) {
                 record.handles.push(handle);
             }
@@ -2102,6 +2137,83 @@ fn push_handle(handles: &mut Vec<ZeroHandle>, handle: ZeroHandle) {
     if !handles.contains(&handle) {
         handles.push(handle);
     }
+}
+
+/// The canonical fail-closed lens result: `Unknown` with one reason, no
+/// locus, no impact closure, no evidence, and no index claim.
+fn task_lens_unknown(reason: &str) -> TaskLensResult {
+    TaskLensResult {
+        verdict: SafetyVerdict::Unknown {
+            reasons: vec![reason.to_owned()],
+        },
+        locus: None,
+        impact: TaskLensCompilerImpact {
+            complete: false,
+            edge_roots: Vec::new(),
+            reverse_roots: Vec::new(),
+        },
+        proof_support: Vec::new(),
+        evidence_roots: Vec::new(),
+        coverage: None,
+        index_digest: String::new(),
+        reasons: vec![reason.to_owned()],
+    }
+}
+
+/// Canonical snake_case reason for a task-lens contract violation.
+fn task_lens_reason(error: &TaskLensError) -> String {
+    match error {
+        TaskLensError::EmptyQuery => "empty_query".into(),
+        TaskLensError::InvalidRequestedRoot(root) => {
+            format!("invalid_requested_root:{root}")
+        }
+        TaskLensError::UnnormalizedReasons => "unnormalized_reasons".into(),
+        TaskLensError::MissingLocus => "missing_locus".into(),
+        TaskLensError::UnrootedLocus => "unrooted_locus".into(),
+        TaskLensError::IncompleteImpact => "incomplete_impact".into(),
+        TaskLensError::MissingProofSupport => "missing_proof_support".into(),
+        TaskLensError::MissingCoverage => "missing_coverage".into(),
+        TaskLensError::StaleCoverage => "stale_coverage".into(),
+        TaskLensError::IncompleteCoverage => "incomplete_coverage".into(),
+        TaskLensError::MissingEvidenceRoot(root) => {
+            format!("missing_evidence_root:{root}")
+        }
+        TaskLensError::MalformedLocusRoot(root) => {
+            format!("malformed_locus_root:{root}")
+        }
+        TaskLensError::MalformedImpactRoot(root) => {
+            format!("malformed_impact_root:{root}")
+        }
+        TaskLensError::MalformedProofRoot(root) => {
+            format!("malformed_proof_root:{root}")
+        }
+        TaskLensError::MalformedEvidenceRoot(root) => {
+            format!("malformed_evidence_root:{root}")
+        }
+        TaskLensError::MalformedIndexDigest => "malformed_index_digest".into(),
+        TaskLensError::SafeWithReasons => "safe_with_reasons".into(),
+        TaskLensError::UnsafeWithoutReasons => "unsafe_without_reasons".into(),
+        TaskLensError::ReasonMismatch => "reason_mismatch".into(),
+    }
+}
+
+/// Every content handle a lens result binds: the locus anchors plus the
+/// impact, proof, and evidence root sets.
+fn task_lens_handles(result: &TaskLensResult) -> Vec<ZeroHandle> {
+    let mut handles = Vec::new();
+    if let Some(locus) = &result.locus {
+        if let Some(handle) = &locus.evidence {
+            handles.push(handle.clone());
+        }
+        if let Some(handle) = &locus.source {
+            handles.push(handle.clone());
+        }
+    }
+    handles.extend(result.evidence_roots.iter().cloned());
+    handles.extend(result.proof_support.iter().cloned());
+    handles.extend(result.impact.edge_roots.iter().cloned());
+    handles.extend(result.impact.reverse_roots.iter().cloned());
+    handles
 }
 
 fn cas_host_error(error: impl std::fmt::Display) -> HostError {

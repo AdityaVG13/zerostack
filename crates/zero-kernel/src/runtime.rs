@@ -9,8 +9,8 @@ use serde_json::{Map, Value};
 use zero_abi::{
     AsgrepMode, AsgrepOptions, CapabilityDescriptor, EffectRequest, EngineError, EngineErrorKind,
     ExpandOptions, GUEST_METHODS, GlobalRegistration, LookupOptions, ReadOptions, ShellOptions,
-    SnapRequest, SnapTargetRequest, SnapViewRequest, ZERO_KERNEL_PROTOCOL, ZeroHandle,
-    ZeroKernelResponse,
+    SnapRequest, SnapTargetRequest, SnapViewRequest, TaskLensRequest, ZERO_KERNEL_PROTOCOL,
+    ZeroHandle, ZeroKernelResponse,
 };
 use zero_codemode::{
     Connector, ConnectorCompletion, ConnectorError, DispatchContext, GuestContext, GuestSurface,
@@ -204,23 +204,34 @@ fn dispatch_concurrent(
             }
         }
         "find" => {
-            let (query, options_source): (Value, Option<Value>) = match positional.first() {
-                Some(Value::Object(first)) if positional.len() == 1 => {
-                    let mut object = first.clone();
-                    let query = object.remove("query").ok_or_else(|| {
-                        ConnectorError::new("z.find object form requires a query field")
-                    })?;
-                    (query, Some(Value::Object(object)))
-                }
-                _ => (
-                    Value::String(string_arg(&positional, 0, "z.find query")?),
-                    positional.get(1).cloned(),
-                ),
-            };
+            let (query, options_source, task_lens): (Value, Option<Value>, Option<Value>) =
+                match positional.first() {
+                    Some(Value::Object(first)) if positional.len() == 1 => {
+                        let mut object = first.clone();
+                        let query = object.remove("query").ok_or_else(|| {
+                            ConnectorError::new("z.find object form requires a query field")
+                        })?;
+                        let task_lens = object.remove("taskLens");
+                        (query, Some(Value::Object(object)), task_lens)
+                    }
+                    _ => (
+                        Value::String(string_arg(&positional, 0, "z.find query")?),
+                        positional.get(1).cloned(),
+                        None,
+                    ),
+                };
             let query = query
                 .as_str()
                 .ok_or_else(|| ConnectorError::new("z.find query must be a string"))?
                 .to_owned();
+            if let Some(task_lens) = task_lens {
+                let options = parse_asgrep_options(options_source.ok_or_else(|| {
+                    ConnectorError::new("z.find taskLens requires object-form options")
+                })?)?;
+                let request = task_lens_request(query, options, task_lens)?;
+                return serde_json::to_value(context.task_lens(request).map_err(host_error)?)
+                    .map_err(json_error);
+            }
             let options = options_source
                 .map(parse_asgrep_options)
                 .transpose()?
@@ -530,6 +541,54 @@ fn parse_asgrep_options(value: Value) -> Result<AsgrepOptions, ConnectorError> {
         .entry("mode")
         .or_insert_with(|| Value::String("natural".into()));
     serde_json::from_value(value).map_err(json_error)
+}
+
+/// Strictly deserialize the object-form z.find taskLens slot. The slot is an
+/// object whose only recognized fields are the camelCase capsuleRoot and
+/// requiredSnapshot content handles; unknown fields, non-string handles, and
+/// malformed digests are rejected before the lens request is dispatched.
+fn task_lens_request(
+    query: String,
+    options: AsgrepOptions,
+    task_lens: Value,
+) -> Result<TaskLensRequest, ConnectorError> {
+    let values = task_lens
+        .as_object()
+        .ok_or_else(|| ConnectorError::new("z.find taskLens must be an object"))?;
+    for key in values.keys() {
+        if key != "capsuleRoot" && key != "requiredSnapshot" {
+            return Err(ConnectorError::new(format!(
+                "unknown z.find taskLens field {key}"
+            )));
+        }
+    }
+    let capsule_root = task_lens_handle(values, "capsuleRoot")?;
+    let required_snapshot = task_lens_handle(values, "requiredSnapshot")?;
+    let request = TaskLensRequest {
+        query,
+        options,
+        capsule_root,
+        required_snapshot,
+    };
+    request.validate().map_err(json_error)?;
+    Ok(request)
+}
+
+fn task_lens_handle(
+    values: &Map<String, Value>,
+    key: &str,
+) -> Result<Option<ZeroHandle>, ConnectorError> {
+    match values.get(key) {
+        None => Ok(None),
+        Some(value) => {
+            let handle = serde_json::from_value::<ZeroHandle>(value.clone()).map_err(json_error)?;
+            // ZeroHandle's serde is transparent over its string; validate the
+            // digest form explicitly so a garbage string cannot name a root.
+            ZeroHandle::parse(handle.as_str())
+                .map_err(|error| ConnectorError::new(error.to_string()))?;
+            Ok(Some(handle))
+        }
+    }
 }
 
 fn shell_arguments(positional: &[Value]) -> Result<(ShellCommand, ShellOptions), ConnectorError> {

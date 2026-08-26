@@ -13,6 +13,7 @@ use std::sync::atomic::AtomicBool;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
+use crate::task_lens::{TaskLensRequest, TaskLensResult};
 use crate::work_capsule::{TurnMetadata, TurnRecord};
 
 /// Stable wire identity. Evolution is bound by `contract_digest`, never by a
@@ -789,6 +790,24 @@ pub trait StructuralEngine: Send + Sync {
         invocation: &EngineInvocation,
         query: StructuralQuery,
     ) -> Result<StructuralResult, EngineError>;
+    /// Task-lens inspection over a rooted capsule/snapshot (Wave16 hub ABI).
+    ///
+    /// The default is fail-closed: engines that have not implemented lens
+    /// support return [`EngineErrorKind::Unsupported`], which hosts must map
+    /// to an `Unknown` verdict — never `Safe`. Implementing engines return a
+    /// [`TaskLensResult`] whose verdict is governed by the task-lens Safe
+    /// laws and whose `reasons` are normalized.
+    fn task_lens(
+        &self,
+        _invocation: &EngineInvocation,
+        _request: TaskLensRequest,
+    ) -> Result<TaskLensResult, EngineError> {
+        Err(EngineError::new(
+            EngineErrorKind::Unsupported,
+            "task_lens is not supported by this engine",
+            false,
+        ))
+    }
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
