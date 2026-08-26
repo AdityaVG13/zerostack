@@ -12,4 +12,4 @@ zero-abi = { path = "../zero-abi" }
 
 [[test]]
 name = "hundredfold"
-path = "../../tests/unit/zero-gauge/hundredfold.rs"
+path = "../../tests/zero_gauge_hundredfold.rs"

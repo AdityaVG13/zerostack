@@ -22,12 +22,12 @@ path = "src/bin/program-evidence.rs"
 
 [[test]]
 name = "project_image_q99"
-path = "../../tests/unit/zero-gate/project_image_q99.rs"
+path = "../../tests/zero_gate_project_image_q99.rs"
 
 [[test]]
 name = "demand_expand"
-path = "../../tests/unit/zero-gate/demand_expand.rs"
+path = "../../tests/zero_gate_demand_expand.rs"
 
 [[test]]
 name = "snap_to_file"
-path = "../../tests/unit/zero-gate/snap_to_file.rs"
+path = "../../tests/zero_gate_snap_to_file.rs"

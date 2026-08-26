@@ -26,11 +26,21 @@ fn managed_block_at_eof_preserves_the_missing_final_newline() {
 
 #[test]
 fn malformed_managed_markers_fail_without_a_replacement() {
-    let previous = "project law\n<!-- tokenzero:rust-core:start -->\nunterminated\n";
-    let err = merge_instructions(previous, McpToolSurface::Classic)
-        .expect_err("malformed markers must fail closed");
-    assert_eq!(err.kind(), ErrorKind::InvalidData);
-    assert!(err.to_string().contains("malformed or duplicate"));
+    // Typed oracle: malformed marker states are rejected as InvalidData.
+    // No merged output is produced on error (merge_instructions returns Err).
+    for previous in [
+        "project law\n<!-- tokenzero:rust-core:start -->\nunterminated\n",
+        "a\n<!-- tokenzero:rust-core:start -->\nold\n<!-- tokenzero:rust-core:end -->\nmid\n<!-- tokenzero:rust-core:start -->\nold2\n<!-- tokenzero:rust-core:end -->\nb\n",
+        "x\n<!-- tokenzero:rust-core:start -->\nold\n<!-- tokenzero:rust-core:start -->\n",
+    ] {
+        let err = merge_instructions(previous, McpToolSurface::Classic)
+            .expect_err("malformed markers must fail closed");
+        assert_eq!(
+            err.kind(),
+            ErrorKind::InvalidData,
+            "expected InvalidData for malformed input, got {err:?}"
+        );
+    }
 }
 
 #[test]

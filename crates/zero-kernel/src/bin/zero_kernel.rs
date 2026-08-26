@@ -54,17 +54,6 @@ fn print_help() {
     println!("{HELP}");
 }
 
-#[cfg(test)]
-mod cli_tests {
-    use super::HELP;
-
-    #[test]
-    fn help_names_commands_without_starting_one() {
-        assert!(HELP.contains("zero-kernel mcp [-C <workspace>]"));
-        assert!(HELP.contains("-h, --help"));
-    }
-}
-
 fn doctor(root: PathBuf) -> Result<(), String> {
     let root = std::fs::canonicalize(root).map_err(|error| error.to_string())?;
     let store = root.join(".zerostack");

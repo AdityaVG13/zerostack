@@ -2876,9 +2876,9 @@ mod capsule_launch_tests {
         }
     }
 
-    #[test]
-    fn begin_from_request_rejects_sealed_source_and_budget_drift() {
-        let root = tempfile::tempdir().unwrap();
+    fn sealed_kernel_and_prepared(
+        root: &tempfile::TempDir,
+    ) -> (ZeroKernel, crate::PreparedCell, String) {
         let kernel = ZeroKernel::new(
             KernelContext {
                 workspace_root: root.path().to_path_buf(),
@@ -2901,12 +2901,10 @@ mod capsule_launch_tests {
             root.path().join(".zerostack"),
         )
         .unwrap();
-
-        // Seal a prepared cell for one source through the ordinary path.
-        let sealed_source = "return 'sealed';";
-        let probe = kernel.begin_cell(sealed_source).unwrap();
+        let sealed_source = "return 'sealed';".to_string();
+        let probe = kernel.begin_cell(&sealed_source).unwrap();
         let mut preparation = CellPreparation::new();
-        preparation.feed(sealed_source).unwrap();
+        preparation.feed(&sealed_source).unwrap();
         let sealed = preparation
             .finish(
                 probe.binding().clone(),
@@ -2915,10 +2913,13 @@ mod capsule_launch_tests {
             )
             .unwrap();
         drop(probe);
+        (kernel, sealed, sealed_source)
+    }
 
-        // An internal caller launching the sealed coordinates under a
-        // different source must be rejected before any state, binding, or
-        // recovery check: the source is bound into the capsule task root.
+    #[test]
+    fn begin_from_request_rejects_sealed_source_drift() {
+        let root = tempfile::tempdir().unwrap();
+        let (kernel, sealed, sealed_source) = sealed_kernel_and_prepared(&root);
         let drifted = ZeroKernelRequest::new(
             "return 'other';".into(),
             kernel.context.clone(),
@@ -2927,27 +2928,55 @@ mod capsule_launch_tests {
         .unwrap();
         let error = kernel
             .begin_from_request(drifted, AtomicCancellation::new(), Some(&sealed))
-            .err()
-            .expect("sealed launch must reject source drift");
-        assert!(
-            matches!(&error, HostError::InvalidRequest(detail) if detail.contains("source")),
-            "sealed launch must reject source drift: {error}"
-        );
+            .expect_err("sealed launch must reject source drift");
+        assert!(matches!(error, HostError::InvalidRequest(_)));
         assert_eq!(kernel.live_frames(), 0);
+        assert_eq!(kernel.live_tasks(), 0);
+        assert_eq!(kernel.live_processes(), 0);
+        let valid = ZeroKernelRequest::new(
+            sealed_source.into(),
+            kernel.context.clone(),
+            kernel.budget.clone(),
+        )
+        .unwrap();
+        let cell = kernel
+            .begin_from_request(valid, AtomicCancellation::new(), Some(&sealed))
+            .expect("valid sealed launch must succeed after source rejection");
+        assert_eq!(kernel.live_frames(), 1);
+        drop(cell);
+        assert_eq!(kernel.live_frames(), 0);
+    }
 
+    #[test]
+    fn begin_from_request_rejects_sealed_budget_drift() {
+        let root = tempfile::tempdir().unwrap();
+        let (kernel, sealed, sealed_source) = sealed_kernel_and_prepared(&root);
         let mut changed_budget = kernel.budget.clone();
         changed_budget.cpu_ms += 1;
-        let budget_drifted =
-            ZeroKernelRequest::new(sealed_source.into(), kernel.context.clone(), changed_budget)
-                .unwrap();
+        let budget_drifted = ZeroKernelRequest::new(
+            sealed_source.clone().into(),
+            kernel.context.clone(),
+            changed_budget,
+        )
+        .unwrap();
         let error = kernel
             .begin_from_request(budget_drifted, AtomicCancellation::new(), Some(&sealed))
-            .err()
-            .expect("sealed launch must reject budget drift");
-        assert!(
-            matches!(&error, HostError::InvalidRequest(detail) if detail.contains("budget")),
-            "sealed launch must reject budget drift: {error}"
-        );
+            .expect_err("sealed launch must reject budget drift");
+        assert!(matches!(error, HostError::InvalidRequest(_)));
+        assert_eq!(kernel.live_frames(), 0);
+        assert_eq!(kernel.live_tasks(), 0);
+        assert_eq!(kernel.live_processes(), 0);
+        let valid = ZeroKernelRequest::new(
+            sealed_source.into(),
+            kernel.context.clone(),
+            kernel.budget.clone(),
+        )
+        .unwrap();
+        let cell = kernel
+            .begin_from_request(valid, AtomicCancellation::new(), Some(&sealed))
+            .expect("valid sealed launch must succeed after budget rejection");
+        assert_eq!(kernel.live_frames(), 1);
+        drop(cell);
         assert_eq!(kernel.live_frames(), 0);
     }
 }

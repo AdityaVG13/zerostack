@@ -18,58 +18,55 @@ serde_json = { workspace = true }
 
 [[test]]
 name = "abi_proptest"
-path = "../../tests/unit/zero-abi/abi_proptest.rs"
+path = "../../tests/zero_abi_abi_proptest.rs"
 
 [[test]]
 name = "zero_kernel"
-path = "../../tests/unit/zero-abi/zero_kernel.rs"
+path = "../../tests/zero_abi_zero_kernel.rs"
 
-[[test]]
-name = "zerokernel"
-path = "../../tests/unit/zero-abi/zerokernel.rs"
 
 [[test]]
 name = "result"
-path = "../../tests/unit/zero-abi/result.rs"
+path = "../../tests/zero_abi_result.rs"
 
 [[test]]
 name = "safe_expand"
-path = "../../tests/unit/zero-abi/safe_expand.rs"
+path = "../../tests/zero_abi_safe_expand.rs"
 
 [[test]]
 name = "etnf"
-path = "../../tests/unit/zero-abi/etnf.rs"
+path = "../../tests/zero_abi_etnf.rs"
 
 [[test]]
 name = "etnf_checks"
-path = "../../tests/unit/zero-abi/etnf_checks.rs"
+path = "../../tests/zero_abi_etnf_checks.rs"
 
 [[test]]
 name = "zbf_from_bytes_harness"
-path = "../../tests/unit/zero-abi/zbf_from_bytes_harness.rs"
+path = "../../tests/zero_abi_zbf_from_bytes_harness.rs"
 
 [[test]]
 name = "raw_worker_unstructured_bytes"
-path = "../../tests/unit/zero-abi/raw_worker_unstructured_bytes.rs"
+path = "../../tests/zero_abi_raw_worker_unstructured_bytes.rs"
 
 [[test]]
 name = "raw_worker_response_golden"
-path = "../../tests/unit/zero-abi/raw_worker_response_golden.rs"
+path = "../../tests/zero_abi_raw_worker_response_golden.rs"
 
 [[test]]
 name = "abi_digest_mutation"
-path = "../../tests/unit/zero-abi/abi_digest_mutation.rs"
+path = "../../tests/zero_abi_abi_digest_mutation.rs"
 
 [[test]]
 name = "speculation"
-path = "../../tests/unit/zero-abi/speculation.rs"
+path = "../../tests/zero_abi_speculation.rs"
 
 [[test]]
 name = "work_capsule"
-path = "../../tests/unit/zero-abi/work_capsule.rs"
+path = "../../tests/zero_abi_work_capsule.rs"
 [[test]]
 name = "provider_usage"
-path = "../../tests/unit/zero-abi/provider_usage.rs"
+path = "../../tests/zero_abi_provider_usage.rs"
 [[test]]
 name = "task_lens"
-path = "../../tests/unit/zero-abi/task_lens.rs"
+path = "../../tests/zero_abi_task_lens.rs"

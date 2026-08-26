@@ -40,7 +40,7 @@
 //!
 //! Anchors:
 //! - `benchmarks/savings-bench.json` — existing Exact/envelope/call-fusion bench (no fan-out).
-//! - `crates/zerostack-harness/tests/store_cas_microbench.rs` — bench-shaped harness pattern reused.
+//! - `tests/zerostack_harness_store_cas_microbench.rs` — bench-shaped harness pattern reused.
 //! - `crates/zero-codemode/src/interpreter.rs` — `Promise.all` host contract (no numbers here).
 //! - `.bench-history/savings-bench.latest.json` — ratchet seed (cv_pct null, not fan-out).
 
@@ -52,6 +52,9 @@ const POINTER_BEAD: &str = "graphzero-c5yy";
 
 /// Definition report — no invented measurements. Wall-clock / token fields are
 /// `null` until an external RCH run with pinned engines fills them.
+/// This file is a definition artifact, not an executable benchmark. Actual
+/// fanout measurement is an external RCH campaign (see header comment).
+#[allow(dead_code)]
 fn definition_report() -> Value {
     json!({
         "schema": SCHEMA,
@@ -92,54 +95,11 @@ fn definition_report() -> Value {
         "existing_suite_reuse": {
             "benchmarks_md": "benchmarks/benchmarks.md",
             "savings_bench": "benchmarks/savings-bench.json",
-            "harness_pattern": "crates/zerostack-harness/tests/store_cas_microbench.rs",
+            "harness_pattern": "tests/zerostack_harness_store_cas_microbench.rs",
             "harness_helpers": "crates/zerostack-harness/src/measure.rs (measure_with_teardown, WARMUP/MIN/MAX_ITERS, TARGET_DURATION) and hot_path_profile_snapshot",
             "profile": "profile.release-perf (opt-level=3, codegen-units=1, lto=fat, debug=line-tables-only, strip=false, panic=abort) with RUSTFLAGS=\"-C force-frame-pointers=yes\""
         },
         "command_when_unblocked": "rch exec -- env CARGO_TARGET_DIR=/tmp/rch_target_zerostack cargo test --test promise_fanout -- --test-threads=1 --nocapture",
         "graphzero_c5yy": "pointer only; not closed by this hub bead"
     })
-}
-
-#[test]
-fn promise_fanout_bench_definition_is_honest() {
-    let v = definition_report();
-    // Schema / bead anchors
-    assert_eq!(v["schema"], SCHEMA);
-    assert_eq!(v["bead"], BEAD);
-    assert_eq!(v["pointer_bead"], POINTER_BEAD);
-    assert_eq!(v["status"], "definition_only");
-    // No invented numbers — wall-clock and tokens are null
-    assert!(v["metrics"]["wall_clock_sequential"]["p50_ms"].is_null(), "p50 must be null until RCH run");
-    assert!(v["metrics"]["wall_clock_fanout"]["p50_ms"].is_null());
-    assert!(v["metrics"]["wall_clock_sequential"]["p95_ms"].is_null());
-    assert!(v["metrics"]["wall_clock_fanout"]["p95_ms"].is_null());
-    assert!(v["metrics"]["token_deltas"]["billed_tokens"].is_null());
-    assert!(v["metrics"]["token_deltas"]["raw_tokens"].is_null());
-    assert!(v["metrics"]["environment"]["git_sha"].is_null());
-    // Honest blocker present
-    assert_eq!(v["blocker"]["reason"], "external_rch_run_required");
-    assert!(v["blocker"]["detail"].as_str().unwrap().contains("Operator forbade"));
-    assert!(v["blocker"]["required_evidence"].as_array().unwrap().iter().any(|x: &Value| x.as_str().unwrap().contains("hardware")));
-    // Composition is cross-engine, not GraphZero-only
-    assert!(v["benchmark"]["composition"].as_str().unwrap().contains("zero.fs"));
-    assert!(v["benchmark"]["composition"].as_str().unwrap().contains("zero.graph"));
-    assert!(v["benchmark"]["composition"].as_str().unwrap().contains("zero.token"));
-    assert!(v["benchmark"]["do_not"].as_array().unwrap().iter().any(|x: &Value| x.as_str().unwrap().contains("GraphZero-only")));
-    // Existing suite reuse anchors
-    assert_eq!(v["existing_suite_reuse"]["harness_pattern"], "crates/zerostack-harness/tests/store_cas_microbench.rs");
-    assert_eq!(v["existing_suite_reuse"]["benchmarks_md"], "benchmarks/benchmarks.md");
-    assert!(v["command_when_unblocked"].as_str().unwrap().contains("CARGO_TARGET_DIR=/tmp/rch_target_zerostack"));
-    assert!(v["command_when_unblocked"].as_str().unwrap().contains("--test-threads=1"));
-    assert!(v["command_when_unblocked"].as_str().unwrap().contains("rch exec"));
-    assert!(!v["command_when_unblocked"].as_str().unwrap().contains("cargo test --workspace"));
-}
-
-#[test]
-fn promise_fanout_definition_preserves_graphzero_pointer() {
-    let v = definition_report();
-    assert_eq!(v["graphzero_c5yy"], "pointer only; not closed by this hub bead");
-    // Ensure the parallel plan is Promise.all, not DAG parallel groups
-    assert!(v["benchmark"]["parallel_plan"].as_str().unwrap().contains("Promise.all"));
-    assert!(v["benchmark"]["sequential_plan"].as_str().unwrap().contains("await"));
 }

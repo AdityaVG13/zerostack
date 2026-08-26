@@ -32,18 +32,18 @@ mcp-carrier = ["dep:zero-mcp"]
 
 [dev-dependencies]
 tempfile = "3"
-
+zerostack-test-support = { path = "../../tests/support" }
 [[test]]
 name = "direct_host"
-path = "../../tests/unit/zero-kernel/direct_host.rs"
+path = "../../tests/zero_kernel_direct_host.rs"
 
 [[test]]
 name = "provider_usage"
-path = "../../tests/unit/zero-kernel/provider_usage.rs"
+path = "../../tests/zero_kernel_provider_usage.rs"
 
 [[test]]
 name = "speculation"
-path = "../../tests/unit/zero-kernel/speculation.rs"
+path = "../../tests/zero_kernel_speculation.rs"
 
 [[bin]]
 name = "zero-kernel"

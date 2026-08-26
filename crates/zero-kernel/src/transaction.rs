@@ -612,25 +612,78 @@ mod tests {
             rollback_errors: Vec::new(),
         };
         persist_record(&record_path, &record).expect("persist");
+        let original_bytes = fs::read(&record_path).expect("read original");
         let err = coordinator
             .reconcile(&invocation)
             .expect_err("first reconcile must error");
-        match err {
-            TransactionError::RecoveryRequired(messages) => {
-                assert!(
-                    messages.iter().any(|m| m.contains(".poisoned.json")),
-                    "error must name poisoned path: {messages:?}"
-                );
+        let TransactionError::RecoveryRequired(messages) = err else {
+            panic!("unexpected error variant");
+        };
+        assert!(!messages.is_empty(), "recovery must carry diagnostics");
+        // Independent oracle: enumerate the transaction directory tree without
+        // using the production quarantine-path helper. The active journal must
+        // be gone and a single quarantine evidence file must preserve the
+        // original record identity and content.
+        assert!(!record_path.exists(), "active journal must be removed");
+        let tx_root = dir.path().join("tx");
+        let mut all_files = Vec::new();
+        let mut stack = vec![tx_root.clone()];
+        while let Some(dir_path) = stack.pop() {
+            for entry in fs::read_dir(&dir_path).expect("read tx dir") {
+                let entry = entry.expect("entry");
+                let path = entry.path();
+                if path.is_dir() {
+                    stack.push(path);
+                } else {
+                    all_files.push(path);
+                }
             }
-            other => panic!("unexpected error {other:?}"),
         }
-        let poisoned = poisoned_journal_path(&record_path);
-        assert!(poisoned.exists(), "poisoned file must exist");
-        assert!(!record_path.exists(), "original must be renamed");
+        // Exactly one file should remain: the quarantined evidence.
+        assert_eq!(
+            all_files.len(),
+            1,
+            "exactly one quarantined file expected, got {all_files:?}"
+        );
+        let quarantined_path = &all_files[0];
+        assert_ne!(quarantined_path, &record_path);
+        let quarantined_bytes = fs::read(quarantined_path).expect("read quarantined");
+        assert_eq!(
+            quarantined_bytes, original_bytes,
+            "quarantined content must preserve original record"
+        );
+        let quarantined_record: TransactionRecord =
+            serde_json::from_slice(&quarantined_bytes).expect("deserialize quarantined");
+        assert_eq!(quarantined_record.session_id, session_id);
+        assert_eq!(quarantined_record.cell_id, cell_id);
+        assert_eq!(quarantined_record.effects, record.effects);
+        // Active journals are those not quarantined; none should exist for this cell.
+        assert!(!record_path.exists());
         let second = coordinator
             .reconcile(&invocation)
             .expect("second reconcile ok");
-        assert!(second.is_empty(), "second reconcile should recover");
-        assert!(poisoned.exists());
+        assert!(
+            second.is_empty(),
+            "second reconcile should recover without retrying poisoned transaction"
+        );
+        // Quarantined evidence must still exist after recovery.
+        assert!(quarantined_path.exists());
+        let after_files: Vec<PathBuf> = {
+            let mut v = Vec::new();
+            let mut s = vec![tx_root];
+            while let Some(d) = s.pop() {
+                for e in fs::read_dir(&d).unwrap() {
+                    let p = e.unwrap().path();
+                    if p.is_dir() {
+                        s.push(p);
+                    } else {
+                        v.push(p);
+                    }
+                }
+            }
+            v
+        };
+        assert_eq!(after_files.len(), 1);
+        assert_eq!(fs::read(&after_files[0]).unwrap(), original_bytes);
     }
 }

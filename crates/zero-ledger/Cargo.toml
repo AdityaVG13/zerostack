@@ -14,7 +14,7 @@ zero-abi = { path = "../zero-abi" }
 
 [[test]]
 name = "usage"
-path = "../../tests/unit/zero-ledger/usage.rs"
+path = "../../tests/zero_ledger_usage.rs"
 [[test]]
 name = "provider_usage"
-path = "../../tests/unit/zero-ledger/provider_usage.rs"
+path = "../../tests/zero_ledger_provider_usage.rs"

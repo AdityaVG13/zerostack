@@ -9,7 +9,7 @@ autobins = false
 
 [[test]]
 name = "child"
-path = "../../tests/unit/zero-process/child.rs"
+path = "../../tests/zero_process_child.rs"
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"

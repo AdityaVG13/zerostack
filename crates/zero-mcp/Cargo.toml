@@ -21,8 +21,8 @@ serde_json.workspace = true
 
 [[test]]
 name = "mcp_transport"
-path = "../../tests/unit/zero-mcp/mcp_transport.rs"
+path = "../../tests/zero_mcp_mcp_transport.rs"
 
 [[test]]
 name = "job_progress"
-path = "../../tests/unit/zero-mcp/job_progress.rs"
+path = "../../tests/zero_mcp_job_progress.rs"

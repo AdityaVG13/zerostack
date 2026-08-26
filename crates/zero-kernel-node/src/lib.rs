@@ -456,6 +456,7 @@ impl Task for ShutdownTask {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use zero_abi::ZERO_KERNEL_PROTOCOL;
 
     fn test_options(
         root: &str,
@@ -481,6 +482,13 @@ mod tests {
         root.to_string_lossy().into_owned()
     }
 
+    fn assert_kernel_operational(kernel: &CoreZeroKernel) {
+        let response = kernel
+            .execute_cell("return '__probe__';")
+            .expect("kernel must execute a trivial cell");
+        assert_eq!(response.protocol, ZERO_KERNEL_PROTOCOL);
+    }
+
     #[test]
     fn concurrent_initialization_singleflights_to_one_kernel() {
         let temp = tempfile::tempdir().expect("temp root");
@@ -499,17 +507,26 @@ mod tests {
             .into_iter()
             .map(|handle| handle.join().expect("initialize thread"))
             .collect();
-        let first = kernels.first().expect("at least one kernel");
-        assert!(kernels.iter().all(|kernel| Arc::ptr_eq(kernel, first)));
-        assert_eq!(
-            KERNEL_REGISTRY
-                .lock()
-                .values()
-                .filter_map(Weak::upgrade)
-                .filter(|kernel| Arc::ptr_eq(kernel, first))
-                .count(),
-            1
-        );
+        assert_eq!(kernels.len(), 6);
+        for kernel in &kernels {
+            assert_kernel_operational(kernel);
+        }
+        for wrapper in &wrappers {
+            let status = wrapper.status();
+            assert!(
+                status.ready,
+                "wrapper must be ready after singleflight init"
+            );
+            assert!(
+                !status.terminated,
+                "wrapper must not be terminated after init"
+            );
+        }
+        let probe = wrappers[0]
+            .core
+            .initialize()
+            .expect("re-initialize after convergence");
+        assert_kernel_operational(&probe);
         drop(wrappers);
     }
 
@@ -523,12 +540,39 @@ mod tests {
             ZeroKernel::new(test_options(&root, "session-b", 30_000, 16)).expect("other session");
         let other_budget =
             ZeroKernel::new(test_options(&root, "session-a", 45_000, 8)).expect("other budget");
-        let baseline = baseline.core.initialize().expect("initialize baseline");
-        let session = other_session.core.initialize().expect("initialize session");
-        let budget = other_budget.core.initialize().expect("initialize budget");
-        assert!(!Arc::ptr_eq(&baseline, &session));
-        assert!(!Arc::ptr_eq(&baseline, &budget));
-        assert!(!Arc::ptr_eq(&session, &budget));
+        let baseline_kernel = baseline.core.initialize().expect("initialize baseline");
+        let session_kernel = other_session.core.initialize().expect("initialize session");
+        let budget_kernel = other_budget.core.initialize().expect("initialize budget");
+        assert_kernel_operational(&baseline_kernel);
+        assert_kernel_operational(&session_kernel);
+        assert_kernel_operational(&budget_kernel);
+        for wrapper in [&baseline, &other_session, &other_budget] {
+            let status = wrapper.status();
+            assert!(status.ready);
+            assert!(!status.terminated);
+        }
+        baseline.core.shutdown().expect("shutdown baseline");
+        assert!(baseline.status().terminated);
+        assert!(!other_session.status().terminated);
+        assert!(!other_budget.status().terminated);
+        assert!(
+            baseline.core.initialize().is_err(),
+            "terminated wrapper must refuse init"
+        );
+        assert_kernel_operational(&session_kernel);
+        assert_kernel_operational(&budget_kernel);
+        assert_kernel_operational(
+            &other_session
+                .core
+                .initialize()
+                .expect("session survives sibling shutdown"),
+        );
+        assert_kernel_operational(
+            &other_budget
+                .core
+                .initialize()
+                .expect("budget survives sibling shutdown"),
+        );
     }
 
     #[test]
@@ -539,11 +583,37 @@ mod tests {
             .expect("first wrapper");
         let second = ZeroKernel::new(test_options(&root, "shared-session", 30_000, 16))
             .expect("second wrapper");
-        let kernel = first.core.initialize().expect("initialize first");
-        let shared = second.core.initialize().expect("initialize second");
-        assert!(Arc::ptr_eq(&kernel, &shared));
+        let first_kernel = first.core.initialize().expect("initialize first");
+        let second_kernel = second.core.initialize().expect("initialize second");
+        assert_kernel_operational(&first_kernel);
+        assert_kernel_operational(&second_kernel);
+        assert!(first.status().ready);
+        assert!(second.status().ready);
         first.core.shutdown().expect("shutdown first wrapper");
-        let after = second.core.initialize().expect("reinitialize second");
-        assert!(Arc::ptr_eq(&after, &shared));
+        assert!(
+            first.status().terminated,
+            "shut down wrapper must be terminated"
+        );
+        assert!(!first.status().ready);
+        assert!(
+            !second.status().terminated,
+            "survivor must not be terminated"
+        );
+        assert!(second.status().ready, "survivor must stay ready");
+        assert!(
+            first.core.initialize().is_err(),
+            "terminated wrapper must refuse re-initialize"
+        );
+        let survivor = second
+            .core
+            .initialize()
+            .expect("survivor re-initialize without new creation");
+        assert_kernel_operational(&survivor);
+        drop(first);
+        let after_drop = second
+            .core
+            .initialize()
+            .expect("survivor after sibling drop");
+        assert_kernel_operational(&after_drop);
     }
 }

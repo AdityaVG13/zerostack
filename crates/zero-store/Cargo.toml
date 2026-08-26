@@ -20,38 +20,38 @@ zero-ref = { path = "../zero-ref" }
 tempfile = "3"
 proptest = "1"
 sha2 = { workspace = true }
-
+zerostack-test-support = { path = "../../tests/support" }
 [[test]]
 name = "ensure_layout"
-path = "../../tests/unit/zero-store/ensure_layout.rs"
+path = "../../tests/zero_store_ensure_layout.rs"
 
 [[test]]
 name = "gc_schema"
-path = "../../tests/unit/zero-store/gc_schema.rs"
+path = "../../tests/zero_store_gc_schema.rs"
 
 [[test]]
 name = "quarantine_reap"
-path = "../../tests/unit/zero-store/quarantine_reap.rs"
+path = "../../tests/zero_store_quarantine_reap.rs"
 [[test]]
 name = "durable_journal"
-path = "../../tests/unit/zero-store/durable_journal.rs"
+path = "../../tests/zero_store_durable_journal.rs"
 
 [[test]]
 name = "zbf_refs_differential"
-path = "../../tests/unit/zero-store/zbf_refs_differential.rs"
+path = "../../tests/zero_store_zbf_refs_differential.rs"
 
 [[test]]
 name = "zero_cas"
-path = "../../tests/unit/zero-store/zero_cas.rs"
+path = "../../tests/zero_store_zero_cas.rs"
 
 [[test]]
 name = "event_log"
-path = "../../tests/unit/zero-store/event_log.rs"
+path = "../../tests/zero_store_event_log.rs"
 
 [[test]]
 name = "provider_usage"
-path = "../../tests/unit/zero-store/provider_usage.rs"
+path = "../../tests/zero_store_provider_usage.rs"
 
 [[test]]
 name = "zero_migration"
-path = "../../tests/unit/zero-store/zero_migration.rs"
+path = "../../tests/zero_store_zero_migration.rs"

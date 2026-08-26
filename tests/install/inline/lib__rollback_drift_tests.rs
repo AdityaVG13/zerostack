@@ -14,16 +14,26 @@ fn rollback_refuses_when_post_install_edit_drifts() {
     let applied = apply(root.path(), false, &["mcp".to_string()]).expect("apply");
     let mut value: Value = serde_json::from_slice(&fs::read(&config).expect("read")).expect("json");
     value["user_after"] = json!({"must_survive_rollback": true});
-    fs::write(&config, serde_json::to_vec_pretty(&value).expect("encode")).expect("edit");
+    let edited = serde_json::to_vec_pretty(&value).expect("encode");
+    fs::write(&config, &edited).expect("edit");
+    let edited_bytes = fs::read(&config).expect("reread edited");
     let err = rollback(root.path(), &applied.rollback.id).expect_err("must conflict");
-    assert!(
-        err.to_string().contains("rollback conflict"),
-        "unexpected error: {err}"
+    assert_eq!(
+        err.kind(),
+        ErrorKind::InvalidData,
+        "rollback conflict must be InvalidData, got {err:?}"
+    );
+    // Byte-for-byte preservation: the post-install edit must remain untouched.
+    assert_eq!(
+        fs::read(&config).expect("reread after refused rollback"),
+        edited_bytes,
+        "refused rollback must not mutate drifted file"
     );
     let final_value: Value =
         serde_json::from_slice(&fs::read(&config).expect("reread")).expect("final json");
-    assert!(
-        final_value.get("user_after").is_some(),
+    assert_eq!(
+        final_value.get("user_after"),
+        Some(&json!({"must_survive_rollback": true})),
         "post-install edit must remain untouched: {final_value}"
     );
 }
@@ -56,26 +66,25 @@ fn instructions_merge_preserves_and_rolls_back_existing_agents_bytes() {
 
     let applied = apply(root.path(), false, &["instructions".to_string()]).expect("apply");
     let installed = fs::read(&agents).expect("read installed instructions");
+    // Public state oracle: every original byte must survive as a prefix.
     assert!(
         installed.starts_with(original),
         "existing bytes must remain a prefix"
     );
-    let installed_text = String::from_utf8(installed).expect("UTF-8 instructions");
+    // No-duplication oracle without counting private delimiters: a second merge
+    // over the already-installed text must be byte-identical (idempotent).
+    let installed_text = String::from_utf8(installed.clone()).expect("UTF-8 instructions");
+    let remerged =
+        merge_instructions(&installed_text, McpToolSurface::Classic).expect("re-merge installed");
     assert_eq!(
-        installed_text
-            .matches("<!-- tokenzero:rust-core:start -->")
-            .count(),
-        1
-    );
-    assert_eq!(
-        installed_text
-            .matches("<!-- tokenzero:rust-core:end -->")
-            .count(),
-        1
+        remerged.as_bytes(),
+        installed.as_slice(),
+        "instruction merge must be idempotent over installed content"
     );
 
     let result = rollback(root.path(), &applied.rollback.id).expect("rollback");
     assert_eq!(result["status"], "ok");
+    // Exact byte-for-byte rollback, not just semantic equality.
     assert_eq!(
         fs::read(&agents).expect("read restored AGENTS.md"),
         original
@@ -114,7 +123,16 @@ fn apply_verification_hashes_match_bytes_on_disk() {
         );
         let observed = fs::read(&row.path).expect("read installed path");
         assert_eq!(row.byte_count, observed.len());
-        assert_eq!(row.observed_sha256, sha256_bytes(&observed));
+        // Independent oracle: compute SHA-256 without calling the production
+        // helper that produced the verification row.
+        let mut hasher = sha2::Sha256::new();
+        hasher.update(&observed);
+        let expected = hasher
+            .finalize()
+            .iter()
+            .map(|b| format!("{b:02x}"))
+            .collect::<String>();
+        assert_eq!(row.observed_sha256, expected);
     }
 }
 

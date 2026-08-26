@@ -1,5 +1,5 @@
-use crate::*;
 use crate::McpToolSurface;
+use crate::*;
 
 macro_rules! doctor_status_report {
     ($schema:literal, $status:expr, $ok:expr, $exit_code:expr; $($key:literal => $value:expr),* $(,)?) => {
@@ -1091,5 +1091,5 @@ pub(crate) fn doctor_run_id(root: &Path, cache: &Path) -> String {
 }
 
 #[cfg(test)]
-#[path = "../../../tests/unit/tokenzero-install/doctor_mcp_ready_tests.rs"]
+#[path = "../../../tests/tokenzero_install_doctor_mcp_ready_tests.rs"]
 mod mcp_ready_tests;
