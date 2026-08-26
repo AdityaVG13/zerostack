@@ -634,9 +634,30 @@ impl ZeroKernel {
         }
         let effect_result = match cell.effect(request) {
             Ok(result) => result,
-            Err(error) => {
+            Err(HostError::Engine(error))
+            | Err(HostError::Transaction(TransactionError::Engine(error))) => {
+                return cell.fail(error);
+            }
+            Err(HostError::Transaction(TransactionError::RecoveryRequired(details))) => {
+                return cell.fail(EngineError::new(
+                    EngineErrorKind::Corrupt,
+                    format!("transaction recovery required: {}", details.join("; ")),
+                    false,
+                ));
+            }
+            Err(HostError::Transaction(TransactionError::Store(detail))) => {
+                return cell.fail(EngineError::new(EngineErrorKind::Corrupt, detail, false));
+            }
+            Err(HostError::InvalidRequest(detail)) => {
                 return cell.fail(EngineError::new(
                     EngineErrorKind::InvalidInput,
+                    detail,
+                    false,
+                ));
+            }
+            Err(error) => {
+                return cell.fail(EngineError::new(
+                    EngineErrorKind::Internal,
                     error.to_string(),
                     false,
                 ));
@@ -2008,22 +2029,18 @@ impl Cell {
             turn: Some(turn.clone()),
             capsule: Some(event_capsule),
         };
-        let publication = match self.events.publish(&event, visible_bytes) {
-            Ok(publication) => publication,
-            Err(error) => {
-                let restoration = self.restore_effects(&committed_effects);
-                if after != before {
-                    self.state_store
-                        .compare_and_set_root(after.as_ref(), before.as_ref())?;
-                }
-                if let Err(restoration) = restoration {
-                    return Err(HostError::Event(format!(
-                        "{error}; committed effect restoration failed: {restoration}"
-                    )));
-                }
-                return Err(HostError::Event(error.to_string()));
-            }
-        };
+        let publication = self
+            .events
+            .publish(&event, visible_bytes)
+            .map_err(|error| {
+                // The transaction and state are already durably committed. Reverting
+                // bytes here would contradict the committed journal and could destroy
+                // a later write. Surface the publication failure without inventing a
+                // rollback after the commit authority has settled.
+                HostError::Event(format!(
+                    "terminal event publication failed after durable commit: {error}"
+                ))
+            })?;
         self.settled = true;
         // The typed response binds state and receipt to the same committed effect:
         // state.after is the exact root committed with these receipts, and effects

@@ -3,7 +3,7 @@ use std::sync::{
     Arc,
     atomic::{AtomicBool, AtomicUsize, Ordering},
 };
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use serde_json::Value;
 use zero_abi::{
@@ -169,10 +169,12 @@ fn admitted_call_has_one_execution_and_one_exact_claim() {
 #[test]
 fn absent_exact_claim_is_an_invariant_failure_not_a_retry() {
     let runtime = SpeculationRuntime::new(1).unwrap();
-    let error = runtime
-        .claim(&permit(1), Duration::from_millis(1))
-        .unwrap_err();
-    assert_eq!(error.kind, EngineErrorKind::Internal);
+    let outcome = runtime.claim_outcome(&permit(1), Duration::from_millis(1));
+    assert!(matches!(
+        outcome,
+        SpeculationClaimOutcome::InvariantFailure(error)
+            if error.kind == EngineErrorKind::Internal
+    ));
     assert_eq!(runtime.ledger().claim_invariant_failures, 1);
     assert_eq!(runtime.ledger().dispatched, 0);
 }
@@ -404,12 +406,23 @@ fn capacity_refusal_is_typed_and_preserves_ordinary_execution() {
 fn end_turn_joins_ready_as_wasted_and_no_leaked_worker() {
     let runtime = SpeculationRuntime::new(2).unwrap();
     let permit = permit(1);
+    let ready = Arc::new(AtomicBool::new(false));
+    let worker_ready = Arc::clone(&ready);
     runtime
-        .admit(permit.clone(), |_| Ok(serde_json::json!("ready")))
+        .admit(permit.clone(), move |_| {
+            worker_ready.store(true, Ordering::Release);
+            Ok(serde_json::json!("ready"))
+        })
         .unwrap();
-    // wait until ready
-    std::thread::sleep(Duration::from_millis(50));
-    // do not claim — end_turn must convert Ready to Cancelled and waste
+    let deadline = Instant::now() + Duration::from_secs(1);
+    while !ready.load(Ordering::Acquire) {
+        assert!(
+            Instant::now() < deadline,
+            "speculative worker did not become ready"
+        );
+        std::thread::yield_now();
+    }
+    // Do not claim. end_turn must convert Ready to Cancelled and account waste.
     let ledger = runtime.end_turn().unwrap();
     assert_eq!(ledger.wasted_ready, 1);
     assert_eq!(ledger.cancelled, 1);
@@ -420,6 +433,17 @@ fn end_turn_joins_ready_as_wasted_and_no_leaked_worker() {
     assert_eq!(ledger.claim_hits, 0);
     // no leaked worker: Drop would also join, but end_turn already drained
     assert_eq!(runtime.inflight(), 0);
+    assert!(runtime.is_empty());
+    assert!(!runtime.is_admitted(&permit));
+
+    runtime
+        .admit(permit.clone(), |_| Ok(serde_json::json!("next turn")))
+        .unwrap();
+    assert_eq!(
+        runtime.claim(&permit, Duration::from_secs(1)).unwrap(),
+        serde_json::json!("next turn")
+    );
+    runtime.end_turn().unwrap();
 }
 
 #[test]

@@ -46,7 +46,8 @@ pub struct UnitSavings {
     pub zero: u64,
     /// Exact savings `baseline - zero` (saturates only when producing Unknown).
     pub numerator: u64,
-    /// Exact baseline denominator (== `baseline` when claimable, else 0 with Unknown reason).
+    /// Exact baseline denominator. It is zero only for a zero baseline;
+    /// negative savings remains Unknown but preserves the measured baseline.
     pub denominator: u64,
     pub status: SavingsStatusForUnit,
 }
@@ -165,12 +166,19 @@ impl SavingsReport {
         self.zero
             .validate()
             .map_err(ReportError::InvalidObservation)?;
+        let expected_tokens = compute_unit(self.native.tokens, self.zero.tokens);
+        let expected_bytes = compute_unit(self.native.bytes, self.zero.bytes);
+        let expected_calls = compute_unit(self.native.calls, self.zero.calls);
+        check_unit_consistency(&self.tokens, &expected_tokens)?;
+        check_unit_consistency(&self.bytes, &expected_bytes)?;
+        check_unit_consistency(&self.calls, &expected_calls)?;
+        let expected_status =
+            aggregate_status(&self.tokens.status, &self.bytes.status, &self.calls.status);
+        if self.status != expected_status {
+            return Err(ReportError::AggregateStatusMismatch);
+        }
         validate_hex_root(&self.provenance_root)?;
-        // Ensure per-unit statuses are consistent with computed values.
-        check_unit_consistency(self.tokens.clone())?;
-        check_unit_consistency(self.bytes.clone())?;
-        check_unit_consistency(self.calls.clone())?;
-        Ok(())
+        self.verify_root()
     }
 
     /// Exact token numerator (saved tokens) and denominator (baseline tokens).
@@ -266,64 +274,16 @@ fn aggregate_status(
     SavingsStatus::Zero
 }
 
-fn check_unit_consistency(unit: UnitSavings) -> Result<(), ReportError> {
-    match &unit.status {
-        SavingsStatusForUnit::Unknown { .. } => Ok(()),
-        SavingsStatusForUnit::Zero => {
-            if unit.numerator != 0 {
-                return Err(ReportError::InconsistentUnit {
-                    baseline: unit.baseline,
-                    zero: unit.zero,
-                    numerator: unit.numerator,
-                    denominator: unit.denominator,
-                });
-            }
-            if unit.denominator != unit.baseline {
-                return Err(ReportError::InconsistentUnit {
-                    baseline: unit.baseline,
-                    zero: unit.zero,
-                    numerator: unit.numerator,
-                    denominator: unit.denominator,
-                });
-            }
-            if unit.zero != unit.baseline {
-                return Err(ReportError::InconsistentUnit {
-                    baseline: unit.baseline,
-                    zero: unit.zero,
-                    numerator: unit.numerator,
-                    denominator: unit.denominator,
-                });
-            }
-            Ok(())
-        }
-        SavingsStatusForUnit::Positive => {
-            if unit.numerator == 0 {
-                return Err(ReportError::InconsistentUnit {
-                    baseline: unit.baseline,
-                    zero: unit.zero,
-                    numerator: unit.numerator,
-                    denominator: unit.denominator,
-                });
-            }
-            if unit.denominator != unit.baseline {
-                return Err(ReportError::InconsistentUnit {
-                    baseline: unit.baseline,
-                    zero: unit.zero,
-                    numerator: unit.numerator,
-                    denominator: unit.denominator,
-                });
-            }
-            if unit.baseline != unit.numerator + unit.zero {
-                return Err(ReportError::InconsistentUnit {
-                    baseline: unit.baseline,
-                    zero: unit.zero,
-                    numerator: unit.numerator,
-                    denominator: unit.denominator,
-                });
-            }
-            Ok(())
-        }
+fn check_unit_consistency(actual: &UnitSavings, expected: &UnitSavings) -> Result<(), ReportError> {
+    if actual != expected {
+        return Err(ReportError::InconsistentUnit {
+            baseline: actual.baseline,
+            zero: actual.zero,
+            numerator: actual.numerator,
+            denominator: actual.denominator,
+        });
     }
+    Ok(())
 }
 
 fn validate_hex_root(value: &str) -> Result<(), ReportError> {
@@ -357,6 +317,7 @@ pub enum ReportError {
         numerator: u64,
         denominator: u64,
     },
+    AggregateStatusMismatch,
 }
 
 impl fmt::Display for ReportError {
@@ -380,6 +341,9 @@ impl fmt::Display for ReportError {
                 f,
                 "inconsistent unit: baseline {baseline} zero {zero} numerator {numerator} denominator {denominator}"
             ),
+            Self::AggregateStatusMismatch => {
+                write!(f, "aggregate savings status disagrees with unit statuses")
+            }
         }
     }
 }

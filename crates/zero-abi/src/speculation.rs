@@ -356,8 +356,10 @@ pub struct SpeculationLedger {
 
 impl SpeculationLedger {
     pub fn validate(&self) -> Result<(), String> {
+        if self.claim_invariant_failures != 0 {
+            return Err("speculation ledger records an exact-claim invariant failure".into());
+        }
         if self.claim_hits > self.dispatched
-            || self.claim_invariant_failures > self.dispatched
             || self.cancelled > self.dispatched
             || self.failed > self.dispatched
             || self.wasted_ready > self.dispatched

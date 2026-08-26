@@ -976,8 +976,8 @@ impl UnidentifiedReason {
             QualityEnvelopeFailureCode::StaleEvidence => Some(Self::StaleEvidence),
             QualityEnvelopeFailureCode::IncomparableIdentity => Some(Self::IncomparableIdentity),
             QualityEnvelopeFailureCode::UnrootedEvidence => Some(Self::UnrootedEvidence),
-            QualityEnvelopeFailureCode::EvidencePayloadMismatch => Some(Self::UnrootedEvidence),
-            QualityEnvelopeFailureCode::EvidenceInvalid => Some(Self::StaleEvidence),
+            QualityEnvelopeFailureCode::EvidencePayloadMismatch
+            | QualityEnvelopeFailureCode::EvidenceInvalid => None,
             QualityEnvelopeFailureCode::ClassMembershipMismatch => Some(Self::BindingMismatch),
             QualityEnvelopeFailureCode::CandidateRegression => Some(Self::CandidateRegression),
             QualityEnvelopeFailureCode::InvalidDistributionalBound

@@ -22,6 +22,10 @@ pub use preparation::{CellPreparation, PreparedCell};
 pub use shell::ShellCommand;
 pub use speculation::{SpeculationClaimOutcome, SpeculationOutcome, SpeculationRuntime};
 pub use state::{StateError, StateSnapshot, StateStore};
+pub use tokenzero_kernel::{
+    EvidenceFreshness, LiveCandidate, LiveEntry, LiveParetoDecision, MetricOrder, ProtectedOutcome,
+    VerifierIdentity, decide_live_pareto,
+};
 pub use transaction::{
     PreparedEffect, Transaction, TransactionCoordinator, TransactionError, TransactionRecord,
     TransactionState,

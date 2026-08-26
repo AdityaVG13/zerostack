@@ -14,7 +14,7 @@ use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::thread::JoinHandle;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use parking_lot::{Condvar, Mutex};
 use serde_json::Value;
@@ -56,6 +56,7 @@ pub enum SpeculationClaimOutcome {
     Hit(Value),
     DomainError(EngineError),
     Cancelled(EngineError),
+    InvariantFailure(EngineError),
 }
 
 struct EntryState {
@@ -186,7 +187,17 @@ impl SpeculationRuntime {
             }
         }
         let key = permit.claim_key()?;
-        if self.inner.entries.lock().contains_key(&key) {
+        let entry = Arc::new(Entry {
+            permit,
+            state: Mutex::new(EntryState {
+                state: SpeculationState::Pending,
+                result: None,
+            }),
+            ready: Condvar::new(),
+            cancelled: Arc::new(AtomicBool::new(false)),
+        });
+        let mut entries = self.inner.entries.lock();
+        if entries.contains_key(&key) {
             return Err("duplicate speculative claim key".into());
         }
         // Capacity refusal BEFORE launch — preserves ordinary execution.
@@ -202,17 +213,8 @@ impl SpeculationRuntime {
             ledger.ordinary_admissions = ledger.ordinary_admissions.saturating_add(1);
             return Ok(SpeculationAdmission::Ordinary);
         }
-
-        let entry = Arc::new(Entry {
-            permit,
-            state: Mutex::new(EntryState {
-                state: SpeculationState::Pending,
-                result: None,
-            }),
-            ready: Condvar::new(),
-            cancelled: Arc::new(AtomicBool::new(false)),
-        });
-        self.inner.entries.lock().insert(key, Arc::clone(&entry));
+        entries.insert(key, Arc::clone(&entry));
+        drop(entries);
         {
             let mut ledger = self.inner.ledger.lock();
             ledger.dispatched = ledger.dispatched.saturating_add(1);
@@ -240,9 +242,9 @@ impl SpeculationRuntime {
                         false,
                     ))
                 });
-            let cancelled = worker_entry.cancelled.load(Ordering::Acquire);
             {
                 let mut state = worker_entry.state.lock();
+                let cancelled = worker_entry.cancelled.load(Ordering::Acquire);
                 if cancelled {
                     state.state = SpeculationState::Cancelled;
                     state.result = None;
@@ -299,11 +301,30 @@ impl SpeculationRuntime {
                 false,
             ));
         }
-        if matches!(
+        let deadline = Instant::now()
+            .checked_add(wait)
+            .unwrap_or_else(Instant::now);
+        while matches!(
             state.state,
             SpeculationState::Pending | SpeculationState::Running
         ) {
-            let timeout = entry.ready.wait_for(&mut state, wait);
+            if entry.cancelled.load(Ordering::Acquire) {
+                return Err(EngineError::new(
+                    EngineErrorKind::Cancelled,
+                    "speculative call was cancelled",
+                    false,
+                ));
+            }
+            let now = Instant::now();
+            if now >= deadline {
+                entry.cancelled.store(true, Ordering::Release);
+                return Err(EngineError::new(
+                    EngineErrorKind::Deadline,
+                    "speculative claim exceeded its bounded wait",
+                    false,
+                ));
+            }
+            let timeout = entry.ready.wait_for(&mut state, deadline - now);
             if timeout.timed_out()
                 && matches!(
                     state.state,
@@ -347,7 +368,10 @@ impl SpeculationRuntime {
                 )),
             },
             SpeculationState::Failed => match state.result.take() {
-                Some(Err(error)) => Err(error),
+                Some(Err(error)) => {
+                    state.state = SpeculationState::Claimed;
+                    Err(error)
+                }
                 _ => Err(EngineError::new(
                     EngineErrorKind::Internal,
                     "failed speculation has no typed error",
@@ -385,6 +409,9 @@ impl SpeculationRuntime {
             Err(error) if error.kind == EngineErrorKind::Deadline => {
                 SpeculationClaimOutcome::Cancelled(error)
             }
+            Err(error) if error.kind == EngineErrorKind::Internal => {
+                SpeculationClaimOutcome::InvariantFailure(error)
+            }
             Err(error) => SpeculationClaimOutcome::DomainError(error),
         }
     }
@@ -397,7 +424,8 @@ impl SpeculationRuntime {
     /// Ready into Cancelled (wasted_ready), then join or drain every admitted
     /// worker. No worker is leaked. Returns the validated ledger.
     pub fn end_turn(&self) -> Result<SpeculationLedger, String> {
-        for entry in self.inner.entries.lock().values() {
+        let entries: Vec<Arc<Entry>> = self.inner.entries.lock().values().cloned().collect();
+        for entry in entries {
             let mut state = entry.state.lock();
             match state.state {
                 SpeculationState::Pending | SpeculationState::Running => {
@@ -420,14 +448,16 @@ impl SpeculationRuntime {
             }
             entry.ready.notify_all();
         }
-        // Join or drain every admitted worker — no leaked worker.
+        let mut join_failed = false;
         for worker in self.inner.workers.lock().drain(..) {
-            worker
-                .join()
-                .map_err(|_| "speculation worker join failed".to_string())?;
+            join_failed |= worker.join().is_err();
         }
+        self.inner.entries.lock().clear();
         let ledger = self.ledger();
         ledger.validate()?;
+        if join_failed {
+            return Err("speculation worker join failed".into());
+        }
         Ok(ledger)
     }
 }

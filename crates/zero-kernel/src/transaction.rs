@@ -10,10 +10,7 @@ use zero_abi::{
     FileEffectRequest, FileEngine, FileLease, FileMetadata, FileReadRequest, ReadOptions,
     ZeroHandle,
 };
-use zero_store::{
-    ZeroCas,
-    fs_replace::{replace_file, sync_dir},
-};
+use zero_store::{ZeroCas, replace_file, sync_dir};
 
 static TEMP_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 
@@ -100,6 +97,9 @@ impl TransactionCoordinator {
                 .map_err(|error| TransactionError::Store(error.to_string()))?
                 .is_file()
             {
+                continue;
+            }
+            if ignored_transaction_entry(&entry.path()) {
                 continue;
             }
             let bytes = fs::read(entry.path()).map_err(|error| {
@@ -205,11 +205,7 @@ impl TransactionCoordinator {
                 continue;
             }
             let path = entry.path();
-            if path
-                .file_name()
-                .and_then(|name| name.to_str())
-                .is_some_and(|name| name.ends_with(".poisoned.json"))
-            {
+            if ignored_transaction_entry(&path) {
                 continue;
             }
             let bytes = fs::read(&path).map_err(|error| {
@@ -529,82 +525,61 @@ impl Transaction {
 
         match self.coordinator.files.apply(&self.invocation, request) {
             Ok(receipt) => {
-                // Fail-closed on receipt mismatch: receipt must bind the same path and
-                // the preparation handle we just created. Mismatch indicates engine bug.
-                let (expected_path, expected_preparation, expected_before) = {
+                // The hub preparation and the engine journal are distinct
+                // authorities. Bind the receipt to the requested path and
+                // observed preimage; the engine owns its journal identity.
+                let (expected_path, expected_before) = {
                     let prepared = self.record.effects.last().expect("prepared effect exists");
-                    (
-                        prepared.request.path.clone(),
-                        prepared.preparation.clone(),
-                        prepared.before.clone(),
-                    )
+                    (prepared.request.path.clone(), prepared.before.clone())
                 };
-                if receipt.path != expected_path {
-                    self.record.effects.pop();
-                    persist_record(&self.path, &self.record)?;
-                    return Err(TransactionError::Store(format!(
+                let mismatch = if receipt.path != expected_path {
+                    Some(format!(
                         "receipt path mismatch: expected {} got {}",
                         expected_path.display(),
                         receipt.path.display()
-                    )));
-                }
-                if receipt.journal != expected_preparation {
-                    self.record.effects.pop();
-                    persist_record(&self.path, &self.record)?;
-                    return Err(TransactionError::Store(format!(
-                        "receipt journal mismatch for {}: expected {} got {}",
-                        receipt.path.display(),
-                        expected_preparation,
-                        receipt.journal
-                    )));
-                }
-                // Also ensure before handle matches snapshot.
-                if receipt.before != expected_before {
-                    self.record.effects.pop();
-                    persist_record(&self.path, &self.record)?;
-                    return Err(TransactionError::Store(format!(
+                    ))
+                } else if receipt.before != expected_before {
+                    Some(format!(
                         "receipt before mismatch for {}",
                         receipt.path.display()
-                    )));
-                }
-                // Cancellation check after apply: if we were cancelled during apply,
-                // we must not claim success; roll back instead.
-                if self.invocation.cancellation.is_cancelled() {
-                    // Restore the just-applied effect then mark rolled back.
-                    let receipt_clone = receipt.clone();
-                    let effect = self
-                        .record
+                    ))
+                } else {
+                    None
+                };
+                if let Some(detail) = mismatch {
+                    self.record
                         .effects
                         .last_mut()
-                        .expect("prepared effect exists");
-                    effect.receipt = Some(receipt.clone());
-                    // Attempt restore of this single effect
-                    let _ = self
-                        .coordinator
-                        .files
-                        .restore(&self.invocation, &receipt_clone);
-                    self.record.effects.pop();
-                    if self.record.effects.is_empty() {
-                        self.record.state = TransactionState::RolledBack;
-                    } else {
-                        rollback_record(
-                            &*self.coordinator.files,
-                            &self.invocation,
-                            &mut self.record,
-                        );
-                    }
+                        .expect("prepared effect exists")
+                        .receipt = Some(receipt.clone());
+                    rollback_record(&*self.coordinator.files, &self.invocation, &mut self.record);
                     persist_record(&self.path, &self.record)?;
-                    return Err(TransactionError::Engine(EngineError::new(
-                        EngineErrorKind::Cancelled,
-                        "transaction cancelled after apply, rolled back",
-                        false,
-                    )));
+                    if self.record.state == TransactionState::RecoveryRequired {
+                        return Err(TransactionError::RecoveryRequired(
+                            self.record.rollback_errors.clone(),
+                        ));
+                    }
+                    return Err(TransactionError::Store(detail));
                 }
                 self.record
                     .effects
                     .last_mut()
                     .expect("prepared effect exists")
                     .receipt = Some(receipt.clone());
+                if self.invocation.cancellation.is_cancelled() {
+                    rollback_record(&*self.coordinator.files, &self.invocation, &mut self.record);
+                    persist_record(&self.path, &self.record)?;
+                    if self.record.state == TransactionState::RecoveryRequired {
+                        return Err(TransactionError::RecoveryRequired(
+                            self.record.rollback_errors.clone(),
+                        ));
+                    }
+                    return Err(TransactionError::Engine(EngineError::new(
+                        EngineErrorKind::Cancelled,
+                        "transaction cancelled after apply, rolled back",
+                        false,
+                    )));
+                }
                 persist_record(&self.path, &self.record)?;
                 Ok(receipt)
             }
@@ -726,15 +701,14 @@ impl Transaction {
                     .into(),
             ));
         }
-        // Fail-closed on receipt mismatch: ensure each receipt's journal equals its preparation.
+        // Fail closed if a committed receipt no longer binds the request and
+        // preimage recorded by the hub. The engine journal remains opaque.
         for effect in &self.record.effects {
             if let Some(receipt) = &effect.receipt {
-                if receipt.journal != effect.preparation {
+                if receipt.path != effect.request.path {
                     return Err(TransactionError::Store(format!(
-                        "commit receipt mismatch for {}: journal {} != preparation {}",
-                        effect.request.path.display(),
-                        receipt.journal,
-                        effect.preparation
+                        "commit receipt path mismatch for {}",
+                        effect.request.path.display()
                     )));
                 }
                 if receipt.before != effect.before {
@@ -887,13 +861,22 @@ fn persist_record(path: &Path, record: &TransactionRecord) -> Result<(), Transac
         .ok_or_else(|| TransactionError::Store("transaction path has no file name".into()))?;
     let (mut file, temp) = open_unique_temp(parent, file_name)
         .map_err(|error| TransactionError::Store(format!("open transaction temp: {error}")))?;
-    file.write_all(&bytes)
-        .map_err(|error| TransactionError::Store(format!("write transaction record: {error}")))?;
-    file.sync_all()
-        .map_err(|error| TransactionError::Store(format!("sync transaction record: {error}")))?;
-    drop(file);
-    replace_file(&temp, path)
-        .map_err(|error| TransactionError::Store(format!("publish transaction record: {error}")))?;
+    let publish: Result<(), TransactionError> = (|| {
+        file.write_all(&bytes).map_err(|error| {
+            TransactionError::Store(format!("write transaction record: {error}"))
+        })?;
+        file.sync_all().map_err(|error| {
+            TransactionError::Store(format!("sync transaction record: {error}"))
+        })?;
+        drop(file);
+        replace_file(&temp, path).map_err(|error| {
+            TransactionError::Store(format!("publish transaction record: {error}"))
+        })
+    })();
+    if let Err(error) = publish {
+        let _ = fs::remove_file(&temp);
+        return Err(error);
+    }
     // Directory sync failure after publish is ambiguous: the new bytes are visible
     // but not proven durable. Recovery must not guess; surface typed RecoveryRequired.
     if let Err(error) = sync_dir(parent) {
@@ -921,6 +904,12 @@ fn open_unique_temp(
             Err(error) => return Err(error),
         }
     }
+}
+
+fn ignored_transaction_entry(path: &Path) -> bool {
+    path.file_name()
+        .and_then(|name| name.to_str())
+        .is_some_and(|name| name.ends_with(".poisoned.json") || name.contains(".txn-tmp-"))
 }
 
 fn poisoned_journal_path(path: &Path) -> PathBuf {
