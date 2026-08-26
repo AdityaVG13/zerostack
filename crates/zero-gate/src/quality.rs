@@ -1,9 +1,15 @@
 //! Proof-carrying protected-quality envelope for strict candidate admission.
 //!
 //! The envelope keeps exact, pointwise, scoped-class, and distributional evidence
-//! distinct. Strict publication admits only evidence that protects the current
-//! task pointwise. Distributional and unidentified candidates select the frozen
-//! raw baseline instead of laundering a population claim into an individual one.
+//! distinct with disjoint typed prerequisites. Strict publication admits only
+//! evidence that protects the current task pointwise via comparable
+//! task/candidate identities, live paired outcomes, declared Pareto vector,
+//! live protected predicate, and locked verifier. Stale, missing,
+//! incomparable, or unrooted evidence returns a typed unknown/refusal and
+//! never upgrades partial evidence into a dominance claim. Distributional and
+//! unidentified candidates select the frozen raw baseline instead of
+//! laundering a population claim into an individual one. Protected outcomes
+//! never regress and deterministic evidence yields deterministic proof roots.
 
 use std::{error::Error, fmt};
 
@@ -142,24 +148,16 @@ impl QualityPair {
                 self.pairing_method_digest,
             ],
         )?;
-        if self.dimensions.is_empty() || self.dimensions.len() > QUALITY_ENVELOPE_MAX_DIMENSIONS
-        {
-            return Err(QualityEnvelopeError::new(
-                QualityEnvelopeFailureCode::InvalidProtectedVector,
-                "protected vector is empty or exceeds its bound",
-            ));
-        }
-        let mut previous: Option<&str> = None;
-        for metric in &self.dimensions {
-            metric.validate()?;
-            if previous.is_some_and(|value| value >= metric.metric_id.as_str()) {
-                return Err(QualityEnvelopeError::new(
-                    QualityEnvelopeFailureCode::NonCanonicalOrder,
-                    "protected metric ids must be unique and strictly sorted",
-                ));
-            }
-            previous = Some(&metric.metric_id);
-        }
+        // Comparable identities must be distinct: a candidate cannot be its own baseline.
+        require_distinct(
+            "quality pair candidate vs baseline",
+            self.raw_baseline_identity_digest,
+            self.candidate_identity_digest,
+        )?;
+        // Live paired outcomes must be non-zero and bound to the declared Pareto vector.
+        require_live("baseline outcome", self.baseline_outcome_digest)?;
+        require_live("candidate outcome", self.candidate_outcome_digest)?;
+        require_declared_pareto_vector(&self.dimensions)?;
         Ok(())
     }
 
@@ -206,9 +204,7 @@ impl QualityPair {
         self.candidate_outcome_digest
     }
     pub fn strictly_better(&self) -> bool {
-        self.dimensions
-            .iter()
-            .any(ProtectedMetric::strictly_better)
+        self.dimensions.iter().any(ProtectedMetric::strictly_better)
     }
 }
 
@@ -256,6 +252,21 @@ impl ExactNeutralCertificate {
                 baseline_protected_outcome_digest,
                 candidate_protected_outcome_digest,
             ],
+        )?;
+        // Comparable task/candidate identities must be live and distinct.
+        require_comparable(
+            "exact-neutral task",
+            task_digest,
+            comparison_identity_digest,
+        )?;
+        require_distinct(
+            "exact-neutral candidate vs baseline",
+            raw_baseline_identity_digest,
+            candidate_identity_digest,
+        )?;
+        require_live(
+            "exact-neutral protected outcome",
+            baseline_protected_outcome_digest,
         )?;
         if baseline_continuation_identity_digest != candidate_continuation_identity_digest
             || baseline_model_visible_input_digest != candidate_model_visible_input_digest
@@ -339,9 +350,15 @@ impl PointwiseDominanceCertificate {
         evidence: &VerifiedEvidence<'_, '_>,
     ) -> Result<Self, QualityEnvelopeError> {
         pair.validate()?;
-        if protected_predicate_digest == Sha256Digest::ZERO {
-            return Err(missing_binding("protected predicate"));
-        }
+        // Declared Pareto vector and protected predicate must be live.
+        require_live("protected predicate", protected_predicate_digest)?;
+        require_live("protected schema", pair.protected_schema_digest)?;
+        require_live("pairing method", pair.pairing_method_digest)?;
+        // Live paired outcomes already validated via QualityPair, but re-check for typed refusal.
+        require_live("baseline outcome", pair.baseline_outcome_digest)?;
+        require_live("candidate outcome", pair.candidate_outcome_digest)?;
+        // Locked verifier: evidence must be rooted and non-stale before any dominance claim.
+        require_locked_verifier(evidence)?;
         let pair_bytes = pair.canonical_bytes()?;
         require_exact_payload("pointwise pair", &pair_bytes, evidence)?;
         let mut certificate = Self {
@@ -484,10 +501,7 @@ impl ClassDominanceRule {
     }
 
     pub fn digest(&self) -> Result<Sha256Digest, QualityEnvelopeError> {
-        Ok(domain_digest(
-            CLASS_RULE_DOMAIN,
-            &self.canonical_bytes()?,
-        ))
+        Ok(domain_digest(CLASS_RULE_DOMAIN, &self.canonical_bytes()?))
     }
 }
 
@@ -540,10 +554,7 @@ impl TaskClassMembership {
     }
 
     pub fn digest(&self) -> Result<Sha256Digest, QualityEnvelopeError> {
-        Ok(domain_digest(
-            MEMBERSHIP_DOMAIN,
-            &self.canonical_bytes()?,
-        ))
+        Ok(domain_digest(MEMBERSHIP_DOMAIN, &self.canonical_bytes()?))
     }
 }
 
@@ -576,6 +587,7 @@ impl ScopedClassDominanceCertificate {
     ) -> Result<Self, QualityEnvelopeError> {
         rule.validate()?;
         membership.validate()?;
+        // Comparable class and candidate protocol must match exactly; mismatch is incomparable.
         if rule.class_digest != membership.class_digest
             || rule.candidate_protocol_digest != membership.candidate_protocol_digest
         {
@@ -584,6 +596,14 @@ impl ScopedClassDominanceCertificate {
                 "class rule and task membership bind different class or candidate protocols",
             ));
         }
+        // Live comparison identities and locked verifiers for both evidences.
+        require_live(
+            "class rule comparison identity",
+            rule.comparison_identity_digest,
+        )?;
+        require_live("class rule protected schema", rule.protected_schema_digest)?;
+        require_locked_verifier(class_evidence)?;
+        require_locked_verifier(membership_evidence)?;
         require_exact_payload("class rule", &rule.canonical_bytes()?, class_evidence)?;
         require_exact_payload(
             "class membership",
@@ -755,8 +775,7 @@ impl DistributionalClaim {
         if self.confidence_ppm == 0
             || i64::from(self.confidence_ppm) >= QUALITY_PPM_SCALE
             || !(-QUALITY_PPM_SCALE..=QUALITY_PPM_SCALE).contains(&self.mean_gain_ppm)
-            || !(-QUALITY_PPM_SCALE..=QUALITY_PPM_SCALE)
-                .contains(&self.lower_confidence_gain_ppm)
+            || !(-QUALITY_PPM_SCALE..=QUALITY_PPM_SCALE).contains(&self.lower_confidence_gain_ppm)
             || self.lower_confidence_gain_ppm > self.mean_gain_ppm
         {
             return Err(QualityEnvelopeError::new(
@@ -822,6 +841,13 @@ impl DistributionalCertificate {
         evidence: &VerifiedEvidence<'_, '_>,
     ) -> Result<Self, QualityEnvelopeError> {
         claim.validate()?;
+        // Locked verifier and live benchmark/predicate for distributional claims.
+        require_live("distributional benchmark", claim.benchmark_digest)?;
+        require_live(
+            "distributional protected predicate",
+            claim.protected_predicate_digest,
+        )?;
+        require_locked_verifier(evidence)?;
         require_exact_payload("distributional claim", &claim.canonical_bytes()?, evidence)?;
         let mut certificate = Self {
             contract_version: QUALITY_ENVELOPE_CONTRACT_VERSION,
@@ -916,6 +942,9 @@ pub enum UnidentifiedReason {
     VerifierUnsupported,
     CandidateRegression,
     DistributionalOnly,
+    StaleEvidence,
+    IncomparableIdentity,
+    UnrootedEvidence,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
@@ -935,6 +964,30 @@ pub enum QualityEvidence {
         candidate_identity_digest: Sha256Digest,
         reason: UnidentifiedReason,
     },
+}
+
+impl UnidentifiedReason {
+    /// Map a typed envelope failure into the corresponding unidentified refusal
+    /// reason. Stale, missing, incomparable, or unrooted evidence must never
+    /// upgrade to a dominance claim; this mapping keeps the refusal typed.
+    pub fn from_failure_code(code: QualityEnvelopeFailureCode) -> Option<Self> {
+        match code {
+            QualityEnvelopeFailureCode::MissingBinding => Some(Self::MissingEvidence),
+            QualityEnvelopeFailureCode::StaleEvidence => Some(Self::StaleEvidence),
+            QualityEnvelopeFailureCode::IncomparableIdentity => Some(Self::IncomparableIdentity),
+            QualityEnvelopeFailureCode::UnrootedEvidence => Some(Self::UnrootedEvidence),
+            QualityEnvelopeFailureCode::EvidencePayloadMismatch => Some(Self::UnrootedEvidence),
+            QualityEnvelopeFailureCode::EvidenceInvalid => Some(Self::StaleEvidence),
+            QualityEnvelopeFailureCode::ClassMembershipMismatch => Some(Self::BindingMismatch),
+            QualityEnvelopeFailureCode::CandidateRegression => Some(Self::CandidateRegression),
+            QualityEnvelopeFailureCode::InvalidDistributionalBound
+            | QualityEnvelopeFailureCode::NonPositiveDistributionalBound
+            | QualityEnvelopeFailureCode::InvalidDistributionalCounts => {
+                Some(Self::DistributionalOnly)
+            }
+            _ => None,
+        }
+    }
 }
 
 impl QualityEvidence {
@@ -957,6 +1010,25 @@ impl QualityEvidence {
             comparison_identity_digest,
             candidate_identity_digest,
             reason,
+        })
+    }
+
+    /// Convenience: build an unidentified refusal directly from a typed envelope
+    /// failure. Returns `None` when the failure is not an unknown/refusal class
+    /// (caller should surface the error directly).
+    pub fn unidentified_from_error(
+        scope_digest: Sha256Digest,
+        comparison_identity_digest: Sha256Digest,
+        candidate_identity_digest: Sha256Digest,
+        error: &QualityEnvelopeError,
+    ) -> Option<Result<Self, QualityEnvelopeError>> {
+        UnidentifiedReason::from_failure_code(error.failure_code()).map(|reason| {
+            Self::unidentified(
+                scope_digest,
+                comparison_identity_digest,
+                candidate_identity_digest,
+                reason,
+            )
         })
     }
 }
@@ -1526,11 +1598,14 @@ pub fn quality_envelope_contract_manifest() -> Value {
             "unidentified",
         ],
         "certificate_requirements": {
-            "exact_neutral": ["candidate_identity", "continuation_identity", "model_visible_input", "protected_outcome"],
-            "pointwise_dominance": ["same_task", "same_comparison_identity", "candidate_identity", "paired_outcomes", "pareto_vector", "pairing_method", "protected_predicate", "locked_verifier"],
-            "scoped_class_dominance": ["candidate_protocol", "class_rule", "machine_checked_membership", "exact_verified_evidence_payloads", "locked_rule_and_membership_verifiers"],
-            "distributional": ["frozen_benchmark", "paired_counts", "pairing_method", "protected_predicate", "positive_lower_bound_ppm", "locked_verifier"],
+            "exact_neutral": ["comparable_task", "comparable_candidate_identity", "live_continuation_identity", "live_model_visible_input", "live_protected_outcome"],
+            "pointwise_dominance": ["comparable_task", "comparable_candidate_identity", "live_paired_outcomes", "declared_pareto_vector", "live_pairing_method", "live_protected_predicate", "locked_verifier", "exact_verified_payload"],
+            "scoped_class_dominance": ["comparable_candidate_protocol", "live_class_rule", "live_task_membership", "machine_checked_membership", "exact_verified_evidence_payloads", "locked_rule_and_membership_verifiers"],
+            "distributional": ["frozen_benchmark", "live_paired_counts", "live_pairing_method", "live_protected_predicate", "positive_lower_bound_ppm", "locked_verifier", "exact_verified_payload"],
         },
+        "disjoint_claims": true,
+        "typed_refusal": ["stale_evidence", "missing_binding", "incomparable_identity", "unrooted_evidence"],
+        "no_upgrade_from_partial_evidence": true,
         "contract_version": QUALITY_ENVELOPE_CONTRACT_VERSION,
         "distributional_arithmetic": "signed_integer_ppm",
         "distributional_strict_selection": "frozen_baseline",
@@ -1597,6 +1672,9 @@ pub enum QualityEnvelopeFailureCode {
     BaselineBindingMismatch,
     InvalidAdmission,
     SerializationFailure,
+    StaleEvidence,
+    IncomparableIdentity,
+    UnrootedEvidence,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -1635,6 +1713,96 @@ fn validate_id(field: &str, value: &str) -> Result<(), QualityEnvelopeError> {
             QualityEnvelopeFailureCode::InvalidProtectedVector,
             format!("{field} is empty, contains control characters, or exceeds its bound"),
         ));
+    }
+    Ok(())
+}
+
+fn require_live(label: &str, digest: Sha256Digest) -> Result<(), QualityEnvelopeError> {
+    if digest == Sha256Digest::ZERO {
+        return Err(QualityEnvelopeError::new(
+            QualityEnvelopeFailureCode::UnrootedEvidence,
+            format!("{label} is unrooted (zero digest)"),
+        ));
+    }
+    Ok(())
+}
+
+fn require_comparable(
+    label: &str,
+    left: Sha256Digest,
+    right: Sha256Digest,
+) -> Result<(), QualityEnvelopeError> {
+    if left == Sha256Digest::ZERO || right == Sha256Digest::ZERO {
+        return Err(QualityEnvelopeError::new(
+            QualityEnvelopeFailureCode::MissingBinding,
+            format!("{label} has missing comparable identity"),
+        ));
+    }
+    Ok(())
+}
+
+fn require_distinct(
+    label: &str,
+    left: Sha256Digest,
+    right: Sha256Digest,
+) -> Result<(), QualityEnvelopeError> {
+    if left == right {
+        return Err(QualityEnvelopeError::new(
+            QualityEnvelopeFailureCode::IncomparableIdentity,
+            format!("{label} requires distinct comparable identities"),
+        ));
+    }
+    Ok(())
+}
+
+fn require_locked_verifier(
+    evidence: &VerifiedEvidence<'_, '_>,
+) -> Result<(), QualityEnvelopeError> {
+    // VerifiedEvidence is already rooted and freshness-checked at verification time.
+    // We enforce that the provenance binds a non-empty, non-stale verifier identity
+    // and that the evidence payload is non-empty (rooted). Any empty provenance
+    // is treated as stale/missing and must not upgrade to dominance.
+    let provenance = &evidence.certificate().provenance;
+    if provenance.operator_id.trim().is_empty()
+        || provenance.operator_version.trim().is_empty()
+        || provenance.parser_id.trim().is_empty()
+        || provenance.parser_version.trim().is_empty()
+        || provenance.index_id.trim().is_empty()
+        || provenance.index_version.trim().is_empty()
+    {
+        return Err(QualityEnvelopeError::new(
+            QualityEnvelopeFailureCode::StaleEvidence,
+            "verified evidence provenance is missing or stale",
+        ));
+    }
+    if evidence.certificate().payload.as_ref().is_empty() {
+        return Err(QualityEnvelopeError::new(
+            QualityEnvelopeFailureCode::UnrootedEvidence,
+            "verified evidence payload is empty (unrooted)",
+        ));
+    }
+    Ok(())
+}
+
+fn require_declared_pareto_vector(
+    dimensions: &[ProtectedMetric],
+) -> Result<(), QualityEnvelopeError> {
+    if dimensions.is_empty() || dimensions.len() > QUALITY_ENVELOPE_MAX_DIMENSIONS {
+        return Err(QualityEnvelopeError::new(
+            QualityEnvelopeFailureCode::InvalidProtectedVector,
+            "protected vector is empty or exceeds its bound",
+        ));
+    }
+    let mut previous: Option<&str> = None;
+    for metric in dimensions {
+        metric.validate()?;
+        if previous.is_some_and(|value| value >= metric.metric_id.as_str()) {
+            return Err(QualityEnvelopeError::new(
+                QualityEnvelopeFailureCode::NonCanonicalOrder,
+                "protected metric ids must be unique and strictly sorted",
+            ));
+        }
+        previous = Some(&metric.metric_id);
     }
     Ok(())
 }
@@ -1687,7 +1855,14 @@ fn require_exact_payload(
     expected: &[u8],
     evidence: &VerifiedEvidence<'_, '_>,
 ) -> Result<(), QualityEnvelopeError> {
-    if evidence.certificate().payload.as_ref() != expected {
+    let payload = evidence.certificate().payload.as_ref();
+    if payload.is_empty() {
+        return Err(QualityEnvelopeError::new(
+            QualityEnvelopeFailureCode::UnrootedEvidence,
+            format!("verified evidence payload is empty for {label} (unrooted)"),
+        ));
+    }
+    if payload != expected {
         return Err(QualityEnvelopeError::new(
             QualityEnvelopeFailureCode::EvidencePayloadMismatch,
             format!("verified evidence payload does not equal canonical {label} bytes"),
@@ -1757,4 +1932,3 @@ fn json_error(error: serde_json::Error) -> QualityEnvelopeError {
         error.to_string(),
     )
 }
-

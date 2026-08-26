@@ -20,7 +20,7 @@ pub use canonical::direct_contract_digest;
 pub use host::{AtomicCancellation, Cell, HostError, ZeroKernel, typed_error};
 pub use preparation::{CellPreparation, PreparedCell};
 pub use shell::ShellCommand;
-pub use speculation::SpeculationRuntime;
+pub use speculation::{SpeculationClaimOutcome, SpeculationOutcome, SpeculationRuntime};
 pub use state::{StateError, StateSnapshot, StateStore};
 pub use transaction::{
     PreparedEffect, Transaction, TransactionCoordinator, TransactionError, TransactionRecord,

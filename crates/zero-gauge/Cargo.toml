@@ -13,3 +13,6 @@ zero-abi = { path = "../zero-abi" }
 [[test]]
 name = "hundredfold"
 path = "../../tests/zero_gauge_hundredfold.rs"
+
+[lints]
+workspace = true

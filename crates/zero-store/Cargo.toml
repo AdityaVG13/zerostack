@@ -55,3 +55,6 @@ path = "../../tests/zero_store_provider_usage.rs"
 [[test]]
 name = "zero_migration"
 path = "../../tests/zero_store_zero_migration.rs"
+
+[lints]
+workspace = true

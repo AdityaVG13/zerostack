@@ -17,6 +17,10 @@ use std::str::FromStr;
 pub mod adaptive_eval;
 pub mod bounds;
 pub mod hundredfold;
+pub mod observation;
+pub mod pair;
+pub mod provenance;
+pub mod report;
 pub mod solver;
 pub mod theorems;
 

@@ -51,6 +51,15 @@ zero-process = { path = "crates/zero-process" }
 zero-ref = { path = "crates/zero-ref" }
 zero-store = { path = "crates/zero-store" }
 zero-machine-permit = { path = "crates/zerostack-machine-permit" }
+# Production Rust complexity policy (Wave 16):
+# Enforced via Clippy `cognitive_complexity` (compiler-backed, maintained lint).
+# Threshold 25 is documented here and is the single source of truth in
+# `clippy.toml` (`cognitive-complexity-threshold = 25`). Enforced as `deny`
+# workspace-wide; every production crate inherits via `[lints] workspace = true`
+# without per-crate `allow` or test-only bypasses.
+[workspace.lints.clippy]
+cognitive_complexity = { level = "deny", priority = -1 }
+
 
 # Honest perf measurement profile (gauntlet keep-gate rule 3).
 # Never use `--release` for a keep claim: size-optimized release can strip

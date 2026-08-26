@@ -48,3 +48,6 @@ path = "../../tests/zero_kernel_speculation.rs"
 [[bin]]
 name = "zero-kernel"
 path = "src/bin/zero_kernel.rs"
+
+[lints]
+workspace = true

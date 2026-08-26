@@ -22,3 +22,6 @@ path = "../../tests/zero_ref_zeroref_proptest.rs"
 [[test]]
 name = "zeroref_api"
 path = "../../tests/zero_ref_zeroref_api.rs"
+
+[lints]
+workspace = true

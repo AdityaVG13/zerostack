@@ -54,6 +54,24 @@ pub enum JournalState {
     Aborted,
 }
 
+impl JournalState {
+    /// Explicit authority matrix: every terminal state has exactly one
+    /// producer. Prepared may move to Committed (commit) or Aborted (abort
+    /// or recovery); terminal states never leave. Idempotent replay of the
+    /// same terminal is allowed only when the authority's receipt is already
+    /// persisted and verified (handled at call sites), not via state transition.
+    pub fn can_transition_to(self, next: JournalState) -> bool {
+        matches!(
+            (self, next),
+            (JournalState::Prepared, JournalState::Committed)
+                | (JournalState::Prepared, JournalState::Aborted)
+        )
+    }
+    pub fn is_terminal(self) -> bool {
+        matches!(self, JournalState::Committed | JournalState::Aborted)
+    }
+}
+
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum AbortReason {
@@ -1167,6 +1185,15 @@ fn commit_bound_journal<B: JournalBindingLike>(
             "prepared record digest differs from continuation cartridge",
         ));
     }
+    // Explicit authority: Prepared -> Committed is the single commit path.
+    // Any other state was rejected above. This transition is fail-closed via
+    // domain digest binding checks (cartridge vs journal, root vs binding).
+    debug_assert!(
+        journal
+            .value
+            .state
+            .can_transition_to(JournalState::Committed)
+    );
     let root = read_root(paths)?;
     if root.root_digest == binding.old_root() {
         let published = RootPublicationReceipt::published(binding, journal.digest);
@@ -1278,6 +1305,8 @@ fn abort_bound_journal<B: JournalBindingLike>(
             "prepared record digest differs from continuation cartridge",
         ));
     }
+    // Explicit authority: Prepared -> Aborted is the single abort path.
+    debug_assert!(journal.value.state.can_transition_to(JournalState::Aborted));
     let root = read_root(paths)?;
     verify_old(&root, binding)?;
     let aborted = DurableJournalRecord::<B>::aborted(
@@ -1675,9 +1704,17 @@ fn persist_recovery(
     receipt: RecoveryReceipt,
     fault: &mut FaultPlan,
 ) -> Result<RecoveryReceipt, JournalError> {
-    if let Some(existing) = existing_recovery::<JournalBinding>(paths, None)? {
-        if existing.binding_digest == receipt.binding_digest {
-            return Ok(existing);
+    // Recovery receipt is immutable and typed: same path for v1 and v2, but
+    // the binding digest is the authority. Generic check ensures we do not
+    // silently alias a v1 receipt for a v2 binding.
+    if let Some(existing) = read_optional::<RecoveryReceipt>(
+        paths.recovery_receipt(),
+        JournalFailureCode::JournalMissing,
+        RECOVERY_DOMAIN,
+    )? {
+        existing.value.canonical_bytes()?;
+        if existing.value.binding_digest == receipt.binding_digest {
+            return Ok(existing.value);
         }
         return Err(JournalError::new(
             JournalFailureCode::ImmutableReceiptConflict,

@@ -1,0 +1,7 @@
+# ZeroStack production complexity policy – single source of truth.
+# Enforced via Clippy `cognitive_complexity` (compiler-backed, maintained lint).
+# Threshold 25 denies functions whose cognitive complexity exceeds 25.
+# Enforced workspace-wide as `deny` in `[workspace.lints.clippy]` in the
+# root Cargo.toml; every production crate inherits via `[lints] workspace = true`.
+# No per-crate `allow` attributes, no test-only bypasses, no custom validator.
+cognitive-complexity-threshold = 25

@@ -69,8 +69,8 @@ pub use durable_journal::{
     recover_lease_journal_with_fault, verify_committed_lease_binding,
 };
 pub use fs_replace::{
-    SyncPolicy, atomic_write_file, atomic_write_file_with_sync, replace_file, sync_unsupported,
-    tolerate_unsupported_sync,
+    SyncPolicy, atomic_write_file, atomic_write_file_with_sync, replace_file, sync_dir,
+    sync_unsupported, tolerate_unsupported_sync,
 };
 pub use gc::{
     BeforeUnlinkHook, DEFAULT_GC_REPORT_LIMIT, DryRunReport, GC_MAX_BLOB_HASHES,

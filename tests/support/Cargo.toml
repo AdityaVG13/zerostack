@@ -9,3 +9,6 @@ description = "Shared test scaffolding for ZeroStack and the three engine repos"
 blake3.workspace = true
 sha2.workspace = true
 zero-abi = { path = "../../crates/zero-abi" }
+
+[lints]
+workspace = true

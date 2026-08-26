@@ -111,6 +111,7 @@ fn completed_response(operations: Vec<ZeroOperationTrace>) -> ZeroKernelResponse
         },
         ledger: KernelLedger::default(),
         turn: None,
+        effects: Vec::new(),
     }
 }
 
@@ -179,6 +180,7 @@ fn failed_response_must_carry_error_and_unchanged_state() {
         },
         ledger: KernelLedger::default(),
         turn: None,
+        effects: Vec::new(),
     };
     response.validate().expect("valid failure");
 

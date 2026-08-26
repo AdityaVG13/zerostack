@@ -16,3 +16,6 @@ zero-store = { path = "../zero-store" }
 
 [dev-dependencies]
 tempfile = "3"
+
+[lints]
+workspace = true

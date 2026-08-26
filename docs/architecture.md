@@ -46,6 +46,8 @@ The first file mutation lazily opens one cell transaction. FSZero returns exact 
 
 TokenZero measures the serialized value at operation and response boundaries. Small values pass through. Larger values may return a bounded projection and exact handles. Recovering a handle returns original bytes and contributes to recovery-aware accounting.
 
+ZeroGauge reports token savings only from paired observations with the same task, machine fingerprint, and measurement kind. Reports carry exact token, byte, and call numerators and denominators. Missing or incomparable observations produce an explicit unknown result, never zero savings or a percentage claim.
+
 ## Zero-miss speculative scheduling
 
 ZeroKernel admits speculative work only after `CellPreparation` seals the full
@@ -66,6 +68,14 @@ optimization and is not counted as token savings. A
 `find -> exact snap -> edit -> verify` workflow still fits in one model-facing
 `zero` call, with intermediate evidence kept behind exact handles.
 
+## Live Pareto decisions
+
+TokenZero computes the live Pareto frontier from fresh, verifier-bound candidates. Candidate identity, semantic and adapter roots, protected outcomes, resource coordinates, verifier identity, and evidence freshness are part of the decision digest. Stale, missing, unknown, or incomparable candidates remain visible and cannot dominate another candidate. ZeroStack consumes the typed decision without translating it into a second frontier model.
+
+## Atomic effect settlement
+
+The direct host can prepare, validate, stage, and commit one effect request in one call. The call binds source, Work Capsule roots, policy/contract coordinate, state-before root, and exact receipts. Receipt validation runs before state or transaction commit. Cancellation and binding drift retain the live transaction for the single rollback authority; rollback failure becomes a corrupt outcome rather than a successful cancellation. Completed responses carry the exact committed receipts and state root from the same settlement.
+
 ## Process ownership
 
 `z.run` belongs to the hub. It validates the working directory, starts the exact child tree, captures bounded output, and terminates and reaps descendants on timeout, cancellation, frame failure, shutdown, or object destruction. TokenZero projects captured output but never owns the process lifecycle.
@@ -73,3 +83,5 @@ optimization and is not counted as token savings. A
 ## Source and release model
 
 ZeroStack is source-only and does not publish standalone releases. FSZero, GraphZero, and TokenZero are the released products. Once coordinated releases begin, the engines will share one version to signal compatible contract parity.
+
+Production Rust inherits a workspace Clippy cognitive-complexity deny rule with threshold 25. The detached harness inherits the same threshold. Complexity exceptions are not a compatibility surface; functions above the threshold must be split along existing authority and lifecycle boundaries.

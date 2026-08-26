@@ -8,3 +8,6 @@ description = "Shared conformance suite: contract tests every engine must pass"
 [dependencies]
 zero-abi = { path = "../zero-abi" }
 tempfile = "3"
+
+[lints]
+workspace = true

@@ -32,3 +32,6 @@ path = "../../tests/zero_codemode_trace_binding.rs"
 [[test]]
 name = "syntax"
 path = "../../tests/zero_codemode_syntax.rs"
+
+[lints]
+workspace = true

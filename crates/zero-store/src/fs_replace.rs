@@ -147,7 +147,7 @@ fn write_sync_replace(
 ///
 /// Returns the error instead of discarding it; callers decide whether the
 /// failure is fatal, which depends on whether the rename already published.
-pub(crate) fn sync_dir(dir: &Path) -> io::Result<()> {
+pub fn sync_dir(dir: &Path) -> io::Result<()> {
     #[cfg(unix)]
     {
         File::open(dir)?.sync_all()?;

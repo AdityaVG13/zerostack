@@ -1,9 +1,13 @@
 //! Bounded in-process zero-miss speculation.
 //!
-//! Admission happens only for a finalized unconditional call permit. Capacity
-//! refusal chooses ordinary execution before any work launches. Once admitted,
-//! the real call must claim the exact rooted result; absence is an invariant
-//! failure and never triggers duplicate execution.
+//! Admission happens only for a finalized unconditional call permit carrying
+//! exact prepared identity. Capacity refusal chooses ordinary execution before
+//! any work launches. Once admitted, the real call must claim the exact
+//! rooted result; absence is an invariant failure and never triggers duplicate
+//! execution. There is no prediction path: work launches only from a
+//! `SpeculationPermit` that validates as unconditional, certified-pure, and
+//! cancellation-bound, and (via `admit_prepared`) matches the sealed
+//! `PreparedCell` digest and binding.
 
 use std::collections::BTreeMap;
 use std::panic::{AssertUnwindSafe, catch_unwind};
@@ -18,6 +22,41 @@ use zero_abi::{
     CancellationProbe, EngineError, EngineErrorKind, SpeculationAdmission, SpeculationLedger,
     SpeculationPermit, SpeculationState,
 };
+
+use crate::PreparedCell;
+
+/// Typed outcomes for zero-miss speculation — covers the five observable
+/// contracts the runtime guarantees without rerunning work:
+///
+/// * `Ordinary` — execution proceeded without speculation (plan marked the
+///   node ordinary or host chose not to speculate).
+/// * `SpeculativeWin` — speculative work completed with a value and the exact
+///   claim hit.
+/// * `SpeculativeDomainError` — speculative work completed with a typed
+///   domain error (e.g., file does not exist, invalid input, `retryable=false`);
+///   no retry is performed.
+/// * `Cancelled` — speculative work was cancelled by bounded-wait timeout or
+///   turn invalidation; the worker was joined and drained.
+/// * `CapacityRefusal` — admission was refused before launch due to the
+///   bounded inflight limit; caller preserved ordinary execution and no worker
+///   was leaked.
+#[derive(Debug)]
+pub enum SpeculationOutcome {
+    Ordinary,
+    SpeculativeWin(Value),
+    SpeculativeDomainError(EngineError),
+    Cancelled(EngineError),
+    CapacityRefusal,
+}
+
+/// Typed claim outcome when a permit was admitted. Splits the speculative
+/// execution result without overlapping the admission decision.
+#[derive(Debug)]
+pub enum SpeculationClaimOutcome {
+    Hit(Value),
+    DomainError(EngineError),
+    Cancelled(EngineError),
+}
 
 struct EntryState {
     state: SpeculationState,
@@ -72,6 +111,29 @@ impl SpeculationRuntime {
         })
     }
 
+    /// Current admitted inflight count — minimal API for host integration.
+    pub fn inflight(&self) -> u32 {
+        self.inner.inflight.load(Ordering::Acquire)
+    }
+
+    /// Whether any speculative work is still admitted.
+    pub fn is_empty(&self) -> bool {
+        self.inner.entries.lock().is_empty() && self.inner.workers.lock().is_empty()
+    }
+
+    /// Check whether a permit is currently admitted (exact claim exists).
+    pub fn is_admitted(&self, permit: &SpeculationPermit) -> bool {
+        permit
+            .claim_key()
+            .map(|key| self.inner.entries.lock().contains_key(&key))
+            .unwrap_or(false)
+    }
+
+    /// Admit one finalized unconditional permit. Validates the permit
+    /// (unconditional, certified-pure, cancellation-bound, positive budgets)
+    /// and enforces the bounded capacity *before* any thread is spawned.
+    /// On capacity refusal the ledger records an ordinary admission and
+    /// ordinary execution is preserved with no worker leaked.
     pub fn admit<F>(
         &self,
         permit: SpeculationPermit,
@@ -80,11 +142,54 @@ impl SpeculationRuntime {
     where
         F: FnOnce(Arc<dyn CancellationProbe>) -> Result<Value, EngineError> + Send + 'static,
     {
+        self.admit_inner(permit, None, work)
+    }
+
+    /// Admit one finalized unconditional permit bound to an exact
+    /// `PreparedCell` identity. In addition to `admit` validation the
+    /// permit's binding and finalized source root must match the sealed
+    /// prepared cell exactly; any drift is rejected before launch with no
+    /// worker created. This is the host-facing zero-miss entry point.
+    pub fn admit_prepared<F>(
+        &self,
+        permit: SpeculationPermit,
+        prepared: &PreparedCell,
+        work: F,
+    ) -> Result<SpeculationAdmission, String>
+    where
+        F: FnOnce(Arc<dyn CancellationProbe>) -> Result<Value, EngineError> + Send + 'static,
+    {
+        self.admit_inner(permit, Some(prepared), work)
+    }
+
+    fn admit_inner<F>(
+        &self,
+        permit: SpeculationPermit,
+        prepared: Option<&PreparedCell>,
+        work: F,
+    ) -> Result<SpeculationAdmission, String>
+    where
+        F: FnOnce(Arc<dyn CancellationProbe>) -> Result<Value, EngineError> + Send + 'static,
+    {
+        // Finalized unconditional permit is mandatory — no prediction path.
         permit.validate()?;
+        if let Some(prepared) = prepared {
+            // Exact prepared identity: binding and finalized source root must be
+            // byte-exact with the sealed cell. No drift, no re-dispatch.
+            if &permit.binding != prepared.binding() {
+                return Err("speculation permit binding does not match prepared identity".into());
+            }
+            if permit.proof.finalized_source_root != prepared.digest() {
+                return Err(
+                    "speculation permit finalized source does not match prepared identity".into(),
+                );
+            }
+        }
         let key = permit.claim_key()?;
         if self.inner.entries.lock().contains_key(&key) {
             return Err("duplicate speculative claim key".into());
         }
+        // Capacity refusal BEFORE launch — preserves ordinary execution.
         let admitted = self
             .inner
             .inflight
@@ -122,6 +227,8 @@ impl SpeculationRuntime {
         let inner = Arc::clone(&self.inner);
         let worker_entry = Arc::clone(&entry);
         let handle = std::thread::spawn(move || {
+            // Entry state transitions: Pending -> Running -> Ready/Failed/Cancelled.
+            // No duplicate commit: result is stored exactly once and taken on claim.
             worker_entry.state.lock().state = SpeculationState::Running;
             let cancellation: Arc<dyn CancellationProbe> =
                 Arc::new(SpeculationCancellation(Arc::clone(&worker_entry.cancelled)));
@@ -164,6 +271,11 @@ impl SpeculationRuntime {
         Ok(SpeculationAdmission::Speculated)
     }
 
+    /// Claim the exact rooted result for an admitted permit. Waits at most
+    /// `wait`; on timeout the worker is cancelled but remains joined via
+    /// `end_turn`/Drop. A missing claim is an invariant failure and never
+    /// triggers duplicate execution. A second claim on the same permit cannot
+    /// commit a duplicate result — it fails closed.
     pub fn claim(&self, permit: &SpeculationPermit, wait: Duration) -> Result<Value, EngineError> {
         let key = permit
             .claim_key()
@@ -179,6 +291,14 @@ impl SpeculationRuntime {
         };
 
         let mut state = entry.state.lock();
+        // Prevent duplicate committed result: already-claimed entry is terminal.
+        if state.state == SpeculationState::Claimed {
+            return Err(EngineError::new(
+                EngineErrorKind::Internal,
+                "speculative claim already consumed",
+                false,
+            ));
+        }
         if matches!(
             state.state,
             SpeculationState::Pending | SpeculationState::Running
@@ -197,6 +317,14 @@ impl SpeculationRuntime {
                     false,
                 ));
             }
+        }
+        // Second check after wake: claimed or cancelled while waiting.
+        if state.state == SpeculationState::Claimed {
+            return Err(EngineError::new(
+                EngineErrorKind::Internal,
+                "speculative claim already consumed",
+                false,
+            ));
         }
         match state.state {
             SpeculationState::Ready => match state.result.take() {
@@ -239,10 +367,35 @@ impl SpeculationRuntime {
         }
     }
 
+    /// Typed claim outcome for host integration — maps the same invariants as
+    /// `claim` onto the five typed contracts: speculative win, speculative
+    /// domain error, cancellation, ordinary (no admission), and capacity
+    /// refusal (handled at admission). Cancellation and domain errors are
+    /// typed via `EngineError` kinds and `retryable=false` for domain.
+    pub fn claim_outcome(
+        &self,
+        permit: &SpeculationPermit,
+        wait: Duration,
+    ) -> SpeculationClaimOutcome {
+        match self.claim(permit, wait) {
+            Ok(value) => SpeculationClaimOutcome::Hit(value),
+            Err(error) if error.kind == EngineErrorKind::Cancelled => {
+                SpeculationClaimOutcome::Cancelled(error)
+            }
+            Err(error) if error.kind == EngineErrorKind::Deadline => {
+                SpeculationClaimOutcome::Cancelled(error)
+            }
+            Err(error) => SpeculationClaimOutcome::DomainError(error),
+        }
+    }
+
     pub fn ledger(&self) -> SpeculationLedger {
         self.inner.ledger.lock().clone()
     }
 
+    /// End of turn: cancel any pending/running work, convert any unclaimed
+    /// Ready into Cancelled (wasted_ready), then join or drain every admitted
+    /// worker. No worker is leaked. Returns the validated ledger.
     pub fn end_turn(&self) -> Result<SpeculationLedger, String> {
         for entry in self.inner.entries.lock().values() {
             let mut state = entry.state.lock();
@@ -267,6 +420,7 @@ impl SpeculationRuntime {
             }
             entry.ready.notify_all();
         }
+        // Join or drain every admitted worker — no leaked worker.
         for worker in self.inner.workers.lock().drain(..) {
             worker
                 .join()

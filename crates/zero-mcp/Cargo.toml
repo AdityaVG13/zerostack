@@ -26,3 +26,6 @@ path = "../../tests/zero_mcp_mcp_transport.rs"
 [[test]]
 name = "job_progress"
 path = "../../tests/zero_mcp_job_progress.rs"
+
+[lints]
+workspace = true

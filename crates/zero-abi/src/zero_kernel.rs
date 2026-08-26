@@ -84,7 +84,8 @@ pub fn zero_kernel_response_schema() -> Value {
                 "required": ["wallNs", "cpuNsUpperBound", "calls", "tasks", "bytesRead", "bytesWritten", "bytesVisible"]
             },
             "operations": { "type": "array", "items": { "type": "object" } },
-            "operationsTruncated": { "type": "boolean" }
+            "operationsTruncated": { "type": "boolean" },
+            "effects": { "type": "array", "items": { "type": "object" } }
         },
         "required": ["protocol", "outcome", "event", "state", "ledger"]
     })
@@ -389,6 +390,13 @@ pub struct ZeroKernelResponse {
     pub ledger: KernelLedger,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub turn: Option<TurnRecord>,
+    /// Exact committed effect receipts bound to the same transaction as `state`.
+    /// Present only on the atomic host effect path; when present it must agree
+    /// with `state.after` and the event's effect_root, and no placeholder is
+    /// allowed. Validation/cancellation failures leave `state` unchanged and
+    /// `effects` empty.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub effects: Vec<FileEffectReceipt>,
 }
 
 impl ZeroKernelResponse {
@@ -441,6 +449,32 @@ impl ZeroKernelResponse {
         }
         if let Some(turn) = &self.turn {
             turn.validate().map_err(ZeroKernelError::InvalidResponse)?;
+        }
+        // Effects, when present, must be consistent with a committed atomic effect:
+        // no placeholder receipt, and a failed/cancelled outcome must not carry effects
+        // and must leave state unchanged.
+        if !self.effects.is_empty() {
+            if !matches!(self.outcome, ZeroKernelOutcome::Completed) {
+                return Err(ZeroKernelError::InvalidResponse(
+                    "effects are only valid on a completed response".into(),
+                ));
+            }
+            for receipt in &self.effects {
+                if receipt.journal.as_str().is_empty() {
+                    return Err(ZeroKernelError::InvalidResponse(
+                        "effect receipt journal must not be empty".into(),
+                    ));
+                }
+            }
+        }
+        if matches!(
+            self.outcome,
+            ZeroKernelOutcome::Cancelled | ZeroKernelOutcome::Failed
+        ) && !self.effects.is_empty()
+        {
+            return Err(ZeroKernelError::InvalidResponse(
+                "cancelled or failed response must not carry effects".into(),
+            ));
         }
         self.state.validate(&self.outcome)
     }

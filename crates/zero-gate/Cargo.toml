@@ -31,3 +31,6 @@ path = "../../tests/zero_gate_demand_expand.rs"
 [[test]]
 name = "snap_to_file"
 path = "../../tests/zero_gate_snap_to_file.rs"
+
+[lints]
+workspace = true

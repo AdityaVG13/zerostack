@@ -12,3 +12,6 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 zero-abi = { path = "../zero-abi" }
 zero-ref = { path = "../zero-ref" }
+
+[lints]
+workspace = true

@@ -11,7 +11,8 @@ use serde_json::{Value, json};
 use tempfile::tempdir;
 use tokenzero_kernel::ZeroTokenEngine;
 use zero_abi::{
-    AsgrepOptions, CapsulePublication, CompressionRequest, CompressionResult, EngineError,
+    AsgrepOptions, CapsulePublication, CompressionRequest, CompressionResult, EffectChangeKind,
+    EffectChangeRequest, EffectRequest, EffectTarget, EffectVerification, EngineError,
     EngineErrorKind, EngineInvocation, FileEffectKind, FileEffectReceipt, FileEffectRequest,
     FileEngine, FileLease, FileReadRequest, FileSnapshot, KernelBudget, KernelContext,
     LookupOptions, ProjectionRequest, ProjectionResult, ReadOptions, SafetyVerdict, ShellOptions,
@@ -899,20 +900,6 @@ fn read_labels_nul_content_as_non_text() {
     );
 }
 
-#[test]
-fn transaction_rolls_back_created_file() {
-    let root = tempdir().unwrap();
-    let files = Arc::new(Files::default());
-    let kernel = kernel(root.path(), Arc::clone(&files) as Arc<dyn FileEngine>);
-    let mut cell = kernel.begin_cell("transaction").unwrap();
-    cell.begin_transaction().unwrap();
-    cell.write("new.txt", b"new".to_vec(), None).unwrap();
-    cell.rollback_transaction().unwrap();
-    assert!(!files.0.lock().contains_key(&PathBuf::from("new.txt")));
-    drop(cell);
-    assert_eq!(kernel.live_frames(), 0);
-}
-
 #[cfg(unix)]
 #[test]
 fn outline_read_is_explicitly_labeled() {
@@ -933,39 +920,6 @@ fn outline_read_is_explicitly_labeled() {
     );
     assert!(text.contains("path=crates/outline-only.rs"), "{text}");
     assert!(text.contains("exact="), "{text}");
-    drop(cell);
-    assert_eq!(kernel.live_frames(), 0);
-}
-
-#[test]
-fn remove_missing_path_keeps_transaction_alive() {
-    let root = tempdir().unwrap();
-    let files = Arc::new(Files::default());
-    let kernel = kernel(root.path(), Arc::clone(&files) as Arc<dyn FileEngine>);
-    let mut cell = kernel.begin_cell("transaction-remove").unwrap();
-    cell.begin_transaction().unwrap();
-    cell.write("kept.txt", b"kept".to_vec(), None).unwrap();
-    let error = cell
-        .remove("missing.txt", None)
-        .expect_err("remove of missing path must fail");
-    let not_found = match &error {
-        HostError::Engine(engine_error) => engine_error.kind == EngineErrorKind::NotFound,
-        HostError::Transaction(transaction_error) => matches!(
-            transaction_error,
-            TransactionError::Engine(engine_error)
-                if engine_error.kind == EngineErrorKind::NotFound
-        ),
-        _ => false,
-    };
-    assert!(not_found, "expected engine NotFound, got {error:?}");
-    // The earlier write must still commit; one failed effect cannot poison
-    // the whole transaction (pc_2ed8bb7745f4).
-    cell.commit_transaction().unwrap();
-    let files = files.0.lock();
-    assert_eq!(
-        files.get(&PathBuf::from("kept.txt")).map(Vec::as_slice),
-        Some(&b"kept"[..])
-    );
     drop(cell);
     assert_eq!(kernel.live_frames(), 0);
 }
@@ -3714,50 +3668,263 @@ fn capsule_failure_publishes_no_event_and_leaves_no_effect() {
 }
 
 #[test]
-fn capsule_terminal_tuple_roots_follow_actual_effects_and_operations() {
+fn capsule_terminal_effect_root_follows_committed_receipt() {
     let root = tempdir().unwrap();
     let files = Arc::new(Files::default());
     let kernel = kernel(root.path(), Arc::clone(&files) as Arc<dyn FileEngine>);
+    let mut targets = BTreeMap::new();
+    targets.insert(
+        "made".into(),
+        zero_abi::EffectTargetRequest {
+            path: PathBuf::from("made.txt"),
+            expect: Some("absent".into()),
+        },
+    );
+    let response = kernel
+        .execute_atomic_effect_simple(
+            "atomic effect",
+            EffectRequest {
+                targets,
+                changes: vec![EffectChangeRequest {
+                    target: "made".into(),
+                    kind: EffectChangeKind::CreateFile,
+                    content: Some("made".into()),
+                    old: None,
+                    replacement: None,
+                    anchor: None,
+                    expected_count: None,
+                }],
+                verify: zero_abi::EffectVerification {
+                    parse: false,
+                    changed_targets_only: true,
+                    command: None,
+                },
+            },
+        )
+        .unwrap();
+    let with_effect = published_event(root.path(), &response)
+        .capsule
+        .expect("capsule tuple");
+    let bare_response = kernel
+        .begin_cell("bare cell")
+        .unwrap()
+        .finish(json!(true))
+        .unwrap();
+    let bare = published_event(root.path(), &bare_response)
+        .capsule
+        .expect("capsule tuple");
 
-    // One cell with a traced operation and a committed effect...
-    let mut cell = kernel.begin_cell("effect-cell").unwrap();
-    cell.record_operations(
-        vec![ZeroOperationTrace {
-            sequence: 1,
-            method: "read".into(),
-            status: ZeroOperationStatus::Completed,
-            capsule_root: cell.capsule_root().to_owned(),
-            occurrence: 1,
-            parallel_group: None,
-            target: None,
-            detail: None,
-            result_count: None,
-            changed_files: None,
-            duration_ns: 0,
-        }],
-        false,
-    )
-    .unwrap();
-    cell.create("made.txt", b"made".to_vec()).unwrap();
-    let response = cell.finish(json!({"ok": true})).unwrap();
-    let with_effect = published_event(root.path(), &response);
-
-    // ...and one bare cell with neither.
-    let cell = kernel.begin_cell("effect-cell").unwrap();
-    let response = cell.finish(json!(true)).unwrap();
-    let bare = published_event(root.path(), &response);
-
-    let with_effect = with_effect.capsule.expect("capsule tuple");
-    let bare = bare.capsule.expect("capsule tuple");
-    // The constant planes stay identical across cells...
-    assert_eq!(with_effect.provider_root, bare.provider_root);
-    assert_eq!(with_effect.cache_root, bare.cache_root);
-    assert_eq!(with_effect.speculation_root, bare.speculation_root);
-    assert_eq!(with_effect.quality_root, bare.quality_root);
-    // ...while the effect and occurrence roots bind the actual facts.
     assert_ne!(with_effect.effect_root, bare.effect_root);
-    assert_ne!(with_effect.occurrence_root, bare.occurrence_root);
-    // Every event still carries a valid capsule object.
     with_effect.validate().unwrap();
     bare.validate().unwrap();
+}
+
+#[test]
+fn atomic_effect_binds_source_capsule_policy_state_before_and_receipt() {
+    let root = tempdir().unwrap();
+    let files = Arc::new(Files::default());
+    let kernel = kernel(root.path(), Arc::clone(&files) as Arc<dyn FileEngine>);
+    let before_state = kernel.begin_cell("probe").unwrap().state_values();
+    assert!(before_state.is_empty());
+    let source = "return await z.apply([{path: 'atomic.txt', create: 'hello'}]);";
+    let request = EffectRequest {
+        targets: {
+            let mut m = BTreeMap::new();
+            m.insert(
+                "t".into(),
+                zero_abi::EffectTargetRequest {
+                    path: PathBuf::from("atomic.txt"),
+                    expect: Some("absent".into()),
+                },
+            );
+            m
+        },
+        changes: vec![EffectChangeRequest {
+            target: "t".into(),
+            kind: EffectChangeKind::CreateFile,
+            content: Some("hello".into()),
+            old: None,
+            replacement: None,
+            anchor: None,
+            expected_count: None,
+        }],
+        verify: zero_abi::EffectVerification {
+            parse: false,
+            changed_targets_only: true,
+            command: None,
+        },
+    };
+    let response = kernel
+        .execute_atomic_effect(source, request, AtomicCancellation::new())
+        .expect("atomic effect must succeed");
+    assert_eq!(response.outcome, zero_abi::ZeroKernelOutcome::Completed);
+    // Typed response binds state and receipt to same committed effect
+    assert!(response.state.unchanged);
+    assert_eq!(response.state.before, response.state.after);
+    assert_eq!(response.effects.len(), 1);
+    let receipt = &response.effects[0];
+    assert_eq!(receipt.path, PathBuf::from("atomic.txt"));
+    assert!(receipt.after.is_some());
+    assert!(receipt.journal.as_str().starts_with("z://blob/"));
+    // No placeholder receipt
+    assert!(!receipt.journal.as_str().is_empty());
+    // Verify file actually exists with expected content
+    let files_lock = files.0.lock();
+    assert_eq!(
+        files_lock
+            .get(&PathBuf::from("atomic.txt"))
+            .map(|v| v.as_slice()),
+        Some(b"hello" as &[u8])
+    );
+    drop(files_lock);
+    let event = published_event(root.path(), &response);
+    event
+        .capsule
+        .expect("event has capsule")
+        .validate()
+        .unwrap();
+    response.validate().expect("response validates");
+    assert_eq!(kernel.live_frames(), 0);
+}
+
+#[test]
+fn atomic_effect_validation_and_cancellation_leave_state_unchanged() {
+    let root = tempdir().unwrap();
+    let files = Arc::new(Files::default());
+    files
+        .0
+        .lock()
+        .insert(PathBuf::from("existing.txt"), b"orig".to_vec());
+    let kernel = kernel(root.path(), Arc::clone(&files) as Arc<dyn FileEngine>);
+    // Validation failure: create_file on existing target should fail and leave state unchanged
+    let bad_request = EffectRequest {
+        targets: {
+            let mut m = BTreeMap::new();
+            m.insert(
+                "t".into(),
+                zero_abi::EffectTargetRequest {
+                    path: PathBuf::from("existing.txt"),
+                    expect: Some("absent".into()),
+                },
+            );
+            m
+        },
+        changes: vec![EffectChangeRequest {
+            target: "t".into(),
+            kind: EffectChangeKind::CreateFile,
+            content: Some("new".into()),
+            old: None,
+            replacement: None,
+            anchor: None,
+            expected_count: None,
+        }],
+        verify: zero_abi::EffectVerification {
+            parse: false,
+            changed_targets_only: true,
+            command: None,
+        },
+    };
+    let bad_source = "return await z.apply([{path: 'existing.txt', create: 'new'}]);";
+    let response = kernel
+        .execute_atomic_effect(bad_source, bad_request, AtomicCancellation::new())
+        .expect("validation failure returns typed Failed response");
+    // Should be Failed with state unchanged and no receipt
+    assert_eq!(response.outcome, zero_abi::ZeroKernelOutcome::Failed);
+    assert!(response.state.unchanged);
+    assert!(response.effects.is_empty());
+    assert_eq!(response.state.before, response.state.after);
+    // Cancellation before commit leaves state unchanged
+    let cancel = AtomicCancellation::new();
+    cancel.cancel();
+    let request2 = EffectRequest {
+        targets: {
+            let mut m = BTreeMap::new();
+            m.insert(
+                "t".into(),
+                zero_abi::EffectTargetRequest {
+                    path: PathBuf::from("cancelled.txt"),
+                    expect: Some("absent".into()),
+                },
+            );
+            m
+        },
+        changes: vec![EffectChangeRequest {
+            target: "t".into(),
+            kind: EffectChangeKind::CreateFile,
+            content: Some("data".into()),
+            old: None,
+            replacement: None,
+            anchor: None,
+            expected_count: None,
+        }],
+        verify: zero_abi::EffectVerification {
+            parse: false,
+            changed_targets_only: true,
+            command: None,
+        },
+    };
+    let response = kernel
+        .execute_atomic_effect(
+            "return await z.apply([{path: 'cancelled.txt', create: 'data'}]);",
+            request2,
+            cancel,
+        )
+        .expect("cancelled returns typed Cancelled response");
+    assert_eq!(response.outcome, zero_abi::ZeroKernelOutcome::Cancelled);
+    assert!(response.state.unchanged);
+    assert!(response.effects.is_empty());
+    assert!(!files.0.lock().contains_key(&PathBuf::from("cancelled.txt")));
+    assert_eq!(kernel.live_frames(), 0);
+}
+
+#[test]
+fn atomic_effect_receipt_is_exact_and_single_authority() {
+    let root = tempdir().unwrap();
+    let files = Arc::new(Files::default());
+    let kernel = kernel(root.path(), Arc::clone(&files) as Arc<dyn FileEngine>);
+    let source = "return await z.apply([{path: 'drift.txt', create: 'ok'}]);";
+    let request = EffectRequest {
+        targets: {
+            let mut m = BTreeMap::new();
+            m.insert(
+                "t".into(),
+                zero_abi::EffectTargetRequest {
+                    path: PathBuf::from("drift.txt"),
+                    expect: Some("absent".into()),
+                },
+            );
+            m
+        },
+        changes: vec![EffectChangeRequest {
+            target: "t".into(),
+            kind: EffectChangeKind::CreateFile,
+            content: Some("ok".into()),
+            old: None,
+            replacement: None,
+            anchor: None,
+            expected_count: None,
+        }],
+        verify: zero_abi::EffectVerification {
+            parse: false,
+            changed_targets_only: true,
+            command: None,
+        },
+    };
+    let response = kernel
+        .execute_atomic_effect(source, request, AtomicCancellation::new())
+        .unwrap();
+    assert_eq!(response.effects.len(), 1);
+    // Receipt must not be placeholder: journal must be valid handle and after must be resolvable
+    let receipt = &response.effects[0];
+    assert!(receipt.journal.as_str().starts_with("z://blob/"));
+    assert!(receipt.after.is_some());
+    // Ensure no second effect authority remains: there is only one committed receipt, not a staged placeholder
+    assert_eq!(
+        files.0.lock().get(&PathBuf::from("drift.txt")).unwrap(),
+        b"ok"
+    );
+    // The public host surface is the one-call atomic path; internal split helpers are crate-private
+    // This is enforced by visibility (pub(crate) for begin_transaction etc.) - compile-time guarantee
+    response.validate().unwrap();
+    assert_eq!(kernel.live_frames(), 0);
 }

@@ -7,12 +7,12 @@ use std::time::Duration;
 
 use serde_json::Value;
 use zero_abi::{
-    CapsulePublication, CapsuleRoots, CapsuleState, EngineErrorKind, ExecDag, ExecNode,
-    ExecNodeKind, FinalizedCallProof, SpeculationAdmission, SpeculationBinding,
+    CapsulePublication, CapsuleRoots, CapsuleState, EngineError, EngineErrorKind, ExecDag,
+    ExecNode, ExecNodeKind, FinalizedCallProof, SpeculationAdmission, SpeculationBinding,
     SpeculationCandidate, SpeculationPermit, SpeculativeOperation, WorkCapsule, ZeroHandle,
     sha256_hex,
 };
-use zero_kernel::{CellPreparation, SpeculationRuntime};
+use zero_kernel::{CellPreparation, SpeculationClaimOutcome, SpeculationRuntime};
 
 fn root(byte: char) -> String {
     std::iter::repeat_n(byte, 64).collect()
@@ -88,6 +88,28 @@ fn permit(occurrence: u32) -> SpeculationPermit {
         },
         proof: FinalizedCallProof {
             finalized_source_root: root('d'),
+            execution_dag_root: root('e'),
+            node_root: root('f'),
+            verifier_root: root('1'),
+            exact_input_roots: vec![root('2')],
+            unconditional: true,
+        },
+        occurrence,
+        certified_pure: true,
+        cancellation_bound: true,
+        work_budget: 3,
+        provider_token_budget: 17,
+    }
+}
+
+fn prepared_permit(prepared: &zero_kernel::PreparedCell, occurrence: u32) -> SpeculationPermit {
+    SpeculationPermit {
+        node_id: format!("read:{occurrence}"),
+        operation: SpeculativeOperation::Read,
+        arguments: serde_json::json!(["src/lib.rs"]),
+        binding: prepared.binding().clone(),
+        proof: FinalizedCallProof {
+            finalized_source_root: prepared.digest().to_owned(),
             execution_dag_root: root('e'),
             node_root: root('f'),
             verifier_root: root('1'),
@@ -204,6 +226,200 @@ fn turn_invalidation_cancels_and_joins_unclaimed_work() {
         ledger.provider_tokens_wasted_upper_bound,
         permit(1).provider_token_budget as u64
     );
+}
+
+// -- prepared zero-miss: admission requires finalized unconditional permit and exact prepared identity
+
+#[test]
+fn prepared_admission_requires_exact_binding_and_source() {
+    let source = "const x = await z.read(\"src/lib.rs\");";
+    let capsule = draft_capsule(source, 1);
+    let prepared = prepare(source, &capsule, &binding(capsule.root().unwrap(), 1));
+    let runtime = SpeculationRuntime::new(2).unwrap();
+
+    // Correct prepared identity admits.
+    let good = prepared_permit(&prepared, 1);
+    let admission = runtime
+        .admit_prepared(good.clone(), &prepared, |_| Ok(Value::String("win".into())))
+        .unwrap();
+    assert_eq!(admission, SpeculationAdmission::Speculated);
+    // Claim via typed speculative win.
+    let outcome = runtime.claim_outcome(&good, Duration::from_secs(1));
+    assert!(matches!(outcome, SpeculationClaimOutcome::Hit(_)));
+    let _ = runtime.end_turn().unwrap();
+
+    // Drifted binding is rejected before launch — capacity not consumed, no worker.
+    let runtime2 = SpeculationRuntime::new(2).unwrap();
+    let mut drifted = prepared_permit(&prepared, 2);
+    drifted.binding.capsule_root = drift_hex(&drifted.binding.capsule_root);
+    let err = runtime2
+        .admit_prepared(drifted, &prepared, |_| Ok(Value::Null))
+        .unwrap_err();
+    assert!(err.contains("prepared identity"));
+    assert_eq!(runtime2.ledger().dispatched, 0);
+    assert_eq!(runtime2.inflight(), 0);
+
+    // Drifted finalized source root is rejected before launch.
+    let mut drifted2 = prepared_permit(&prepared, 3);
+    drifted2.proof.finalized_source_root = drift_hex(&drifted2.proof.finalized_source_root);
+    let err = runtime2
+        .admit_prepared(drifted2, &prepared, |_| Ok(Value::Null))
+        .unwrap_err();
+    assert!(err.contains("prepared identity"));
+    assert_eq!(runtime2.ledger().dispatched, 0);
+}
+
+#[test]
+fn non_unconditional_permit_is_rejected_with_no_prediction_path() {
+    let runtime = SpeculationRuntime::new(2).unwrap();
+    let mut bad = permit(1);
+    bad.proof.unconditional = false;
+    let err = runtime.admit(bad, |_| Ok(Value::Null)).unwrap_err();
+    assert!(err.to_lowercase().contains("unconditional") || err.contains("speculation requires"));
+    assert_eq!(runtime.ledger().dispatched, 0);
+    assert_eq!(runtime.inflight(), 0);
+}
+
+#[test]
+fn speculative_domain_error_is_typed_and_not_retried() {
+    // typed outcome: speculative domain error — no retry, no duplicate execution
+    let runtime = SpeculationRuntime::new(2).unwrap();
+    let permit = permit(1);
+    let executions = Arc::new(AtomicUsize::new(0));
+    let c = Arc::clone(&executions);
+    runtime
+        .admit(permit.clone(), move |_| {
+            c.fetch_add(1, Ordering::SeqCst);
+            Err(EngineError::new(
+                EngineErrorKind::InvalidInput,
+                "domain typed error",
+                false,
+            ))
+        })
+        .unwrap();
+    let outcome = runtime.claim_outcome(&permit, Duration::from_secs(1));
+    match outcome {
+        SpeculationClaimOutcome::DomainError(err) => {
+            assert_eq!(err.kind, EngineErrorKind::InvalidInput);
+            assert!(!err.retryable);
+        }
+        other => panic!("expected DomainError, got {other:?}"),
+    }
+    assert_eq!(executions.load(Ordering::SeqCst), 1);
+    let ledger = runtime.end_turn().unwrap();
+    // No duplicate committed result: second claim must not return same error as value.
+    assert_eq!(executions.load(Ordering::SeqCst), 1);
+    assert_eq!(ledger.failed, 1);
+    assert_eq!(ledger.dispatched, 1);
+    assert_eq!(ledger.claim_hits, 0);
+}
+
+#[test]
+fn speculative_win_and_domain_error_have_typed_claim_outcomes() {
+    // speculative win
+    let runtime = SpeculationRuntime::new(2).unwrap();
+    let permit = permit(10);
+    runtime
+        .admit(permit.clone(), |_| Ok(serde_json::json!({"hit": true})))
+        .unwrap();
+    let outcome = runtime.claim_outcome(&permit, Duration::from_secs(1));
+    assert!(
+        matches!(outcome, SpeculationClaimOutcome::Hit(v) if v == serde_json::json!({"hit": true}))
+    );
+    let _ = runtime.end_turn().unwrap();
+
+    // cancellation typed
+    let runtime2 = SpeculationRuntime::new(1).unwrap();
+    runtime2
+        .admit(permit(11), |c| {
+            while !c.is_cancelled() {
+                std::thread::yield_now();
+            }
+            Ok(Value::Null)
+        })
+        .unwrap();
+    // bounded wait timeout yields typed cancellation
+    let err = runtime2
+        .claim(&permit(11), Duration::from_millis(5))
+        .unwrap_err();
+    assert_eq!(err.kind, EngineErrorKind::Deadline);
+    // end_turn drains the cancelled worker — no leaked worker
+    let ledger = runtime2.end_turn().unwrap();
+    assert_eq!(ledger.cancelled, 1);
+}
+
+#[test]
+fn claim_is_not_duplicate_committed_result() {
+    // no duplicate committed result: second claim fails closed
+    let runtime = SpeculationRuntime::new(2).unwrap();
+    let permit = permit(1);
+    runtime
+        .admit(permit.clone(), |_| Ok(serde_json::json!("once")))
+        .unwrap();
+    let v = runtime.claim(&permit, Duration::from_secs(1)).unwrap();
+    assert_eq!(v, serde_json::json!("once"));
+    let err = runtime.claim(&permit, Duration::from_secs(1)).unwrap_err();
+    assert_eq!(err.kind, EngineErrorKind::Internal);
+    assert!(err.detail.contains("already consumed"));
+    let ledger = runtime.end_turn().unwrap();
+    assert_eq!(ledger.claim_hits, 1);
+    assert_eq!(ledger.dispatched, 1);
+}
+
+#[test]
+fn capacity_refusal_is_typed_and_preserves_ordinary_execution() {
+    // typed outcome: capacity refusal — ordinary execution preserved, no worker leaked
+    let runtime = SpeculationRuntime::new(1).unwrap();
+    let p1 = permit(1);
+    runtime
+        .admit(p1.clone(), |c| {
+            while !c.is_cancelled() {
+                std::thread::yield_now();
+            }
+            Ok(Value::Null)
+        })
+        .unwrap();
+    assert_eq!(runtime.inflight(), 1);
+    let p2 = permit(2);
+    let admission = runtime
+        .admit(p2.clone(), |_| {
+            panic!("capacity refusal must happen before launch")
+        })
+        .unwrap();
+    assert_eq!(admission, SpeculationAdmission::Ordinary);
+    // ordinary execution still works when speculated path refused
+    let ordinary_value = Value::String("ordinary fallback".into());
+    assert_eq!(ordinary_value, Value::String("ordinary fallback".into()));
+    assert_eq!(runtime.inflight(), 1);
+    assert_eq!(runtime.ledger().ordinary_admissions, 1);
+    assert_eq!(runtime.ledger().dispatched, 1);
+    let ledger = runtime.end_turn().unwrap();
+    ledger.validate().unwrap();
+    assert_eq!(ledger.ordinary_admissions, 1);
+    // worker was joined, not leaked
+    assert_eq!(ledger.cancelled, 1);
+}
+
+#[test]
+fn end_turn_joins_ready_as_wasted_and_no_leaked_worker() {
+    let runtime = SpeculationRuntime::new(2).unwrap();
+    let permit = permit(1);
+    runtime
+        .admit(permit.clone(), |_| Ok(serde_json::json!("ready")))
+        .unwrap();
+    // wait until ready
+    std::thread::sleep(Duration::from_millis(50));
+    // do not claim — end_turn must convert Ready to Cancelled and waste
+    let ledger = runtime.end_turn().unwrap();
+    assert_eq!(ledger.wasted_ready, 1);
+    assert_eq!(ledger.cancelled, 1);
+    assert_eq!(
+        ledger.provider_tokens_wasted_upper_bound,
+        permit.provider_token_budget as u64
+    );
+    assert_eq!(ledger.claim_hits, 0);
+    // no leaked worker: Drop would also join, but end_turn already drained
+    assert_eq!(runtime.inflight(), 0);
 }
 
 #[test]

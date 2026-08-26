@@ -70,3 +70,6 @@ path = "../../tests/zero_abi_provider_usage.rs"
 [[test]]
 name = "task_lens"
 path = "../../tests/zero_abi_task_lens.rs"
+
+[lints]
+workspace = true

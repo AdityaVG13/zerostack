@@ -597,6 +597,75 @@ impl ZeroKernel {
             .publish_provider_usage(&self.context.session_id, kernel_event_handle, observation)
             .map_err(|error| HostError::Event(error.to_string()))
     }
+
+    /// One-call prepare, validate, execute, and atomically commit.
+    ///
+    /// Binds the prepared source digest, WorkCapsule roots (including policy
+    /// via the contract coordinate), state-before root, and the exact effect
+    /// receipt in a single host call. Cancellation is enforced before any
+    /// commit and receipt/binding drift is rejected. The returned typed
+    /// response's `state` and `effects` refer to the same committed effect;
+    /// validation/cancellation failures leave state unchanged. No placeholder
+    /// receipt and no second effect authority exists outside this path.
+    pub fn execute_atomic_effect(
+        &self,
+        source: &str,
+        request: zero_abi::EffectRequest,
+        cancellation: AtomicCancellation,
+    ) -> Result<ZeroKernelResponse, HostError> {
+        request
+            .validate()
+            .map_err(|error| HostError::InvalidRequest(error.to_string()))?;
+        if cancellation.is_cancelled() {
+            let cell = self.begin_cell_with_cancellation(source, cancellation.clone())?;
+            return cell.fail(EngineError::new(
+                EngineErrorKind::Cancelled,
+                "cancelled before validation",
+                false,
+            ));
+        }
+        let mut cell = self.begin_cell_with_cancellation(source, cancellation.clone())?;
+        if cancellation.is_cancelled() || cell.invocation.cancellation.is_cancelled() {
+            return cell.fail(EngineError::new(
+                EngineErrorKind::Cancelled,
+                "cancelled before effect",
+                false,
+            ));
+        }
+        let effect_result = match cell.effect(request) {
+            Ok(result) => result,
+            Err(error) => {
+                return cell.fail(EngineError::new(
+                    EngineErrorKind::InvalidInput,
+                    error.to_string(),
+                    false,
+                ));
+            }
+        };
+        // Enforce cancellation before commit (no commit after cancellation).
+        // Call fail with the transaction still present so fail owns rollback.
+        if cancellation.is_cancelled() || cell.invocation.cancellation.is_cancelled() {
+            return cell.fail(EngineError::new(
+                EngineErrorKind::Cancelled,
+                "cancelled before commit",
+                false,
+            ));
+        }
+        // The cell's finish will enforce binding drift and receipt drift atomically
+        // and return a typed response where state and receipt are the same committed effect.
+        let value = serde_json::to_value(&effect_result)
+            .map_err(|error| HostError::Serialization(error.to_string()))?;
+        cell.finish(value)
+    }
+
+    /// Convenience wrapper using a fresh cancellation token.
+    pub fn execute_atomic_effect_simple(
+        &self,
+        source: &str,
+        request: zero_abi::EffectRequest,
+    ) -> Result<ZeroKernelResponse, HostError> {
+        self.execute_atomic_effect(source, request, AtomicCancellation::new())
+    }
 }
 
 pub struct Cell {
@@ -1058,7 +1127,7 @@ impl Cell {
         Ok(result)
     }
 
-    pub fn effect(&mut self, request: EffectRequest) -> Result<EffectResult, HostError> {
+    pub(crate) fn effect(&mut self, request: EffectRequest) -> Result<EffectResult, HostError> {
         request.validate().map_err(HostError::InvalidRequest)?;
         if self.transaction.is_some() {
             return Err(HostError::InvalidRequest(
@@ -1202,7 +1271,8 @@ impl Cell {
             schema: EFFECT_RESULT_SCHEMA.into(),
             outcome: "staged".into(),
             delta,
-            changed_files: results.len() as u32,
+            changed_files: u32::try_from(results.len())
+                .map_err(|_| HostError::Serialization("effect target count exceeds u32".into()))?,
             targets: results,
             verification: EffectVerificationResult {
                 parse: "not_requested".into(),
@@ -1287,7 +1357,7 @@ impl Cell {
         Ok(result)
     }
 
-    pub fn begin_transaction(&mut self) -> Result<(), HostError> {
+    pub(crate) fn begin_transaction(&mut self) -> Result<(), HostError> {
         if self.transaction.is_some() {
             return Ok(());
         }
@@ -1298,7 +1368,7 @@ impl Cell {
         Ok(())
     }
 
-    pub fn apply_file_effect(
+    pub(crate) fn apply_file_effect(
         &mut self,
         request: FileEffectRequest,
     ) -> Result<FileEffectReceipt, HostError> {
@@ -1321,7 +1391,7 @@ impl Cell {
         Ok(receipt)
     }
 
-    pub fn create(
+    pub(crate) fn create(
         &mut self,
         path: impl Into<PathBuf>,
         content: Vec<u8>,
@@ -1340,7 +1410,7 @@ impl Cell {
         })
     }
 
-    pub fn write(
+    pub(crate) fn write(
         &mut self,
         path: impl Into<PathBuf>,
         content: Vec<u8>,
@@ -1360,7 +1430,7 @@ impl Cell {
         })
     }
 
-    pub fn edit(
+    pub(crate) fn edit(
         &mut self,
         path: impl Into<PathBuf>,
         postimage: Vec<u8>,
@@ -1381,7 +1451,7 @@ impl Cell {
         })
     }
 
-    pub fn remove(
+    pub(crate) fn remove(
         &mut self,
         path: impl Into<PathBuf>,
         expected_preimage: Option<ZeroHandle>,
@@ -1412,14 +1482,14 @@ impl Cell {
         }
     }
 
-    pub fn commit_transaction(&mut self) -> Result<Vec<FileEffectReceipt>, HostError> {
+    pub(crate) fn commit_transaction(&mut self) -> Result<Vec<FileEffectReceipt>, HostError> {
         let transaction = self.transaction.take().ok_or_else(|| {
             HostError::Transaction(TransactionError::Store("no active transaction".into()))
         })?;
         transaction.commit().map_err(Into::into)
     }
 
-    pub fn rollback_transaction(&mut self) -> Result<(), HostError> {
+    pub(crate) fn rollback_transaction(&mut self) -> Result<(), HostError> {
         let transaction = self.transaction.take().ok_or_else(|| {
             HostError::Transaction(TransactionError::Store("no active transaction".into()))
         })?;
@@ -1752,6 +1822,7 @@ impl Cell {
             },
             ledger: self.ledger.clone(),
             turn: Some(turn),
+            effects: Vec::new(),
         };
         response
             .validate()
@@ -1759,9 +1830,89 @@ impl Cell {
         Ok(response)
     }
 
+    fn validate_staged_receipts(&self) -> Result<(), EngineError> {
+        let receipts = self
+            .transaction
+            .as_ref()
+            .map(Transaction::receipts)
+            .unwrap_or_default();
+        for receipt in receipts {
+            if receipt.journal.as_str().is_empty() {
+                return Err(typed_error(
+                    EngineErrorKind::Corrupt,
+                    "effect receipt journal is placeholder",
+                ));
+            }
+            let observed = self.files.read(
+                &self.invocation,
+                FileReadRequest {
+                    path: receipt.path.clone(),
+                    options: ReadOptions::default(),
+                },
+            );
+            if receipt.kind == FileEffectKind::Remove {
+                if receipt.after.is_some() {
+                    return Err(typed_error(
+                        EngineErrorKind::Corrupt,
+                        "remove receipt must not carry an after handle",
+                    ));
+                }
+                match observed {
+                    Err(error) if error.kind == EngineErrorKind::NotFound => continue,
+                    Ok(_) => {
+                        return Err(typed_error(
+                            EngineErrorKind::Corrupt,
+                            "removed effect target still exists",
+                        ));
+                    }
+                    Err(error) => return Err(error),
+                }
+            }
+            let expected = receipt.after.as_ref().ok_or_else(|| {
+                typed_error(
+                    EngineErrorKind::Corrupt,
+                    "non-remove receipt is missing its after handle",
+                )
+            })?;
+            let snapshot = observed?;
+            if &snapshot.content != expected {
+                return Err(typed_error(
+                    EngineErrorKind::Corrupt,
+                    "effect receipt after handle differs from FileEngine state",
+                ));
+            }
+        }
+        Ok(())
+    }
+
     pub fn finish(mut self, value: Value) -> Result<ZeroKernelResponse, HostError> {
         self.merge_async_records();
         self.dedup_handles();
+        // Enforce cancellation before any durable commit. A cancelled frame must
+        // never commit state or effects; it rolls back and returns Cancelled with
+        // state unchanged and no placeholder effect.
+        if self.cancellation.is_cancelled() || self.invocation.cancellation.is_cancelled() {
+            return self.fail(EngineError::new(
+                EngineErrorKind::Cancelled,
+                "cancelled before commit",
+                false,
+            ));
+        }
+        // Reject binding drift before commit: the effective state root and
+        // contract coordinate must still match the sealed binding. Drift is a
+        // hard failure with state unchanged, never a silent second authority.
+        // Call fail with the transaction still present so fail owns rollback
+        // and surfaces any rollback errors.
+        let current_state_root = effective_state_root(&self.state);
+        if self.binding().state_root != current_state_root
+            || self.binding().contract_root != contract_root(&self.context)
+        {
+            return self.fail(EngineError::new(
+                EngineErrorKind::Conflict,
+                "binding drifted before commit",
+                false,
+            ));
+        }
         let raw = match serde_json::to_vec(&value) {
             Ok(raw) => raw,
             Err(error) => {
@@ -1789,6 +1940,12 @@ impl Cell {
             self.handles.push(handle);
         }
         let turn = self.turn_record(&ZeroKernelOutcome::Completed)?;
+        // Validate staged receipts against the FileEngine authority before
+        // committing state or the transaction. Keep the transaction live so
+        // fail() remains the single rollback path.
+        if let Err(error) = self.validate_staged_receipts() {
+            return self.fail(error);
+        }
         let before = self.state.root.clone();
         let after = if self.state_dirty {
             match self.state_store.commit(before.as_ref(), &self.state.values) {
@@ -1868,6 +2025,9 @@ impl Cell {
             }
         };
         self.settled = true;
+        // The typed response binds state and receipt to the same committed effect:
+        // state.after is the exact root committed with these receipts, and effects
+        // are the exact receipts committed in this transaction. No placeholder.
         let response = ZeroKernelResponse {
             protocol: ZERO_KERNEL_PROTOCOL.into(),
             outcome: ZeroKernelOutcome::Completed,
@@ -1884,6 +2044,7 @@ impl Cell {
             },
             ledger: self.ledger.clone(),
             turn: Some(turn),
+            effects: committed_effects.clone(),
         };
         response
             .validate()
