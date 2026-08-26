@@ -158,6 +158,8 @@ fn completed_response() -> zero_abi::ZeroKernelResponse {
             sequence: 1,
             method: "read".into(),
             status: zero_abi::ZeroOperationStatus::Completed,
+            capsule_root: "a".repeat(64),
+            occurrence: 1,
             parallel_group: None,
             target: Some("src/lib.rs".into()),
             detail: Some("11 bytes visible".into()),

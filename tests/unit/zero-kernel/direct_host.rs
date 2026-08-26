@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -11,14 +11,18 @@ use serde_json::{Value, json};
 use tempfile::tempdir;
 use tokenzero_kernel::ZeroTokenEngine;
 use zero_abi::{
-    AsgrepOptions, CompressionRequest, CompressionResult, EngineError, EngineErrorKind,
-    EngineInvocation, FileEffectKind, FileEffectReceipt, FileEffectRequest, FileEngine, FileLease,
-    FileReadRequest, FileSnapshot, KernelBudget, KernelContext, LookupOptions, ProjectionRequest,
-    ProjectionResult, ReadOptions, SafetyVerdict, ShellOptions, StructuralCoverage,
-    StructuralEngine, StructuralHit, StructuralQuery, StructuralResult, TaskLensCompilerImpact,
-    TaskLensRequest, TaskLensResult, TokenAccounting, TokenEngine, ZeroHandle,
+    AsgrepOptions, CapsulePublication, CompressionRequest, CompressionResult, EngineError,
+    EngineErrorKind, EngineInvocation, FileEffectKind, FileEffectReceipt, FileEffectRequest,
+    FileEngine, FileLease, FileReadRequest, FileSnapshot, KernelBudget, KernelContext,
+    LookupOptions, ProjectionRequest, ProjectionResult, ReadOptions, SafetyVerdict, ShellOptions,
+    SpeculationBinding, StructuralCoverage, StructuralEngine, StructuralHit, StructuralQuery,
+    StructuralResult, TaskLensCompilerImpact, TaskLensRequest, TaskLensResult, TokenAccounting,
+    TokenEngine, ZeroHandle, ZeroKernelEvent, ZeroOperationStatus, ZeroOperationTrace, sha256_hex,
 };
-use zero_kernel::{AtomicCancellation, HostError, ShellCommand, TransactionError, ZeroKernel};
+use zero_kernel::{
+    AtomicCancellation, CellPreparation, HostError, PreparedCell, ShellCommand, TransactionError,
+    ZeroKernel,
+};
 
 fn handle(bytes: &[u8]) -> ZeroHandle {
     ZeroHandle::from_digest(blake3::hash(bytes).to_hex().as_str()).unwrap()
@@ -27,8 +31,14 @@ fn handle(bytes: &[u8]) -> ZeroHandle {
 struct MockLease;
 impl FileLease for MockLease {}
 
+/// In-memory file engine whose capsule store is content-addressed by the
+/// canonical capsule root: `put_capsule` and `get_capsule` serve capsules
+/// exactly in memory.
 #[derive(Default)]
-struct Files(Mutex<BTreeMap<PathBuf, Vec<u8>>>);
+struct Files(
+    Mutex<BTreeMap<PathBuf, Vec<u8>>>,
+    Mutex<BTreeMap<String, zero_abi::WorkCapsule>>,
+);
 
 impl FileEngine for Files {
     fn lease(&self, _invocation: &EngineInvocation) -> Result<Box<dyn FileLease>, EngineError> {
@@ -136,6 +146,70 @@ impl FileEngine for Files {
     fn reconcile(&self, _invocation: &EngineInvocation) -> Result<Vec<ZeroHandle>, EngineError> {
         Ok(Vec::new())
     }
+
+    fn put_capsule(
+        &self,
+        _invocation: &EngineInvocation,
+        capsule: &zero_abi::WorkCapsule,
+    ) -> Result<zero_abi::CapsulePublication, EngineError> {
+        let capsule_root = capsule
+            .root()
+            .map_err(|detail| EngineError::new(EngineErrorKind::InvalidInput, detail, false))?;
+        let object_digest = capsule_object_digest(capsule);
+        self.1.lock().insert(object_digest.clone(), capsule.clone());
+        let object = ZeroHandle::from_digest(&object_digest).map_err(|error| {
+            EngineError::new(EngineErrorKind::InvalidInput, error.to_string(), false)
+        })?;
+        Ok(zero_abi::CapsulePublication {
+            capsule_root,
+            object,
+            created: true,
+        })
+    }
+
+    fn get_capsule(
+        &self,
+        _invocation: &EngineInvocation,
+        publication: &zero_abi::CapsulePublication,
+    ) -> Result<zero_abi::WorkCapsule, EngineError> {
+        // Recovery is object-addressed, exactly like the real capsule store:
+        // a valid root with a wrong object handle must not recover anything.
+        let capsule = self
+            .1
+            .lock()
+            .get(publication.object.digest())
+            .cloned()
+            .ok_or_else(|| {
+                EngineError::new(
+                    EngineErrorKind::NotFound,
+                    "capsule object is not published",
+                    false,
+                )
+            })?;
+        let capsule_root = capsule
+            .root()
+            .map_err(|detail| EngineError::new(EngineErrorKind::InvalidInput, detail, false))?;
+        if capsule_root != publication.capsule_root {
+            return Err(EngineError::new(
+                EngineErrorKind::Corrupt,
+                "capsule root does not match its publication",
+                false,
+            ));
+        }
+        Ok(capsule)
+    }
+}
+
+/// Distinct deterministic object digest over the canonical capsule envelope
+/// bytes: sha256 of the canonical JSON of a typed envelope wrapping the
+/// capsule. Never equal to the capsule root itself.
+fn capsule_object_digest(capsule: &zero_abi::WorkCapsule) -> String {
+    let value = serde_json::to_value(capsule).expect("capsule JSON");
+    let envelope = serde_json::json!({
+        "schema": "zerostack.capsule.object.v1",
+        "capsule": value,
+    });
+    sha256_hex(zero_abi::canonical_json(&envelope).as_bytes())
 }
 
 struct SlowFiles {
@@ -216,6 +290,138 @@ impl FileEngine for SlowFiles {
     fn reconcile(&self, invocation: &EngineInvocation) -> Result<Vec<ZeroHandle>, EngineError> {
         self.inner.reconcile(invocation)
     }
+
+    fn put_capsule(
+        &self,
+        invocation: &EngineInvocation,
+        capsule: &zero_abi::WorkCapsule,
+    ) -> Result<zero_abi::CapsulePublication, EngineError> {
+        self.inner.put_capsule(invocation, capsule)
+    }
+
+    fn get_capsule(
+        &self,
+        invocation: &EngineInvocation,
+        publication: &zero_abi::CapsulePublication,
+    ) -> Result<zero_abi::WorkCapsule, EngineError> {
+        self.inner.get_capsule(invocation, publication)
+    }
+}
+
+/// FileEngine whose capsule publication always fails: every cell launch must
+/// fail closed before any guest work or event exists.
+struct NoCapsuleFiles(Files);
+
+impl FileEngine for NoCapsuleFiles {
+    fn lease(&self, invocation: &EngineInvocation) -> Result<Box<dyn FileLease>, EngineError> {
+        self.0.lease(invocation)
+    }
+
+    fn read(
+        &self,
+        invocation: &EngineInvocation,
+        request: FileReadRequest,
+    ) -> Result<FileSnapshot, EngineError> {
+        self.0.read(invocation, request)
+    }
+
+    fn lookup(
+        &self,
+        invocation: &EngineInvocation,
+        root: PathBuf,
+        options: LookupOptions,
+    ) -> Result<Vec<PathBuf>, EngineError> {
+        self.0.lookup(invocation, root, options)
+    }
+
+    fn apply(
+        &self,
+        invocation: &EngineInvocation,
+        request: FileEffectRequest,
+    ) -> Result<FileEffectReceipt, EngineError> {
+        self.0.apply(invocation, request)
+    }
+
+    fn restore(
+        &self,
+        invocation: &EngineInvocation,
+        receipt: &FileEffectReceipt,
+    ) -> Result<(), EngineError> {
+        self.0.restore(invocation, receipt)
+    }
+
+    fn reconcile(&self, invocation: &EngineInvocation) -> Result<Vec<ZeroHandle>, EngineError> {
+        self.0.reconcile(invocation)
+    }
+
+    fn put_capsule(
+        &self,
+        _invocation: &EngineInvocation,
+        _capsule: &zero_abi::WorkCapsule,
+    ) -> Result<zero_abi::CapsulePublication, EngineError> {
+        Err(EngineError::new(
+            EngineErrorKind::Unsupported,
+            "capsule publication is disabled",
+            false,
+        ))
+    }
+    // get_capsule intentionally not implemented (trait default Unsupported).
+}
+
+/// FileEngine that publishes capsules but cannot recover them: prepared
+/// launches must fail closed at the recovery roundtrip.
+struct PutOnlyFiles(Files);
+
+impl FileEngine for PutOnlyFiles {
+    fn lease(&self, invocation: &EngineInvocation) -> Result<Box<dyn FileLease>, EngineError> {
+        self.0.lease(invocation)
+    }
+
+    fn read(
+        &self,
+        invocation: &EngineInvocation,
+        request: FileReadRequest,
+    ) -> Result<FileSnapshot, EngineError> {
+        self.0.read(invocation, request)
+    }
+
+    fn lookup(
+        &self,
+        invocation: &EngineInvocation,
+        root: PathBuf,
+        options: LookupOptions,
+    ) -> Result<Vec<PathBuf>, EngineError> {
+        self.0.lookup(invocation, root, options)
+    }
+
+    fn apply(
+        &self,
+        invocation: &EngineInvocation,
+        request: FileEffectRequest,
+    ) -> Result<FileEffectReceipt, EngineError> {
+        self.0.apply(invocation, request)
+    }
+
+    fn restore(
+        &self,
+        invocation: &EngineInvocation,
+        receipt: &FileEffectReceipt,
+    ) -> Result<(), EngineError> {
+        self.0.restore(invocation, receipt)
+    }
+
+    fn reconcile(&self, invocation: &EngineInvocation) -> Result<Vec<ZeroHandle>, EngineError> {
+        self.0.reconcile(invocation)
+    }
+
+    fn put_capsule(
+        &self,
+        invocation: &EngineInvocation,
+        capsule: &zero_abi::WorkCapsule,
+    ) -> Result<zero_abi::CapsulePublication, EngineError> {
+        self.0.put_capsule(invocation, capsule)
+    }
+    // get_capsule intentionally not implemented (trait default Unsupported).
 }
 
 struct Graph;
@@ -2942,4 +3148,395 @@ fn canonical_method_table_has_only_six_operations() {
         zero_abi::GUEST_METHODS,
         ["read", "find", "edit", "apply", "run", "state"]
     );
+}
+fn root64(label: char) -> String {
+    sha256_hex(&[label as u8])
+}
+
+/// Read the published event object back from the kernel CAS.
+fn published_event(
+    root: &std::path::Path,
+    response: &zero_abi::ZeroKernelResponse,
+) -> ZeroKernelEvent {
+    let cas = zero_store::ZeroCas::open(root.join(".zerostack"));
+    let bytes = cas.get(&response.event).expect("event object");
+    serde_json::from_slice(&bytes).expect("event JSON")
+}
+
+/// Seal a prepared cell from a live cell's exact capsule, publication, and
+/// binding coordinates.
+fn prepare_from_cell(cell: &zero_kernel::Cell, source: &str) -> PreparedCell {
+    let mut preparation = CellPreparation::new();
+    preparation.feed(source).unwrap();
+    preparation
+        .finish(
+            cell.binding().clone(),
+            cell.capsule().clone(),
+            cell.publication().clone(),
+        )
+        .unwrap()
+}
+
+#[test]
+fn capsule_completed_and_failed_events_carry_same_valid_root() {
+    let root = tempdir().unwrap();
+    let files = Arc::new(Files::default());
+    let kernel = kernel(root.path(), Arc::clone(&files) as Arc<dyn FileEngine>);
+    let source = "return 7;";
+
+    let completed = kernel.begin_cell(source).unwrap();
+    let capsule_root = completed.capsule_root().to_owned();
+    let capsule_object = completed.publication().object.clone();
+    let response = completed.finish(json!(7)).unwrap();
+    assert_eq!(response.outcome, zero_abi::ZeroKernelOutcome::Completed);
+    let event = published_event(root.path(), &response);
+    let capsule = event
+        .capsule
+        .expect("completed event must carry capsule roots");
+    capsule.validate().unwrap();
+    assert_eq!(capsule.capsule_root, capsule_root);
+    assert_eq!(capsule.capsule_object, capsule_object);
+    assert_eq!(event.input_handles, vec![capsule_object.clone()]);
+    {
+        let stored = files
+            .1
+            .lock()
+            .get(capsule_object.digest())
+            .cloned()
+            .expect("published capsule");
+        assert_eq!(stored.root().unwrap(), capsule_root);
+        assert_eq!(capsule_object_digest(&stored), capsule_object.digest());
+    }
+
+    let failed = kernel.begin_cell(source).unwrap();
+    let failed_root = failed.capsule_root().to_owned();
+    let failed_object = failed.publication().object.clone();
+    let response = failed
+        .fail(EngineError::new(
+            EngineErrorKind::InvalidInput,
+            "boom",
+            false,
+        ))
+        .unwrap();
+    assert_eq!(response.outcome, zero_abi::ZeroKernelOutcome::Failed);
+    let event = published_event(root.path(), &response);
+    let capsule = event
+        .capsule
+        .expect("failed event must carry capsule roots");
+    capsule.validate().unwrap();
+    assert_eq!(capsule.capsule_root, failed_root);
+    assert_eq!(capsule.capsule_object, failed_object);
+    assert_eq!(event.input_handles, vec![failed_object.clone()]);
+    {
+        let stored = files
+            .1
+            .lock()
+            .get(failed_object.digest())
+            .cloned()
+            .expect("published capsule");
+        assert_eq!(stored.root().unwrap(), failed_root);
+        assert_eq!(capsule_object_digest(&stored), failed_object.digest());
+    }
+}
+
+#[test]
+fn six_method_cell_traces_bind_one_capsule_root_with_strict_occurrences() {
+    let root = tempdir().unwrap();
+    let files = Arc::new(Files::default());
+    files
+        .0
+        .lock()
+        .insert(PathBuf::from("a.txt"), b"alpha".to_vec());
+    let kernel = kernel(root.path(), Arc::clone(&files) as Arc<dyn FileEngine>);
+    let response = kernel
+        .execute_cell(
+            r#"
+            const text = await z.read("a.txt");
+            const hits = await z.find({query: "alpha", mode: "natural"});
+            await z.apply([{path: "c.txt", create: "gamma"}]);
+            await z.edit("b.txt", {create: "beta"});
+            const ran = await z.run(["printf", "ok"]);
+            z.state.set("seen", true);
+            return {text, hits: hits.hits.length, ran: ran.stdout, state: z.state.get("seen")};
+            "#,
+        )
+        .unwrap();
+    assert_eq!(
+        response.outcome,
+        zero_abi::ZeroKernelOutcome::Completed,
+        "error={:?}",
+        response.error
+    );
+
+    // All six canonical methods are traced and share one capsule root with
+    // strictly positive, strictly increasing occurrences.
+    let mut methods = BTreeSet::new();
+    let mut previous_sequence = 0_u64;
+    let mut previous_occurrence = 0_u64;
+    let capsule_root = response.operations[0].capsule_root.clone();
+    for operation in &response.operations {
+        methods.insert(operation.method.as_str());
+        assert_eq!(operation.capsule_root, capsule_root);
+        assert!(operation.occurrence > 0, "occurrence must be positive");
+        assert!(
+            operation.sequence > previous_sequence,
+            "sequence must be strictly increasing"
+        );
+        assert!(
+            operation.occurrence > previous_occurrence,
+            "occurrence must be strictly increasing"
+        );
+        previous_sequence = operation.sequence;
+        previous_occurrence = operation.occurrence;
+    }
+    for method in ["read", "find", "edit", "apply", "run", "state"] {
+        assert!(
+            methods.contains(method),
+            "missing traced method {method}: {methods:?}"
+        );
+    }
+
+    // The terminal event carries the same capsule root as every trace, and
+    // the response validates end to end (occurrence monotonicity enforced).
+    let event = published_event(root.path(), &response);
+    let capsule = event
+        .capsule
+        .expect("terminal event must be capsule-rooted");
+    assert_eq!(capsule.capsule_root, capsule_root);
+    assert!(capsule.capsule_object.as_str().starts_with("z://blob/"));
+    response.validate().unwrap();
+}
+
+#[test]
+fn capsule_prepared_launch_uses_exact_coordinates_and_rejects_drift() {
+    let root = tempdir().unwrap();
+    let files = Arc::new(Files::default());
+    files
+        .0
+        .lock()
+        .insert(PathBuf::from("src/lib.rs"), b"content".to_vec());
+    let kernel = kernel(root.path(), Arc::clone(&files) as Arc<dyn FileEngine>);
+    let source = "return await z.read('src/lib.rs');";
+
+    // Seal a prepared cell from the kernel's own current coordinates and
+    // launch it: the exact capsule, publication, and binding must roundtrip.
+    let probe = kernel.begin_cell(source).unwrap();
+    let prepared = prepare_from_cell(&probe, source);
+    drop(probe);
+    let response = kernel.execute_prepared(&prepared).unwrap();
+    assert_eq!(response.outcome, zero_abi::ZeroKernelOutcome::Completed);
+    assert_eq!(response.value, Some(json!("\"content\"")));
+    let event = published_event(root.path(), &response);
+    let capsule = event.capsule.unwrap();
+    assert_eq!(capsule.capsule_root, prepared.binding().capsule_root);
+    assert_eq!(capsule.capsule_object, prepared.publication().object);
+    assert_eq!(
+        response.operations[0].capsule_root,
+        prepared.binding().capsule_root
+    );
+    // The prepared launch must not publish a second capsule.
+    assert_eq!(
+        files.1.lock().len(),
+        1,
+        "prepared launch must not re-publish"
+    );
+
+    // Capsule/source drift: a capsule that was never published is
+    // unrecoverable, so the launch fails closed at the roundtrip.
+    let probe = kernel.begin_cell(source).unwrap();
+    let mut preparation = CellPreparation::new();
+    preparation.feed(source).unwrap();
+    let mut unpublished = probe.capsule().clone();
+    unpublished.roots.evidence = root64('a');
+    let unpublished_root = unpublished.root().unwrap();
+    let unpublished = preparation
+        .finish(
+            SpeculationBinding {
+                capsule_root: unpublished_root.clone(),
+                state_root: probe.binding().state_root.clone(),
+                contract_root: probe.binding().contract_root.clone(),
+                epoch: probe.binding().epoch,
+            },
+            unpublished,
+            CapsulePublication {
+                capsule_root: unpublished_root,
+                object: ZeroHandle::from_digest(&root64('e')).unwrap(),
+                created: true,
+            },
+        )
+        .unwrap();
+    drop(probe);
+    let error = kernel.execute_prepared(&unpublished).unwrap_err();
+    assert!(
+        matches!(&error, HostError::Engine(engine) if engine.kind == EngineErrorKind::NotFound),
+        "{error}"
+    );
+    // Object drift: the real capsule root paired with a wrong object handle
+    // must fail the roundtrip (recovery is object-addressed, not
+    // root-addressed).
+    let probe = kernel.begin_cell(source).unwrap();
+    let mut preparation = CellPreparation::new();
+    preparation.feed(source).unwrap();
+    let wrong_object = CapsulePublication {
+        capsule_root: probe.publication().capsule_root.clone(),
+        object: ZeroHandle::from_digest(&root64('f')).unwrap(),
+        created: true,
+    };
+    let drifted = preparation
+        .finish(
+            probe.binding().clone(),
+            probe.capsule().clone(),
+            wrong_object,
+        )
+        .unwrap();
+    drop(probe);
+    let error = kernel.execute_prepared(&drifted).unwrap_err();
+    assert!(
+        matches!(&error, HostError::Engine(engine) if engine.kind == EngineErrorKind::NotFound),
+        "wrong capsule object must fail the roundtrip: {error}"
+    );
+
+    // State drift: the same real capsule sealed against a different state
+    // root must fail launch.
+    let probe = kernel.begin_cell(source).unwrap();
+    let mut drifted_binding = probe.binding().clone();
+    drifted_binding.state_root = root64('b');
+    let mut preparation = CellPreparation::new();
+    preparation.feed(source).unwrap();
+    let drifted = preparation
+        .finish(
+            drifted_binding,
+            probe.capsule().clone(),
+            probe.publication().clone(),
+        )
+        .unwrap();
+    drop(probe);
+    let error = kernel.execute_prepared(&drifted).unwrap_err();
+    assert!(error.to_string().contains("drifted"), "{error}");
+
+    // Contract drift: the same real capsule sealed against a different
+    // contract root must fail launch.
+    let probe = kernel.begin_cell(source).unwrap();
+    let mut drifted_binding = probe.binding().clone();
+    drifted_binding.contract_root = root64('c');
+    let mut preparation = CellPreparation::new();
+    preparation.feed(source).unwrap();
+    let drifted = preparation
+        .finish(
+            drifted_binding,
+            probe.capsule().clone(),
+            probe.publication().clone(),
+        )
+        .unwrap();
+    drop(probe);
+    let error = kernel.execute_prepared(&drifted).unwrap_err();
+    assert!(error.to_string().contains("drifted"), "{error}");
+}
+
+#[test]
+fn capsule_put_or_get_failure_blocks_launch() {
+    let root = tempdir().unwrap();
+    let files = Arc::new(NoCapsuleFiles(Files::default()));
+    let put_failing_kernel = kernel(root.path(), Arc::clone(&files) as Arc<dyn FileEngine>);
+    let error = put_failing_kernel.execute_cell("return 1;").unwrap_err();
+    assert!(
+        matches!(&error, HostError::Engine(engine) if engine.kind == EngineErrorKind::Unsupported),
+        "{error}"
+    );
+    assert_eq!(put_failing_kernel.live_frames(), 0);
+
+    // Recovery failure: a valid published capsule cannot be recovered, so a
+    // prepared launch fails closed at the roundtrip.
+    let put_only = Arc::new(PutOnlyFiles(Files::default()));
+    let kernel = kernel(root.path(), Arc::clone(&put_only) as Arc<dyn FileEngine>);
+    let source = "return 2;";
+    let probe = kernel.begin_cell(source).unwrap();
+    let prepared = prepare_from_cell(&probe, source);
+    drop(probe);
+    let error = kernel.execute_prepared(&prepared).unwrap_err();
+    assert!(
+        matches!(&error, HostError::Engine(engine) if engine.kind == EngineErrorKind::Unsupported),
+        "{error}"
+    );
+    assert_eq!(kernel.live_frames(), 0);
+}
+
+#[test]
+fn capsule_failure_publishes_no_event_and_leaves_no_effect() {
+    let root = tempdir().unwrap();
+    let files = Arc::new(NoCapsuleFiles(Files::default()));
+    let kernel = kernel(root.path(), Arc::clone(&files) as Arc<dyn FileEngine>);
+    let error = kernel
+        .execute_cell(
+            r#"
+            await z.edit("created.txt", {create: "new"});
+            return true;
+            "#,
+        )
+        .unwrap_err();
+    assert!(
+        matches!(&error, HostError::Engine(engine) if engine.kind == EngineErrorKind::Unsupported),
+        "{error}"
+    );
+    assert!(
+        !files.0.0.lock().contains_key(&PathBuf::from("created.txt")),
+        "no effect may exist without a published capsule"
+    );
+    let records = zero_store::EventLog::open(root.path().join(".zerostack"))
+        .records("session")
+        .unwrap();
+    assert!(
+        records.is_empty(),
+        "no event may be published without a capsule"
+    );
+    assert_eq!(kernel.live_frames(), 0);
+}
+
+#[test]
+fn capsule_terminal_tuple_roots_follow_actual_effects_and_operations() {
+    let root = tempdir().unwrap();
+    let files = Arc::new(Files::default());
+    let kernel = kernel(root.path(), Arc::clone(&files) as Arc<dyn FileEngine>);
+
+    // One cell with a traced operation and a committed effect...
+    let mut cell = kernel.begin_cell("effect-cell").unwrap();
+    cell.record_operations(
+        vec![ZeroOperationTrace {
+            sequence: 1,
+            method: "read".into(),
+            status: ZeroOperationStatus::Completed,
+            capsule_root: cell.capsule_root().to_owned(),
+            occurrence: 1,
+            parallel_group: None,
+            target: None,
+            detail: None,
+            result_count: None,
+            changed_files: None,
+            duration_ns: 0,
+        }],
+        false,
+    )
+    .unwrap();
+    cell.create("made.txt", b"made".to_vec()).unwrap();
+    let response = cell.finish(json!({"ok": true})).unwrap();
+    let with_effect = published_event(root.path(), &response);
+
+    // ...and one bare cell with neither.
+    let cell = kernel.begin_cell("effect-cell").unwrap();
+    let response = cell.finish(json!(true)).unwrap();
+    let bare = published_event(root.path(), &response);
+
+    let with_effect = with_effect.capsule.expect("capsule tuple");
+    let bare = bare.capsule.expect("capsule tuple");
+    // The constant planes stay identical across cells...
+    assert_eq!(with_effect.provider_root, bare.provider_root);
+    assert_eq!(with_effect.cache_root, bare.cache_root);
+    assert_eq!(with_effect.speculation_root, bare.speculation_root);
+    assert_eq!(with_effect.quality_root, bare.quality_root);
+    // ...while the effect and occurrence roots bind the actual facts.
+    assert_ne!(with_effect.effect_root, bare.effect_root);
+    assert_ne!(with_effect.occurrence_root, bare.occurrence_root);
+    // Every event still carries a valid capsule object.
+    with_effect.validate().unwrap();
+    bare.validate().unwrap();
 }

@@ -22,6 +22,17 @@ pub struct GuestContext {
     pub session_root: Option<String>,
     pub session_id: String,
     pub protocol: String,
+    /// Exact work-capsule root this cell runs under: the canonical lowercase
+    /// hexadecimal SHA256 root of the finalized source capsule. Every guest
+    /// operation trace binds to this root at dispatch start; nothing stamps
+    /// traces after the fact and no root is ever synthesized here.
+    ///
+    /// An empty value is the honest no-claim state for hosts that do not
+    /// run under a work capsule (for example a generic non-Zero host with
+    /// no [`GuestSurface`]). Traces bound to an empty or non-canonical root
+    /// fail `ZeroKernelResponse::validate`, so no ZeroKernel response can
+    /// ever validate a fabricated coordinate.
+    pub capsule_root: String,
 }
 
 pub struct GuestSurface {
@@ -50,6 +61,14 @@ impl GuestSurface {
 
     pub fn session_id(&self) -> &str {
         &self.context.session_id
+    }
+    /// Capsule root every operation trace produced by this guest is bound
+    /// to. Non-model-facing: deliberately excluded from [`Self::context_json`]
+    /// and from every value the guest can read. Empty means the host makes
+    /// no capsule claim; traces keep that empty root and response
+    /// validation rejects them rather than a fake root being fabricated.
+    pub fn capsule_root(&self) -> &str {
+        &self.context.capsule_root
     }
 
     pub fn protocol(&self) -> &str {

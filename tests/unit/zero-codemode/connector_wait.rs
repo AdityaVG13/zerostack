@@ -54,6 +54,7 @@ fn top_level_literal_reads_are_prefetched_concurrently() {
         session_root: None,
         session_id: "prefetch".into(),
         protocol: "ZeroKernel".into(),
+        capsule_root: "a".repeat(64),
     }));
     let host = Host::new_zero_kernel(limits, registration)
         .unwrap()
@@ -103,6 +104,7 @@ fn idle_connector_wait_does_not_consume_microtask_budget() {
         session_root: None,
         session_id: "connector-wait".into(),
         protocol: "ZeroKernel".into(),
+        capsule_root: "a".repeat(64),
     }));
     let host = Host::new_zero_kernel(limits, registration)
         .unwrap()

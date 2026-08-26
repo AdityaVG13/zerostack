@@ -412,7 +412,7 @@ struct Interpreter<'tree> {
     sender: SyncSender<ConnectorCompletionMessage>,
     promises: BTreeMap<u64, PromiseState<'tree>>,
     inflight_connector_calls: usize,
-    next_promise: u64,
+    next_sequence: u64,
     operations: Rc<RefCell<Vec<ZeroOperationTrace>>>,
     operations_truncated: Rc<Cell<bool>>,
     pending_operations: BTreeMap<u64, PendingOperation>,
@@ -457,7 +457,7 @@ impl<'tree> Interpreter<'tree> {
             sender,
             promises: BTreeMap::new(),
             inflight_connector_calls: 0,
-            next_promise: 1,
+            next_sequence: 1,
             operations,
             operations_truncated,
             pending_operations: BTreeMap::new(),
@@ -1688,6 +1688,20 @@ impl<'tree> Interpreter<'tree> {
             })
     }
 
+    /// Allocate the next dispatch sequence from the shared monotonic
+    /// allocator used by connector calls (promise ids), derived promises,
+    /// and synchronous state operations. State consumption can therefore
+    /// never collide with a later promise, and every traced operation keeps
+    /// a strictly increasing sequence and occurrence.
+    fn allocate_sequence(&mut self) -> Result<u64, Fault<'tree>> {
+        let sequence = self.next_sequence;
+        self.next_sequence = self
+            .next_sequence
+            .checked_add(1)
+            .ok_or_else(|| Fault::Host(HostError::Data("dispatch sequence exhausted".into())))?;
+        Ok(sequence)
+    }
+
     fn start_operation(&mut self, sequence: u64, method: &str, args: &JsonValue) {
         if method.starts_with("__") {
             return;
@@ -1698,10 +1712,22 @@ impl<'tree> Interpreter<'tree> {
             return;
         }
         let trace_index = operations.len();
+        // The trace is bound at dispatch start to the capsule root of the
+        // installed guest surface; no host-side post-hoc stamping happens.
+        // A host without a guest surface (or with an empty capsule root)
+        // keeps that empty root, and response validation rejects it rather
+        // than a root being fabricated here.
+        let capsule_root = self
+            .host
+            .guest
+            .as_ref()
+            .map_or_else(String::new, |guest| guest.capsule_root().to_owned());
         operations.push(ZeroOperationTrace {
             sequence,
             method: method.to_owned(),
             status: ZeroOperationStatus::Failed,
+            capsule_root,
+            occurrence: sequence,
             parallel_group: None,
             target: operation_target(method, args),
             detail: Some("operation did not complete".into()),
@@ -1819,11 +1845,7 @@ impl<'tree> Interpreter<'tree> {
                 maximum: self.host.limits.memory_bytes,
             }));
         }
-        let id = self.next_promise;
-        self.next_promise = self
-            .next_promise
-            .checked_add(1)
-            .ok_or_else(|| Fault::Host(HostError::Data("promise sequence exhausted".into())))?;
+        let id = self.allocate_sequence()?;
         self.promises
             .insert(id, PromiseState::Pending(PromiseKind::Connector));
         self.metrics.peak_retained_promises =
@@ -2739,60 +2761,93 @@ impl<'tree> Interpreter<'tree> {
         }
     }
 
-    /// Bounded serializable cell state.
+    /// Bounded serializable cell state. Every invocation records one
+    /// synchronous `state` trace bound to the guest capsule root; its
+    /// sequence comes from the same monotonic allocator as connector
+    /// calls, so state consumption cannot collide with later promises.
+    /// The trace completes on both success and failure.
     fn z_state_member(
         &mut self,
         name: &str,
         args: Vec<Value<'tree>>,
     ) -> Result<Value<'tree>, Fault<'tree>> {
-        let Some(guest) = &self.host.guest else {
-            return Err(Fault::Host(HostError::Data(
-                "ZeroKernel guest surface is not installed".into(),
-            )));
+        let guest = match self.host.guest.as_ref() {
+            Some(guest) => Arc::clone(guest),
+            None => {
+                return Err(Fault::Host(HostError::Data(
+                    "ZeroKernel guest surface is not installed".into(),
+                )));
+            }
         };
         if !matches!(name, "get" | "set" | "has" | "delete" | "list") {
             return Err(Fault::Host(HostError::Data(format!(
                 "z.state.{name} is not a ZeroKernel method"
             ))));
         }
-        match name {
-            "get" => {
-                let key = self.guest_state_key(&args)?;
-                match guest.state_get(&key) {
-                    Ok(Some(value)) => self.convert_from_json(value, false).map_err(Fault::Host),
-                    Ok(None) => Ok(Value::Undefined),
-                    Err(detail) => Err(Fault::Host(HostError::Data(detail))),
+        let sequence = self.allocate_sequence()?;
+        let key = if name == "list" {
+            None
+        } else {
+            match self.guest_state_key(&args) {
+                Ok(key) => Some(key),
+                Err(Fault::Host(HostError::Data(detail))) => {
+                    self.trace_failed_state(sequence, name, &detail);
+                    return Err(Fault::Host(HostError::Data(detail)));
                 }
+                Err(fault) => return Err(fault),
             }
-            "has" => {
-                let key = self.guest_state_key(&args)?;
-                guest
-                    .state_has(&key)
-                    .map(Value::Bool)
-                    .map_err(|detail| Fault::Host(HostError::Data(detail)))
-            }
-            "set" => {
-                let key = self.guest_state_key(&args)?;
-                let value = args.get(1).cloned().unwrap_or(Value::Undefined);
-                let json = self.to_json(&value).map_err(Fault::Host)?;
-                guest
-                    .state_set(&key, json)
-                    .map(|()| Value::Undefined)
-                    .map_err(|detail| Fault::Host(HostError::Data(detail)))
-            }
-            "delete" => {
-                let key = self.guest_state_key(&args)?;
-                guest
-                    .state_delete(&key)
-                    .map(Value::Bool)
-                    .map_err(|detail| Fault::Host(HostError::Data(detail)))
-            }
-            "list" => {
+        };
+        let trace_args = key
+            .as_ref()
+            .map_or_else(|| serde_json::json!([name]), |key| serde_json::json!([key]));
+        self.start_operation(sequence, "state", &trace_args);
+        let outcome: Result<Value<'tree>, HostError> = match (name, key) {
+            ("list", None) => {
                 let keys = guest.state_list();
                 Ok(new_array(keys.into_iter().map(Value::String).collect()))
             }
-            _ => unreachable!("state members are matched above"),
+            ("get", Some(key)) => match guest.state_get(&key) {
+                Ok(Some(value)) => self.convert_from_json(value, false),
+                Ok(None) => Ok(Value::Undefined),
+                Err(detail) => Err(HostError::Data(detail)),
+            },
+            ("has", Some(key)) => guest
+                .state_has(&key)
+                .map(Value::Bool)
+                .map_err(HostError::Data),
+            ("set", Some(key)) => {
+                let value = args.get(1).cloned().unwrap_or(Value::Undefined);
+                let json = self.to_json(&value);
+                match json {
+                    Ok(json) => guest
+                        .state_set(&key, json)
+                        .map(|()| Value::Undefined)
+                        .map_err(HostError::Data),
+                    Err(error) => Err(error),
+                }
+            }
+            ("delete", Some(key)) => guest
+                .state_delete(&key)
+                .map(Value::Bool)
+                .map_err(HostError::Data),
+            _ => unreachable!("state members and keys are matched above"),
+        };
+        match &outcome {
+            Ok(_) => self.complete_operation(sequence, Ok(OperationSummary::default())),
+            Err(detail) => {
+                let detail = detail.to_string();
+                self.complete_operation(sequence, Err(&detail));
+            }
         }
+        outcome.map_err(Fault::Host)
+    }
+
+    /// Record a `state` trace that failed before its member ran (for
+    /// example an invalid key), with the member name as target.
+    fn trace_failed_state(&mut self, sequence: u64, member: &str, detail: &str) {
+        self.start_operation(sequence, "state", &serde_json::json!([member]));
+        let detail = detail.to_string();
+        self.complete_operation(sequence, Err(&detail));
     }
 
     fn guest_state_key(&self, args: &[Value<'tree>]) -> Result<String, Fault<'tree>> {
@@ -3557,8 +3612,8 @@ impl<'tree> Interpreter<'tree> {
     }
 
     fn new_promise(&mut self, state: PromiseState<'tree>) -> Value<'tree> {
-        let id = self.next_promise;
-        self.next_promise = self.next_promise.saturating_add(1);
+        let id = self.next_sequence;
+        self.next_sequence = self.next_sequence.saturating_add(1);
         self.promises.insert(id, state);
         Value::Promise(id)
     }

@@ -7,21 +7,24 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use parking_lot::Mutex;
 use serde_json::Value;
 use zero_abi::{
-    AsgrepMode, AsgrepOptions, EFFECT_RESULT_SCHEMA, EXPAND_RESULT_SCHEMA, EffectChangeKind,
-    EffectChangeRequest, EffectRequest, EffectResult, EffectTargetResult, EffectVerificationResult,
-    EngineCallContext, EngineError, EngineErrorKind, EngineInvocation, ExpandOptions, ExpandResult,
-    FileEffectKind, FileEffectReceipt, FileEffectRequest, FileEngine, FileReadRequest,
-    FileSnapshot, KernelBudget, KernelContext, KernelLedger, LookupOptions, ProjectionRequest,
-    ProviderUsageObservation, ReadOptions, SNAP_WORKSPACE_SCHEMA, SafetyVerdict, ShellOptions,
-    ShellResult, SnapAccounting, SnapByteRange, SnapNewline, SnapRecovery, SnapRequest, SnapResult,
-    SnapSelection, SnapSelectionRequest, SnapSource, SnapStructuralEvidence, SnapTargetRequest,
-    SnapView, SnapViewMode, StateEvidence, StructuralEngine, StructuralQuery,
+    AsgrepMode, AsgrepOptions, CapsuleEventRoots, CapsulePublication, CapsuleRoots,
+    EFFECT_RESULT_SCHEMA, EXPAND_RESULT_SCHEMA, EffectChangeKind, EffectChangeRequest,
+    EffectRequest, EffectResult, EffectTargetResult, EffectVerificationResult, EngineCallContext,
+    EngineError, EngineErrorKind, EngineInvocation, ExpandOptions, ExpandResult, FileEffectKind,
+    FileEffectReceipt, FileEffectRequest, FileEngine, FileReadRequest, FileSnapshot, KernelBudget,
+    KernelContext, KernelLedger, LookupOptions, ProjectionRequest, ProviderUsageObservation,
+    ReadOptions, SNAP_WORKSPACE_SCHEMA, SafetyVerdict, ShellOptions, ShellResult, SnapAccounting,
+    SnapByteRange, SnapNewline, SnapRecovery, SnapRequest, SnapResult, SnapSelection,
+    SnapSelectionRequest, SnapSource, SnapStructuralEvidence, SnapTargetRequest, SnapView,
+    SnapViewMode, SpeculationBinding, StateEvidence, StructuralEngine, StructuralQuery,
     TaskLensCompilerImpact, TaskLensError, TaskLensRequest, TaskLensResult, TokenEngine,
-    TurnMetadata, TurnRecord, ZERO_KERNEL_PROTOCOL, ZeroHandle, ZeroKernelEvent, ZeroKernelOutcome,
-    ZeroKernelRequest, ZeroKernelResponse, ZeroOperationTrace, canonical_json, sha256_hex,
+    TurnMetadata, TurnRecord, WorkCapsule, ZERO_KERNEL_PROTOCOL, ZeroHandle, ZeroKernelEvent,
+    ZeroKernelOutcome, ZeroKernelRequest, ZeroKernelResponse, ZeroOperationTrace, canonical_json,
+    sha256_hex,
 };
 use zero_store::{EventLog, ProviderUsagePublication, ZeroCas};
 
+use crate::preparation::{CellPreparation, PreparedCell};
 use crate::shell::{ShellCommand, run_shell};
 use crate::state::{StateError, StateSnapshot, StateStore};
 use crate::transaction::{
@@ -398,11 +401,29 @@ impl ZeroKernel {
                 .map_err(|error| HostError::InvalidRequest(error.to_string()))?;
         self.begin_request(request, cancellation)
     }
-
     pub fn begin_request(
         &self,
         request: ZeroKernelRequest,
         cancellation: AtomicCancellation,
+    ) -> Result<Cell, HostError> {
+        self.begin_from_request(request, cancellation, None)
+    }
+
+    /// Shared launch core for ordinary and prepared cells.
+    ///
+    /// Ordinary cells derive canonical capsule roots from the current facts,
+    /// draft a `WorkCapsule`, publish it through the FileEngine, and seal a
+    /// `PreparedCell` carrying the exact capsule, publication, and binding.
+    /// Prepared cells bind the caller-supplied coordinates instead: the
+    /// publication must roundtrip through the FileEngine byte-for-byte and
+    /// the current effective state/contract coordinates must match the
+    /// sealed binding before any guest work launches. No capsule is drafted
+    /// or published twice and no transient divergent capsule exists.
+    pub(crate) fn begin_from_request(
+        &self,
+        request: ZeroKernelRequest,
+        cancellation: AtomicCancellation,
+        sealed: Option<&PreparedCell>,
     ) -> Result<Cell, HostError> {
         request
             .validate()
@@ -436,9 +457,84 @@ impl ZeroKernel {
             cancellation: Arc::new(cancellation.clone()),
         };
         self.transactions.reconcile(&invocation)?;
+        let prepared = match sealed {
+            Some(sealed) => {
+                // The finalized source is bound into the capsule task root:
+                // an internal caller must never launch sealed coordinates
+                // under a different source. Reject before any state,
+                // binding, or recovery check.
+                if request.source != sealed.source() {
+                    return Err(HostError::InvalidRequest(
+                        "prepared cell launch source differs from the sealed source".into(),
+                    ));
+                }
+                let current_state_root = effective_state_root(&state);
+                let current_contract_root = contract_root(&self.context);
+                if sealed.binding().state_root != current_state_root
+                    || sealed.binding().contract_root != current_contract_root
+                {
+                    return Err(HostError::InvalidRequest(
+                        "prepared cell state or contract binding drifted".into(),
+                    ));
+                }
+                if sealed.capsule().roots.execution != execution_root(&request.budget)
+                    || sealed.capsule().provider_usage_budget
+                        != u64::from(request.budget.call_limit)
+                    || sealed.capsule().complete_work_budget != request.budget.cpu_ms
+                {
+                    return Err(HostError::InvalidRequest(
+                        "prepared cell budget binding drifted".into(),
+                    ));
+                }
+                let recovered = self
+                    .files
+                    .get_capsule(&invocation, sealed.publication())
+                    .map_err(HostError::Engine)?;
+                if &recovered != sealed.capsule() {
+                    return Err(HostError::InvalidRequest(
+                        "prepared cell capsule is not recoverable from its publication".into(),
+                    ));
+                }
+                sealed.clone()
+            }
+            None => {
+                // The capsule budgets are explicit units mapped from the
+                // kernel budget: provider_usage_budget binds the
+                // provider-visible dispatch envelope (call_limit) and
+                // complete_work_budget binds the compute envelope (cpu_ms).
+                // The epoch is this cell's session sequence. Nothing is
+                // silently zeroed; request validation already guarantees
+                // every budget dimension is positive.
+                let capsule = WorkCapsule::draft(
+                    capsule_roots(&self.context, &request.budget, &request.source)?,
+                    cell_number,
+                    u64::from(request.budget.call_limit),
+                    request.budget.cpu_ms,
+                )
+                .map_err(|detail| HostError::InvalidRequest(detail))?;
+                let publication = self
+                    .files
+                    .put_capsule(&invocation, &capsule)
+                    .map_err(HostError::Engine)?;
+                let binding = SpeculationBinding {
+                    capsule_root: publication.capsule_root.clone(),
+                    state_root: effective_state_root(&state),
+                    contract_root: contract_root(&self.context),
+                    epoch: capsule.epoch,
+                };
+                let mut preparation = CellPreparation::new();
+                preparation
+                    .feed(&request.source)
+                    .map_err(|detail| HostError::InvalidRequest(detail))?;
+                preparation
+                    .finish(binding, capsule, publication)
+                    .map_err(|detail| HostError::InvalidRequest(detail))?
+            }
+        };
         self.live_frames.fetch_add(1, Ordering::AcqRel);
         Ok(Cell {
             source: request.source,
+            prepared,
             context: request.context,
             budget: request.budget,
             invocation,
@@ -466,6 +562,14 @@ impl ZeroKernel {
             turn_metadata: request.turn.unwrap_or_else(TurnMetadata::native),
             settled: false,
         })
+    }
+
+    pub(crate) fn request_context(&self) -> &KernelContext {
+        &self.context
+    }
+
+    pub(crate) fn request_budget(&self) -> &KernelBudget {
+        &self.budget
     }
 
     pub fn live_frames(&self) -> u64 {
@@ -497,6 +601,7 @@ impl ZeroKernel {
 
 pub struct Cell {
     source: String,
+    prepared: PreparedCell,
     context: KernelContext,
     budget: KernelBudget,
     invocation: EngineInvocation,
@@ -529,7 +634,33 @@ impl Cell {
     pub fn cancellation(&self) -> AtomicCancellation {
         self.cancellation.clone()
     }
+    pub(crate) fn source(&self) -> &str {
+        &self.source
+    }
 
+    /// The exact capsule root this cell runs under: the canonical root of
+    /// the Draft work capsule sealed at launch. Every guest operation trace
+    /// and every terminal event binds to this root.
+    pub fn capsule_root(&self) -> &str {
+        &self.prepared.publication().capsule_root
+    }
+
+    /// The capsule publication through which the sealed capsule was (or, for
+    /// prepared launches, was originally) persisted.
+    pub fn publication(&self) -> &CapsulePublication {
+        self.prepared.publication()
+    }
+
+    /// The speculation binding sealed for this cell: capsule, effective state
+    /// root, contract root, and epoch.
+    pub fn binding(&self) -> &SpeculationBinding {
+        self.prepared.binding()
+    }
+
+    /// The exact Draft work capsule this cell launches under.
+    pub fn capsule(&self) -> &WorkCapsule {
+        self.prepared.capsule()
+    }
     pub(crate) fn has_active_transaction(&self) -> bool {
         self.transaction.is_some()
     }
@@ -1348,9 +1479,53 @@ impl Cell {
         async_record.bytes_visible = 0;
     }
 
-    pub fn record_operations(&mut self, operations: Vec<ZeroOperationTrace>, truncated: bool) {
+    /// Bind the guest dispatch trace to this cell. Every trace must carry the
+    /// exact cell capsule root and a positive, strictly monotonic occurrence
+    /// (and sequence); an empty or mismatched root, a nonpositive occurrence,
+    /// or a monotonicity break is rejected outright — nothing is stamped or
+    /// repaired after the guest recorded it. A rejected trace is never
+    /// rendered into a response or terminal event.
+    pub fn record_operations(
+        &mut self,
+        operations: Vec<ZeroOperationTrace>,
+        truncated: bool,
+    ) -> Result<(), HostError> {
+        let capsule_root = self.capsule_root().to_owned();
+        let mut previous_sequence = 0_u64;
+        let mut previous_occurrence = 0_u64;
+        for operation in &operations {
+            if operation.capsule_root.is_empty() {
+                return Err(HostError::InvalidRequest(format!(
+                    "operation trace {} carries an empty capsule root",
+                    operation.sequence
+                )));
+            }
+            if operation.capsule_root != capsule_root {
+                return Err(HostError::InvalidRequest(format!(
+                    "operation trace {} capsule root {} differs from the cell capsule root {capsule_root}",
+                    operation.sequence, operation.capsule_root
+                )));
+            }
+            if operation.occurrence == 0 {
+                return Err(HostError::InvalidRequest(format!(
+                    "operation trace {} carries a nonpositive occurrence",
+                    operation.sequence
+                )));
+            }
+            if operation.sequence <= previous_sequence
+                || operation.occurrence <= previous_occurrence
+            {
+                return Err(HostError::InvalidRequest(format!(
+                    "operation trace {} sequence and occurrence must be strictly monotonic",
+                    operation.sequence
+                )));
+            }
+            previous_sequence = operation.sequence;
+            previous_occurrence = operation.occurrence;
+        }
         self.operations = operations;
         self.operations_truncated = truncated;
+        Ok(())
     }
 
     pub fn record_runtime_metrics(&mut self, wall_ns: u64, calls: u64, peak_tasks: u64) {
@@ -1483,19 +1658,28 @@ impl Cell {
         record.validate().map_err(HostError::Serialization)?;
         Ok(record)
     }
-
     pub fn fail(mut self, mut error: EngineError) -> Result<ZeroKernelResponse, HostError> {
         self.merge_async_records();
         self.dedup_handles();
-        if let Some(transaction) = self.transaction.take()
-            && let Err(rollback) = transaction.rollback()
-        {
-            error = EngineError::new(
-                EngineErrorKind::Corrupt,
-                format!("{}; rollback: {rollback}", error.detail),
-                false,
-            );
-        }
+        let rolled_back = self
+            .transaction
+            .as_ref()
+            .map(|transaction| transaction.receipts())
+            .unwrap_or_default();
+        let rollback_state = match self.transaction.take() {
+            Some(transaction) => match transaction.rollback() {
+                Ok(()) => "rolled_back",
+                Err(rollback) => {
+                    error = EngineError::new(
+                        EngineErrorKind::Corrupt,
+                        format!("{}; rollback: {rollback}", error.detail),
+                        false,
+                    );
+                    "rollback_failed"
+                }
+            },
+            None => "no_effects",
+        };
         let outcome = if error.kind == EngineErrorKind::Cancelled {
             ZeroKernelOutcome::Cancelled
         } else {
@@ -1504,6 +1688,16 @@ impl Cell {
         let turn = self.turn_record(&outcome)?;
         let visible = error.detail.clone();
         let visible_digest = blake3::hash(visible.as_bytes()).to_hex().to_string();
+        let capsule_object = self.publication().object.clone();
+        let event_capsule = event_capsule_roots(
+            self.publication(),
+            serde_json::json!({
+                "kind": "effects",
+                "state": rollback_state,
+                "receipts": rolled_back.iter().map(effect_fact).collect::<Vec<_>>(),
+            }),
+            occurrence_manifest(&self.operations),
+        );
         let event = ZeroKernelEvent {
             protocol: ZERO_KERNEL_PROTOCOL.into(),
             session_id: self.context.session_id.clone(),
@@ -1511,14 +1705,23 @@ impl Cell {
             source_digest: source_digest(&self.source),
             contract_digest: self.context.contract_digest.clone(),
             policy_digest: source_digest(b"direct-z"),
-            state_root_before: self.state.root.as_ref().map(ToString::to_string),
-            state_root_after: self.state.root.as_ref().map(ToString::to_string),
-            input_handles: Vec::new(),
+            state_root_before: self
+                .state
+                .root
+                .as_ref()
+                .map(|handle| handle.as_str().to_owned()),
+            state_root_after: self
+                .state
+                .root
+                .as_ref()
+                .map(|handle| handle.as_str().to_owned()),
+            input_handles: vec![capsule_object],
             output_handles: self.handles.clone(),
             outcome: outcome.clone(),
             ledger: self.ledger.clone(),
             model_visible_digest: visible_digest,
             turn: Some(turn.clone()),
+            capsule: Some(event_capsule),
         };
         let publication = self
             .events
@@ -1535,8 +1738,16 @@ impl Cell {
             handles: self.handles.clone(),
             event: publication.event,
             state: StateEvidence {
-                before: self.state.root.as_ref().map(ToString::to_string),
-                after: self.state.root.as_ref().map(ToString::to_string),
+                before: self
+                    .state
+                    .root
+                    .as_ref()
+                    .map(|handle| handle.as_str().to_owned()),
+                after: self
+                    .state
+                    .root
+                    .as_ref()
+                    .map(|handle| handle.as_str().to_owned()),
                 unchanged: true,
             },
             ledger: self.ledger.clone(),
@@ -1611,6 +1822,16 @@ impl Cell {
             None => Vec::new(),
         };
         self.dedup_handles();
+        let capsule_object = self.publication().object.clone();
+        let event_capsule = event_capsule_roots(
+            self.publication(),
+            serde_json::json!({
+                "kind": "effects",
+                "state": "committed",
+                "receipts": committed_effects.iter().map(effect_fact).collect::<Vec<_>>(),
+            }),
+            occurrence_manifest(&self.operations),
+        );
         let visible_bytes = projection.visible.as_bytes();
         let visible_digest = blake3::hash(visible_bytes).to_hex().to_string();
         let event = ZeroKernelEvent {
@@ -1620,14 +1841,15 @@ impl Cell {
             source_digest: source_digest(&self.source),
             contract_digest: self.context.contract_digest.clone(),
             policy_digest: source_digest(b"direct-z"),
-            state_root_before: before.as_ref().map(ToString::to_string),
-            state_root_after: after.as_ref().map(ToString::to_string),
-            input_handles: Vec::new(),
+            state_root_before: before.as_ref().map(|handle| handle.as_str().to_owned()),
+            state_root_after: after.as_ref().map(|handle| handle.as_str().to_owned()),
+            input_handles: vec![capsule_object],
             output_handles: self.handles.clone(),
             outcome: ZeroKernelOutcome::Completed,
             ledger: self.ledger.clone(),
             model_visible_digest: visible_digest,
             turn: Some(turn.clone()),
+            capsule: Some(event_capsule),
         };
         let publication = match self.events.publish(&event, visible_bytes) {
             Ok(publication) => publication,
@@ -1656,8 +1878,8 @@ impl Cell {
             handles: self.handles.clone(),
             event: publication.event,
             state: StateEvidence {
-                before: before.as_ref().map(ToString::to_string),
-                after: after.as_ref().map(ToString::to_string),
+                before: before.as_ref().map(|handle| handle.as_str().to_owned()),
+                after: after.as_ref().map(|handle| handle.as_str().to_owned()),
                 unchanged: before == after,
             },
             ledger: self.ledger.clone(),
@@ -1727,9 +1949,170 @@ fn source_digest(source: impl AsRef<[u8]>) -> String {
 fn now_ms() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
-        .map(|duration| duration.as_millis().min(u128::from(u64::MAX)) as u64)
-        .unwrap_or(0)
+        .unwrap_or_default()
+        .as_millis() as u64
 }
+
+/// Canonical coordinate root: SHA256 over the canonical JSON encoding of a
+/// typed manifest. Coordinates that are not directly derivable content
+/// (unmeasured, empty, or environmental facts) bind this way, so no root is
+/// ever an all-zero or sentinel placeholder.
+fn coordinate_root(manifest: serde_json::Value) -> String {
+    sha256_hex(canonical_json(&manifest).as_bytes())
+}
+
+/// The effective state root a cell launches under: the loaded durable root
+/// when state exists, otherwise the canonical manifest for an explicitly
+/// empty state.
+fn effective_state_root(state: &StateSnapshot) -> String {
+    state
+        .root
+        .as_ref()
+        .map(|handle| handle.digest().to_owned())
+        .unwrap_or_else(|| coordinate_root(serde_json::json!({"kind": "state", "state": "empty"})))
+}
+
+/// The canonical contract coordinate: the direct contract digest bound into
+/// a typed manifest so any digest form yields a canonical root.
+fn contract_root(context: &KernelContext) -> String {
+    coordinate_root(serde_json::json!({
+        "kind": "contract",
+        "digest": context.contract_digest,
+    }))
+}
+
+/// Real current capsule coordinates for a fresh cell: the project and
+/// protected scope bind the canonical workspace/project facts, task binds
+/// the finalized source digest, policy binds the direct contract, execution
+/// binds the complete enforced budget, and the explicitly empty or
+/// unmeasured planes (obligations, evidence, verifier, ledger) bind typed
+/// manifests.
+fn capsule_roots(
+    context: &KernelContext,
+    budget: &KernelBudget,
+    source: &str,
+) -> Result<CapsuleRoots, HostError> {
+    let project = coordinate_root(serde_json::json!({
+        "kind": "project",
+        "workspaceRoot": context.workspace_root.to_string_lossy(),
+        "projectRoot": context.project_root.to_string_lossy(),
+        "sessionId": &context.session_id,
+    }));
+    let protected_scope = coordinate_root(serde_json::json!({
+        "kind": "protected_scope",
+        "workspaceRoot": context.workspace_root.to_string_lossy(),
+        "projectRoot": context.project_root.to_string_lossy(),
+    }));
+    let policy = coordinate_root(serde_json::json!({
+        "kind": "policy",
+        "direct": "direct-z",
+        "contractDigest": &context.contract_digest,
+    }));
+    let execution = execution_root(budget);
+    let fallback = coordinate_root(serde_json::json!({
+        "kind": "fallback",
+        "engine": "direct-z",
+    }));
+    Ok(CapsuleRoots {
+        project,
+        task: sha256_hex(source.as_bytes()),
+        protected_scope,
+        obligations: coordinate_root(serde_json::json!({
+            "kind": "obligations",
+            "state": "unmeasured",
+        })),
+        evidence: coordinate_root(serde_json::json!({
+            "kind": "evidence",
+            "state": "unmeasured",
+        })),
+        policy,
+        execution,
+        verifier: coordinate_root(serde_json::json!({
+            "kind": "verifier",
+            "state": "unmeasured",
+        })),
+        fallback,
+        ledger: coordinate_root(serde_json::json!({
+            "kind": "ledger",
+            "state": "empty",
+        })),
+    })
+}
+
+fn execution_root(budget: &KernelBudget) -> String {
+    coordinate_root(serde_json::json!({
+        "kind": "execution",
+        "budget": {
+            "wallMs": budget.wall_ms,
+            "cpuMs": budget.cpu_ms,
+            "memoryBytes": budget.memory_bytes,
+            "callLimit": budget.call_limit,
+            "taskLimit": budget.task_limit,
+            "outputByteLimit": budget.output_byte_limit,
+        },
+    }))
+}
+
+/// Canonical receipt facts for the terminal effect root: the actual
+/// committed or rolled-back receipt coordinates, never a placeholder.
+fn effect_fact(receipt: &FileEffectReceipt) -> serde_json::Value {
+    serde_json::json!({
+        "kind": match receipt.kind {
+            FileEffectKind::Write => "write",
+            FileEffectKind::Edit => "edit",
+            FileEffectKind::Remove => "remove",
+            FileEffectKind::Restore => "restore",
+        },
+        "path": receipt.path.to_string_lossy(),
+        "before": receipt.before.as_ref().map(|handle| handle.as_str()),
+        "after": receipt.after.as_ref().map(|handle| handle.as_str()),
+        "journal": receipt.journal.as_str(),
+    })
+}
+
+/// The terminal capsule tuple every new event carries: the sealed capsule
+/// root and object, explicit unmeasured provider/cache/quality coordinates,
+/// an explicit ordinary speculation coordinate, the actual effect facts, and
+/// the actual operation trace vector.
+fn event_capsule_roots(
+    publication: &CapsulePublication,
+    effect_manifest: serde_json::Value,
+    occurrence_manifest: serde_json::Value,
+) -> CapsuleEventRoots {
+    CapsuleEventRoots {
+        capsule_root: publication.capsule_root.clone(),
+        capsule_object: publication.object.clone(),
+        provider_root: coordinate_root(serde_json::json!({
+            "kind": "provider_usage",
+            "state": "unmeasured",
+        })),
+        cache_root: coordinate_root(serde_json::json!({
+            "kind": "cache",
+            "state": "unmeasured",
+        })),
+        speculation_root: coordinate_root(serde_json::json!({
+            "kind": "speculation",
+            "mode": "ordinary",
+            "claims": 0,
+        })),
+        effect_root: coordinate_root(effect_manifest),
+        quality_root: coordinate_root(serde_json::json!({
+            "kind": "quality",
+            "state": "unmeasured",
+        })),
+        occurrence_root: coordinate_root(occurrence_manifest),
+    }
+}
+
+/// Canonical occurrence facts for the terminal occurrence root: the actual
+/// trace vector as recorded by the guest, or an explicitly empty vector.
+fn occurrence_manifest(operations: &[ZeroOperationTrace]) -> serde_json::Value {
+    serde_json::json!({
+        "kind": "occurrences",
+        "trace": operations,
+    })
+}
+
 struct PlannedFileEffect {
     path: PathBuf,
     before: Option<FileSnapshot>,
@@ -2284,4 +2667,287 @@ pub fn typed_error(kind: EngineErrorKind, detail: impl Into<String>) -> EngineEr
 #[allow(dead_code)]
 fn _empty_state() -> BTreeMap<String, Value> {
     BTreeMap::new()
+}
+#[cfg(test)]
+mod capsule_launch_tests {
+    use super::*;
+    use zero_abi::{
+        CertifyResult, CompressionRequest, CompressionResult, FileLease, ProjectionRequest,
+        ProjectionResult, StructuralResult, TokenAccounting,
+    };
+
+    struct CapsuleOnlyLease;
+    impl FileLease for CapsuleOnlyLease {}
+
+    /// FileEngine whose only real surface is capsule storage; the sealed
+    /// source check fires before any other engine interaction.
+    struct CapsuleOnlyFiles(Mutex<BTreeMap<String, WorkCapsule>>);
+
+    impl FileEngine for CapsuleOnlyFiles {
+        fn lease(&self, _invocation: &EngineInvocation) -> Result<Box<dyn FileLease>, EngineError> {
+            Ok(Box::new(CapsuleOnlyLease))
+        }
+
+        fn read(
+            &self,
+            _invocation: &EngineInvocation,
+            _request: FileReadRequest,
+        ) -> Result<FileSnapshot, EngineError> {
+            Err(EngineError::new(
+                EngineErrorKind::NotFound,
+                "no files",
+                false,
+            ))
+        }
+
+        fn lookup(
+            &self,
+            _invocation: &EngineInvocation,
+            _root: PathBuf,
+            _options: LookupOptions,
+        ) -> Result<Vec<PathBuf>, EngineError> {
+            Ok(Vec::new())
+        }
+
+        fn apply(
+            &self,
+            _invocation: &EngineInvocation,
+            _request: FileEffectRequest,
+        ) -> Result<FileEffectReceipt, EngineError> {
+            Err(EngineError::new(
+                EngineErrorKind::Internal,
+                "no effects",
+                false,
+            ))
+        }
+
+        fn restore(
+            &self,
+            _invocation: &EngineInvocation,
+            _receipt: &FileEffectReceipt,
+        ) -> Result<(), EngineError> {
+            Err(EngineError::new(
+                EngineErrorKind::Internal,
+                "no restore",
+                false,
+            ))
+        }
+
+        fn reconcile(
+            &self,
+            _invocation: &EngineInvocation,
+        ) -> Result<Vec<ZeroHandle>, EngineError> {
+            Ok(Vec::new())
+        }
+
+        fn put_capsule(
+            &self,
+            _invocation: &EngineInvocation,
+            capsule: &WorkCapsule,
+        ) -> Result<CapsulePublication, EngineError> {
+            let capsule_root = capsule
+                .root()
+                .map_err(|detail| EngineError::new(EngineErrorKind::InvalidInput, detail, false))?;
+            let value = serde_json::to_value(capsule).map_err(|error| {
+                EngineError::new(EngineErrorKind::InvalidInput, error.to_string(), false)
+            })?;
+            let object_digest = sha256_hex(canonical_json(&value).as_bytes());
+            let object = ZeroHandle::from_digest(&object_digest).map_err(|error| {
+                EngineError::new(EngineErrorKind::InvalidInput, error.to_string(), false)
+            })?;
+            self.0.lock().insert(object_digest, capsule.clone());
+            Ok(CapsulePublication {
+                capsule_root,
+                object,
+                created: true,
+            })
+        }
+
+        fn get_capsule(
+            &self,
+            _invocation: &EngineInvocation,
+            publication: &CapsulePublication,
+        ) -> Result<WorkCapsule, EngineError> {
+            let capsule = self
+                .0
+                .lock()
+                .get(publication.object.digest())
+                .cloned()
+                .ok_or_else(|| {
+                    EngineError::new(
+                        EngineErrorKind::NotFound,
+                        "capsule object is not published",
+                        false,
+                    )
+                })?;
+            let actual = capsule
+                .root()
+                .map_err(|detail| EngineError::new(EngineErrorKind::InvalidInput, detail, false))?;
+            if actual != publication.capsule_root {
+                return Err(EngineError::new(
+                    EngineErrorKind::Corrupt,
+                    "capsule root does not match its publication",
+                    false,
+                ));
+            }
+            Ok(capsule)
+        }
+    }
+
+    struct NoGraph;
+    impl StructuralEngine for NoGraph {
+        fn query(
+            &self,
+            _invocation: &EngineInvocation,
+            _query: StructuralQuery,
+        ) -> Result<StructuralResult, EngineError> {
+            Err(EngineError::new(
+                EngineErrorKind::Unsupported,
+                "no graph",
+                false,
+            ))
+        }
+    }
+
+    struct NoTokens;
+    impl TokenEngine for NoTokens {
+        fn measure(
+            &self,
+            _invocation: &EngineInvocation,
+            _bytes: &[u8],
+        ) -> Result<TokenAccounting, EngineError> {
+            Ok(TokenAccounting {
+                tokenizer: "bytes".into(),
+                billed: 0,
+                visible: 0,
+                cached: 0,
+                certified: false,
+            })
+        }
+
+        fn certify(
+            &self,
+            _invocation: &EngineInvocation,
+            _bytes: &[u8],
+            _claimed: &TokenAccounting,
+        ) -> Result<CertifyResult, EngineError> {
+            Err(EngineError::new(
+                EngineErrorKind::Unsupported,
+                "no certify",
+                false,
+            ))
+        }
+
+        fn project(
+            &self,
+            _invocation: &EngineInvocation,
+            _request: ProjectionRequest,
+        ) -> Result<ProjectionResult, EngineError> {
+            Err(EngineError::new(
+                EngineErrorKind::Unsupported,
+                "no project",
+                false,
+            ))
+        }
+
+        fn compress(
+            &self,
+            _invocation: &EngineInvocation,
+            _request: CompressionRequest,
+        ) -> Result<CompressionResult, EngineError> {
+            Err(EngineError::new(
+                EngineErrorKind::Unsupported,
+                "no compress",
+                false,
+            ))
+        }
+
+        fn expand(
+            &self,
+            _invocation: &EngineInvocation,
+            _handle: &ZeroHandle,
+            _options: ExpandOptions,
+        ) -> Result<Vec<u8>, EngineError> {
+            Err(EngineError::new(
+                EngineErrorKind::Unsupported,
+                "no expand",
+                false,
+            ))
+        }
+    }
+
+    #[test]
+    fn begin_from_request_rejects_sealed_source_and_budget_drift() {
+        let root = tempfile::tempdir().unwrap();
+        let kernel = ZeroKernel::new(
+            KernelContext {
+                workspace_root: root.path().to_path_buf(),
+                project_root: root.path().to_path_buf(),
+                session_id: "capsule-launch".into(),
+                expected_state_root: None,
+                contract_digest: "contract".into(),
+            },
+            KernelBudget {
+                wall_ms: 1_000,
+                cpu_ms: 1_000,
+                memory_bytes: 8 * 1024 * 1024,
+                call_limit: 16,
+                task_limit: 4,
+                output_byte_limit: 16 * 1024,
+            },
+            Arc::new(CapsuleOnlyFiles(Mutex::new(BTreeMap::new()))),
+            Arc::new(NoGraph),
+            Arc::new(NoTokens),
+            root.path().join(".zerostack"),
+        )
+        .unwrap();
+
+        // Seal a prepared cell for one source through the ordinary path.
+        let sealed_source = "return 'sealed';";
+        let probe = kernel.begin_cell(sealed_source).unwrap();
+        let mut preparation = CellPreparation::new();
+        preparation.feed(sealed_source).unwrap();
+        let sealed = preparation
+            .finish(
+                probe.binding().clone(),
+                probe.capsule().clone(),
+                probe.publication().clone(),
+            )
+            .unwrap();
+        drop(probe);
+
+        // An internal caller launching the sealed coordinates under a
+        // different source must be rejected before any state, binding, or
+        // recovery check: the source is bound into the capsule task root.
+        let drifted = ZeroKernelRequest::new(
+            "return 'other';".into(),
+            kernel.context.clone(),
+            kernel.budget.clone(),
+        )
+        .unwrap();
+        let error = kernel
+            .begin_from_request(drifted, AtomicCancellation::new(), Some(&sealed))
+            .err()
+            .expect("sealed launch must reject source drift");
+        assert!(
+            matches!(&error, HostError::InvalidRequest(detail) if detail.contains("source")),
+            "sealed launch must reject source drift: {error}"
+        );
+        assert_eq!(kernel.live_frames(), 0);
+
+        let mut changed_budget = kernel.budget.clone();
+        changed_budget.cpu_ms += 1;
+        let budget_drifted =
+            ZeroKernelRequest::new(sealed_source.into(), kernel.context.clone(), changed_budget)
+                .unwrap();
+        let error = kernel
+            .begin_from_request(budget_drifted, AtomicCancellation::new(), Some(&sealed))
+            .err()
+            .expect("sealed launch must reject budget drift");
+        assert!(
+            matches!(&error, HostError::InvalidRequest(detail) if detail.contains("budget")),
+            "sealed launch must reject budget drift: {error}"
+        );
+        assert_eq!(kernel.live_frames(), 0);
+    }
 }

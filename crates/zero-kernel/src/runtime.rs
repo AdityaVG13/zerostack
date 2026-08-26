@@ -10,7 +10,7 @@ use zero_abi::{
     AsgrepMode, AsgrepOptions, CapabilityDescriptor, EffectRequest, EngineError, EngineErrorKind,
     ExpandOptions, GUEST_METHODS, GlobalRegistration, LookupOptions, ReadOptions, ShellOptions,
     SnapRequest, SnapTargetRequest, SnapViewRequest, TaskLensRequest, ZERO_KERNEL_PROTOCOL,
-    ZeroHandle, ZeroKernelResponse,
+    ZeroHandle, ZeroKernelRequest, ZeroKernelResponse,
 };
 use zero_codemode::{
     Connector, ConnectorCompletion, ConnectorError, DispatchContext, GuestContext, GuestSurface,
@@ -253,13 +253,33 @@ impl ZeroKernel {
     pub fn begin_preparation(&self) -> crate::CellPreparation {
         crate::CellPreparation::new()
     }
-
     /// Execute a completed streamed cell through the same canonical path.
     pub fn execute_prepared(
         &self,
         prepared: &crate::PreparedCell,
     ) -> Result<ZeroKernelResponse, crate::HostError> {
-        self.execute_cell(prepared.source())
+        self.execute_prepared_with_cancellation(prepared, crate::AtomicCancellation::new())
+    }
+
+    /// Execute a prepared cell under its exact sealed coordinates. The
+    /// supplied publication must roundtrip through the FileEngine and the
+    /// current effective state and contract coordinates must match the
+    /// sealed binding before any guest work launches; no capsule is drafted
+    /// or published here. The sealed source then runs through the same
+    /// launch path as ordinary cells, bound to the sealed capsule root.
+    pub fn execute_prepared_with_cancellation(
+        &self,
+        prepared: &crate::PreparedCell,
+        cancellation: crate::AtomicCancellation,
+    ) -> Result<ZeroKernelResponse, crate::HostError> {
+        let request = ZeroKernelRequest::new(
+            prepared.source().to_owned(),
+            self.request_context().clone(),
+            self.request_budget().clone(),
+        )
+        .map_err(|error| crate::HostError::InvalidRequest(error.to_string()))?;
+        let cell = self.begin_from_request(request, cancellation.clone(), Some(prepared))?;
+        self.launch_cell(cell, cancellation)
     }
 
     /// Execute one TypeScript/JavaScript cell in a fresh bounded frame.
@@ -273,7 +293,21 @@ impl ZeroKernel {
         cancellation: crate::AtomicCancellation,
     ) -> Result<ZeroKernelResponse, crate::HostError> {
         let cell = self.begin_cell_with_cancellation(source, cancellation.clone())?;
-        let erased = match erase_typescript(source) {
+        self.launch_cell(cell, cancellation)
+    }
+
+    /// Shared guest launch for ordinary and prepared cells: erase TypeScript,
+    /// install the guest surface bound to the cell's exact capsule root, run
+    /// the bounded frame, and settle the cell through the terminal event
+    /// path. Every guest operation trace binds to the cell capsule root at
+    /// dispatch time and is rejected here if it drifted.
+    fn launch_cell(
+        &self,
+        cell: Cell,
+        cancellation: crate::AtomicCancellation,
+    ) -> Result<ZeroKernelResponse, crate::HostError> {
+        let source = cell.source().to_owned();
+        let erased = match erase_typescript(&source) {
             Ok(erased) => erased,
             Err(error) => return cell.fail(type_engine_error(error)),
         };
@@ -286,6 +320,7 @@ impl ZeroKernel {
             session_root: context.expected_state_root.clone(),
             session_id: context.session_id.clone(),
             protocol: ZERO_KERNEL_PROTOCOL.into(),
+            capsule_root: cell.capsule_root().to_owned(),
         }));
         if let Err(error) = guest.state_hydrate(cell.state_values()) {
             return cell.fail(EngineError::new(
@@ -346,7 +381,14 @@ impl ZeroKernel {
             outcome.metrics.connector_dispatches,
             outcome.metrics.peak_inflight_connector_calls as u64,
         );
-        cell.record_operations(outcome.operations, outcome.operations_truncated);
+        if let Err(error) = cell.record_operations(outcome.operations, outcome.operations_truncated)
+        {
+            return cell.fail(EngineError::new(
+                EngineErrorKind::InvalidInput,
+                error.to_string(),
+                false,
+            ));
+        }
         if let Err(error) = quiescence {
             let kind = if cancellation.is_cancelled() {
                 EngineErrorKind::Cancelled
@@ -364,7 +406,6 @@ impl ZeroKernel {
         }
     }
 }
-
 fn direct_capabilities() -> Vec<CapabilityDescriptor> {
     GUEST_METHODS
         .iter()

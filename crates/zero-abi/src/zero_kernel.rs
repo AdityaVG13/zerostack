@@ -14,7 +14,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use crate::task_lens::{TaskLensRequest, TaskLensResult};
-use crate::work_capsule::{TurnMetadata, TurnRecord};
+use crate::work_capsule::{TurnMetadata, TurnRecord, WorkCapsule, valid_root};
 
 /// Stable wire identity. Evolution is bound by `contract_digest`, never by a
 /// numeric suffix in a symbol or operation name.
@@ -194,8 +194,20 @@ impl ZeroHandle {
 
 impl fmt::Display for ZeroHandle {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter.write_str(&self.0)
+        formatter.write_str(self.as_str())
     }
+}
+
+fn valid_handle(handle: &ZeroHandle) -> bool {
+    handle
+        .as_str()
+        .strip_prefix(ZERO_HANDLE_PREFIX)
+        .is_some_and(|digest| {
+            digest.len() == HANDLE_DIGEST_BYTES
+                && digest
+                    .bytes()
+                    .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+        })
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -308,6 +320,8 @@ pub struct ZeroOperationTrace {
     pub sequence: u64,
     pub method: String,
     pub status: ZeroOperationStatus,
+    pub capsule_root: String,
+    pub occurrence: u64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub parallel_group: Option<u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -326,6 +340,16 @@ impl ZeroOperationTrace {
         if self.sequence == 0 || !GUEST_METHODS.contains(&self.method.as_str()) {
             return Err(ZeroKernelError::InvalidResponse(
                 "operation trace contains an invalid sequence or method".into(),
+            ));
+        }
+        if !valid_root(&self.capsule_root) {
+            return Err(ZeroKernelError::InvalidResponse(
+                "operation trace carries an invalid capsule root".into(),
+            ));
+        }
+        if self.occurrence == 0 {
+            return Err(ZeroKernelError::InvalidResponse(
+                "operation trace occurrence must be positive".into(),
             ));
         }
         if self
@@ -399,6 +423,7 @@ impl ZeroKernelResponse {
             ));
         }
         let mut previous_sequence = 0;
+        let mut previous_occurrence = 0;
         for operation in &self.operations {
             operation.validate()?;
             if operation.sequence <= previous_sequence {
@@ -407,11 +432,57 @@ impl ZeroKernelResponse {
                 ));
             }
             previous_sequence = operation.sequence;
+            if operation.occurrence <= previous_occurrence {
+                return Err(ZeroKernelError::InvalidResponse(
+                    "operation trace occurrence is not strictly increasing".into(),
+                ));
+            }
+            previous_occurrence = operation.occurrence;
         }
         if let Some(turn) = &self.turn {
             turn.validate().map_err(ZeroKernelError::InvalidResponse)?;
         }
         self.state.validate(&self.outcome)
+    }
+}
+
+/// Capsule coordinates published with every new kernel event. Optional on the
+/// wire only so legacy persisted events replay unchanged; new event writes
+/// always carry them.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+pub struct CapsuleEventRoots {
+    pub capsule_root: String,
+    pub capsule_object: ZeroHandle,
+    pub provider_root: String,
+    pub cache_root: String,
+    pub speculation_root: String,
+    pub effect_root: String,
+    pub quality_root: String,
+    pub occurrence_root: String,
+}
+
+impl CapsuleEventRoots {
+    pub fn validate(&self) -> Result<(), String> {
+        for (name, root) in [
+            ("capsule_root", &self.capsule_root),
+            ("provider_root", &self.provider_root),
+            ("cache_root", &self.cache_root),
+            ("speculation_root", &self.speculation_root),
+            ("effect_root", &self.effect_root),
+            ("quality_root", &self.quality_root),
+            ("occurrence_root", &self.occurrence_root),
+        ] {
+            if !valid_root(root) {
+                return Err(format!(
+                    "capsule event {name} root must be 64 lowercase hexadecimal characters"
+                ));
+            }
+        }
+        if !valid_handle(&self.capsule_object) {
+            return Err("capsule event capsule_object must be a canonical z://blob handle".into());
+        }
+        Ok(())
     }
 }
 
@@ -438,6 +509,8 @@ pub struct ZeroKernelEvent {
     pub model_visible_digest: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub turn: Option<TurnRecord>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub capsule: Option<CapsuleEventRoots>,
 }
 
 impl ZeroKernelEvent {
@@ -461,6 +534,9 @@ impl ZeroKernelEvent {
         }
         if let Some(turn) = &self.turn {
             turn.validate().map_err(ZeroKernelError::InvalidEvent)?;
+        }
+        if let Some(capsule) = &self.capsule {
+            capsule.validate().map_err(ZeroKernelError::InvalidEvent)?;
         }
         Ok(())
     }
@@ -638,6 +714,32 @@ pub struct LookupOptions {
     pub recursive: bool,
 }
 
+/// Persisted capsule identity returned by [`FileEngine::put_capsule`]. The
+/// root must equal the capsule's canonical root; the object is the byte-store
+/// handle from which the capsule can be recovered.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+pub struct CapsulePublication {
+    pub capsule_root: String,
+    pub object: ZeroHandle,
+    pub created: bool,
+}
+
+impl CapsulePublication {
+    pub fn validate(&self) -> Result<(), String> {
+        if !valid_root(&self.capsule_root) {
+            return Err(
+                "capsule publication capsule_root must be 64 lowercase hexadecimal characters"
+                    .into(),
+            );
+        }
+        if !valid_handle(&self.object) {
+            return Err("capsule publication object must be a canonical z://blob handle".into());
+        }
+        Ok(())
+    }
+}
+
 pub trait FileLease: Send {}
 
 pub trait FileEngine: Send + Sync {
@@ -669,6 +771,34 @@ pub trait FileEngine: Send + Sync {
     ) -> Result<(), EngineError>;
 
     fn reconcile(&self, invocation: &EngineInvocation) -> Result<Vec<ZeroHandle>, EngineError>;
+
+    /// Persist a capsule so its object can be recovered later. Engines that
+    /// cannot store capsules fail closed with [`EngineErrorKind::Unsupported`].
+    fn put_capsule(
+        &self,
+        _invocation: &EngineInvocation,
+        _capsule: &WorkCapsule,
+    ) -> Result<CapsulePublication, EngineError> {
+        Err(EngineError::new(
+            EngineErrorKind::Unsupported,
+            "put_capsule is not supported by this engine",
+            false,
+        ))
+    }
+
+    /// Recover a capsule from its publication. Engines that cannot store
+    /// capsules fail closed with [`EngineErrorKind::Unsupported`].
+    fn get_capsule(
+        &self,
+        _invocation: &EngineInvocation,
+        _publication: &CapsulePublication,
+    ) -> Result<WorkCapsule, EngineError> {
+        Err(EngineError::new(
+            EngineErrorKind::Unsupported,
+            "get_capsule is not supported by this engine",
+            false,
+        ))
+    }
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]

@@ -2,11 +2,28 @@ use std::path::Path;
 
 use tempfile::tempdir;
 use zero_abi::{
-    KernelBudget, KernelLedger, PROVIDER_USAGE_SCHEMA, ProviderUsageObservation, UsageAmount,
-    ZERO_KERNEL_PROTOCOL, ZeroHandle, ZeroKernelEvent, ZeroKernelOutcome,
+    CapsuleEventRoots, KernelBudget, KernelLedger, PROVIDER_USAGE_SCHEMA, ProviderUsageObservation,
+    UsageAmount, ZERO_KERNEL_PROTOCOL, ZeroHandle, ZeroKernelEvent, ZeroKernelOutcome,
 };
 use zero_kernel::{HostError, ZeroKernel};
 use zero_store::EventLog;
+
+fn root64(hex: char) -> String {
+    std::iter::repeat_n(hex, 64).collect()
+}
+
+fn capsule_roots() -> CapsuleEventRoots {
+    CapsuleEventRoots {
+        capsule_root: root64('1'),
+        capsule_object: ZeroHandle::from_digest(&root64('a')).unwrap(),
+        provider_root: root64('2'),
+        cache_root: root64('3'),
+        speculation_root: root64('4'),
+        effect_root: root64('5'),
+        quality_root: root64('6'),
+        occurrence_root: root64('7'),
+    }
+}
 
 fn event(visible: &[u8]) -> ZeroKernelEvent {
     ZeroKernelEvent {
@@ -24,6 +41,7 @@ fn event(visible: &[u8]) -> ZeroKernelEvent {
         ledger: KernelLedger::default(),
         model_visible_digest: blake3::hash(visible).to_hex().to_string(),
         turn: None,
+        capsule: Some(capsule_roots()),
     }
 }
 

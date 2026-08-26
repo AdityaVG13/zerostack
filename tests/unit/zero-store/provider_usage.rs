@@ -2,10 +2,27 @@ use std::fs;
 
 use tempfile::tempdir;
 use zero_abi::{
-    KernelLedger, PROVIDER_USAGE_SCHEMA, ProviderUsageObservation, UsageAmount,
+    CapsuleEventRoots, KernelLedger, PROVIDER_USAGE_SCHEMA, ProviderUsageObservation, UsageAmount,
     ZERO_KERNEL_PROTOCOL, ZeroHandle, ZeroKernelEvent, ZeroKernelOutcome,
 };
 use zero_store::{EventLog, EventLogError, ProviderUsageLogRecord, ZeroCas};
+
+fn root64(hex: char) -> String {
+    std::iter::repeat_n(hex, 64).collect()
+}
+
+fn capsule_roots() -> CapsuleEventRoots {
+    CapsuleEventRoots {
+        capsule_root: root64('1'),
+        capsule_object: ZeroHandle::from_digest(&root64('a')).unwrap(),
+        provider_root: root64('2'),
+        cache_root: root64('3'),
+        speculation_root: root64('4'),
+        effect_root: root64('5'),
+        quality_root: root64('6'),
+        occurrence_root: root64('7'),
+    }
+}
 
 fn event(visible: &[u8]) -> ZeroKernelEvent {
     ZeroKernelEvent {
@@ -23,6 +40,7 @@ fn event(visible: &[u8]) -> ZeroKernelEvent {
         ledger: KernelLedger::default(),
         model_visible_digest: blake3::hash(visible).to_hex().to_string(),
         turn: None,
+        capsule: Some(capsule_roots()),
     }
 }
 
@@ -140,6 +158,29 @@ fn provider_usage_conflicts_on_different_observation() {
     assert!(matches!(error, EventLogError::UsageConflict(_)));
     // The conflicting observation never reached the log.
     assert_eq!(log.provider_usage_records("session").unwrap().len(), 1);
+}
+
+#[test]
+fn provider_usage_sidecar_links_to_capsule_rooted_event() {
+    let root = tempdir().unwrap();
+    let log = EventLog::open(root.path());
+    let event_handle = publish(&log, b"model-visible");
+    log.publish_provider_usage("session", &event_handle, observation("req-1", 100))
+        .unwrap();
+
+    let records = log.provider_usage_records("session").unwrap();
+    assert_eq!(records.len(), 1);
+    assert_eq!(records[0].kernel_event, event_handle);
+
+    // The sidecar references an event object that carries the exact capsule
+    // tuple: capsule/provider/cache/speculation/effect/quality/occurrence
+    // roots plus the capsule object handle.
+    let bytes = ZeroCas::open(root.path())
+        .get(&records[0].kernel_event)
+        .unwrap();
+    let linked: ZeroKernelEvent = serde_json::from_slice(&bytes).unwrap();
+    assert_eq!(linked.capsule, Some(capsule_roots()));
+    assert_eq!(linked.session_id, "session");
 }
 
 #[test]

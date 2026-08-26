@@ -276,6 +276,17 @@ impl Transaction {
         })
     }
 
+    /// The receipt facts of every applied effect, in dispatch order. Callers
+    /// snapshot this before settlement (commit/rollback) so terminal events
+    /// can bind the actual committed or rolled-back receipt coordinates.
+    pub(crate) fn receipts(&self) -> Vec<FileEffectReceipt> {
+        self.record
+            .effects
+            .iter()
+            .filter_map(|effect| effect.receipt.clone())
+            .collect()
+    }
+
     pub fn apply(
         &mut self,
         mut request: FileEffectRequest,

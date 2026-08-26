@@ -12,7 +12,7 @@ use crate::schema::canonical_json;
 
 const ROOT_HEX_LEN: usize = 64;
 
-fn valid_root(root: &str) -> bool {
+pub(crate) fn valid_root(root: &str) -> bool {
     root.len() == ROOT_HEX_LEN
         && root
             .bytes()
@@ -107,7 +107,33 @@ impl WorkCapsule {
         if self.version == 0 {
             return Err("capsule version must be positive".into());
         }
+        if self.epoch == 0 {
+            return Err("capsule epoch must be positive".into());
+        }
         self.roots.validate()
+    }
+
+    /// Deterministic Draft genesis. Identical full inputs (roots, epoch, and
+    /// both budgets) always produce the same capsule and the same capsule
+    /// root. The epoch must be positive; budgets are caller-provided and
+    /// retained exactly, so zero is representable only when explicitly
+    /// supplied — never silently manufactured.
+    pub fn draft(
+        roots: CapsuleRoots,
+        epoch: u64,
+        provider_usage_budget: u64,
+        complete_work_budget: u64,
+    ) -> Result<Self, String> {
+        let capsule = Self {
+            version: 1,
+            roots,
+            state: CapsuleState::Draft,
+            epoch,
+            provider_usage_budget,
+            complete_work_budget,
+        };
+        capsule.validate()?;
+        Ok(capsule)
     }
 
     pub fn root(&self) -> Result<String, String> {
@@ -116,14 +142,47 @@ impl WorkCapsule {
         Ok(sha256_hex(canonical_json(&value).as_bytes()))
     }
 
-    pub fn transition(&mut self, next: CapsuleState) -> Result<(), String> {
-        if !self.state.allows(next) {
+    /// Successor law. `next` is a legal successor of `self` only when both
+    /// capsules validate (version nonzero, epoch positive), the epoch is
+    /// nondecreasing, the state edge is a legal [`CapsuleState`] edge, and
+    /// the immutable roots (project, task, protected_scope, fallback) are
+    /// unchanged. All other roots may evolve.
+    pub fn validate_successor(&self, next: &Self) -> Result<(), String> {
+        self.validate()?;
+        next.validate()?;
+        if next.epoch < self.epoch {
+            return Err("capsule successor epoch must not decrease".into());
+        }
+        if !self.state.allows(next.state) {
             return Err(format!(
-                "illegal capsule transition {:?} -> {next:?}",
-                self.state
+                "illegal capsule transition {:?} -> {:?}",
+                self.state, next.state
             ));
         }
-        self.state = next;
+        if next.roots.project != self.roots.project
+            || next.roots.task != self.roots.task
+            || next.roots.protected_scope != self.roots.protected_scope
+            || next.roots.fallback != self.roots.fallback
+        {
+            return Err(
+                "capsule successor must not mutate project, task, protected_scope, or fallback roots"
+                    .into(),
+            );
+        }
+        Ok(())
+    }
+
+    /// Advance to `next` under the successor law, bumping the epoch. On any
+    /// law violation the capsule is left unchanged.
+    pub fn advance(&mut self, next: CapsuleState) -> Result<(), String> {
+        let mut successor = self.clone();
+        successor.state = next;
+        successor.epoch = successor
+            .epoch
+            .checked_add(1)
+            .ok_or_else(|| "capsule epoch overflow".to_string())?;
+        self.validate_successor(&successor)?;
+        *self = successor;
         Ok(())
     }
 }
