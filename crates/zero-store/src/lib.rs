@@ -139,7 +139,8 @@ pub use zero_cas::{
 
 pub use event_log::{
     EVENT_LOG_BYTE_LIMIT, EVENT_LOG_DIR, EVENT_RECORD_BYTE_LIMIT, EventLog, EventLogError,
-    EventLogRecord, EventPublication,
+    EventLogRecord, EventPublication, ProviderUsageLogRecord, ProviderUsagePublication,
+    USAGE_LOG_DIR,
 };
 
 pub use zero_migration::{

@@ -210,10 +210,9 @@ pub use snap_effect::{
     SnapTargetRequest, SnapView, SnapViewMode, SnapViewRequest,
 };
 pub use speculation::{
-    DEFAULT_SPECULATION_LIMIT, SPECULATION_CONTRACT, FinalizedCallProof,
-    FinalizedSpeculationPlan, SpeculationAdmission, SpeculationBinding, SpeculationCandidate,
-    SpeculationLedger, SpeculationPermit, SpeculationState, SpeculativeOperation,
-    compile_finalized_speculation_plan,
+    DEFAULT_SPECULATION_LIMIT, FinalizedCallProof, FinalizedSpeculationPlan, SPECULATION_CONTRACT,
+    SpeculationAdmission, SpeculationBinding, SpeculationCandidate, SpeculationLedger,
+    SpeculationPermit, SpeculationState, SpeculativeOperation, compile_finalized_speculation_plan,
 };
 pub use surface::{
     CapabilityDescriptor, DomainAdapterRegistration, GlobalRegistration, RegistrationError,
@@ -239,10 +238,11 @@ pub use zero_kernel::{
     ExpandOptions, FileEffectKind, FileEffectReceipt, FileEffectRequest, FileEngine, FileLease,
     FileMetadata, FileReadRequest, FileSnapshot, GUEST_METHODS, HANDLE_DIGEST_BYTES, KernelBudget,
     KernelContext, KernelLedger, LookupOptions, OPERATION_TRACE_LIMIT, PARALLEL_TASK_LIMIT,
-    ProjectionRequest, ProjectionResult, ReadOptions, SOURCE_BYTE_LIMIT, STATE_KEY_BYTE_LIMIT,
-    STATE_KEY_LIMIT, STATE_TOTAL_BYTE_LIMIT, STATE_VALUE_BYTE_LIMIT, ShellOptions, ShellResult,
-    StateEvidence, StructuralAbsence, StructuralBudget, StructuralCoverage, StructuralEngine,
-    StructuralHit, StructuralQuery, StructuralResult, TokenAccounting, TokenEngine,
+    PROVIDER_USAGE_SCHEMA, ProjectionRequest, ProjectionResult, ProviderUsageObservation,
+    ReadOptions, SOURCE_BYTE_LIMIT, STATE_KEY_BYTE_LIMIT, STATE_KEY_LIMIT, STATE_TOTAL_BYTE_LIMIT,
+    STATE_VALUE_BYTE_LIMIT, ShellOptions, ShellResult, StateEvidence, StructuralAbsence,
+    StructuralBudget, StructuralCoverage, StructuralEngine, StructuralHit, StructuralQuery,
+    StructuralResult, TokenAccounting, TokenEngine, UsageAmount, UsageMeasurement,
     ZERO_HANDLE_PREFIX, ZERO_KERNEL_PROTOCOL, ZeroHandle, ZeroKernelError, ZeroKernelEvent,
     ZeroKernelOutcome, ZeroKernelRequest, ZeroKernelResponse, ZeroOperationStatus,
     ZeroOperationTrace, zero_kernel_response_schema,

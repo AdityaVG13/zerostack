@@ -23,6 +23,9 @@ pub enum UsageCoordinate {
     Latency,
     Storage,
     Verification,
+    UncachedInput,
+    BilledTokens,
+    BilledCost,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -175,4 +178,101 @@ pub fn coordinate_totals(events: &[UsageEvent]) -> Result<BTreeMap<UsageCoordina
         }
     }
     Ok(totals)
+}
+/// Convert a provider-neutral observation into deterministic [`UsageEvent`]s.
+///
+/// Every coordinate in the observation produces one event, even when
+/// unmeasured (amount 0, observation Unmeasured). This preserves
+/// missing-data honesty: absent provider fields remain `Unmeasured` and
+/// never become measured zero.
+pub fn provider_usage_events(
+    task_root: &str,
+    arm: UsageArm,
+    observation: &zero_abi::zero_kernel::ProviderUsageObservation,
+) -> Result<Vec<UsageEvent>, String> {
+    if task_root.is_empty() {
+        return Err("task_root must not be empty".into());
+    }
+    observation.validate()?;
+
+    let entries: [(
+        UsageCoordinate,
+        &zero_abi::zero_kernel::UsageAmount,
+        &str,
+        &str,
+    ); 8] = [
+        (
+            UsageCoordinate::UncachedInput,
+            &observation.uncached_input_tokens,
+            "uncached_input",
+            "tokens",
+        ),
+        (
+            UsageCoordinate::CacheRead,
+            &observation.cached_read_input_tokens,
+            "cache_read",
+            "tokens",
+        ),
+        (
+            UsageCoordinate::CacheWrite,
+            &observation.cached_write_input_tokens,
+            "cache_write",
+            "tokens",
+        ),
+        (
+            UsageCoordinate::Reasoning,
+            &observation.reasoning_tokens,
+            "reasoning",
+            "tokens",
+        ),
+        (
+            UsageCoordinate::VisibleOutput,
+            &observation.output_tokens,
+            "visible_output",
+            "tokens",
+        ),
+        (
+            UsageCoordinate::BilledTokens,
+            &observation.billed_tokens,
+            "billed_tokens",
+            "tokens",
+        ),
+        (
+            UsageCoordinate::BilledCost,
+            &observation.billed_microcredits,
+            "billed_cost",
+            "microcredits",
+        ),
+        (
+            UsageCoordinate::ProviderCredit,
+            &observation.credit_microcredits,
+            "provider_credit",
+            "microcredits",
+        ),
+    ];
+
+    let mut out = Vec::with_capacity(8);
+    for (coordinate, amount, slug, unit) in entries {
+        let observation_kind = match amount.measurement {
+            zero_abi::zero_kernel::UsageMeasurement::Measured => ObservationKind::Measured,
+            zero_abi::zero_kernel::UsageMeasurement::Estimated => ObservationKind::Estimated,
+            zero_abi::zero_kernel::UsageMeasurement::Unmeasured => ObservationKind::Unmeasured,
+        };
+        let numeric = amount.amount.unwrap_or(0);
+        let event = UsageEvent {
+            event_id: format!("{}:{slug}", observation.request_id),
+            task_root: task_root.to_string(),
+            arm,
+            coordinate,
+            amount: numeric,
+            unit: unit.to_string(),
+            provenance: amount.provenance.clone(),
+            observation: observation_kind,
+            window_id: None,
+            occurrence_id: Some(observation.request_id.clone()),
+        };
+        event.validate()?;
+        out.push(event);
+    }
+    Ok(out)
 }

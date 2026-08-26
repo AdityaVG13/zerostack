@@ -49,5 +49,9 @@ name = "event_log"
 path = "../../tests/unit/zero-store/event_log.rs"
 
 [[test]]
+name = "provider_usage"
+path = "../../tests/unit/zero-store/provider_usage.rs"
+
+[[test]]
 name = "zero_migration"
 path = "../../tests/unit/zero-store/zero_migration.rs"

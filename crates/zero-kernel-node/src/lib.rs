@@ -8,8 +8,9 @@ use napi::bindgen_prelude::{AbortSignal, AsyncTask, ToNapiValue, TypeName, Value
 use napi::{Env, Error, Result, Task};
 use napi_derive::napi;
 use parking_lot::Mutex;
-use zero_abi::{KernelBudget, ZeroKernelResponse};
+use zero_abi::{KernelBudget, ProviderUsageObservation, ZeroHandle, ZeroKernelResponse};
 use zero_kernel::{AtomicCancellation, ZeroKernel as CoreZeroKernel};
+use zero_store::ProviderUsagePublication;
 
 const DEFAULT_WALL_MS: u64 = 30_000;
 const DEFAULT_MEMORY_BYTES: u64 = 256 * 1024 * 1024;
@@ -187,6 +188,31 @@ impl ZeroKernel {
         Ok(AsyncTask::new(task))
     }
 
+    #[napi(js_name = "recordProviderUsage")]
+    pub fn record_provider_usage(
+        &self,
+        event: String,
+        observation_json: String,
+    ) -> Result<AsyncTask<RecordProviderUsageTask>> {
+        let kernel_event = ZeroHandle::parse(event.trim())
+            .map_err(|error| Error::from_reason(error.to_string()))?;
+        let observation = serde_json::from_str::<ProviderUsageObservation>(&observation_json)
+            .map_err(|error| {
+                Error::from_reason(format!("invalid provider usage observation: {error}"))
+            })?;
+        let active = self.core.active.lock();
+        if self.core.terminated.load(Ordering::Acquire) {
+            return Err(Error::from_reason("ZeroKernel is shut down"));
+        }
+        self.core.inflight.fetch_add(1, Ordering::AcqRel);
+        drop(active);
+        Ok(AsyncTask::new(RecordProviderUsageTask {
+            core: Arc::clone(&self.core),
+            kernel_event,
+            observation,
+        }))
+    }
+
     #[napi]
     pub fn status(&self) -> ZeroKernelStatus {
         let (live_frames, live_tasks, live_processes) = self
@@ -311,6 +337,38 @@ impl Task for ExecuteTask {
 
     fn finally(self, _env: Env) -> Result<()> {
         self.core.active.lock().remove(&self.task_id);
+        self.core.inflight.fetch_sub(1, Ordering::AcqRel);
+        Ok(())
+    }
+}
+
+pub struct RecordProviderUsageTask {
+    core: Arc<KernelCore>,
+    kernel_event: ZeroHandle,
+    observation: ProviderUsageObservation,
+}
+
+impl Task for RecordProviderUsageTask {
+    type Output = ProviderUsagePublication;
+    type JsValue = JsJson;
+
+    fn compute(&mut self) -> Result<Self::Output> {
+        let kernel = catch_unwind(AssertUnwindSafe(|| self.core.initialize()))
+            .map_err(|_| Error::from_reason("ZeroKernel initialization panicked"))??;
+        catch_unwind(AssertUnwindSafe(|| {
+            kernel.record_provider_usage(&self.kernel_event, self.observation.clone())
+        }))
+        .map_err(|_| Error::from_reason("ZeroKernel provider usage recording panicked"))?
+        .map_err(|error| Error::from_reason(error.to_string()))
+    }
+
+    fn resolve(&mut self, _env: Env, output: Self::Output) -> Result<Self::JsValue> {
+        serde_json::to_value(output)
+            .map(JsJson)
+            .map_err(|error| Error::from_reason(error.to_string()))
+    }
+
+    fn finally(self, _env: Env) -> Result<()> {
         self.core.inflight.fetch_sub(1, Ordering::AcqRel);
         Ok(())
     }

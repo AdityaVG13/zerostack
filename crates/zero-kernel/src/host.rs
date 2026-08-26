@@ -12,14 +12,14 @@ use zero_abi::{
     EngineCallContext, EngineError, EngineErrorKind, EngineInvocation, ExpandOptions, ExpandResult,
     FileEffectKind, FileEffectReceipt, FileEffectRequest, FileEngine, FileReadRequest,
     FileSnapshot, KernelBudget, KernelContext, KernelLedger, LookupOptions, ProjectionRequest,
-    ReadOptions, SNAP_WORKSPACE_SCHEMA, ShellOptions, ShellResult, SnapAccounting, SnapByteRange,
-    SnapNewline, SnapRecovery, SnapRequest, SnapResult, SnapSelection, SnapSelectionRequest,
-    SnapSource, SnapStructuralEvidence, SnapTargetRequest, SnapView, SnapViewMode, StateEvidence,
-    StructuralEngine, StructuralQuery, TokenEngine, TurnMetadata, TurnRecord, ZERO_KERNEL_PROTOCOL,
-    ZeroHandle, ZeroKernelEvent, ZeroKernelOutcome, ZeroKernelRequest, ZeroKernelResponse,
-    ZeroOperationTrace, canonical_json, sha256_hex,
+    ProviderUsageObservation, ReadOptions, SNAP_WORKSPACE_SCHEMA, ShellOptions, ShellResult,
+    SnapAccounting, SnapByteRange, SnapNewline, SnapRecovery, SnapRequest, SnapResult,
+    SnapSelection, SnapSelectionRequest, SnapSource, SnapStructuralEvidence, SnapTargetRequest,
+    SnapView, SnapViewMode, StateEvidence, StructuralEngine, StructuralQuery, TokenEngine,
+    TurnMetadata, TurnRecord, ZERO_KERNEL_PROTOCOL, ZeroHandle, ZeroKernelEvent, ZeroKernelOutcome,
+    ZeroKernelRequest, ZeroKernelResponse, ZeroOperationTrace, canonical_json, sha256_hex,
 };
-use zero_store::{EventLog, ZeroCas};
+use zero_store::{EventLog, ProviderUsagePublication, ZeroCas};
 
 use crate::shell::{ShellCommand, run_shell};
 use crate::state::{StateError, StateSnapshot, StateStore};
@@ -447,6 +447,16 @@ impl ZeroKernel {
 
     pub fn cas(&self) -> &ZeroCas {
         &self.cas
+    }
+
+    pub fn record_provider_usage(
+        &self,
+        kernel_event_handle: &ZeroHandle,
+        observation: ProviderUsageObservation,
+    ) -> Result<ProviderUsagePublication, HostError> {
+        self.events
+            .publish_provider_usage(&self.context.session_id, kernel_event_handle, observation)
+            .map_err(|error| HostError::Event(error.to_string()))
     }
 }
 

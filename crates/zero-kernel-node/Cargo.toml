@@ -16,6 +16,7 @@ parking_lot = "0.12"
 serde_json.workspace = true
 zero-abi = { path = "../zero-abi" }
 zero-kernel = { path = "../zero-kernel" }
+zero-store = { path = "../zero-store" }
 
 [build-dependencies]
 napi-build = "2.4.1"

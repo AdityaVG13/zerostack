@@ -67,3 +67,6 @@ path = "../../tests/unit/zero-abi/speculation.rs"
 [[test]]
 name = "work_capsule"
 path = "../../tests/unit/zero-abi/work_capsule.rs"
+[[test]]
+name = "provider_usage"
+path = "../../tests/unit/zero-abi/provider_usage.rs"

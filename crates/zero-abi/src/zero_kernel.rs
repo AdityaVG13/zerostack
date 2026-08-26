@@ -930,7 +930,131 @@ pub trait TokenEngine: Send + Sync {
         options: ExpandOptions,
     ) -> Result<Vec<u8>, EngineError>;
 }
+/// Stable schema identifier for provider-neutral usage observations.
+pub const PROVIDER_USAGE_SCHEMA: &str = "zerostack.provider_usage.v1";
 
+/// How a provider usage coordinate was obtained.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum UsageMeasurement {
+    Measured,
+    Estimated,
+    Unmeasured,
+}
+
+/// One provider usage coordinate with its provenance.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+pub struct UsageAmount {
+    pub measurement: UsageMeasurement,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub amount: Option<u64>,
+    pub provenance: String,
+}
+
+impl UsageAmount {
+    pub fn measured(amount: u64, provenance: impl Into<String>) -> Self {
+        Self {
+            measurement: UsageMeasurement::Measured,
+            amount: Some(amount),
+            provenance: provenance.into(),
+        }
+    }
+
+    pub fn estimated(amount: u64, provenance: impl Into<String>) -> Self {
+        Self {
+            measurement: UsageMeasurement::Estimated,
+            amount: Some(amount),
+            provenance: provenance.into(),
+        }
+    }
+
+    pub fn unmeasured(provenance: impl Into<String>) -> Self {
+        Self {
+            measurement: UsageMeasurement::Unmeasured,
+            amount: None,
+            provenance: provenance.into(),
+        }
+    }
+
+    pub fn validate(&self) -> Result<(), String> {
+        if self.provenance.trim().is_empty() {
+            return Err("usage amount provenance must not be empty".into());
+        }
+        match self.measurement {
+            UsageMeasurement::Measured | UsageMeasurement::Estimated => {
+                if self.amount.is_none() {
+                    return Err("measured and estimated usage must carry an amount".into());
+                }
+            }
+            UsageMeasurement::Unmeasured => {
+                if self.amount.is_some() {
+                    return Err("unmeasured usage must not carry an amount".into());
+                }
+            }
+        }
+        Ok(())
+    }
+}
+
+/// Provider-neutral observation covering all token and microcredit coordinates.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+pub struct ProviderUsageObservation {
+    pub schema: String,
+    pub provider: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
+    pub request_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub route: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub service_tier: Option<String>,
+    pub uncached_input_tokens: UsageAmount,
+    pub cached_read_input_tokens: UsageAmount,
+    pub cached_write_input_tokens: UsageAmount,
+    pub reasoning_tokens: UsageAmount,
+    pub output_tokens: UsageAmount,
+    pub billed_tokens: UsageAmount,
+    pub billed_microcredits: UsageAmount,
+    pub credit_microcredits: UsageAmount,
+}
+
+impl ProviderUsageObservation {
+    pub fn validate(&self) -> Result<(), String> {
+        if self.schema != PROVIDER_USAGE_SCHEMA {
+            return Err(format!(
+                "invalid provider usage schema: expected {PROVIDER_USAGE_SCHEMA}"
+            ));
+        }
+        if self.provider.trim().is_empty() {
+            return Err("provider must not be empty".into());
+        }
+        if self.request_id.trim().is_empty() {
+            return Err("request_id must not be empty".into());
+        }
+        for (name, value) in [
+            ("model", &self.model),
+            ("route", &self.route),
+            ("service_tier", &self.service_tier),
+        ] {
+            if let Some(v) = value {
+                if v.trim().is_empty() {
+                    return Err(format!("{name} must not be blank when present"));
+                }
+            }
+        }
+        self.uncached_input_tokens.validate()?;
+        self.cached_read_input_tokens.validate()?;
+        self.cached_write_input_tokens.validate()?;
+        self.reasoning_tokens.validate()?;
+        self.output_tokens.validate()?;
+        self.billed_tokens.validate()?;
+        self.billed_microcredits.validate()?;
+        self.credit_microcredits.validate()?;
+        Ok(())
+    }
+}
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum ZeroKernelError {
     InvalidProtocol(String),
