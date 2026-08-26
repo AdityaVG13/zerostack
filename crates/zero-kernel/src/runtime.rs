@@ -21,6 +21,8 @@ use crate::host::{Cell, ZeroKernel};
 use crate::shell::ShellCommand;
 use crate::typescript::{TypeScriptError, erase_typescript};
 
+const MAX_CONCURRENT_CONNECTOR_CALLS: usize = 2;
+
 const FRAME_SETTLE_GRACE: Duration = Duration::from_millis(1_500);
 
 struct CellConnector {
@@ -368,7 +370,9 @@ fn host_limits(budget: &zero_abi::KernelBudget) -> Result<HostLimits, crate::Hos
         Duration::from_millis(budget.wall_ms),
         budget.cpu_ms.saturating_mul(10_000).max(1),
         4_096,
-        (budget.task_limit as usize).min(zero_codemode::MAX_INFLIGHT_CONNECTOR_CALLS),
+        (budget.task_limit as usize)
+            .min(zero_codemode::MAX_INFLIGHT_CONNECTOR_CALLS)
+            .min(MAX_CONCURRENT_CONNECTOR_CALLS),
         u64::from(budget.call_limit),
         zero_abi::SOURCE_BYTE_LIMIT,
         usize::try_from(budget.memory_bytes).unwrap_or(usize::MAX),

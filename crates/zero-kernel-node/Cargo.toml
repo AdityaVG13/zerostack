@@ -20,3 +20,6 @@ zero-store = { path = "../zero-store" }
 
 [build-dependencies]
 napi-build = "2.4.1"
+
+[dev-dependencies]
+tempfile = "3"

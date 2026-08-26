@@ -785,16 +785,13 @@ fn failed_cell_restores_created_file() {
 fn parallel_reads_overlap_in_real_time() {
     let root = tempdir().unwrap();
     let files = Arc::new(SlowFiles::new());
-    files
-        .inner
-        .0
-        .lock()
-        .insert(PathBuf::from("a.txt"), b"a".to_vec());
-    files
-        .inner
-        .0
-        .lock()
-        .insert(PathBuf::from("b.txt"), b"b".to_vec());
+    for name in ["a.txt", "b.txt", "c.txt", "d.txt", "e.txt", "f.txt"] {
+        files
+            .inner
+            .0
+            .lock()
+            .insert(PathBuf::from(name), b"content".to_vec());
+    }
     let kernel = kernel(root.path(), Arc::clone(&files) as Arc<dyn FileEngine>);
     let response = kernel
         .execute_cell(
@@ -802,13 +799,26 @@ fn parallel_reads_overlap_in_real_time() {
             return await Promise.all([
               z.read("a.txt"),
               z.read("b.txt"),
+              z.read("c.txt"),
+              z.read("d.txt"),
+              z.read("e.txt"),
+              z.read("f.txt"),
             ]);
             "#,
         )
         .unwrap();
     assert_eq!(response.outcome, zero_abi::ZeroKernelOutcome::Completed);
-    assert!(files.peak.load(Ordering::Acquire) >= 2);
+    // The six reads must run in three overlapping pairs.
+    let peak = files.peak.load(Ordering::Acquire);
+    assert_eq!(peak, 2, "peak must be exactly 2, got {peak}");
+    // Settlement counters return to zero after quiescence.
+    assert_eq!(
+        files.inflight.load(Ordering::Acquire),
+        0,
+        "SlowFiles inflight must settle to zero"
+    );
     assert_eq!(kernel.live_tasks(), 0);
+    assert_eq!(kernel.live_frames(), 0);
 }
 
 #[test]

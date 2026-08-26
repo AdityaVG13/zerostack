@@ -1,7 +1,7 @@
 use std::collections::BTreeMap;
 use std::panic::{AssertUnwindSafe, catch_unwind};
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
+use std::sync::{Arc, Weak};
 use std::time::{Duration, Instant};
 
 use napi::bindgen_prelude::{AbortSignal, AsyncTask, ToNapiValue, TypeName, ValueType};
@@ -49,6 +49,55 @@ struct KernelCore {
     active: Mutex<BTreeMap<u64, AtomicCancellation>>,
 }
 
+/// Complete identity of a [`CoreZeroKernel`] as constructed from
+/// [`KernelConfig`]: canonical project root, state root, session, tokenizer,
+/// and every budget coordinate. Serves as the process-wide singleflight key so
+/// identical harness instances share one runtime while distinct
+/// configurations never do.
+#[derive(Clone, Eq, Hash, Ord, PartialEq, PartialOrd)]
+struct RegistryKey {
+    root: String,
+    state_root: String,
+    session_id: String,
+    tokenizer_model: Option<String>,
+    wall_ms: u64,
+    cpu_ms: u64,
+    memory_bytes: u64,
+    call_limit: u32,
+    task_limit: u32,
+    output_byte_limit: u32,
+}
+
+impl KernelConfig {
+    fn registry_key(&self) -> RegistryKey {
+        // The kernel canonicalizes the project root before opening engines, so
+        // the key must too; two spellings of one directory are one identity.
+        let root = std::fs::canonicalize(&self.root)
+            .map(|path| path.to_string_lossy().into_owned())
+            .unwrap_or_else(|_| self.root.clone());
+        RegistryKey {
+            root,
+            state_root: self.state_root.clone(),
+            session_id: self.session_id.clone(),
+            tokenizer_model: self.tokenizer_model.clone(),
+            wall_ms: self.budget.wall_ms,
+            cpu_ms: self.budget.cpu_ms,
+            memory_bytes: self.budget.memory_bytes,
+            call_limit: self.budget.call_limit,
+            task_limit: self.budget.task_limit,
+            output_byte_limit: self.budget.output_byte_limit,
+        }
+    }
+}
+
+/// Process-wide singleflight registry: every distinct [`RegistryKey`] maps to
+/// one weak handle, so N harness instances with an identical configuration
+/// reuse a single runtime instead of rebuilding and re-scanning it. Weak
+/// entries never keep a kernel alive; stale entries are pruned on the next
+/// construction. No thread is spawned and no kernel is built here.
+static KERNEL_REGISTRY: Mutex<BTreeMap<RegistryKey, Weak<CoreZeroKernel>>> =
+    Mutex::new(BTreeMap::new());
+
 impl KernelCore {
     fn initialize(&self) -> Result<Arc<CoreZeroKernel>> {
         if self.terminated.load(Ordering::Acquire) {
@@ -61,6 +110,17 @@ impl KernelCore {
         if let Some(kernel) = slot.as_ref() {
             return Ok(Arc::clone(kernel));
         }
+        // Singleflight gate: hold the registry lock across the reuse probe and
+        // any construction. Concurrent initializations with this identity
+        // upgrade the same weak handle onto one kernel; distinct identities
+        // serialize construction but never share an entry.
+        let key = self.config.registry_key();
+        let mut registry = KERNEL_REGISTRY.lock();
+        if let Some(kernel) = registry.get(&key).and_then(Weak::upgrade) {
+            *slot = Some(Arc::clone(&kernel));
+            self.ready.store(true, Ordering::Release);
+            return Ok(kernel);
+        }
         let kernel = CoreZeroKernel::canonical_with_tokenizer(
             &self.config.root,
             &self.config.state_root,
@@ -70,6 +130,8 @@ impl KernelCore {
         )
         .map_err(|error| Error::from_reason(error.to_string()))?;
         let kernel = Arc::new(kernel);
+        registry.retain(|_, entry| entry.strong_count() != 0);
+        registry.insert(key, Arc::downgrade(&kernel));
         *slot = Some(Arc::clone(&kernel));
         self.ready.store(true, Ordering::Release);
         Ok(kernel)
@@ -388,5 +450,100 @@ impl Task for ShutdownTask {
 
     fn resolve(&mut self, _env: Env, output: Self::Output) -> Result<Self::JsValue> {
         Ok(output)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn test_options(
+        root: &str,
+        session_id: &str,
+        wall_ms: u32,
+        task_limit: u32,
+    ) -> ZeroKernelOptions {
+        ZeroKernelOptions {
+            root: root.to_string(),
+            session_id: Some(session_id.to_string()),
+            state_root: None,
+            tokenizer_model: None,
+            wall_ms: Some(wall_ms),
+            cpu_ms: None,
+            memory_bytes: None,
+            call_limit: None,
+            task_limit: Some(task_limit),
+            output_byte_limit: None,
+        }
+    }
+
+    fn root_string(root: &std::path::Path) -> String {
+        root.to_string_lossy().into_owned()
+    }
+
+    #[test]
+    fn concurrent_initialization_singleflights_to_one_kernel() {
+        let temp = tempfile::tempdir().expect("temp root");
+        let root = root_string(temp.path());
+        let mut wrappers = Vec::new();
+        let handles: Vec<_> = (0..6)
+            .map(|_| {
+                let wrapper = ZeroKernel::new(test_options(&root, "race-session", 30_000, 16))
+                    .expect("wrapper");
+                let core = Arc::clone(&wrapper.core);
+                wrappers.push(wrapper);
+                std::thread::spawn(move || core.initialize().expect("initialize"))
+            })
+            .collect();
+        let kernels: Vec<_> = handles
+            .into_iter()
+            .map(|handle| handle.join().expect("initialize thread"))
+            .collect();
+        let first = kernels.first().expect("at least one kernel");
+        assert!(kernels.iter().all(|kernel| Arc::ptr_eq(kernel, first)));
+        assert_eq!(
+            KERNEL_REGISTRY
+                .lock()
+                .values()
+                .filter_map(Weak::upgrade)
+                .filter(|kernel| Arc::ptr_eq(kernel, first))
+                .count(),
+            1
+        );
+        drop(wrappers);
+    }
+
+    #[test]
+    fn distinct_identity_never_shares() {
+        let temp = tempfile::tempdir().expect("temp root");
+        let root = root_string(temp.path());
+        let baseline =
+            ZeroKernel::new(test_options(&root, "session-a", 30_000, 16)).expect("baseline");
+        let other_session =
+            ZeroKernel::new(test_options(&root, "session-b", 30_000, 16)).expect("other session");
+        let other_budget =
+            ZeroKernel::new(test_options(&root, "session-a", 45_000, 8)).expect("other budget");
+        let baseline = baseline.core.initialize().expect("initialize baseline");
+        let session = other_session.core.initialize().expect("initialize session");
+        let budget = other_budget.core.initialize().expect("initialize budget");
+        assert!(!Arc::ptr_eq(&baseline, &session));
+        assert!(!Arc::ptr_eq(&baseline, &budget));
+        assert!(!Arc::ptr_eq(&session, &budget));
+    }
+
+    #[test]
+    fn shutdown_of_one_wrapper_keeps_shared_kernel_alive() {
+        let temp = tempfile::tempdir().expect("temp root");
+        let root = root_string(temp.path());
+        let first = ZeroKernel::new(test_options(&root, "shared-session", 30_000, 16))
+            .expect("first wrapper");
+        let second = ZeroKernel::new(test_options(&root, "shared-session", 30_000, 16))
+            .expect("second wrapper");
+        let kernel = first.core.initialize().expect("initialize first");
+        let shared = second.core.initialize().expect("initialize second");
+        assert!(Arc::ptr_eq(&kernel, &shared));
+        first.core.shutdown().expect("shutdown first wrapper");
+        let after = second.core.initialize().expect("reinitialize second");
+        assert!(Arc::ptr_eq(&after, &shared));
     }
 }

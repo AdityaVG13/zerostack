@@ -14,6 +14,7 @@ tokenzero-kernel = { path = "../../../TokenZero/crates/tokenzero-kernel" }
 graphzero-kernel = { path = "../../../GraphZero/crates/graphzero-kernel" }
 fszero-kernel = { path = "../../../FSZero/crates/fszero-kernel" }
 blake3 = { workspace = true }
+fs4 = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = "2"

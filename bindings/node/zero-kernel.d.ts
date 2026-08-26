@@ -233,21 +233,18 @@ export interface ZeroKernelResponse {
   };
 }
 
-export interface ZeroKernelStatus {
-  runtime: "ZeroKernel";
-  ready: boolean;
-  terminated: boolean;
-  inflight: number;
-  completed: number;
-  liveFrames: number;
-  liveTasks: number;
-  liveProcesses: number;
+export interface ProviderUsagePublication {
+  kernel_event: string;
+  request_id: string;
+  observation: string;
+  observation_digest: string;
 }
 
 export declare class ZeroKernel {
   constructor(options: ZeroKernelOptions);
   initialize(): Promise<void>;
   executeCell(source: string, signal?: AbortSignal): Promise<ZeroKernelResponse>;
+  recordProviderUsage(event: string, observationJson: string): Promise<ProviderUsagePublication>;
   status(): ZeroKernelStatus;
   shutdown(): Promise<void>;
 }
