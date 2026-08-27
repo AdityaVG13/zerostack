@@ -206,7 +206,7 @@ fn read_accepts_explicit_parent_relative_external_path() {
         .read(
             &invocation(&workspace),
             FileReadRequest {
-                path: PathBuf::from("../outside/contract.txt"),
+                path: PathBuf::from("../TokenZero/contract.txt"),
                 options: ReadOptions::default(),
             },
         )
