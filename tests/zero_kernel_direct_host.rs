@@ -4015,3 +4015,44 @@ fn atomic_effect_receipt_is_exact_and_single_authority() {
     response.validate().unwrap();
     assert_eq!(kernel.live_frames(), 0);
 }
+
+#[test]
+fn single_static_find_settles_one_dispatch_with_quiesced_frame() {
+    let root = tempdir().unwrap();
+    write_fixture(root.path(), "src/lib.rs", "pub fn ZeroKernelToken() {}\n");
+    write_fixture(
+        root.path(),
+        "src/main.rs",
+        "fn main() { ZeroKernelToken(); }\n",
+    );
+    let store = root.path().join(".state");
+    let kernel = ZeroKernel::canonical(
+        root.path(),
+        &store,
+        "single-find",
+        KernelBudget {
+            wall_ms: 30_000,
+            cpu_ms: 30_000,
+            memory_bytes: 256 * 1024 * 1024,
+            call_limit: 64,
+            task_limit: 4,
+            output_byte_limit: 64 * 1024,
+        },
+    )
+    .unwrap();
+
+    let response = kernel
+        .execute_cell(
+            r#"return await z.find("ZeroKernelToken", {mode: "literal", path: ".", limit: 5});"#,
+        )
+        .unwrap();
+    assert_eq!(response.outcome, zero_abi::ZeroKernelOutcome::Completed);
+    // One static find dispatches exactly one connector task and one operation
+    // trace: the speculative prefetch and the awaited call are the same task.
+    assert_eq!(response.operations.len(), 1);
+    assert_eq!(response.ledger.tasks, 1);
+    // The frame must settle with no leaked task or process.
+    assert_eq!(kernel.live_tasks(), 0);
+    assert_eq!(kernel.live_processes(), 0);
+    assert_eq!(kernel.live_frames(), 0);
+}

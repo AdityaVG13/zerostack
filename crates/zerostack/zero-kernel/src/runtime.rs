@@ -24,6 +24,7 @@ use crate::typescript::{TypeScriptError, erase_typescript};
 const MAX_CONCURRENT_CONNECTOR_CALLS: usize = 2;
 
 const FRAME_SETTLE_GRACE: Duration = Duration::from_millis(1_500);
+const FAILED_FRAME_SETTLE_MAX: Duration = Duration::from_secs(30);
 
 struct CellConnector {
     cell: Rc<RefCell<Option<Cell>>>,
@@ -363,14 +364,24 @@ impl ZeroKernel {
             cancellation.flag(),
             Duration::from_millis(budget.wall_ms),
         );
-        if outcome.result.is_err() {
-            cancellation.cancel();
-        }
+        // A failed interpreter returns before its cancelled connector tasks
+        // finish unwinding. Index publication may have an uncancellable tail
+        // that exceeds the normal settle grace. Give failed cells a separate
+        // cleanup window so they report the root error only after task
+        // ownership reaches zero. Cap that window at 30 seconds even when the
+        // execution budget is larger.
+        let quiescence_bound = if outcome.result.is_err() {
+            Duration::from_millis(budget.wall_ms)
+                .max(FRAME_SETTLE_GRACE)
+                .min(FAILED_FRAME_SETTLE_MAX)
+        } else {
+            FRAME_SETTLE_GRACE
+        };
         let quiescence = {
             let slot = slot.borrow();
             slot.as_ref()
                 .ok_or_else(|| crate::HostError::InvalidRequest("cell ownership lost".into()))?
-                .wait_for_quiescence(FRAME_SETTLE_GRACE)
+                .wait_for_quiescence(quiescence_bound)
         };
         let mut cell = slot
             .borrow_mut()
