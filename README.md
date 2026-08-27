@@ -1,12 +1,66 @@
 # ZeroStack
 
-A daemonless, in-process agent kernel that composes filesystem, structure, and output authority behind six operations.
+<div align="center">
 
-**Status:** active development, Rust 2024 edition, MIT
+[![Status](https://img.shields.io/badge/status-active%20monorepo-2ea44f)](#project-status)
+[![Rust](https://img.shields.io/badge/rust-nightly%202024-b7410e)](rust-toolchain.toml)
+[![Workspace](https://img.shields.io/badge/workspace-48%20packages-0969da)](#repository-snapshot)
+[![Surface](https://img.shields.io/badge/ZeroKernel-6%20operations-1f883d)](#the-six-operations)
+[![Contracts](https://img.shields.io/badge/contracts-9%20machine%20inputs-8250df)](contracts/README.md)
+[![License](https://img.shields.io/badge/license-MIT-yellow)](LICENSE)
 
-ZeroKernel is the only model-facing execution surface in this repository. It provides one reusable Rust host and one fresh, bounded JavaScript or TypeScript frame per cell. Each cell receives a single global `z` with exactly six operations. ZeroStack owns host lifecycle, budgets, cancellation, transactions, owned processes, session state, and the terminal response. Three independent engines supply typed contracts behind that surface and never import one another.
+</div>
 
-> **Project status:** ZeroStack is the source-only composition hub for the Zero family. FSZero, GraphZero, and TokenZero are product domains built from the same Cargo workspace. The six-operation surface is canonical and under active dogfooding, while package and engine contracts may still change. Homebrew, npm, and Pi distribution files are pre-release scaffolds and are not published release claims.
+ZeroStack is a Rust workspace for a daemonless, in-process agent kernel. It composes exact filesystem authority, structural code intelligence, and output accounting behind one six-operation API.
+
+ZeroKernel is the only model-facing execution surface. A reusable host creates one fresh, bounded JavaScript or TypeScript frame per cell. ZeroStack owns lifecycle, budgets, cancellation, transactions, child processes, session state, and the terminal response. FSZero, GraphZero, and TokenZero provide typed engine contracts and never import one another.
+
+## Project status
+
+ZeroStack is under active development. The six-operation surface is canonical, while package and engine contracts may still change. Homebrew, npm, and Pi files are private pre-release scaffolds, not publication claims. There is no standalone end-user application or tagged ZeroStack release yet.
+
+### Repository snapshot
+
+| Tracked fact | Current value |
+| --- | ---: |
+| Cargo workspace packages | 48 |
+| Hub packages under `crates/zerostack` | 15 |
+| FSZero packages | 7 |
+| GraphZero packages | 14 |
+| TokenZero packages | 10 |
+| Machine-readable contract inputs | 9 |
+| Tracked documentation files | 33 |
+| Consolidated fuzz targets | 6 |
+| Preserved benchmark files | 143 |
+
+The package counts come from `cargo metadata --no-deps`. File counts include only Git-tracked inputs.
+
+## TL;DR
+
+**The problem:** agent runtimes often split file state, structural search, output projection, process control, and recovery across unrelated catalogs. The caller must choose transports and compose partial failure behavior itself.
+
+**The solution:** ZeroKernel exposes `z.read`, `z.find`, `z.edit`, `z.apply`, `z.run`, and `z.state` in one bounded cell. The host coordinates typed engines, owns cancellation and rollback, and returns one terminal response with exact recovery handles and resource accounting.
+
+### What exists now
+
+| Area | Current implementation |
+| --- | --- |
+| Host | Reusable Rust `ZeroKernel` with fresh frames, budgets, task accounting, cancellation, and one terminal outcome |
+| FSZero | Exact reads, snapshots, guarded edits, atomic application, receipts, and restoration |
+| GraphZero | Text and syntax search, symbols, references, callers, freshness, coverage, and impact evidence |
+| TokenZero | Token measurement, bounded projection, compression, exact expansion, and recovery-aware accounting |
+| Processes and state | Owned child-process trees plus CAS-backed session facts across otherwise fresh frames |
+| Contracts | Nine machine-readable inputs plus a shared executable conformance crate |
+| Distribution | Head-only Homebrew, private npm operator, and private Pi package scaffolds |
+| Evidence | Preserved benchmark harnesses, exact source handles, operation traces, and resource ledgers |
+
+### Current boundaries
+
+- No tagged ZeroStack release exists. Homebrew is head-only, and npm and Pi packaging remain private.
+- The Git-tracked Node prebuild currently covers Darwin ARM64. Other platforms build the native addon from source.
+- The Pi package registers only a local status command. Native ZeroKernel tools are not exposed through Pi yet.
+- Benchmark files document their recorded workload and machine boundary. They are not universal performance claims.
+- Structural absence is claimable only when GraphZero reports complete, fresh coverage for the requested scope.
 
 ## What ZeroKernel is
 
@@ -157,7 +211,20 @@ interface ZeroKernelResponse {
 }
 ```
 
-## Build and test
+## What you can use today
+
+| Task | Implemented surface |
+| --- | --- |
+| Embed ZeroKernel in Rust | `zero_kernel::ZeroKernel` from `crates/zerostack/zero-kernel` |
+| Embed ZeroKernel in Node.js | `@zerostack/zero-kernel` from `bindings/node` |
+| Execute one bounded cell | `zero-kernel exec -C <workspace>` |
+| Read and mutate workspace bytes | `z.read`, `z.edit`, and `z.apply` through FSZero |
+| Query symbols and relationships | `z.find` through GraphZero |
+| Measure and recover projected output | automatic TokenZero accounting plus exact handles |
+| Inspect normative machine contracts | `contracts/` and `crates/zerostack/zerostack-conformance` |
+| Run an end-to-end source demo | `node demo/run.js` |
+
+## Quick start
 
 This repository is a single Cargo workspace. No sibling checkout is required.
 
@@ -178,6 +245,19 @@ cargo test -p zero-codemode --test syntax
 Use the narrowest relevant test target during development. Domain tests live under `tests/fszero`, `tests/graphzero`, `tests/tokenzero`, and `tests/support`. Name the package and exact `--lib`, `--bin`, or `--test` target.
 
 The CLI binary is `zero-kernel` in `crates/zerostack/zero-kernel`. It exposes `doctor`, `health`, `exec`, `mcp` (when built with the `mcp-carrier` feature), and `migrate`. `exec` reads one cell from stdin and is intended for diagnostics, not as the production model path.
+
+### Command reference
+
+| Command | Purpose |
+| --- | --- |
+| `cargo build -p zero-kernel --bin zero-kernel` | Build the standalone diagnostic CLI |
+| `zero-kernel doctor -C <workspace>` | Validate the workspace and durable ZeroStack store |
+| `zero-kernel exec -C <workspace>` | Read one JavaScript or TypeScript cell from stdin |
+| `zero-kernel mcp -C <workspace>` | Run the optional stdio carrier when `mcp-carrier` is enabled |
+| `cargo test -p zero-kernel --test direct_host <test-name> -- --exact` | Run one focused host contract |
+| `cargo run --manifest-path xtask/Cargo.toml -- doctor --json` | Inspect repository layout and required files |
+| `node demo/run.js` | Exercise FSZero, GraphZero, and TokenZero through one cell |
+| `npm --prefix packaging/package/npm run validate` | Validate Node package inputs without publishing |
 
 Reference benchmark evidence is under `benchmarks/`. Reproduce the host lifecycle and fixtures with:
 
