@@ -81,24 +81,63 @@ fn direct_zero_method<'a>(source: &'a str, function: Node<'_>) -> Option<&'a str
         .flatten()
 }
 
-fn is_guaranteed_top_level_call(mut node: Node<'_>) -> bool {
+fn top_level_statement<'tree>(mut node: Node<'tree>) -> Option<Node<'tree>> {
     while let Some(parent) = node.parent() {
+        if parent.kind() == "program" {
+            return Some(node);
+        }
+        node = parent;
+    }
+    None
+}
+
+fn is_first_executable_statement(statement: Node<'_>) -> bool {
+    let Some(program) = statement.parent() else {
+        return false;
+    };
+    let mut cursor = program.walk();
+    program
+        .named_children(&mut cursor)
+        .filter(|child| child.kind() != "comment")
+        .next()
+        .is_some_and(|first| first.id() == statement.id())
+}
+
+fn is_guaranteed_first_statement_call(source: &str, node: Node<'_>) -> bool {
+    let Some(statement) = top_level_statement(node) else {
+        return false;
+    };
+    if !is_first_executable_statement(statement) {
+        return false;
+    }
+    let mut current = node;
+    while current.id() != statement.id() {
+        let Some(parent) = current.parent() else {
+            return false;
+        };
         match parent.kind() {
-            "await_expression" | "parenthesized_expression" | "variable_declarator" => {
-                node = parent;
-            }
-            "lexical_declaration"
+            "await_expression"
+            | "parenthesized_expression"
+            | "variable_declarator"
+            | "lexical_declaration"
             | "variable_declaration"
             | "expression_statement"
-            | "return_statement" => {
-                return parent
-                    .parent()
-                    .is_some_and(|ancestor| ancestor.kind() == "program");
+            | "return_statement"
+            | "array"
+            | "arguments" => {}
+            "call_expression" => {
+                let Some(function) = parent.child_by_field_name("function") else {
+                    return false;
+                };
+                if source.get(function.byte_range()) != Some("Promise.all") {
+                    return false;
+                }
             }
             _ => return false,
         }
+        current = parent;
     }
-    false
+    true
 }
 
 fn is_static_expression(node: Node<'_>) -> bool {
@@ -529,7 +568,7 @@ impl<'tree> Interpreter<'tree> {
     }
 
     fn run(&mut self) -> Result<Value<'tree>, HostError> {
-        self.prefetch_top_level_pure_calls();
+        self.compile_finalized_prefetch_plan();
         let result = match self.exec(self.root) {
             Ok(Control::Return(value)) => {
                 self.await_value(value).map_err(|fault| self.fault(fault))
@@ -547,18 +586,11 @@ impl<'tree> Interpreter<'tree> {
         result
     }
 
-    fn prefetch_top_level_pure_calls(&mut self) {
+    fn compile_finalized_prefetch_plan(&mut self) {
         let mut calls = Vec::new();
         collect_call_expressions(self.root, &mut calls);
-        if calls.iter().any(|call| {
-            call.child_by_field_name("function")
-                .and_then(|function| direct_zero_method(self.source, function))
-                .is_some_and(|method| matches!(method, "edit" | "apply"))
-        }) {
-            return;
-        }
         for call in calls {
-            if !is_guaranteed_top_level_call(call)
+            if !is_guaranteed_first_statement_call(self.source, call)
                 || self.prefetched_calls.contains_key(&call.start_byte())
             {
                 continue;
