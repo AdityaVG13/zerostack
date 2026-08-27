@@ -1,1 +1,0 @@
-{"name":"@tokenzero/cli","version":"1.4.0","description":"Recovery-aware context compression runtime for AI coding agents","license":"MIT","bin":{"tokenzero":"bin/tokenzero.js"},"files":["bin/tokenzero.js","README.md"],"scripts":{"smoke":"node bin/tokenzero.js --version","test":"node --test test/*.test.js"}}

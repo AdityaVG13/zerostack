@@ -90,7 +90,7 @@ For a provenance-stamped JSON publication, invoke the
 [Python driver](store_open.py) with the resulting release-perf
 `perf_harness` executable as `--helper`. Publication still requires the
 matching host class and isolation fields from
-[benchmark integrity policy](../docs/benchmark-integrity.md).
+[benchmark integrity policy](../../docs/fszero/benchmark-integrity.md).
 
 ## Memory dual metric (fszero-5444)
 

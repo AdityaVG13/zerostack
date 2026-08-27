@@ -2,7 +2,7 @@
 
 Status: normative version 1.0.4. Beads: `fszero-ai-filesystem-excellence-jqf.8`, `fszero-ncib.1`, `fszero-bhc1`.
 
-The canonical, machine-readable contract is [`contracts/filesystem-v1.json`](../contracts/filesystem-v1.json). This document is a reading guide, not a second source of semantics. The Rust API parses that checked-in JSON once and exposes the same value through:
+The canonical, machine-readable contract is [`contracts/filesystem-v1.json`](../../contracts/filesystem-v1.json). This document is a reading guide, not a second source of semantics. The Rust API parses that checked-in JSON once and exposes the same value through:
 
 - `filesystem_contract_descriptor()` for embedded callers;
 - `FSZeroSession::root_report()["filesystem_contract"]` for doctor/CLI;
@@ -11,7 +11,7 @@ The canonical, machine-readable contract is [`contracts/filesystem-v1.json`](../
 
 ## Operation ABI (typed domain surface)
 
-Bead `fszero-ncib.1` adds a **canonical operation ABI** in `src/core/operation_abi.rs` (`OPERATION_REGISTRY`) plus full **input/output JSON Schema ownership** in [`contracts/operation-abi-schemas-v1.json`](../contracts/operation-abi-schemas-v1.json) (loaded by `src/core/operation_schemas.rs`).
+Bead `fszero-ncib.1` adds a **canonical operation ABI** in `src/core/operation_abi.rs` (`OPERATION_REGISTRY`) plus full **input/output JSON Schema ownership** in [`contracts/operation-abi-schemas-v1.json`](../../contracts/operation-abi-schemas-v1.json) (loaded by `src/core/operation_schemas.rs`).
 
 - Domain ops, MCP tools, CodeMode tools, and CodeMode methods each have complete schema structure (properties, types, `required`, constraints, optional `output`).
 - Live MCP/CodeMode tool catalogs are **materialized** from that document (`mcp_tools()` / `codemode_tools()`); exact structural parity rejects missing/extra properties, type changes, requiredness, constraint, and output-shape drift.
@@ -70,7 +70,7 @@ The explicit full-read ceiling is currently absent; callers should range large f
 
 Alias honesty: every public MCP tool name, CodeMode method path, and CLI opcode is dual-written into `OPERATION_REGISTRY` and `contracts/filesystem-v1.json` `aliases`. Live MCP/CodeMode catalogs are compared to that map. Registry CLI opcodes must also appear under `aliases.cli` (no one-sided registry letters).
 
-### CLI opcode `M` — PRESENT (aligned)
+### CLI opcode `M`: PRESENT (aligned)
 
 | Surface | Binding |
 |---|---|
@@ -80,7 +80,7 @@ Alias honesty: every public MCP tool name, CodeMode method path, and CLI opcode 
 
 `M` was already live on the session `OpCode` table and registry `cli_opcodes`; 1.0.4 dual-writes it into the contract CLI map so doctor/parity tests cannot drift.
 
-### `fs.listMany` single-letter CLI — DROPPED
+### `fs.listMany` single-letter CLI: DROPPED
 
 `fs.listMany` has **no** single-char CLI opcode (`cli_opcodes` empty). It is not missing dual-write; the letter space is reserved for primary interactive ops.
 
@@ -88,7 +88,7 @@ Alias honesty: every public MCP tool name, CodeMode method path, and CLI opcode 
 |---|---|
 | MCP | `fszero.list_many` |
 | CodeMode | `fs.listMany` |
-| CLI | packaging **`batch`** subcommand only — JSON envelope `{"operation":"fs.listMany","args":{...}}` (same path as other `*Many` vectorized ops) |
+| CLI | packaging **`batch`** subcommand only: JSON envelope `{"operation":"fs.listMany","args":{...}}` (same path as other `*Many` vectorized ops) |
 
 ### Compound MCP policy
 

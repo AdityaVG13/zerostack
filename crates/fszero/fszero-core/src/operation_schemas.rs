@@ -17,7 +17,7 @@ use std::sync::OnceLock;
 
 /// Checked-in canonical schema catalog (digested with the operation ABI).
 pub const OPERATION_ABI_SCHEMAS_JSON: &str =
-    include_str!("../../../../contracts/fszero/operation-abi-schemas-v1.json");
+    include_str!("../../../../contracts/operation-abi-schemas-v1.json");
 
 pub const OPERATION_ABI_SCHEMAS_NAME: &str = "fszero-operation-abi-schemas";
 pub const OPERATION_ABI_SCHEMAS_VERSION: &str = "1.0.0";

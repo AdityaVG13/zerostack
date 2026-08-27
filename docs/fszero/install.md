@@ -5,8 +5,8 @@ FSZero currently builds from source. The repository pins its toolchain.
 ## Build the standalone CLI
 
 ```bash
-git clone https://github.com/AdityaVG13/FSZero.git
-cd FSZero
+git clone https://github.com/AdityaVG13/zerostack
+cd zerostack
 cargo build --release -p fszero-cli
   # <!-- audit:skip --> binary is produced by the preceding cargo build
 ./target/release/fszero --help
@@ -17,13 +17,8 @@ The CLI is for FSZero-only diagnostics, batch operations, store inspection, worl
 ## Use through ZeroKernel
 
 ```bash
-mkdir zerostack-workspace
-cd zerostack-workspace
-git clone https://github.com/AdityaVG13/ZeroStack.git
-git clone https://github.com/AdityaVG13/FSZero.git
-git clone https://github.com/AdityaVG13/GraphZero.git
-git clone https://github.com/AdityaVG13/TokenZero.git
-cd ZeroStack
+git clone https://github.com/AdityaVG13/zerostack
+cd zerostack
 cargo build -p zero-kernel
 ```
 

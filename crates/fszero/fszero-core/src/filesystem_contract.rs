@@ -14,8 +14,7 @@ pub const FILESYSTEM_CONTRACT_MINOR: u64 = 0;
 /// Patch bumps are additive clarifications only (ABI advertisement, golden vectors).
 pub const FILESYSTEM_CONTRACT_VERSION: &str = "1.0.4";
 pub const FILESYSTEM_CONTRACT_STORE_KEY: &str = "filesystem_contract";
-pub const FILESYSTEM_CONTRACT_JSON: &str =
-    include_str!("../../../../contracts/fszero/filesystem-v1.json");
+pub const FILESYSTEM_CONTRACT_JSON: &str = include_str!("../../../../contracts/filesystem-v1.json");
 
 static FILESYSTEM_CONTRACT: OnceLock<Value> = OnceLock::new();
 

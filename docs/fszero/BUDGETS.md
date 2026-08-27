@@ -3,8 +3,8 @@
 Single human/agent source of truth for **northstar** latency and size budgets.
 Per-scenario measurement cards live under `benchmarks/*.md` and
 `benchmarks/perf_harness.md`. Statistical hygiene and profilable build rules:
-[`benchmark-integrity.md`](benchmark-integrity.md). Profiling how-to:
-[`profiling.md`](profiling.md).
+benchmark-integrity.md. Profiling how-to:
+`profiling.md`.
 
 This file is the committed contract. Local gitignored DEFINE cards under
 `tests/artifacts/perf/` may hold machine-specific fingerprints; they must not
@@ -72,7 +72,7 @@ DEFINE-linked scripts under `tests/artifacts/perf/` (local) plus
 
 | Metric | Budget | Status | Notes / provenance |
 | :-- | :-- | :-- | :-- |
-| save → queryable p50 / p95 | < 1 s | **gated** (tests) | `save_to_queryable_freshness_under_1s_p50` in `tests/watch_mode.rs` ([`index-trust.md`](index-trust.md)). |
+| save → queryable p50 / p95 | < 1 s | **gated** (tests) | `save_to_queryable_freshness_under_1s_p50` in `tests/watch_mode.rs` (`index-trust.md`). |
 | per-save index apply p50 | < 1 ms (release) | **gated** (tests) | `per_save_index_cost_under_1ms_p50`. |
 | Watch bake-off competitor walls | -- | **observational** | `benchmarks/watch-bakeoff.md` -- fair comparison fingerprints, not product SLOs. |
 

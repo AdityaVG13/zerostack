@@ -6,7 +6,7 @@
   "files": [
     "loader.js",
     "zero-kernel.d.ts",
-    "prebuilds/"
+    "prebuilds/*/zero_kernel_product.node"
   ],
   "engines": {
     "node": ">=18.0.0"

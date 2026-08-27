@@ -51,7 +51,7 @@ Command: `benchmarks/cli-cold-read.sh`. Cold = recovery cache removed per cell; 
 | `store_open` (`mem`) | 107 | 112 | 112 | 115 | 116 | 116 |
 | `first_read` (`read`) | 116 | 118 | 118 | 106 | 111 | 111 |
 | `first_expand` (`expand`) | 342 | 363 | 363 | 458 | 472 | 472 |
-| **Startup tax** = cold first_read p50 − process_start p50 | **112 ms** | — | — | — | — | — |
+| **Startup tax** = cold first_read p50 − process_start p50 | **112 ms** | - | - | - | - | - |
 
 ## Token savings vs alternatives (competitor bake-off)
 

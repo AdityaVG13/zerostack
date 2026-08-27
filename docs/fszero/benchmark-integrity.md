@@ -283,8 +283,8 @@ must record `cargo_profile: release-perf` (see Environment fingerprint and
 
 Related beads: `fszero-k0tg` (force-frame-pointers wrapper), `fszero-lmkh`
 (runners default to release-perf), `fszero-lghz` (samply/flamegraph runbook
-in [`docs/profiling.md`](profiling.md)), `fszero-act0` (macOS sample/xctrace
-fallback in [`docs/profiling-macos.md`](profiling-macos.md)), `fszero-tep8`
+in `docs/profiling.md`), `fszero-act0` (macOS sample/xctrace
+fallback in `docs/profiling-macos.md`), `fszero-tep8`
 (CI surface ratchets).
 
 ## Enforcement
@@ -292,7 +292,7 @@ fallback in [`docs/profiling-macos.md`](profiling-macos.md)), `fszero-tep8`
 | Tool | Role |
 | :-- | :-- |
 | `scripts/benchmark.sh` / `scripts/benchmark.py` | Regenerates `benchmarks/demo-bench_results.json` with provenance stamped. |
-| [`benchmarks/perf_harness.md`](../benchmarks/perf_harness.md) | Defines the inputs, expected outcome, metric, and gate status of every `perf_harness` scenario. |
+| [`benchmarks/perf_harness.md`](../../benchmarks/fszero/perf_harness.md) | Defines the inputs, expected outcome, metric, and gate status of every `perf_harness` scenario. |
 | `scripts/claims_audit.py` | Verifies every claim-annotated README number against the cited artifact and checks artifact provenance. Non-zero exit on any violation. |
 | `<!-- claim:FILE#dotted.path -->` | Row-level annotation linking a README number to the artifact field that backs it. |
 
@@ -348,7 +348,7 @@ Canonical filled example: `tests/artifacts/perf/20260704_001/` (`fszero-dlqt`,
 
 Local run dirs under `tests/artifacts/perf/` are gitignored. To retain a CPU
 profile that survives `git clone`, promote the min set into
-`docs/evidence/perf/<run-id>/` per [`docs/evidence/perf/README.md`](evidence/perf/README.md)
+`docs/evidence/perf/<run-id>/` per `docs/evidence/perf/README.md`
 (fingerprint + one of `flame.svg` / `cpu.json` / `sample.txt` + hotspot_table).
 Worked example: `docs/evidence/perf/20260704_001/PROMOTED.md`. Do not commit
 multi-MB raw traces without size review. Force-add under the scratch tree is a

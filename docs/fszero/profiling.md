@@ -7,7 +7,8 @@ Profile one named FSZero operation or benchmark scenario at a time. Performance 
 Use the repository `release-perf` profile with frame pointers. Maintainers offload compilation through RCH:
 
 ```bash
-rch exec -- env CARGO_TARGET_DIR="${RCH_TARGET_BASE}/rch_target_fszero_profile" \
+rch exec -- env \
+  CARGO_TARGET_DIR="${RCH_TARGET_BASE:-${TMPDIR:-/tmp}}/rch_target_fszero_profile" \
   ./scripts/profile_build.sh -p fszero-cli --bin fszero
 ```
 
@@ -38,8 +39,8 @@ Replace the help probe with the actual named workload before using the output as
 | Path | Role |
 | --- | --- |
 | `tests/artifacts/perf/<run-id>/` | Local scratch output; ignored by Git |
-| `docs/evidence/perf/<run-id>/` | Explicitly promoted, clone-visible evidence |
+| `benchmarks/fszero/` | Tracked claim artifacts approved under the benchmark integrity policy |
 
 A promoted package contains a fingerprint, scenario, compact profile artifact, hotspot table, and interpretation. Raw multi-megabyte traces stay local unless the owner approves their publication.
 
-See [evidence/perf/README.md](evidence/perf/README.md) for promotion rules and [profiling-macos.md](profiling-macos.md) for macOS-specific tooling.
+On macOS, use Instruments or `/usr/bin/sample`; keep raw traces local unless the evidence owner approves publication.

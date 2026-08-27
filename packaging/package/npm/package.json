@@ -1,0 +1,22 @@
+{
+  "name": "@zerostack/npm-operators",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Private operator helpers that validate and pack the real @zerostack/zero-kernel binding in bindings/node",
+  "license": "MIT",
+  "type": "commonjs",
+  "scripts": {
+    "validate": "node ./validate.js",
+    "pack": "npm pack ../../../bindings/node",
+    "pack:operator": "npm pack",
+    "build:prebuild": "./build-prebuild.sh"
+  },
+  "files": [
+    "build-prebuild.sh",
+    "validate.js",
+    "README.md"
+  ],
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}

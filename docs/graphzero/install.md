@@ -5,8 +5,8 @@ GraphZero currently builds from source. The repository pins the expected toolcha
 ## Build the standalone CLI
 
 ```bash
-git clone https://github.com/AdityaVG13/GraphZero.git
-cd GraphZero
+git clone https://github.com/AdityaVG13/zerostack
+cd zerostack
 cargo build --release -p graphzero-cli --bin graphzero
 ./target/release/graphzero --help
 ```
@@ -16,13 +16,8 @@ The CLI supports graph diagnostics, indexing, orientation, blast-radius inspecti
 ## Use GraphZero through ZeroKernel
 
 ```bash
-mkdir zerostack-workspace
-cd zerostack-workspace
-git clone https://github.com/AdityaVG13/ZeroStack.git
-git clone https://github.com/AdityaVG13/FSZero.git
-git clone https://github.com/AdityaVG13/GraphZero.git
-git clone https://github.com/AdityaVG13/TokenZero.git
-cd ZeroStack
+git clone https://github.com/AdityaVG13/zerostack
+cd zerostack
 cargo build -p zero-kernel
 ```
 

@@ -17,24 +17,17 @@ Every apply records rollback data.
 ## Build from source
 
 ```bash
-git clone https://github.com/AdityaVG13/TokenZero.git
-cd TokenZero
+git clone https://github.com/AdityaVG13/zerostack
+cd zerostack
 cargo build --release -p tokenzero-cli --bin tokenzero
 ./target/release/tokenzero --help
 ```
 
 ## Use through ZeroKernel
 
-TokenZero supplies measurement, projection, compression, and exact expansion behind operation and response boundaries.
-
 ```bash
-mkdir zerostack-workspace
-cd zerostack-workspace
-git clone https://github.com/AdityaVG13/ZeroStack.git
-git clone https://github.com/AdityaVG13/FSZero.git
-git clone https://github.com/AdityaVG13/GraphZero.git
-git clone https://github.com/AdityaVG13/TokenZero.git
-cd ZeroStack
+git clone https://github.com/AdityaVG13/zerostack
+cd zerostack
 cargo build -p zero-kernel
 ```
 

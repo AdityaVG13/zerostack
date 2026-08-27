@@ -18,4 +18,4 @@ cargo xtask test-targeted <package> [test-filter]
 | `cargo xtask docs` | Build API documentation |
 | `cargo xtask release` | Build the standalone FSZero release artifact |
 
-See [profiling.md](profiling.md) and [benchmark-integrity.md](benchmark-integrity.md) before publishing performance claims. Use focused test targets; ZeroKernel composition is verified from the hub.
+See profiling.md and [benchmark-integrity.md](benchmark-integrity.md) before publishing performance claims. Use focused test targets; ZeroKernel composition is verified from the hub.

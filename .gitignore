@@ -1,5 +1,5 @@
 # =============================================================================
-# ZeroStack — .gitignore (public hub)
+# ZeroStack - .gitignore (public hub)
 # =============================================================================
 
 # --- Build / test output ---
@@ -13,6 +13,7 @@ tmp/
 *.log
 *.samply
 **/Cargo.lock
+!/Cargo.lock
 
 # --- Secrets ---
 .env
@@ -67,28 +68,12 @@ CLAUDE.md.*
 .skill-loop-progress.md
 .skill-loop-progress.*
 
-# Gauntlet / campaign -- local only. A clone does not need these.
-docs/progress/
-docs/spec/
-docs/CHARTER.md
-docs/lean/
-docs/papers/
-docs/authority-boundaries.md
-fuzz/
-crates/zerostack-harness/
 .zsx_patch.diff
 *.diff
 *.patch
 bindings/node/prebuilds/
-scripts/bench/
 tests/scripts/
 tests/unit/zero-abi/fuzz_corpus_untrusted_bytes_20260815.rs
-scripts/bless-golden.sh
-scripts/capture_golden.py
-scripts/check_bench_history.py
-scripts/check_feature_coverage_dashboard.py
-scripts/check_golden_integrity.py
-scripts/check_ledger_retry.py
 
 .dolt/
 .beads-credential-key
@@ -115,12 +100,10 @@ beads_compliance_audit/
 MODES_OF_REASONING_REPORT_AND_ANALYSIS_OF_PROJECT.md
 MOR_CASE.md
 MOR_CLAIMS.jsonl
-# Unit tests live in tests/unit/. Keep leftover dump dirs out of git.
+# Domain tests live under tests/<domain>/. Keep leftover dump dirs out of git.
 /tests/python/
 /tests/tests/
 archive/
-docs/adr/
-docs/internal/
 packages/
 reports/
 # cargo-fuzz work products. Source under fuzz/fuzz_targets/ is tracked.
@@ -129,7 +112,6 @@ fuzz/artifacts/
 fuzz/target/
 fuzz/coverage/
 fuzz/corpus/*/[0-9a-f]*
-scripts/dev/
 scripts/__pycache__/
 __pycache__/
 *.py[cod]
@@ -140,15 +122,6 @@ tests/artifacts/
 tests/reports/
 .ubs-loop/
 
-# Published benchmark harnesses and claim artifacts
-benchmarks/**
-!benchmarks/
-!benchmarks/README.md
-!benchmarks/zero-kernel-reference.cjs
-!benchmarks/zero-kernel-reference.json
-
-# Historical root conformance workspace; live contracts are owned by crates.
-conformance/
 
 # Local bench-history ratchet (dotfile, not public).
 .bench-history/

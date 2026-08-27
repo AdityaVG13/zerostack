@@ -1,8 +1,6 @@
 # Development
 
-Build, test, and verify the TokenZero Rust Core from source. Most users should
-prefer a prebuilt binary from the [latest Release](https://github.com/AdityaVG13/tokenzero/releases);
-this page is for contributors and from-source builds.
+Build, test, and verify the TokenZero Rust core from source. Source development happens in this monorepo.
 
 TokenZero requires Rust 1.98 nightly or newer. `rust-toolchain.toml` pins
 `nightly-2026-05-31` so local and CI builds use the verified minimum toolchain.
@@ -10,14 +8,16 @@ TokenZero requires Rust 1.98 nightly or newer. `rust-toolchain.toml` pins
 ## Build
 
 ```bash
-cargo build --release -p tokenzero
+git clone https://github.com/AdityaVG13/zerostack
+cd zerostack
+cargo build --release -p tokenzero-cli --bin tokenzero
 
-target/release/tokenzero doctor --json
-target/release/tokenzero read README.md --json
-target/release/tokenzero find "TokenZero" docs --json
-target/release/tokenzero tree . --depth 2 --json
-target/release/tokenzero run -- cargo test --workspace
-target/release/tokenzero expand tz://blob/<id> --selector raw
+./target/release/tokenzero doctor --json
+./target/release/tokenzero read README.md --json
+./target/release/tokenzero find "TokenZero" docs --json
+./target/release/tokenzero tree . --depth 2 --json
+./target/release/tokenzero run -- cargo test -p tokenzero-kernel --lib
+./target/release/tokenzero expand tz://blob/<id> --selector raw
 ```
 
 ## Verify
@@ -83,4 +83,4 @@ repo checkout; do not infer those from a local `results/current/` listing.
 
 Pre-launch: do not upload packages, mutate global config, publish remotes,
 rewrite history, or perform a public release without explicit approval. See
-[`../SECURITY.md`](../SECURITY.md) and [`../CONTRIBUTING.md`](../CONTRIBUTING.md).
+[`SECURITY.md`](../../SECURITY.md) and [`CONTRIBUTING.md`](../../CONTRIBUTING.md).

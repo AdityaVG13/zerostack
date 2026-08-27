@@ -1,7 +1,7 @@
 # `perf_harness` scenario catalog
 
 `perf_harness` contains in-process profiling scenarios. How to attach samply /
-flamegraph / fingerprint artifacts: [`docs/profiling.md`](../docs/profiling.md).
+flamegraph / fingerprint artifacts: [`docs/profiling.md`](../../docs/fszero/profiling.md).
 
 Run one scenario with:
 

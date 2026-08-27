@@ -114,12 +114,12 @@ successful `atomic_write_with_outcome` with `atomic_write_phases_us` for
 
 ## What tests prove
 
-- `durable_store_sets_synchronous_full` — pragma is FULL (2), not NORMAL (1)
-- `durable_store_pragma_synchronous_is_full` — same check via reopen
-- `acked_packed_put_survives_reopen` — after put returns, drop+reopen expands byte-exact
-- `mid_pack_orphan_tail_without_locator_is_harmless` — raw pack append without a locator does not invent payloads
-- `pack_truncation_reported_earlier_payloads_intact` — committed locator past EOF misses; prior payloads intact
-- `torn_pack_surfaces_pack_torn_on_expand` — typed `pack_torn:` on expand_with_tiers
+- `durable_store_sets_synchronous_full`: pragma is FULL (2), not NORMAL (1)
+- `durable_store_pragma_synchronous_is_full`: same check via reopen
+- `acked_packed_put_survives_reopen`: after put returns, drop+reopen expands byte-exact
+- `mid_pack_orphan_tail_without_locator_is_harmless`: raw pack append without a locator does not invent payloads
+- `pack_truncation_reported_earlier_payloads_intact`: committed locator past EOF misses; prior payloads intact
+- `torn_pack_surfaces_pack_torn_on_expand`: typed `pack_torn:` on expand_with_tiers
 
 See `tests/crash_injection.rs` and `src/core/recovery.rs` unit tests.
 

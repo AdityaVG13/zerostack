@@ -9,8 +9,15 @@ cargo-fuzz = true
 
 [dependencies]
 libfuzzer-sys = "0.4"
+serde_json = "1"
+arbitrary = { version = "1", features = ["derive"] }
 zero-abi = { path = "../crates/zerostack/zero-abi" }
 zero-ref = { path = "../crates/zerostack/zero-ref" }
+graphzero-store = { path = "../crates/graphzero/graphzero-store" }
+graphzero-pack = { path = "../crates/graphzero/graphzero-pack" }
+graphzero-scip = { path = "../crates/graphzero/graphzero-scip" }
+tokenzero-core = { path = "../crates/tokenzero/tokenzero-core" }
+tokenzero-recovery = { path = "../crates/tokenzero/tokenzero-recovery" }
 
 [workspace]
 members = ["."]
@@ -28,3 +35,34 @@ path = "fuzz_targets/abi_frame_decode.rs"
 test = false
 doc = false
 bench = false
+
+[[bin]]
+name = "graphzero_delta_codec"
+path = "fuzz_targets/graphzero_delta_codec.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "graphzero_pack_sign"
+path = "fuzz_targets/graphzero_pack_sign.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "graphzero_scip_parse"
+path = "fuzz_targets/graphzero_scip_parse.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "tokenzero_expand_fragment_differential"
+path = "fuzz_targets/tokenzero_expand_fragment_differential.rs"
+test = false
+doc = false
+bench = false
+
+[profile.release]
+debug = 1

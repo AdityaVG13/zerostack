@@ -88,8 +88,8 @@ Prints the exact JSON above. `inspect` and `dry-run` are aliases.
 
 Separate from the aggregate dry-run payload above, FSZero can append closed
 JSONL usage records when explicitly opted in via the same permission surfaces
-(`FSZERO_TELEMETRY`, config `telemetry`, CLI `--telemetry`). **Default off** —
-no `usage-telemetry.jsonl` file is created unless opted in.
+(`FSZERO_TELEMETRY`, config `telemetry`, CLI `--telemetry`). **Default off:** no
+`usage-telemetry.jsonl` file is created unless opted in.
 
 When enabled, MCP and CodeMode may append only:
 

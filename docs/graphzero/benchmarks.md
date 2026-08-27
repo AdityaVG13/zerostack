@@ -4,7 +4,7 @@ Current public latency claims come from committed, reproducible artifacts. Each 
 
 ## Current rebaseline
 
-Source: [`benchmarks/rebaseline/latest.json`](../benchmarks/rebaseline/latest.json)
+Source: [`benchmarks/rebaseline/latest.json`](../../benchmarks/graphzero/rebaseline/latest.json)
 
 | Operation | p50 | p95 | Runs |
 | --- | ---: | ---: | ---: |

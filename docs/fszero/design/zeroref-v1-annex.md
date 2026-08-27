@@ -188,9 +188,9 @@ them into a generic failure.
 ## 9. Legacy behavior and migration window
 
 The strict v1 layer (`src/core/zeroref.rs`) is wired into the live
-expansion path (bead fszero-c6q.2): `RecoveryStore::expand_with_tiers` — the
+expansion path (bead fszero-c6q.2): `RecoveryStore::expand_with_tiers` is the
 single funnel behind `session.expand`, the `X` op (CLI/MCP `fszero.expand`)
-and the CodeMode `fs.expand` connector — routes every input claiming the v1
+and the CodeMode `fs.expand` connector, and routes every input claiming the v1
 jurisdiction (`fz://blob/…` and all `gz://`/`tz://` refs) through
 `expand_zeroref`: strict `ZeroRef` parse, whole-object digest verification
 in the read tiers (`verified_blob`), then `#B`/`#L` fragment selection.
@@ -205,7 +205,7 @@ Conformance: `tests/zeroref_expand.rs`. Remaining legacy behavior, honestly:
 2. **Scheme rewrite narrowed (closed).** Foreign-scheme inputs no longer
    pass through `normalize_ref_scheme`: `gz://blob/…`/`tz://blob/…` resolve
    as same-store lookups of the local `fz://blob/<hash>` key (a provenance
-   convenience, not interop — see "Same-store limitation" above); foreign
+   convenience, not interop; see "Same-store limitation" above); foreign
    non-blob refs fail typed as `unsupported`. `normalize_ref_scheme`
    survives only for refs the engine itself stored.
 3. **Sentinel keys inside the blob namespace.** Failure paths mint
@@ -213,7 +213,7 @@ Conformance: `tests/zeroref_expand.rs`. Remaining legacy behavior, honestly:
    `fz://blob/legacy`. These are not v1 identities and never leave the
    engine; the expansion path now rejects them as `malformed`.
 4. **Error rendering.** The v1 path produces typed classes (§5), rendered
-   on string surfaces as `class: message` with the canonical full ref —
+   on string surfaces as `class: message` with the canonical full ref:
    never a truncated hash, never a private store path. Legacy-path errors
    keep their prose strings (`ref_not_found`, `seq_ref_scoped`) during the
    window.

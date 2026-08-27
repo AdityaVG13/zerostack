@@ -115,7 +115,7 @@ TokenZero deliberately returns raw or near-raw output when compression would cos
 Examples:
 
 - tiny shell results such as `echo ok`, `pwd`, `mktemp -d`, and compact `git status --short --branch` use `raw_passthrough`.
-- zero-hit searches render a one-line `# <tool> <query> — 0 matches` note (clamped query echo) with refs intact.
+- zero-hit searches render a one-line `# <tool> <query>: 0 matches` note (clamped query echo) with refs intact.
 - short search hits and tiny files use `near_raw_with_ref`.
 - broad expansions use `guarded_expansion` unless force is explicit.
 - shallow tree passthrough and rewrite-control events are neutral in Pulse when the only cost is bounded TokenZero routing overhead.

@@ -1,0 +1,25 @@
+{
+  "name": "@zerostack/pi",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Pre-release Pi extension scaffold for ZeroStack",
+  "license": "MIT",
+  "keywords": [
+    "pi-package"
+  ],
+  "pi": {
+    "extensions": [
+      "extensions/zerostack.ts"
+    ]
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": "*"
+  },
+  "files": [
+    "extensions/zerostack.ts",
+    "README.md"
+  ],
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}

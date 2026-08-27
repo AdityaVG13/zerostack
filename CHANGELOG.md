@@ -11,6 +11,12 @@ TokenZero, and ZeroStack release in lockstep because they share the
 ### Changed
 - ZeroStack, FSZero, GraphZero, and TokenZero now build from one Cargo
   workspace, with separate crate domains and no engine-to-engine imports.
+- Distribution scaffolds now live under `packaging/package/` for Homebrew,
+  npm, and Pi, with the Node binding remaining authoritative in `bindings/node/`.
+- The repository now has one demo, one xtask crate, one fuzz workspace, and one
+  flat contracts surface. Archived metadata, obsolete engine-local scripts,
+  duplicate documentation, and the retired root conformance workspace were
+  removed.
 
 ### Fixed
 - CodeMode string literals now decode every JavaScript escape sequence in a

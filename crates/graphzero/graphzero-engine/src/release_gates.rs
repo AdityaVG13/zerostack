@@ -84,13 +84,13 @@ pub struct SmokeCheck {
     pub detail: String,
 }
 
-/// Pinned approved digest (checked into docs/contracts/). Unapproved drift fails CI.
+/// Pinned approved digest (checked into contracts/). Unapproved drift fails CI.
 pub const APPROVED_DIGEST_FILE: &str =
-    include_str!("../../../../docs/graphzero/contracts/approved_operation_abi_digest.txt");
+    include_str!("../../../../contracts/approved_operation_abi_digest.txt");
 
 /// Optional break approval JSON (must exist only when intentionally changing the ABI).
 /// Schema: `{"classification":"major_breaking|minor_additive|patch_compatible","owner":"...","rationale":"..."}`
-pub const DIGEST_BREAK_APPROVAL_FILE: &str = "docs/contracts/digest_break_approval.json";
+pub const DIGEST_BREAK_APPROVAL_FILE: &str = "contracts/digest_break_approval.json";
 
 /// Load the checked-in approved digest (trimmed hex).
 pub fn approved_contract_digest() -> String {
@@ -125,7 +125,7 @@ pub fn enforce_approved_digest() -> Result<(), GateFailure> {
             planner_owner: None,
             compression_owner: None,
             latency_stage: Some("contract_digest".into()),
-            message: "docs/contracts/approved_operation_abi_digest.txt is empty".into(),
+            message: "contracts/approved_operation_abi_digest.txt is empty".into(),
         });
     }
     if live == approved {
@@ -134,7 +134,7 @@ pub fn enforce_approved_digest() -> Result<(), GateFailure> {
     // Allow only with explicit break approval checked into the repo.
     let approval_path = concat!(
         env!("CARGO_MANIFEST_DIR"),
-        "/../../docs/contracts/digest_break_approval.json"
+        "/../../contracts/digest_break_approval.json"
     );
     let approval = std::fs::read_to_string(approval_path).ok();
     if let Some(raw) = approval {
@@ -358,7 +358,7 @@ pub fn run_bench_gates(
 /// is mirrored here as source+contract checks that run without dual-feature builds).
 pub fn release_smoke_checklist() -> Vec<SmokeCheck> {
     let packaging_src = include_str!("../../graphzero-cli/src/packaging.rs");
-    let install_sh = include_str!("../../../../packaging/graphzero/install.sh");
+    let homebrew_rb = include_str!("../../../../packaging/package/homebrew/zerostack.rb");
     vec![
         SmokeCheck {
             name: "single_surface_compile_invariant_documented".into(),
@@ -368,12 +368,12 @@ pub fn release_smoke_checklist() -> Vec<SmokeCheck> {
             detail: "packaging.rs enforces mutual exclusion at compile time".into(),
         },
         SmokeCheck {
-            name: "installer_selects_one_surface".into(),
-            passed: install_sh.contains("--surface")
-                && install_sh.contains("graphzero-mcp")
-                && install_sh.contains("graphzero-codemode")
-                && install_sh.contains("Never install both"),
-            detail: "install.sh selects exactly one surface artifact".into(),
+            name: "homebrew_formula_zero_kernel_install".into(),
+            passed: homebrew_rb.contains("class Zerostack")
+                && homebrew_rb.contains("ZeroKernel")
+                && homebrew_rb.contains("cargo")
+                && homebrew_rb.contains("zero-kernel"),
+            detail: "homebrew formula installs the unified ZeroKernel artifact".into(),
         },
         SmokeCheck {
             name: "client_config_single_mode_args".into(),
@@ -429,11 +429,11 @@ pub fn debug_build_latency_waivers() -> Vec<GateWaiver> {
             owner: "graphzero-perf".into(),
             expires_on: "2026-10-20".into(),
             rationale: format!(
-                "Build class debug_unoptimized: absolute max(250µs,15% raw) is not a \
+                "Build class debug_unoptimized: absolute max(250us,15% raw) is not a \
 like-for-like release profile measurement. Gate remains active for release builds; \
 this waiver is build-class scoped and expires 2026-10-20."
             ),
-            evidence_link: "docs/contracts/operation_abi.md#release-gates-graphzero-o2uq10".into(),
+            evidence_link: "docs/graphzero/operation_abi.md#release-gates-graphzero-o2uq10".into(),
         });
         if n >= 3 {
             out.push(GateWaiver {
@@ -444,7 +444,7 @@ this waiver is build-class scoped and expires 2026-10-20."
                     "Build class debug_unoptimized: CM vs FM p50 can invert under \
 debug codegen; release-optimized profile is the ratchet class. Waiver expires 2026-10-20."
                 ),
-                evidence_link: "docs/contracts/operation_abi.md#release-gates-graphzero-o2uq10"
+                evidence_link: "docs/graphzero/operation_abi.md#release-gates-graphzero-o2uq10"
                     .into(),
             });
         }

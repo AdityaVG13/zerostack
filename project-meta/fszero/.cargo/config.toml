@@ -1,9 +1,0 @@
-# Keep local and CI development resource usage predictable.
-[build]
-jobs = 3
-
-[env]
-RUST_TEST_THREADS = "2"
-
-[alias]
-xtask = "run --quiet --manifest-path xtask/Cargo.toml --"
