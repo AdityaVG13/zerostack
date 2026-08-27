@@ -1,0 +1,43 @@
+[package]
+name = "graphzero-reserve"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+autotests = false
+
+[dependencies]
+anyhow = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+sha2 = { workspace = true }
+graphzero-store = { workspace = true }
+
+[dev-dependencies]
+graphzero-test-support = { workspace = true }
+criterion = { workspace = true }
+proptest = { workspace = true }
+tempfile = { workspace = true }
+graphzero-store = { workspace = true }
+
+[[bench]]
+name = "reserve_check"
+harness = false
+
+[lints]
+workspace = true
+
+[[test]]
+name = "reserve_crash_boundary_reserve"
+path = "../../../tests/graphzero/reserve/crash_boundary_reserve.rs"
+
+[[test]]
+name = "reserve_reserve_contract"
+path = "../../../tests/graphzero/reserve/reserve_contract.rs"
+
+[[test]]
+name = "reserve_reserve_proptest"
+path = "../../../tests/graphzero/reserve/reserve_proptest.rs"
+
+[[test]]
+name = "reserve_wal_writer_domain"
+path = "../../../tests/graphzero/reserve/wal_writer_domain.rs"

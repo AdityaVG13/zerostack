@@ -1,0 +1,2 @@
+{"agent_a":"AgentA","agent_b":"AgentB","intent_a":"intent_a.json","intent_b":"overlap.json","expect_conflict":true}
+{"agent_a":"AgentC","agent_b":"AgentD","intent_a":"intent_a.json","intent_b":"intent_b.json","expect_conflict":false}

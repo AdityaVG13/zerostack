@@ -1,0 +1,76 @@
+{
+  "accounting": {
+    "billed_tokens": 30,
+    "cached_tokens": 0,
+    "exact_ref_tokens": 28,
+    "raw_tokens": 14,
+    "recovery_tokens": 0,
+    "visible_tokens": 30
+  },
+  "ack": "0",
+  "budget_exhausted": false,
+  "content_type": "search_result",
+  "detail_ref": "tz://blob/[BLOB_REF_1]",
+  "mode": "auto",
+  "refs": [
+    {
+      "bytes": 40,
+      "kind": "blob",
+      "live": true,
+      "ref": "tz://blob/[BLOB_REF_1]"
+    },
+    {
+      "bytes": 40,
+      "kind": "file",
+      "live": true,
+      "ref": "tz://file/[FILE_REF_1]"
+    },
+    {
+      "bytes": 0,
+      "kind": "search",
+      "live": true,
+      "ref": "tz://search/[SEARCH_REF_1]"
+    },
+    {
+      "bytes": 0,
+      "kind": "search",
+      "live": true,
+      "ref": "tz://search/[SEARCH_REF_2]"
+    }
+  ],
+  "remaining_budget_tokens": 3970,
+  "schema_version": "tokenzero.cli.v1",
+  "status": "ok",
+  "telemetry": {
+    "cache_hit": false,
+    "degraded": false,
+    "exact_refs_available": true,
+    "matched_files": 1,
+    "matches": 2,
+    "output_strategy": "full",
+    "query": "alpha",
+    "result_limit": 20,
+    "roots": [
+      "sample.txt"
+    ],
+    "search_backend": "internal",
+    "session_delta": {
+      "delta_bytes": 85,
+      "from_hwm": "[DYNAMIC_HWM]",
+      "full_bytes": 85,
+      "saved_bytes": 0,
+      "to_hwm": "[DYNAMIC_HWM]"
+    },
+    "storage_error": null,
+    "transport_status": "ok",
+    "truncated_by_results": false,
+    "truncated_by_visit": false,
+    "visit_limit": 10000,
+    "visited_files": 1
+  },
+  "tool": "find",
+  "visible": {
+    "kind": "capsule",
+    "text": "HIT sample.txt#L1-L3 kind=literal sym=(file-scope)\n| 1: alpha\n| 2: beta\n| 3: alphabet"
+  }
+}

@@ -1,0 +1,479 @@
+{
+  "schema": "zeroref-golden-vectors",
+  "zeroref_version": "v1",
+  "fixture_version": 2,
+  "canonical_owner": "GraphZero docs/adr/002-zeroref-v1.md (bead graphzero-zeroref-v1-shared-cas-1ghi.1)",
+  "notes": "Shared verbatim across GraphZero, FSZero, and TokenZero. Any change is a reviewed cross-repo decision that bumps fixture_version in all three repos atomically.",
+  "error_classes": [
+    "malformed",
+    "unsupported",
+    "range_out_of_bounds",
+    "not_utf8",
+    "missing",
+    "io",
+    "digest_mismatch",
+    "policy_denied",
+    "incompatible_version",
+    "legacy_ambiguity"
+  ],
+  "blobs": {
+    "alpha": {
+      "bytes_hex": "616c7068610a626574610a67616d6d610a",
+      "sha256": "4fdbc441ea7b546100e086ac1e4fc5ae6749b7314311c99db05be450eca12996"
+    },
+    "noeol": {
+      "bytes_hex": "6f6e650a74776f",
+      "sha256": "21066d108d5319ecb5a1fc4454f42ef22fc5f1c7df49c31d90294950e0ea8b2c"
+    },
+    "crlf": {
+      "bytes_hex": "610d0a620d0a",
+      "sha256": "58055bdcc73787eb88c78d36f0b4939e9c5dc1c3ad17e25cc85a6833cf1a0cab"
+    },
+    "empty": {
+      "bytes_hex": "",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "nonutf8": {
+      "bytes_hex": "fffe67616d6d610a42",
+      "sha256": "2a540e1ced3e166c5ac5a1c095594cd7829bdc3262e5216392f465bb17d3199a"
+    }
+  },
+  "vectors": [
+    {
+      "name": "gz_blob_whole",
+      "input": "gz://blob/4fdbc441ea7b546100e086ac1e4fc5ae6749b7314311c99db05be450eca12996",
+      "parse": "ok",
+      "canonical": "gz://blob/4fdbc441ea7b546100e086ac1e4fc5ae6749b7314311c99db05be450eca12996",
+      "blob": "alpha",
+      "selected_hex": "616c7068610a626574610a67616d6d610a"
+    },
+    {
+      "name": "fz_blob_whole",
+      "input": "fz://blob/4fdbc441ea7b546100e086ac1e4fc5ae6749b7314311c99db05be450eca12996",
+      "parse": "ok",
+      "canonical": "fz://blob/4fdbc441ea7b546100e086ac1e4fc5ae6749b7314311c99db05be450eca12996",
+      "blob": "alpha",
+      "selected_hex": "616c7068610a626574610a67616d6d610a"
+    },
+    {
+      "name": "tz_blob_whole",
+      "input": "tz://blob/4fdbc441ea7b546100e086ac1e4fc5ae6749b7314311c99db05be450eca12996",
+      "parse": "ok",
+      "canonical": "tz://blob/4fdbc441ea7b546100e086ac1e4fc5ae6749b7314311c99db05be450eca12996",
+      "blob": "alpha",
+      "selected_hex": "616c7068610a626574610a67616d6d610a"
+    },
+    {
+      "name": "bytes_prefix",
+      "input": "gz://blob/4fdbc441ea7b546100e086ac1e4fc5ae6749b7314311c99db05be450eca12996#B0-5",
+      "parse": "ok",
+      "canonical": "gz://blob/4fdbc441ea7b546100e086ac1e4fc5ae6749b7314311c99db05be450eca12996#B0-5",
+      "blob": "alpha",
+      "selected_hex": "616c706861"
+    },
+    {
+      "name": "bytes_middle",
+      "input": "gz://blob/4fdbc441ea7b546100e086ac1e4fc5ae6749b7314311c99db05be450eca12996#B6-10",
+      "parse": "ok",
+      "canonical": "gz://blob/4fdbc441ea7b546100e086ac1e4fc5ae6749b7314311c99db05be450eca12996#B6-10",
+      "blob": "alpha",
+      "selected_hex": "62657461"
+    },
+    {
+      "name": "bytes_empty_at_zero",
+      "input": "gz://blob/4fdbc441ea7b546100e086ac1e4fc5ae6749b7314311c99db05be450eca12996#B0-0",
+      "parse": "ok",
+      "canonical": "gz://blob/4fdbc441ea7b546100e086ac1e4fc5ae6749b7314311c99db05be450eca12996#B0-0",
+      "blob": "alpha",
+      "selected_hex": "",
+      "notes": "start == end is an allowed empty selection"
+    },
+    {
+      "name": "bytes_empty_at_len",
+      "input": "gz://blob/4fdbc441ea7b546100e086ac1e4fc5ae6749b7314311c99db05be450eca12996#B17-17",
+      "parse": "ok",
+      "canonical": "gz://blob/4fdbc441ea7b546100e086ac1e4fc5ae6749b7314311c99db05be450eca12996#B17-17",
+      "blob": "alpha",
+      "selected_hex": "",
+      "notes": "empty selection at exactly the byte length is allowed"
+    },
+    {
+      "name": "bytes_whole_span",
+      "input": "gz://blob/4fdbc441ea7b546100e086ac1e4fc5ae6749b7314311c99db05be450eca12996#B0-17",
+      "parse": "ok",
+      "canonical": "gz://blob/4fdbc441ea7b546100e086ac1e4fc5ae6749b7314311c99db05be450eca12996#B0-17",
+      "blob": "alpha",
+      "selected_hex": "616c7068610a626574610a67616d6d610a"
+    },
+    {
+      "name": "bytes_on_non_utf8",
+      "input": "gz://blob/2a540e1ced3e166c5ac5a1c095594cd7829bdc3262e5216392f465bb17d3199a#B0-2",
+      "parse": "ok",
+      "canonical": "gz://blob/2a540e1ced3e166c5ac5a1c095594cd7829bdc3262e5216392f465bb17d3199a#B0-2",
+      "blob": "nonutf8",
+      "selected_hex": "fffe",
+      "notes": "#B operates on raw bytes; UTF-8 validity is not required"
+    },
+    {
+      "name": "bytes_empty_blob",
+      "input": "gz://blob/e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855#B0-0",
+      "parse": "ok",
+      "canonical": "gz://blob/e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855#B0-0",
+      "blob": "empty",
+      "selected_hex": ""
+    },
+    {
+      "name": "lines_first",
+      "input": "gz://blob/4fdbc441ea7b546100e086ac1e4fc5ae6749b7314311c99db05be450eca12996#L1-1",
+      "parse": "ok",
+      "canonical": "gz://blob/4fdbc441ea7b546100e086ac1e4fc5ae6749b7314311c99db05be450eca12996#L1-1",
+      "blob": "alpha",
+      "selected_hex": "616c7068610a",
+      "notes": "a selected line includes its terminating LF when present"
+    },
+    {
+      "name": "lines_tail",
+      "input": "gz://blob/4fdbc441ea7b546100e086ac1e4fc5ae6749b7314311c99db05be450eca12996#L2-3",
+      "parse": "ok",
+      "canonical": "gz://blob/4fdbc441ea7b546100e086ac1e4fc5ae6749b7314311c99db05be450eca12996#L2-3",
+      "blob": "alpha",
+      "selected_hex": "626574610a67616d6d610a"
+    },
+    {
+      "name": "lines_full",
+      "input": "gz://blob/4fdbc441ea7b546100e086ac1e4fc5ae6749b7314311c99db05be450eca12996#L1-3",
+      "parse": "ok",
+      "canonical": "gz://blob/4fdbc441ea7b546100e086ac1e4fc5ae6749b7314311c99db05be450eca12996#L1-3",
+      "blob": "alpha",
+      "selected_hex": "616c7068610a626574610a67616d6d610a"
+    },
+    {
+      "name": "lines_unterminated_last",
+      "input": "gz://blob/21066d108d5319ecb5a1fc4454f42ef22fc5f1c7df49c31d90294950e0ea8b2c#L2-2",
+      "parse": "ok",
+      "canonical": "gz://blob/21066d108d5319ecb5a1fc4454f42ef22fc5f1c7df49c31d90294950e0ea8b2c#L2-2",
+      "blob": "noeol",
+      "selected_hex": "74776f",
+      "notes": "an unterminated final line is selected without appending a newline"
+    },
+    {
+      "name": "lines_span_to_unterminated",
+      "input": "gz://blob/21066d108d5319ecb5a1fc4454f42ef22fc5f1c7df49c31d90294950e0ea8b2c#L1-2",
+      "parse": "ok",
+      "canonical": "gz://blob/21066d108d5319ecb5a1fc4454f42ef22fc5f1c7df49c31d90294950e0ea8b2c#L1-2",
+      "blob": "noeol",
+      "selected_hex": "6f6e650a74776f"
+    },
+    {
+      "name": "lines_crlf_retained",
+      "input": "gz://blob/58055bdcc73787eb88c78d36f0b4939e9c5dc1c3ad17e25cc85a6833cf1a0cab#L1-1",
+      "parse": "ok",
+      "canonical": "gz://blob/58055bdcc73787eb88c78d36f0b4939e9c5dc1c3ad17e25cc85a6833cf1a0cab#L1-1",
+      "blob": "crlf",
+      "selected_hex": "610d0a",
+      "notes": "CR is ordinary line content; LF is the only terminator"
+    },
+    {
+      "name": "alias_plus_len",
+      "input": "gz://blob/4fdbc441ea7b546100e086ac1e4fc5ae6749b7314311c99db05be450eca12996#B6+4",
+      "parse": "ok",
+      "canonical": "gz://blob/4fdbc441ea7b546100e086ac1e4fc5ae6749b7314311c99db05be450eca12996#B6-10",
+      "blob": "alpha",
+      "selected_hex": "62657461",
+      "notes": "deprecated GraphZero input alias, normalized to half-open form"
+    },
+    {
+      "name": "alias_plus_zero",
+      "input": "gz://blob/4fdbc441ea7b546100e086ac1e4fc5ae6749b7314311c99db05be450eca12996#B3+0",
+      "parse": "ok",
+      "canonical": "gz://blob/4fdbc441ea7b546100e086ac1e4fc5ae6749b7314311c99db05be450eca12996#B3-3",
+      "blob": "alpha",
+      "selected_hex": ""
+    },
+    {
+      "name": "leading_zeros_normalized",
+      "input": "gz://blob/4fdbc441ea7b546100e086ac1e4fc5ae6749b7314311c99db05be450eca12996#B06-010",
+      "parse": "ok",
+      "canonical": "gz://blob/4fdbc441ea7b546100e086ac1e4fc5ae6749b7314311c99db05be450eca12996#B6-10",
+      "blob": "alpha",
+      "selected_hex": "62657461",
+      "notes": "leading zeros accepted on input, canonical form emits plain decimal"
+    },
+    {
+      "name": "hash_uppercase",
+      "input": "gz://blob/4FDBC441EA7B546100E086AC1E4FC5AE6749B7314311C99DB05BE450ECA12996",
+      "parse": "error",
+      "error_class": "malformed",
+      "notes": "uppercase hex is rejected in v1"
+    },
+    {
+      "name": "hash_mixed_case",
+      "input": "gz://blob/4fdbc441ea7b546100e086ac1e4fc5ae6749B7314311C99DB05BE450ECA12996",
+      "parse": "error",
+      "error_class": "malformed"
+    },
+    {
+      "name": "hash_short_prefix",
+      "input": "gz://blob/4fdbc441ea7b546100e086ac1e4fc5ae6749b7314311c99db05be450eca1299",
+      "parse": "error",
+      "error_class": "malformed",
+      "notes": "short prefixes are ambiguous and rejected in v1; legacy resolution may map them to legacy_ambiguity"
+    },
+    {
+      "name": "hash_way_short",
+      "input": "gz://blob/4fdbc441ea7b",
+      "parse": "error",
+      "error_class": "malformed"
+    },
+    {
+      "name": "hash_too_long",
+      "input": "gz://blob/4fdbc441ea7b546100e086ac1e4fc5ae6749b7314311c99db05be450eca129960",
+      "parse": "error",
+      "error_class": "malformed"
+    },
+    {
+      "name": "hash_non_hex",
+      "input": "gz://blob/zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz",
+      "parse": "error",
+      "error_class": "malformed"
+    },
+    {
+      "name": "hash_empty",
+      "input": "gz://blob/",
+      "parse": "error",
+      "error_class": "malformed"
+    },
+    {
+      "name": "extra_path_segment",
+      "input": "gz://blob/4fdbc441ea7b546100e086ac1e4fc5ae6749b7314311c99db05be450eca12996/extra",
+      "parse": "error",
+      "error_class": "malformed",
+      "notes": "extra path segments after the hash are rejected"
+    },
+    {
+      "name": "unknown_kind",
+      "input": "gz://widget/abc123",
+      "parse": "error",
+      "error_class": "unsupported"
+    },
+    {
+      "name": "engine_owned_node",
+      "input": "gz://node/sym-42",
+      "parse": "error",
+      "error_class": "unsupported",
+      "notes": "graph node refs are engine-owned, not portable blobs"
+    },
+    {
+      "name": "engine_owned_query",
+      "input": "gz://query/q123",
+      "parse": "error",
+      "error_class": "unsupported"
+    },
+    {
+      "name": "foreign_non_blob_fz",
+      "input": "fz://query/abc",
+      "parse": "error",
+      "error_class": "unsupported",
+      "notes": "foreign non-blob refs must fail as unsupported, never be canonicalized"
+    },
+    {
+      "name": "foreign_non_blob_tz",
+      "input": "tz://file/ffa8138833248dead",
+      "parse": "error",
+      "error_class": "unsupported"
+    },
+    {
+      "name": "unknown_scheme",
+      "input": "xx://blob/4fdbc441ea7b546100e086ac1e4fc5ae6749b7314311c99db05be450eca12996",
+      "parse": "error",
+      "error_class": "unsupported"
+    },
+    {
+      "name": "compact_locate",
+      "input": "g:26",
+      "parse": "error",
+      "error_class": "unsupported",
+      "notes": "engine compact forms are documented but not portable ZeroRefs"
+    },
+    {
+      "name": "compact_query",
+      "input": "q:abc",
+      "parse": "error",
+      "error_class": "unsupported"
+    },
+    {
+      "name": "no_scheme",
+      "input": "not a ref at all",
+      "parse": "error",
+      "error_class": "malformed"
+    },
+    {
+      "name": "bare_scheme",
+      "input": "gz://",
+      "parse": "error",
+      "error_class": "malformed"
+    },
+    {
+      "name": "kind_without_id",
+      "input": "gz://blob",
+      "parse": "error",
+      "error_class": "malformed"
+    },
+    {
+      "name": "bytes_reversed",
+      "input": "gz://blob/4fdbc441ea7b546100e086ac1e4fc5ae6749b7314311c99db05be450eca12996#B5-2",
+      "parse": "error",
+      "error_class": "malformed",
+      "notes": "start > end is statically invalid and rejected at parse time"
+    },
+    {
+      "name": "lines_reversed",
+      "input": "gz://blob/4fdbc441ea7b546100e086ac1e4fc5ae6749b7314311c99db05be450eca12996#L3-2",
+      "parse": "error",
+      "error_class": "malformed"
+    },
+    {
+      "name": "lines_zero_start",
+      "input": "gz://blob/4fdbc441ea7b546100e086ac1e4fc5ae6749b7314311c99db05be450eca12996#L0-3",
+      "parse": "error",
+      "error_class": "malformed",
+      "notes": "line numbering is one-based"
+    },
+    {
+      "name": "bytes_overflow_add",
+      "input": "gz://blob/4fdbc441ea7b546100e086ac1e4fc5ae6749b7314311c99db05be450eca12996#B18446744073709551615+1",
+      "parse": "error",
+      "error_class": "malformed",
+      "notes": "checked arithmetic: start + len must not overflow u64"
+    },
+    {
+      "name": "bytes_overflow_digits",
+      "input": "gz://blob/4fdbc441ea7b546100e086ac1e4fc5ae6749b7314311c99db05be450eca12996#B99999999999999999999-99999999999999999999",
+      "parse": "error",
+      "error_class": "malformed"
+    },
+    {
+      "name": "fragment_empty",
+      "input": "gz://blob/4fdbc441ea7b546100e086ac1e4fc5ae6749b7314311c99db05be450eca12996#",
+      "parse": "error",
+      "error_class": "malformed"
+    },
+    {
+      "name": "fragment_unknown_letter",
+      "input": "gz://blob/4fdbc441ea7b546100e086ac1e4fc5ae6749b7314311c99db05be450eca12996#X1-2",
+      "parse": "error",
+      "error_class": "malformed"
+    },
+    {
+      "name": "bytes_signed_number",
+      "input": "gz://blob/4fdbc441ea7b546100e086ac1e4fc5ae6749b7314311c99db05be450eca12996#B+1-2",
+      "parse": "error",
+      "error_class": "malformed",
+      "notes": "digits only; explicit signs are rejected"
+    },
+    {
+      "name": "bytes_missing_end",
+      "input": "gz://blob/4fdbc441ea7b546100e086ac1e4fc5ae6749b7314311c99db05be450eca12996#B12",
+      "parse": "error",
+      "error_class": "malformed"
+    },
+    {
+      "name": "bytes_double_fragment",
+      "input": "gz://blob/4fdbc441ea7b546100e086ac1e4fc5ae6749b7314311c99db05be450eca12996#B1-2#B3-4",
+      "parse": "error",
+      "error_class": "malformed"
+    },
+    {
+      "name": "lines_missing_dash",
+      "input": "gz://blob/4fdbc441ea7b546100e086ac1e4fc5ae6749b7314311c99db05be450eca12996#L5",
+      "parse": "error",
+      "error_class": "malformed"
+    },
+    {
+      "name": "bytes_end_past_len",
+      "input": "gz://blob/4fdbc441ea7b546100e086ac1e4fc5ae6749b7314311c99db05be450eca12996#B0-18",
+      "parse": "ok",
+      "canonical": "gz://blob/4fdbc441ea7b546100e086ac1e4fc5ae6749b7314311c99db05be450eca12996#B0-18",
+      "blob": "alpha",
+      "selection_error": "range_out_of_bounds",
+      "notes": "end > byte length is an error; never clamp"
+    },
+    {
+      "name": "bytes_start_past_len",
+      "input": "gz://blob/4fdbc441ea7b546100e086ac1e4fc5ae6749b7314311c99db05be450eca12996#B18-18",
+      "parse": "ok",
+      "canonical": "gz://blob/4fdbc441ea7b546100e086ac1e4fc5ae6749b7314311c99db05be450eca12996#B18-18",
+      "blob": "alpha",
+      "selection_error": "range_out_of_bounds"
+    },
+    {
+      "name": "lines_end_past_count",
+      "input": "gz://blob/4fdbc441ea7b546100e086ac1e4fc5ae6749b7314311c99db05be450eca12996#L1-4",
+      "parse": "ok",
+      "canonical": "gz://blob/4fdbc441ea7b546100e086ac1e4fc5ae6749b7314311c99db05be450eca12996#L1-4",
+      "blob": "alpha",
+      "notes": "canonical line_end=clamp selects through the final available line",
+      "selected_hex": "616c7068610a626574610a67616d6d610a"
+    },
+    {
+      "name": "lines_end_past_count_strict_override",
+      "input": "gz://blob/4fdbc441ea7b546100e086ac1e4fc5ae6749b7314311c99db05be450eca12996#L1-4",
+      "parse": "ok",
+      "canonical": "gz://blob/4fdbc441ea7b546100e086ac1e4fc5ae6749b7314311c99db05be450eca12996#L1-4",
+      "blob": "alpha",
+      "notes": "explicit strict validation rejects a line end past EOF",
+      "selection_error": "range_out_of_bounds",
+      "line_end_policy": "strict"
+    },
+    {
+      "name": "lines_start_past_count",
+      "input": "gz://blob/4fdbc441ea7b546100e086ac1e4fc5ae6749b7314311c99db05be450eca12996#L4-4",
+      "parse": "ok",
+      "canonical": "gz://blob/4fdbc441ea7b546100e086ac1e4fc5ae6749b7314311c99db05be450eca12996#L4-4",
+      "blob": "alpha",
+      "selection_error": "range_out_of_bounds"
+    },
+    {
+      "name": "lines_on_empty_blob",
+      "input": "gz://blob/e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855#L1-1",
+      "parse": "ok",
+      "canonical": "gz://blob/e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855#L1-1",
+      "blob": "empty",
+      "selection_error": "range_out_of_bounds",
+      "notes": "the empty blob has zero lines"
+    },
+    {
+      "name": "lines_on_non_utf8",
+      "input": "gz://blob/2a540e1ced3e166c5ac5a1c095594cd7829bdc3262e5216392f465bb17d3199a#L1-1",
+      "parse": "ok",
+      "canonical": "gz://blob/2a540e1ced3e166c5ac5a1c095594cd7829bdc3262e5216392f465bb17d3199a#L1-1",
+      "blob": "nonutf8",
+      "selection_error": "not_utf8",
+      "notes": "#L requires the complete blob to be valid UTF-8"
+    },
+    {
+      "name": "digest_mismatch_before_selection",
+      "input": "gz://blob/4fdbc441ea7b546100e086ac1e4fc5ae6749b7314311c99db05be450eca12996#B0-5",
+      "parse": "ok",
+      "canonical": "gz://blob/4fdbc441ea7b546100e086ac1e4fc5ae6749b7314311c99db05be450eca12996#B0-5",
+      "blob": "noeol",
+      "selection_error": "digest_mismatch",
+      "notes": "verification of the complete unfragmented bytes precedes fragment selection"
+    }
+  ],
+  "span_vectors": [
+    {"name":"valid_span","blob":"alpha","fragment":{"kind":"bytes","start":0,"end":5},"byte_start":0,"byte_len":5,"selected_hex":"616c706861","span_digest":"8ed3f6ad685b959ead7022518e1af76cd816f8e8ec7ccdda1ed4018e8f2223f8"},
+    {"name":"empty_span","blob":"alpha","fragment":{"kind":"bytes","start":3,"end":3},"byte_start":3,"byte_len":0,"selected_hex":"","span_digest":"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"},
+    {"name":"line_derived_span","blob":"alpha","fragment":{"kind":"lines","start":2,"end":3},"byte_start":6,"byte_len":11,"selected_hex":"626574610a67616d6d610a","span_digest":"aa5989aacb57830a365b63654addd2b3e7427ce3e8869f52e261ac98cc318734"}
+  ],
+  "span_tamper_cases": [
+    {"name":"tampered_payload","base":"valid_span","expected":"span_digest_mismatch"},
+    {"name":"tampered_range","base":"valid_span","expected":"range_out_of_bounds"},
+    {"name":"tampered_digest","base":"valid_span","expected":"span_digest_mismatch"}
+  ],
+  "selection_policy": {
+    "byte": "strict",
+    "line_start": "strict",
+    "line_end": "clamp"
+  }
+}

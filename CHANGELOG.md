@@ -8,6 +8,10 @@ TokenZero, and ZeroStack release in lockstep because they share the
 
 ## [Unreleased]
 
+### Changed
+- ZeroStack, FSZero, GraphZero, and TokenZero now build from one Cargo
+  workspace, with separate crate domains and no engine-to-engine imports.
+
 ### Fixed
 - CodeMode string literals now decode every JavaScript escape sequence in a
   single pass; `\r`, `\uXXXX`, and `\u{...}` can no longer survive as literal

@@ -1,0 +1,73 @@
+[package]
+name = "tokenzero-engine"
+version = "1.4.0"
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Transport-neutral TokenZero domain engine and typed dispatcher (tokenzero-irx9.2)."
+homepage.workspace = true
+readme.workspace = true
+keywords.workspace = true
+categories.workspace = true
+rust-version.workspace = true
+autotests = false
+
+[dependencies]
+tiktoken-rs.workspace = true
+fs4.workspace = true
+globset.workspace = true
+memchr.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+similar.workspace = true
+thiserror.workspace = true
+tempfile.workspace = true
+tokenzero-core = { path = "../tokenzero-core", version = "1.0.2" }
+tokenzero-filters = { path = "../tokenzero-filters", version = "1.0.2" }
+tokenzero-pulse = { path = "../tokenzero-pulse", version = "1.0.2" }
+tokenzero-recovery = { path = "../tokenzero-recovery", version = "1.0.2" }
+tokenzero-runtime = { path = "../tokenzero-runtime", version = "1.0.2" }
+zero-abi.workspace = true
+zero-store.workspace = true
+zero-ledger.workspace = true
+zero-process.workspace = true
+
+[dev-dependencies]
+zerostack-conformance.workspace = true
+proptest.workspace = true
+serde_json.workspace = true
+tempfile.workspace = true
+tokenzero-kernel.workspace = true
+tokenzero-test-support = { path = "../tokenzero-test-support" }
+zerostack-test-support.workspace = true
+
+# Live contract proofs only. d8c0844 pruned the rest; missing test
+# targets were deleted in Phase 1 rather than left compile-broken.
+[[test]]
+name = "engine_codemode_bindings_dispatcher"
+path = "../../../tests/tokenzero/engine/codemode_bindings_dispatcher.rs"
+
+[[test]]
+name = "engine_dispatcher"
+path = "../../../tests/tokenzero/engine/dispatcher.rs"
+
+[[test]]
+name = "engine_irx9_conformance_corpus"
+path = "../../../tests/tokenzero/engine/irx9_conformance_corpus.rs"
+
+[[test]]
+name = "certify"
+path = "../../../tests/tokenzero/unit/tokenzero-engine/certify.rs"
+
+[[test]]
+name = "prefix_probe_eligibility"
+path = "../../../tests/tokenzero/unit/tokenzero-engine/prefix_probe_eligibility.rs"
+
+[[test]]
+name = "phase4_output_contract_goldens"
+path = "../../../tests/tokenzero/unit/tokenzero-engine/phase4_output_contract_goldens.rs"
+
+[[test]]
+name = "provider_usage"
+path = "../../../tests/tokenzero/unit/tokenzero-engine/provider_usage.rs"

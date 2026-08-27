@@ -1,0 +1,23 @@
+{
+  "schema": "graphzero.first-blast-reverse-index.v1",
+  "bead": "graphzero-math-query-first-blast-pvey",
+  "corpus": {"repo": ".", "rust_files": 671},
+  "command": "target/release/graphzero blast --intent 'change signature of run_index' --budget 1 --repo .",
+  "runs": 10,
+  "baseline": {
+    "source_revision": "40f64d0",
+    "p50_ms": 36.395,
+    "samples_ms": [67.766, 29.497, 30.492, 30.441, 31.141, 37.104, 36.874, 35.938, 37.092, 36.853]
+  },
+  "candidate": {
+    "source_revision": "commit containing this artifact",
+    "p50_ms": 31.408,
+    "samples_ms": [64.039, 33.046, 31.772, 30.84, 32.031, 29.995, 31.006, 32.86, 31.044, 30.306]
+  },
+  "p50_improvement_pct": 13.7,
+  "design": {
+    "reverse_indexes": "one O(E) traversal builds exact all, blast, and calls views",
+    "claim_verify": "incoming checks reuse the Snapshot-lifetime all-edge reverse view",
+    "silent_risks": "lazy OnceLock scan remains the default and runs only when blast requests it"
+  }
+}

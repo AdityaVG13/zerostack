@@ -1,0 +1,58 @@
+[package]
+name = "tokenzero-cli"
+version = "1.4.0"
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "TokenZero CLI: token-efficient file read/search/shell with exact recovery."
+homepage.workspace = true
+readme.workspace = true
+keywords.workspace = true
+categories.workspace = true
+rust-version.workspace = true
+autotests = false
+autobins = false
+
+# The CLI is operator-only; model execution belongs to ZeroKernel.
+[features]
+default = []
+surface-mcp = []
+
+[[bin]]
+name = "tokenzero"
+path = "src/main.rs"
+
+
+[dependencies]
+anyhow.workspace = true
+clap.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tempfile.workspace = true
+tokenzero-core = { path = "../tokenzero-core", version = "1.0.2" }
+tokenzero-engine = { path = "../tokenzero-engine", version = "1.0.2" }
+tokenzero-install = { path = "../tokenzero-install", version = "1.0.2", default-features = false }
+tokenzero-pulse = { path = "../tokenzero-pulse", version = "1.0.2" }
+tokenzero-runtime = { path = "../tokenzero-runtime", version = "1.0.2" }
+
+[dev-dependencies]
+assert_cmd.workspace = true
+predicates.workspace = true
+proptest.workspace = true
+sha2.workspace = true
+tempfile.workspace = true
+tokenzero-test-support = { path = "../tokenzero-test-support" }
+
+# Live contract proofs only. d8c0844 pruned the rest; missing test
+# targets were deleted in Phase 1 rather than left compile-broken.
+[[test]]
+name = "cli_help_contract"
+path = "../../../tests/tokenzero/cli/cli_help_contract.rs"
+
+[[test]]
+name = "passthrough_conformance"
+path = "../../../tests/tokenzero/cli/passthrough_conformance.rs"
+
+[[test]]
+name = "raw_worker_packaged_conformance"
+path = "../../../tests/tokenzero/cli/raw_worker_packaged_conformance.rs"

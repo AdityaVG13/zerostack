@@ -1,0 +1,19 @@
+{
+  "account": {
+    "raw": 2,
+    "recovered": 0,
+    "spent": 2,
+    "visible": 2
+  },
+  "certified": false,
+  "equivalence_predicate": "logical_token_mass",
+  "tier": "Tier3Logical",
+  "token_accounting": {
+    "billed": 2,
+    "cached": 0,
+    "certified": false,
+    "tokenizer": "estimator:tokenzero-lexical",
+    "visible": 2
+  },
+  "tokenizer": "estimator:tokenzero-lexical"
+}

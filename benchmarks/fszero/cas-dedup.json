@@ -1,0 +1,11 @@
+{
+  "git_commit": "0424550e83dd4642d93c5c65267ad22c55879fab",
+  "date": "2026-07-10T08:39:26Z",
+  "files": 2000,
+  "checkout_a_wall_s": 15.579043666999496,
+  "checkout_b_wall_s": 0.038986499999737134,
+  "objects_after_a": 2000,
+  "objects_after_b": 2000,
+  "new_objects_from_b": 0,
+  "honest_note": "B warm-starts entirely off the SHARED store root: same relative keys + mtime-preserving copy match A's manifest, so B's cold index is a no-op AND its blob puts never run. Costs stated: A pays a per-object fsync for CAS publication (dual-write makes A's cold ingest slower than a no-CAS run); same-machine shared root only \u2014 the artifact-import variant (docs/design/team-shared-warm-store.md) is designed, not built."
+}

@@ -1,0 +1,148 @@
+name: Coordinated engine release
+
+# FSZero, GraphZero, and TokenZero publish one version together once coordinated
+# releases begin. ZeroStack remains source-only.
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Shared engine tag, for example v1.5.0"
+        required: true
+        type: string
+      fszero_ref:
+        description: "FSZero tag or commit with the same workspace version"
+        required: true
+        type: string
+      graphzero_ref:
+        description: "GraphZero tag or commit with the same workspace version"
+        required: true
+        type: string
+      zerostack_ref:
+        description: "ZeroStack source commit used for composition"
+        required: true
+        type: string
+      prerelease:
+        description: "Create a prerelease"
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  validate-parity:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with: { ref: "${{ inputs.tag }}", path: TokenZero }
+      - uses: actions/checkout@v4
+        with: { repository: AdityaVG13/FSZero, ref: "${{ inputs.fszero_ref }}", path: FSZero }
+      - uses: actions/checkout@v4
+        with: { repository: AdityaVG13/GraphZero, ref: "${{ inputs.graphzero_ref }}", path: GraphZero }
+      - uses: actions/checkout@v4
+        with: { repository: AdityaVG13/ZeroStack, ref: "${{ inputs.zerostack_ref }}", path: ZeroStack }
+      - name: Verify shared engine version
+        shell: bash
+        env: { RELEASE_TAG: "${{ inputs.tag }}" }
+        run: |
+          python3 - <<'PY'
+          import os, pathlib, re
+          expected = os.environ["RELEASE_TAG"].removeprefix("v")
+          versions = {}
+          for repo in ("TokenZero", "FSZero", "GraphZero"):
+              text = pathlib.Path(repo, "Cargo.toml").read_text(encoding="utf-8")
+              section = re.search(r"\[workspace\.package\](.*?)(?:\n\[|\Z)", text, re.S)
+              version = re.search(r'^version\s*=\s*"([^"]+)"', section.group(1), re.M) if section else None
+              if not version:
+                  raise SystemExit(f"{repo}: missing workspace version")
+              versions[repo] = version.group(1)
+          if set(versions.values()) != {expected}:
+              raise SystemExit(f"engine version parity failed: expected {expected}, got {versions}")
+          print(f"engine version parity OK: {expected}")
+          PY
+      - name: Verify ZeroStack is source-only
+        run: test ! -f ZeroStack/.github/workflows/release.yml
+
+  build:
+    needs: validate-parity
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: ubuntu-latest, target: x86_64-unknown-linux-gnu }
+          - { os: macos-14, target: aarch64-apple-darwin }
+          - { os: macos-13, target: x86_64-apple-darwin }
+          - { os: windows-latest, target: x86_64-pc-windows-msvc }
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+        with: { ref: "${{ inputs.tag }}", path: TokenZero }
+      - uses: actions/checkout@v4
+        with: { repository: AdityaVG13/FSZero, ref: "${{ inputs.fszero_ref }}", path: FSZero }
+      - uses: actions/checkout@v4
+        with: { repository: AdityaVG13/GraphZero, ref: "${{ inputs.graphzero_ref }}", path: GraphZero }
+      - uses: actions/checkout@v4
+        with: { repository: AdityaVG13/ZeroStack, ref: "${{ inputs.zerostack_ref }}", path: ZeroStack }
+      - name: Install target
+        shell: bash
+        run: rustup target add "${{ matrix.target }}"
+      - name: Build CLI and classic MCP compatibility
+        shell: bash
+        run: |
+          cargo build --manifest-path TokenZero/Cargo.toml --locked --release --target "${{ matrix.target }}" -p tokenzero-cli --bin tokenzero
+          cargo build --manifest-path TokenZero/Cargo.toml --locked --release --target "${{ matrix.target }}" --target-dir TokenZero/target-mcp -p tokenzero-cli --bin tokenzero --features surface-mcp
+      - name: Package
+        shell: bash
+        env:
+          RELEASE_TAG: "${{ inputs.tag }}"
+          TARGET: "${{ matrix.target }}"
+          RUNNER_OS_NAME: "${{ runner.os }}"
+        run: |
+          set -euo pipefail
+          version="${RELEASE_TAG#v}"
+          name="tokenzero-${version}-${TARGET}"
+          mkdir -p "dist/${name}"
+          exe=""; [[ "${RUNNER_OS_NAME}" == "Windows" ]] && exe=".exe"
+          cp "TokenZero/target/${TARGET}/release/tokenzero${exe}" "dist/${name}/tokenzero${exe}"
+          cp "TokenZero/target-mcp/${TARGET}/release/tokenzero${exe}" "dist/${name}/tokenzero-mcp${exe}"
+          cp TokenZero/README.md TokenZero/LICENSE "dist/${name}/"
+          if [[ "${RUNNER_OS_NAME}" == "Windows" ]]; then
+            (cd dist && 7z a "${name}.zip" "${name}")
+            shasum -a 256 "dist/${name}.zip" > "dist/${name}.zip.sha256"
+          else
+            tar -C dist -czf "dist/${name}.tar.gz" "${name}"
+            shasum -a 256 "dist/${name}.tar.gz" > "dist/${name}.tar.gz.sha256"
+          fi
+      - uses: actions/upload-artifact@v4
+        with:
+          name: tokenzero-${{ matrix.target }}
+          path: |
+            dist/*.tar.gz
+            dist/*.tar.gz.sha256
+            dist/*.zip
+            dist/*.zip.sha256
+          if-no-files-found: error
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/download-artifact@v4
+        with: { path: dist, merge-multiple: true }
+      - name: Create GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: "${{ inputs.tag }}"
+          PRERELEASE: "${{ inputs.prerelease }}"
+        shell: bash
+        run: |
+          args=("${RELEASE_TAG}" dist/* --verify-tag --generate-notes)
+          [[ "${PRERELEASE}" == "true" ]] && args+=(--prerelease)
+          gh release create "${args[@]}"

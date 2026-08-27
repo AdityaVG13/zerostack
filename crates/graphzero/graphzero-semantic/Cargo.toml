@@ -1,0 +1,29 @@
+[package]
+name = "graphzero-semantic"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+autotests = false
+description = "P5.1 owned semantic index and deterministic embed path (walking skeleton)"
+
+[dependencies]
+graphzero-store = { workspace = true, features = ["tokenzero"] }
+graphzero-extract = { workspace = true }
+anyhow = { workspace = true }
+memmap2 = { workspace = true }
+sha2 = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+bytemuck = { workspace = true }
+
+[dev-dependencies]
+graphzero-test-support = { workspace = true }
+tempfile = { workspace = true }
+serial_test = { workspace = true }
+
+[lints]
+workspace = true
+
+[[test]]
+name = "semantic_integration"
+path = "../../../tests/graphzero/semantic/integration.rs"

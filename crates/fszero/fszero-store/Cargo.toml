@@ -1,0 +1,44 @@
+[package]
+name = "fszero-store"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "FSZero bytes/CAS/recovery authority."
+autotests = false
+publish = false
+
+[features]
+default = []
+dev-harness = []
+sqlite-bundled = ["rusqlite/bundled"]
+
+[dependencies]
+fszero-core.workspace = true
+fsqlite = "0.1.19"
+fsqlite-core = "0.1.19"
+rusqlite = { version = "0.40", features = ["backup"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.11.0"
+unicode-normalization = "0.1"
+zero-abi.workspace = true
+zero-ref.workspace = true
+zero-store.workspace = true
+
+[dev-dependencies]
+tempfile = "3.27.0"
+
+[target.'cfg(unix)'.dependencies]
+xattr = "1"
+
+[[test]]
+name = "cas_put_prehashed"
+path = "../../../tests/fszero/store/cas_put_prehashed.rs"
+
+[[test]]
+name = "journal_delta_gap"
+path = "../../../tests/fszero/store/journal_delta_gap.rs"
+
+[[test]]
+name = "capsule_store"
+path = "../../../tests/fszero/store/capsule_store.rs"

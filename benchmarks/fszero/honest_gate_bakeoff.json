@@ -1,0 +1,90 @@
+{
+  "schema": "fszero.honest_gate",
+  "label": "bakeoff",
+  "artifact": "benchmarks/bakeoff.json",
+  "generated_at_utc": "2026-08-07T00:00:00Z",
+  "generator_note": "Attestation for already-published artifact; not a re-run.",
+  "questions": [
+    {
+      "id": "Q01_same_build_profile",
+      "prompt": "All compared tools measured under declared build profiles (release-perf for FSZero stack claims)?",
+      "status": "pass",
+      "evidence": "bakeoff.py uses release bin for fszero; peers are system rg/grep and pip packages"
+    },
+    {
+      "id": "Q02_api_workload_match",
+      "prompt": "Same question corpus and success predicate for every tool?",
+      "status": "pass",
+      "evidence": "gen_corpus seed 42; path-in-output success for all tools"
+    },
+    {
+      "id": "Q03_warmup_symmetry",
+      "prompt": "Warmup rules identical across tools (or STATE-labeled when process models differ)?",
+      "status": "waive:process-model STATE intentional -- fszero-server vs fszero-spawn vs fff in-process vs rg/grep spawn; tables separate dual-mode axes"
+    },
+    {
+      "id": "Q04_sample_count_n",
+      "prompt": "n>=20 independent trials (or conservative-tail exception explicit)?",
+      "status": "waive:single-shot cross-question mix labeled in bakeoff.md/json (fszero-67pr); not trial-median; not absolute latency claim",
+      "evidence": "benchmarks/bakeoff.json latency_statistic.kind=single_shot_cross_question_mix"
+    },
+    {
+      "id": "Q05_host_quiet",
+      "prompt": "Host quiet / isolation note recorded in fingerprint or artifact?",
+      "status": "waive:hardware string only in bakeoff.json; no full env_fingerprint isolation note on this artifact"
+    },
+    {
+      "id": "Q06_variance_envelope",
+      "prompt": "Variance envelope or ordered trial vector retained for latency claims?",
+      "status": "waive:per-question single-shot latency; no ordered trial vector in bakeoff.json"
+    },
+    {
+      "id": "Q07_three_tier",
+      "prompt": "p50/p95/p99 (or documented median-only with reason) reported?",
+      "status": "waive:median only across questions; not multi-trial p95/p99"
+    },
+    {
+      "id": "Q08_losses_published",
+      "prompt": "Losses and exclusions published (not dropped)?",
+      "status": "pass",
+      "evidence": "exclusions[] for smfs/embedding-RAG/fff-CLI; bm25 14/20 accuracy published"
+    },
+    {
+      "id": "Q09_apples_flags",
+      "prompt": "Apples-to-apples flags / best documented competitor config?",
+      "status": "pass",
+      "evidence": "fff official SDK; rg/grep default best local; notes in bakeoff.md"
+    },
+    {
+      "id": "Q10_reproducible_runner",
+      "prompt": "Committed runner regenerates numbers from clean checkout?",
+      "status": "pass",
+      "evidence": "benchmarks/bakeoff.py"
+    },
+    {
+      "id": "Q11_git_dirty_false",
+      "prompt": "Committed comparative artifact has git_dirty:false?",
+      "status": "pass",
+      "evidence": "benchmarks/bakeoff.json git_dirty:false (fszero-tqz4)"
+    },
+    {
+      "id": "Q12_process_model_labels",
+      "prompt": "Process-model axis labeled (long-lived MCP vs process-spawn vs in-process)?",
+      "status": "pass",
+      "evidence": "fszero-server vs fszero-spawn rows; fff in-process noted"
+    },
+    {
+      "id": "Q13_tool_order_cache",
+      "prompt": "Tool order does not poison OS page cache for later tools (or mitigated)?",
+      "status": "pass",
+      "evidence": "bakeoff.py --order-policy shuffle|dual|fixed (default shuffle); pure-scan tools reordered before fszero cold; multi-matrix conservative max median wall; measurement_order + measurement_order_policy in bakeoff.json; optional FSZERO_BAKEOFF_PURGE=1; publish guidance order_shuffles>=3 or dual (fszero-hyht)"
+    },
+    {
+      "id": "Q14_claims_audit",
+      "prompt": "Artifact is in claims_audit or competitive inventory; provenance complete?",
+      "status": "pass",
+      "evidence": "claims_audit competitive inventory includes bakeoff.json (fszero-tqz4)"
+    }
+  ],
+  "policy": "docs/benchmark-integrity.md#honest-gate-for-comparative-publish"
+}

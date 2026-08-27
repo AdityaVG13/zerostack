@@ -1,0 +1,36 @@
+[package]
+autobenches = false
+autotests = false
+name = "zero-gate"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+description = "Proof-carrying deterministic decision gate for ZeroStack"
+
+[dependencies]
+sha2 = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+zero-abi = { path = "../zero-abi" }
+zero-cert = { path = "../zero-cert" }
+zero-ledger = { path = "../zero-ledger" }
+zero-store = { path = "../zero-store" }
+
+[[bin]]
+name = "zerostack-program-evidence"
+path = "src/bin/program-evidence.rs"
+
+[[test]]
+name = "project_image_q99"
+path = "../../../tests/zero_gate_project_image_q99.rs"
+
+[[test]]
+name = "demand_expand"
+path = "../../../tests/zero_gate_demand_expand.rs"
+
+[[test]]
+name = "snap_to_file"
+path = "../../../tests/zero_gate_snap_to_file.rs"
+
+[lints]
+workspace = true

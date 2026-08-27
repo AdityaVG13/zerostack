@@ -1,0 +1,30 @@
+[package]
+name = "zerostack-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2024"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+zero-abi = { path = "../crates/zerostack/zero-abi" }
+zero-ref = { path = "../crates/zerostack/zero-ref" }
+
+[workspace]
+members = ["."]
+
+[[bin]]
+name = "zeroref_parse"
+path = "fuzz_targets/zeroref_parse.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "abi_frame_decode"
+path = "fuzz_targets/abi_frame_decode.rs"
+test = false
+doc = false
+bench = false

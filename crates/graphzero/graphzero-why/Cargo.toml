@@ -1,0 +1,27 @@
+[package]
+name = "graphzero-why"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+autotests = false
+
+[dependencies]
+anyhow = { workspace = true }
+graphzero-store = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+sha2 = { workspace = true }
+
+[dev-dependencies]
+graphzero-test-support = { workspace = true }
+tempfile = { workspace = true }
+criterion = { workspace = true }
+git2 = { workspace = true }
+graphzero-store = { workspace = true }
+
+[lints]
+workspace = true
+
+[[test]]
+name = "why_why_contract"
+path = "../../../tests/graphzero/why/why_contract.rs"

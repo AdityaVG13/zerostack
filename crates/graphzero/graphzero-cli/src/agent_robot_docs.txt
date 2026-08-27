@@ -1,0 +1,15 @@
+GRAPHZERO — AI AGENT ONLY
+
+START: graphzero (no args) → JSON triage
+Then: graphzero index . → graphzero orient --name <sym> → graphzero expand <gz://ref>
+MCP: graphzero serve (10 tools). Canonical blast name is blast; blast_intent is a live alias, not a catalog tool (major-version removal). budget=1 ref-first. stderr JSON has hint+example.
+RETRIEVAL: keyword = search/locate (indexed, or exact worktree match with no index); expand = graphzero expand <ref>; semantic_search is not shipped. Large blast/search pages via cursor=gz://query/<id> (durable, session LRU 20 advertised).
+TELEMETRY: default off; `graphzero telemetry inspect [--telemetry|--no-telemetry]` dry-runs payload only (exporter=none). See docs/telemetry.md.
+
+BINARIES (see `graphzero capabilities | jq .dual_binaries`):
+- graphzero — full CLI + install shim (index/doctor/orient/search/blast/serve/…)
+- gzero — direct recipe/JSON-DAG CLI (`gzero codemode|execute '<plan>'`); JavaScript requires zerostack-codemode-host or zsx
+- graphzero-mcp / graphzero-codemode — MCP adapter and raw-worker-v2 package surfaces (docs/install.md)
+
+STORE: default `<repo>/.graphzero`; if `<repo>/.zerostack` exists → `<repo>/.zerostack/graphzero`;
+shared root only with GRAPHZERO_SHARED_STORE/ZEROSTACK_SHARED_STORE opt-in (doctor.store_resolution).

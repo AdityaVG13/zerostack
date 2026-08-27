@@ -1,0 +1,9 @@
+{
+  "schema": "tokenzero.working_set_dedup_ta.v1",
+  "definition": "TA = visible_tokens / floor_tokens",
+  "cases": [
+    {"op_class": "already-resident", "visible_tokens": 1, "floor_tokens": 1, "max_ta": 1.0},
+    {"op_class": "changed-file-delta", "visible_tokens": 12, "floor_tokens": 4, "max_ta": 3.0},
+    {"op_class": "hunk-edit-ack", "visible_tokens": 9, "floor_tokens": 3, "max_ta": 3.0}
+  ]
+}

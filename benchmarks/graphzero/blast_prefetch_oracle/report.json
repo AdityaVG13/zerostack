@@ -1,0 +1,1248 @@
+{
+  "arms": [
+    {
+      "competitive_ratio": 0.414286,
+      "events": 70,
+      "fault_rate": 0.414286,
+      "hits": 29,
+      "k": 5,
+      "losses": [
+        {
+          "event_id": "28557fb85b85",
+          "faults": [
+            "crates/graphzero-semantic/tests/integration.rs"
+          ],
+          "predicted": [
+            "crates/graphzero-query/tests/codemode_e2e.rs",
+            "crates/graphzero-reserve/tests/reserve_proptest.rs",
+            "crates/graphzero-store/tests/amdahl_cold_index_breakdown.rs",
+            "crates/graphzero-cli/tests/mcp_parity.rs",
+            "crates/graphzero-cli/tests/gold_edge_accuracy_metrics.rs"
+          ]
+        },
+        {
+          "event_id": "a78cc52f7d80",
+          "faults": [
+            "crates/graphzero-pack/tests/pack_contract.rs"
+          ],
+          "predicted": [
+            "crates/graphzero-cli/tests/tier_c_surfaces_gate.rs",
+            "crates/graphzero-scip/tests/fixture_golden.rs"
+          ]
+        },
+        {
+          "event_id": "49fd38c964df",
+          "faults": [
+            "crates/graphzero-cli/tests/claim_verify_cli.rs"
+          ],
+          "predicted": [
+            "crates/graphzero-query/tests/deterministic_graph_renders.rs",
+            "crates/graphzero-query/tests/codemode_e2e.rs",
+            "crates/graphzero-query/tests/dispatcher_coverage.rs",
+            "crates/graphzero-query/tests/cross_repo_blast.rs",
+            "crates/graphzero-query/tests/deterministic_facts_contract.rs"
+          ]
+        },
+        {
+          "event_id": "7aee2a71d6ed",
+          "faults": [
+            "crates/graphzero-cli/tests/claim_verify_cli.rs",
+            "crates/graphzero-cli/tests/cli.rs",
+            "crates/graphzero-cli/tests/common/mod.rs",
+            "crates/graphzero-cli/tests/github_action_contract.rs",
+            "crates/graphzero-cli/tests/gold_edge_accuracy_metrics.rs",
+            "crates/graphzero-cli/tests/gold_edge_validation.rs",
+            "crates/graphzero-cli/tests/impact_bakeoff_report.rs",
+            "crates/graphzero-cli/tests/orient_latency_gate.rs",
+            "crates/graphzero-cli/tests/readme_claims.rs",
+            "crates/graphzero-cli/tests/real_task_eval_gate.rs",
+            "crates/graphzero-cli/tests/rebaseline_report.rs",
+            "crates/graphzero-query/tests/common/mod.rs",
+            "crates/graphzero-query/tests/cross_repo_blast.rs",
+            "crates/graphzero-query/tests/delta_surface.rs",
+            "crates/graphzero-query/tests/extraction_backed_tier_a.rs",
+            "crates/graphzero-query/tests/impact_before_edit.rs",
+            "crates/graphzero-query/tests/retrieval_neighborhood.rs"
+          ],
+          "predicted": [
+            "crates/graphzero-query/tests/codemode_e2e.rs",
+            "crates/graphzero-query/tests/search_bigram_gold_bakeoff.rs",
+            "crates/graphzero-query/tests/dispatcher_coverage.rs",
+            "crates/graphzero-reserve/tests/reserve_contract.rs",
+            "crates/graphzero-store/tests/shared_cas_gc_roots.rs"
+          ]
+        },
+        {
+          "event_id": "9e6eb001e72b",
+          "faults": [
+            "crates/graphzero-store/tests/provenance_vnext.rs"
+          ],
+          "predicted": [
+            "crates/graphzero-query/tests/codemode_e2e.rs",
+            "crates/graphzero-query/tests/dispatcher_coverage.rs",
+            "crates/graphzero-cli/tests/gold_edge_accuracy_metrics.rs",
+            "crates/graphzero-query/tests/private_worker_handshake.rs",
+            "crates/graphzero-semantic/tests/integration.rs"
+          ]
+        },
+        {
+          "event_id": "1141c9f81e85",
+          "faults": [
+            "crates/graphzero-query/tests/search_bigram_spike.rs"
+          ],
+          "predicted": [
+            "crates/graphzero-cli/tests/cli.rs",
+            "crates/graphzero-query/tests/codemode_e2e.rs",
+            "crates/graphzero-store/tests/amdahl_cold_index_breakdown.rs",
+            "crates/graphzero-coverage/tests/integration.rs",
+            "crates/graphzero-query/tests/search_bigram_gold_bakeoff.rs"
+          ]
+        },
+        {
+          "event_id": "0f2e952636a7",
+          "faults": [
+            "crates/graphzero-store/tests/provenance_vnext.rs"
+          ],
+          "predicted": [
+            "crates/graphzero-cli/tests/claim_verify_cli.rs",
+            "crates/graphzero-query/tests/common/mod.rs",
+            "crates/graphzero-query/tests/codemode_e2e.rs",
+            "crates/graphzero-query/tests/codemode_bindings_parity.rs",
+            "crates/graphzero-query/tests/search_bigram_spike.rs"
+          ]
+        },
+        {
+          "event_id": "5998de4d4cc0",
+          "faults": [
+            "crates/graphzero-cli/tests/ref_index_cli.rs"
+          ],
+          "predicted": [
+            "crates/graphzero-cli/tests/gold_edge_accuracy_metrics.rs",
+            "crates/graphzero-cli/tests/packaging_e2e.rs",
+            "crates/graphzero-coverage/tests/integration.rs",
+            "crates/graphzero-query/tests/deterministic_facts_contract.rs",
+            "crates/graphzero-query/tests/search_bigram_gold_bakeoff.rs"
+          ]
+        },
+        {
+          "event_id": "b9b4612883d8",
+          "faults": [
+            "crates/graphzero-store/tests/entity_cross_view_dedup_gate.rs"
+          ],
+          "predicted": [
+            "crates/graphzero-query/tests/codemode_e2e.rs",
+            "crates/graphzero-query/tests/dispatcher_coverage.rs",
+            "crates/graphzero-query/tests/search_bigram_gold_bakeoff.rs",
+            "crates/graphzero-cli/tests/o2uq_real_surfaces.rs",
+            "crates/graphzero-query/tests/search_bigram_spike.rs"
+          ]
+        },
+        {
+          "event_id": "2a9977e3a6a2",
+          "faults": [
+            "crates/graphzero-store/tests/entity_novelty_fusion_gate.rs"
+          ],
+          "predicted": [
+            "crates/graphzero-query/tests/codemode_e2e.rs",
+            "crates/graphzero-query/tests/search_bigram_gold_bakeoff.rs",
+            "crates/graphzero-cli/tests/gold_edge_accuracy_metrics.rs",
+            "crates/graphzero-query/tests/search_bigram_spike.rs",
+            "crates/graphzero-semantic/tests/integration.rs"
+          ]
+        },
+        {
+          "event_id": "df8020f45491",
+          "faults": [
+            "crates/graphzero-store/tests/warm_fingerprint_content.rs"
+          ],
+          "predicted": [
+            "crates/graphzero-query/tests/codemode_e2e.rs",
+            "crates/graphzero-query/tests/search_bigram_gold_bakeoff.rs",
+            "crates/graphzero-query/tests/search_bigram_spike.rs",
+            "crates/graphzero-store/tests/provenance_vnext.rs",
+            "crates/graphzero-cli/tests/gold_edge_accuracy_metrics.rs"
+          ]
+        },
+        {
+          "event_id": "35dbf5294f5a",
+          "faults": [
+            "crates/graphzero-store/tests/amdahl_cold_index_breakdown.rs"
+          ],
+          "predicted": [
+            "crates/graphzero-query/tests/codemode_e2e.rs",
+            "crates/graphzero-query/tests/search_bigram_gold_bakeoff.rs",
+            "crates/graphzero-query/tests/search_bigram_spike.rs",
+            "crates/graphzero-store/tests/provenance_vnext.rs",
+            "crates/graphzero-cli/tests/gold_edge_accuracy_metrics.rs"
+          ]
+        },
+        {
+          "event_id": "bd2bb04f05f8",
+          "faults": [
+            "crates/graphzero-store/tests/crash_boundary_store.rs"
+          ],
+          "predicted": [
+            "crates/graphzero-store/tests/amdahl_cold_index_breakdown.rs",
+            "crates/graphzero-cli/tests/claim_verify_cli.rs",
+            "crates/graphzero-query/tests/common/mod.rs",
+            "crates/graphzero-store/tests/provenance_vnext.rs",
+            "crates/graphzero-query/tests/search_bigram_spike.rs"
+          ]
+        },
+        {
+          "event_id": "bcbb303c07e2",
+          "faults": [
+            "crates/graphzero-cli/tests/ref_index_cli.rs"
+          ],
+          "predicted": [
+            "crates/graphzero-query/tests/codemode_e2e.rs",
+            "crates/graphzero-query/tests/search_bigram_gold_bakeoff.rs",
+            "crates/graphzero-query/tests/common/mod.rs",
+            "crates/graphzero-cli/tests/gold_edge_validation.rs",
+            "crates/graphzero-pack/tests/pack_contract.rs"
+          ]
+        },
+        {
+          "event_id": "f741f9c68009",
+          "faults": [
+            "crates/graphzero-query/tests/operation_abi_contract.rs"
+          ],
+          "predicted": [
+            "crates/graphzero-query/tests/codemode_e2e.rs",
+            "crates/graphzero-query/tests/search_bigram_spike.rs",
+            "crates/graphzero-query/tests/search_bigram_gold_bakeoff.rs",
+            "crates/graphzero-cli/tests/cli.rs",
+            "crates/graphzero-cli/tests/gold_edge_accuracy_metrics.rs"
+          ]
+        },
+        {
+          "event_id": "e254c03539da",
+          "faults": [
+            "crates/graphzero-query/tests/operation_abi_contract.rs"
+          ],
+          "predicted": [
+            "crates/graphzero-query/tests/codemode_e2e.rs",
+            "crates/graphzero-cli/tests/cli.rs",
+            "crates/graphzero-query/tests/search_bigram_gold_bakeoff.rs",
+            "crates/graphzero-query/tests/search_bigram_spike.rs",
+            "crates/graphzero-cli/tests/mcp_stdio.rs"
+          ]
+        },
+        {
+          "event_id": "b3cb99969c2c",
+          "faults": [
+            "crates/graphzero-query/tests/dispatcher_identity.rs"
+          ],
+          "predicted": [
+            "crates/graphzero-query/tests/codemode_e2e.rs",
+            "crates/graphzero-query/tests/search_bigram_gold_bakeoff.rs",
+            "crates/graphzero-query/tests/operation_abi_contract.rs",
+            "crates/graphzero-query/tests/search_bigram_spike.rs",
+            "crates/graphzero-cli/tests/gold_edge_accuracy_metrics.rs"
+          ]
+        },
+        {
+          "event_id": "da80b1d30104",
+          "faults": [
+            "crates/graphzero-cli/tests/packaging_lifecycle.rs"
+          ],
+          "predicted": [
+            "crates/graphzero-query/tests/codemode_e2e.rs",
+            "crates/graphzero-query/tests/search_bigram_gold_bakeoff.rs",
+            "crates/graphzero-cli/tests/gold_edge_accuracy_metrics.rs",
+            "crates/graphzero-query/tests/operation_abi_contract.rs",
+            "crates/graphzero-query/tests/search_bigram_spike.rs"
+          ]
+        },
+        {
+          "event_id": "df7a7c5e6b6d",
+          "faults": [
+            "crates/graphzero-cli/tests/packaging_e2e.rs",
+            "crates/graphzero-cli/tests/packaging_lifecycle.rs"
+          ],
+          "predicted": [
+            "crates/graphzero-query/tests/codemode_e2e.rs",
+            "crates/graphzero-cli/tests/gold_edge_accuracy_metrics.rs",
+            "crates/graphzero-query/tests/search_bigram_gold_bakeoff.rs",
+            "crates/graphzero-query/tests/dispatcher_coverage.rs",
+            "crates/graphzero-store/tests/amdahl_cold_index_breakdown.rs"
+          ]
+        },
+        {
+          "event_id": "c2d0dca93e4c",
+          "faults": [
+            "crates/graphzero-query/tests/private_worker_handshake.rs"
+          ],
+          "predicted": [
+            "crates/graphzero-query/tests/codemode_e2e.rs",
+            "crates/graphzero-query/tests/dispatcher_coverage.rs",
+            "crates/graphzero-query/tests/search_bigram_gold_bakeoff.rs",
+            "crates/graphzero-query/tests/operation_abi_contract.rs",
+            "crates/graphzero-query/tests/search_bigram_spike.rs"
+          ]
+        },
+        {
+          "event_id": "e76b9b82a000",
+          "faults": [
+            "crates/graphzero-query/tests/codemode_bindings_parity.rs"
+          ],
+          "predicted": [
+            "crates/graphzero-query/tests/codemode_e2e.rs",
+            "crates/graphzero-query/tests/operation_abi_contract.rs"
+          ]
+        },
+        {
+          "event_id": "22f22d72eb6a",
+          "faults": [
+            "crates/graphzero-query/tests/conformance_corpus.rs"
+          ],
+          "predicted": [
+            "crates/graphzero-query/tests/codemode_e2e.rs",
+            "crates/graphzero-query/tests/codemode_bindings_parity.rs",
+            "crates/graphzero-query/tests/dispatcher_coverage.rs",
+            "crates/graphzero-query/tests/operation_abi_contract.rs",
+            "crates/graphzero-cli/tests/o2uq_real_surfaces.rs"
+          ]
+        },
+        {
+          "event_id": "4deec1619b6b",
+          "faults": [
+            "crates/graphzero-cli/tests/o2uq_real_surfaces.rs"
+          ],
+          "predicted": [
+            "crates/graphzero-query/tests/codemode_e2e.rs",
+            "crates/graphzero-query/tests/dispatcher_coverage.rs",
+            "crates/graphzero-query/tests/search_bigram_gold_bakeoff.rs",
+            "crates/graphzero-query/tests/operation_abi_contract.rs",
+            "crates/graphzero-cli/tests/gold_edge_accuracy_metrics.rs"
+          ]
+        },
+        {
+          "event_id": "c59568299eed",
+          "faults": [
+            "crates/graphzero-cli/tests/o2uq_real_surfaces.rs"
+          ],
+          "predicted": [
+            "crates/graphzero-query/tests/conformance_corpus.rs",
+            "crates/graphzero-pack/tests/pack_contract.rs",
+            "crates/graphzero-cli/tests/gold_edge_accuracy_metrics.rs",
+            "crates/graphzero-query/tests/dispatcher_coverage.rs",
+            "crates/graphzero-query/tests/search_bigram_gold_bakeoff.rs"
+          ]
+        },
+        {
+          "event_id": "56420701a738",
+          "faults": [
+            "crates/graphzero-store/tests/semantic_lexical_contract.rs"
+          ],
+          "predicted": [
+            "crates/graphzero-query/tests/codemode_e2e.rs",
+            "crates/graphzero-query/tests/dispatcher_coverage.rs",
+            "crates/graphzero-cli/tests/o2uq_real_surfaces.rs",
+            "crates/graphzero-reserve/tests/reserve_contract.rs",
+            "crates/graphzero-query/tests/search_bigram_gold_bakeoff.rs"
+          ]
+        },
+        {
+          "event_id": "cceb3eb98c49",
+          "faults": [
+            "crates/graphzero-query/tests/deterministic_graph_renders.rs",
+            "crates/graphzero-store/tests/racc_durability_matrix.rs"
+          ],
+          "predicted": [
+            "crates/graphzero-query/tests/codemode_e2e.rs",
+            "crates/graphzero-query/tests/dispatcher_coverage.rs",
+            "crates/graphzero-cli/tests/o2uq_real_surfaces.rs",
+            "crates/graphzero-query/tests/search_bigram_gold_bakeoff.rs",
+            "crates/graphzero-query/tests/codemode_bindings_parity.rs"
+          ]
+        },
+        {
+          "event_id": "0153d79beeab",
+          "faults": [
+            "crates/graphzero-store/tests/snap_contract.rs",
+            "crates/graphzero-store/tests/snap_to_edit_gold.rs"
+          ],
+          "predicted": [
+            "crates/graphzero-query/tests/codemode_e2e.rs",
+            "crates/graphzero-query/tests/dispatcher_coverage.rs",
+            "crates/graphzero-cli/tests/o2uq_real_surfaces.rs",
+            "crates/graphzero-query/tests/search_bigram_gold_bakeoff.rs",
+            "crates/graphzero-query/tests/search_bigram_spike.rs"
+          ]
+        },
+        {
+          "event_id": "0ed047878641",
+          "faults": [
+            "crates/graphzero-query/tests/query_surface_contract.rs"
+          ],
+          "predicted": [
+            "crates/graphzero-query/tests/codemode_e2e.rs",
+            "crates/graphzero-query/tests/dispatcher_coverage.rs",
+            "crates/graphzero-cli/tests/o2uq_real_surfaces.rs",
+            "crates/graphzero-query/tests/search_bigram_spike.rs",
+            "crates/graphzero-query/tests/search_bigram_gold_bakeoff.rs"
+          ]
+        },
+        {
+          "event_id": "d0bad01a4e19",
+          "faults": [
+            "crates/graphzero-store/tests/amdahl_cold_index_breakdown.rs"
+          ],
+          "predicted": [
+            "crates/graphzero-store/tests/snap_contract.rs",
+            "crates/graphzero-query/tests/dispatcher_coverage.rs",
+            "crates/graphzero-cli/tests/claim_verify_cli.rs",
+            "crates/graphzero-query/tests/common/mod.rs",
+            "crates/graphzero-store/tests/provenance_vnext.rs"
+          ]
+        },
+        {
+          "event_id": "230db448f604",
+          "faults": [
+            "crates/graphzero-store/tests/shared_cas_contract.rs"
+          ],
+          "predicted": [
+            "crates/graphzero-store/tests/provenance_vnext.rs",
+            "crates/graphzero-query/tests/codemode_e2e.rs",
+            "crates/graphzero-why/tests/why_contract.rs",
+            "crates/graphzero-cli/tests/packaging_e2e.rs",
+            "crates/graphzero-store/tests/entity_novelty_fusion_gate.rs"
+          ]
+        },
+        {
+          "event_id": "796cf590dfee",
+          "faults": [
+            "crates/graphzero-cli/tests/rebaseline_report.rs"
+          ],
+          "predicted": [
+            "crates/graphzero-pack/tests/pack_contract.rs",
+            "crates/graphzero-query/tests/dispatcher_coverage.rs",
+            "crates/graphzero-cli/tests/gold_edge_accuracy_metrics.rs",
+            "crates/graphzero-cli/tests/o2uq_real_surfaces.rs",
+            "crates/graphzero-query/tests/search_bigram_gold_bakeoff.rs"
+          ]
+        },
+        {
+          "event_id": "ac08fea6e953",
+          "faults": [
+            "crates/graphzero-store/tests/amdahl_cold_index_breakdown.rs"
+          ],
+          "predicted": [
+            "crates/graphzero-query/tests/codemode_e2e.rs",
+            "crates/graphzero-query/tests/dispatcher_coverage.rs",
+            "crates/graphzero-cli/tests/o2uq_real_surfaces.rs",
+            "crates/graphzero-query/tests/search_bigram_gold_bakeoff.rs",
+            "crates/graphzero-query/tests/search_bigram_spike.rs"
+          ]
+        },
+        {
+          "event_id": "290955745b81",
+          "faults": [
+            "crates/graphzero-store/tests/crash_boundary_store.rs"
+          ],
+          "predicted": [
+            "crates/graphzero-query/tests/dispatcher_coverage.rs",
+            "crates/graphzero-store/tests/amdahl_cold_index_breakdown.rs",
+            "crates/graphzero-store/tests/provenance_vnext.rs",
+            "crates/graphzero-cli/tests/o2uq_real_surfaces.rs",
+            "crates/graphzero-query/tests/codemode_e2e.rs"
+          ]
+        },
+        {
+          "event_id": "689678ae6e3d",
+          "faults": [
+            "crates/graphzero-cli/tests/cli.rs"
+          ],
+          "predicted": [
+            "crates/graphzero-query/tests/codemode_e2e.rs",
+            "crates/graphzero-query/tests/dispatcher_coverage.rs",
+            "crates/graphzero-cli/tests/o2uq_real_surfaces.rs",
+            "crates/graphzero-query/tests/operation_abi_contract.rs",
+            "crates/graphzero-store/tests/amdahl_cold_index_breakdown.rs"
+          ]
+        },
+        {
+          "event_id": "1feb44e0c097",
+          "faults": [
+            "crates/graphzero-store/tests/provenance_vnext.rs",
+            "crates/graphzero-store/tests/ref_index_contract.rs"
+          ],
+          "predicted": [
+            "crates/graphzero-query/tests/codemode_e2e.rs",
+            "crates/graphzero-query/tests/dispatcher_coverage.rs",
+            "crates/graphzero-cli/tests/o2uq_real_surfaces.rs",
+            "crates/graphzero-query/tests/dispatcher_identity.rs",
+            "crates/graphzero-query/tests/codemode_bindings_parity.rs"
+          ]
+        },
+        {
+          "event_id": "79dd558390c3",
+          "faults": [
+            "crates/graphzero-store/tests/snap_to_file_targets_proof.rs"
+          ],
+          "predicted": [
+            "crates/graphzero-query/tests/codemode_e2e.rs",
+            "crates/graphzero-query/tests/dispatcher_coverage.rs",
+            "crates/graphzero-cli/tests/o2uq_real_surfaces.rs",
+            "crates/graphzero-query/tests/search_bigram_gold_bakeoff.rs",
+            "crates/graphzero-query/tests/operation_abi_contract.rs"
+          ]
+        },
+        {
+          "event_id": "2b731ab62c6b",
+          "faults": [
+            "crates/graphzero-query/tests/rewrite_closure_sites.rs"
+          ],
+          "predicted": [
+            "crates/graphzero-query/tests/codemode_e2e.rs",
+            "crates/graphzero-query/tests/dispatcher_coverage.rs",
+            "crates/graphzero-cli/tests/o2uq_real_surfaces.rs",
+            "crates/graphzero-store/tests/amdahl_cold_index_breakdown.rs",
+            "crates/graphzero-query/tests/search_bigram_gold_bakeoff.rs"
+          ]
+        },
+        {
+          "event_id": "f867750fce3b",
+          "faults": [
+            "crates/graphzero-query/tests/witness_cache_invalidation.rs"
+          ],
+          "predicted": [
+            "crates/graphzero-query/tests/codemode_e2e.rs",
+            "crates/graphzero-query/tests/dispatcher_coverage.rs",
+            "crates/graphzero-store/tests/amdahl_cold_index_breakdown.rs",
+            "crates/graphzero-cli/tests/o2uq_real_surfaces.rs",
+            "crates/graphzero-query/tests/search_bigram_gold_bakeoff.rs"
+          ]
+        },
+        {
+          "event_id": "bd4e8c625d96",
+          "faults": [
+            "crates/graphzero-query/tests/deterministic_facts_contract.rs"
+          ],
+          "predicted": [
+            "crates/graphzero-query/tests/dispatcher_coverage.rs",
+            "crates/graphzero-cli/tests/o2uq_real_surfaces.rs",
+            "crates/graphzero-cli/tests/proof_matrix_gate.rs",
+            "crates/graphzero-query/tests/codemode_bindings_parity.rs",
+            "crates/graphzero-query/tests/dispatcher_identity.rs"
+          ]
+        },
+        {
+          "event_id": "8e3990e2a242",
+          "faults": [
+            "crates/graphzero-store/tests/typed_edge_fusion.rs"
+          ],
+          "predicted": [
+            "crates/graphzero-store/tests/amdahl_cold_index_breakdown.rs",
+            "crates/graphzero-query/tests/search_bigram_gold_bakeoff.rs",
+            "crates/graphzero-cli/tests/gold_edge_accuracy_metrics.rs",
+            "crates/graphzero-store/tests/provenance_vnext.rs",
+            "crates/graphzero-query/tests/codemode_e2e.rs"
+          ]
+        },
+        {
+          "event_id": "02129aaaaf18",
+          "faults": [
+            "crates/graphzero-cli/tests/gold_edge_accuracy_metrics.rs",
+            "crates/graphzero-cli/tests/impact_bakeoff_report.rs",
+            "crates/graphzero-extract/tests/live_rust_analyzer_fusion.rs"
+          ],
+          "predicted": [
+            "crates/graphzero-scip/tests/fixture_golden.rs"
+          ]
+        }
+      ],
+      "misses": 41,
+      "policy": "graph_blast_oracle"
+    },
+    {
+      "competitive_ratio": 0.3,
+      "events": 70,
+      "fault_rate": 0.3,
+      "hits": 21,
+      "k": 5,
+      "losses": [
+        {
+          "event_id": "146325a0b218",
+          "faults": [
+            "crates/graphzero-query/tests/codemode_e2e.rs"
+          ],
+          "predicted": []
+        },
+        {
+          "event_id": "28557fb85b85",
+          "faults": [
+            "crates/graphzero-semantic/tests/integration.rs"
+          ],
+          "predicted": [
+            "crates/graphzero-query/tests/codemode_e2e.rs"
+          ]
+        },
+        {
+          "event_id": "def59ae5b572",
+          "faults": [
+            "crates/graphzero-reserve/tests/crash_boundary_reserve.rs",
+            "crates/graphzero-reserve/tests/reserve_contract.rs"
+          ],
+          "predicted": [
+            "crates/graphzero-semantic/tests/integration.rs",
+            "crates/graphzero-query/tests/codemode_e2e.rs"
+          ]
+        },
+        {
+          "event_id": "a78cc52f7d80",
+          "faults": [
+            "crates/graphzero-pack/tests/pack_contract.rs"
+          ],
+          "predicted": [
+            "crates/graphzero-reserve/tests/reserve_contract.rs",
+            "crates/graphzero-reserve/tests/crash_boundary_reserve.rs",
+            "crates/graphzero-semantic/tests/integration.rs",
+            "crates/graphzero-query/tests/codemode_e2e.rs"
+          ]
+        },
+        {
+          "event_id": "49fd38c964df",
+          "faults": [
+            "crates/graphzero-cli/tests/claim_verify_cli.rs"
+          ],
+          "predicted": [
+            "crates/graphzero-pack/tests/pack_contract.rs",
+            "crates/graphzero-reserve/tests/reserve_contract.rs",
+            "crates/graphzero-reserve/tests/crash_boundary_reserve.rs",
+            "crates/graphzero-semantic/tests/integration.rs",
+            "crates/graphzero-query/tests/codemode_e2e.rs"
+          ]
+        },
+        {
+          "event_id": "47022d76dbb9",
+          "faults": [
+            "crates/graphzero-store/tests/shared_cas_gc_roots.rs"
+          ],
+          "predicted": [
+            "crates/graphzero-test-support/tests/unwrap_ratchet.rs",
+            "crates/graphzero-test-support/tests/surface_matrix.rs",
+            "crates/graphzero-test-support/tests/real_task_provenance.rs",
+            "crates/graphzero-test-support/tests/benchmark_sample_accounting.rs",
+            "crates/graphzero-pack/tests/pack_contract.rs"
+          ]
+        },
+        {
+          "event_id": "7aee2a71d6ed",
+          "faults": [
+            "crates/graphzero-cli/tests/claim_verify_cli.rs",
+            "crates/graphzero-cli/tests/cli.rs",
+            "crates/graphzero-cli/tests/common/mod.rs",
+            "crates/graphzero-cli/tests/github_action_contract.rs",
+            "crates/graphzero-cli/tests/gold_edge_accuracy_metrics.rs",
+            "crates/graphzero-cli/tests/gold_edge_validation.rs",
+            "crates/graphzero-cli/tests/impact_bakeoff_report.rs",
+            "crates/graphzero-cli/tests/orient_latency_gate.rs",
+            "crates/graphzero-cli/tests/readme_claims.rs",
+            "crates/graphzero-cli/tests/real_task_eval_gate.rs",
+            "crates/graphzero-cli/tests/rebaseline_report.rs",
+            "crates/graphzero-query/tests/common/mod.rs",
+            "crates/graphzero-query/tests/cross_repo_blast.rs",
+            "crates/graphzero-query/tests/delta_surface.rs",
+            "crates/graphzero-query/tests/extraction_backed_tier_a.rs",
+            "crates/graphzero-query/tests/impact_before_edit.rs",
+            "crates/graphzero-query/tests/retrieval_neighborhood.rs"
+          ],
+          "predicted": [
+            "crates/graphzero-store/tests/shared_cas_gc_roots.rs",
+            "crates/graphzero-test-support/tests/unwrap_ratchet.rs",
+            "crates/graphzero-test-support/tests/surface_matrix.rs",
+            "crates/graphzero-test-support/tests/real_task_provenance.rs",
+            "crates/graphzero-test-support/tests/benchmark_sample_accounting.rs"
+          ]
+        },
+        {
+          "event_id": "ee4ef475628c",
+          "faults": [
+            "crates/graphzero-cli/tests/mcp_stdio.rs",
+            "crates/graphzero-cli/tests/ref_index_cli.rs",
+            "crates/graphzero-query/tests/codemode_e2e.rs"
+          ],
+          "predicted": [
+            "crates/graphzero-query/tests/retrieval_neighborhood.rs",
+            "crates/graphzero-query/tests/impact_before_edit.rs",
+            "crates/graphzero-query/tests/extraction_backed_tier_a.rs",
+            "crates/graphzero-query/tests/delta_surface.rs",
+            "crates/graphzero-query/tests/cross_repo_blast.rs"
+          ]
+        },
+        {
+          "event_id": "9e6eb001e72b",
+          "faults": [
+            "crates/graphzero-store/tests/provenance_vnext.rs"
+          ],
+          "predicted": [
+            "crates/graphzero-query/tests/codemode_e2e.rs",
+            "crates/graphzero-cli/tests/ref_index_cli.rs",
+            "crates/graphzero-cli/tests/mcp_stdio.rs",
+            "crates/graphzero-query/tests/retrieval_neighborhood.rs",
+            "crates/graphzero-query/tests/impact_before_edit.rs"
+          ]
+        },
+        {
+          "event_id": "1141c9f81e85",
+          "faults": [
+            "crates/graphzero-query/tests/search_bigram_spike.rs"
+          ],
+          "predicted": [
+            "crates/graphzero-store/tests/provenance_vnext.rs",
+            "crates/graphzero-query/tests/codemode_e2e.rs",
+            "crates/graphzero-cli/tests/ref_index_cli.rs",
+            "crates/graphzero-cli/tests/mcp_stdio.rs",
+            "crates/graphzero-query/tests/retrieval_neighborhood.rs"
+          ]
+        },
+        {
+          "event_id": "b9b4612883d8",
+          "faults": [
+            "crates/graphzero-store/tests/entity_cross_view_dedup_gate.rs"
+          ],
+          "predicted": [
+            "crates/graphzero-query/tests/search_bigram_spike.rs",
+            "crates/graphzero-query/tests/search_bigram_gold_bakeoff.rs",
+            "crates/graphzero-cli/tests/ref_index_cli.rs",
+            "crates/graphzero-store/tests/provenance_vnext.rs",
+            "crates/graphzero-query/tests/codemode_e2e.rs"
+          ]
+        },
+        {
+          "event_id": "2a9977e3a6a2",
+          "faults": [
+            "crates/graphzero-store/tests/entity_novelty_fusion_gate.rs"
+          ],
+          "predicted": [
+            "crates/graphzero-store/tests/entity_cross_view_dedup_gate.rs",
+            "crates/graphzero-query/tests/search_bigram_spike.rs",
+            "crates/graphzero-query/tests/search_bigram_gold_bakeoff.rs",
+            "crates/graphzero-cli/tests/ref_index_cli.rs",
+            "crates/graphzero-store/tests/provenance_vnext.rs"
+          ]
+        },
+        {
+          "event_id": "df8020f45491",
+          "faults": [
+            "crates/graphzero-store/tests/warm_fingerprint_content.rs"
+          ],
+          "predicted": [
+            "crates/graphzero-store/tests/entity_novelty_fusion_gate.rs",
+            "crates/graphzero-store/tests/entity_cross_view_dedup_gate.rs",
+            "crates/graphzero-query/tests/search_bigram_spike.rs",
+            "crates/graphzero-query/tests/search_bigram_gold_bakeoff.rs",
+            "crates/graphzero-cli/tests/ref_index_cli.rs"
+          ]
+        },
+        {
+          "event_id": "35dbf5294f5a",
+          "faults": [
+            "crates/graphzero-store/tests/amdahl_cold_index_breakdown.rs"
+          ],
+          "predicted": [
+            "crates/graphzero-store/tests/warm_fingerprint_content.rs",
+            "crates/graphzero-store/tests/entity_novelty_fusion_gate.rs",
+            "crates/graphzero-store/tests/entity_cross_view_dedup_gate.rs",
+            "crates/graphzero-query/tests/search_bigram_spike.rs",
+            "crates/graphzero-query/tests/search_bigram_gold_bakeoff.rs"
+          ]
+        },
+        {
+          "event_id": "bd2bb04f05f8",
+          "faults": [
+            "crates/graphzero-store/tests/crash_boundary_store.rs"
+          ],
+          "predicted": [
+            "crates/graphzero-store/tests/amdahl_cold_index_breakdown.rs",
+            "crates/graphzero-store/tests/warm_fingerprint_content.rs",
+            "crates/graphzero-store/tests/entity_novelty_fusion_gate.rs",
+            "crates/graphzero-store/tests/entity_cross_view_dedup_gate.rs",
+            "crates/graphzero-query/tests/search_bigram_spike.rs"
+          ]
+        },
+        {
+          "event_id": "bcbb303c07e2",
+          "faults": [
+            "crates/graphzero-cli/tests/ref_index_cli.rs"
+          ],
+          "predicted": [
+            "crates/graphzero-store/tests/crash_boundary_store.rs",
+            "crates/graphzero-store/tests/amdahl_cold_index_breakdown.rs",
+            "crates/graphzero-store/tests/warm_fingerprint_content.rs",
+            "crates/graphzero-store/tests/entity_novelty_fusion_gate.rs",
+            "crates/graphzero-store/tests/entity_cross_view_dedup_gate.rs"
+          ]
+        },
+        {
+          "event_id": "88d597d5793e",
+          "faults": [
+            "crates/graphzero-cli/tests/cli.rs",
+            "crates/graphzero-cli/tests/rebaseline_report.rs",
+            "crates/graphzero-query/tests/codemode_e2e.rs",
+            "crates/graphzero-store/tests/snap_contract.rs"
+          ],
+          "predicted": [
+            "crates/graphzero-cli/tests/ref_index_cli.rs",
+            "crates/graphzero-store/tests/crash_boundary_store.rs",
+            "crates/graphzero-store/tests/amdahl_cold_index_breakdown.rs",
+            "crates/graphzero-store/tests/warm_fingerprint_content.rs",
+            "crates/graphzero-store/tests/entity_novelty_fusion_gate.rs"
+          ]
+        },
+        {
+          "event_id": "f741f9c68009",
+          "faults": [
+            "crates/graphzero-query/tests/operation_abi_contract.rs"
+          ],
+          "predicted": [
+            "crates/graphzero-store/tests/snap_contract.rs",
+            "crates/graphzero-query/tests/codemode_e2e.rs",
+            "crates/graphzero-cli/tests/rebaseline_report.rs",
+            "crates/graphzero-cli/tests/cli.rs",
+            "crates/graphzero-cli/tests/ref_index_cli.rs"
+          ]
+        },
+        {
+          "event_id": "b3cb99969c2c",
+          "faults": [
+            "crates/graphzero-query/tests/dispatcher_identity.rs"
+          ],
+          "predicted": [
+            "crates/graphzero-query/tests/operation_abi_contract.rs",
+            "crates/graphzero-store/tests/snap_contract.rs",
+            "crates/graphzero-query/tests/codemode_e2e.rs",
+            "crates/graphzero-cli/tests/rebaseline_report.rs",
+            "crates/graphzero-cli/tests/cli.rs"
+          ]
+        },
+        {
+          "event_id": "da80b1d30104",
+          "faults": [
+            "crates/graphzero-cli/tests/packaging_lifecycle.rs"
+          ],
+          "predicted": [
+            "crates/graphzero-query/tests/dispatcher_identity.rs",
+            "crates/graphzero-query/tests/operation_abi_contract.rs",
+            "crates/graphzero-store/tests/snap_contract.rs",
+            "crates/graphzero-query/tests/codemode_e2e.rs",
+            "crates/graphzero-cli/tests/rebaseline_report.rs"
+          ]
+        },
+        {
+          "event_id": "f084bebed56c",
+          "faults": [
+            "crates/graphzero-query/tests/dispatcher_coverage.rs"
+          ],
+          "predicted": [
+            "crates/graphzero-cli/tests/packaging_lifecycle.rs",
+            "crates/graphzero-query/tests/dispatcher_identity.rs",
+            "crates/graphzero-query/tests/operation_abi_contract.rs",
+            "crates/graphzero-store/tests/snap_contract.rs",
+            "crates/graphzero-query/tests/codemode_e2e.rs"
+          ]
+        },
+        {
+          "event_id": "c2d0dca93e4c",
+          "faults": [
+            "crates/graphzero-query/tests/private_worker_handshake.rs"
+          ],
+          "predicted": [
+            "crates/graphzero-query/tests/dispatcher_coverage.rs",
+            "crates/graphzero-cli/tests/packaging_lifecycle.rs",
+            "crates/graphzero-cli/tests/packaging_e2e.rs",
+            "crates/graphzero-query/tests/dispatcher_identity.rs",
+            "crates/graphzero-query/tests/operation_abi_contract.rs"
+          ]
+        },
+        {
+          "event_id": "e76b9b82a000",
+          "faults": [
+            "crates/graphzero-query/tests/codemode_bindings_parity.rs"
+          ],
+          "predicted": [
+            "crates/graphzero-query/tests/private_worker_handshake.rs",
+            "crates/graphzero-query/tests/dispatcher_coverage.rs",
+            "crates/graphzero-cli/tests/packaging_lifecycle.rs",
+            "crates/graphzero-cli/tests/packaging_e2e.rs",
+            "crates/graphzero-query/tests/dispatcher_identity.rs"
+          ]
+        },
+        {
+          "event_id": "448e27b89d3d",
+          "faults": [
+            "crates/graphzero-query/tests/conformance_corpus.rs"
+          ],
+          "predicted": [
+            "crates/graphzero-query/tests/codemode_bindings_parity.rs",
+            "crates/graphzero-query/tests/private_worker_handshake.rs",
+            "crates/graphzero-query/tests/dispatcher_coverage.rs",
+            "crates/graphzero-cli/tests/packaging_lifecycle.rs",
+            "crates/graphzero-cli/tests/packaging_e2e.rs"
+          ]
+        },
+        {
+          "event_id": "4deec1619b6b",
+          "faults": [
+            "crates/graphzero-cli/tests/o2uq_real_surfaces.rs"
+          ],
+          "predicted": [
+            "crates/graphzero-query/tests/conformance_corpus.rs",
+            "crates/graphzero-query/tests/codemode_bindings_parity.rs",
+            "crates/graphzero-query/tests/private_worker_handshake.rs",
+            "crates/graphzero-query/tests/dispatcher_coverage.rs",
+            "crates/graphzero-cli/tests/packaging_lifecycle.rs"
+          ]
+        },
+        {
+          "event_id": "e79698169e75",
+          "faults": [
+            "crates/graphzero-query/tests/codemode_e2e.rs"
+          ],
+          "predicted": [
+            "crates/graphzero-cli/tests/o2uq_real_surfaces.rs",
+            "crates/graphzero-query/tests/conformance_corpus.rs",
+            "crates/graphzero-query/tests/codemode_bindings_parity.rs",
+            "crates/graphzero-query/tests/private_worker_handshake.rs",
+            "crates/graphzero-query/tests/dispatcher_coverage.rs"
+          ]
+        },
+        {
+          "event_id": "56420701a738",
+          "faults": [
+            "crates/graphzero-store/tests/semantic_lexical_contract.rs"
+          ],
+          "predicted": [
+            "crates/graphzero-query/tests/codemode_e2e.rs",
+            "crates/graphzero-cli/tests/o2uq_real_surfaces.rs",
+            "crates/graphzero-query/tests/conformance_corpus.rs",
+            "crates/graphzero-query/tests/codemode_bindings_parity.rs",
+            "crates/graphzero-query/tests/private_worker_handshake.rs"
+          ]
+        },
+        {
+          "event_id": "cceb3eb98c49",
+          "faults": [
+            "crates/graphzero-query/tests/deterministic_graph_renders.rs",
+            "crates/graphzero-store/tests/racc_durability_matrix.rs"
+          ],
+          "predicted": [
+            "crates/graphzero-store/tests/semantic_lexical_contract.rs",
+            "crates/graphzero-query/tests/codemode_e2e.rs",
+            "crates/graphzero-cli/tests/o2uq_real_surfaces.rs",
+            "crates/graphzero-query/tests/conformance_corpus.rs",
+            "crates/graphzero-query/tests/codemode_bindings_parity.rs"
+          ]
+        },
+        {
+          "event_id": "0153d79beeab",
+          "faults": [
+            "crates/graphzero-store/tests/snap_contract.rs",
+            "crates/graphzero-store/tests/snap_to_edit_gold.rs"
+          ],
+          "predicted": [
+            "crates/graphzero-query/tests/codemode_e2e.rs",
+            "crates/graphzero-store/tests/crash_boundary_store.rs",
+            "crates/graphzero-store/tests/racc_durability_matrix.rs",
+            "crates/graphzero-query/tests/deterministic_graph_renders.rs",
+            "crates/graphzero-store/tests/semantic_lexical_contract.rs"
+          ]
+        },
+        {
+          "event_id": "0ed047878641",
+          "faults": [
+            "crates/graphzero-query/tests/query_surface_contract.rs"
+          ],
+          "predicted": [
+            "crates/graphzero-store/tests/snap_to_edit_gold.rs",
+            "crates/graphzero-store/tests/snap_contract.rs",
+            "crates/graphzero-query/tests/codemode_e2e.rs",
+            "crates/graphzero-store/tests/crash_boundary_store.rs",
+            "crates/graphzero-store/tests/racc_durability_matrix.rs"
+          ]
+        },
+        {
+          "event_id": "d87cba8e0f17",
+          "faults": [
+            "crates/graphzero-query/tests/dispatcher_coverage.rs"
+          ],
+          "predicted": [
+            "crates/graphzero-query/tests/query_surface_contract.rs",
+            "crates/graphzero-store/tests/snap_to_edit_gold.rs",
+            "crates/graphzero-store/tests/snap_contract.rs",
+            "crates/graphzero-query/tests/codemode_e2e.rs",
+            "crates/graphzero-store/tests/crash_boundary_store.rs"
+          ]
+        },
+        {
+          "event_id": "d0bad01a4e19",
+          "faults": [
+            "crates/graphzero-store/tests/amdahl_cold_index_breakdown.rs"
+          ],
+          "predicted": [
+            "crates/graphzero-query/tests/dispatcher_coverage.rs",
+            "crates/graphzero-query/tests/query_surface_contract.rs",
+            "crates/graphzero-store/tests/snap_to_edit_gold.rs",
+            "crates/graphzero-store/tests/snap_contract.rs",
+            "crates/graphzero-query/tests/codemode_e2e.rs"
+          ]
+        },
+        {
+          "event_id": "230db448f604",
+          "faults": [
+            "crates/graphzero-store/tests/shared_cas_contract.rs"
+          ],
+          "predicted": [
+            "crates/graphzero-store/tests/amdahl_cold_index_breakdown.rs",
+            "crates/graphzero-query/tests/dispatcher_coverage.rs",
+            "crates/graphzero-query/tests/query_surface_contract.rs",
+            "crates/graphzero-store/tests/snap_to_edit_gold.rs",
+            "crates/graphzero-store/tests/snap_contract.rs"
+          ]
+        },
+        {
+          "event_id": "fcf45d8d85e1",
+          "faults": [
+            "crates/graphzero-cli/tests/o2uq_real_surfaces.rs"
+          ],
+          "predicted": [
+            "crates/graphzero-store/tests/shared_cas_contract.rs",
+            "crates/graphzero-store/tests/amdahl_cold_index_breakdown.rs",
+            "crates/graphzero-query/tests/dispatcher_coverage.rs",
+            "crates/graphzero-query/tests/query_surface_contract.rs",
+            "crates/graphzero-store/tests/snap_to_edit_gold.rs"
+          ]
+        },
+        {
+          "event_id": "bcc86032faa1",
+          "faults": [
+            "crates/graphzero-query/tests/unknown_surface_guidance.rs"
+          ],
+          "predicted": [
+            "crates/graphzero-cli/tests/o2uq_real_surfaces.rs",
+            "crates/graphzero-store/tests/shared_cas_contract.rs",
+            "crates/graphzero-store/tests/amdahl_cold_index_breakdown.rs",
+            "crates/graphzero-query/tests/dispatcher_coverage.rs",
+            "crates/graphzero-query/tests/query_surface_contract.rs"
+          ]
+        },
+        {
+          "event_id": "796cf590dfee",
+          "faults": [
+            "crates/graphzero-cli/tests/rebaseline_report.rs"
+          ],
+          "predicted": [
+            "crates/graphzero-query/tests/unknown_surface_guidance.rs",
+            "crates/graphzero-cli/tests/o2uq_real_surfaces.rs",
+            "crates/graphzero-store/tests/shared_cas_contract.rs",
+            "crates/graphzero-store/tests/amdahl_cold_index_breakdown.rs",
+            "crates/graphzero-query/tests/dispatcher_coverage.rs"
+          ]
+        },
+        {
+          "event_id": "7cdda1595213",
+          "faults": [
+            "crates/graphzero-query/tests/codemode_e2e.rs"
+          ],
+          "predicted": [
+            "crates/graphzero-store/tests/amdahl_cold_index_breakdown.rs",
+            "crates/graphzero-cli/tests/rebaseline_report.rs",
+            "crates/graphzero-query/tests/unknown_surface_guidance.rs",
+            "crates/graphzero-cli/tests/o2uq_real_surfaces.rs",
+            "crates/graphzero-store/tests/shared_cas_contract.rs"
+          ]
+        },
+        {
+          "event_id": "28de901161fe",
+          "faults": [
+            "crates/graphzero-pack/tests/canonical_json_drift.rs",
+            "crates/graphzero-pack/tests/pack_contract.rs"
+          ],
+          "predicted": [
+            "crates/graphzero-query/tests/codemode_e2e.rs",
+            "crates/graphzero-store/tests/amdahl_cold_index_breakdown.rs",
+            "crates/graphzero-cli/tests/rebaseline_report.rs",
+            "crates/graphzero-query/tests/unknown_surface_guidance.rs",
+            "crates/graphzero-cli/tests/o2uq_real_surfaces.rs"
+          ]
+        },
+        {
+          "event_id": "290955745b81",
+          "faults": [
+            "crates/graphzero-store/tests/crash_boundary_store.rs"
+          ],
+          "predicted": [
+            "crates/graphzero-pack/tests/pack_contract.rs",
+            "crates/graphzero-pack/tests/canonical_json_drift.rs",
+            "crates/graphzero-query/tests/codemode_e2e.rs",
+            "crates/graphzero-store/tests/amdahl_cold_index_breakdown.rs",
+            "crates/graphzero-cli/tests/rebaseline_report.rs"
+          ]
+        },
+        {
+          "event_id": "689678ae6e3d",
+          "faults": [
+            "crates/graphzero-cli/tests/cli.rs"
+          ],
+          "predicted": [
+            "crates/graphzero-store/tests/crash_boundary_store.rs",
+            "crates/graphzero-pack/tests/pack_contract.rs",
+            "crates/graphzero-pack/tests/canonical_json_drift.rs",
+            "crates/graphzero-query/tests/codemode_e2e.rs",
+            "crates/graphzero-store/tests/amdahl_cold_index_breakdown.rs"
+          ]
+        },
+        {
+          "event_id": "2f4959ccd452",
+          "faults": [
+            "crates/graphzero-cli/tests/packaging_lifecycle.rs",
+            "crates/graphzero-query/tests/search_bigram_gold_bakeoff.rs",
+            "crates/graphzero-query/tests/search_bigram_spike.rs",
+            "crates/graphzero-store/tests/amdahl_cold_index_breakdown.rs",
+            "crates/graphzero-store/tests/entity_novelty_fusion_gate.rs",
+            "crates/graphzero-store/tests/provenance_vnext.rs",
+            "crates/graphzero-store/tests/ref_index_contract.rs",
+            "crates/graphzero-store/tests/shared_cas_contract.rs",
+            "crates/graphzero-store/tests/shared_cas_gc_roots.rs",
+            "crates/graphzero-store/tests/zeroref_capability_contract.rs",
+            "crates/graphzero-test-support/tests/env_lock_inventory.rs"
+          ],
+          "predicted": [
+            "crates/graphzero-query/tests/codemode_e2e.rs",
+            "crates/graphzero-cli/tests/cli.rs",
+            "crates/graphzero-store/tests/crash_boundary_store.rs",
+            "crates/graphzero-pack/tests/pack_contract.rs",
+            "crates/graphzero-pack/tests/canonical_json_drift.rs"
+          ]
+        },
+        {
+          "event_id": "b11a425d9ea7",
+          "faults": [
+            "crates/graphzero-query/tests/codemode_e2e.rs",
+            "crates/graphzero-query/tests/dispatcher_coverage.rs"
+          ],
+          "predicted": [
+            "crates/graphzero-store/tests/ref_index_contract.rs",
+            "crates/graphzero-store/tests/provenance_vnext.rs",
+            "crates/graphzero-test-support/tests/env_lock_inventory.rs",
+            "crates/graphzero-store/tests/zeroref_capability_contract.rs",
+            "crates/graphzero-store/tests/shared_cas_gc_roots.rs"
+          ]
+        },
+        {
+          "event_id": "79dd558390c3",
+          "faults": [
+            "crates/graphzero-store/tests/snap_to_file_targets_proof.rs"
+          ],
+          "predicted": [
+            "crates/graphzero-query/tests/codemode_e2e.rs",
+            "crates/graphzero-query/tests/dispatcher_coverage.rs",
+            "crates/graphzero-store/tests/ref_index_contract.rs",
+            "crates/graphzero-store/tests/provenance_vnext.rs",
+            "crates/graphzero-test-support/tests/env_lock_inventory.rs"
+          ]
+        },
+        {
+          "event_id": "2b731ab62c6b",
+          "faults": [
+            "crates/graphzero-query/tests/rewrite_closure_sites.rs"
+          ],
+          "predicted": [
+            "crates/graphzero-store/tests/snap_to_file_targets_proof.rs",
+            "crates/graphzero-query/tests/codemode_e2e.rs",
+            "crates/graphzero-query/tests/dispatcher_coverage.rs",
+            "crates/graphzero-store/tests/ref_index_contract.rs",
+            "crates/graphzero-store/tests/provenance_vnext.rs"
+          ]
+        },
+        {
+          "event_id": "f867750fce3b",
+          "faults": [
+            "crates/graphzero-query/tests/witness_cache_invalidation.rs"
+          ],
+          "predicted": [
+            "crates/graphzero-query/tests/rewrite_closure_sites.rs",
+            "crates/graphzero-store/tests/snap_to_file_targets_proof.rs",
+            "crates/graphzero-query/tests/codemode_e2e.rs",
+            "crates/graphzero-query/tests/dispatcher_coverage.rs",
+            "crates/graphzero-store/tests/ref_index_contract.rs"
+          ]
+        },
+        {
+          "event_id": "bd4e8c625d96",
+          "faults": [
+            "crates/graphzero-query/tests/deterministic_facts_contract.rs"
+          ],
+          "predicted": [
+            "crates/graphzero-query/tests/witness_cache_invalidation.rs",
+            "crates/graphzero-query/tests/rewrite_closure_sites.rs",
+            "crates/graphzero-store/tests/snap_to_file_targets_proof.rs",
+            "crates/graphzero-query/tests/codemode_e2e.rs",
+            "crates/graphzero-query/tests/dispatcher_coverage.rs"
+          ]
+        },
+        {
+          "event_id": "8e3990e2a242",
+          "faults": [
+            "crates/graphzero-store/tests/typed_edge_fusion.rs"
+          ],
+          "predicted": [
+            "crates/graphzero-query/tests/deterministic_facts_contract.rs",
+            "crates/graphzero-query/tests/witness_cache_invalidation.rs",
+            "crates/graphzero-query/tests/rewrite_closure_sites.rs",
+            "crates/graphzero-store/tests/snap_to_file_targets_proof.rs",
+            "crates/graphzero-query/tests/codemode_e2e.rs"
+          ]
+        },
+        {
+          "event_id": "02129aaaaf18",
+          "faults": [
+            "crates/graphzero-cli/tests/gold_edge_accuracy_metrics.rs",
+            "crates/graphzero-cli/tests/impact_bakeoff_report.rs",
+            "crates/graphzero-extract/tests/live_rust_analyzer_fusion.rs"
+          ],
+          "predicted": [
+            "crates/graphzero-store/tests/typed_edge_fusion.rs",
+            "crates/graphzero-query/tests/deterministic_facts_contract.rs",
+            "crates/graphzero-query/tests/witness_cache_invalidation.rs",
+            "crates/graphzero-query/tests/rewrite_closure_sites.rs",
+            "crates/graphzero-store/tests/snap_to_file_targets_proof.rs"
+          ]
+        },
+        {
+          "event_id": "a10ba03ed5ac",
+          "faults": [
+            "crates/graphzero-query/tests/codemode_e2e.rs"
+          ],
+          "predicted": [
+            "crates/graphzero-extract/tests/live_rust_analyzer_fusion.rs",
+            "crates/graphzero-cli/tests/impact_bakeoff_report.rs",
+            "crates/graphzero-cli/tests/gold_edge_accuracy_metrics.rs",
+            "crates/graphzero-store/tests/typed_edge_fusion.rs",
+            "crates/graphzero-query/tests/deterministic_facts_contract.rs"
+          ]
+        }
+      ],
+      "misses": 49,
+      "policy": "temporal_only"
+    }
+  ],
+  "benchmark": "blast_prefetch_oracle",
+  "event_count": 70,
+  "fault_rate_lift_percent": 38.0953,
+  "freshness": {
+    "METHODOLOGY.md": "55be73539d1e4f8c3d362b6e9102112bad51eee8e49c1f5483628ce532f12ef4",
+    "build_corpus.py": "d3af6ca40f0ad61e05cb8f9a72f7abffe712fdf38651c81f47652bf366532567",
+    "corpus.jsonl": "23b3bf46c2fa4992a237cc75c8c4c69a0fa9b63e2ad69259aea5b96cc50e3303",
+    "run.py": "8d486e1e474a5004371b5fd859fd02f6f786024bb4a4cdfb4931dd40636f93d0"
+  },
+  "gate": {
+    "k": 5,
+    "min_events": 50,
+    "min_lift_percent": 20.0
+  },
+  "k": 5,
+  "schema_version": 1
+}

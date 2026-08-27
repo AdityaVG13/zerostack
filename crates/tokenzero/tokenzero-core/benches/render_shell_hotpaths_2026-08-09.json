@@ -1,0 +1,33 @@
+{
+  "schema_version": "tokenzero.render_shell_hotpaths.v1",
+  "captured_at_utc": "2026-08-09T08:42:43Z",
+  "host": "spark-1672",
+  "command": "rch exec -- env CARGO_TARGET_DIR=/tmp/rch_target_tokenzero cargo bench -p tokenzero-core --bench hotpaths -- render_shell --noplot",
+  "criterion": {
+    "baseline": {
+      "render_shell_tiny_success_us": {
+        "interval": [11.302, 11.312],
+        "midpoint": 11.307
+      },
+      "render_shell_failed_build_us": {
+        "interval": [25.088, 25.098],
+        "midpoint": 25.093
+      }
+    },
+    "candidate": {
+      "render_shell_tiny_success_us": {
+        "interval": [10.819, 10.823],
+        "midpoint": 10.821,
+        "change_percent": -4.2982,
+        "criterion_comparison": "+0.8453% to +0.9264% versus immediately preceding Cow-adjusted local baseline; within noise threshold"
+      },
+      "render_shell_failed_build_us": {
+        "interval": [24.261, 24.292],
+        "midpoint": 24.2765,
+        "change_percent": -3.2539,
+        "criterion_comparison": "-0.0050% to +0.2307% versus immediately preceding Cow-adjusted local baseline; no performance change detected"
+      }
+    }
+  },
+  "caveat": "Baseline and candidate were measured with the identical Criterion command on spark-1672. Candidate values are the final worktree after Cow borrowing and direct key/value pushes. Criterion intervals are run-specific and hardware-dependent; the second comparison is against the prior local candidate, not the original baseline."
+}

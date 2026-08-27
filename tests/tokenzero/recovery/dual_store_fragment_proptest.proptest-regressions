@@ -1,0 +1,10 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc 7b8f04b33daad7a499742a32605c4144dba6291a83cc9075dfaaf7672647187a # shrinks to payload = "", fragment = Some("L1,1")
+cc 7a720cdae08716b4f96e03085f69bfc55c345b8fa270b39066b4e790501482ac # shrinks to payload = "aa\0𐀀𐀀a0 A¡0𐀀𐀀ࠀࠀ", fragment = Some("B0-19")
+cc 90136bc0c60e35162a8c76d482bb7e6a4788de3d5cd0d2c7a364c64b9238ce8f # shrinks to payload = "", fragment = Some("B0")
+cc b9178dfc9489ef14cf4b7be5a8127d73ce05f5b63378d0d1ea301a32c90acf85 # shrinks to payload = "\0Aa𐀀\0𐀀𐀀0A\0ࠀࠀ", fragment = Some("B20")

@@ -1,0 +1,155 @@
+{
+  "adapters": [
+    {
+      "approval_required": true,
+      "approval_status": "reviewed",
+      "blind_install_attempted": false,
+      "execution_allowed": false,
+      "reviewed_command": "rtk --version",
+      "sandbox_required": true,
+      "tool": "rtk",
+      "unsafe_reason": null,
+      "url": "https://github.com/rtk-ai/rtk"
+    },
+    {
+      "approval_required": true,
+      "approval_status": "reviewed",
+      "blind_install_attempted": false,
+      "execution_allowed": false,
+      "reviewed_command": "ztk --version",
+      "sandbox_required": true,
+      "tool": "ztk",
+      "unsafe_reason": null,
+      "url": "https://github.com/codejunkie99/ztk"
+    },
+    {
+      "approval_required": true,
+      "approval_status": "reviewed",
+      "blind_install_attempted": false,
+      "execution_allowed": false,
+      "reviewed_command": "lean-ctx --version",
+      "sandbox_required": true,
+      "tool": "lean-ctx",
+      "unsafe_reason": null,
+      "url": "https://github.com/yvgude/lean-ctx"
+    },
+    {
+      "approval_required": true,
+      "approval_status": "reviewed",
+      "blind_install_attempted": false,
+      "execution_allowed": false,
+      "reviewed_command": "tokenpak --version",
+      "sandbox_required": true,
+      "tool": "tokenpak",
+      "unsafe_reason": null,
+      "url": "https://github.com/tokenpak/tokenpak"
+    },
+    {
+      "approval_required": true,
+      "approval_status": "reviewed",
+      "blind_install_attempted": false,
+      "execution_allowed": false,
+      "reviewed_command": "tokenjuice --version",
+      "sandbox_required": true,
+      "tool": "tokenjuice",
+      "unsafe_reason": null,
+      "url": "https://github.com/vincentkoc/tokenjuice"
+    },
+    {
+      "approval_required": true,
+      "approval_status": "reviewed",
+      "blind_install_attempted": false,
+      "execution_allowed": false,
+      "reviewed_command": "context-mode --version",
+      "sandbox_required": true,
+      "tool": "context-mode",
+      "unsafe_reason": null,
+      "url": "https://github.com/mksglu/context-mode"
+    },
+    {
+      "approval_required": true,
+      "approval_status": "reviewed",
+      "blind_install_attempted": false,
+      "execution_allowed": false,
+      "reviewed_command": "caveman --version",
+      "sandbox_required": true,
+      "tool": "caveman",
+      "unsafe_reason": null,
+      "url": "https://github.com/JuliusBrussee/caveman"
+    },
+    {
+      "approval_required": true,
+      "approval_status": "reviewed",
+      "blind_install_attempted": false,
+      "execution_allowed": false,
+      "reviewed_command": "headroom --version",
+      "sandbox_required": true,
+      "tool": "headroom",
+      "unsafe_reason": null,
+      "url": "https://github.com/chopratejas/headroom"
+    },
+    {
+      "approval_required": true,
+      "approval_status": "reviewed",
+      "blind_install_attempted": false,
+      "execution_allowed": false,
+      "reviewed_command": "claw --version",
+      "sandbox_required": true,
+      "tool": "claw",
+      "unsafe_reason": null,
+      "url": "https://github.com/open-compress/claw-compactor"
+    },
+    {
+      "approval_required": true,
+      "approval_status": "reviewed",
+      "blind_install_attempted": false,
+      "execution_allowed": false,
+      "reviewed_command": "compresh --version",
+      "sandbox_required": true,
+      "tool": "compresh",
+      "unsafe_reason": null,
+      "url": "https://github.com/compresh/compresh"
+    },
+    {
+      "approval_required": true,
+      "approval_status": "reviewed",
+      "blind_install_attempted": false,
+      "execution_allowed": false,
+      "reviewed_command": "context-gateway --version",
+      "sandbox_required": true,
+      "tool": "context-gateway",
+      "unsafe_reason": null,
+      "url": "https://github.com/Compresr-ai/Context-Gateway"
+    }
+  ],
+  "approval_file": "[TMP]/adapter-approval-template.json",
+  "approval_file_schema_valid": true,
+  "blind_install_attempted": false,
+  "blocked_reasons": [
+    "explicit runnable adapter execution approval not granted"
+  ],
+  "command_safety_policy": {
+    "blocked_side_effects": [
+      "package_manager_install",
+      "external_fetch_or_container_execution",
+      "curl_pipe_execution",
+      "powershell_web_pipe_execution",
+      "destructive_filesystem_command"
+    ],
+    "execution_policy": "reviewed commands may be linked as approved_not_executed evidence; commands with install/fetch/container/destructive side effects remain blocked before any runnable execution phase",
+    "schema_version": "tokenzero.adapter_command_safety.v1"
+  },
+  "duplicate_command_count": 0,
+  "execution_allowed": false,
+  "execution_approval_granted": false,
+  "missing_reviewed_command_count": 0,
+  "ok": true,
+  "public_claims_approved": false,
+  "release_candidate_id": "golden-test",
+  "release_publication_allowed": false,
+  "required_adapter_count": 11,
+  "reviewed_command_count": 11,
+  "schema_version": "tokenzero.adapter_approval_audit.v1",
+  "status": "ok",
+  "unsafe_command_count": 0
+}

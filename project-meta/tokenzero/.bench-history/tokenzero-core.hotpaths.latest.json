@@ -1,0 +1,24 @@
+{
+  "schema": "tokenzero.bench-history/v1",
+  "benchmark_id": "tokenzero-core.hotpaths",
+  "primary": "count_tokens",
+  "label": "fixture-seed",
+  "note": "Synthetic fixture-seed baseline for the keep-gate ratchet (F-010). Numbers are labeled fixture-seed, not a live unlabeled measurement percentage.",
+  "recorded_at": "2026-08-15T00:00:00Z",
+  "cargo_bench": "rch exec -- env CARGO_TARGET_DIR=/tmp/rch_target_tokenzero cargo bench -p tokenzero-core --bench hotpaths --profile release-perf",
+  "groups": [
+    {
+      "name": "count_tokens",
+      "mean_ns": 1000.0,
+      "cv_pct": 1.0,
+      "samples": [990.0, 1000.0, 1010.0]
+    },
+    {
+      "name": "render_shell",
+      "mean_ns": 20000.0,
+      "cv_pct": 2.0,
+      "samples": [19600.0, 20000.0, 20400.0]
+    }
+  ],
+  "geomean_ns": 4472.13595499958
+}

@@ -1,0 +1,60 @@
+[package]
+autotests = false
+name = "zero-store"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+description = "Canonical ZeroRef content-addressed store layout and publish protocol"
+
+[dependencies]
+serde = { workspace = true }
+serde_json = { workspace = true }
+sha2 = { workspace = true }
+blake3 = { workspace = true }
+memmap2 = { workspace = true }
+thiserror = "2"
+zero-abi = { path = "../zero-abi" }
+zero-ref = { path = "../zero-ref" }
+
+[dev-dependencies]
+tempfile = "3"
+proptest = "1"
+sha2 = { workspace = true }
+zerostack-test-support = { path = "../../../tests/support" }
+[[test]]
+name = "ensure_layout"
+path = "../../../tests/zero_store_ensure_layout.rs"
+
+[[test]]
+name = "gc_schema"
+path = "../../../tests/zero_store_gc_schema.rs"
+
+[[test]]
+name = "quarantine_reap"
+path = "../../../tests/zero_store_quarantine_reap.rs"
+[[test]]
+name = "durable_journal"
+path = "../../../tests/zero_store_durable_journal.rs"
+
+[[test]]
+name = "zbf_refs_differential"
+path = "../../../tests/zero_store_zbf_refs_differential.rs"
+
+[[test]]
+name = "zero_cas"
+path = "../../../tests/zero_store_zero_cas.rs"
+
+[[test]]
+name = "event_log"
+path = "../../../tests/zero_store_event_log.rs"
+
+[[test]]
+name = "provider_usage"
+path = "../../../tests/zero_store_provider_usage.rs"
+
+[[test]]
+name = "zero_migration"
+path = "../../../tests/zero_store_zero_migration.rs"
+
+[lints]
+workspace = true

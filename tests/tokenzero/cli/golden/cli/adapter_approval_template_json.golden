@@ -1,0 +1,113 @@
+{
+  "command_count": 11,
+  "command_safety_policy": {
+    "blocked_side_effects": [
+      "package_manager_install",
+      "external_fetch_or_container_execution",
+      "curl_pipe_execution",
+      "powershell_web_pipe_execution",
+      "destructive_filesystem_command"
+    ],
+    "execution_policy": "reviewed commands may be linked as approved_not_executed evidence; commands with install/fetch/container/destructive side effects remain blocked before any runnable execution phase",
+    "schema_version": "tokenzero.adapter_command_safety.v1"
+  },
+  "commands": [
+    {
+      "command": "rtk --version",
+      "execution_approval_required": true,
+      "review_scope": "command-shape safety review only; does not approve execution",
+      "reviewed": true,
+      "tool": "rtk",
+      "url": "https://github.com/rtk-ai/rtk"
+    },
+    {
+      "command": "ztk --version",
+      "execution_approval_required": true,
+      "review_scope": "command-shape safety review only; does not approve execution",
+      "reviewed": true,
+      "tool": "ztk",
+      "url": "https://github.com/codejunkie99/ztk"
+    },
+    {
+      "command": "lean-ctx --version",
+      "execution_approval_required": true,
+      "review_scope": "command-shape safety review only; does not approve execution",
+      "reviewed": true,
+      "tool": "lean-ctx",
+      "url": "https://github.com/yvgude/lean-ctx"
+    },
+    {
+      "command": "tokenpak --version",
+      "execution_approval_required": true,
+      "review_scope": "command-shape safety review only; does not approve execution",
+      "reviewed": true,
+      "tool": "tokenpak",
+      "url": "https://github.com/tokenpak/tokenpak"
+    },
+    {
+      "command": "tokenjuice --version",
+      "execution_approval_required": true,
+      "review_scope": "command-shape safety review only; does not approve execution",
+      "reviewed": true,
+      "tool": "tokenjuice",
+      "url": "https://github.com/vincentkoc/tokenjuice"
+    },
+    {
+      "command": "context-mode --version",
+      "execution_approval_required": true,
+      "review_scope": "command-shape safety review only; does not approve execution",
+      "reviewed": true,
+      "tool": "context-mode",
+      "url": "https://github.com/mksglu/context-mode"
+    },
+    {
+      "command": "caveman --version",
+      "execution_approval_required": true,
+      "review_scope": "command-shape safety review only; does not approve execution",
+      "reviewed": true,
+      "tool": "caveman",
+      "url": "https://github.com/JuliusBrussee/caveman"
+    },
+    {
+      "command": "headroom --version",
+      "execution_approval_required": true,
+      "review_scope": "command-shape safety review only; does not approve execution",
+      "reviewed": true,
+      "tool": "headroom",
+      "url": "https://github.com/chopratejas/headroom"
+    },
+    {
+      "command": "claw --version",
+      "execution_approval_required": true,
+      "review_scope": "command-shape safety review only; does not approve execution",
+      "reviewed": true,
+      "tool": "claw",
+      "url": "https://github.com/open-compress/claw-compactor"
+    },
+    {
+      "command": "compresh --version",
+      "execution_approval_required": true,
+      "review_scope": "command-shape safety review only; does not approve execution",
+      "reviewed": true,
+      "tool": "compresh",
+      "url": "https://github.com/compresh/compresh"
+    },
+    {
+      "command": "context-gateway --version",
+      "execution_approval_required": true,
+      "review_scope": "command-shape safety review only; does not approve execution",
+      "reviewed": true,
+      "tool": "context-gateway",
+      "url": "https://github.com/Compresr-ai/Context-Gateway"
+    }
+  ],
+  "execution_approval_required": true,
+  "generated_by": "tokenzero adapter-approval-template",
+  "ok": true,
+  "public_claims_approved": false,
+  "release_candidate_id": "golden-test",
+  "required_adapter_count": 11,
+  "review_scope": "command-shape safety review only; explicit execution approval remains required",
+  "schema_version": "tokenzero.adapter_approval_file.v1",
+  "status": "ok"
+}

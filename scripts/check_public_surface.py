@@ -18,7 +18,7 @@ def fail(message: str) -> None:
 
 def main() -> None:
     readme = (ROOT / "README.md").read_text(encoding="utf-8")
-    specification = (ROOT / "docs/zero-kernel.md").read_text(encoding="utf-8")
+    specification = (ROOT / "docs/architecture.md").read_text(encoding="utf-8")
     public_text = readme + "\n" + specification
 
     found = set(re.findall(r"`z\.(read|find|edit|apply|run|state)`", public_text))

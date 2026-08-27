@@ -1,0 +1,35 @@
+{
+  "schema": "gauntlet.golden.manifest.v1",
+  "tier": "Tier3Logical",
+  "source": "curated-corpus",
+  "reference_version": "tokenzero-spec@HEAD-fb73416",
+  "canonicalization_fn": "json_account_mass_raw_visible_recovered_spent",
+  "equivalence_predicate": "logical_token_mass",
+  "replay_command": "cargo test -p tokenzero-engine --test phase4_output_contract_goldens -- --test-threads=1",
+  "entries": [
+    {
+      "fixture_id": "measure-account-lexical",
+      "tier": "Tier3Logical",
+      "source": "curated-corpus",
+      "sha256": "8520b83a82e414958f95d94fc8e66a05c55cd8edca2609cc7081bda76e55f8bd",
+      "source_artifact_path": "tests/fixtures/tier3/curated-corpus/measure-account-lexical.golden",
+      "canonicalization_fn": "json_account_mass_raw_visible_recovered_spent",
+      "equivalence_predicate": "logical_token_mass",
+      "capture_timestamp": "2026-08-24T09:00:00Z",
+      "reference_version": "tokenzero-spec@HEAD-fb73416",
+      "replay_command": "cargo test -p tokenzero-engine --test phase4_output_contract_goldens -- --test-threads=1"
+    },
+    {
+      "fixture_id": "measure-account-sentencepiece-approx",
+      "tier": "Tier3Logical",
+      "source": "curated-corpus",
+      "sha256": "3cf74a2d75f199731b201642a92a5890a5d147c534231bbce60d72e0c2a24457",
+      "source_artifact_path": "tests/fixtures/tier3/curated-corpus/measure-account-sentencepiece-approx.golden",
+      "canonicalization_fn": "json_account_mass_raw_visible_recovered_spent",
+      "equivalence_predicate": "logical_token_mass",
+      "capture_timestamp": "2026-08-24T09:00:00Z",
+      "reference_version": "tokenzero-spec@HEAD-fb73416",
+      "replay_command": "cargo test -p tokenzero-engine --test phase4_output_contract_goldens -- --test-threads=1"
+    }
+  ]
+}

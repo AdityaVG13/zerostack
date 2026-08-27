@@ -1,0 +1,33 @@
+[package]
+name = "graphzero-core"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "GraphZero structural truth authority: truth classes, coverage, negative knowledge, certified incremental invalidation"
+
+[dependencies]
+graphzero-types = { workspace = true }
+serde = { workspace = true }
+
+[dev-dependencies]
+serde_json = { workspace = true }
+proptest = { workspace = true }
+
+[[test]]
+name = "core_invalidation_proptest"
+path = "../../../tests/graphzero/core/invalidation_proptest.rs"
+
+[[test]]
+name = "grades_cross_repo"
+path = "../../../tests/graphzero/unit/graphzero-core/grades_cross_repo.rs"
+
+[[test]]
+name = "cognitive_work"
+path = "../../../tests/graphzero/unit/graphzero-core/cognitive_work.rs"
+
+[[test]]
+name = "cognitive_work_lens"
+path = "../../../tests/graphzero/core/cognitive_work_lens.rs"
+
+[lints]
+workspace = true

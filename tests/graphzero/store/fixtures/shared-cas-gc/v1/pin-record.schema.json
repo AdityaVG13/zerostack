@@ -1,0 +1,51 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://zerostack.dev/schemas/shared-cas-gc/v1/pin-record.schema.json",
+  "title": "ZeroStack shared-CAS pin record v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "record_type",
+    "engine",
+    "project_id",
+    "pin_id",
+    "created_at",
+    "blob_hash"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "zerostack.cas-gc.legacy"
+    },
+    "record_type": {
+      "const": "pin"
+    },
+    "engine": {
+      "enum": [
+        "tokenzero",
+        "fszero",
+        "graphzero"
+      ]
+    },
+    "project_id": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "pin_id": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+    },
+    "created_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "expires_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "blob_hash": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    }
+  }
+}

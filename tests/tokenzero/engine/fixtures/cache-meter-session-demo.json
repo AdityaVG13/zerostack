@@ -1,0 +1,21 @@
+{
+  "schema": "tokenzero.cache-meter-demo.v1",
+  "source": {
+    "kind": "sanitized_projection_of_committed_session_observatory_replay",
+    "path": "crates/tokenzero-mcp/benches/session_observatory/replayed.json",
+    "session_id": "tz-39598-18c1624c22cf65e8",
+    "note": "Request text is a non-secret canonical projection of observed tool turns; provider usage envelopes exercise normalization without claiming captured provider billing."
+  },
+  "turns": [
+    {"provider":"anthropic","request_projection":"session-observatory-replay tool=read stable-prefix=v1","response":{"usage":{"input_tokens":256,"output_tokens":0,"cache_read_input_tokens":0,"cache_creation_input_tokens":0}}},
+    {"provider":"open_ai","request_projection":"session-observatory-replay tool=find stable-prefix=v1","response":{"usage":{"prompt_tokens":540,"completion_tokens":0,"prompt_tokens_details":{"cached_tokens":256}}},"diagnosis":{"cache_diagnosis":{"cache_miss_reason":"prefix_changed"}}},
+    {"provider":"gemini","request_projection":"session-observatory-replay tool=expand stable-prefix=v1","response":{"usageMetadata":{"promptTokenCount":256,"candidatesTokenCount":0,"cachedContentTokenCount":167}}}
+  ],
+  "warmkeeper": {
+    "lanes": [
+      {"provider":"anthropic","model":"claude-paid-frontier","tier":"paid_frontier","ttl_seconds":86400,"prefix_tokens":200000,"expected_reads_per_ttl":8.0,"observed_reads":8,"pricing":{"input_per_million":3.0,"cache_read_per_million":0.3,"cache_creation_per_million":3.75,"output_per_million":15.0}},
+      {"provider":"open_ai","model":"sparse-paid-frontier","tier":"paid_frontier","ttl_seconds":86400,"prefix_tokens":100000,"expected_reads_per_ttl":0.1,"observed_reads":1,"pricing":{"input_per_million":3.0,"cache_read_per_million":0.3,"cache_creation_per_million":3.75,"output_per_million":15.0}},
+      {"provider":"gemini","model":"self-hosted-compatibility","tier":"self_hosted","ttl_seconds":86400,"prefix_tokens":100000,"expected_reads_per_ttl":4.0,"observed_reads":1,"pricing":{"input_per_million":3.0,"cache_read_per_million":0.3,"cache_creation_per_million":3.75,"output_per_million":15.0}}
+    ]
+  }
+}

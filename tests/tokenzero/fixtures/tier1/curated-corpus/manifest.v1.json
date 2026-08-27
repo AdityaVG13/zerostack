@@ -1,0 +1,23 @@
+{
+  "schema": "gauntlet.golden.manifest.v1",
+  "tier": "Tier1Raw",
+  "source": "curated-corpus",
+  "reference_version": "tokenzero-spec@HEAD-fb73416",
+  "canonicalization_fn": null,
+  "equivalence_predicate": "sha256_bytes",
+  "replay_command": "cargo test -p tokenzero-engine --test phase4_output_contract_goldens -- --test-threads=1",
+  "entries": [
+    {
+      "fixture_id": "expand-hello-world",
+      "tier": "Tier1Raw",
+      "source": "curated-corpus",
+      "sha256": "b94d27b9934d3e08a52e52d7da7dabfac484efe37a5380ee9088f7ace2efcde9",
+      "source_artifact_path": "tests/fixtures/tier1/curated-corpus/expand-hello-world.golden",
+      "canonicalization_fn": null,
+      "equivalence_predicate": "sha256_bytes",
+      "capture_timestamp": "2026-08-24T09:00:00Z",
+      "reference_version": "tokenzero-spec@HEAD-fb73416",
+      "replay_command": "cargo test -p tokenzero-engine --test phase4_output_contract_goldens -- --test-threads=1"
+    }
+  ]
+}

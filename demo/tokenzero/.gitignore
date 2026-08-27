@@ -1,0 +1,9 @@
+# Generated demo artifacts (rebuilt by run_*/build_* scripts)
+.tokenzero-bin/
+.cache/
+demo_results.json
+agent_results.json
+gap_report.json
+composition_benchmark.json
+demo_viz.html
+agent_viz.html

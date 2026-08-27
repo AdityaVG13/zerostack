@@ -1,0 +1,37 @@
+{
+  "schema": "tokenzero.perf-corpus.v1",
+  "root": "tests/artifacts/perf/_corpus",
+  "max_bytes": 100000000,
+  "max_age_hours": 24,
+  "base": {
+    "functions": 120000,
+    "path": "large.rs",
+    "size": 4457789,
+    "sha256": "e179e885d1e6c39cd3d35ed21d7820461ef75af429b0e331892aef8240003274"
+  },
+  "small": {
+    "path": "small.rs",
+    "content": "fn main() { println!(\"hi\"); }\n",
+    "size": 30,
+    "sha256": "f32984046c38408e258267acd5e0842739023a5c6d7aeb3a962478c1af077190"
+  },
+  "variant_groups": {
+    "v_1mb": [0],
+    "v_10mb": [0, 1, 2],
+    "v_50mb": [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]
+  },
+  "variant_sha256": [
+    "ce6f4f33e93dc21d8cff19a2311090c686783a1278843cee7ecd438baa19803a",
+    "5723b168b29522f6b45bd3e27f0f79e0e1a6ca9e7d2734bb0525b9c7623b785e",
+    "b47667fd54691054e6f5c7efd31b82b81507282846f862061dcea479ae3bf05c",
+    "5b7699fdd06c6c9568a3db59096322adf3d5b8664589c1bf6fedc1192a363776",
+    "0ba882f62b00ebc7ed7cc1abc671879426706d6b66e54a1b2a67990a9ac511b3",
+    "a4bea3176a06e5e1704821fc443194645a76675984d437f5070cbed88226c154",
+    "809be519720571fc0d011bf238804e26c36b568077530027fb10d2a3b28d71c2",
+    "778aeeeac42b8bd89ffda648021550304f7162c0f57fe807ffa1a44e7136361a",
+    "eee2783f19d61dee1272071a78c855d241adce5cf690faeafd517f9b0202fc5d",
+    "203ef61b2f1445023b8a441322ca7966bf25ef5bdb180ed841f98c94cb9e32d3",
+    "3882e14b1094e8741ad800c5ebf3e7fb5785d86584432dfdf1d5cd57fa0accbc",
+    "61ff4f6ec1b5c23d336b9174bb9899c1df73e621dcfe75a3d59e2d62265dbd14"
+  ]
+}

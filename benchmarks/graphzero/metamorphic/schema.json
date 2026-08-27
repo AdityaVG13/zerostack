@@ -1,0 +1,21 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "GraphZero metamorphic corpus case",
+  "type": "object",
+  "required": ["id", "domain", "invariant", "source", "transform", "expected_envelope"],
+  "properties": {
+    "id": {"type": "string"},
+    "domain": {"enum": ["extraction", "query", "store"]},
+    "invariant": {"type": "string"},
+    "source": {"type": "object"},
+    "transform": {"type": "object"},
+    "expected_envelope": {
+      "type": "object",
+      "required": ["status", "checks"],
+      "properties": {
+        "status": {"enum": ["ok", "err"]},
+        "checks": {"type": "array", "items": {"type": "string"}}
+      }
+    }
+  }
+}

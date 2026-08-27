@@ -1,0 +1,162 @@
+{
+  "schema": "tokenzero.tokenizer-goldens.v1",
+  "note": "Provider tokenizer golden prompts (ZS-VIEW-008). Honesty contract: no tokenizer vocabulary is linked in this repo, so every registered family in tokenzero-core reports approximate=true. Entries with unverified=false carry asserted counts and ARE checked against count_tokens_for_model: count_class 'exact' means the count is provable without a vocabulary (empty string, single byte), count_class 'approximate' means the count is the locally derived disclosed average-width estimate and is never presented as an exact provider count. Entries with unverified=true carry NO numeric count (expected_count is null) and are TODO fill-ins to derive from a linked vocabulary or provider API; no fabricated counts enter this repo as facts.",
+  "entries": [
+    {
+      "id": "cl100k-empty",
+      "provider": "openai",
+      "tokenizer_identity": "cl100k_base",
+      "tokenizer_revision": "tiktoken cl100k_base (public 2020-08-28 revision)",
+      "model_id": "gpt-3.5-turbo",
+      "prompt_text": "",
+      "expected_count": 0,
+      "count_class": "exact",
+      "unverified": false,
+      "source": "trivially verifiable without a vocabulary: every deterministic tokenizer encodes the empty string to zero tokens"
+    },
+    {
+      "id": "o200k-empty",
+      "provider": "openai",
+      "tokenizer_identity": "o200k_base",
+      "tokenizer_revision": "tiktoken o200k_base (public 2024-08 revision)",
+      "model_id": "gpt-4o",
+      "prompt_text": "",
+      "expected_count": 0,
+      "count_class": "exact",
+      "unverified": false,
+      "source": "trivially verifiable without a vocabulary: every deterministic tokenizer encodes the empty string to zero tokens"
+    },
+    {
+      "id": "sp-empty",
+      "provider": "meta",
+      "tokenizer_identity": "llama_sentencepiece_v3",
+      "tokenizer_revision": "llama-3 tokenizer (sentencepiece bpe)",
+      "model_id": "llama-3.1-8b-instruct",
+      "prompt_text": "",
+      "expected_count": 0,
+      "count_class": "exact",
+      "unverified": false,
+      "source": "trivially verifiable without a vocabulary: every deterministic tokenizer encodes the empty string to zero tokens"
+    },
+    {
+      "id": "cl100k-single-byte",
+      "provider": "openai",
+      "tokenizer_identity": "cl100k_base",
+      "tokenizer_revision": "tiktoken cl100k_base (public 2020-08-28 revision)",
+      "model_id": "gpt-3.5-turbo",
+      "prompt_text": "a",
+      "expected_count": 1,
+      "count_class": "exact",
+      "unverified": false,
+      "source": "provable from byte-level BPE construction: every byte (here 0x61 'a') is a base vocabulary token, so a single-byte input encodes to exactly one token; the local approximate counter also yields 1"
+    },
+    {
+      "id": "o200k-single-byte",
+      "provider": "openai",
+      "tokenizer_identity": "o200k_base",
+      "tokenizer_revision": "tiktoken o200k_base (public 2024-08 revision)",
+      "model_id": "gpt-4o",
+      "prompt_text": "a",
+      "expected_count": 1,
+      "count_class": "exact",
+      "unverified": false,
+      "source": "provable from byte-level BPE construction: every byte (here 0x61 'a') is a base vocabulary token, so a single-byte input encodes to exactly one token; the local approximate counter also yields 1"
+    },
+    {
+      "id": "cl100k-hello-todo",
+      "provider": "openai",
+      "tokenizer_identity": "cl100k_base",
+      "tokenizer_revision": "tiktoken cl100k_base (public 2020-08-28 revision)",
+      "model_id": "gpt-3.5-turbo",
+      "prompt_text": "hello",
+      "expected_count": null,
+      "count_class": "exact",
+      "unverified": true,
+      "source": "TODO: expected 1 token per widely documented tiktoken behavior; unconfirmed without a linked vocabulary, count not asserted"
+    },
+    {
+      "id": "cl100k-hello-world-todo",
+      "provider": "openai",
+      "tokenizer_identity": "cl100k_base",
+      "tokenizer_revision": "tiktoken cl100k_base (public 2020-08-28 revision)",
+      "model_id": "gpt-3.5-turbo",
+      "prompt_text": "hello world",
+      "expected_count": null,
+      "count_class": "exact",
+      "unverified": true,
+      "source": "TODO: expected 2 tokens ('hello' + ' world') per widely documented tiktoken behavior; unconfirmed without a linked vocabulary, count not asserted"
+    },
+    {
+      "id": "o200k-hello-world-todo",
+      "provider": "openai",
+      "tokenizer_identity": "o200k_base",
+      "tokenizer_revision": "tiktoken o200k_base (public 2024-08 revision)",
+      "model_id": "gpt-4o",
+      "prompt_text": "hello world",
+      "expected_count": null,
+      "count_class": "exact",
+      "unverified": true,
+      "source": "TODO: expected 2 tokens ('hello' + ' world') per widely documented tiktoken behavior; unconfirmed without a linked vocabulary, count not asserted"
+    },
+    {
+      "id": "cl100k-char-run-todo",
+      "provider": "openai",
+      "tokenizer_identity": "cl100k_base",
+      "tokenizer_revision": "tiktoken cl100k_base (public 2020-08-28 revision)",
+      "model_id": "gpt-3.5-turbo",
+      "prompt_text": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "expected_count": null,
+      "count_class": "exact",
+      "unverified": true,
+      "source": "TODO: repeated-char run expected to merge into 2-4 tokens in cl100k_base; unconfirmed without a linked vocabulary, count not asserted"
+    },
+    {
+      "id": "o200k-char-run-todo",
+      "provider": "openai",
+      "tokenizer_identity": "o200k_base",
+      "tokenizer_revision": "tiktoken o200k_base (public 2024-08 revision)",
+      "model_id": "gpt-4o",
+      "prompt_text": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "expected_count": null,
+      "count_class": "exact",
+      "unverified": true,
+      "source": "TODO: repeated-char run expected to merge into 2-4 tokens in o200k_base; unconfirmed without a linked vocabulary, count not asserted"
+    },
+    {
+      "id": "cl100k-approx-demo",
+      "provider": "openai",
+      "tokenizer_identity": "cl100k_base",
+      "tokenizer_revision": "tiktoken cl100k_base (public 2020-08-28 revision)",
+      "model_id": "gpt-3.5-turbo",
+      "prompt_text": "The quick brown fox jumps over the lazy dog. TokenZero keeps the provider-visible prefix stable across turns so cache hits stay measurable.",
+      "expected_count": 35,
+      "count_class": "approximate",
+      "unverified": false,
+      "source": "locally derived disclosed estimate: chars(139)*1000/4000 (cl100k chars_per_token_milli), rounded up; approximate by design, never an exact provider count"
+    },
+    {
+      "id": "o200k-approx-demo",
+      "provider": "openai",
+      "tokenizer_identity": "o200k_base",
+      "tokenizer_revision": "tiktoken o200k_base (public 2024-08 revision)",
+      "model_id": "gpt-4o",
+      "prompt_text": "Compare the raw-retained arm against the retrospective rewrite arm: only measured prefixes may be called cache hits.",
+      "expected_count": 29,
+      "count_class": "approximate",
+      "unverified": false,
+      "source": "locally derived disclosed estimate: chars(116)*1000/4000 (o200k chars_per_token_milli), rounded up; approximate by design, never an exact provider count"
+    },
+    {
+      "id": "sp-approx-demo",
+      "provider": "meta",
+      "tokenizer_identity": "llama_sentencepiece_v3",
+      "tokenizer_revision": "llama-3 tokenizer (sentencepiece bpe)",
+      "model_id": "llama-3.1-8b-instruct",
+      "prompt_text": "The llama sentencepiece family counts with a wider average token width and stays honest about it.",
+      "expected_count": 28,
+      "count_class": "approximate",
+      "unverified": false,
+      "source": "locally derived disclosed estimate: chars(97)*1000/3500 (sentencepiece chars_per_token_milli), rounded up; approximate by design, never an exact provider count"
+    }
+  ]
+}

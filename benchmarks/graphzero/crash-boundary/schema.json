@@ -1,0 +1,13 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "GraphZero crash-boundary case",
+  "type": "object",
+  "required": ["id", "component", "crash_point", "recovery_contract", "evidence"],
+  "properties": {
+    "id": {"type": "string"},
+    "component": {"enum": ["indexing", "shard_write", "sidecar_append", "reservation"]},
+    "crash_point": {"type": "string"},
+    "recovery_contract": {"type": "string"},
+    "evidence": {"type": "object", "required": ["test", "expected"]}
+  }
+}

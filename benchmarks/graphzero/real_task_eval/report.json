@@ -1,0 +1,91 @@
+{
+  "byte_savings_multiple": 5.69,
+  "graph_guided_bytes": 316669,
+  "graph_guided_estimated_tokens": 79168,
+  "graph_guided_successes": 3,
+  "methodology": "deterministic replay of completed GraphZero change tasks; unguided reads broad repo/module candidates expanded from committed globs; graph_guided reads committed reading-set closure; success requires all success_files present; estimated_tokens=ceil(bytes/4)",
+  "rows": [
+    {
+      "byte_savings_multiple": 5.21,
+      "change": "Add executable FP/FN edge-precision gate over committed gold rows.",
+      "graph_guided": {
+        "bytes_read": 61032,
+        "estimated_tokens": 15258,
+        "files_read": 7,
+        "success": true
+      },
+      "id": "fp_gate_metrics",
+      "outcome": "both policies include every success file; graph-guided avoids unrelated extractor/query/validation/manifest files",
+      "repo": "graphzero",
+      "success_files": [
+        "crates/graphzero-cli/tests/gold_edge_accuracy_metrics.rs",
+        "benchmarks/gold/edge_accuracy_report.json"
+      ],
+      "target_symbol": "extract_tier_a",
+      "unguided": {
+        "bytes_read": 318145,
+        "estimated_tokens": 79537,
+        "files_read": 45,
+        "success": true
+      }
+    },
+    {
+      "byte_savings_multiple": 3.99,
+      "change": "Expose graph.readingSet()/reading_set CodeMode API and prove expandable q refs.",
+      "graph_guided": {
+        "bytes_read": 106731,
+        "estimated_tokens": 26683,
+        "files_read": 6,
+        "success": true
+      },
+      "id": "reading_set_codemode_api",
+      "outcome": "both policies include codemode API and e2e test; graph-guided skips docs and module boilerplate for implementation",
+      "repo": "graphzero",
+      "success_files": [
+        "crates/graphzero-query/src/codemode.rs",
+        "crates/graphzero-query/tests/codemode_e2e.rs"
+      ],
+      "target_symbol": "reading_set",
+      "unguided": {
+        "bytes_read": 425626,
+        "estimated_tokens": 106407,
+        "files_read": 49,
+        "success": true
+      }
+    },
+    {
+      "byte_savings_multiple": 7.11,
+      "change": "Add per-save incremental collect path that reparses changed files and coalesces bursts.",
+      "graph_guided": {
+        "bytes_read": 148906,
+        "estimated_tokens": 37227,
+        "files_read": 4,
+        "success": true
+      },
+      "id": "incremental_watch_collect",
+      "outcome": "both policies include implementation and regression test; graph-guided skips query surface and manifest files",
+      "repo": "graphzero",
+      "success_files": [
+        "crates/graphzero-store/src/store/indexer.rs",
+        "crates/graphzero-store/tests/incremental_watch.rs"
+      ],
+      "target_symbol": "collect_changed_paths",
+      "unguided": {
+        "bytes_read": 1058877,
+        "estimated_tokens": 264720,
+        "files_read": 101,
+        "success": true
+      }
+    }
+  ],
+  "sample_accounting": {
+    "dropped_count": 0,
+    "losses": [],
+    "total_samples": 3
+  },
+  "schema_version": 1,
+  "task_count": 3,
+  "unguided_bytes": 1802648,
+  "unguided_estimated_tokens": 450662,
+  "unguided_successes": 3
+}

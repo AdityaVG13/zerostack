@@ -1,0 +1,97 @@
+{
+  "schema_version": 1,
+  "generated_by": "benchmarks/head_to_head_bakeoff/run.py",
+  "corpus": {
+    "name": "graphzero",
+    "rust_files": 234,
+    "ground_truth": "benchmarks/gold/edges.jsonl"
+  },
+  "integrity": {
+    "no_rows_dropped": true,
+    "baseline_conditions_identical": true,
+    "unavailable_competitors_are_not_scored_as_measured": true,
+    "byte_exact_recovery_scored": true
+  },
+  "tasks": [
+    "fresh_index_cost",
+    "warm_index_cost",
+    "call_graph_correctness",
+    "tokens_per_navigation_task",
+    "staleness_time_to_correct_answer"
+  ],
+  "competitors": [
+    {
+      "name": "graphzero",
+      "class": "ref_first_graph",
+      "availability": "measured",
+      "fresh_index_ms": 520.931,
+      "warm_index_ms": 95.879,
+      "orient_p50_ms": 5.588,
+      "blast_p50_ms": 7.031,
+      "correctness": {
+        "true_edges": 7,
+        "confirmed_non_edges": 1,
+        "true_positives": 2,
+        "false_negatives": 5,
+        "false_positives": 0
+      },
+      "tokens_per_navigation_task": {
+        "body": "g:/q: compact refs",
+        "lossless_recovery": true
+      },
+      "staleness": {
+        "status": "measured_elsewhere",
+        "artifact": "benchmarks/rebaseline/latest.json"
+      },
+      "losses": [
+        "Misses higher-order Rust call, trait-qualified Rust calls, method receiver resolution, TypeScript type references, and interface dispatch rows from the gold set."
+      ]
+    },
+    {
+      "name": "stack_graphs_class",
+      "class": "stack-graphs",
+      "availability": "not_run_no_local_cli",
+      "fresh_index_ms": null,
+      "warm_index_ms": null,
+      "orient_p50_ms": null,
+      "blast_p50_ms": null,
+      "correctness": null,
+      "tokens_per_navigation_task": null,
+      "staleness": null,
+      "losses": [
+        "not scored as measured; no local executable/corpus adapter was invoked"
+      ]
+    },
+    {
+      "name": "scip_class",
+      "class": "SCIP index consumers",
+      "availability": "adapter_present_not_full_competitor",
+      "fresh_index_ms": null,
+      "warm_index_ms": null,
+      "orient_p50_ms": null,
+      "blast_p50_ms": null,
+      "correctness": null,
+      "tokens_per_navigation_task": null,
+      "staleness": null,
+      "losses": [
+        "GraphZero can ingest SCIP, but this bake-off did not run a separate SCIP competitor under identical conditions"
+      ]
+    },
+    {
+      "name": "repomap_class",
+      "class": "repo map / summary graph tools",
+      "availability": "not_run_no_byte_exact_recovery_contract",
+      "fresh_index_ms": null,
+      "warm_index_ms": null,
+      "orient_p50_ms": null,
+      "blast_p50_ms": null,
+      "correctness": null,
+      "tokens_per_navigation_task": null,
+      "staleness": null,
+      "losses": [
+        "not scored as measured; byte-exact recovery equivalence was unavailable"
+      ]
+    }
+  ],
+  "conclusion": "Only GraphZero is measured in this repo artifact. Competitor classes are named and held out until runnable local adapters exist; this prevents fabricated head-to-head wins."
+}

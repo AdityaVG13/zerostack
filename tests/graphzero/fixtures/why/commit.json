@@ -1,0 +1,7 @@
+{
+  "commit_oid": "abc123deadbeeffixture0000000000000000000001",
+  "message": "introduce alpha helper for graph walking skeleton",
+  "path": "src/a.rs",
+  "node_ref": "gz://node/sym:alpha",
+  "freshness": "2026-06-25T12:00:00Z"
+}

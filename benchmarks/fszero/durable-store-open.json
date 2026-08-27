@@ -1,0 +1,40 @@
+{
+  "generated_at": "2026-07-22T22:35:50Z",
+  "git_commit": "ceef58bb3a2d8306bcd5180051008ca5982cd150",
+  "host": "spark-1672",
+  "fsqlite_version": "0.1.15",
+  "runs_per_size": 5,
+  "sizes": {
+    "100000": {
+      "p50_wall_ns": 154273904,
+      "p50_process_wall_ns": 180067113,
+      "p50_cpu_ns": 170000000,
+      "p50_incremental_rss_bytes": 69918720,
+      "max_incremental_rss_bytes": 69922816,
+      "payload_rows_scanned": [0, 0, 0, 0, 0]
+    },
+    "1000000": {
+      "p50_wall_ns": 1796148136,
+      "p50_process_wall_ns": 2058898041,
+      "p50_cpu_ns": 2030000000,
+      "p50_incremental_rss_bytes": 585256960,
+      "max_incremental_rss_bytes": 585261056,
+      "payload_rows_scanned": [0, 0, 0, 0, 0]
+    }
+  },
+  "ratios": {
+    "wall": 11.642592100346407,
+    "cpu": 11.941176470588236
+  },
+  "limits": {
+    "ratio": 3.0,
+    "incremental_rss_bytes": 67108864
+  },
+  "failures": [
+    "100000: incremental RSS exceeded limit",
+    "1000000: incremental RSS exceeded limit",
+    "wall ratio 11.643 exceeded 3",
+    "CPU ratio 11.941 exceeded 3"
+  ],
+  "status": "tracked_failing"
+}

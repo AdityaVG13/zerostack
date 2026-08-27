@@ -1,0 +1,8 @@
+{
+  "schema": "tokenzero.ta-replay.v1",
+  "cases": [
+    {"execution_path":"mcp","operation_class":"read","input":{"raw":8,"visible":8,"billed":8,"cached":0},"output":{"raw":120,"visible":12,"billed":12,"cached":0},"decision_atoms":1,"pointer_tokens":2,"novel_bpe_tokens":8,"floor_tokens":11,"amplification_milli":1090},
+    {"execution_path":"mcp","operation_class":"search","input":{"raw":6,"visible":6,"billed":6,"cached":0},"output":{"raw":80,"visible":16,"billed":16,"cached":0},"decision_atoms":1,"pointer_tokens":2,"novel_bpe_tokens":6,"floor_tokens":9,"amplification_milli":1777},
+    {"execution_path":"codemode","operation_class":"plan","input":{"raw":20,"visible":20,"billed":20,"cached":0},"output":{"raw":300,"visible":30,"billed":30,"cached":4},"decision_atoms":1,"pointer_tokens":3,"novel_bpe_tokens":20,"floor_tokens":24,"amplification_milli":1250}
+  ]
+}

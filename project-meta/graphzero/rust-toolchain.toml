@@ -1,0 +1,15 @@
+# Nightly is pinned to the exact date proven by ZeroStack
+# (ZeroStack/rust-toolchain.toml: nightly-2026-05-31), so every checkout and CI
+# run resolves the same compiler. A bare `nightly` channel or a stable-style
+# `min-version` is mutable/misleading for a date-based toolchain.
+#
+# Historical reason for nightly: the transitive fastmcp/asupersync
+# `nightly-outcome-try` feature enables Rust `try_trait_v2`. The current
+# Cargo.lock does not activate that feature (0 occurrences) and no dependency
+# pins a rust-version, so nightly-2026-05-31 is retained as the compatible
+# immutable pin rather than a newer date.
+# Re-test stable after the dependency path stops enabling the feature:
+# `rustup run stable cargo test --workspace --all-targets --no-fail-fast`.
+[toolchain]
+channel = "nightly-2026-05-31"
+components = ["rustfmt", "clippy"]

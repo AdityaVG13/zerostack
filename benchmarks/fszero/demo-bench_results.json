@@ -1,0 +1,27 @@
+{
+  "hardware": "Apple M5 Max / 48 GB",
+  "date": "2026-07-10T04:18:34Z",
+  "git_commit": "ed60f85ba390a98dcc13cf6a93d24c3549662e1c",
+  "git_dirty": false,
+  "corpus": {
+    "files": 265,
+    "bytes": 19558512
+  },
+  "results": {
+    "cold_full_index_ms": 434.463667,
+    "cold_full_index_n_runs": 5,
+    "warm_read_p50_ms": 0.182229,
+    "warm_read_p95_ms": 1.336875,
+    "warm_read_iterations": 100,
+    "search_p50_ms": 0.624688,
+    "search_iterations": 30,
+    "codemode_3read_plan_p50_ms": 14.356187,
+    "codemode_plan_iterations": 20,
+    "worlds_new_commit_cycle_ms": 9.007208,
+    "worlds_n_runs": 5,
+    "history_undo_roundtrip_ms": 16.864333,
+    "history_undo_n_runs": 5,
+    "mcp_tools_call_roundtrip_p50_ms": 0.158875,
+    "mcp_iterations": 30
+  }
+}

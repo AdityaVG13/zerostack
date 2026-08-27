@@ -1,0 +1,79 @@
+{
+  "schema": "tokenzero.prefix-probe.v1",
+  "note": "BENCH-003 provider-prefix probe fixture. Chunk token counts are measured per chunk; identical text must carry identical token counts across histories so prefix comparison stays consistent. hit_declared_by_provider and eligibility_declared are declared facts carried through verbatim and never derived from history overlap: the raw_retained arm here has full prefix retention (lcp_tokens 20) while the provider declared NO cache hit, demonstrating measured-vs-declared separation.",
+  "arms": [
+    {
+      "arm": "raw_retained",
+      "eligibility_declared": true,
+      "hit_declared_by_provider": false,
+      "cost_usd_milli": 12,
+      "latency_ms": 312,
+      "expansion_count": 0,
+      "histories": [
+        [
+          {"text": "system: stable system prompt", "tokens": 6},
+          {"text": "user: read file", "tokens": 3}
+        ],
+        [
+          {"text": "system: stable system prompt", "tokens": 6},
+          {"text": "user: read file", "tokens": 3},
+          {"text": "assistant: <result>", "tokens": 2}
+        ],
+        [
+          {"text": "system: stable system prompt", "tokens": 6},
+          {"text": "user: read file", "tokens": 3},
+          {"text": "assistant: <result>", "tokens": 2},
+          {"text": "user: continue", "tokens": 2}
+        ]
+      ]
+    },
+    {
+      "arm": "retrospective_rewrite",
+      "eligibility_declared": true,
+      "hit_declared_by_provider": null,
+      "cost_usd_milli": 21,
+      "latency_ms": 421,
+      "expansion_count": 2,
+      "histories": [
+        [
+          {"text": "system: stable system prompt", "tokens": 6},
+          {"text": "user: read file", "tokens": 3},
+          {"text": "assistant: <draft result>", "tokens": 2}
+        ],
+        [
+          {"text": "system: stable system prompt", "tokens": 6},
+          {"text": "user: read file after rewrite", "tokens": 5},
+          {"text": "assistant: <draft result>", "tokens": 2}
+        ],
+        [
+          {"text": "system: stable system prompt", "tokens": 6},
+          {"text": "user: read file after rewrite", "tokens": 5},
+          {"text": "assistant: <draft result>", "tokens": 2},
+          {"text": "user: continue", "tokens": 2}
+        ]
+      ]
+    },
+    {
+      "arm": "stable_capsule",
+      "eligibility_declared": true,
+      "hit_declared_by_provider": null,
+      "cost_usd_milli": 9,
+      "latency_ms": 180,
+      "expansion_count": 0,
+      "histories": [
+        [
+          {"text": "capsule: stable prefix", "tokens": 6},
+          {"text": "volatile: turn one", "tokens": 2}
+        ],
+        [
+          {"text": "capsule: stable prefix", "tokens": 6},
+          {"text": "volatile: turn two", "tokens": 3}
+        ],
+        [
+          {"text": "capsule: stable prefix", "tokens": 6},
+          {"text": "volatile: turn three", "tokens": 4}
+        ]
+      ]
+    }
+  ]
+}

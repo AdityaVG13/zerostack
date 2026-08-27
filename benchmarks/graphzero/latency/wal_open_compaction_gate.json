@@ -1,0 +1,31 @@
+{
+  "schema_version": 1,
+  "scenario": {
+    "name": "wal_segment_pressure_reopen",
+    "corpus": {
+      "name": "graphzero-self-repo",
+      "min_rust_files": 600
+    },
+    "inputs": {
+      "trials": 9,
+      "wal_segments": 11,
+      "entries_per_segment": 256
+    },
+    "expected_output": {
+      "before.wal_segment_count": 11,
+      "after.wal_segment_count": 0,
+      "opens_succeed": true
+    }
+  },
+  "success_metrics": {
+    "before.wal_replay_open.p50_max_ms": 180.0,
+    "before.wal_replay_open.p95_max_ms": 200.0,
+    "after.post_compaction_cached_open.p50_max_ms": 0.1,
+    "after.post_compaction_cached_open.p95_max_ms": 0.1
+  },
+  "published_fixture": {
+    "path": "benchmarks/latency/wal_open_compaction.json",
+    "immutable_measurement": true
+  },
+  "profile": "release"
+}

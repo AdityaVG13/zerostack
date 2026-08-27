@@ -1,0 +1,107 @@
+{
+  "document": {
+    "name": "fszero-ncib-conformance-corpus",
+    "version": "1.0.0",
+    "note": "Differential FastMCP / CodeMode / raw-worker vectors (fszero-ncib.7). Machine-readable; regenerated digests must bump version."
+  },
+  "normalize": {
+    "strip_transport": ["jsonrpc", "id", "content", "structuredContent", "isError"],
+    "compare": ["operation", "ok", "error.class", "mutated", "refs_family"]
+  },
+  "vectors": [
+    {
+      "id": "read-success",
+      "operation": "fs.read",
+      "class": "positive",
+      "mcp_tool": "fszero.read",
+      "codemode_method": "fs.read",
+      "args": { "path": "corpus.txt" },
+      "setup": { "write": { "path": "corpus.txt", "content": "conformance-v1" } },
+      "expect": { "ok": true, "operation": "fs.read" }
+    },
+    {
+      "id": "read-missing",
+      "operation": "fs.read",
+      "class": "failure",
+      "mcp_tool": "fszero.read",
+      "codemode_method": "fs.read",
+      "args": { "path": "no-such-file-xyz.txt" },
+      "expect": { "ok": false }
+    },
+    {
+      "id": "read-empty-path",
+      "operation": "fs.read",
+      "class": "boundary",
+      "mcp_tool": "fszero.read",
+      "codemode_method": "fs.read",
+      "args": { "path": "" },
+      "expect": { "ok": false }
+    },
+    {
+      "id": "ls-success",
+      "operation": "fs.ls",
+      "class": "positive",
+      "mcp_tool": "fszero.ls",
+      "codemode_method": "fs.ls",
+      "args": {},
+      "setup": { "write": { "path": "listed.txt", "content": "x" } },
+      "expect": { "ok": true, "operation": "fs.ls" }
+    },
+    {
+      "id": "stat-success",
+      "operation": "fs.stat",
+      "class": "positive",
+      "mcp_tool": "fszero.stat",
+      "codemode_method": "fs.stat",
+      "args": { "path": "statme.txt" },
+      "setup": { "write": { "path": "statme.txt", "content": "meta" } },
+      "expect": { "ok": true, "operation": "fs.stat" }
+    },
+    {
+      "id": "write-success",
+      "operation": "fs.write",
+      "class": "positive",
+      "mcp_tool": "fszero.write",
+      "codemode_method": "fs.write",
+      "args": { "path": "w.txt", "content": "written" },
+      "expect": { "ok": true, "operation": "fs.write", "mutated": true }
+    },
+    {
+      "id": "expand-missing-ref",
+      "operation": "fs.expand",
+      "class": "failure",
+      "mcp_tool": "fszero.expand",
+      "codemode_method": "fs.expand",
+      "args": { "ref": "not-a-real-ref" },
+      "expect": { "ok": false }
+    },
+    {
+      "id": "search-success",
+      "operation": "fs.search",
+      "class": "positive",
+      "mcp_tool": "fszero.search",
+      "codemode_method": "fs.search",
+      "args": { "query": "conformance" },
+      "setup": { "write": { "path": "searchme.txt", "content": "conformance needle" } },
+      "expect": { "ok": true, "operation": "fs.search" }
+    },
+    {
+      "id": "memory-put-get",
+      "operation": "fs.memory",
+      "class": "positive",
+      "mcp_tool": "fszero.memory_put",
+      "codemode_method": "fs.memory.put",
+      "args": { "path": "agent/note", "content": "mem-v1" },
+      "expect": { "ok": true }
+    },
+    {
+      "id": "root-escape",
+      "operation": "fs.read",
+      "class": "failure",
+      "mcp_tool": "fszero.read",
+      "codemode_method": "fs.read",
+      "args": { "path": "../secret" },
+      "expect": { "ok": false }
+    }
+  ]
+}

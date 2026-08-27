@@ -1,0 +1,161 @@
+schema_version = 1
+# Canonical operation ABI: docs/contracts/operation_abi.md
+# Runtime registry: graphzero_query::operation_abi (graphzero-o2uq.1)
+# semantic_contract_version = "1.0.0" (see SEMANTIC_CONTRACT_VERSION)
+# Surfaces below remain documentation anchors; catalog derivation is registry-owned.
+
+[[surface]]
+name = "orient"
+kind = "query_router"
+test = ["crates/graphzero-query/tests/query_surface_contract.rs"]
+doc = ["README.md#how-it-works"]
+
+[[surface]]
+name = "symbol"
+kind = "query_surface"
+test = ["crates/graphzero-query/tests/query_surface_contract.rs"]
+doc = ["README.md#how-it-works"]
+
+[[surface]]
+name = "callers"
+kind = "query_surface"
+test = ["crates/graphzero-query/tests/query_surface_contract.rs"]
+doc = ["README.md#how-it-works"]
+
+[[surface]]
+name = "deps"
+kind = "query_surface"
+test = ["crates/graphzero-query/tests/query_surface_contract.rs"]
+doc = ["README.md#how-it-works"]
+
+[[surface]]
+name = "outline"
+kind = "query_surface"
+test = ["crates/graphzero-query/tests/query_surface_contract.rs"]
+doc = ["README.md#how-it-works"]
+
+[[surface]]
+name = "context"
+kind = "query_surface"
+test = ["crates/graphzero-query/tests/query_surface_contract.rs"]
+doc = ["README.md#how-it-works"]
+
+[[surface]]
+name = "hot"
+kind = "query_surface"
+test = ["crates/graphzero-query/tests/query_surface_contract.rs"]
+doc = ["README.md#how-it-works"]
+
+[[surface]]
+name = "changes"
+kind = "query_surface"
+test = ["crates/graphzero-query/tests/query_surface_contract.rs"]
+doc = ["README.md#how-it-works"]
+
+[[surface]]
+name = "word"
+kind = "query_surface"
+test = ["crates/graphzero-query/tests/query_surface_contract.rs"]
+doc = ["README.md#how-it-works"]
+
+[[surface]]
+name = "search"
+kind = "query_surface"
+test = ["crates/graphzero-query/tests/query_surface_contract.rs"]
+doc = ["README.md#how-it-works"]
+
+[[surface]]
+name = "locate"
+kind = "query_surface"
+test = ["crates/graphzero-query/tests/query_surface_contract.rs", "crates/graphzero-cli/tests/locate_1token_gate.rs"]
+doc = ["README.md#how-it-works"]
+
+[[surface]]
+name = "delta"
+kind = "query_surface"
+test = ["crates/graphzero-query/tests/delta_surface.rs"]
+doc = ["README.md#mcp-mode"]
+
+[[surface]]
+name = "recall"
+kind = "query_surface"
+test = ["crates/graphzero-query/tests/memory_surface.rs"]
+doc = ["README.md#mcp-mode"]
+
+[[surface]]
+name = "callpath"
+kind = "query_surface"
+test = ["crates/graphzero-query/tests/query_surface_contract.rs"]
+doc = ["README.md#mcp-mode"]
+
+[[surface]]
+name = "reading_set"
+kind = "query_surface"
+test = ["crates/graphzero-query/tests/query_surface_contract.rs"]
+doc = ["README.md#highlights"]
+
+[[surface]]
+name = "blast"
+kind = "impact"
+test = ["crates/graphzero-cli/tests/blast_contract.rs", "crates/graphzero-query/tests/blast_proptest.rs"]
+doc = ["README.md#how-it-works"]
+
+[[surface]]
+name = "no_remaining_callers"
+kind = "verify_claim"
+test = ["crates/graphzero-store/tests/claim_verification.rs"]
+doc = ["README.md#how-it-works"]
+
+[[surface]]
+name = "no_outgoing_calls"
+kind = "verify_claim"
+test = ["crates/graphzero-store/tests/claim_verification.rs"]
+doc = ["README.md#how-it-works"]
+
+[[surface]]
+name = "no_remaining_references"
+kind = "verify_claim"
+test = ["crates/graphzero-store/tests/claim_verification.rs"]
+doc = ["README.md#how-it-works"]
+
+[[surface]]
+name = "symbol_removed"
+kind = "verify_claim"
+test = ["crates/graphzero-store/tests/claim_verification.rs"]
+doc = ["README.md#how-it-works"]
+
+[[surface]]
+name = "no_remaining_dependencies"
+kind = "verify_claim"
+test = ["crates/graphzero-store/tests/claim_verification.rs"]
+doc = ["README.md#how-it-works"]
+
+[[surface]]
+name = "gz://blob/<hash>"
+kind = "expand_ref"
+test = ["crates/graphzero-store/tests/store_contract.rs", "crates/graphzero-cli/tests/cli.rs"]
+doc = ["docs/adr/002-zeroref-v1.md#Decision"]
+
+[[surface]]
+name = "gz://blob/<hash>#B<start>-<end>"
+kind = "expand_ref"
+test = ["crates/graphzero-store/tests/zeroref_fragment_conformance.rs", "crates/graphzero-cli/tests/cli.rs"]
+doc = ["docs/adr/002-zeroref-v1.md#3. Byte fragments"]
+
+[[surface]]
+name = "gz://node/<id>"
+kind = "expand_ref"
+test = ["crates/graphzero-store/tests/store_contract.rs", "crates/graphzero-query/tests/blast_proptest.rs"]
+doc = ["docs/adr/002-zeroref-v1.md#Decision"]
+
+[[surface]]
+name = "shared_cas"
+kind = "storage"
+test = ["crates/graphzero-store/tests/shared_cas_contract.rs"]
+doc = ["docs/adr/002-zeroref-v1.md#7. Storage"]
+
+[[surface]]
+name = "capability_negotiation"
+kind = "zeroref_capability"
+test = ["crates/graphzero-store/tests/zeroref_capability_contract.rs"]
+doc = ["docs/adr/002-zeroref-v1.md#10. Capability negotiation"]

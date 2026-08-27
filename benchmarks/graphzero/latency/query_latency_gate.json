@@ -1,0 +1,23 @@
+{
+  "schema_version": 1,
+  "surface": "QueryEngine library",
+  "fixture": {
+    "rust_files": 200,
+    "query": "sym_100",
+    "budget": 1
+  },
+  "warm": {
+    "definition": "one Snapshot opened before timing; QueryEngine::warm only",
+    "iterations": 128,
+    "median_max_ms": 10.0,
+    "p99_max_ms": 50.0
+  },
+  "cold": {
+    "definition": "QueryEngine::cold opens a new Snapshot from the indexed store for every timed query; OS page cache is allowed",
+    "iterations": 32,
+    "median_max_ms": 10.0,
+    "p99_max_ms": 20.0
+  },
+  "profile": "cargo-test-dev",
+  "authority": "crates/graphzero-store/tests/warm_query_latency_gate.rs"
+}

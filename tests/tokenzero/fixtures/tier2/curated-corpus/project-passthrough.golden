@@ -1,0 +1,14 @@
+{
+  "accounting": {
+    "billed": 2,
+    "cached": 0,
+    "certified": false,
+    "tokenizer": "estimator:tokenzero-lexical",
+    "visible": 2
+  },
+  "exact": null,
+  "passthrough": true,
+  "tier": "Tier2Canonical",
+  "visible": "hello world",
+  "visible_source_bytes": 11
+}

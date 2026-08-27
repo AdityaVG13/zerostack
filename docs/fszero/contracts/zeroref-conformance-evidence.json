@@ -1,0 +1,1277 @@
+{
+  "descriptor_tests": "crates/tokenzero-recovery/tests/zeroref_conformance_matrix.rs",
+  "docs_audit": "ok",
+  "matrix": {
+    "concurrent": {
+      "expected_hash": "701218aa1dd615473a1b07c4cc7dd3b75ed7d4c9d55003e43585e319dce20b01",
+      "hashes": {
+        "fszero": "701218aa1dd615473a1b07c4cc7dd3b75ed7d4c9d55003e43585e319dce20b01",
+        "graphzero": "701218aa1dd615473a1b07c4cc7dd3b75ed7d4c9d55003e43585e319dce20b01",
+        "tokenzero": "701218aa1dd615473a1b07c4cc7dd3b75ed7d4c9d55003e43585e319dce20b01"
+      },
+      "status": "pass",
+      "test": "concurrent-identical-writers"
+    },
+    "fragment_rows": [
+      {
+        "expected": "alpha",
+        "fragment": "B0-5",
+        "notes": "",
+        "reader": "fszero",
+        "reference": "fz://blob/927c9bb49935d22cfef1df0fd954eb8011420a9b1ec2350d65647accf201bbe9#B0-5",
+        "status": "pass",
+        "writer": "fszero"
+      },
+      {
+        "expected": "beta",
+        "fragment": "B6-10",
+        "notes": "",
+        "reader": "fszero",
+        "reference": "fz://blob/927c9bb49935d22cfef1df0fd954eb8011420a9b1ec2350d65647accf201bbe9#B6-10",
+        "status": "pass",
+        "writer": "fszero"
+      },
+      {
+        "expected": "",
+        "fragment": "B0-0",
+        "notes": "",
+        "reader": "fszero",
+        "reference": "fz://blob/927c9bb49935d22cfef1df0fd954eb8011420a9b1ec2350d65647accf201bbe9#B0-0",
+        "status": "pass",
+        "writer": "fszero"
+      },
+      {
+        "expected": "alpha\n",
+        "fragment": "L1-1",
+        "notes": "",
+        "reader": "fszero",
+        "reference": "fz://blob/927c9bb49935d22cfef1df0fd954eb8011420a9b1ec2350d65647accf201bbe9#L1-1",
+        "status": "pass",
+        "writer": "fszero"
+      },
+      {
+        "expected": "beta\ngamma\n",
+        "fragment": "L2-3",
+        "notes": "",
+        "reader": "fszero",
+        "reference": "fz://blob/927c9bb49935d22cfef1df0fd954eb8011420a9b1ec2350d65647accf201bbe9#L2-3",
+        "status": "pass",
+        "writer": "fszero"
+      },
+      {
+        "expected": "alpha",
+        "fragment": "B0-5",
+        "notes": "",
+        "reader": "graphzero",
+        "reference": "fz://blob/927c9bb49935d22cfef1df0fd954eb8011420a9b1ec2350d65647accf201bbe9#B0-5",
+        "status": "pass",
+        "writer": "fszero"
+      },
+      {
+        "expected": "beta",
+        "fragment": "B6-10",
+        "notes": "",
+        "reader": "graphzero",
+        "reference": "fz://blob/927c9bb49935d22cfef1df0fd954eb8011420a9b1ec2350d65647accf201bbe9#B6-10",
+        "status": "pass",
+        "writer": "fszero"
+      },
+      {
+        "expected": "",
+        "fragment": "B0-0",
+        "notes": "",
+        "reader": "graphzero",
+        "reference": "fz://blob/927c9bb49935d22cfef1df0fd954eb8011420a9b1ec2350d65647accf201bbe9#B0-0",
+        "status": "pass",
+        "writer": "fszero"
+      },
+      {
+        "expected": "alpha\n",
+        "fragment": "L1-1",
+        "notes": "",
+        "reader": "graphzero",
+        "reference": "fz://blob/927c9bb49935d22cfef1df0fd954eb8011420a9b1ec2350d65647accf201bbe9#L1-1",
+        "status": "pass",
+        "writer": "fszero"
+      },
+      {
+        "expected": "beta\ngamma\n",
+        "fragment": "L2-3",
+        "notes": "",
+        "reader": "graphzero",
+        "reference": "fz://blob/927c9bb49935d22cfef1df0fd954eb8011420a9b1ec2350d65647accf201bbe9#L2-3",
+        "status": "pass",
+        "writer": "fszero"
+      },
+      {
+        "expected": "alpha",
+        "fragment": "B0-5",
+        "notes": "",
+        "reader": "tokenzero",
+        "reference": "fz://blob/927c9bb49935d22cfef1df0fd954eb8011420a9b1ec2350d65647accf201bbe9#B0-5",
+        "status": "pass",
+        "writer": "fszero"
+      },
+      {
+        "expected": "beta",
+        "fragment": "B6-10",
+        "notes": "",
+        "reader": "tokenzero",
+        "reference": "fz://blob/927c9bb49935d22cfef1df0fd954eb8011420a9b1ec2350d65647accf201bbe9#B6-10",
+        "status": "pass",
+        "writer": "fszero"
+      },
+      {
+        "expected": "",
+        "fragment": "B0-0",
+        "notes": "",
+        "reader": "tokenzero",
+        "reference": "fz://blob/927c9bb49935d22cfef1df0fd954eb8011420a9b1ec2350d65647accf201bbe9#B0-0",
+        "status": "pass",
+        "writer": "fszero"
+      },
+      {
+        "expected": "alpha\n",
+        "fragment": "L1-1",
+        "notes": "",
+        "reader": "tokenzero",
+        "reference": "fz://blob/927c9bb49935d22cfef1df0fd954eb8011420a9b1ec2350d65647accf201bbe9#L1-1",
+        "status": "pass",
+        "writer": "fszero"
+      },
+      {
+        "expected": "beta\ngamma\n",
+        "fragment": "L2-3",
+        "notes": "",
+        "reader": "tokenzero",
+        "reference": "fz://blob/927c9bb49935d22cfef1df0fd954eb8011420a9b1ec2350d65647accf201bbe9#L2-3",
+        "status": "pass",
+        "writer": "fszero"
+      },
+      {
+        "expected": "alpha",
+        "fragment": "B0-5",
+        "notes": "",
+        "reader": "fszero",
+        "reference": "gz://blob/927c9bb49935d22cfef1df0fd954eb8011420a9b1ec2350d65647accf201bbe9#B0-5",
+        "status": "pass",
+        "writer": "graphzero"
+      },
+      {
+        "expected": "beta",
+        "fragment": "B6-10",
+        "notes": "",
+        "reader": "fszero",
+        "reference": "gz://blob/927c9bb49935d22cfef1df0fd954eb8011420a9b1ec2350d65647accf201bbe9#B6-10",
+        "status": "pass",
+        "writer": "graphzero"
+      },
+      {
+        "expected": "",
+        "fragment": "B0-0",
+        "notes": "",
+        "reader": "fszero",
+        "reference": "gz://blob/927c9bb49935d22cfef1df0fd954eb8011420a9b1ec2350d65647accf201bbe9#B0-0",
+        "status": "pass",
+        "writer": "graphzero"
+      },
+      {
+        "expected": "alpha\n",
+        "fragment": "L1-1",
+        "notes": "",
+        "reader": "fszero",
+        "reference": "gz://blob/927c9bb49935d22cfef1df0fd954eb8011420a9b1ec2350d65647accf201bbe9#L1-1",
+        "status": "pass",
+        "writer": "graphzero"
+      },
+      {
+        "expected": "beta\ngamma\n",
+        "fragment": "L2-3",
+        "notes": "",
+        "reader": "fszero",
+        "reference": "gz://blob/927c9bb49935d22cfef1df0fd954eb8011420a9b1ec2350d65647accf201bbe9#L2-3",
+        "status": "pass",
+        "writer": "graphzero"
+      },
+      {
+        "expected": "alpha",
+        "fragment": "B0-5",
+        "notes": "",
+        "reader": "graphzero",
+        "reference": "gz://blob/927c9bb49935d22cfef1df0fd954eb8011420a9b1ec2350d65647accf201bbe9#B0-5",
+        "status": "pass",
+        "writer": "graphzero"
+      },
+      {
+        "expected": "beta",
+        "fragment": "B6-10",
+        "notes": "",
+        "reader": "graphzero",
+        "reference": "gz://blob/927c9bb49935d22cfef1df0fd954eb8011420a9b1ec2350d65647accf201bbe9#B6-10",
+        "status": "pass",
+        "writer": "graphzero"
+      },
+      {
+        "expected": "",
+        "fragment": "B0-0",
+        "notes": "",
+        "reader": "graphzero",
+        "reference": "gz://blob/927c9bb49935d22cfef1df0fd954eb8011420a9b1ec2350d65647accf201bbe9#B0-0",
+        "status": "pass",
+        "writer": "graphzero"
+      },
+      {
+        "expected": "alpha\n",
+        "fragment": "L1-1",
+        "notes": "",
+        "reader": "graphzero",
+        "reference": "gz://blob/927c9bb49935d22cfef1df0fd954eb8011420a9b1ec2350d65647accf201bbe9#L1-1",
+        "status": "pass",
+        "writer": "graphzero"
+      },
+      {
+        "expected": "beta\ngamma\n",
+        "fragment": "L2-3",
+        "notes": "",
+        "reader": "graphzero",
+        "reference": "gz://blob/927c9bb49935d22cfef1df0fd954eb8011420a9b1ec2350d65647accf201bbe9#L2-3",
+        "status": "pass",
+        "writer": "graphzero"
+      },
+      {
+        "expected": "alpha",
+        "fragment": "B0-5",
+        "notes": "",
+        "reader": "tokenzero",
+        "reference": "gz://blob/927c9bb49935d22cfef1df0fd954eb8011420a9b1ec2350d65647accf201bbe9#B0-5",
+        "status": "pass",
+        "writer": "graphzero"
+      },
+      {
+        "expected": "beta",
+        "fragment": "B6-10",
+        "notes": "",
+        "reader": "tokenzero",
+        "reference": "gz://blob/927c9bb49935d22cfef1df0fd954eb8011420a9b1ec2350d65647accf201bbe9#B6-10",
+        "status": "pass",
+        "writer": "graphzero"
+      },
+      {
+        "expected": "",
+        "fragment": "B0-0",
+        "notes": "",
+        "reader": "tokenzero",
+        "reference": "gz://blob/927c9bb49935d22cfef1df0fd954eb8011420a9b1ec2350d65647accf201bbe9#B0-0",
+        "status": "pass",
+        "writer": "graphzero"
+      },
+      {
+        "expected": "alpha\n",
+        "fragment": "L1-1",
+        "notes": "",
+        "reader": "tokenzero",
+        "reference": "gz://blob/927c9bb49935d22cfef1df0fd954eb8011420a9b1ec2350d65647accf201bbe9#L1-1",
+        "status": "pass",
+        "writer": "graphzero"
+      },
+      {
+        "expected": "beta\ngamma\n",
+        "fragment": "L2-3",
+        "notes": "",
+        "reader": "tokenzero",
+        "reference": "gz://blob/927c9bb49935d22cfef1df0fd954eb8011420a9b1ec2350d65647accf201bbe9#L2-3",
+        "status": "pass",
+        "writer": "graphzero"
+      },
+      {
+        "expected": "alpha",
+        "fragment": "B0-5",
+        "notes": "",
+        "reader": "fszero",
+        "reference": "tz://blob/927c9bb49935d22cfef1df0fd954eb8011420a9b1ec2350d65647accf201bbe9#B0-5",
+        "status": "pass",
+        "writer": "tokenzero"
+      },
+      {
+        "expected": "beta",
+        "fragment": "B6-10",
+        "notes": "",
+        "reader": "fszero",
+        "reference": "tz://blob/927c9bb49935d22cfef1df0fd954eb8011420a9b1ec2350d65647accf201bbe9#B6-10",
+        "status": "pass",
+        "writer": "tokenzero"
+      },
+      {
+        "expected": "",
+        "fragment": "B0-0",
+        "notes": "",
+        "reader": "fszero",
+        "reference": "tz://blob/927c9bb49935d22cfef1df0fd954eb8011420a9b1ec2350d65647accf201bbe9#B0-0",
+        "status": "pass",
+        "writer": "tokenzero"
+      },
+      {
+        "expected": "alpha\n",
+        "fragment": "L1-1",
+        "notes": "",
+        "reader": "fszero",
+        "reference": "tz://blob/927c9bb49935d22cfef1df0fd954eb8011420a9b1ec2350d65647accf201bbe9#L1-1",
+        "status": "pass",
+        "writer": "tokenzero"
+      },
+      {
+        "expected": "beta\ngamma\n",
+        "fragment": "L2-3",
+        "notes": "",
+        "reader": "fszero",
+        "reference": "tz://blob/927c9bb49935d22cfef1df0fd954eb8011420a9b1ec2350d65647accf201bbe9#L2-3",
+        "status": "pass",
+        "writer": "tokenzero"
+      },
+      {
+        "expected": "alpha",
+        "fragment": "B0-5",
+        "notes": "",
+        "reader": "graphzero",
+        "reference": "tz://blob/927c9bb49935d22cfef1df0fd954eb8011420a9b1ec2350d65647accf201bbe9#B0-5",
+        "status": "pass",
+        "writer": "tokenzero"
+      },
+      {
+        "expected": "beta",
+        "fragment": "B6-10",
+        "notes": "",
+        "reader": "graphzero",
+        "reference": "tz://blob/927c9bb49935d22cfef1df0fd954eb8011420a9b1ec2350d65647accf201bbe9#B6-10",
+        "status": "pass",
+        "writer": "tokenzero"
+      },
+      {
+        "expected": "",
+        "fragment": "B0-0",
+        "notes": "",
+        "reader": "graphzero",
+        "reference": "tz://blob/927c9bb49935d22cfef1df0fd954eb8011420a9b1ec2350d65647accf201bbe9#B0-0",
+        "status": "pass",
+        "writer": "tokenzero"
+      },
+      {
+        "expected": "alpha\n",
+        "fragment": "L1-1",
+        "notes": "",
+        "reader": "graphzero",
+        "reference": "tz://blob/927c9bb49935d22cfef1df0fd954eb8011420a9b1ec2350d65647accf201bbe9#L1-1",
+        "status": "pass",
+        "writer": "tokenzero"
+      },
+      {
+        "expected": "beta\ngamma\n",
+        "fragment": "L2-3",
+        "notes": "",
+        "reader": "graphzero",
+        "reference": "tz://blob/927c9bb49935d22cfef1df0fd954eb8011420a9b1ec2350d65647accf201bbe9#L2-3",
+        "status": "pass",
+        "writer": "tokenzero"
+      },
+      {
+        "expected": "alpha",
+        "fragment": "B0-5",
+        "notes": "",
+        "reader": "tokenzero",
+        "reference": "tz://blob/927c9bb49935d22cfef1df0fd954eb8011420a9b1ec2350d65647accf201bbe9#B0-5",
+        "status": "pass",
+        "writer": "tokenzero"
+      },
+      {
+        "expected": "beta",
+        "fragment": "B6-10",
+        "notes": "",
+        "reader": "tokenzero",
+        "reference": "tz://blob/927c9bb49935d22cfef1df0fd954eb8011420a9b1ec2350d65647accf201bbe9#B6-10",
+        "status": "pass",
+        "writer": "tokenzero"
+      },
+      {
+        "expected": "",
+        "fragment": "B0-0",
+        "notes": "",
+        "reader": "tokenzero",
+        "reference": "tz://blob/927c9bb49935d22cfef1df0fd954eb8011420a9b1ec2350d65647accf201bbe9#B0-0",
+        "status": "pass",
+        "writer": "tokenzero"
+      },
+      {
+        "expected": "alpha\n",
+        "fragment": "L1-1",
+        "notes": "",
+        "reader": "tokenzero",
+        "reference": "tz://blob/927c9bb49935d22cfef1df0fd954eb8011420a9b1ec2350d65647accf201bbe9#L1-1",
+        "status": "pass",
+        "writer": "tokenzero"
+      },
+      {
+        "expected": "beta\ngamma\n",
+        "fragment": "L2-3",
+        "notes": "",
+        "reader": "tokenzero",
+        "reference": "tz://blob/927c9bb49935d22cfef1df0fd954eb8011420a9b1ec2350d65647accf201bbe9#L2-3",
+        "status": "pass",
+        "writer": "tokenzero"
+      }
+    ],
+    "note": "Real three-binary ZeroRef v1 conformance matrix. Only macOS rows executed on this host. Linux and Windows rows are explicit not-run skips and do not satisfy the multi-platform release gate.",
+    "platform_status": {
+      "macos": {
+        "total": 45,
+        "executed": 45,
+        "passed": 45,
+        "failed": 0,
+        "skipped": 0,
+        "status": "green"
+      },
+      "linux": {
+        "total": 9,
+        "executed": 0,
+        "passed": 0,
+        "failed": 0,
+        "skipped": 9,
+        "status": "not-run"
+      },
+      "windows": {
+        "total": 9,
+        "executed": 0,
+        "passed": 0,
+        "failed": 0,
+        "skipped": 9,
+        "status": "not-run"
+      }
+    },
+    "rows": [
+      {
+        "cells": [
+          {
+            "actual_hash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "consumer": "fszero",
+            "consumer_path": "target/release/fszero",
+            "consumer_sha256": "fa5427bbf00c411205baf60c5cec232e43469fc8ffaf36f02be5b76ab6364ec2",
+            "consumer_version": "",
+            "expected_hash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "notes": "",
+            "payload": "empty",
+            "reader": "fszero",
+            "reference": "fz://blob/e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "status": "pass",
+            "writer": "fszero"
+          },
+          {
+            "actual_hash": "5989b27430bd160178c9f1c7df22b98625a27a2a75dca3e7ead9d509bbc36583",
+            "consumer": "fszero",
+            "consumer_path": "target/release/fszero",
+            "consumer_sha256": "fa5427bbf00c411205baf60c5cec232e43469fc8ffaf36f02be5b76ab6364ec2",
+            "consumer_version": "",
+            "expected_hash": "5989b27430bd160178c9f1c7df22b98625a27a2a75dca3e7ead9d509bbc36583",
+            "notes": "",
+            "payload": "utf8_text",
+            "reader": "fszero",
+            "reference": "fz://blob/5989b27430bd160178c9f1c7df22b98625a27a2a75dca3e7ead9d509bbc36583",
+            "status": "pass",
+            "writer": "fszero"
+          },
+          {
+            "actual_hash": "96e4d66c5a42d171e8aa107059eacaf52d3c2c095cbba1316b590a7392497718",
+            "consumer": "fszero",
+            "consumer_path": "target/release/fszero",
+            "consumer_sha256": "fa5427bbf00c411205baf60c5cec232e43469fc8ffaf36f02be5b76ab6364ec2",
+            "consumer_version": "",
+            "expected_hash": "96e4d66c5a42d171e8aa107059eacaf52d3c2c095cbba1316b590a7392497718",
+            "notes": "",
+            "payload": "crlf",
+            "reader": "fszero",
+            "reference": "fz://blob/96e4d66c5a42d171e8aa107059eacaf52d3c2c095cbba1316b590a7392497718",
+            "status": "pass",
+            "writer": "fszero"
+          },
+          {
+            "actual_hash": "db26ff816ac0f1934c81c2b52f9a6c5e2cc4884bbd830e0d434989e77de8196f",
+            "consumer": "fszero",
+            "consumer_path": "target/release/fszero",
+            "consumer_sha256": "fa5427bbf00c411205baf60c5cec232e43469fc8ffaf36f02be5b76ab6364ec2",
+            "consumer_version": "",
+            "expected_hash": "db26ff816ac0f1934c81c2b52f9a6c5e2cc4884bbd830e0d434989e77de8196f",
+            "notes": "",
+            "payload": "binary",
+            "reader": "fszero",
+            "reference": "fz://blob/db26ff816ac0f1934c81c2b52f9a6c5e2cc4884bbd830e0d434989e77de8196f",
+            "status": "pass",
+            "writer": "fszero"
+          },
+          {
+            "actual_hash": "675bdcefd49332c40b96a8d715780d03e1b3d0778a2047ff36f27dc2f256ef9d",
+            "consumer": "fszero",
+            "consumer_path": "target/release/fszero",
+            "consumer_sha256": "fa5427bbf00c411205baf60c5cec232e43469fc8ffaf36f02be5b76ab6364ec2",
+            "consumer_version": "",
+            "expected_hash": "675bdcefd49332c40b96a8d715780d03e1b3d0778a2047ff36f27dc2f256ef9d",
+            "notes": "",
+            "payload": "big",
+            "reader": "fszero",
+            "reference": "fz://blob/675bdcefd49332c40b96a8d715780d03e1b3d0778a2047ff36f27dc2f256ef9d",
+            "status": "pass",
+            "writer": "fszero"
+          },
+          {
+            "actual_hash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "consumer": "graphzero",
+            "consumer_path": "../GraphZero/target/release/graphzero",
+            "consumer_sha256": "778f6a1d50ba4091128db633c483d8062c0d9c02dd84ecec7f6b247462f0d214",
+            "consumer_version": "graphzero 0.1.0",
+            "expected_hash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "notes": "",
+            "payload": "empty",
+            "reader": "graphzero",
+            "reference": "fz://blob/e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "status": "pass",
+            "writer": "fszero"
+          },
+          {
+            "actual_hash": "5989b27430bd160178c9f1c7df22b98625a27a2a75dca3e7ead9d509bbc36583",
+            "consumer": "graphzero",
+            "consumer_path": "../GraphZero/target/release/graphzero",
+            "consumer_sha256": "778f6a1d50ba4091128db633c483d8062c0d9c02dd84ecec7f6b247462f0d214",
+            "consumer_version": "graphzero 0.1.0",
+            "expected_hash": "5989b27430bd160178c9f1c7df22b98625a27a2a75dca3e7ead9d509bbc36583",
+            "notes": "",
+            "payload": "utf8_text",
+            "reader": "graphzero",
+            "reference": "fz://blob/5989b27430bd160178c9f1c7df22b98625a27a2a75dca3e7ead9d509bbc36583",
+            "status": "pass",
+            "writer": "fszero"
+          },
+          {
+            "actual_hash": "96e4d66c5a42d171e8aa107059eacaf52d3c2c095cbba1316b590a7392497718",
+            "consumer": "graphzero",
+            "consumer_path": "../GraphZero/target/release/graphzero",
+            "consumer_sha256": "778f6a1d50ba4091128db633c483d8062c0d9c02dd84ecec7f6b247462f0d214",
+            "consumer_version": "graphzero 0.1.0",
+            "expected_hash": "96e4d66c5a42d171e8aa107059eacaf52d3c2c095cbba1316b590a7392497718",
+            "notes": "",
+            "payload": "crlf",
+            "reader": "graphzero",
+            "reference": "fz://blob/96e4d66c5a42d171e8aa107059eacaf52d3c2c095cbba1316b590a7392497718",
+            "status": "pass",
+            "writer": "fszero"
+          },
+          {
+            "actual_hash": "db26ff816ac0f1934c81c2b52f9a6c5e2cc4884bbd830e0d434989e77de8196f",
+            "consumer": "graphzero",
+            "consumer_path": "../GraphZero/target/release/graphzero",
+            "consumer_sha256": "778f6a1d50ba4091128db633c483d8062c0d9c02dd84ecec7f6b247462f0d214",
+            "consumer_version": "graphzero 0.1.0",
+            "expected_hash": "db26ff816ac0f1934c81c2b52f9a6c5e2cc4884bbd830e0d434989e77de8196f",
+            "notes": "",
+            "payload": "binary",
+            "reader": "graphzero",
+            "reference": "fz://blob/db26ff816ac0f1934c81c2b52f9a6c5e2cc4884bbd830e0d434989e77de8196f",
+            "status": "pass",
+            "writer": "fszero"
+          },
+          {
+            "actual_hash": "675bdcefd49332c40b96a8d715780d03e1b3d0778a2047ff36f27dc2f256ef9d",
+            "consumer": "graphzero",
+            "consumer_path": "../GraphZero/target/release/graphzero",
+            "consumer_sha256": "778f6a1d50ba4091128db633c483d8062c0d9c02dd84ecec7f6b247462f0d214",
+            "consumer_version": "graphzero 0.1.0",
+            "expected_hash": "675bdcefd49332c40b96a8d715780d03e1b3d0778a2047ff36f27dc2f256ef9d",
+            "notes": "",
+            "payload": "big",
+            "reader": "graphzero",
+            "reference": "fz://blob/675bdcefd49332c40b96a8d715780d03e1b3d0778a2047ff36f27dc2f256ef9d",
+            "status": "pass",
+            "writer": "fszero"
+          },
+          {
+            "actual_hash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "consumer": "tokenzero",
+            "consumer_path": "../TokenZero/target/release/tokenzero",
+            "consumer_sha256": "6ed827055e2c5cde79d8f6b3a82ae5696d33c8ca96113a4f6cc9aa81dbb9bc57",
+            "consumer_version": "tokenzero 1.2.0",
+            "expected_hash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "notes": "",
+            "payload": "empty",
+            "reader": "tokenzero",
+            "reference": "fz://blob/e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "status": "pass",
+            "writer": "fszero"
+          },
+          {
+            "actual_hash": "5989b27430bd160178c9f1c7df22b98625a27a2a75dca3e7ead9d509bbc36583",
+            "consumer": "tokenzero",
+            "consumer_path": "../TokenZero/target/release/tokenzero",
+            "consumer_sha256": "6ed827055e2c5cde79d8f6b3a82ae5696d33c8ca96113a4f6cc9aa81dbb9bc57",
+            "consumer_version": "tokenzero 1.2.0",
+            "expected_hash": "5989b27430bd160178c9f1c7df22b98625a27a2a75dca3e7ead9d509bbc36583",
+            "notes": "",
+            "payload": "utf8_text",
+            "reader": "tokenzero",
+            "reference": "fz://blob/5989b27430bd160178c9f1c7df22b98625a27a2a75dca3e7ead9d509bbc36583",
+            "status": "pass",
+            "writer": "fszero"
+          },
+          {
+            "actual_hash": "96e4d66c5a42d171e8aa107059eacaf52d3c2c095cbba1316b590a7392497718",
+            "consumer": "tokenzero",
+            "consumer_path": "../TokenZero/target/release/tokenzero",
+            "consumer_sha256": "6ed827055e2c5cde79d8f6b3a82ae5696d33c8ca96113a4f6cc9aa81dbb9bc57",
+            "consumer_version": "tokenzero 1.2.0",
+            "expected_hash": "96e4d66c5a42d171e8aa107059eacaf52d3c2c095cbba1316b590a7392497718",
+            "notes": "",
+            "payload": "crlf",
+            "reader": "tokenzero",
+            "reference": "fz://blob/96e4d66c5a42d171e8aa107059eacaf52d3c2c095cbba1316b590a7392497718",
+            "status": "pass",
+            "writer": "fszero"
+          },
+          {
+            "actual_hash": "db26ff816ac0f1934c81c2b52f9a6c5e2cc4884bbd830e0d434989e77de8196f",
+            "consumer": "tokenzero",
+            "consumer_path": "../TokenZero/target/release/tokenzero",
+            "consumer_sha256": "6ed827055e2c5cde79d8f6b3a82ae5696d33c8ca96113a4f6cc9aa81dbb9bc57",
+            "consumer_version": "tokenzero 1.2.0",
+            "expected_hash": "db26ff816ac0f1934c81c2b52f9a6c5e2cc4884bbd830e0d434989e77de8196f",
+            "notes": "",
+            "payload": "binary",
+            "reader": "tokenzero",
+            "reference": "fz://blob/db26ff816ac0f1934c81c2b52f9a6c5e2cc4884bbd830e0d434989e77de8196f",
+            "status": "pass",
+            "writer": "fszero"
+          },
+          {
+            "actual_hash": "675bdcefd49332c40b96a8d715780d03e1b3d0778a2047ff36f27dc2f256ef9d",
+            "consumer": "tokenzero",
+            "consumer_path": "../TokenZero/target/release/tokenzero",
+            "consumer_sha256": "6ed827055e2c5cde79d8f6b3a82ae5696d33c8ca96113a4f6cc9aa81dbb9bc57",
+            "consumer_version": "tokenzero 1.2.0",
+            "expected_hash": "675bdcefd49332c40b96a8d715780d03e1b3d0778a2047ff36f27dc2f256ef9d",
+            "notes": "",
+            "payload": "big",
+            "reader": "tokenzero",
+            "reference": "fz://blob/675bdcefd49332c40b96a8d715780d03e1b3d0778a2047ff36f27dc2f256ef9d",
+            "status": "pass",
+            "writer": "fszero"
+          },
+          {
+            "actual_hash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "consumer": "fszero",
+            "consumer_path": "target/release/fszero",
+            "consumer_sha256": "fa5427bbf00c411205baf60c5cec232e43469fc8ffaf36f02be5b76ab6364ec2",
+            "consumer_version": "",
+            "expected_hash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "notes": "",
+            "payload": "empty",
+            "reader": "fszero",
+            "reference": "gz://blob/e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "status": "pass",
+            "writer": "graphzero"
+          },
+          {
+            "actual_hash": "5989b27430bd160178c9f1c7df22b98625a27a2a75dca3e7ead9d509bbc36583",
+            "consumer": "fszero",
+            "consumer_path": "target/release/fszero",
+            "consumer_sha256": "fa5427bbf00c411205baf60c5cec232e43469fc8ffaf36f02be5b76ab6364ec2",
+            "consumer_version": "",
+            "expected_hash": "5989b27430bd160178c9f1c7df22b98625a27a2a75dca3e7ead9d509bbc36583",
+            "notes": "",
+            "payload": "utf8_text",
+            "reader": "fszero",
+            "reference": "gz://blob/5989b27430bd160178c9f1c7df22b98625a27a2a75dca3e7ead9d509bbc36583",
+            "status": "pass",
+            "writer": "graphzero"
+          },
+          {
+            "actual_hash": "96e4d66c5a42d171e8aa107059eacaf52d3c2c095cbba1316b590a7392497718",
+            "consumer": "fszero",
+            "consumer_path": "target/release/fszero",
+            "consumer_sha256": "fa5427bbf00c411205baf60c5cec232e43469fc8ffaf36f02be5b76ab6364ec2",
+            "consumer_version": "",
+            "expected_hash": "96e4d66c5a42d171e8aa107059eacaf52d3c2c095cbba1316b590a7392497718",
+            "notes": "",
+            "payload": "crlf",
+            "reader": "fszero",
+            "reference": "gz://blob/96e4d66c5a42d171e8aa107059eacaf52d3c2c095cbba1316b590a7392497718",
+            "status": "pass",
+            "writer": "graphzero"
+          },
+          {
+            "actual_hash": "db26ff816ac0f1934c81c2b52f9a6c5e2cc4884bbd830e0d434989e77de8196f",
+            "consumer": "fszero",
+            "consumer_path": "target/release/fszero",
+            "consumer_sha256": "fa5427bbf00c411205baf60c5cec232e43469fc8ffaf36f02be5b76ab6364ec2",
+            "consumer_version": "",
+            "expected_hash": "db26ff816ac0f1934c81c2b52f9a6c5e2cc4884bbd830e0d434989e77de8196f",
+            "notes": "",
+            "payload": "binary",
+            "reader": "fszero",
+            "reference": "gz://blob/db26ff816ac0f1934c81c2b52f9a6c5e2cc4884bbd830e0d434989e77de8196f",
+            "status": "pass",
+            "writer": "graphzero"
+          },
+          {
+            "actual_hash": "675bdcefd49332c40b96a8d715780d03e1b3d0778a2047ff36f27dc2f256ef9d",
+            "consumer": "fszero",
+            "consumer_path": "target/release/fszero",
+            "consumer_sha256": "fa5427bbf00c411205baf60c5cec232e43469fc8ffaf36f02be5b76ab6364ec2",
+            "consumer_version": "",
+            "expected_hash": "675bdcefd49332c40b96a8d715780d03e1b3d0778a2047ff36f27dc2f256ef9d",
+            "notes": "",
+            "payload": "big",
+            "reader": "fszero",
+            "reference": "gz://blob/675bdcefd49332c40b96a8d715780d03e1b3d0778a2047ff36f27dc2f256ef9d",
+            "status": "pass",
+            "writer": "graphzero"
+          },
+          {
+            "actual_hash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "consumer": "graphzero",
+            "consumer_path": "../GraphZero/target/release/graphzero",
+            "consumer_sha256": "778f6a1d50ba4091128db633c483d8062c0d9c02dd84ecec7f6b247462f0d214",
+            "consumer_version": "graphzero 0.1.0",
+            "expected_hash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "notes": "",
+            "payload": "empty",
+            "reader": "graphzero",
+            "reference": "gz://blob/e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "status": "pass",
+            "writer": "graphzero"
+          },
+          {
+            "actual_hash": "5989b27430bd160178c9f1c7df22b98625a27a2a75dca3e7ead9d509bbc36583",
+            "consumer": "graphzero",
+            "consumer_path": "../GraphZero/target/release/graphzero",
+            "consumer_sha256": "778f6a1d50ba4091128db633c483d8062c0d9c02dd84ecec7f6b247462f0d214",
+            "consumer_version": "graphzero 0.1.0",
+            "expected_hash": "5989b27430bd160178c9f1c7df22b98625a27a2a75dca3e7ead9d509bbc36583",
+            "notes": "",
+            "payload": "utf8_text",
+            "reader": "graphzero",
+            "reference": "gz://blob/5989b27430bd160178c9f1c7df22b98625a27a2a75dca3e7ead9d509bbc36583",
+            "status": "pass",
+            "writer": "graphzero"
+          },
+          {
+            "actual_hash": "96e4d66c5a42d171e8aa107059eacaf52d3c2c095cbba1316b590a7392497718",
+            "consumer": "graphzero",
+            "consumer_path": "../GraphZero/target/release/graphzero",
+            "consumer_sha256": "778f6a1d50ba4091128db633c483d8062c0d9c02dd84ecec7f6b247462f0d214",
+            "consumer_version": "graphzero 0.1.0",
+            "expected_hash": "96e4d66c5a42d171e8aa107059eacaf52d3c2c095cbba1316b590a7392497718",
+            "notes": "",
+            "payload": "crlf",
+            "reader": "graphzero",
+            "reference": "gz://blob/96e4d66c5a42d171e8aa107059eacaf52d3c2c095cbba1316b590a7392497718",
+            "status": "pass",
+            "writer": "graphzero"
+          },
+          {
+            "actual_hash": "db26ff816ac0f1934c81c2b52f9a6c5e2cc4884bbd830e0d434989e77de8196f",
+            "consumer": "graphzero",
+            "consumer_path": "../GraphZero/target/release/graphzero",
+            "consumer_sha256": "778f6a1d50ba4091128db633c483d8062c0d9c02dd84ecec7f6b247462f0d214",
+            "consumer_version": "graphzero 0.1.0",
+            "expected_hash": "db26ff816ac0f1934c81c2b52f9a6c5e2cc4884bbd830e0d434989e77de8196f",
+            "notes": "",
+            "payload": "binary",
+            "reader": "graphzero",
+            "reference": "gz://blob/db26ff816ac0f1934c81c2b52f9a6c5e2cc4884bbd830e0d434989e77de8196f",
+            "status": "pass",
+            "writer": "graphzero"
+          },
+          {
+            "actual_hash": "675bdcefd49332c40b96a8d715780d03e1b3d0778a2047ff36f27dc2f256ef9d",
+            "consumer": "graphzero",
+            "consumer_path": "../GraphZero/target/release/graphzero",
+            "consumer_sha256": "778f6a1d50ba4091128db633c483d8062c0d9c02dd84ecec7f6b247462f0d214",
+            "consumer_version": "graphzero 0.1.0",
+            "expected_hash": "675bdcefd49332c40b96a8d715780d03e1b3d0778a2047ff36f27dc2f256ef9d",
+            "notes": "",
+            "payload": "big",
+            "reader": "graphzero",
+            "reference": "gz://blob/675bdcefd49332c40b96a8d715780d03e1b3d0778a2047ff36f27dc2f256ef9d",
+            "status": "pass",
+            "writer": "graphzero"
+          },
+          {
+            "actual_hash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "consumer": "tokenzero",
+            "consumer_path": "../TokenZero/target/release/tokenzero",
+            "consumer_sha256": "6ed827055e2c5cde79d8f6b3a82ae5696d33c8ca96113a4f6cc9aa81dbb9bc57",
+            "consumer_version": "tokenzero 1.2.0",
+            "expected_hash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "notes": "",
+            "payload": "empty",
+            "reader": "tokenzero",
+            "reference": "gz://blob/e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "status": "pass",
+            "writer": "graphzero"
+          },
+          {
+            "actual_hash": "5989b27430bd160178c9f1c7df22b98625a27a2a75dca3e7ead9d509bbc36583",
+            "consumer": "tokenzero",
+            "consumer_path": "../TokenZero/target/release/tokenzero",
+            "consumer_sha256": "6ed827055e2c5cde79d8f6b3a82ae5696d33c8ca96113a4f6cc9aa81dbb9bc57",
+            "consumer_version": "tokenzero 1.2.0",
+            "expected_hash": "5989b27430bd160178c9f1c7df22b98625a27a2a75dca3e7ead9d509bbc36583",
+            "notes": "",
+            "payload": "utf8_text",
+            "reader": "tokenzero",
+            "reference": "gz://blob/5989b27430bd160178c9f1c7df22b98625a27a2a75dca3e7ead9d509bbc36583",
+            "status": "pass",
+            "writer": "graphzero"
+          },
+          {
+            "actual_hash": "96e4d66c5a42d171e8aa107059eacaf52d3c2c095cbba1316b590a7392497718",
+            "consumer": "tokenzero",
+            "consumer_path": "../TokenZero/target/release/tokenzero",
+            "consumer_sha256": "6ed827055e2c5cde79d8f6b3a82ae5696d33c8ca96113a4f6cc9aa81dbb9bc57",
+            "consumer_version": "tokenzero 1.2.0",
+            "expected_hash": "96e4d66c5a42d171e8aa107059eacaf52d3c2c095cbba1316b590a7392497718",
+            "notes": "",
+            "payload": "crlf",
+            "reader": "tokenzero",
+            "reference": "gz://blob/96e4d66c5a42d171e8aa107059eacaf52d3c2c095cbba1316b590a7392497718",
+            "status": "pass",
+            "writer": "graphzero"
+          },
+          {
+            "actual_hash": "db26ff816ac0f1934c81c2b52f9a6c5e2cc4884bbd830e0d434989e77de8196f",
+            "consumer": "tokenzero",
+            "consumer_path": "../TokenZero/target/release/tokenzero",
+            "consumer_sha256": "6ed827055e2c5cde79d8f6b3a82ae5696d33c8ca96113a4f6cc9aa81dbb9bc57",
+            "consumer_version": "tokenzero 1.2.0",
+            "expected_hash": "db26ff816ac0f1934c81c2b52f9a6c5e2cc4884bbd830e0d434989e77de8196f",
+            "notes": "",
+            "payload": "binary",
+            "reader": "tokenzero",
+            "reference": "gz://blob/db26ff816ac0f1934c81c2b52f9a6c5e2cc4884bbd830e0d434989e77de8196f",
+            "status": "pass",
+            "writer": "graphzero"
+          },
+          {
+            "actual_hash": "675bdcefd49332c40b96a8d715780d03e1b3d0778a2047ff36f27dc2f256ef9d",
+            "consumer": "tokenzero",
+            "consumer_path": "../TokenZero/target/release/tokenzero",
+            "consumer_sha256": "6ed827055e2c5cde79d8f6b3a82ae5696d33c8ca96113a4f6cc9aa81dbb9bc57",
+            "consumer_version": "tokenzero 1.2.0",
+            "expected_hash": "675bdcefd49332c40b96a8d715780d03e1b3d0778a2047ff36f27dc2f256ef9d",
+            "notes": "",
+            "payload": "big",
+            "reader": "tokenzero",
+            "reference": "gz://blob/675bdcefd49332c40b96a8d715780d03e1b3d0778a2047ff36f27dc2f256ef9d",
+            "status": "pass",
+            "writer": "graphzero"
+          },
+          {
+            "actual_hash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "consumer": "fszero",
+            "consumer_path": "target/release/fszero",
+            "consumer_sha256": "fa5427bbf00c411205baf60c5cec232e43469fc8ffaf36f02be5b76ab6364ec2",
+            "consumer_version": "",
+            "expected_hash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "notes": "",
+            "payload": "empty",
+            "reader": "fszero",
+            "reference": "tz://blob/e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "status": "pass",
+            "writer": "tokenzero"
+          },
+          {
+            "actual_hash": "5989b27430bd160178c9f1c7df22b98625a27a2a75dca3e7ead9d509bbc36583",
+            "consumer": "fszero",
+            "consumer_path": "target/release/fszero",
+            "consumer_sha256": "fa5427bbf00c411205baf60c5cec232e43469fc8ffaf36f02be5b76ab6364ec2",
+            "consumer_version": "",
+            "expected_hash": "5989b27430bd160178c9f1c7df22b98625a27a2a75dca3e7ead9d509bbc36583",
+            "notes": "",
+            "payload": "utf8_text",
+            "reader": "fszero",
+            "reference": "tz://blob/5989b27430bd160178c9f1c7df22b98625a27a2a75dca3e7ead9d509bbc36583",
+            "status": "pass",
+            "writer": "tokenzero"
+          },
+          {
+            "actual_hash": "96e4d66c5a42d171e8aa107059eacaf52d3c2c095cbba1316b590a7392497718",
+            "consumer": "fszero",
+            "consumer_path": "target/release/fszero",
+            "consumer_sha256": "fa5427bbf00c411205baf60c5cec232e43469fc8ffaf36f02be5b76ab6364ec2",
+            "consumer_version": "",
+            "expected_hash": "96e4d66c5a42d171e8aa107059eacaf52d3c2c095cbba1316b590a7392497718",
+            "notes": "",
+            "payload": "crlf",
+            "reader": "fszero",
+            "reference": "tz://blob/96e4d66c5a42d171e8aa107059eacaf52d3c2c095cbba1316b590a7392497718",
+            "status": "pass",
+            "writer": "tokenzero"
+          },
+          {
+            "actual_hash": "db26ff816ac0f1934c81c2b52f9a6c5e2cc4884bbd830e0d434989e77de8196f",
+            "consumer": "fszero",
+            "consumer_path": "target/release/fszero",
+            "consumer_sha256": "fa5427bbf00c411205baf60c5cec232e43469fc8ffaf36f02be5b76ab6364ec2",
+            "consumer_version": "",
+            "expected_hash": "db26ff816ac0f1934c81c2b52f9a6c5e2cc4884bbd830e0d434989e77de8196f",
+            "notes": "",
+            "payload": "binary",
+            "reader": "fszero",
+            "reference": "tz://blob/db26ff816ac0f1934c81c2b52f9a6c5e2cc4884bbd830e0d434989e77de8196f",
+            "status": "pass",
+            "writer": "tokenzero"
+          },
+          {
+            "actual_hash": "675bdcefd49332c40b96a8d715780d03e1b3d0778a2047ff36f27dc2f256ef9d",
+            "consumer": "fszero",
+            "consumer_path": "target/release/fszero",
+            "consumer_sha256": "fa5427bbf00c411205baf60c5cec232e43469fc8ffaf36f02be5b76ab6364ec2",
+            "consumer_version": "",
+            "expected_hash": "675bdcefd49332c40b96a8d715780d03e1b3d0778a2047ff36f27dc2f256ef9d",
+            "notes": "",
+            "payload": "big",
+            "reader": "fszero",
+            "reference": "tz://blob/675bdcefd49332c40b96a8d715780d03e1b3d0778a2047ff36f27dc2f256ef9d",
+            "status": "pass",
+            "writer": "tokenzero"
+          },
+          {
+            "actual_hash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "consumer": "graphzero",
+            "consumer_path": "../GraphZero/target/release/graphzero",
+            "consumer_sha256": "778f6a1d50ba4091128db633c483d8062c0d9c02dd84ecec7f6b247462f0d214",
+            "consumer_version": "graphzero 0.1.0",
+            "expected_hash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "notes": "",
+            "payload": "empty",
+            "reader": "graphzero",
+            "reference": "tz://blob/e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "status": "pass",
+            "writer": "tokenzero"
+          },
+          {
+            "actual_hash": "5989b27430bd160178c9f1c7df22b98625a27a2a75dca3e7ead9d509bbc36583",
+            "consumer": "graphzero",
+            "consumer_path": "../GraphZero/target/release/graphzero",
+            "consumer_sha256": "778f6a1d50ba4091128db633c483d8062c0d9c02dd84ecec7f6b247462f0d214",
+            "consumer_version": "graphzero 0.1.0",
+            "expected_hash": "5989b27430bd160178c9f1c7df22b98625a27a2a75dca3e7ead9d509bbc36583",
+            "notes": "",
+            "payload": "utf8_text",
+            "reader": "graphzero",
+            "reference": "tz://blob/5989b27430bd160178c9f1c7df22b98625a27a2a75dca3e7ead9d509bbc36583",
+            "status": "pass",
+            "writer": "tokenzero"
+          },
+          {
+            "actual_hash": "96e4d66c5a42d171e8aa107059eacaf52d3c2c095cbba1316b590a7392497718",
+            "consumer": "graphzero",
+            "consumer_path": "../GraphZero/target/release/graphzero",
+            "consumer_sha256": "778f6a1d50ba4091128db633c483d8062c0d9c02dd84ecec7f6b247462f0d214",
+            "consumer_version": "graphzero 0.1.0",
+            "expected_hash": "96e4d66c5a42d171e8aa107059eacaf52d3c2c095cbba1316b590a7392497718",
+            "notes": "",
+            "payload": "crlf",
+            "reader": "graphzero",
+            "reference": "tz://blob/96e4d66c5a42d171e8aa107059eacaf52d3c2c095cbba1316b590a7392497718",
+            "status": "pass",
+            "writer": "tokenzero"
+          },
+          {
+            "actual_hash": "db26ff816ac0f1934c81c2b52f9a6c5e2cc4884bbd830e0d434989e77de8196f",
+            "consumer": "graphzero",
+            "consumer_path": "../GraphZero/target/release/graphzero",
+            "consumer_sha256": "778f6a1d50ba4091128db633c483d8062c0d9c02dd84ecec7f6b247462f0d214",
+            "consumer_version": "graphzero 0.1.0",
+            "expected_hash": "db26ff816ac0f1934c81c2b52f9a6c5e2cc4884bbd830e0d434989e77de8196f",
+            "notes": "",
+            "payload": "binary",
+            "reader": "graphzero",
+            "reference": "tz://blob/db26ff816ac0f1934c81c2b52f9a6c5e2cc4884bbd830e0d434989e77de8196f",
+            "status": "pass",
+            "writer": "tokenzero"
+          },
+          {
+            "actual_hash": "675bdcefd49332c40b96a8d715780d03e1b3d0778a2047ff36f27dc2f256ef9d",
+            "consumer": "graphzero",
+            "consumer_path": "../GraphZero/target/release/graphzero",
+            "consumer_sha256": "778f6a1d50ba4091128db633c483d8062c0d9c02dd84ecec7f6b247462f0d214",
+            "consumer_version": "graphzero 0.1.0",
+            "expected_hash": "675bdcefd49332c40b96a8d715780d03e1b3d0778a2047ff36f27dc2f256ef9d",
+            "notes": "",
+            "payload": "big",
+            "reader": "graphzero",
+            "reference": "tz://blob/675bdcefd49332c40b96a8d715780d03e1b3d0778a2047ff36f27dc2f256ef9d",
+            "status": "pass",
+            "writer": "tokenzero"
+          },
+          {
+            "actual_hash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "consumer": "tokenzero",
+            "consumer_path": "../TokenZero/target/release/tokenzero",
+            "consumer_sha256": "6ed827055e2c5cde79d8f6b3a82ae5696d33c8ca96113a4f6cc9aa81dbb9bc57",
+            "consumer_version": "tokenzero 1.2.0",
+            "expected_hash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "notes": "",
+            "payload": "empty",
+            "reader": "tokenzero",
+            "reference": "tz://blob/e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "status": "pass",
+            "writer": "tokenzero"
+          },
+          {
+            "actual_hash": "5989b27430bd160178c9f1c7df22b98625a27a2a75dca3e7ead9d509bbc36583",
+            "consumer": "tokenzero",
+            "consumer_path": "../TokenZero/target/release/tokenzero",
+            "consumer_sha256": "6ed827055e2c5cde79d8f6b3a82ae5696d33c8ca96113a4f6cc9aa81dbb9bc57",
+            "consumer_version": "tokenzero 1.2.0",
+            "expected_hash": "5989b27430bd160178c9f1c7df22b98625a27a2a75dca3e7ead9d509bbc36583",
+            "notes": "",
+            "payload": "utf8_text",
+            "reader": "tokenzero",
+            "reference": "tz://blob/5989b27430bd160178c9f1c7df22b98625a27a2a75dca3e7ead9d509bbc36583",
+            "status": "pass",
+            "writer": "tokenzero"
+          },
+          {
+            "actual_hash": "96e4d66c5a42d171e8aa107059eacaf52d3c2c095cbba1316b590a7392497718",
+            "consumer": "tokenzero",
+            "consumer_path": "../TokenZero/target/release/tokenzero",
+            "consumer_sha256": "6ed827055e2c5cde79d8f6b3a82ae5696d33c8ca96113a4f6cc9aa81dbb9bc57",
+            "consumer_version": "tokenzero 1.2.0",
+            "expected_hash": "96e4d66c5a42d171e8aa107059eacaf52d3c2c095cbba1316b590a7392497718",
+            "notes": "",
+            "payload": "crlf",
+            "reader": "tokenzero",
+            "reference": "tz://blob/96e4d66c5a42d171e8aa107059eacaf52d3c2c095cbba1316b590a7392497718",
+            "status": "pass",
+            "writer": "tokenzero"
+          },
+          {
+            "actual_hash": "db26ff816ac0f1934c81c2b52f9a6c5e2cc4884bbd830e0d434989e77de8196f",
+            "consumer": "tokenzero",
+            "consumer_path": "../TokenZero/target/release/tokenzero",
+            "consumer_sha256": "6ed827055e2c5cde79d8f6b3a82ae5696d33c8ca96113a4f6cc9aa81dbb9bc57",
+            "consumer_version": "tokenzero 1.2.0",
+            "expected_hash": "db26ff816ac0f1934c81c2b52f9a6c5e2cc4884bbd830e0d434989e77de8196f",
+            "notes": "",
+            "payload": "binary",
+            "reader": "tokenzero",
+            "reference": "tz://blob/db26ff816ac0f1934c81c2b52f9a6c5e2cc4884bbd830e0d434989e77de8196f",
+            "status": "pass",
+            "writer": "tokenzero"
+          },
+          {
+            "actual_hash": "675bdcefd49332c40b96a8d715780d03e1b3d0778a2047ff36f27dc2f256ef9d",
+            "consumer": "tokenzero",
+            "consumer_path": "../TokenZero/target/release/tokenzero",
+            "consumer_sha256": "6ed827055e2c5cde79d8f6b3a82ae5696d33c8ca96113a4f6cc9aa81dbb9bc57",
+            "consumer_version": "tokenzero 1.2.0",
+            "expected_hash": "675bdcefd49332c40b96a8d715780d03e1b3d0778a2047ff36f27dc2f256ef9d",
+            "notes": "",
+            "payload": "big",
+            "reader": "tokenzero",
+            "reference": "tz://blob/675bdcefd49332c40b96a8d715780d03e1b3d0778a2047ff36f27dc2f256ef9d",
+            "status": "pass",
+            "writer": "tokenzero"
+          }
+        ],
+        "os": "macos"
+      },
+      {
+        "cells": [
+          {
+            "payload": "all",
+            "reader": "fszero",
+            "skip_reason": "host OS is macos; cannot run linux cells on this machine",
+            "status": "skip",
+            "writer": "fszero"
+          },
+          {
+            "payload": "all",
+            "reader": "graphzero",
+            "skip_reason": "host OS is macos; cannot run linux cells on this machine",
+            "status": "skip",
+            "writer": "fszero"
+          },
+          {
+            "payload": "all",
+            "reader": "tokenzero",
+            "skip_reason": "host OS is macos; cannot run linux cells on this machine",
+            "status": "skip",
+            "writer": "fszero"
+          },
+          {
+            "payload": "all",
+            "reader": "fszero",
+            "skip_reason": "host OS is macos; cannot run linux cells on this machine",
+            "status": "skip",
+            "writer": "graphzero"
+          },
+          {
+            "payload": "all",
+            "reader": "graphzero",
+            "skip_reason": "host OS is macos; cannot run linux cells on this machine",
+            "status": "skip",
+            "writer": "graphzero"
+          },
+          {
+            "payload": "all",
+            "reader": "tokenzero",
+            "skip_reason": "host OS is macos; cannot run linux cells on this machine",
+            "status": "skip",
+            "writer": "graphzero"
+          },
+          {
+            "payload": "all",
+            "reader": "fszero",
+            "skip_reason": "host OS is macos; cannot run linux cells on this machine",
+            "status": "skip",
+            "writer": "tokenzero"
+          },
+          {
+            "payload": "all",
+            "reader": "graphzero",
+            "skip_reason": "host OS is macos; cannot run linux cells on this machine",
+            "status": "skip",
+            "writer": "tokenzero"
+          },
+          {
+            "payload": "all",
+            "reader": "tokenzero",
+            "skip_reason": "host OS is macos; cannot run linux cells on this machine",
+            "status": "skip",
+            "writer": "tokenzero"
+          }
+        ],
+        "os": "linux"
+      },
+      {
+        "cells": [
+          {
+            "payload": "all",
+            "reader": "fszero",
+            "skip_reason": "host OS is macos; cannot run windows cells on this machine",
+            "status": "skip",
+            "writer": "fszero"
+          },
+          {
+            "payload": "all",
+            "reader": "graphzero",
+            "skip_reason": "host OS is macos; cannot run windows cells on this machine",
+            "status": "skip",
+            "writer": "fszero"
+          },
+          {
+            "payload": "all",
+            "reader": "tokenzero",
+            "skip_reason": "host OS is macos; cannot run windows cells on this machine",
+            "status": "skip",
+            "writer": "fszero"
+          },
+          {
+            "payload": "all",
+            "reader": "fszero",
+            "skip_reason": "host OS is macos; cannot run windows cells on this machine",
+            "status": "skip",
+            "writer": "graphzero"
+          },
+          {
+            "payload": "all",
+            "reader": "graphzero",
+            "skip_reason": "host OS is macos; cannot run windows cells on this machine",
+            "status": "skip",
+            "writer": "graphzero"
+          },
+          {
+            "payload": "all",
+            "reader": "tokenzero",
+            "skip_reason": "host OS is macos; cannot run windows cells on this machine",
+            "status": "skip",
+            "writer": "graphzero"
+          },
+          {
+            "payload": "all",
+            "reader": "fszero",
+            "skip_reason": "host OS is macos; cannot run windows cells on this machine",
+            "status": "skip",
+            "writer": "tokenzero"
+          },
+          {
+            "payload": "all",
+            "reader": "graphzero",
+            "skip_reason": "host OS is macos; cannot run windows cells on this machine",
+            "status": "skip",
+            "writer": "tokenzero"
+          },
+          {
+            "payload": "all",
+            "reader": "tokenzero",
+            "skip_reason": "host OS is macos; cannot run windows cells on this machine",
+            "status": "skip",
+            "writer": "tokenzero"
+          }
+        ],
+        "os": "windows"
+      }
+    ],
+    "sibling_shas": [
+      {
+        "commit": "ed190f8851c4247cbfa557ed72779ed180c37f41",
+        "engine": "fszero",
+        "os": "macos",
+        "path": "target/release/fszero",
+        "sha256": "fa5427bbf00c411205baf60c5cec232e43469fc8ffaf36f02be5b76ab6364ec2",
+        "version": ""
+      },
+      {
+        "commit": "dadf675d39c30b4e63feb7fab29b7a5726283994",
+        "engine": "graphzero",
+        "os": "macos",
+        "path": "../GraphZero/target/release/graphzero",
+        "sha256": "778f6a1d50ba4091128db633c483d8062c0d9c02dd84ecec7f6b247462f0d214",
+        "version": "graphzero 0.1.0"
+      },
+      {
+        "commit": "5baf7b3ff184c6242c0e0e3c32dcdb559b877a35",
+        "engine": "tokenzero",
+        "os": "macos",
+        "path": "../TokenZero/target/release/tokenzero",
+        "sha256": "6ed827055e2c5cde79d8f6b3a82ae5696d33c8ca96113a4f6cc9aa81dbb9bc57",
+        "version": "tokenzero 1.2.0"
+      }
+    ],
+    "status": "macos-only",
+    "wrong_store": {
+      "consumer": "graphzero",
+      "consumer_failed": true,
+      "diag": {
+        "binary": {
+          "commit": "dadf675d39c30b4e63feb7fab29b7a5726283994",
+          "engine": "graphzero",
+          "version": "0.1.0"
+        },
+        "error_class": "digest_mismatch",
+        "exit_code": 8,
+        "message": "expected 7f553ef88f1d2b0ecf80588bdddc2f97de5267647a1a6fcc77c749a5144434c6, got c90a090615d6c77dfdc45a02d9d18c7cebe71c0d2213efbc7dd50f7e9ea2dbd5",
+        "ok": false,
+        "os": "macos",
+        "ref": "fz://blob/7f553ef88f1d2b0ecf80588bdddc2f97de5267647a1a6fcc77c749a5144434c6",
+        "schema": "zeroref-fixture/v1"
+      },
+      "error_class": "digest_mismatch",
+      "exit_code": 8,
+      "producer": "fszero",
+      "reference": "fz://blob/7f553ef88f1d2b0ecf80588bdddc2f97de5267647a1a6fcc77c749a5144434c6",
+      "status": "pass",
+      "test": "corruption-catches-false-positive"
+    }
+  },
+  "schema": "zeroref-conformance-evidence/v1",
+  "timestamp": "2026-07-12T12:57:44.191628000Z",
+  "zeroref_version": "v1"
+}

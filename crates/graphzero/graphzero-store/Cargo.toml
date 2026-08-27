@@ -1,0 +1,116 @@
+[package]
+name = "graphzero-store"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+autotests = false
+
+[features]
+default = ["tokenzero"]
+tokenzero = []
+# Non-default build identity for deliberate durability crash injection.
+crash-injection = []
+
+[dependencies]
+anyhow = { workspace = true }
+graphzero-extract = { workspace = true }
+graphzero-types = { workspace = true }
+parking_lot = "0.12"
+serde = { workspace = true }
+serde_json = { workspace = true }
+tracing = { workspace = true }
+hdrhistogram = { workspace = true }
+zstd = "0.13"
+bytemuck = { workspace = true }
+crc32fast = "1"
+memmap2 = { workspace = true }
+sha2 = { workspace = true }
+zero-abi = { workspace = true }
+zero-gauge = { workspace = true }
+zero-ref = { workspace = true }
+zero-store = { workspace = true }
+git2 = { workspace = true }
+libc = "0.2"
+notify = "8.2.0"
+rayon = "1.12"
+crossbeam-queue = "0.3"
+
+[dev-dependencies]
+graphzero-test-support = { workspace = true }
+graphzero-semantic = { workspace = true }
+graphzero-engine = { workspace = true }
+bytemuck = { workspace = true }
+parking_lot = "0.12"
+proptest = { workspace = true }
+criterion = { workspace = true }
+tempfile = { workspace = true }
+serial_test = { workspace = true }
+git2 = { workspace = true }
+libc = "0.2"
+
+[[bench]]
+name = "budgets"
+harness = false
+
+[[bench]]
+name = "query_warm"
+harness = false
+
+[[bench]]
+name = "query_cold"
+harness = false
+
+[[bench]]
+name = "branch_switch"
+harness = false
+
+[[bench]]
+name = "query_warm_breakdown"
+harness = false
+
+[[bench]]
+name = "cold_breakdown"
+harness = false
+
+[[bench]]
+name = "snap_to_file"
+harness = false
+
+[[bench]]
+name = "blast_precomp"
+harness = false
+
+[lints]
+workspace = true
+
+[[test]]
+name = "store_codemode_ref_contract"
+path = "../../../tests/graphzero/store/codemode_ref_contract.rs"
+
+[[test]]
+name = "store_crash_boundary_store"
+path = "../../../tests/graphzero/store/crash_boundary_store.rs"
+
+[[test]]
+name = "store_durability_receipt_contract"
+path = "../../../tests/graphzero/store/durability_receipt_contract.rs"
+
+[[test]]
+name = "store_external_store_contract"
+path = "../../../tests/graphzero/store/external_store_contract.rs"
+
+[[test]]
+name = "store_ref_index_contract"
+path = "../../../tests/graphzero/store/ref_index_contract.rs"
+
+[[test]]
+name = "store_zeroref_capability_contract"
+path = "../../../tests/graphzero/store/zeroref_capability_contract.rs"
+
+[[test]]
+name = "store_zeroref_conformance_gate"
+path = "../../../tests/graphzero/store/zeroref_conformance_gate.rs"
+
+[[test]]
+name = "store_zeroref_fragment_conformance"
+path = "../../../tests/graphzero/store/zeroref_fragment_conformance.rs"

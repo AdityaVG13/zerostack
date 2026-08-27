@@ -1,0 +1,7 @@
+{"id":"rare_primary","class":"rare","needle":"rare_zz9q_unique_needle_aluu","expect_min_hits":1,"expect_max_hits":8,"budget":80}
+{"id":"rare_prefix","class":"rare","needle":"zz9q_unique","expect_min_hits":1,"expect_max_hits":8,"budget":80}
+{"id":"common_parse","class":"common","needle":"parse","expect_min_hits":50,"expect_max_hits":null,"budget":80}
+{"id":"common_prefix","class":"common","needle":"parse_alpha_","expect_min_hits":20,"expect_max_hits":null,"budget":80}
+{"id":"common_mod","class":"common","needle":"mod_","expect_min_hits":10,"expect_max_hits":null,"budget":80}
+{"id":"absent_primary","class":"absent","needle":"ABSENT_needle_xyz_never_9yq","expect_min_hits":0,"expect_max_hits":0,"budget":80}
+{"id":"absent_noise","class":"absent","needle":"zzz_nomatch_9yq_aluu","expect_min_hits":0,"expect_max_hits":0,"budget":80}

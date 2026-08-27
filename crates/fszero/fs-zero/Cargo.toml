@@ -1,0 +1,162 @@
+[package]
+name = "fs-zero"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+autotests = false
+
+[lib]
+path = "src/lib.rs"
+
+[features]
+# The library's broad defaults exist for development and compatibility tests.
+# Shipped packages below use default-features=false and opt into only their
+# surface plus an explicit SQLite link mode.
+default = ["fszero-ast-sgrep", "watch", "dev-harness", "mcp-http", "sqlite-bundled"]
+fszero-ast-sgrep = ["dep:ast-sgrep-lang", "dep:ast-sgrep-core", "fszero-engine/fszero-ast-sgrep"]
+fszero-semantic-local = ["dep:frankensearch", "fszero-engine/fszero-semantic-local"]
+# FSEvents/inotify for FSZERO_WATCH=1 (inject harness works without OS watcher).
+watch = ["dep:notify", "fszero-engine/watch"]
+# In-process surface_bench / release harness (not shipped product surfaces).
+dev-harness = ["fszero-engine/dev-harness"]
+# Stateless HTTP MCP transport (examples + lib API). Shipped stdio packages
+# deliberately omit it.
+mcp-http = []
+# Mutually exclusive package surfaces. Each shipped package selects exactly one.
+# `surface-mcp` is now domain/catalog configuration only. The FastMCP
+# transport lives in the `fszero-mcp` package via the hub `zero-codemode`
+# adapter (fszero-xg53); the root library no longer links fastmcp-rust.
+surface-mcp = ["watch"]
+# Legacy engine-local CodeMode surface keeps the hub interpreter host so
+# existing direct/default behavior is unchanged. Planner-free raw-worker
+# builds (--no-default-features) omit the interpreter entirely.
+surface-codemode = ["dep:zero-codemode", "watch"]
+# Use the host libsqlite3 when the packager has verified it is available.
+sqlite-system = []
+# Portable fallback for hosts without a usable system SQLite installation.
+sqlite-bundled = ["rusqlite/bundled", "fszero-store/sqlite-bundled", "fszero-engine/sqlite-bundled"]
+# Eval/spike scanners for benchmarks only (not in shipped packages).
+search-eval = ["fszero-engine/search-eval"]
+
+
+
+[dependencies]
+# frankensqlite: durable content-addressed store. Transitively pulls asupersync,
+# which gates the crate to the nightly toolchain (#![feature(try_trait_v2)]).
+fsqlite = "0.1.19"
+# Direct pin for prepared-cache / hot-path profile snapshot (fszero-fsqlite-prepared-cache-metrics-fudk).
+# The fsqlite facade does not re-export hot_path_profile_snapshot; core is already a transitive dep.
+fsqlite-core = "0.1.19"
+# sha256 for fz://blob/<hash> content addressing.
+sha2 = "0.11.0"
+# Work-stealing pool for cold-index file ingest (fszero-lj3): static chunking
+# left cores idle on skewed file-size distributions; rayon rebalances.
+rayon = "1.12"
+# Literal search prefilter eval (fszero-9yq): memmem Finder for candidate scanners.
+memchr = "2"
+# Batch multiSearch compiles mixed literal/regex matcher sets once per traversal.
+regex = "1"
+unicode-normalization = "0.1"
+# Real SQLite for the rebuildable AST sidecar. Product packages prefer a
+# verified system libsqlite3, avoiding sqlite3.c compilation. Their
+# `sqlite-bundled` feature is the explicit cross-platform fallback.
+rusqlite = { version = "0.40", features = ["backup"] }
+# JSON-RPC framing for the sync stdio MCP target.
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+# Shared ZeroStack foundation crates (drift-forbidden contract machinery).
+zero-abi.workspace = true
+zero-ref.workspace = true
+zero-cert.workspace = true
+fszero-core.workspace = true
+fszero-store.workspace = true
+fszero-engine.workspace = true
+# Canonical store-root / project-key / CAS layout (fszero-9pvk / hub ee2).
+zero-store.workspace = true
+# Hub-owned restricted CodeMode host/runtime boundary. Keep the revision aligned
+# with every other ZeroStack contract dependency above.
+zero-codemode = { workspace = true, optional = true }
+ast-sgrep-lang = { git = "https://github.com/AdityaVG13/ast-sgrep.git", rev = "ab3bdc395446d90566e52ccc6cdb761b55dc228b", optional = true }
+ast-sgrep-core = { git = "https://github.com/AdityaVG13/ast-sgrep.git", rev = "ab3bdc395446d90566e52ccc6cdb761b55dc228b", optional = true }
+# Local semantic resolve (fszero-9wn): pin frankensearch 0.3.2 hash+lexical only.
+# Optional ML backends (model2vec/fastembed/download) stay off -- local-first,
+# zero-infra. Enable via --features fszero-semantic-local (default remains off).
+frankensearch = { version = "0.3.2", default-features = false, features = ["hash", "lexical"], optional = true }
+# FSEvents/inotify watcher for watch-mode (feature `watch` / FSZERO_WATCH=1).
+notify = { version = "8.2.0", optional = true }
+ignore = "0.4"
+[target.'cfg(unix)'.dependencies]
+# Extended-attribute fidelity (fszero-l4g): carry xattrs through atomic_write
+# and journal/restore them across undo and rollback (com.apple.quarantine
+# and friends on macOS).
+xattr = "1"
+
+[target.'cfg(unix)'.dev-dependencies]
+xattr = "1"
+
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(feature, values("default", "fszero-ast-sgrep", "fszero-semantic-local", "surface-mcp", "surface-codemode", "watch", "dev-harness", "search-eval", "mcp-http", "sqlite-system", "sqlite-bundled"))'] }
+
+[[bench]]
+name = "perf_harness"
+path = "../../../benchmarks/fszero/perf_harness.rs"
+harness = false
+
+[[bench]]
+name = "search_prefilter_spike"
+path = "../../../benchmarks/fszero/search_prefilter_spike.rs"
+harness = false
+required-features = ["search-eval"]
+
+[dev-dependencies]
+fszero-test-support = { path = "../fszero-test-support" }
+tempfile = "3.27.0"
+# Fidelity keystone (fszero-39h): property test materialize(journal(tree)) == tree.
+proptest = "1"
+
+# Live [[test]] paths only. Vanished files after the intent-not-fluff prune
+# are not declared here and must not be restored as fluff.
+
+[[test]]
+name = "capability"
+path = "../../../tests/fszero/core/capability.rs"
+
+[[test]]
+name = "crash_injection"
+path = "../../../tests/fszero/engine/crash_injection.rs"
+
+[[test]]
+name = "confinement_hardening"
+path = "../../../tests/fszero/store/confinement_hardening.rs"
+
+[[test]]
+name = "path_confinement"
+path = "../../../tests/fszero/store/path_confinement.rs"
+
+[[test]]
+name = "racc_durability_matrix"
+path = "../../../tests/fszero/engine/racc_durability_matrix.rs"
+
+[[test]]
+name = "request_expired"
+path = "../../../tests/fszero/engine/request_expired.rs"
+
+[[test]]
+name = "smoke"
+path = "../../../tests/fszero/engine/smoke.rs"
+
+[[test]]
+name = "structural_contract"
+path = "../../../tests/fszero/engine/structural_contract.rs"
+
+[[test]]
+name = "wire_contract"
+path = "../../../tests/fszero/core/wire_contract.rs"
+
+[[test]]
+name = "wire_ratchet_schema"
+path = "../../../tests/fszero/core/wire_ratchet_schema.rs"
+
+[[test]]
+name = "zeroref_golden"
+path = "../../../tests/fszero/core/zeroref_golden.rs"

@@ -1,6 +1,6 @@
 # Architecture
 
-ZeroStack composes three independent engines behind one reusable in-process host. It does not merge their implementations and the engines never import one another.
+ZeroStack composes three independent engines behind one reusable in-process host. One monorepo stores the hub under `crates/zerostack/` and the engines under `crates/fszero/`, `crates/graphzero/`, and `crates/tokenzero/`. The engines never import one another.
 
 ZeroStack is harness-agnostic and can be embedded by any compatible caller.
 
@@ -84,6 +84,6 @@ The direct host can prepare, validate, stage, and commit one effect request in o
 
 ## Source and release model
 
-ZeroStack is source-only and does not publish standalone releases. FSZero, GraphZero, and TokenZero are the released products. Once coordinated releases begin, the engines will share one version to signal compatible contract parity.
+ZeroStack is source-only and does not publish a standalone hub release. FSZero, GraphZero, and TokenZero remain separate released products built from the same Cargo workspace. Coordinated releases can share one version to signal compatible contract parity.
 
 Production Rust inherits a workspace Clippy cognitive-complexity deny rule with threshold 25. The detached harness inherits the same threshold. Complexity exceptions are not a compatibility surface; functions above the threshold must be split along existing authority and lifecycle boundaries.

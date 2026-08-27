@@ -1,0 +1,12 @@
+{
+  "schema": "tokenzero.ack2.golden.v1",
+  "cases": [
+    {"class":"success","atom":"0"},
+    {"class":"validation","atom":"1"},
+    {"class":"policy","atom":"2"},
+    {"class":"substrate","atom":"3"},
+    {"class":"retryable","atom":"4"},
+    {"class":"internal","atom":"9"}
+  ],
+  "silent_pure_mutation_success": ""
+}

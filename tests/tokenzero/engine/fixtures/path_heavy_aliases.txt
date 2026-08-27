@@ -1,0 +1,4 @@
+/workspace/crates/tokenzero-engine/src/engine_expand.rs:24 tokenzero_engine::engine_expand::recovery_orchestration::PathHeavyExpandCoordinator
+/workspace/crates/tokenzero-engine/src/engine_expand.rs:45 tokenzero_engine::engine_expand::recovery_orchestration::PathHeavyExpandCoordinator
+/workspace/crates/tokenzero-engine/src/engine_expand.rs:66 tokenzero_engine::engine_expand::recovery_orchestration::PathHeavyExpandCoordinator
+/workspace/crates/tokenzero-engine/src/engine_expand.rs:89 tokenzero_engine::engine_expand::recovery_orchestration::PathHeavyExpandCoordinator

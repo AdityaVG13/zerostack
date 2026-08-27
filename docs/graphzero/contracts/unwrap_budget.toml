@@ -1,0 +1,53 @@
+schema_version = 1
+
+# Production source-text budgets for .unwrap( and .expect(.
+# Test-only counts are reported by the gate but are intentionally not budgeted.
+
+[[crate]]
+name = "graphzero-cli"
+production = 0
+
+[[crate]]
+name = "graphzero-coverage"
+production = 1
+
+[[crate]]
+name = "graphzero-extract"
+production = 0
+
+[[crate]]
+name = "graphzero-pack"
+production = 0
+
+[[crate]]
+name = "graphzero-query"
+production = 6
+# Existing graph execution invariants; GraphZero has no embedded JavaScript FFI runtime.
+
+[[crate]]
+name = "graphzero-reserve"
+production = 0
+
+[[crate]]
+name = "graphzero-scip"
+production = 0
+
+[[crate]]
+name = "graphzero-semantic"
+production = 1
+
+[[crate]]
+name = "graphzero-store"
+production = 20
+
+[[crate]]
+name = "graphzero-test-support"
+production = 153
+
+[[crate]]
+name = "graphzero-types"
+production = 0
+
+[[crate]]
+name = "graphzero-why"
+production = 1

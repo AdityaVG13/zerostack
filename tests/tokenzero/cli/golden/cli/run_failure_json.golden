@@ -1,0 +1,132 @@
+{
+  "accounting": {
+    "billed_tokens": 46,
+    "cached_tokens": 0,
+    "exact_ref_tokens": 28,
+    "raw_tokens": 22,
+    "recovery_tokens": 0,
+    "visible_tokens": 46
+  },
+  "ack": "0",
+  "content_type": "shell_output",
+  "detail_ref": "tz://blob/[BLOB_REF_1]",
+  "mode": "diagnostic",
+  "refs": [
+    {
+      "bytes": 5,
+      "kind": "stdout",
+      "live": true,
+      "ref": "tz://blob/[BLOB_REF_1]"
+    },
+    {
+      "bytes": 4,
+      "kind": "stderr",
+      "live": true,
+      "ref": "tz://blob/[BLOB_REF_2]"
+    },
+    {
+      "bytes": 18,
+      "kind": "combined",
+      "live": true,
+      "ref": "tz://blob/[BLOB_REF_3]"
+    },
+    {
+      "bytes": "[DYNAMIC_CAPTURE_BYTES]",
+      "kind": "capture",
+      "live": true,
+      "ref": "tz://blob/[BLOB_REF_4]"
+    }
+  ],
+  "safety": {
+    "combined_witness_temporal_interleaving": "not_claimed",
+    "hidden_critical_evidence_requires_ref": true,
+    "refs_available": true,
+    "refs_cover_full_output": true,
+    "schema_version": "tokenzero.shell_safety.v1",
+    "secret_masking": true
+  },
+  "schema_version": "tokenzero.cli.v1",
+  "status": "ok",
+  "telemetry": {
+    "alias_dependency": false,
+    "allocator_pressure_relief": {
+      "attempted": false,
+      "reclaimed_bytes": null
+    },
+    "argv": [
+      "sh",
+      "-c",
+      "printf alpha; printf beta >&2; exit 7"
+    ],
+    "background_io_terminated": false,
+    "capture_ref": "tz://blob/[BLOB_REF_4]",
+    "combined_ref": "tz://blob/[BLOB_REF_3]",
+    "command": "sh -c 'printf alpha; printf beta >&2; exit 7'",
+    "command_success": false,
+    "cwd": "[TMP]",
+    "cwd_source": "explicit",
+    "execution_mode": "argv",
+    "exit_code": 7,
+    "failed_segment": "exit 7",
+    "family": "generic",
+    "latency_ms": "[DYNAMIC_LATENCY_MS]",
+    "output_strategy": "compact_diagnostic_shell",
+    "output_truncated": false,
+    "pipeline_masking_warning": null,
+    "pipeline_rerun_command": null,
+    "policy": "diagnostic",
+    "policy_reason": "failure or diagnostic family",
+    "preview_truncated": false,
+    "raw_tokens": 22,
+    "recovery_tokens": 0,
+    "refs_cover_full_output": true,
+    "rewrite_applied": false,
+    "rewrite_skip_reason": "disabled",
+    "shell_syntax_summary": "sequence,redirect",
+    "status_label": "command_failed",
+    "stderr_capture": {
+      "bytes": 4,
+      "bytes_seen": 4,
+      "captured_bytes": 4,
+      "captured_utf8_lossless": true,
+      "full_stream_sha256": "f44e64e75f3948e9f73f8dfa94721c4ce8cbb4f265c4790c702b2d41cfbf2753",
+      "preview_bytes": 4,
+      "preview_truncated": false,
+      "ref": "tz://blob/[BLOB_REF_2]",
+      "ref_covers_full_stream": true,
+      "sha256": "f44e64e75f3948e9f73f8dfa94721c4ce8cbb4f265c4790c702b2d41cfbf2753",
+      "sha256_scope": "full_stream",
+      "spill_bytes": 0,
+      "spill_path": null,
+      "truncated": false
+    },
+    "stderr_preview": "beta",
+    "stderr_ref": "tz://blob/[BLOB_REF_2]",
+    "stdout_capture": {
+      "bytes": 5,
+      "bytes_seen": 5,
+      "captured_bytes": 5,
+      "captured_utf8_lossless": true,
+      "full_stream_sha256": "8ed3f6ad685b959ead7022518e1af76cd816f8e8ec7ccdda1ed4018e8f2223f8",
+      "preview_bytes": 5,
+      "preview_truncated": false,
+      "ref": "tz://blob/[BLOB_REF_1]",
+      "ref_covers_full_stream": true,
+      "sha256": "8ed3f6ad685b959ead7022518e1af76cd816f8e8ec7ccdda1ed4018e8f2223f8",
+      "sha256_scope": "full_stream",
+      "spill_bytes": 0,
+      "spill_path": null,
+      "truncated": false
+    },
+    "stdout_preview": "alpha",
+    "stdout_ref": "tz://blob/[BLOB_REF_1]",
+    "timeout": false,
+    "transport_status": "ok",
+    "visible_tokens": 46
+  },
+  "tool": "shell",
+  "visible": {
+    "kind": "capsule",
+    "text": "# shell\ncwd: [TMP]\nstatus: command_failed\nexit_code: 7\nfailed_segment: exit 7\nstderr_ref: tz://blob/[BLOB_REF_2]\ncombined_ref: tz://blob/[BLOB_REF_3]\n\nalpha"
+  }
+}

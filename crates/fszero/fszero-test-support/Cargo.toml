@@ -1,0 +1,9 @@
+[package]
+name = "fszero-test-support"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+
+[dependencies]
+zero-abi.workspace = true

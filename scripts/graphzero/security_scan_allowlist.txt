@@ -1,0 +1,10 @@
+# DEPRECATED: retained for history only, no longer read by scripts/security_scan.sh.
+# Replaced by scripts/secret_keyword_ledger.tsv + scripts/check_secret_keyword_ledger.py,
+# which classify every tracked keyword hit as fixture/doc/code/config and fail
+# closed on unclassified, stale, duplicate, invalid-class, or real-risk rows.
+#
+# Historical format (no longer in force): pattern-id<TAB>repository-relative path<TAB>exact matched line
+# Every entry must have an immediately preceding comment naming the fixture or
+# documentation purpose and explaining why the text cannot be a live secret.
+# No current tracked file matches the focused secret patterns, so there are no
+# suppressions. Keyword-only redaction code is intentionally not a match.

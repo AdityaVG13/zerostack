@@ -1,0 +1,150 @@
+# TokenZero public tree -- deny-by-default at repo root.
+# Only the un-ignored folders and root files below may be committed.
+# New docs / markdown / ledgers / research dumps are denied. Do not expand
+# the docs or scripts allowlists without explicit operator approval.
+
+# ---------------------------------------------------------------------------
+# Root: ignore everything, then allow the public surface
+# ---------------------------------------------------------------------------
+/*
+
+# Public folders
+!/crates/
+!/tests/
+!/scripts/
+!/docs/
+!/.github/
+!/benchmarks/
+!/.bench-history/
+!/demo/
+!/package/
+!/packaging/
+!/fuzz/
+
+# .bench-history -- keep committed *.latest.json ratchet files only (F-010)
+/.bench-history/*
+!/.bench-history/*.latest.json
+
+# Public root files
+!/Cargo.toml
+!/Cargo.lock
+!/rust-toolchain.toml
+!/deny.toml
+!/Makefile
+!/LICENSE
+!/README.md
+!/CHANGELOG.md
+!/CONTRIBUTING.md
+!/SECURITY.md
+!/.gitignore
+!/.gitattributes
+
+# ---------------------------------------------------------------------------
+# Inside public folders: keep junk out
+# ---------------------------------------------------------------------------
+
+# docs -- these ten files only
+/docs/*
+!/docs/README.md
+!/docs/benchmarks.md
+!/docs/codemode.md
+!/docs/command-coverage.md
+!/docs/development.md
+!/docs/install.md
+!/docs/mcp.md
+!/docs/mcp-compat.md
+!/docs/pulse.md
+!/docs/racc.md
+!/docs/repo-shape.md
+
+# scripts -- tracked helpers only (do not add new scripts without approval)
+/scripts/*
+!/scripts/check_embedded_tests.py
+!/scripts/check_module_boundaries.py
+!/scripts/check_no_host_paths.py
+!/scripts/irx9_release_gate.sh
+!/scripts/perf_corpus.py
+!/scripts/readme_command_audit.py
+!/scripts/rust_adaptive_scorecard.ps1
+!/scripts/rust_linux_docker_verify.sh
+!/scripts/rust_linux_perf_budget.sh
+!/scripts/rust_verify.sh
+!/scripts/rust_windows_global_rehearsal.ps1
+!/scripts/rust_windows_migrate.ps1
+!/scripts/rust_windows_verify.ps1
+!/scripts/rustfmt_targeted.sh
+!/scripts/scrub_beads_export.py
+!/scripts/test_windows_migrate_restore.py
+!/scripts/zerostack_testkit_adapter.py
+
+# tests -- generated ship ledgers stay local
+/tests/artifacts/
+/tests/ship-mutation-receipts.json
+/tests/ship-mutations.json
+
+# demo / fuzz / github local noise
+/demo/.cache/
+/demo/.tokenzero/
+/demo/.tokenzero-bin/
+/demo/tokenzero-mcp.json
+/demo/agent_runs/
+/fuzz/artifacts/
+/fuzz/corpus/
+/.github/assets/how-racc-works.mmd
+
+# ---------------------------------------------------------------------------
+# Anywhere: secrets, agent law, build caches, binaries
+# ---------------------------------------------------------------------------
+.env
+.env.*
+!.env.example
+.tokenzero/
+**/.tokenzero/
+.zerostack/
+.fszero/
+.graphzero/
+.beads/
+.bv/
+.cursor/
+.grok/
+.claude/
+.factory/
+.mcp.json
+**/.mcp.json
+
+AGENTS.md
+Agents.md
+CLAUDE.md
+Claude.md
+AGENTS.md.*
+CLAUDE.md.*
+.papercuts.jsonl
+
+/target/
+results/
+__pycache__/
+*.py[cod]
+.DS_Store
+*.log
+**/.asgrep/
+
+*.bin
+*.db
+*.sqlite
+*.sqlite3
+*.docx
+*.gif
+*.jpeg
+*.jpg
+*.png
+*.pdf
+*.zip
+*.tar
+*.tar.gz
+*.tgz
+*.gguf
+*.onnx
+*.pkl
+*.pt
+*.pth
+*.safetensors

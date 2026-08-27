@@ -1,0 +1,74 @@
+[workspace]
+resolver = "3"
+members = [
+    "crates/tokenzero-core",
+    "crates/tokenzero-recovery",
+    "crates/tokenzero-runtime",
+    "crates/tokenzero-engine",
+    "crates/tokenzero-kernel",
+    "crates/tokenzero-filters",
+    "crates/tokenzero-test-support",
+    "crates/tokenzero-cli",
+    "crates/tokenzero-install",
+    "crates/tokenzero-pulse",
+]
+exclude = ["fuzz"]
+
+[workspace.package]
+version = "1.4.0"
+edition = "2024"
+license = "MIT"
+repository = "https://github.com/AdityaVG13/tokenzero"
+homepage = "https://github.com/AdityaVG13/tokenzero"
+readme = "README.md"
+keywords = ["llm", "context", "compression", "tokens", "cli"]
+categories = ["command-line-utilities", "development-tools"]
+rust-version = "1.98"
+
+[workspace.dependencies]
+anyhow = "1.0.104"
+assert_cmd = "2.2.2"
+clap = { version = "4.6.6", features = ["derive", "env"] }
+globset = "0.4.20"
+memchr = "2.8.3"
+flate2 = { version = "1.1.9", default-features = false, features = ["rust_backend"] }
+predicates = "3.1.4"
+proptest = "1.11.0"
+regex = "1.13.1"
+rustix = { version = "1.1.4", default-features = false, features = ["fs"] }
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.151"
+sha2 = "0.11.0"
+similar = { version = "3.1.2", default-features = false, features = ["text"] }
+rusqlite = { version = "0.40.2", features = ["bundled"] }
+fs4 = "1.1.0"
+tempfile = "3.27.0"
+thiserror = "2.0.20"
+toml = "1.1.4"
+wait-timeout = "0.2.1"
+tiktoken-rs = "0.12"
+zero-abi = { path = "../ZeroStack/crates/zero-abi" }
+zerostack-test-support = { path = "../ZeroStack/tests/support" }
+zerostack-conformance = { path = "../ZeroStack/crates/zerostack-conformance" }
+zerostack-install = { path = "../ZeroStack/crates/zerostack-install" }
+zero-gauge = { path = "../ZeroStack/crates/zero-gauge" }
+zero-ledger = { path = "../ZeroStack/crates/zero-ledger" }
+zero-ref = { path = "../ZeroStack/crates/zero-ref" }
+zero-process = { path = "../ZeroStack/crates/zero-process" }
+zero-store = { path = "../ZeroStack/crates/zero-store" }
+tokenzero-kernel = { path = "crates/tokenzero-kernel" }
+# Hub-owned MCP transport authority (replaces the retired zero-codemode fastmcp carrier).
+zero-mcp = { git = "https://github.com/AdityaVG13/zerostack", rev = "bae540d3fe16b1d5f53948f293eb04a8c93e68c6", features = ["fastmcp"] }
+
+[profile.release-perf]
+inherits = "release"
+opt-level = 3
+lto = "thin"
+codegen-units = 1
+debug = "line-tables-only"
+strip = false
+
+# Keep-gate: `cargo bench` must not use size-optimized `--release`.
+# LTO / codegen-units differences swamp the signal (never `--release` for claims).
+[profile.bench]
+inherits = "release-perf"

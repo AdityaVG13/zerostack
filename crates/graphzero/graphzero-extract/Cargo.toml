@@ -1,0 +1,36 @@
+[package]
+name = "graphzero-extract"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+autotests = false
+
+[dependencies]
+graphzero-types = { workspace = true }
+tree-sitter = "0.26.12"
+tree-sitter-rust = "0.24"
+tree-sitter-typescript = "0.23"
+tree-sitter-python = "0.25"
+rayon = "1.12"
+serde_json = { workspace = true }
+
+[dev-dependencies]
+criterion = { workspace = true }
+graphzero-test-support = { workspace = true }
+proptest = { workspace = true }
+tempfile = { workspace = true }
+
+[[bench]]
+name = "extraction_bench"
+harness = false
+
+[lints]
+workspace = true
+
+[[test]]
+name = "extract_live_rust_analyzer_fusion"
+path = "../../../tests/graphzero/extract/live_rust_analyzer_fusion.rs"
+
+[[test]]
+name = "extract_metamorphic_extraction"
+path = "../../../tests/graphzero/extract/metamorphic_extraction.rs"

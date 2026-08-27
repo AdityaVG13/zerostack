@@ -1,0 +1,48 @@
+{
+  "schema_version": 1,
+  "purpose": "Foreign corpora for GraphZero latency integrity (non-self-repo). Large pins materialize offline/CI; mini fixtures live in-tree for harness proof.",
+  "corpora": [
+    {
+      "id": "rust-mini",
+      "kind": "fixture",
+      "language": "rust",
+      "path": "benchmarks/foreign_corpora/fixtures/rust-mini",
+      "license": "MIT",
+      "role": "harness_proof_non_self",
+      "approx_files": 3
+    },
+    {
+      "id": "ts-mini",
+      "kind": "fixture",
+      "language": "typescript",
+      "path": "benchmarks/foreign_corpora/fixtures/ts-mini",
+      "license": "MIT",
+      "role": "harness_proof_non_self",
+      "approx_files": 2
+    },
+    {
+      "id": "rust-regex",
+      "kind": "git_pin",
+      "language": "rust",
+      "url": "https://github.com/rust-lang/regex.git",
+      "rev": "f6f735910f12e1002fda10d90ecc1fd32e1226b8",
+      "tag": "1.11.1",
+      "license": "MIT OR Apache-2.0",
+      "role": "large_rust_scale",
+      "approx_files_target": ">=1000",
+      "materialize_dir": "benchmarks/foreign_corpora/materialized/rust-regex"
+    },
+    {
+      "id": "ts-typescript",
+      "kind": "git_pin",
+      "language": "typescript",
+      "url": "https://github.com/microsoft/TypeScript.git",
+      "rev": "a5e123d9e0690fcea92878ea8a0a382922009fc9",
+      "tag": "v5.7.3",
+      "license": "Apache-2.0",
+      "role": "large_ts_monorepo",
+      "approx_files_target": ">=5000",
+      "materialize_dir": "benchmarks/foreign_corpora/materialized/ts-typescript"
+    }
+  ]
+}

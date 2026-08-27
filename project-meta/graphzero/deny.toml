@@ -1,0 +1,52 @@
+# GraphZero dependency policy. Keep this allowlist limited to licenses reviewed as
+# permissive and actually present in the resolved dependency graph.
+
+[advisories]
+version = 2
+ignore = [
+    # anyhow 1.0.102: GraphZero never calls Error::downcast_mut; upgrade when a patched release exists.
+    "RUSTSEC-2026-0190",
+    # git2 0.19.0: no GraphZero callsites dereference an empty git2::Buf; upgrade follow-up required.
+    "RUSTSEC-2026-0008",
+    # git2 0.19.0: GraphZero does not call Remote::list; upgrade follow-up required.
+    "RUSTSEC-2026-0183",
+    # git2 0.19.0: GraphZero does not call Blame::blame_buffer; upgrade follow-up required.
+    "RUSTSEC-2026-0184",
+]
+
+[licenses]
+version = 2
+confidence-threshold = 0.8
+allow = [
+    "0BSD",
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "BSD-1-Clause",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "CC0-1.0",
+    "ISC",
+    "MIT",
+    "Unicode-3.0",
+    "Unlicense",
+    "Zlib",
+]
+
+[bans]
+# Duplicate versions remain visible for follow-up but do not fail policy without an upgrade review.
+multiple-versions = "warn"
+wildcards = "allow"
+highlight = "all"
+workspace-default-features = "allow"
+external-default-features = "allow"
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]
+# Release-owned, revision-pinned dependencies; governance and audit procedure:
+# docs/contracts/dependency_pins.md
+allow-git = [
+    "https://github.com/Dicklesworthstone/fastmcp_rust",
+    "https://github.com/AdityaVG13/zerostack",
+]

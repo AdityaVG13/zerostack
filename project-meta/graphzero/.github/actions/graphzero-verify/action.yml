@@ -1,0 +1,172 @@
+name: GraphZero verify claims
+description: Verify GraphZero-Claim lines from a pull request body and publish evidence.
+inputs:
+  claims-file:
+    description: Workspace-local markdown path for GraphZero-Claim lines. A non-empty pr-body replaces its contents; otherwise an existing regular file is scanned.
+    required: false
+    default: pr-body.md
+  pr-body:
+    description: Pull request body text to scan for GraphZero-Claim lines.
+    required: false
+    default: ""
+  repo:
+    description: Repository path to index and verify.
+    required: false
+    default: .
+  toolchain:
+    description: Rust toolchain used to build graphzero.
+    required: false
+    default: stable
+  comment:
+    description: Post a pull request comment with the JSON evidence summary when possible.
+    required: false
+    default: "true"
+outputs:
+  report-file:
+    description: Path to the GraphZero claim verification JSON report.
+    value: ${{ steps.verify.outputs.report-file }}
+  verified:
+    description: true when every parsed claim verifies.
+    value: ${{ steps.verify.outputs.verified }}
+runs:
+  using: composite
+  steps:
+    - name: Checkout repository
+      uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+    - name: Install Rust
+      shell: bash
+      env:
+        TOOLCHAIN: ${{ inputs.toolchain }}
+      run: |
+        rustup toolchain install "$TOOLCHAIN" --profile minimal
+        rustup default "$TOOLCHAIN"
+    - name: Capture PR body
+      shell: bash
+      env:
+        PR_BODY: ${{ inputs.pr-body }}
+        CLAIMS_FILE: ${{ inputs.claims-file }}
+      run: |
+        workspace=$(cd -- "${GITHUB_WORKSPACE:-.}" && pwd -P)
+        claims_parent=$(cd -- "$(dirname -- "$CLAIMS_FILE")" && pwd -P)
+        case "$claims_parent" in
+          "$workspace"|"$workspace"/*) ;;
+          *) echo "claims-file must stay inside GITHUB_WORKSPACE" >&2; exit 2 ;;
+        esac
+        if [ -L "$CLAIMS_FILE" ]; then
+          echo "claims-file must not be a symbolic link" >&2
+          exit 2
+        fi
+        if [ -e "$CLAIMS_FILE" ] && [ ! -f "$CLAIMS_FILE" ]; then
+          echo "claims-file must be a regular file" >&2
+          exit 2
+        fi
+        if [ -n "$PR_BODY" ] || [ ! -s "$CLAIMS_FILE" ]; then
+          printf '%s\n' "$PR_BODY" > "$CLAIMS_FILE"
+        fi
+    - name: Index repository
+      shell: bash
+      env:
+        REPO: ${{ inputs.repo }}
+      run: cargo run -q -p graphzero-cli -- index --repo "$REPO"
+    - name: Verify GraphZero claims
+      id: verify
+      shell: bash
+      env:
+        CLAIMS_FILE: ${{ inputs.claims-file }}
+        REPO: ${{ inputs.repo }}
+      run: |
+        set +e
+        cargo run -q -p graphzero-cli -- verify --claims-file "$CLAIMS_FILE" --repo "$REPO" > graphzero-claim-report.json
+        status=$?
+        set -e
+        echo "report-file=graphzero-claim-report.json" >> "$GITHUB_OUTPUT"
+        if [ "$status" -ne 0 ]; then
+          echo "verified=false" >> "$GITHUB_OUTPUT"
+          echo "GraphZero verifier exited with status $status" >&2
+          exit "$status"
+        fi
+        verified=$(python3 - <<'PY'
+        import json
+        import pathlib
+        import sys
+
+        path = pathlib.Path("graphzero-claim-report.json")
+        try:
+            report = json.loads(path.read_text())
+        except Exception as exc:
+            print(f"invalid GraphZero verify report JSON: {exc}", file=sys.stderr)
+            sys.exit(2)
+        print(str(bool(report.get("verified", False))).lower())
+        PY
+        )
+        parse_status=$?
+        if [ "$parse_status" -ne 0 ]; then
+          echo "verified=false" >> "$GITHUB_OUTPUT"
+          exit "$parse_status"
+        fi
+        echo "verified=$verified" >> "$GITHUB_OUTPUT"
+        if [ "$verified" != "true" ]; then
+          exit 1
+        fi
+    - name: Upload evidence report
+      if: always()
+      uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+      with:
+        name: graphzero-claim-report
+        path: graphzero-claim-report.json
+        if-no-files-found: ignore
+    - name: Comment evidence summary
+      if: always() && inputs.comment == 'true' && github.event_name == 'pull_request'
+      uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b
+      with:
+        script: |
+          const fs = require('fs');
+          const path = 'graphzero-claim-report.json';
+          if (!fs.existsSync(path)) return;
+          let report;
+          try {
+            report = JSON.parse(fs.readFileSync(path, 'utf8'));
+          } catch (error) {
+            report = { verified: false, claims: [], tool_error: 'invalid report JSON: ' + error.message };
+          }
+          // Hostile claim text must not break the markdown table: escape pipes
+          // and collapse newlines to spaces so injected cells stay inert.
+          const cell = (s) => (s == null ? '' : String(s))
+            .replace(/\\/g, '\\\\')
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/\|/g, '\\|')
+            .replace(/[\r\n]+/g, ' ')
+            .slice(0, 512);
+          const claims = Array.isArray(report.claims) ? report.claims : [];
+          const claimRows = claims.slice(0, 50).map((claim) => {
+            const icon = claim.verified ? 'PASS' : 'FAIL';
+            return '| ' + icon + ' | ' + cell(claim.claim) + ' | ' + cell(claim.target) + ' |';
+          });
+          if (claims.length > 50) {
+            claimRows.push('| INFO | ' + (claims.length - 50) + ' more claims omitted | |');
+          }
+          const rows = report.tool_error
+            ? '| ERROR | ' + cell(report.tool_error) + ' | |'
+            : claimRows.join('\n') || '| INFO | no GraphZero-Claim lines | |';
+          const body = [
+            '<!-- graphzero-claim-report -->',
+            'GraphZero claim verification: **' + (report.verified ? 'passed' : 'failed') + '**',
+            '',
+            '| Result | Claim | Target |',
+            '| --- | --- | --- |',
+            rows,
+            '',
+            'Full JSON evidence is attached as the graphzero-claim-report artifact.'
+          ].join('\n');
+          const owner = context.repo.owner;
+          const repo = context.repo.repo;
+          const issue_number = context.payload.pull_request.number;
+          const comments = await github.rest.issues.listComments({owner, repo, issue_number, per_page: 100});
+          const existing = comments.data.find((comment) => comment.body && comment.body.includes('<!-- graphzero-claim-report -->'));
+          if (existing) {
+            await github.rest.issues.updateComment({owner, repo, comment_id: existing.id, body});
+          } else {
+            await github.rest.issues.createComment({owner, repo, issue_number, body});
+          }

@@ -1,0 +1,145 @@
+{
+  "schema_version": 1,
+  "authority": "benchmarks/latency/scenario_catalog.json",
+  "rule": "Every performance claim must use a named scenario below; measure_only_no_gate observations are not pass/fail claims.",
+  "scenarios": [
+    {
+      "name": "cold_index_tracked_rust",
+      "surface": "index cold",
+      "inputs": {
+        "command": "target/release/graphzero index .",
+        "store": "new isolated empty benchmark store"
+      },
+      "corpus_pin": "benchmarks/latency/results.json#corpus (tracked GraphZero Rust corpus at recorded git_rev)",
+      "expected_output_class": "exit 0 and a published snapshot manifest",
+      "success_metrics": {
+        "status": "measure_only_no_gate",
+        "observed": "cold_index.cold_index_s and ordered raw_ms"
+      },
+      "artifact": "benchmarks/latency/results.json#cold_index",
+      "gate": "benchmarks/latency/setup_surface_policy.json#surfaces.cold_index"
+    },
+    {
+      "name": "warm_reindex_tracked_rust",
+      "surface": "index warm",
+      "inputs": {
+        "command": "target/release/graphzero index .",
+        "store": "already indexed benchmark store"
+      },
+      "corpus_pin": "benchmarks/latency/results.json#corpus (tracked GraphZero Rust corpus at recorded git_rev)",
+      "expected_output_class": "exit 0 and the current snapshot remains queryable",
+      "success_metrics": {
+        "status": "measure_only_no_gate",
+        "observed": "warm_reindex.warm_reindex_s and ordered raw_ms"
+      },
+      "artifact": "benchmarks/latency/results.json#warm_reindex",
+      "gate": "benchmarks/latency/setup_surface_policy.json#surfaces.warm_reindex"
+    },
+    {
+      "name": "orient_symbol_run_index",
+      "surface": "orient",
+      "inputs": {
+        "command": "target/release/graphzero orient --surface symbol --name run_index --budget 1 --repo ."
+      },
+      "corpus_pin": "benchmarks/latency/results.json#corpus; at least benchmarks/latency/latency_gate.json#corpus.min_rust_files",
+      "expected_output_class": "exit 0 and a budgeted symbol response with expandable refs when detail spills",
+      "success_metrics": {
+        "p50_max_ms": 120.0,
+        "p95_max_ms": 150.0,
+        "relative_max_multiple": 2.0
+      },
+      "artifact": "benchmarks/latency/results.json#orient",
+      "gate": "benchmarks/latency/latency_gate.json#thresholds.orient_symbol",
+      "fixture_state": "absolute values are diagnostic; retained 671-file fixture is incomparable with the 234-file relative baseline and has fewer than 20 ordered samples"
+    },
+    {
+      "name": "blast_change_signature_run_index",
+      "surface": "blast",
+      "inputs": {
+        "command": "target/release/graphzero blast --intent \"change signature of run_index\" --budget 1 --repo ."
+      },
+      "corpus_pin": "benchmarks/latency/results.json#corpus; at least benchmarks/latency/latency_gate.json#corpus.min_rust_files",
+      "expected_output_class": "exit 0 and a budgeted blast response with expandable refs",
+      "success_metrics": {
+        "p50_max_ms": 15.0,
+        "p95_max_ms": 25.0,
+        "relative_max_multiple": 2.0
+      },
+      "artifact": "benchmarks/latency/results.json#blast",
+      "gate": "benchmarks/latency/latency_gate.json#thresholds.blast",
+      "fixture_state": "retained fixture exceeds the absolute gate; do not report pass"
+    },
+    {
+      "name": "queryengine_scaled_200",
+      "surface": "query warm/cold",
+      "inputs": {
+        "api": "QueryEngine::warm / QueryEngine::cold",
+        "query": "sym_100",
+        "budget": 1
+      },
+      "corpus_pin": "generated 200-file scaled Rust fixture",
+      "expected_output_class": "successful Capsule for sym_100",
+      "success_metrics": {
+        "warm": {
+          "samples": 128,
+          "median_max_ms": 10.0,
+          "p99_max_ms": 50.0
+        },
+        "cold": {
+          "samples": 32,
+          "median_max_ms": 10.0,
+          "p99_max_ms": 20.0
+        }
+      },
+      "artifact": "live integration-test stderr",
+      "gate": "benchmarks/latency/query_latency_gate.json"
+    },
+    {
+      "name": "codemode_callers_run_index_warm",
+      "surface": "codemode",
+      "status": "retired",
+      "retired_reason": "Standalone graphzero-codemode stdio JSON-RPC gz_execute_code server removed (graphzero-codemode is raw-worker-v2 only). Aggregate plan warm-latency measurement ownership moved to ZeroStack (zerostack-codemode-host / zsx); GraphZero publishes no CodeMode plan latency claim.",
+      "artifact": null,
+      "gate": "benchmarks/latency/archive/codemode_latency_gate.retired.json",
+      "fixture_state": "archived; immutable seven-run diagnostic preserved in benchmarks/latency/archive/codemode_standalone_latency_evidence.json"
+    },
+    {
+      "name": "snap_cli_run_index",
+      "surface": "snap",
+      "inputs": {
+        "command": "target/release/graphzero snap run_index --budget 1 --repo ."
+      },
+      "corpus_pin": "benchmarks/latency/results.json#corpus",
+      "expected_output_class": "exit 0 and a compact capsule with exact expandable refs",
+      "success_metrics": {
+        "status": "measure_only_no_gate",
+        "observed": "snap.snap_p50_ms"
+      },
+      "artifact": "benchmarks/latency/results.json#snap",
+      "gate": "benchmarks/latency/setup_surface_policy.json#surfaces.snap_cli"
+    },
+    {
+      "name": "wal_segment_pressure_reopen",
+      "surface": "store open/reopen",
+      "inputs": {
+        "wal_segments": 11,
+        "entries_per_segment": 256,
+        "trials": 9
+      },
+      "corpus_pin": "tracked GraphZero self corpus with at least 600 Rust files",
+      "expected_output_class": "all opens succeed; WAL segment count is 11 before and 0 after compaction",
+      "success_metrics": {
+        "replay_open": {
+          "p50_max_ms": 180.0,
+          "p95_max_ms": 200.0
+        },
+        "post_compaction_cached_open": {
+          "p50_max_ms": 0.1,
+          "p95_max_ms": 0.1
+        }
+      },
+      "artifact": "benchmarks/latency/wal_open_compaction.json",
+      "gate": "benchmarks/latency/wal_open_compaction_gate.json"
+    }
+  ]
+}

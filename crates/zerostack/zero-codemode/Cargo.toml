@@ -1,0 +1,37 @@
+[package]
+autotests = false
+name = "zero-codemode"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+description = "Restricted JavaScript and TypeScript interpreter for ZeroKernel"
+
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true
+regex.workspace = true
+zero-abi = { path = "../zero-abi" }
+tree-sitter = "0.26.12"
+tree-sitter-javascript = "0.25.0"
+
+[dev-dependencies]
+parking_lot = "0.12"
+
+[[test]]
+name = "limits"
+path = "../../../tests/zero_codemode_limits.rs"
+
+[[test]]
+name = "connector_wait"
+path = "../../../tests/zero_codemode_connector_wait.rs"
+
+[[test]]
+name = "trace_binding"
+path = "../../../tests/zero_codemode_trace_binding.rs"
+
+[[test]]
+name = "syntax"
+path = "../../../tests/zero_codemode_syntax.rs"
+
+[lints]
+workspace = true

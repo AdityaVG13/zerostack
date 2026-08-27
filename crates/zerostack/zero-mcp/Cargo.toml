@@ -1,0 +1,31 @@
+[package]
+autotests = false
+name = "zero-mcp"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+description = "Domain-neutral MCP transport authority (FastMCP stdio carrier) over ZeroStack surface registrations"
+
+[features]
+default = []
+fastmcp = ["dep:fastmcp-rust"]
+
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true
+zero-abi = { path = "../zero-abi" }
+fastmcp-rust = { git = "https://github.com/Dicklesworthstone/fastmcp_rust", rev = "1c66097b15dea9550e833ee9e433beeb66eefece", optional = true }
+
+[dev-dependencies]
+serde_json.workspace = true
+
+[[test]]
+name = "mcp_transport"
+path = "../../../tests/zero_mcp_mcp_transport.rs"
+
+[[test]]
+name = "job_progress"
+path = "../../../tests/zero_mcp_job_progress.rs"
+
+[lints]
+workspace = true

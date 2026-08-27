@@ -1,0 +1,1131 @@
+{
+  "all_direct_artifact_evidence_valid": true,
+  "all_direct_file_evidence_present": true,
+  "all_requirement_rows_passed": false,
+  "all_residual_gates_resolved": false,
+  "artifact_loop_handoff": {
+    "next": "OS matrix expansion, runnable adapter approval if desired, and final release-gate review",
+    "stop_before": [
+      "release",
+      "publication",
+      "remote mutation",
+      "paid services",
+      "global install apply"
+    ]
+  },
+  "blocked_requirement_ids": [
+    "G-005",
+    "G-008",
+    "FR-007",
+    "FR-010",
+    "NFR-002"
+  ],
+  "blocked_residual_gate_ids": [
+    "adapter_approval",
+    "benchmark_artifact",
+    "os_artifact",
+    "release_approval"
+  ],
+  "claim_gate_snapshot": {
+    "artifact_path": "results/current/tokenzero_claim_audit.json",
+    "blocked_reasons": [
+      "release approval not granted"
+    ],
+    "gate_passes": {
+      "adapter_approval": false,
+      "benchmark_artifact": false,
+      "os_artifact": false,
+      "release_approval": false,
+      "release_candidate": true,
+      "source_currency": true
+    },
+    "gate_reasons": {
+      "adapter_approval": [
+        "adapter approval artifact does not allow execution",
+        "adapter approval artifact not approved for public claims"
+      ],
+      "benchmark_artifact": [
+        "benchmark artifact not approved for publication",
+        "benchmark competitor rows must be runnable for public claims"
+      ],
+      "os_artifact": [
+        "OS artifact set not approved for public claim"
+      ],
+      "release_approval": [
+        "release approval not granted"
+      ],
+      "release_candidate": [],
+      "source_currency": []
+    },
+    "present": true,
+    "public_claims_approved": false,
+    "release_candidate_artifacts": [
+      {
+        "artifact_id": "source_artifact",
+        "artifact_path": "results/current/tokenzero_source_currency.json",
+        "release_candidate_id": "golden-test",
+        "schema_version": "tokenzero.source_currency.v1"
+      },
+      {
+        "artifact_id": "adapter_approval_artifact",
+        "artifact_path": "results/current/tokenzero_adapter_approval_audit.json",
+        "release_candidate_id": "golden-test",
+        "schema_version": "tokenzero.adapter_approval_audit.v1"
+      }
+    ],
+    "release_candidate_id": "golden-test",
+    "release_candidate_ids": [
+      "golden-test"
+    ],
+    "schema_version": "tokenzero.claim_audit.v1"
+  },
+  "completion_achieved": false,
+  "completion_status": "blocked",
+  "critical_nfr": [
+    {
+      "direct_evidence": [
+        "results/current/tokenzero_exact_recovery_audit.json"
+      ],
+      "id": "NFR-001",
+      "residual": null,
+      "status": "passed"
+    },
+    {
+      "direct_evidence": [
+        "results/current/tokenzero_os_reach_audit.json",
+        "results/current/tokenzero_os_release_artifact.json"
+      ],
+      "id": "NFR-002",
+      "residual": "macOS shell and install artifacts missing",
+      "status": "blocked_public"
+    },
+    {
+      "direct_evidence": [
+        "results/current/tokenzero_security_privacy_audit.json"
+      ],
+      "id": "NFR-003",
+      "residual": null,
+      "status": "passed"
+    },
+    {
+      "direct_evidence": [
+        "results/current/tokenzero_security_privacy_audit.json"
+      ],
+      "id": "NFR-004",
+      "residual": null,
+      "status": "passed"
+    }
+  ],
+  "evidence_integrity_matrix": [
+    {
+      "artifact_valid": true,
+      "content_markers_present": null,
+      "evidence": "results/current/tokenzero_source_currency.json",
+      "evidence_kind": "artifact",
+      "expected_content_markers": null,
+      "expected_release_candidate_id": "golden-test",
+      "expected_schema_version": "tokenzero.source_currency.v1",
+      "present": true,
+      "reasons": [],
+      "release_candidate_id": "golden-test",
+      "release_candidate_matches": true,
+      "requirement_id": "G-001",
+      "requirement_residual": "source evidence is current; public claims still require benchmark, recovery, task-success, OS, adapter, and release approval gates",
+      "requirement_status": "passed_private",
+      "schema_matches": true,
+      "schema_version": "tokenzero.source_currency.v1",
+      "section": "g_goals",
+      "status": "present"
+    },
+    {
+      "artifact_valid": true,
+      "content_markers_present": null,
+      "evidence": "results/current/tokenzero_bench_competitors_shell_heavy.json",
+      "evidence_kind": "artifact",
+      "expected_content_markers": null,
+      "expected_release_candidate_id": "golden-test",
+      "expected_schema_version": "tokenzero.bench.v1",
+      "present": true,
+      "reasons": [],
+      "release_candidate_id": "golden-test",
+      "release_candidate_matches": true,
+      "requirement_id": "G-002",
+      "requirement_residual": "runnable competitor execution remains approval-gated",
+      "requirement_status": "passed_private",
+      "schema_matches": true,
+      "schema_version": "tokenzero.bench.v1",
+      "section": "g_goals",
+      "status": "present"
+    },
+    {
+      "artifact_valid": true,
+      "content_markers_present": null,
+      "evidence": "results/current/tokenzero_adapter_approval_audit.json",
+      "evidence_kind": "artifact",
+      "expected_content_markers": null,
+      "expected_release_candidate_id": "golden-test",
+      "expected_schema_version": "tokenzero.adapter_approval_audit.v1",
+      "present": true,
+      "reasons": [],
+      "release_candidate_id": "golden-test",
+      "release_candidate_matches": true,
+      "requirement_id": "G-002",
+      "requirement_residual": "runnable competitor execution remains approval-gated",
+      "requirement_status": "passed_private",
+      "schema_matches": true,
+      "schema_version": "tokenzero.adapter_approval_audit.v1",
+      "section": "g_goals",
+      "status": "present"
+    },
+    {
+      "artifact_valid": true,
+      "content_markers_present": null,
+      "evidence": "results/current/tokenzero_exact_recovery_audit.json",
+      "evidence_kind": "artifact",
+      "expected_content_markers": null,
+      "expected_release_candidate_id": "golden-test",
+      "expected_schema_version": "tokenzero.exact_recovery_audit.v1",
+      "present": true,
+      "reasons": [],
+      "release_candidate_id": "golden-test",
+      "release_candidate_matches": true,
+      "requirement_id": "G-003",
+      "requirement_residual": null,
+      "requirement_status": "passed",
+      "schema_matches": true,
+      "schema_version": "tokenzero.exact_recovery_audit.v1",
+      "section": "g_goals",
+      "status": "present"
+    },
+    {
+      "artifact_valid": true,
+      "content_markers_present": null,
+      "evidence": "results/current/tokenzero_exact_recovery_shell.json",
+      "evidence_kind": "artifact",
+      "expected_content_markers": null,
+      "expected_release_candidate_id": null,
+      "expected_schema_version": "tokenzero.exact_recovery_shell.v1",
+      "present": true,
+      "reasons": [],
+      "release_candidate_id": null,
+      "release_candidate_matches": null,
+      "requirement_id": "G-003",
+      "requirement_residual": null,
+      "requirement_status": "passed",
+      "schema_matches": true,
+      "schema_version": "tokenzero.exact_recovery_shell.v1",
+      "section": "g_goals",
+      "status": "present"
+    },
+    {
+      "artifact_valid": true,
+      "content_markers_present": null,
+      "evidence": "results/current/tokenzero_one_shot_eval.json",
+      "evidence_kind": "artifact",
+      "expected_content_markers": null,
+      "expected_release_candidate_id": "golden-test",
+      "expected_schema_version": "tokenzero.one_shot_eval.v1",
+      "present": true,
+      "reasons": [],
+      "release_candidate_id": "golden-test",
+      "release_candidate_matches": true,
+      "requirement_id": "G-004",
+      "requirement_residual": "public one-shot claim remains gated",
+      "requirement_status": "passed_private",
+      "schema_matches": true,
+      "schema_version": "tokenzero.one_shot_eval.v1",
+      "section": "g_goals",
+      "status": "present"
+    },
+    {
+      "artifact_valid": true,
+      "content_markers_present": null,
+      "evidence": "results/current/tokenzero_os_reach_audit.json",
+      "evidence_kind": "artifact",
+      "expected_content_markers": null,
+      "expected_release_candidate_id": "golden-test",
+      "expected_schema_version": "tokenzero.os_reach_audit.v1",
+      "present": true,
+      "reasons": [],
+      "release_candidate_id": "golden-test",
+      "release_candidate_matches": true,
+      "requirement_id": "G-005",
+      "requirement_residual": "macOS shell and install artifacts missing",
+      "requirement_status": "blocked_public",
+      "schema_matches": true,
+      "schema_version": "tokenzero.os_reach_audit.v1",
+      "section": "g_goals",
+      "status": "present"
+    },
+    {
+      "artifact_valid": true,
+      "content_markers_present": null,
+      "evidence": "results/current/tokenzero_os_release_artifact.json",
+      "evidence_kind": "artifact",
+      "expected_content_markers": null,
+      "expected_release_candidate_id": "golden-test",
+      "expected_schema_version": "tokenzero.os_release_artifact.v1",
+      "present": true,
+      "reasons": [],
+      "release_candidate_id": "golden-test",
+      "release_candidate_matches": true,
+      "requirement_id": "G-005",
+      "requirement_residual": "macOS shell and install artifacts missing",
+      "requirement_status": "blocked_public",
+      "schema_matches": true,
+      "schema_version": "tokenzero.os_release_artifact.v1",
+      "section": "g_goals",
+      "status": "present"
+    },
+    {
+      "artifact_valid": null,
+      "content_markers_present": null,
+      "evidence": "cargo test --workspace",
+      "evidence_kind": "command",
+      "expected_content_markers": null,
+      "expected_release_candidate_id": null,
+      "expected_schema_version": null,
+      "present": null,
+      "reasons": [],
+      "release_candidate_id": null,
+      "release_candidate_matches": null,
+      "requirement_id": "G-006",
+      "requirement_residual": null,
+      "requirement_status": "passed",
+      "schema_matches": null,
+      "schema_version": null,
+      "section": "g_goals",
+      "status": "command_evidence"
+    },
+    {
+      "artifact_valid": true,
+      "content_markers_present": null,
+      "evidence": "results/current/tokenzero_false_success_shell.json",
+      "evidence_kind": "artifact",
+      "expected_content_markers": null,
+      "expected_release_candidate_id": null,
+      "expected_schema_version": "tokenzero.false_success_shell.v1",
+      "present": true,
+      "reasons": [],
+      "release_candidate_id": null,
+      "release_candidate_matches": null,
+      "requirement_id": "G-006",
+      "requirement_residual": null,
+      "requirement_status": "passed",
+      "schema_matches": true,
+      "schema_version": "tokenzero.false_success_shell.v1",
+      "section": "g_goals",
+      "status": "present"
+    },
+    {
+      "artifact_valid": true,
+      "content_markers_present": null,
+      "evidence": "results/current/tokenzero_bench_competitors_shell_heavy.json",
+      "evidence_kind": "artifact",
+      "expected_content_markers": null,
+      "expected_release_candidate_id": "golden-test",
+      "expected_schema_version": "tokenzero.bench.v1",
+      "present": true,
+      "reasons": [],
+      "release_candidate_id": "golden-test",
+      "release_candidate_matches": true,
+      "requirement_id": "G-006",
+      "requirement_residual": null,
+      "requirement_status": "passed",
+      "schema_matches": true,
+      "schema_version": "tokenzero.bench.v1",
+      "section": "g_goals",
+      "status": "present"
+    },
+    {
+      "artifact_valid": true,
+      "content_markers_present": null,
+      "evidence": "results/current/tokenzero_reach.json",
+      "evidence_kind": "artifact",
+      "expected_content_markers": null,
+      "expected_release_candidate_id": null,
+      "expected_schema_version": "tokenzero.reach.v1",
+      "present": true,
+      "reasons": [],
+      "release_candidate_id": null,
+      "release_candidate_matches": null,
+      "requirement_id": "G-007",
+      "requirement_residual": "non-current OS release artifacts remain gated",
+      "requirement_status": "passed_private",
+      "schema_matches": true,
+      "schema_version": "tokenzero.reach.v1",
+      "section": "g_goals",
+      "status": "present"
+    },
+    {
+      "artifact_valid": true,
+      "content_markers_present": null,
+      "evidence": "results/current/tokenzero_os_reach_audit.json",
+      "evidence_kind": "artifact",
+      "expected_content_markers": null,
+      "expected_release_candidate_id": "golden-test",
+      "expected_schema_version": "tokenzero.os_reach_audit.v1",
+      "present": true,
+      "reasons": [],
+      "release_candidate_id": "golden-test",
+      "release_candidate_matches": true,
+      "requirement_id": "G-007",
+      "requirement_residual": "non-current OS release artifacts remain gated",
+      "requirement_status": "passed_private",
+      "schema_matches": true,
+      "schema_version": "tokenzero.os_reach_audit.v1",
+      "section": "g_goals",
+      "status": "present"
+    },
+    {
+      "artifact_valid": true,
+      "content_markers_present": null,
+      "evidence": "results/current/tokenzero_os_release_artifact.json",
+      "evidence_kind": "artifact",
+      "expected_content_markers": null,
+      "expected_release_candidate_id": "golden-test",
+      "expected_schema_version": "tokenzero.os_release_artifact.v1",
+      "present": true,
+      "reasons": [],
+      "release_candidate_id": "golden-test",
+      "release_candidate_matches": true,
+      "requirement_id": "G-007",
+      "requirement_residual": "non-current OS release artifacts remain gated",
+      "requirement_status": "passed_private",
+      "schema_matches": true,
+      "schema_version": "tokenzero.os_release_artifact.v1",
+      "section": "g_goals",
+      "status": "present"
+    },
+    {
+      "artifact_valid": true,
+      "content_markers_present": null,
+      "evidence": "results/current/tokenzero_claim_audit.json",
+      "evidence_kind": "artifact",
+      "expected_content_markers": null,
+      "expected_release_candidate_id": "golden-test",
+      "expected_schema_version": "tokenzero.claim_audit.v1",
+      "present": true,
+      "reasons": [],
+      "release_candidate_id": "golden-test",
+      "release_candidate_matches": true,
+      "requirement_id": "G-008",
+      "requirement_residual": "public claim approval intentionally false: release approval not granted",
+      "requirement_status": "passed_blocked",
+      "schema_matches": true,
+      "schema_version": "tokenzero.claim_audit.v1",
+      "section": "g_goals",
+      "status": "present"
+    },
+    {
+      "artifact_valid": true,
+      "content_markers_present": null,
+      "evidence": "results/current/tokenzero_security_privacy_audit.json",
+      "evidence_kind": "artifact",
+      "expected_content_markers": null,
+      "expected_release_candidate_id": null,
+      "expected_schema_version": "tokenzero.security_privacy_audit.v1",
+      "present": true,
+      "reasons": [],
+      "release_candidate_id": null,
+      "release_candidate_matches": null,
+      "requirement_id": "G-009",
+      "requirement_residual": null,
+      "requirement_status": "passed",
+      "schema_matches": true,
+      "schema_version": "tokenzero.security_privacy_audit.v1",
+      "section": "g_goals",
+      "status": "present"
+    },
+    {
+      "artifact_valid": true,
+      "content_markers_present": null,
+      "evidence": "results/current/tokenzero_artifact_handoff.json",
+      "evidence_kind": "artifact",
+      "expected_content_markers": null,
+      "expected_release_candidate_id": "golden-test",
+      "expected_schema_version": "tokenzero.artifact_handoff.v1",
+      "present": true,
+      "reasons": [],
+      "release_candidate_id": "golden-test",
+      "release_candidate_matches": true,
+      "requirement_id": "G-010",
+      "requirement_residual": "completion remains blocked by explicit residual gates",
+      "requirement_status": "passed_private",
+      "schema_matches": true,
+      "schema_version": "tokenzero.artifact_handoff.v1",
+      "section": "g_goals",
+      "status": "present"
+    },
+    {
+      "artifact_valid": true,
+      "content_markers_present": true,
+      "evidence": "docs/advanced-adr-execution-record.md",
+      "evidence_kind": "artifact",
+      "expected_content_markers": [
+        "## ADR-",
+        "Failure-first evidence:",
+        "Residual gates:",
+        "validate_prd_goal.py",
+        "cargo test --workspace"
+      ],
+      "expected_release_candidate_id": null,
+      "expected_schema_version": null,
+      "present": true,
+      "reasons": [],
+      "release_candidate_id": null,
+      "release_candidate_matches": null,
+      "requirement_id": "G-010",
+      "requirement_residual": "completion remains blocked by explicit residual gates",
+      "requirement_status": "passed_private",
+      "schema_matches": null,
+      "schema_version": null,
+      "section": "g_goals",
+      "status": "present"
+    },
+    {
+      "artifact_valid": true,
+      "content_markers_present": true,
+      "evidence": "results/current/tokenzero_competitive_superiority_reconciliation.md",
+      "evidence_kind": "artifact",
+      "expected_content_markers": [
+        "Snapshot",
+        "no gated action was performed"
+      ],
+      "expected_release_candidate_id": null,
+      "expected_schema_version": null,
+      "present": true,
+      "reasons": [],
+      "release_candidate_id": null,
+      "release_candidate_matches": null,
+      "requirement_id": "G-010",
+      "requirement_residual": "completion remains blocked by explicit residual gates",
+      "requirement_status": "passed_private",
+      "schema_matches": null,
+      "schema_version": null,
+      "section": "g_goals",
+      "status": "present"
+    },
+    {
+      "artifact_valid": null,
+      "content_markers_present": null,
+      "evidence": "validate_prd_goal.py --min-score 930",
+      "evidence_kind": "command",
+      "expected_content_markers": null,
+      "expected_release_candidate_id": null,
+      "expected_schema_version": null,
+      "present": null,
+      "reasons": [],
+      "release_candidate_id": null,
+      "release_candidate_matches": null,
+      "requirement_id": "G-010",
+      "requirement_residual": "completion remains blocked by explicit residual gates",
+      "requirement_status": "passed_private",
+      "schema_matches": null,
+      "schema_version": null,
+      "section": "g_goals",
+      "status": "command_evidence"
+    },
+    {
+      "artifact_valid": true,
+      "content_markers_present": null,
+      "evidence": "results/current/tokenzero_source_currency.json",
+      "evidence_kind": "artifact",
+      "expected_content_markers": null,
+      "expected_release_candidate_id": "golden-test",
+      "expected_schema_version": "tokenzero.source_currency.v1",
+      "present": true,
+      "reasons": [],
+      "release_candidate_id": "golden-test",
+      "release_candidate_matches": true,
+      "requirement_id": "FR-001",
+      "requirement_residual": "source evidence is current; public claims still require benchmark, recovery, task-success, OS, adapter, and release approval gates",
+      "requirement_status": "passed_private",
+      "schema_matches": true,
+      "schema_version": "tokenzero.source_currency.v1",
+      "section": "must_fr",
+      "status": "present"
+    },
+    {
+      "artifact_valid": true,
+      "content_markers_present": null,
+      "evidence": "results/current/tokenzero_bench_competitors_shell_heavy.json",
+      "evidence_kind": "artifact",
+      "expected_content_markers": null,
+      "expected_release_candidate_id": "golden-test",
+      "expected_schema_version": "tokenzero.bench.v1",
+      "present": true,
+      "reasons": [],
+      "release_candidate_id": "golden-test",
+      "release_candidate_matches": true,
+      "requirement_id": "FR-002",
+      "requirement_residual": "runnable competitor adapters require approval",
+      "requirement_status": "passed_private",
+      "schema_matches": true,
+      "schema_version": "tokenzero.bench.v1",
+      "section": "must_fr",
+      "status": "present"
+    },
+    {
+      "artifact_valid": true,
+      "content_markers_present": null,
+      "evidence": "results/current/tokenzero_adapter_approval_audit.json",
+      "evidence_kind": "artifact",
+      "expected_content_markers": null,
+      "expected_release_candidate_id": "golden-test",
+      "expected_schema_version": "tokenzero.adapter_approval_audit.v1",
+      "present": true,
+      "reasons": [],
+      "release_candidate_id": "golden-test",
+      "release_candidate_matches": true,
+      "requirement_id": "FR-002",
+      "requirement_residual": "runnable competitor adapters require approval",
+      "requirement_status": "passed_private",
+      "schema_matches": true,
+      "schema_version": "tokenzero.adapter_approval_audit.v1",
+      "section": "must_fr",
+      "status": "present"
+    },
+    {
+      "artifact_valid": true,
+      "content_markers_present": null,
+      "evidence": "results/current/tokenzero_exact_recovery_audit.json",
+      "evidence_kind": "artifact",
+      "expected_content_markers": null,
+      "expected_release_candidate_id": "golden-test",
+      "expected_schema_version": "tokenzero.exact_recovery_audit.v1",
+      "present": true,
+      "reasons": [],
+      "release_candidate_id": "golden-test",
+      "release_candidate_matches": true,
+      "requirement_id": "FR-003",
+      "requirement_residual": null,
+      "requirement_status": "passed",
+      "schema_matches": true,
+      "schema_version": "tokenzero.exact_recovery_audit.v1",
+      "section": "must_fr",
+      "status": "present"
+    },
+    {
+      "artifact_valid": true,
+      "content_markers_present": null,
+      "evidence": "results/current/tokenzero_protected_anchor_audit.json",
+      "evidence_kind": "artifact",
+      "expected_content_markers": null,
+      "expected_release_candidate_id": null,
+      "expected_schema_version": "tokenzero.protected_anchor_audit.v1",
+      "present": true,
+      "reasons": [],
+      "release_candidate_id": null,
+      "release_candidate_matches": null,
+      "requirement_id": "FR-004",
+      "requirement_residual": null,
+      "requirement_status": "passed",
+      "schema_matches": true,
+      "schema_version": "tokenzero.protected_anchor_audit.v1",
+      "section": "must_fr",
+      "status": "present"
+    },
+    {
+      "artifact_valid": true,
+      "content_markers_present": null,
+      "evidence": "results/current/tokenzero_one_shot_eval.json",
+      "evidence_kind": "artifact",
+      "expected_content_markers": null,
+      "expected_release_candidate_id": "golden-test",
+      "expected_schema_version": "tokenzero.one_shot_eval.v1",
+      "present": true,
+      "reasons": [],
+      "release_candidate_id": "golden-test",
+      "release_candidate_matches": true,
+      "requirement_id": "FR-005",
+      "requirement_residual": "public one-shot claim still gated",
+      "requirement_status": "passed_private",
+      "schema_matches": true,
+      "schema_version": "tokenzero.one_shot_eval.v1",
+      "section": "must_fr",
+      "status": "present"
+    },
+    {
+      "artifact_valid": null,
+      "content_markers_present": null,
+      "evidence": "cargo test --workspace",
+      "evidence_kind": "command",
+      "expected_content_markers": null,
+      "expected_release_candidate_id": null,
+      "expected_schema_version": null,
+      "present": null,
+      "reasons": [],
+      "release_candidate_id": null,
+      "release_candidate_matches": null,
+      "requirement_id": "FR-006",
+      "requirement_residual": null,
+      "requirement_status": "passed",
+      "schema_matches": null,
+      "schema_version": null,
+      "section": "must_fr",
+      "status": "command_evidence"
+    },
+    {
+      "artifact_valid": true,
+      "content_markers_present": null,
+      "evidence": "results/current/tokenzero_false_success_shell.json",
+      "evidence_kind": "artifact",
+      "expected_content_markers": null,
+      "expected_release_candidate_id": null,
+      "expected_schema_version": "tokenzero.false_success_shell.v1",
+      "present": true,
+      "reasons": [],
+      "release_candidate_id": null,
+      "release_candidate_matches": null,
+      "requirement_id": "FR-006",
+      "requirement_residual": null,
+      "requirement_status": "passed",
+      "schema_matches": true,
+      "schema_version": "tokenzero.false_success_shell.v1",
+      "section": "must_fr",
+      "status": "present"
+    },
+    {
+      "artifact_valid": true,
+      "content_markers_present": null,
+      "evidence": "results/current/tokenzero_os_reach_audit.json",
+      "evidence_kind": "artifact",
+      "expected_content_markers": null,
+      "expected_release_candidate_id": "golden-test",
+      "expected_schema_version": "tokenzero.os_reach_audit.v1",
+      "present": true,
+      "reasons": [],
+      "release_candidate_id": "golden-test",
+      "release_candidate_matches": true,
+      "requirement_id": "FR-007",
+      "requirement_residual": "macOS shell and install artifacts missing",
+      "requirement_status": "blocked_public",
+      "schema_matches": true,
+      "schema_version": "tokenzero.os_reach_audit.v1",
+      "section": "must_fr",
+      "status": "present"
+    },
+    {
+      "artifact_valid": true,
+      "content_markers_present": null,
+      "evidence": "results/current/tokenzero_os_release_artifact.json",
+      "evidence_kind": "artifact",
+      "expected_content_markers": null,
+      "expected_release_candidate_id": "golden-test",
+      "expected_schema_version": "tokenzero.os_release_artifact.v1",
+      "present": true,
+      "reasons": [],
+      "release_candidate_id": "golden-test",
+      "release_candidate_matches": true,
+      "requirement_id": "FR-007",
+      "requirement_residual": "macOS shell and install artifacts missing",
+      "requirement_status": "blocked_public",
+      "schema_matches": true,
+      "schema_version": "tokenzero.os_release_artifact.v1",
+      "section": "must_fr",
+      "status": "present"
+    },
+    {
+      "artifact_valid": true,
+      "content_markers_present": null,
+      "evidence": "results/current/tokenzero_claim_audit.json",
+      "evidence_kind": "artifact",
+      "expected_content_markers": null,
+      "expected_release_candidate_id": "golden-test",
+      "expected_schema_version": "tokenzero.claim_audit.v1",
+      "present": true,
+      "reasons": [],
+      "release_candidate_id": "golden-test",
+      "release_candidate_matches": true,
+      "requirement_id": "FR-010",
+      "requirement_residual": "public claim approval intentionally false: release approval not granted",
+      "requirement_status": "passed_blocked",
+      "schema_matches": true,
+      "schema_version": "tokenzero.claim_audit.v1",
+      "section": "must_fr",
+      "status": "present"
+    },
+    {
+      "artifact_valid": true,
+      "content_markers_present": null,
+      "evidence": "results/current/tokenzero_exact_recovery_audit.json",
+      "evidence_kind": "artifact",
+      "expected_content_markers": null,
+      "expected_release_candidate_id": "golden-test",
+      "expected_schema_version": "tokenzero.exact_recovery_audit.v1",
+      "present": true,
+      "reasons": [],
+      "release_candidate_id": "golden-test",
+      "release_candidate_matches": true,
+      "requirement_id": "NFR-001",
+      "requirement_residual": null,
+      "requirement_status": "passed",
+      "schema_matches": true,
+      "schema_version": "tokenzero.exact_recovery_audit.v1",
+      "section": "critical_nfr",
+      "status": "present"
+    },
+    {
+      "artifact_valid": true,
+      "content_markers_present": null,
+      "evidence": "results/current/tokenzero_os_reach_audit.json",
+      "evidence_kind": "artifact",
+      "expected_content_markers": null,
+      "expected_release_candidate_id": "golden-test",
+      "expected_schema_version": "tokenzero.os_reach_audit.v1",
+      "present": true,
+      "reasons": [],
+      "release_candidate_id": "golden-test",
+      "release_candidate_matches": true,
+      "requirement_id": "NFR-002",
+      "requirement_residual": "macOS shell and install artifacts missing",
+      "requirement_status": "blocked_public",
+      "schema_matches": true,
+      "schema_version": "tokenzero.os_reach_audit.v1",
+      "section": "critical_nfr",
+      "status": "present"
+    },
+    {
+      "artifact_valid": true,
+      "content_markers_present": null,
+      "evidence": "results/current/tokenzero_os_release_artifact.json",
+      "evidence_kind": "artifact",
+      "expected_content_markers": null,
+      "expected_release_candidate_id": "golden-test",
+      "expected_schema_version": "tokenzero.os_release_artifact.v1",
+      "present": true,
+      "reasons": [],
+      "release_candidate_id": "golden-test",
+      "release_candidate_matches": true,
+      "requirement_id": "NFR-002",
+      "requirement_residual": "macOS shell and install artifacts missing",
+      "requirement_status": "blocked_public",
+      "schema_matches": true,
+      "schema_version": "tokenzero.os_release_artifact.v1",
+      "section": "critical_nfr",
+      "status": "present"
+    },
+    {
+      "artifact_valid": true,
+      "content_markers_present": null,
+      "evidence": "results/current/tokenzero_security_privacy_audit.json",
+      "evidence_kind": "artifact",
+      "expected_content_markers": null,
+      "expected_release_candidate_id": null,
+      "expected_schema_version": "tokenzero.security_privacy_audit.v1",
+      "present": true,
+      "reasons": [],
+      "release_candidate_id": null,
+      "release_candidate_matches": null,
+      "requirement_id": "NFR-003",
+      "requirement_residual": null,
+      "requirement_status": "passed",
+      "schema_matches": true,
+      "schema_version": "tokenzero.security_privacy_audit.v1",
+      "section": "critical_nfr",
+      "status": "present"
+    },
+    {
+      "artifact_valid": true,
+      "content_markers_present": null,
+      "evidence": "results/current/tokenzero_security_privacy_audit.json",
+      "evidence_kind": "artifact",
+      "expected_content_markers": null,
+      "expected_release_candidate_id": null,
+      "expected_schema_version": "tokenzero.security_privacy_audit.v1",
+      "present": true,
+      "reasons": [],
+      "release_candidate_id": null,
+      "release_candidate_matches": null,
+      "requirement_id": "NFR-004",
+      "requirement_residual": null,
+      "requirement_status": "passed",
+      "schema_matches": true,
+      "schema_version": "tokenzero.security_privacy_audit.v1",
+      "section": "critical_nfr",
+      "status": "present"
+    }
+  ],
+  "final_summary_is_evidence": false,
+  "g_goals": [
+    {
+      "claim": "Competitive evidence ledger covers named and adjacent repositories",
+      "direct_evidence": [
+        "results/current/tokenzero_source_currency.json"
+      ],
+      "id": "G-001",
+      "residual": "source evidence is current; public claims still require benchmark, recovery, task-success, OS, adapter, and release approval gates",
+      "status": "passed_private"
+    },
+    {
+      "claim": "Benchmark harness measures TokenZero and accounts for competitor adapters",
+      "direct_evidence": [
+        "results/current/tokenzero_bench_competitors_shell_heavy.json",
+        "results/current/tokenzero_adapter_approval_audit.json"
+      ],
+      "id": "G-002",
+      "residual": "runnable competitor execution remains approval-gated",
+      "status": "passed_private"
+    },
+    {
+      "claim": "Exact Recovery Always has refs or degraded diagnostics",
+      "direct_evidence": [
+        "results/current/tokenzero_exact_recovery_audit.json",
+        "results/current/tokenzero_exact_recovery_shell.json"
+      ],
+      "id": "G-003",
+      "residual": null,
+      "status": "passed"
+    },
+    {
+      "claim": "Adaptive One-Shot Planner avoids hidden second-call dependence on golden critical traces",
+      "direct_evidence": [
+        "results/current/tokenzero_one_shot_eval.json"
+      ],
+      "id": "G-004",
+      "residual": "public one-shot claim remains gated",
+      "status": "passed_private"
+    },
+    {
+      "claim": "No-Daemon OS Runtime preserves Windows, macOS, and Linux behavior",
+      "direct_evidence": [
+        "results/current/tokenzero_os_reach_audit.json",
+        "results/current/tokenzero_os_release_artifact.json"
+      ],
+      "id": "G-005",
+      "residual": "macOS shell and install artifacts missing",
+      "status": "blocked_public"
+    },
+    {
+      "claim": "Stable CLI/MCP diagnostics separate transport from child command success",
+      "direct_evidence": [
+        "cargo test --workspace",
+        "results/current/tokenzero_false_success_shell.json",
+        "results/current/tokenzero_bench_competitors_shell_heavy.json"
+      ],
+      "id": "G-006",
+      "residual": null,
+      "status": "passed"
+    },
+    {
+      "claim": "Reach and install coverage identifies intercepted and bypassed host surfaces",
+      "direct_evidence": [
+        "results/current/tokenzero_reach.json",
+        "results/current/tokenzero_os_reach_audit.json",
+        "results/current/tokenzero_os_release_artifact.json"
+      ],
+      "id": "G-007",
+      "residual": "non-current OS release artifacts remain gated",
+      "status": "passed_private"
+    },
+    {
+      "claim": "Public Claim Gate blocks release-facing savings claims",
+      "direct_evidence": [
+        "results/current/tokenzero_claim_audit.json"
+      ],
+      "id": "G-008",
+      "residual": "public claim approval intentionally false: release approval not granted",
+      "status": "passed_blocked"
+    },
+    {
+      "claim": "Security and privacy keep raw payloads local and avoid unapproved external writes",
+      "direct_evidence": [
+        "results/current/tokenzero_security_privacy_audit.json"
+      ],
+      "id": "G-009",
+      "residual": null,
+      "status": "passed"
+    },
+    {
+      "claim": "Agent Execution Pack supports future implementation without this chat",
+      "direct_evidence": [
+        "results/current/tokenzero_artifact_handoff.json",
+        "docs/advanced-adr-execution-record.md",
+        "results/current/tokenzero_competitive_superiority_reconciliation.md",
+        "validate_prd_goal.py --min-score 930"
+      ],
+      "id": "G-010",
+      "residual": "completion remains blocked by explicit residual gates",
+      "status": "passed_private"
+    }
+  ],
+  "must_fr": [
+    {
+      "direct_evidence": [
+        "results/current/tokenzero_source_currency.json"
+      ],
+      "id": "FR-001",
+      "residual": "source evidence is current; public claims still require benchmark, recovery, task-success, OS, adapter, and release approval gates",
+      "status": "passed_private"
+    },
+    {
+      "direct_evidence": [
+        "results/current/tokenzero_bench_competitors_shell_heavy.json",
+        "results/current/tokenzero_adapter_approval_audit.json"
+      ],
+      "id": "FR-002",
+      "residual": "runnable competitor adapters require approval",
+      "status": "passed_private"
+    },
+    {
+      "direct_evidence": [
+        "results/current/tokenzero_exact_recovery_audit.json"
+      ],
+      "id": "FR-003",
+      "residual": null,
+      "status": "passed"
+    },
+    {
+      "direct_evidence": [
+        "results/current/tokenzero_protected_anchor_audit.json"
+      ],
+      "id": "FR-004",
+      "residual": null,
+      "status": "passed"
+    },
+    {
+      "direct_evidence": [
+        "results/current/tokenzero_one_shot_eval.json"
+      ],
+      "id": "FR-005",
+      "residual": "public one-shot claim still gated",
+      "status": "passed_private"
+    },
+    {
+      "direct_evidence": [
+        "cargo test --workspace",
+        "results/current/tokenzero_false_success_shell.json"
+      ],
+      "id": "FR-006",
+      "residual": null,
+      "status": "passed"
+    },
+    {
+      "direct_evidence": [
+        "results/current/tokenzero_os_reach_audit.json",
+        "results/current/tokenzero_os_release_artifact.json"
+      ],
+      "id": "FR-007",
+      "residual": "macOS shell and install artifacts missing",
+      "status": "blocked_public"
+    },
+    {
+      "direct_evidence": [
+        "results/current/tokenzero_claim_audit.json"
+      ],
+      "id": "FR-010",
+      "residual": "public claim approval intentionally false: release approval not granted",
+      "status": "passed_blocked"
+    }
+  ],
+  "ok": true,
+  "public_claims_approved": false,
+  "release_candidate_id": "golden-test",
+  "release_publication_allowed": false,
+  "requirement_status_counts": {
+    "blocked_public": 3,
+    "passed": 9,
+    "passed_blocked": 2,
+    "passed_private": 8
+  },
+  "residual_gaps": [
+    "macOS shell and install artifacts missing; do not claim OS-agnostic release readiness",
+    "public claim approval intentionally false: release approval not granted; do not publish release-facing savings claims",
+    "runnable competitor adapter execution requires reviewed commands and explicit approval",
+    "release/publication/global install apply remain gated actions"
+  ],
+  "residual_gate_matrix": [
+    {
+      "blocked_reasons": [
+        "adapter approval artifact does not allow execution",
+        "adapter approval artifact not approved for public claims"
+      ],
+      "gate_id": "adapter_approval",
+      "next_action": {
+        "action": "approve reviewed competitor commands, link them into the benchmark as approved_not_executed evidence, and only then decide whether an explicitly approved execution phase is warranted",
+        "id": "runnable_adapter_approval",
+        "owner": "bench/release",
+        "stop_condition": "no blind install, no unreviewed competitor binary execution, and no public benchmark claim from approved_not_executed rows",
+        "validation": "tokenzero adapter-approval-audit --approval-file <reviewed.json> --execution-approval --json, then tokenzero bench competitors --adapter-approval-artifact <adapter-approval.json> --json and inspect approved_not_executed rows before any runnable execution"
+      },
+      "next_action_id": "runnable_adapter_approval",
+      "owner": "bench/release",
+      "status": "blocked",
+      "stop_before": [
+        "competitor execution",
+        "public benchmark claim"
+      ]
+    },
+    {
+      "blocked_reasons": [
+        "benchmark artifact not approved for publication",
+        "benchmark competitor rows must be runnable for public claims"
+      ],
+      "gate_id": "benchmark_artifact",
+      "next_action": {
+        "action": "approve reviewed competitor commands, link them into the benchmark as approved_not_executed evidence, and only then decide whether an explicitly approved execution phase is warranted",
+        "id": "runnable_adapter_approval",
+        "owner": "bench/release",
+        "stop_condition": "no blind install, no unreviewed competitor binary execution, and no public benchmark claim from approved_not_executed rows",
+        "validation": "tokenzero adapter-approval-audit --approval-file <reviewed.json> --execution-approval --json, then tokenzero bench competitors --adapter-approval-artifact <adapter-approval.json> --json and inspect approved_not_executed rows before any runnable execution"
+      },
+      "next_action_id": "runnable_adapter_approval",
+      "owner": "bench/release",
+      "status": "blocked",
+      "stop_before": [
+        "competitor execution",
+        "public benchmark claim"
+      ]
+    },
+    {
+      "blocked_reasons": [
+        "OS artifact set not approved for public claim"
+      ],
+      "gate_id": "os_artifact",
+      "next_action": {
+        "action": "run os-release-artifact on macOS, then rerun OS reach audit with those artifacts",
+        "id": "os_matrix_expansion",
+        "missing_release_oses": [
+          "macos"
+        ],
+        "owner": "release/verification",
+        "stop_condition": "do not claim OS-agnostic until all release OS rows pass",
+        "validation": "tokenzero os-release-artifact --json on macOS, then tokenzero os-reach-audit --os-artifact <macos.json> --json with Windows/Linux/macOS release-candidate rows"
+      },
+      "next_action_id": "os_matrix_expansion",
+      "owner": "release/verification",
+      "status": "blocked",
+      "stop_before": [
+        "OS-agnostic public claim",
+        "publication"
+      ]
+    },
+    {
+      "blocked_reasons": [
+        "release approval not granted"
+      ],
+      "gate_id": "release_approval",
+      "next_action": {
+        "action": "rerun completion audit and reconcile every residual gate before claiming completion",
+        "id": "final_false_closure_audit",
+        "owner": "implementer",
+        "stop_condition": "completion_achieved must remain false until every required evidence row is direct and current",
+        "validation": "tokenzero completion-audit --json"
+      },
+      "next_action_id": "final_false_closure_audit",
+      "owner": "implementer",
+      "status": "blocked",
+      "stop_before": [
+        "release",
+        "publication",
+        "global install apply"
+      ]
+    }
+  ],
+  "residual_gate_status_counts": {
+    "blocked": 4
+  },
+  "schema_version": "tokenzero.completion_audit.v1",
+  "status": "ok"
+}

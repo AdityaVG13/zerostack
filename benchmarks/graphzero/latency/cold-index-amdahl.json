@@ -1,0 +1,35 @@
+{
+  "schema": "graphzero.cold-index-amdahl.v1",
+  "bead": "graphzero-math-cold-index-throughput-fzzl",
+  "corpus": {"repo": ".", "rust_files": 671},
+  "command": "rm -rf .zerostack/graphzero && target/release/graphzero index .",
+  "baseline": {
+    "source_revision": "a3001de",
+    "p50_ms": 6317.197,
+    "samples_ms": [6181.316, 6710.811, 6898.013, 6372.8, 6258.93, 6300.994, 6317.197]
+  },
+  "candidate": {
+    "source_revision": "commit containing this artifact",
+    "p50_ms": 5907.466,
+    "samples_ms": [5907.466, 5873.883, 6074.968]
+  },
+  "p50_improvement_pct": 6.5,
+  "measured_synthetic_289_phase_ms": {
+    "extract": 5.393,
+    "blob_put": 23.737,
+    "blob_sync": 11.253,
+    "write_snapshot": 61.356,
+    "manifest_publish": 17.518,
+    "total": 178.176
+  },
+  "amdahl": {
+    "p_extract_plus_scan": 0.03336,
+    "extract_infinite_speedup_ceiling": 1.0345,
+    "claim": "6.5% overall; no extract-driven 2x claim"
+  },
+  "design": [
+    "parallel sync_data of pending blob files before the existing directory barrier",
+    "git ODB existence checks avoid loading every tracked blob during classification",
+    "manifest publication and directory durability barriers remain unchanged"
+  ]
+}

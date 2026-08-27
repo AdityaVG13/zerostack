@@ -1,0 +1,75 @@
+[workspace]
+resolver = "3"
+members = [
+    "crates/graphzero-types",
+    "crates/graphzero-core",
+    "crates/graphzero-store",
+    "crates/graphzero-engine",
+    "crates/graphzero-kernel",
+    "crates/graphzero-cli",
+    "crates/graphzero-test-support",
+    "crates/graphzero-coverage",
+    "crates/graphzero-extract",
+    "crates/graphzero-pack",
+    "crates/graphzero-reserve",
+    "crates/graphzero-scip",
+    "crates/graphzero-semantic",
+    "crates/graphzero-why",
+]
+exclude = ["crates/benchmarks", "crates/.tokenzero", "crates/.zerostack"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+
+[workspace.dependencies]
+ah-ah-ah = "0.1"
+anyhow = "1"
+bytemuck = { version = "1.25", features = ["derive"] }
+criterion = { version = "0.8", features = ["html_reports"] }
+git2 = { version = "0.21", default-features = false }
+graphzero-extract = { path = "crates/graphzero-extract" }
+# The query package keeps recipe/JSON compatibility without a JavaScript runtime.
+graphzero-engine = { path = "crates/graphzero-engine", default-features = false }
+graphzero-kernel = { path = "crates/graphzero-kernel" }
+graphzero-reserve = { path = "crates/graphzero-reserve" }
+graphzero-semantic = { path = "crates/graphzero-semantic" }
+graphzero-store = { path = "crates/graphzero-store", default-features = false }
+graphzero-test-support = { path = "crates/graphzero-test-support" }
+graphzero-types = { path = "crates/graphzero-types" }
+memmap2 = ">=0.9.11"
+proptest = "1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+blake3 = "1.8"
+ast-sgrep-core = { git = "https://github.com/AdityaVG13/ast-sgrep.git", rev = "6b65549bd9db13f253b0f26a9f6b06b661dc41e4" }
+ast-sgrep-lang = { git = "https://github.com/AdityaVG13/ast-sgrep.git", rev = "6b65549bd9db13f253b0f26a9f6b06b661dc41e4" }
+zero-abi = { path = "../ZeroStack/crates/zero-abi" }
+# Hub-owned MCP transport authority (replaces the retired zero-codemode fastmcp carrier).
+zero-mcp = { git = "https://github.com/AdityaVG13/zerostack", rev = "bae540d3fe16b1d5f53948f293eb04a8c93e68c6", features = ["fastmcp"] }
+zero-gauge = { path = "../ZeroStack/crates/zero-gauge" }
+zero-ref = { path = "../ZeroStack/crates/zero-ref" }
+zero-store = { path = "../ZeroStack/crates/zero-store" }
+serial_test = "4"
+sha2 = "0.11"
+tempfile = "3.27"
+tracing = "0.1"
+hdrhistogram = "7"
+tiktoken-rs = "0.12"
+
+[profile.release-perf]
+inherits = "release"
+opt-level = 3
+lto = "thin"
+codegen-units = 1
+debug = "line-tables-only"
+strip = false
+
+[workspace.lints.rust]
+unsafe_op_in_unsafe_fn = "deny"
+
+[workspace.lints.clippy]
+dbg_macro = "deny"
+todo = "deny"
+unimplemented = "deny"

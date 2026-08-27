@@ -1,0 +1,51 @@
+id	query	expected_path	expected_symbol	class
+q01	render_agent_json	crates/graphzero-cli/src/agent_cli.rs	render_agent_json	exact
+q02	capabilities_json	crates/graphzero-cli/src/agent_cli.rs	capabilities_json	exact
+q03	robot_docs_guide	crates/graphzero-cli/src/agent_cli.rs	robot_docs_guide	exact
+q04	agent_triage_json	crates/graphzero-cli/src/agent_cli.rs	agent_triage_json	exact
+q05	doctor_json	crates/graphzero-cli/src/agent_cli.rs	doctor_json	exact
+q06	sorted_keys	crates/graphzero-cli/src/agent_cli.rs	sorted_keys	exact
+q07	agent_json_subcommands_preserve_top_level_contracts	crates/graphzero-cli/src/agent_cli.rs	agent_json_subcommands_preserve_top_level_contracts	exact
+q08	doctor_surfaces_shared_store_multi_root_warning	crates/graphzero-cli/src/agent_cli.rs	doctor_surfaces_shared_store_multi_root_warning	exact
+q09	valid_surfaces_json	crates/graphzero-cli/src/agent_errors.rs	valid_surfaces_json	exact
+q10	agent_error_json	crates/graphzero-cli/src/agent_errors.rs	agent_error_json	exact
+q11	query_surface_error_json	crates/graphzero-cli/src/agent_errors.rs	query_surface_error_json	exact
+q12	missing_arg_hint	crates/graphzero-cli/src/agent_errors.rs	missing_arg_hint	exact
+q13	orient_help_enrichment	crates/graphzero-cli/src/agent_errors.rs	orient_help_enrichment	exact
+q14	expand_ref_enrichment	crates/graphzero-cli/src/agent_errors.rs	expand_ref_enrichment	exact
+q15	read_path_enrichment	crates/graphzero-cli/src/agent_errors.rs	read_path_enrichment	exact
+q16	daemon_socket_enrichment	crates/graphzero-cli/src/agent_errors.rs	daemon_socket_enrichment	exact
+q17	unknown_surface_enrichment	crates/graphzero-cli/src/agent_errors.rs	unknown_surface_enrichment	exact
+q18	missing_argument_enrichment	crates/graphzero-cli/src/agent_errors.rs	missing_argument_enrichment	exact
+q19	missing_snapshot_enrichment	crates/graphzero-cli/src/agent_errors.rs	missing_snapshot_enrichment	exact
+q20	enrich_cli_error_message	crates/graphzero-cli/src/agent_errors.rs	enrich_cli_error_message	exact
+q21	crates/graphzero-cli/src/agent_errors.rs::enriched	crates/graphzero-cli/src/agent_errors.rs	enriched	qualified
+q22	crates/graphzero-cli/src/agent_errors.rs::enriches_common_cli_error_shapes	crates/graphzero-cli/src/agent_errors.rs	enriches_common_cli_error_shapes	qualified
+q23	crates/graphzero-cli/src/agent_errors.rs::enrich_cli_error_message_keeps_fallback_shape	crates/graphzero-cli/src/agent_errors.rs	enrich_cli_error_message_keeps_fallback_shape	qualified
+q24	crates/graphzero-cli/src/agent_output.rs::set_json_envelope	crates/graphzero-cli/src/agent_output.rs	set_json_envelope	qualified
+q25	crates/graphzero-cli/src/agent_output.rs::json_envelope_enabled	crates/graphzero-cli/src/agent_output.rs	json_envelope_enabled	qualified
+q26	crates/graphzero-cli/src/agent_output.rs::agent_json_line	crates/graphzero-cli/src/agent_output.rs	agent_json_line	qualified
+q27	crates/graphzero-cli/src/agent_output.rs::emit_agent_json_to	crates/graphzero-cli/src/agent_output.rs	emit_agent_json_to	qualified
+q28	crates/graphzero-cli/src/agent_output.rs::emit_agent_json	crates/graphzero-cli/src/agent_output.rs	emit_agent_json	qualified
+q29	crates/graphzero-cli/src/agent_output.rs::parse_agent_json_payload	crates/graphzero-cli/src/agent_output.rs	parse_agent_json_payload	qualified
+q30	crates/graphzero-cli/src/agent_output.rs::emit_agent_json_from_str	crates/graphzero-cli/src/agent_output.rs	emit_agent_json_from_str	qualified
+q31	crates/graphzero-cli/src/agent_output.rs::hardening_invariant_malformed_stdin_payload_returns_structured_error_without_envelope	crates/graphzero-cli/src/agent_output.rs	hardening_invariant_malformed_stdin_payload_returns_structured_error_without_envelope	qualified
+q32	crates/graphzero-cli/src/agent_output.rs::hardening_invariant_malformed_stdin_payload_is_structured_error_inside_envelope	crates/graphzero-cli/src/agent_output.rs	hardening_invariant_malformed_stdin_payload_is_structured_error_inside_envelope	qualified
+q33	crates/graphzero-cli/src/agent_output.rs::envelope_rendering_preserves_raw_payload	crates/graphzero-cli/src/agent_output.rs	envelope_rendering_preserves_raw_payload	qualified
+q34	crates/graphzero-cli/src/agent_output.rs::writer_errors_are_returned_not_panicked	crates/graphzero-cli/src/agent_output.rs	writer_errors_are_returned_not_panicked	qualified
+q35	crates/graphzero-cli/src/agent_subcommand_hints.rs::subcommand_hint_from_parse_error	crates/graphzero-cli/src/agent_subcommand_hints.rs	subcommand_hint_from_parse_error	qualified
+q36	extract unrecognized subcommand	crates/graphzero-cli/src/agent_subcommand_hints.rs	extract_unrecognized_subcommand	intent
+q37	levenshtein1 match	crates/graphzero-cli/src/agent_subcommand_hints.rs	levenshtein1_match	intent
+q38	common typo map	crates/graphzero-cli/src/agent_subcommand_hints.rs	common_typo_map	intent
+q39	levenshtein distance	crates/graphzero-cli/src/agent_subcommand_hints.rs	levenshtein_distance	intent
+q40	serach maps to search	crates/graphzero-cli/src/agent_subcommand_hints.rs	serach_maps_to_search	intent
+q41	run neighborhood	crates/graphzero-cli/src/blast_tools.rs	run_neighborhood	intent
+q42	run speculative blast	crates/graphzero-cli/src/blast_tools.rs	run_speculative_blast	intent
+q43	parse planned edit	crates/graphzero-cli/src/blast_tools.rs	parse_planned_edit	intent
+q44	version requested	crates/graphzero-cli/src/cli_args.rs	version_requested	intent
+q45	agent typo extra hint	crates/graphzero-cli/src/cli_args.rs	agent_typo_extra_hint	intent
+q46	agent json mode	crates/graphzero-cli/src/cli_args.rs	agent_json_mode	intent
+q47	json version mode	crates/graphzero-cli/src/cli_args.rs	json_version_mode	intent
+q48	print version	crates/graphzero-cli/src/cli_args.rs	print_version	intent
+q49	canonical repo	crates/graphzero-cli/src/commands/paths.rs	canonical_repo	intent
+q50	repo pair	crates/graphzero-cli/src/commands/paths.rs	repo_pair	intent

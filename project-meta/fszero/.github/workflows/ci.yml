@@ -1,0 +1,22 @@
+name: public-contract
+
+# DSR is the repository quality authority. This workflow remains manual and
+# checks portable public documentation and lightweight contracts only.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  public-contract:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+      - name: Reject private host paths
+        run: scripts/check-portability.sh
+      - name: Audit documented commands
+        run: python3 scripts/readme_command_audit.py
+      - name: Verify benchmark claims
+        run: python3 scripts/claims_audit.py

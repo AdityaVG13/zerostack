@@ -1,0 +1,407 @@
+{
+  "provenance": {
+    "hardware": "Apple M5 Max / 48 GB",
+    "date": "2026-07-10T08:31:58Z",
+    "git_commit": "0424550e83dd4642d93c5c65267ad22c55879fab",
+    "git_dirty": false,
+    "versions": {
+      "git": "git version 2.55.0",
+      "watchman": "2026.07.06.00",
+      "fszero_bin_sha256_16": "bf562a07ef8586eb"
+    },
+    "seed": 42,
+    "k": 10,
+    "trials": 5,
+    "poll_sleep_ms": 2.0
+  },
+  "sizes": [
+    {
+      "files": 23000,
+      "setup": {
+        "git_init_commit_s": 7.81,
+        "fszero_cold_index_ms": 6981.5,
+        "fszero_cold_oneshot_wall_ms": 7173.5,
+        "watchman_initial_crawl_ms": 16.2
+      },
+      "change_detection": {
+        "trials": [
+          {
+            "files": [
+              "mod_010/sub_027/f_032.rs",
+              "mod_008/sub_017/f_026.rs",
+              "mod_015/sub_029/f_016.rs",
+              "mod_012/sub_006/f_037.rs",
+              "mod_015/sub_028/f_031.rs",
+              "mod_013/sub_000/f_025.rs",
+              "mod_010/sub_001/f_033.rs",
+              "mod_012/sub_016/f_039.rs",
+              "mod_001/sub_016/f_032.rs",
+              "mod_010/sub_014/f_027.rs"
+            ],
+            "git_cold_ms": 46.22,
+            "git_warm_ms": 37.78,
+            "watchman_event_latency_ms": 10.7,
+            "watchman_query_ms": 12.32,
+            "fszero_oneshot_wall_ms": 504.95,
+            "fszero_internal_refresh_ms": 382.78,
+            "fszero_phases_ms": {
+              "index_lock": 0.017,
+              "walk": 54.109,
+              "manifest_diff": 38.93,
+              "prepare": 18.057,
+              "parallel_ingest": 1.921,
+              "asgrep_open": 0.017,
+              "merge_and_asgrep_upserts": 2.3,
+              "ast_persist": 198.981,
+              "txn_commit": 67.897,
+              "searcher_create": 0.546
+            }
+          },
+          {
+            "files": [
+              "mod_012/sub_024/f_035.rs",
+              "mod_012/sub_011/f_028.rs",
+              "mod_015/sub_027/f_028.rs",
+              "mod_016/sub_019/f_012.rs",
+              "mod_006/sub_027/f_003.rs",
+              "mod_008/sub_008/f_028.rs",
+              "mod_003/sub_004/f_027.rs",
+              "mod_015/sub_021/f_005.rs",
+              "mod_016/sub_024/f_025.rs",
+              "mod_006/sub_005/f_035.rs"
+            ],
+            "git_cold_ms": 36.77,
+            "git_warm_ms": 36.94,
+            "watchman_event_latency_ms": 11.69,
+            "watchman_query_ms": 12.34,
+            "fszero_oneshot_wall_ms": 1767.45,
+            "fszero_internal_refresh_ms": 1641.07,
+            "fszero_phases_ms": {
+              "index_lock": 0.017,
+              "walk": 53.247,
+              "manifest_diff": 38.553,
+              "prepare": 17.363,
+              "parallel_ingest": 1.553,
+              "asgrep_open": 0.02,
+              "merge_and_asgrep_upserts": 1.072,
+              "ast_persist": 195.062,
+              "txn_commit": 1333.831,
+              "searcher_create": 0.347
+            }
+          },
+          {
+            "files": [
+              "mod_015/sub_012/f_026.rs",
+              "mod_000/sub_023/f_018.rs",
+              "mod_007/sub_025/f_015.rs",
+              "mod_008/sub_031/f_000.rs",
+              "mod_009/sub_011/f_017.rs",
+              "mod_013/sub_019/f_029.rs",
+              "mod_011/sub_013/f_011.rs",
+              "mod_014/sub_016/f_019.rs",
+              "mod_011/sub_027/f_015.rs",
+              "mod_015/sub_009/f_009.rs"
+            ],
+            "git_cold_ms": 37.78,
+            "git_warm_ms": 37.26,
+            "watchman_event_latency_ms": 11.78,
+            "watchman_query_ms": 12.0,
+            "fszero_oneshot_wall_ms": 500.37,
+            "fszero_internal_refresh_ms": 378.28,
+            "fszero_phases_ms": {
+              "index_lock": 0.018,
+              "walk": 53.061,
+              "manifest_diff": 39.369,
+              "prepare": 18.675,
+              "parallel_ingest": 1.567,
+              "asgrep_open": 0.024,
+              "merge_and_asgrep_upserts": 1.224,
+              "ast_persist": 197.273,
+              "txn_commit": 66.628,
+              "searcher_create": 0.432
+            }
+          },
+          {
+            "files": [
+              "mod_007/sub_012/f_022.rs",
+              "mod_013/sub_004/f_028.rs",
+              "mod_005/sub_019/f_025.rs",
+              "mod_013/sub_020/f_010.rs",
+              "mod_001/sub_001/f_009.rs",
+              "mod_001/sub_027/f_039.rs",
+              "mod_014/sub_024/f_002.rs",
+              "mod_000/sub_018/f_015.rs",
+              "mod_000/sub_013/f_009.rs",
+              "mod_005/sub_009/f_027.rs"
+            ],
+            "git_cold_ms": 40.38,
+            "git_warm_ms": 41.6,
+            "watchman_event_latency_ms": 11.59,
+            "watchman_query_ms": 12.1,
+            "fszero_oneshot_wall_ms": 1772.22,
+            "fszero_internal_refresh_ms": 1646.37,
+            "fszero_phases_ms": {
+              "index_lock": 0.016,
+              "walk": 53.963,
+              "manifest_diff": 38.442,
+              "prepare": 17.798,
+              "parallel_ingest": 1.744,
+              "asgrep_open": 0.017,
+              "merge_and_asgrep_upserts": 0.925,
+              "ast_persist": 196.271,
+              "txn_commit": 1336.794,
+              "searcher_create": 0.391
+            }
+          },
+          {
+            "files": [
+              "mod_010/sub_024/f_016.rs",
+              "mod_017/sub_022/f_017.rs",
+              "mod_004/sub_005/f_010.rs",
+              "mod_013/sub_026/f_027.rs",
+              "mod_013/sub_005/f_032.rs",
+              "mod_006/sub_004/f_018.rs",
+              "mod_004/sub_023/f_009.rs",
+              "mod_014/sub_013/f_027.rs",
+              "mod_006/sub_010/f_034.rs",
+              "mod_008/sub_008/f_001.rs"
+            ],
+            "git_cold_ms": 37.34,
+            "git_warm_ms": 37.1,
+            "watchman_event_latency_ms": 11.82,
+            "watchman_query_ms": 11.85,
+            "fszero_oneshot_wall_ms": 515.72,
+            "fszero_internal_refresh_ms": 395.08,
+            "fszero_phases_ms": {
+              "index_lock": 0.017,
+              "walk": 53.345,
+              "manifest_diff": 38.765,
+              "prepare": 17.888,
+              "parallel_ingest": 1.695,
+              "asgrep_open": 0.021,
+              "merge_and_asgrep_upserts": 1.143,
+              "ast_persist": 197.562,
+              "txn_commit": 84.11,
+              "searcher_create": 0.527
+            }
+          }
+        ],
+        "fszero_nochange_oneshot_wall_ms": 410.5,
+        "medians": {
+          "git_cold_ms": 37.78,
+          "git_warm_ms": 37.26,
+          "watchman_event_latency_ms": 11.69,
+          "watchman_query_ms": 12.1,
+          "fszero_oneshot_wall_ms": 515.72,
+          "fszero_internal_refresh_ms": 395.08
+        }
+      },
+      "watch_latency": {
+        "trials": [
+          {
+            "files": [
+              "mod_015/sub_014/f_036.rs",
+              "mod_007/sub_028/f_022.rs",
+              "mod_008/sub_021/f_036.rs",
+              "mod_007/sub_018/f_031.rs",
+              "mod_017/sub_026/f_021.rs",
+              "mod_012/sub_001/f_033.rs",
+              "mod_010/sub_013/f_013.rs",
+              "mod_001/sub_028/f_027.rs",
+              "mod_011/sub_029/f_028.rs",
+              "mod_004/sub_015/f_011.rs"
+            ],
+            "fszero_e2e_ms": 2760.01
+          },
+          {
+            "files": [
+              "mod_013/sub_003/f_020.rs",
+              "mod_004/sub_016/f_028.rs",
+              "mod_001/sub_005/f_014.rs",
+              "mod_013/sub_021/f_032.rs",
+              "mod_004/sub_030/f_016.rs",
+              "mod_012/sub_022/f_012.rs",
+              "mod_010/sub_007/f_012.rs",
+              "mod_009/sub_007/f_001.rs",
+              "mod_009/sub_027/f_015.rs",
+              "mod_008/sub_020/f_029.rs"
+            ],
+            "fszero_e2e_ms": 2741.34
+          },
+          {
+            "files": [
+              "mod_003/sub_016/f_011.rs",
+              "mod_016/sub_001/f_035.rs",
+              "mod_014/sub_002/f_023.rs",
+              "mod_002/sub_011/f_008.rs",
+              "mod_002/sub_005/f_033.rs",
+              "mod_012/sub_006/f_016.rs",
+              "mod_006/sub_030/f_026.rs",
+              "mod_007/sub_017/f_004.rs",
+              "mod_015/sub_014/f_002.rs",
+              "mod_002/sub_001/f_006.rs"
+            ],
+            "fszero_e2e_ms": 2734.49
+          },
+          {
+            "files": [
+              "mod_006/sub_031/f_032.rs",
+              "mod_013/sub_001/f_014.rs",
+              "mod_009/sub_011/f_029.rs",
+              "mod_015/sub_023/f_025.rs",
+              "mod_015/sub_014/f_011.rs",
+              "mod_017/sub_020/f_007.rs",
+              "mod_014/sub_025/f_033.rs",
+              "mod_009/sub_028/f_027.rs",
+              "mod_006/sub_001/f_006.rs",
+              "mod_015/sub_018/f_038.rs"
+            ],
+            "fszero_e2e_ms": 2751.29
+          },
+          {
+            "files": [
+              "mod_003/sub_025/f_032.rs",
+              "mod_007/sub_030/f_002.rs",
+              "mod_005/sub_022/f_039.rs",
+              "mod_002/sub_028/f_001.rs",
+              "mod_000/sub_029/f_010.rs",
+              "mod_014/sub_027/f_021.rs",
+              "mod_007/sub_005/f_028.rs",
+              "mod_017/sub_022/f_003.rs",
+              "mod_007/sub_007/f_030.rs",
+              "mod_012/sub_009/f_002.rs"
+            ],
+            "fszero_e2e_ms": 2792.51
+          }
+        ],
+        "poll_sleep_ms": 2.0,
+        "fszero_poll_wall_ms": 103.45,
+        "medians": {
+          "fszero_e2e_ms": 2751.29
+        }
+      }
+    }
+  ],
+  "fidelity": [
+    {
+      "op": "create",
+      "expected": {
+        "desc": "new file appears as a creation"
+      },
+      "git": {
+        "observed": [
+          "?? mod_000/sub_000/zz_bakeoff_new.rs"
+        ],
+        "match": true
+      },
+      "watchman": {
+        "observed": {
+          "mod_000/sub_000/zz_bakeoff_new.rs": {
+            "exists": true,
+            "new": true
+          }
+        },
+        "match": true
+      },
+      "fszero_feed": {
+        "observed": [
+          "changed:mod_000/sub_000/zz_bakeoff_new.rs"
+        ],
+        "match": true
+      }
+    },
+    {
+      "op": "modify",
+      "expected": {
+        "desc": "existing file appears as a modification"
+      },
+      "git": {
+        "observed": [
+          " M mod_000/sub_000/f_000.rs"
+        ],
+        "match": true
+      },
+      "watchman": {
+        "observed": {
+          "mod_000/sub_000/f_000.rs": {
+            "exists": true,
+            "new": false
+          }
+        },
+        "match": true
+      },
+      "fszero_feed": {
+        "observed": [
+          "changed:mod_000/sub_000/f_000.rs"
+        ],
+        "match": true
+      }
+    },
+    {
+      "op": "delete",
+      "expected": {
+        "desc": "deleted file appears as a deletion"
+      },
+      "git": {
+        "observed": [
+          " D mod_000/sub_000/zz_bakeoff_new.rs"
+        ],
+        "match": true
+      },
+      "watchman": {
+        "observed": {
+          "mod_000/sub_000/zz_bakeoff_new.rs": {
+            "exists": false,
+            "new": false
+          }
+        },
+        "match": true
+      },
+      "fszero_feed": {
+        "observed": [],
+        "match": false
+      }
+    },
+    {
+      "op": "rename",
+      "expected": {
+        "desc": "old path removed + new path created (no system reports a first-class rename for unstaged worktree moves)"
+      },
+      "git": {
+        "observed": [
+          " D mod_000/sub_000/f_000.rs",
+          "?? mod_000/sub_000/zz_bakeoff_renamed.rs"
+        ],
+        "match": true
+      },
+      "watchman": {
+        "observed": {
+          "mod_000/sub_000/f_000.rs": {
+            "exists": false,
+            "new": false
+          },
+          "mod_000/sub_000/zz_bakeoff_renamed.rs": {
+            "exists": true,
+            "new": true
+          }
+        },
+        "match": true
+      },
+      "fszero_feed": {
+        "observed": [
+          "changed:mod_000/sub_000/zz_bakeoff_renamed.rs",
+          "removed:mod_000/sub_000/f_000.rs"
+        ],
+        "match": true
+      }
+    }
+  ],
+  "verdicts": [
+    "- **LOSS (23000 files)**: fszero one-shot (516ms) is 13.7x slower than cold-ish `git status` (38ms) as a raw change-detection CLI \u2014 even though the one-shot also rebuilds the index for the changed files, the CLI-shaped comparison is a loss.",
+    "- **LOSS (23000 files)**: fszero one-shot (516ms) is 13.8x slower than warm `git status` (37ms) as a raw change-detection CLI \u2014 even though the one-shot also rebuilds the index for the changed files, the CLI-shaped comparison is a loss.",
+    "- **LOSS (23000 files)**: fszero's detection-only floor (no-change one-shot, 410ms) is 11.0x slower than warm `git status` (37ms): process spawn + store open + full walk dominate.",
+    "- **LOSS to watchman (23000 files)**: a settled watchman since-query (12.1ms) beats both git warm status (37ms) and fszero's one-shot floor (410ms). A long-lived daemon with an in-memory view wins the pure detection race; fszero only matches this shape in server mode (see event latency).",
+    "- **LOSS (23000 files)**: end-to-end watch latency 2751.3ms (fszero server) vs 11.7ms (watchman) under the identical poll loop \u2014 watchman reports the change faster; fszero is also reindexing before it answers.",
+    "- **Fidelity mismatches** on: delete (see table 3)."
+  ]
+}

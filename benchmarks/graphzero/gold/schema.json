@@ -1,0 +1,83 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "GraphZero edge accuracy gold record",
+  "type": "object",
+  "required": [
+    "id",
+    "corpus",
+    "language",
+    "fixture",
+    "relation",
+    "edge_kind",
+    "caller",
+    "callee",
+    "anchor",
+    "expected"
+  ],
+  "properties": {
+    "id": {
+      "type": "string"
+    },
+    "corpus": {
+      "type": "string"
+    },
+    "language": {
+      "enum": [
+        "rust",
+        "typescript"
+      ]
+    },
+    "fixture": {
+      "type": "string"
+    },
+    "relation": {
+      "enum": [
+        "true_edge",
+        "confirmed_non_edge"
+      ]
+    },
+    "edge_kind": {
+      "enum": [
+        "calls",
+        "imports",
+        "implements"
+      ]
+    },
+    "caller": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "callee": {
+      "type": "string"
+    },
+    "anchor": {
+      "type": "string"
+    },
+    "cases": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "expected": {
+      "type": "object",
+      "required": [
+        "structural",
+        "typed"
+      ],
+      "properties": {
+        "structural": {
+          "type": "string"
+        },
+        "typed": {
+          "type": "string"
+        }
+      }
+    },
+    "evidence": {
+      "type": "string"
+    }
+  }
+}

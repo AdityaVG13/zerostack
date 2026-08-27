@@ -1,0 +1,31 @@
+[package]
+name = "fszero-cli"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+
+[[bin]]
+name = "fszero"
+path = "src/main.rs"
+
+[features]
+default = ["sqlite-system"]
+sqlite-system = ["fs-zero/sqlite-system"]
+# Declared only so legacy cfg guards remain check-cfg clean. Enabling either is
+# rejected in main; surface runtimes belong to the dedicated packages.
+surface-mcp = []
+surface-codemode = []
+sqlite-bundled = ["fs-zero/sqlite-bundled"]
+
+[dependencies]
+fs-zero = { path = "../fs-zero", default-features = false }
+serde_json = "1.0.151"
+
+[[test]]
+name = "shim_dispatch"
+path = "../../../tests/fszero/cli/shim_dispatch.rs"
+
+[[test]]
+name = "doctor_surface"
+path = "../../../tests/fszero/cli/doctor_surface.rs"

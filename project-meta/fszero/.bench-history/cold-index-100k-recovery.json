@@ -1,0 +1,64 @@
+{
+  "benchmark_id": "cold-index.100k-recovery",
+  "failures": [
+    "sample count 2 is below the 20-trial publication floor"
+  ],
+  "harness_evidence": {
+    "artifact_reference": "benchmarks/index-scaling.json",
+    "resource_profiler": "darwin-time-l"
+  },
+  "metrics": {
+    "files": 100000,
+    "gate_eligible": false,
+    "latency_target_observed": true,
+    "ordered_wall_ns": [
+      4940278750,
+      4948582667
+    ],
+    "reported_median_total_ms": "4944.4307085",
+    "rounded_p50_wall_ns": 4944430709,
+    "target_wall_ns": 5000000000
+  },
+  "policy": {
+    "gate": "cold_index_100k",
+    "max_wall_ns": 5000000000,
+    "no_pass_over_pass": true,
+    "threshold_change_requires_decision": true
+  },
+  "recorded_at": "2026-07-10T18:05:22Z",
+  "runner": {
+    "arch": "unrecorded",
+    "hardware": "Apple M5 Max / 48 GB",
+    "measurement_scope": "cold index of deterministic 100000-file corpus",
+    "os": "macos",
+    "profile": "unrecorded",
+    "runner_class": "apple-m5-max-48gb-darwin-time-l"
+  },
+  "schema": "fszero.bench-history",
+  "source": {
+    "artifact_path": "benchmarks/index-scaling.json",
+    "artifact_sha256": "a18d95c083051d7cde0cfa218467568a8ccf18bd77bb2dd17be084d18ea7920f",
+    "command": [
+      "python3",
+      "benchmarks/index_scaling.py"
+    ],
+    "git_commit": "0fbe907d36197e83369ef75d1d41d230c23a3de6",
+    "git_dirty": true,
+    "harness_schema": "fszero.index-scaling.legacy"
+  },
+  "statistical_profile": {
+    "measured_trials_per_surface": 2,
+    "minimum_measured_trials": 20,
+    "ordered_raw_trials": true,
+    "outlier_policy": "none recorded",
+    "percentile_method": "legacy median of two trials",
+    "sample_size_exception": {
+      "conservative_tail": true,
+      "reason": "Recovery artifact has two cold trials; its sub-5s median is observational, not a ratchet pass.",
+      "removal_condition": "Publish at least 20 same-host measured trials before assigning pass status."
+    },
+    "total_trials_per_surface": 2,
+    "warmup_trials_discarded": 0
+  },
+  "status": "blocked"
+}

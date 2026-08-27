@@ -2,6 +2,7 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+TARGET_DIR="${CARGO_TARGET_DIR:-$ROOT/target}"
 MAX_BYTES=50000000
 
 case "$(uname -s):$(uname -m)" in
@@ -17,7 +18,7 @@ if [[ "${1:-}" != "--stage-only" ]]; then
   cargo build --profile release-node -p zero-kernel-node
 fi
 
-source="target/release-node/$library"
+source="$TARGET_DIR/release-node/$library"
 destination="bindings/node/prebuilds/$platform/zero_kernel_product.node"
 install -d "$(dirname "$destination")"
 install -m 0755 "$source" "$destination"

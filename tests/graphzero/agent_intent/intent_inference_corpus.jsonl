@@ -1,0 +1,6 @@
+{"id":"gzero-wrong-snap","binary":"gzero","argv":["snap","alpha"],"expect":"useful_hint","must_contain":["wrong_binary","graphzero"],"critical_path":"gzero/snap"}
+{"id":"gzero-typo-codmode","binary":"gzero","argv":["codmode"],"expect":"useful_hint","must_contain":["codemode"],"critical_path":"gzero"}
+{"id":"gzero-unknown-verb","binary":"gzero","argv":["blorp"],"expect":"useful_hint","must_contain":["unknown_verb","codemode"],"critical_path":"gzero"}
+{"id":"gzero-help","binary":"gzero","argv":["--help"],"expect":"inferred_and_acted","must_contain":["codemode","gzero"],"exit_code":0,"critical_path":"gzero"}
+{"id":"graphzero-help","binary":"graphzero","argv":["--help"],"expect":"inferred_and_acted","must_contain":["snap","Commands"],"exit_code":0,"critical_path":"graphzero"}
+{"id":"graphzero-snap-missing","binary":"graphzero","argv":["snap"],"expect":"useful_hint","must_contain":["snap"],"critical_path":"gzero/snap"}

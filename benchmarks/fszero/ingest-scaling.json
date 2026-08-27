@@ -1,0 +1,36 @@
+{
+  "hardware": "Apple M5 Max / 18 cores",
+  "cores": 18,
+  "git_commit": "c6dc8815616710794f47567113bff5e86a32054f",
+  "date": "2026-07-10T07:30:03Z",
+  "files": 50000,
+  "runs_per_config": 2,
+  "seed": 42,
+  "configs": [
+    {
+      "threads": 1,
+      "median_ingest_ms": 21773.762292,
+      "median_total_ms": 34010.3618125
+    },
+    {
+      "threads": 2,
+      "median_ingest_ms": 12647.694562,
+      "median_total_ms": 25986.317291
+    },
+    {
+      "threads": 4,
+      "median_ingest_ms": 6180.5964585,
+      "median_total_ms": 18244.641979
+    },
+    {
+      "threads": 8,
+      "median_ingest_ms": 3955.305104,
+      "median_total_ms": 16072.990249999999
+    },
+    {
+      "threads": 18,
+      "median_ingest_ms": 2114.196688,
+      "median_total_ms": 14325.132333000001
+    }
+  ]
+}
