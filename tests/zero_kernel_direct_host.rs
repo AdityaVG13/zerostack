@@ -12,17 +12,16 @@ use tempfile::tempdir;
 use tokenzero_kernel::ZeroTokenEngine;
 use zero_abi::{
     AsgrepOptions, CapsulePublication, CompressionRequest, CompressionResult, EffectChangeKind,
-    EffectChangeRequest, EffectRequest, EffectTarget, EffectVerification, EngineError,
-    EngineErrorKind, EngineInvocation, FileEffectKind, FileEffectReceipt, FileEffectRequest,
-    FileEngine, FileLease, FileReadRequest, FileSnapshot, KernelBudget, KernelContext,
-    LookupOptions, ProjectionRequest, ProjectionResult, ReadOptions, SafetyVerdict, ShellOptions,
-    SpeculationBinding, StructuralCoverage, StructuralEngine, StructuralHit, StructuralQuery,
-    StructuralResult, TaskLensCompilerImpact, TaskLensRequest, TaskLensResult, TokenAccounting,
-    TokenEngine, ZeroHandle, ZeroKernelEvent, ZeroOperationStatus, ZeroOperationTrace, sha256_hex,
+    EffectChangeRequest, EffectRequest, EngineError, EngineErrorKind, EngineInvocation,
+    FileEffectKind, FileEffectReceipt, FileEffectRequest, FileEngine, FileLease, FileReadRequest,
+    FileSnapshot, KernelBudget, KernelContext, LookupOptions, ProjectionRequest, ProjectionResult,
+    ReadOptions, SafetyVerdict, ShellOptions, SpeculationBinding, StructuralCoverage,
+    StructuralEngine, StructuralHit, StructuralQuery, StructuralResult, TaskLensCompilerImpact,
+    TaskLensRequest, TaskLensResult, TokenAccounting, TokenEngine, ZeroHandle, ZeroKernelEvent,
+    sha256_hex,
 };
 use zero_kernel::{
-    AtomicCancellation, CellPreparation, HostError, PreparedCell, ShellCommand, TransactionError,
-    ZeroKernel,
+    AtomicCancellation, CellPreparation, HostError, PreparedCell, ShellCommand, ZeroKernel,
 };
 
 fn handle(bytes: &[u8]) -> ZeroHandle {
@@ -1280,8 +1279,37 @@ fn projection_failure_rolls_back_file_and_state() {
             .contains_key(&PathBuf::from("projection.txt"))
     );
     assert!(response.state.unchanged);
+}
+
+#[test]
+fn event_publication_failure_compensates_effects_and_state() {
+    let root = tempdir().unwrap();
+    let files = Arc::new(Files::default());
+    let kernel = kernel(root.path(), Arc::clone(&files) as Arc<dyn FileEngine>);
+    let event_path = root.path().join(".zerostack/events");
+    fs::create_dir_all(event_path.parent().unwrap()).unwrap();
+    fs::write(&event_path, b"block event directory creation").unwrap();
+
+    let error = kernel
+        .execute_cell(
+            r#"
+            await z.edit("event-failure.txt", {create: "temporary"});
+            z.state.set("event-failure", true);
+            return true;
+            "#,
+        )
+        .expect_err("event publication must fail");
+    assert!(matches!(error, HostError::Event(_)), "{error}");
+    assert!(
+        !files
+            .0
+            .lock()
+            .contains_key(&PathBuf::from("event-failure.txt"))
+    );
+
+    fs::remove_file(event_path).unwrap();
     let state = kernel
-        .execute_cell("return z.state.has('staged');")
+        .execute_cell("return z.state.has('event-failure');")
         .unwrap();
     assert_eq!(state.outcome, zero_abi::ZeroKernelOutcome::Completed);
     assert_eq!(state.value, Some(json!("false")));
@@ -1367,6 +1395,41 @@ fn fresh_kernel_continues_transaction_cell_sequence() {
     assert_eq!(files.get(&PathBuf::from("second.txt")).unwrap(), b"second");
 }
 
+#[test]
+fn concurrently_initialized_hosts_allocate_distinct_cell_sequences() {
+    let root = tempdir().unwrap();
+    let files: Arc<dyn FileEngine> = Arc::new(Files::default());
+    let first = kernel(root.path(), Arc::clone(&files));
+    let second = kernel(root.path(), Arc::clone(&files));
+
+    let first_response = first
+        .execute_cell(r#"return await z.edit("first.txt", {create: "first"});"#)
+        .unwrap();
+    let second_response = second
+        .execute_cell(r#"return await z.edit("second.txt", {create: "second"});"#)
+        .unwrap();
+
+    assert_eq!(
+        first_response.outcome,
+        zero_abi::ZeroKernelOutcome::Completed
+    );
+    assert_eq!(
+        second_response.outcome,
+        zero_abi::ZeroKernelOutcome::Completed
+    );
+    assert_ne!(
+        first_response.turn.as_ref().unwrap().sequence,
+        second_response.turn.as_ref().unwrap().sequence
+    );
+    assert_eq!(
+        zero_store::EventLog::open(root.path().join(".zerostack"))
+            .records("session")
+            .unwrap()
+            .len(),
+        2
+    );
+}
+
 #[cfg(unix)]
 #[test]
 fn cancelled_run_frame_drains_before_response() {
@@ -1416,7 +1479,7 @@ fn read_full_view_expands_exact_source() {
         .execute_cell(
             r#"
             const snap = await z.read({
-              target: {path: "src/lib.rs"},
+              path: "src/lib.rs",
               view: {mode: "full"},
             });
             const expanded = await z.read(snap, {all: true});
@@ -1494,10 +1557,15 @@ fn read_full_view_expands_exact_source() {
         .to_hex()
         .to_string()
     );
-    assert!(value["expanded"]["accounting"]["billed"].as_u64().unwrap() > 0);
+    assert!(
+        value["expanded"]["accounting"]["sourceTokens"]
+            .as_u64()
+            .unwrap()
+            > 0
+    );
     assert_eq!(
-        value["expanded"]["accounting"]["billed"],
-        value["expanded"]["accounting"]["visible"]
+        value["expanded"]["accounting"]["sourceTokens"],
+        value["expanded"]["accounting"]["visibleTokens"]
     );
     assert_eq!(kernel.live_frames(), 0);
 }
@@ -1995,7 +2063,7 @@ fn read_rejects_structural_evidence_for_another_source() {
         .execute_cell(
             r#"
             return await z.read({
-              target: {search: {query: "alpha", under: "src", mode: "natural"}},
+              target: {search: {query: "alpha", under: "src", mode: "literal"}},
               cardinality: "exactly_one",
             });
             "#,
@@ -2113,7 +2181,8 @@ fn snapshot_edit_supports_line_replacement_and_anchored_insertion() {
               path: "typed.txt",
               selection: {lines: {start: 2, end: 2}},
             });
-            await z.edit(line, {kind: "replace_lines", content: "BETA\n"});
+            await z.edit(line, {kind: "replace_lines", content: `BETA
+`});
             const anchor = await z.read({
               path: "typed.txt",
               selection: {exactText: "gamma"},
@@ -2124,7 +2193,12 @@ fn snapshot_edit_supports_line_replacement_and_anchored_insertion() {
         )
         .unwrap();
 
-    assert_eq!(response.outcome, zero_abi::ZeroKernelOutcome::Completed);
+    assert_eq!(
+        response.outcome,
+        zero_abi::ZeroKernelOutcome::Completed,
+        "error={:?}",
+        response.error
+    );
     assert_eq!(model_json(&response), "alpha\nBETA\nbefore-gamma\n");
     assert_eq!(
         fs::read_to_string(root.path().join("typed.txt")).unwrap(),
@@ -2147,14 +2221,19 @@ fn snapshot_edit_replace_file_requires_unselected_snapshot() {
         .execute_cell(
             r#"
             const snap = await z.read({path: "whole.txt"});
-            await z.edit(snap, {kind: "replace_file", content: "new
-"});
+            await z.edit(snap, {kind: "replace_file", content: `new
+`});
             return await z.read("whole.txt");
             "#,
         )
         .unwrap();
 
-    assert_eq!(response.outcome, zero_abi::ZeroKernelOutcome::Completed);
+    assert_eq!(
+        response.outcome,
+        zero_abi::ZeroKernelOutcome::Completed,
+        "error={:?}",
+        response.error
+    );
     assert_eq!(
         model_json(&response),
         "new
@@ -2170,8 +2249,8 @@ fn snapshot_edit_replace_file_requires_unselected_snapshot() {
         .execute_cell(
             r#"
             const snap = await z.read({path: "whole.txt", selection: {exactText: "new"}});
-            return await z.edit(snap, {kind: "replace_file", content: "bad
-"});
+            return await z.edit(snap, {kind: "replace_file", content: `bad
+`});
             "#,
         )
         .unwrap();
@@ -2315,9 +2394,7 @@ fn full_read_view_fails_typed_instead_of_truncating() {
     let kernel = production_kernel(root.path());
 
     let response = kernel
-        .execute_cell(
-            r#"return await z.read({target:{path:"large-full.txt"},view:{mode:"full"}});"#,
-        )
+        .execute_cell(r#"return await z.read({path:"large-full.txt",view:{mode:"full"}});"#)
         .unwrap();
 
     assert_eq!(response.outcome, zero_abi::ZeroKernelOutcome::Failed);
@@ -2341,7 +2418,7 @@ fn read_search_refuses_ambiguous_exact_target() {
         .execute_cell(
             r#"
             return await z.read({
-              target: {search: {query: "ambiguous", under: "src", mode: "natural"}},
+              target: {search: {query: "ambiguous", under: "src", mode: "literal"}},
               cardinality: "exactly_one",
             });
             "#,
@@ -2503,7 +2580,7 @@ fn canonical_kernel_binds_graph_hits_without_repository_indexes() {
                 limit: 2,
               });
             const snap = await z.read({
-              target: {search: {query: "alpha", under: "src/lib.rs", mode: "natural"}},
+              target: {search: {query: "alpha", under: "src/lib.rs", mode: "literal"}},
               cardinality: "exactly_one",
             });
             const symbol = await z.read({
@@ -2623,10 +2700,10 @@ fn edit_path_find_replacement_substitutes_first_unique_match() {
         .execute_cell(
             r#"
             const p = 'guard-edit-sub.txt';
-            await z.edit(p, {create: 'v1
+            await z.edit(p, {create: `v1
 v2
 v3
-'});
+`});
             await z.edit(p, { find: 'v2', replacement: 'V2-DONE' });
             return await z.read(p);
         "#,
@@ -2638,7 +2715,7 @@ v3
     let returned = response.value.unwrap();
     assert_eq!(
         returned.as_str(),
-        Some("\"v1\nV2-DONE\nv3\n\""),
+        Some("\"v1\\nV2-DONE\\nv3\\n\""),
         "substituted content must round-trip"
     );
     assert_eq!(
@@ -2679,19 +2756,24 @@ fn edit_path_replace_file_kind_replaces_deliberately() {
         .execute_cell(
             r#"
             const p = 'guard-edit-rf.txt';
-            await z.edit(p, {create: 'old content
-'});
-            await z.edit(p, { kind: 'replace_file', content: 'fresh
-' });
+            await z.edit(p, {create: `old content
+`});
+            await z.edit(p, { kind: 'replace_file', content: `fresh
+` });
             return await z.read(p);
         "#,
         )
         .unwrap();
-    assert_eq!(response.outcome, zero_abi::ZeroKernelOutcome::Completed);
+    assert_eq!(
+        response.outcome,
+        zero_abi::ZeroKernelOutcome::Completed,
+        "error={:?}",
+        response.error
+    );
     let returned = response.value.unwrap();
     assert_eq!(
         returned.as_str(),
-        Some("\"fresh\n\""),
+        Some("\"fresh\\n\""),
         "deliberate replace_file content must round-trip"
     );
     assert_eq!(
@@ -2744,7 +2826,7 @@ fn find_accepts_single_object_and_positional_forms() {
 ",
     )
     .unwrap();
-    let kernel = production_kernel_relaxed(root.path());
+    let kernel = production_kernel_relaxed_with_graph(root.path());
     let object_form = kernel
         .execute_cell(
             r#"
@@ -3014,15 +3096,20 @@ fn run_output_accounting_is_truthful_against_visible_bytes() {
     let response = kernel
         .execute_cell(&format!("return await z.run([\"printf\", {payload:?}]);"))
         .unwrap();
-    assert_eq!(response.outcome, zero_abi::ZeroKernelOutcome::Completed);
+    assert_eq!(
+        response.outcome,
+        zero_abi::ZeroKernelOutcome::Completed,
+        "error={:?}",
+        response.error
+    );
     let raw = response.value.unwrap();
     let raw = raw.as_str().expect("shell result serializes to a string");
     let shell: Value = serde_json::from_str(raw).unwrap();
     let stdout = shell["stdout"].as_str().unwrap();
     assert_eq!(stdout, payload);
     let accounting = &shell["accounting"];
-    let visible = accounting["visible"].as_u64().unwrap();
-    let billed = accounting["billed"].as_u64().unwrap();
+    let visible = accounting["visibleTokens"].as_u64().unwrap();
+    let billed = accounting["sourceTokens"].as_u64().unwrap();
     // Byte-faithful estimator: visible tokens must track the exact stdout
     // byte length the model received (production_kernel counts bytes).
     assert_eq!(visible as usize, stdout.len(), "visible must match bytes");
@@ -3261,7 +3348,7 @@ fn canonical_find_and_run_work() {
         "pub fn beta() {}
 ",
     );
-    let kernel = production_kernel_relaxed(root.path());
+    let kernel = production_kernel_relaxed_with_graph(root.path());
     let find = kernel
         .execute_cell("const r = await z.find({query:'AlphaMarker', mode:'natural'}); return r;")
         .unwrap();
@@ -3694,7 +3781,7 @@ fn capsule_terminal_effect_root_follows_committed_receipt() {
                     anchor: None,
                     expected_count: None,
                 }],
-                verify: zero_abi::EffectVerification {
+                verify: zero_abi::EffectVerificationRequest {
                     parse: false,
                     changed_targets_only: true,
                     command: None,
@@ -3748,7 +3835,7 @@ fn atomic_effect_binds_source_capsule_policy_state_before_and_receipt() {
             anchor: None,
             expected_count: None,
         }],
-        verify: zero_abi::EffectVerification {
+        verify: zero_abi::EffectVerificationRequest {
             parse: false,
             changed_targets_only: true,
             command: None,
@@ -3818,7 +3905,7 @@ fn atomic_effect_validation_and_cancellation_leave_state_unchanged() {
             anchor: None,
             expected_count: None,
         }],
-        verify: zero_abi::EffectVerification {
+        verify: zero_abi::EffectVerificationRequest {
             parse: false,
             changed_targets_only: true,
             command: None,
@@ -3857,7 +3944,7 @@ fn atomic_effect_validation_and_cancellation_leave_state_unchanged() {
             anchor: None,
             expected_count: None,
         }],
-        verify: zero_abi::EffectVerification {
+        verify: zero_abi::EffectVerificationRequest {
             parse: false,
             changed_targets_only: true,
             command: None,
@@ -3904,7 +3991,7 @@ fn atomic_effect_receipt_is_exact_and_single_authority() {
             anchor: None,
             expected_count: None,
         }],
-        verify: zero_abi::EffectVerification {
+        verify: zero_abi::EffectVerificationRequest {
             parse: false,
             changed_targets_only: true,
             command: None,

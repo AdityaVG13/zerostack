@@ -1,6 +1,6 @@
 use std::collections::BTreeSet;
 use std::sync::{
-    Arc,
+    Arc, Barrier,
     atomic::{AtomicBool, AtomicUsize, Ordering},
 };
 use std::time::{Duration, Instant};
@@ -320,11 +320,13 @@ fn speculative_domain_error_is_typed_and_not_retried() {
 fn speculative_win_and_domain_error_have_typed_claim_outcomes() {
     // speculative win
     let runtime = SpeculationRuntime::new(2).unwrap();
-    let permit = permit(10);
+    let winning_permit = permit(10);
     runtime
-        .admit(permit.clone(), |_| Ok(serde_json::json!({"hit": true})))
+        .admit(winning_permit.clone(), |_| {
+            Ok(serde_json::json!({"hit": true}))
+        })
         .unwrap();
-    let outcome = runtime.claim_outcome(&permit, Duration::from_secs(1));
+    let outcome = runtime.claim_outcome(&winning_permit, Duration::from_secs(1));
     assert!(
         matches!(outcome, SpeculationClaimOutcome::Hit(v) if v == serde_json::json!({"hit": true}))
     );
@@ -366,6 +368,52 @@ fn claim_is_not_duplicate_committed_result() {
     let ledger = runtime.end_turn().unwrap();
     assert_eq!(ledger.claim_hits, 1);
     assert_eq!(ledger.dispatched, 1);
+}
+
+#[test]
+fn concurrent_duplicate_admission_launches_exactly_once() {
+    const CONTENDERS: usize = 64;
+    let runtime = Arc::new(SpeculationRuntime::new(4).unwrap());
+    let candidate = permit(21);
+    let gate = Arc::new(Barrier::new(CONTENDERS + 1));
+    let executions = Arc::new(AtomicUsize::new(0));
+    let mut contenders = Vec::with_capacity(CONTENDERS);
+    for _ in 0..CONTENDERS {
+        let runtime = Arc::clone(&runtime);
+        let candidate = candidate.clone();
+        let gate = Arc::clone(&gate);
+        let executions = Arc::clone(&executions);
+        contenders.push(std::thread::spawn(move || {
+            gate.wait();
+            runtime.admit(candidate, move |_| {
+                executions.fetch_add(1, Ordering::SeqCst);
+                Ok(serde_json::json!("single execution"))
+            })
+        }));
+    }
+    gate.wait();
+    let results = contenders
+        .into_iter()
+        .map(|thread| thread.join().unwrap())
+        .collect::<Vec<_>>();
+    assert_eq!(
+        results
+            .iter()
+            .filter(|result| matches!(result, Ok(SpeculationAdmission::Speculated)))
+            .count(),
+        1
+    );
+    assert_eq!(
+        results.iter().filter(|result| result.is_err()).count(),
+        CONTENDERS - 1
+    );
+    assert_eq!(
+        runtime.claim(&candidate, Duration::from_secs(1)).unwrap(),
+        serde_json::json!("single execution")
+    );
+    assert_eq!(executions.load(Ordering::SeqCst), 1);
+    runtime.end_turn().unwrap();
+    assert!(runtime.is_empty());
 }
 
 #[test]

@@ -2,6 +2,8 @@
 
 ZeroStack composes three independent engines behind one reusable in-process host. It does not merge their implementations and the engines never import one another.
 
+ZeroStack is harness-agnostic and can be embedded by any compatible caller.
+
 ## Authority boundaries
 
 | Owner | Authority | ZeroKernel boundary |

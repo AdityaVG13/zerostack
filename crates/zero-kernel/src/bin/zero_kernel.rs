@@ -1,6 +1,8 @@
 use std::io::Read;
 use std::path::PathBuf;
+#[cfg(feature = "mcp-carrier")]
 use std::sync::Arc;
+#[cfg(feature = "mcp-carrier")]
 use std::time::Duration;
 
 use serde_json::json;
@@ -181,6 +183,7 @@ impl ZeroCarrierExecutor for KernelStdioExecutor {
     }
 }
 
+#[cfg(feature = "mcp-carrier")]
 fn native_package_digest() -> String {
     let exe = std::env::current_exe()
         .ok()

@@ -214,7 +214,6 @@ impl SpeculationRuntime {
             return Ok(SpeculationAdmission::Ordinary);
         }
         entries.insert(key, Arc::clone(&entry));
-        drop(entries);
         {
             let mut ledger = self.inner.ledger.lock();
             ledger.dispatched = ledger.dispatched.saturating_add(1);
@@ -270,6 +269,9 @@ impl SpeculationRuntime {
             inner.inflight.fetch_sub(1, Ordering::AcqRel);
         });
         self.inner.workers.lock().push(handle);
+        // Admission becomes visible atomically with worker registration. end_turn
+        // cannot snapshot the entry before its JoinHandle is owned.
+        drop(entries);
         Ok(SpeculationAdmission::Speculated)
     }
 

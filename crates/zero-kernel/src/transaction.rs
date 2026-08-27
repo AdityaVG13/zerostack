@@ -10,9 +10,10 @@ use zero_abi::{
     FileEffectRequest, FileEngine, FileLease, FileMetadata, FileReadRequest, ReadOptions,
     ZeroHandle,
 };
-use zero_store::{ZeroCas, replace_file, sync_dir};
+use zero_store::{LOCK_DEADLINE, StoreLock, ZeroCas, atomic_write_file, replace_file, sync_dir};
 
 static TEMP_SEQUENCE: AtomicU64 = AtomicU64::new(0);
+static CELL_SEQUENCE_MUTEX: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -20,6 +21,7 @@ pub enum TransactionState {
     Prepared,
     Applying,
     Committed,
+    Compensating,
     RolledBack,
     RecoveryRequired,
 }
@@ -115,6 +117,44 @@ impl TransactionCoordinator {
             highest = highest.max(cell_sequence(&record.cell_id).unwrap_or(0));
         }
         Ok(highest)
+    }
+
+    pub fn allocate_cell_sequence(
+        &self,
+        session_id: &str,
+        minimum: u64,
+    ) -> Result<u64, TransactionError> {
+        let _process_guard = CELL_SEQUENCE_MUTEX
+            .lock()
+            .map_err(|_| TransactionError::Store("cell sequence mutex is poisoned".into()))?;
+        let session = blake3::hash(session_id.as_bytes()).to_hex().to_string();
+        let lock_root = self.root.join("cell-sequence-lock").join(&session);
+        let _guard = StoreLock::publish(&lock_root, LOCK_DEADLINE).map_err(|error| {
+            TransactionError::Store(format!("acquire cell sequence lock: {error}"))
+        })?;
+        let path = self
+            .root
+            .join("cell-sequences")
+            .join(format!("{session}.txt"));
+        let stored = match fs::read_to_string(&path) {
+            Ok(value) => value.trim().parse::<u64>().map_err(|error| {
+                TransactionError::Store(format!("invalid durable cell sequence: {error}"))
+            })?,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => 0,
+            Err(error) => {
+                return Err(TransactionError::Store(format!(
+                    "read durable cell sequence: {error}"
+                )));
+            }
+        };
+        let next = stored
+            .max(minimum)
+            .checked_add(1)
+            .ok_or_else(|| TransactionError::Store("cell sequence overflow".into()))?;
+        atomic_write_file(&path, next.to_string().as_bytes()).map_err(|error| {
+            TransactionError::Store(format!("publish durable cell sequence: {error}"))
+        })?;
+        Ok(next)
     }
 
     pub fn begin(&self, invocation: EngineInvocation) -> Result<Transaction, TransactionError> {
@@ -258,16 +298,31 @@ impl TransactionCoordinator {
             // Every terminal path goes through rollback_record exactly once. RecoveryRequired
             // is the typed state that proves quarantine.
             rollback_record(&*self.files, invocation, &mut record);
-            // Persist the terminalization durably; if dir sync fails, the publish is
-            // ambiguous and we must report RecoveryRequired, not guess.
+            if record.state == TransactionState::RecoveryRequired {
+                // Preserve the exact original journal for forensic recovery.
+                // Persisting the mutated RecoveryRequired record first would
+                // overwrite the evidence that explains the failed rollback.
+                let poisoned = poisoned_journal_path(&path);
+                fs::rename(&path, &poisoned).map_err(|error| {
+                    TransactionError::Store(format!(
+                        "quarantine poisoned transaction journal: {error}"
+                    ))
+                })?;
+                recovery_details.extend(record.rollback_errors.clone());
+                recovery_details.push(format!(
+                    "quarantined poisoned journal {}",
+                    poisoned.display()
+                ));
+                continue;
+            }
+            // Persist a successful terminalization durably; if dir sync fails,
+            // the publish is ambiguous and we must report RecoveryRequired.
             if let Err(error) = persist_record(&path, &record) {
                 let is_recovery = matches!(error, TransactionError::RecoveryRequired(_));
                 if is_recovery {
-                    // persist already signaled ambiguous write as RecoveryRequired
                     if let TransactionError::RecoveryRequired(details) = error {
                         recovery_details.extend(details);
                     }
-                    // Quarantine ambiguous record for manual inspection.
                     let poisoned = poisoned_journal_path(&path);
                     let _ = fs::rename(&path, &poisoned);
                     recovery_details.push(format!(
@@ -277,16 +332,6 @@ impl TransactionCoordinator {
                     continue;
                 }
                 return Err(error);
-            }
-            if record.state == TransactionState::RecoveryRequired {
-                let poisoned = poisoned_journal_path(&path);
-                let _ = fs::rename(&path, &poisoned);
-                recovery_details.extend(record.rollback_errors.clone());
-                recovery_details.push(format!(
-                    "quarantined poisoned journal {}",
-                    poisoned.display()
-                ));
-                continue;
             }
             recovered.push(path);
         }
@@ -359,6 +404,10 @@ fn transition_allowed(from: &TransactionState, to: &TransactionState) -> bool {
         // authority paths (commit/rollback checking already-terminal), not via
         // arbitrary transition.
         (TransactionState::Committed, TransactionState::Committed) => true,
+        (TransactionState::Committed, TransactionState::Compensating) => true,
+        (TransactionState::Compensating, TransactionState::Compensating) => true,
+        (TransactionState::Compensating, TransactionState::RolledBack) => true,
+        (TransactionState::Compensating, TransactionState::RecoveryRequired) => true,
         (TransactionState::RolledBack, TransactionState::RolledBack) => true,
         (TransactionState::RecoveryRequired, TransactionState::RecoveryRequired) => true,
         _ => false,
@@ -633,7 +682,7 @@ impl Transaction {
         }
     }
 
-    pub fn commit(mut self) -> Result<Vec<FileEffectReceipt>, TransactionError> {
+    pub fn commit(&mut self) -> Result<Vec<FileEffectReceipt>, TransactionError> {
         if self.settled {
             return Err(TransactionError::Store(
                 "transaction is already settled".into(),
@@ -732,26 +781,55 @@ impl Transaction {
             .collect())
     }
 
-    pub fn rollback(mut self) -> Result<(), TransactionError> {
-        if self.settled {
+    pub fn compensate_committed(&mut self) -> Result<(), TransactionError> {
+        if self.record.state != TransactionState::Committed || !self.settled {
             return Err(TransactionError::Store(
-                "transaction is already settled".into(),
+                "compensation requires a durably committed transaction".into(),
             ));
         }
-        // Idempotent re-rollback: if already rolled back, succeed.
+        validate_transition(&self.record.state, &TransactionState::Compensating)?;
+        self.record.state = TransactionState::Compensating;
+        // Publish compensation intent before restoring bytes. A crash after
+        // this boundary is recovered by reconcile through the same receipts.
+        if let Err(error) = persist_record(&self.path, &self.record) {
+            self.record.state = TransactionState::Committed;
+            return Err(error);
+        }
+        self.settled = false;
+        rollback_record(&*self.coordinator.files, &self.invocation, &mut self.record);
+        let persist_result = persist_record(&self.path, &self.record);
+        self.settled = true;
+        persist_result?;
+        if self.record.state == TransactionState::RecoveryRequired {
+            Err(TransactionError::RecoveryRequired(
+                self.record.rollback_errors.clone(),
+            ))
+        } else {
+            Ok(())
+        }
+    }
+
+    pub fn rollback(mut self) -> Result<(), TransactionError> {
+        // Terminal rollback states are idempotent even when apply already
+        // settled the journal before returning its engine error.
         if self.record.state == TransactionState::RolledBack {
             self.settled = true;
             return Ok(());
+        }
+        if self.record.state == TransactionState::RecoveryRequired {
+            self.settled = true;
+            return Err(TransactionError::RecoveryRequired(
+                self.record.rollback_errors.clone(),
+            ));
         }
         if self.record.state == TransactionState::Committed {
             return Err(TransactionError::Store(
                 "transaction already committed, cannot rollback".into(),
             ));
         }
-        if self.record.state == TransactionState::RecoveryRequired {
-            self.settled = true;
-            return Err(TransactionError::RecoveryRequired(
-                self.record.rollback_errors.clone(),
+        if self.settled {
+            return Err(TransactionError::Store(
+                "transaction is already settled".into(),
             ));
         }
         rollback_record(&*self.coordinator.files, &self.invocation, &mut self.record);

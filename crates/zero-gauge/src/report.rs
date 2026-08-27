@@ -355,3 +355,64 @@ impl From<PairError> for ReportError {
         Self::Pair(err)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn valid_report() -> SavingsReport {
+        let native = MeasuredUsage::new(100, 200, 4);
+        let zero = MeasuredUsage::new(60, 150, 3);
+        let tokens = compute_unit(native.tokens, zero.tokens);
+        let bytes = compute_unit(native.bytes, zero.bytes);
+        let calls = compute_unit(native.calls, zero.calls);
+        let mut report = SavingsReport {
+            schema: SAVINGS_REPORT_SCHEMA.into(),
+            version: SAVINGS_REPORT_VERSION,
+            task: TaskIdentity {
+                task_id: "report-validation".into(),
+                corpus_sha: None,
+            },
+            machine: MachineFingerprint {
+                os: "test-os".into(),
+                arch: "test-arch".into(),
+                cpu_model: "test-cpu".into(),
+                kernel: "test-kernel".into(),
+                rustc_version: "test-rustc".into(),
+                git_sha: "a".repeat(40),
+                cargo_profile: "test".into(),
+            },
+            native,
+            zero,
+            status: aggregate_status(&tokens.status, &bytes.status, &calls.status),
+            tokens,
+            bytes,
+            calls,
+            provenance_root: String::new(),
+        };
+        report.provenance_root = report.compute_root();
+        report
+    }
+
+    #[test]
+    fn validation_recomputes_units_and_aggregate_status() {
+        let report = valid_report();
+        report.validate().unwrap();
+
+        let mut forged_unit = report.clone();
+        forged_unit.tokens.numerator += 1;
+        forged_unit.provenance_root = forged_unit.compute_root();
+        assert!(matches!(
+            forged_unit.validate(),
+            Err(ReportError::InconsistentUnit { .. })
+        ));
+
+        let mut forged_status = report;
+        forged_status.status = SavingsStatus::Zero;
+        forged_status.provenance_root = forged_status.compute_root();
+        assert_eq!(
+            forged_status.validate(),
+            Err(ReportError::AggregateStatusMismatch)
+        );
+    }
+}

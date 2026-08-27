@@ -441,7 +441,11 @@ impl ZeroKernel {
             .transpose()
             .map_err(|error| HostError::InvalidRequest(error.to_string()))?;
         let state = self.state.load(expected.as_ref())?;
-        let cell_number = self.next_cell.fetch_add(1, Ordering::Relaxed) + 1;
+        let minimum = self.next_cell.load(Ordering::Acquire);
+        let cell_number = self
+            .transactions
+            .allocate_cell_sequence(&self.context.session_id, minimum)?;
+        self.next_cell.fetch_max(cell_number, Ordering::AcqRel);
         let cell_id = format!("cell-{cell_number}");
         let deadline_unix_ms = now_ms().saturating_add(request.budget.wall_ms);
         let invocation = EngineInvocation {
@@ -1203,7 +1207,26 @@ impl Cell {
                     push_handle(&mut self.handles, snapshot.content.clone());
                     (Some(snapshot), Some(bytes))
                 }
-                "absent" => (None, None),
+                "absent" => {
+                    self.ledger.calls = self.ledger.calls.saturating_add(1);
+                    match self.files.read(
+                        &self.invocation,
+                        FileReadRequest {
+                            path: target.path.clone(),
+                            options: ReadOptions::default(),
+                        },
+                    ) {
+                        Err(error) if error.kind == EngineErrorKind::NotFound => (None, None),
+                        Ok(_) => {
+                            return Err(HostError::Engine(EngineError::new(
+                                EngineErrorKind::Conflict,
+                                format!("z.apply target {name:?} exists but absence was required"),
+                                false,
+                            )));
+                        }
+                        Err(error) => return Err(error.into()),
+                    }
+                }
                 other => {
                     return Err(HostError::InvalidRequest(format!(
                         "z.apply target {name:?} has unknown expectation {other:?}"
@@ -1431,26 +1454,6 @@ impl Cell {
         })
     }
 
-    pub(crate) fn write(
-        &mut self,
-        path: impl Into<PathBuf>,
-        content: Vec<u8>,
-        expected_preimage: Option<ZeroHandle>,
-    ) -> Result<FileEffectReceipt, HostError> {
-        self.ledger.bytes_written = self
-            .ledger
-            .bytes_written
-            .saturating_add(content.len() as u64);
-        self.apply_file_effect(FileEffectRequest {
-            kind: FileEffectKind::Write,
-            path: path.into(),
-            content: Some(content),
-            patch: None,
-            expected_preimage,
-            expect_absent: false,
-        })
-    }
-
     pub(crate) fn edit(
         &mut self,
         path: impl Into<PathBuf>,
@@ -1485,29 +1488,6 @@ impl Cell {
             expected_preimage,
             expect_absent: false,
         })
-    }
-
-    fn restore_effects(&self, receipts: &[FileEffectReceipt]) -> Result<(), HostError> {
-        let mut failures = Vec::new();
-        for receipt in receipts.iter().rev() {
-            if let Err(error) = self.files.restore(&self.invocation, receipt) {
-                failures.push(error.to_string());
-            }
-        }
-        if failures.is_empty() {
-            Ok(())
-        } else {
-            Err(HostError::Transaction(TransactionError::RecoveryRequired(
-                failures,
-            )))
-        }
-    }
-
-    pub(crate) fn commit_transaction(&mut self) -> Result<Vec<FileEffectReceipt>, HostError> {
-        let transaction = self.transaction.take().ok_or_else(|| {
-            HostError::Transaction(TransactionError::Store("no active transaction".into()))
-        })?;
-        transaction.commit().map_err(Into::into)
     }
 
     pub(crate) fn rollback_transaction(&mut self) -> Result<(), HostError> {
@@ -1857,6 +1837,7 @@ impl Cell {
             .as_ref()
             .map(Transaction::receipts)
             .unwrap_or_default();
+        let mut final_receipts: BTreeMap<PathBuf, FileEffectReceipt> = BTreeMap::new();
         for receipt in receipts {
             if receipt.journal.as_str().is_empty() {
                 return Err(typed_error(
@@ -1864,6 +1845,29 @@ impl Cell {
                     "effect receipt journal is placeholder",
                 ));
             }
+            if receipt.kind == FileEffectKind::Remove && receipt.after.is_some() {
+                return Err(typed_error(
+                    EngineErrorKind::Corrupt,
+                    "remove receipt must not carry an after handle",
+                ));
+            }
+            if receipt.kind != FileEffectKind::Remove && receipt.after.is_none() {
+                return Err(typed_error(
+                    EngineErrorKind::Corrupt,
+                    "non-remove receipt is missing its after handle",
+                ));
+            }
+            if let Some(previous) = final_receipts.get(&receipt.path)
+                && receipt.before != previous.after
+            {
+                return Err(typed_error(
+                    EngineErrorKind::Corrupt,
+                    "same-path effect receipt chain is discontinuous",
+                ));
+            }
+            final_receipts.insert(receipt.path.clone(), receipt);
+        }
+        for receipt in final_receipts.into_values() {
             let observed = self.files.read(
                 &self.invocation,
                 FileReadRequest {
@@ -1872,12 +1876,6 @@ impl Cell {
                 },
             );
             if receipt.kind == FileEffectKind::Remove {
-                if receipt.after.is_some() {
-                    return Err(typed_error(
-                        EngineErrorKind::Corrupt,
-                        "remove receipt must not carry an after handle",
-                    ));
-                }
                 match observed {
                     Err(error) if error.kind == EngineErrorKind::NotFound => continue,
                     Ok(_) => {
@@ -1889,17 +1887,15 @@ impl Cell {
                     Err(error) => return Err(error),
                 }
             }
-            let expected = receipt.after.as_ref().ok_or_else(|| {
-                typed_error(
-                    EngineErrorKind::Corrupt,
-                    "non-remove receipt is missing its after handle",
-                )
-            })?;
+            let expected = receipt
+                .after
+                .as_ref()
+                .expect("validated non-remove receipt");
             let snapshot = observed?;
             if &snapshot.content != expected {
                 return Err(typed_error(
                     EngineErrorKind::Corrupt,
-                    "effect receipt after handle differs from FileEngine state",
+                    "final effect receipt differs from FileEngine state",
                 ));
             }
         }
@@ -1982,7 +1978,7 @@ impl Cell {
         } else {
             before.clone()
         };
-        let committed_effects = match self.transaction.take() {
+        let committed_effects = match self.transaction.as_mut() {
             Some(transaction) => match transaction.commit() {
                 Ok(receipts) => receipts,
                 Err(error) => {
@@ -2029,18 +2025,33 @@ impl Cell {
             turn: Some(turn.clone()),
             capsule: Some(event_capsule),
         };
-        let publication = self
-            .events
-            .publish(&event, visible_bytes)
-            .map_err(|error| {
-                // The transaction and state are already durably committed. Reverting
-                // bytes here would contradict the committed journal and could destroy
-                // a later write. Surface the publication failure without inventing a
-                // rollback after the commit authority has settled.
-                HostError::Event(format!(
-                    "terminal event publication failed after durable commit: {error}"
-                ))
-            })?;
+        let publication = match self.events.publish(&event, visible_bytes) {
+            Ok(publication) => publication,
+            Err(error) => {
+                let mut failures = Vec::new();
+                if let Some(transaction) = self.transaction.as_mut()
+                    && let Err(compensation) = transaction.compensate_committed()
+                {
+                    failures.push(format!("effect compensation: {compensation}"));
+                }
+                if after != before
+                    && let Err(state_error) = self
+                        .state_store
+                        .compare_and_set_root(after.as_ref(), before.as_ref())
+                {
+                    failures.push(format!("state compensation: {state_error}"));
+                }
+                if failures.is_empty() {
+                    return Err(HostError::Event(format!(
+                        "terminal event publication failed; committed state and effects were compensated: {error}"
+                    )));
+                }
+                return Err(HostError::Event(format!(
+                    "terminal event publication failed: {error}; compensation incomplete: {}",
+                    failures.join("; ")
+                )));
+            }
+        };
         self.settled = true;
         // The typed response binds state and receipt to the same committed effect:
         // state.after is the exact root committed with these receipts, and effects
@@ -3104,9 +3115,11 @@ mod capsule_launch_tests {
             kernel.budget.clone(),
         )
         .unwrap();
-        let error = kernel
-            .begin_from_request(drifted, AtomicCancellation::new(), Some(&sealed))
-            .expect_err("sealed launch must reject source drift");
+        let error =
+            match kernel.begin_from_request(drifted, AtomicCancellation::new(), Some(&sealed)) {
+                Ok(_) => panic!("sealed launch accepted source drift"),
+                Err(error) => error,
+            };
         assert!(matches!(error, HostError::InvalidRequest(_)));
         assert_eq!(kernel.live_frames(), 0);
         assert_eq!(kernel.live_tasks(), 0);
@@ -3137,9 +3150,14 @@ mod capsule_launch_tests {
             changed_budget,
         )
         .unwrap();
-        let error = kernel
-            .begin_from_request(budget_drifted, AtomicCancellation::new(), Some(&sealed))
-            .expect_err("sealed launch must reject budget drift");
+        let error = match kernel.begin_from_request(
+            budget_drifted,
+            AtomicCancellation::new(),
+            Some(&sealed),
+        ) {
+            Ok(_) => panic!("sealed launch accepted budget drift"),
+            Err(error) => error,
+        };
         assert!(matches!(error, HostError::InvalidRequest(_)));
         assert_eq!(kernel.live_frames(), 0);
         assert_eq!(kernel.live_tasks(), 0);

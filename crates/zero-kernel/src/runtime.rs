@@ -1436,14 +1436,13 @@ fn map_interpreter_error(error: zero_codemode::HostError) -> EngineError {
         HostError::Parse(_)
         | HostError::UnsupportedSyntax(_)
         | HostError::Data(_)
-        | HostError::Execution(_)
         | HostError::MethodNotFound(_)
         | HostError::SurfaceNotFound(_)
         | HostError::Json(_)
         | HostError::Plan(_)
         | HostError::Registration(_)
         | HostError::Limits(_) => EngineErrorKind::InvalidInput,
-        HostError::Connector(_)
+        HostError::Connector(_) | HostError::Execution(_)
             if text.contains("preimage")
                 || text.contains("selection_")
                 || text.contains("structural source")
@@ -1451,14 +1450,15 @@ fn map_interpreter_error(error: zero_codemode::HostError) -> EngineError {
         {
             EngineErrorKind::Conflict
         }
-        HostError::Connector(_)
+        HostError::Connector(_) | HostError::Execution(_)
             if text.contains("budget") || text.contains("full_view_unavailable") =>
         {
             EngineErrorKind::Budget
         }
-        HostError::Connector(_) if text.contains("invalid request") => {
+        HostError::Connector(_) | HostError::Execution(_) if text.contains("invalid request") => {
             EngineErrorKind::InvalidInput
         }
+        HostError::Execution(_) => EngineErrorKind::InvalidInput,
         HostError::Runtime(_) | HostError::Connector(_) => EngineErrorKind::Internal,
     };
     EngineError::new(kind, text, false)
