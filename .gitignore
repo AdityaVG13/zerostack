@@ -68,6 +68,9 @@ CLAUDE.md.*
 .skill-loop-progress.md
 .skill-loop-progress.*
 
+# Local multi-model handoff prompts and execution notes.
+docs/internal/
+
 .zsx_patch.diff
 *.diff
 *.patch
