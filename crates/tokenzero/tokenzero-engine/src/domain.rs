@@ -486,7 +486,7 @@ pub fn execute_domain_op(
                     "report_tool_issue",
                     "not_reportable",
                     message,
-                    Some("use tool=zero_execute (or tz_execute_code / zero.token.*) for CodeMode failures".into()),
+                    Some("use tool=tz_execute_code for CodeMode journal control failures".into()),
                 ),
             }
         }

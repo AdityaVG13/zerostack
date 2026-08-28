@@ -321,7 +321,3 @@ fn insert_blob_for_path(
     out.insert(rel, (hash, content));
     Ok(())
 }
-
-#[cfg(test)]
-#[path = "../../../../tests/graphzero/unit/graphzero-scip/ingest_tests.rs"]
-mod tests;

@@ -26,6 +26,14 @@ const MAX_CONCURRENT_CONNECTOR_CALLS: usize = 2;
 const FRAME_SETTLE_GRACE: Duration = Duration::from_millis(1_500);
 const FAILED_FRAME_SETTLE_MAX: Duration = Duration::from_secs(30);
 
+fn frame_quiescence_bound(failed: bool, wall: Duration) -> Duration {
+    if failed {
+        wall.max(FRAME_SETTLE_GRACE).min(FAILED_FRAME_SETTLE_MAX)
+    } else {
+        FRAME_SETTLE_GRACE
+    }
+}
+
 struct CellConnector {
     cell: Rc<RefCell<Option<Cell>>>,
 }
@@ -103,9 +111,11 @@ fn spawn_concurrent(
     max_json_bytes: usize,
     completion: ConnectorCompletion,
 ) -> Result<(), ConnectorError> {
+    let thread_task = context.acquire_task();
     std::thread::Builder::new()
         .name(format!("zero-kernel-{method}"))
         .spawn(move || {
+            let _thread_task = thread_task;
             let result = dispatch_concurrent(&context, &method, args).and_then(|value| {
                 serde_json::to_string(&value)
                     .map_err(|error| ConnectorError::new(error.to_string()))
@@ -294,6 +304,13 @@ impl ZeroKernel {
         cancellation: crate::AtomicCancellation,
     ) -> Result<ZeroKernelResponse, crate::HostError> {
         let cell = self.begin_cell_with_cancellation(source, cancellation.clone())?;
+        if cancellation.is_cancelled() {
+            return cell.fail(EngineError::new(
+                EngineErrorKind::Cancelled,
+                "execution cancelled",
+                false,
+            ));
+        }
         self.launch_cell(cell, cancellation)
     }
 
@@ -364,19 +381,20 @@ impl ZeroKernel {
             cancellation.flag(),
             Duration::from_millis(budget.wall_ms),
         );
-        // A failed interpreter returns before its cancelled connector tasks
-        // finish unwinding. Index publication may have an uncancellable tail
-        // that exceeds the normal settle grace. Give failed cells a separate
-        // cleanup window so they report the root error only after task
-        // ownership reaches zero. Cap that window at 30 seconds even when the
-        // execution budget is larger.
-        let quiescence_bound = if outcome.result.is_err() {
-            Duration::from_millis(budget.wall_ms)
-                .max(FRAME_SETTLE_GRACE)
-                .min(FAILED_FRAME_SETTLE_MAX)
-        } else {
-            FRAME_SETTLE_GRACE
-        };
+        // A failed interpreter returns before its connector tasks finish
+        // unwinding. Request sibling cancellation so engines polling the
+        // cell flag can stop, then wait a bounded cleanup window. Cap that
+        // window at 30 seconds even when the execution budget is larger so
+        // failed cells cannot inherit an arbitrarily long wall timeout.
+        // Successful cells keep the short settle grace and return as soon
+        // as task and process counters are already zero.
+        if outcome.result.is_err() {
+            cancellation.cancel();
+        }
+        let quiescence_bound = frame_quiescence_bound(
+            outcome.result.is_err(),
+            Duration::from_millis(budget.wall_ms),
+        );
         let quiescence = {
             let slot = slot.borrow();
             slot.as_ref()
@@ -400,23 +418,39 @@ impl ZeroKernel {
                 false,
             ));
         }
-        if let Err(error) = quiescence {
-            let kind = if cancellation.is_cancelled() {
-                EngineErrorKind::Cancelled
-            } else {
-                EngineErrorKind::Deadline
-            };
-            return cell.fail(EngineError::new(kind, error.to_string(), false));
-        }
-        match outcome.result {
-            Ok(value) => {
+        finish_guest_cell(cell, guest, outcome.result, quiescence, &cancellation)
+    }
+}
+
+fn finish_guest_cell(
+    mut cell: Cell,
+    guest: Arc<GuestSurface>,
+    result: Result<Value, zero_codemode::HostError>,
+    quiescence: Result<(), crate::HostError>,
+    cancellation: &crate::AtomicCancellation,
+) -> Result<ZeroKernelResponse, crate::HostError> {
+    match result {
+        Ok(value) => match quiescence {
+            Ok(()) => {
                 cell.replace_state(guest.state_snapshot());
                 cell.finish(value)
             }
-            Err(error) => cell.fail(map_interpreter_error(error)),
-        }
+            Err(error) => {
+                let kind = if cancellation.is_cancelled() {
+                    EngineErrorKind::Cancelled
+                } else {
+                    EngineErrorKind::Deadline
+                };
+                cell.fail(EngineError::new(kind, error.to_string(), false))
+            }
+        },
+        // The interpreter error is the root cause. Quiescence is a drain
+        // obligation, not a second error authority that may replace Deadline
+        // with "frame did not quiesce".
+        Err(error) => cell.fail(map_interpreter_error(error)),
     }
 }
+
 fn direct_capabilities() -> Vec<CapabilityDescriptor> {
     GUEST_METHODS
         .iter()
@@ -1473,4 +1507,25 @@ fn map_interpreter_error(error: zero_codemode::HostError) -> EngineError {
         HostError::Runtime(_) | HostError::Connector(_) => EngineErrorKind::Internal,
     };
     EngineError::new(kind, text, false)
+}
+
+#[cfg(test)]
+mod quiescence_bound_tests {
+    use super::*;
+
+    #[test]
+    fn failed_frame_bound_is_capped_independently_of_wall_budget() {
+        assert_eq!(
+            frame_quiescence_bound(true, Duration::from_millis(1)),
+            FRAME_SETTLE_GRACE
+        );
+        assert_eq!(
+            frame_quiescence_bound(true, Duration::from_secs(120)),
+            FAILED_FRAME_SETTLE_MAX
+        );
+        assert_eq!(
+            frame_quiescence_bound(false, Duration::from_secs(120)),
+            FRAME_SETTLE_GRACE
+        );
+    }
 }

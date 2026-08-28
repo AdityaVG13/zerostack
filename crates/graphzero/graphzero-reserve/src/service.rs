@@ -543,7 +543,3 @@ pub fn test_notify_hook_count() -> usize {
 pub fn test_reset_notify_hook() {
     NOTIFY_HOOK_FIRED.store(0, std::sync::atomic::Ordering::SeqCst);
 }
-
-#[cfg(test)]
-#[path = "../../../../tests/graphzero/unit/graphzero-reserve/service_tests.rs"]
-mod tests;

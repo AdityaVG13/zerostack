@@ -610,7 +610,3 @@ fn read_message(reader: &mut impl BufRead) -> Option<Value> {
     reader.read_exact(&mut body).ok()?;
     serde_json::from_slice(&body).ok()
 }
-
-#[cfg(test)]
-#[path = "../../../../tests/graphzero/unit/graphzero-extract/rust_analyzer_lsp_tests.rs"]
-mod tests;

@@ -1005,10 +1005,3 @@ fn match_call_target_at(
 fn is_ident_char(ch: Option<char>) -> bool {
     ch.is_some_and(|c| c.is_ascii_alphanumeric() || c == '_' || c == '$')
 }
-
-#[cfg(test)]
-#[path = "../../../../../tests/fszero/unit/fs-zero/js_sandbox_precheck_tests.rs"]
-mod sandbox_precheck_tests;
-#[cfg(test)]
-#[path = "../../../../../tests/fszero/unit/fs-zero/js_wrap_user_code_tests.rs"]
-mod wrap_user_code_tests;

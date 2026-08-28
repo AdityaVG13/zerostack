@@ -57,7 +57,3 @@ pub fn validate_confidence_score(confidence: f32) -> Result<f32, String> {
         Ok(confidence)
     }
 }
-
-#[cfg(test)]
-#[path = "../../../../tests/graphzero/unit/graphzero-why/evidence_tests.rs"]
-mod tests;

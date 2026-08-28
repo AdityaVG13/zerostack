@@ -15,7 +15,7 @@ impl ServerMode {
         match raw {
             "mcp" => Ok(Self::Mcp),
             "codemode" => anyhow::bail!(
-                "standalone CodeMode server retired; use zerostack-codemode-host or zsx"
+                "standalone CodeMode server retired; model execution is ZeroKernel (`z.find`, `z.read`)"
             ),
             other => anyhow::bail!("mode must be mcp, got {other}"),
         }
@@ -115,9 +115,9 @@ fn mcp_cli_hint_for_tool_name(tool_name: &str, message: &str) -> String {
         "verify" | "verify_claim" => {
             "graphzero verify <TARGET> --claim no_remaining_callers|no_outgoing_calls|no_remaining_references|no_remaining_dependencies|symbol_removed --repo .".into()
         }
-        "gz_execute_code" => "graphzero code-mode '<plan>' --repo .".into(),
-        "gz_codemode_search" => "graphzero code-mode-search <query>".into(),
-        "gz_codemode_describe" => "graphzero code-mode-describe graph.query".into(),
+        "gz_execute_code" | "gz_codemode_search" | "gz_codemode_describe" => {
+            "retired; use ZeroKernel z.find".into()
+        }
         s if graphzero_engine::SURFACE_NAMES.contains(&s) => {
             format!("graphzero query-surface {s} --name|--query|--path <…> --repo .")
         }

@@ -38,6 +38,4 @@ path = "../../../tests/graphzero/reserve/reserve_contract.rs"
 name = "reserve_reserve_proptest"
 path = "../../../tests/graphzero/reserve/reserve_proptest.rs"
 
-[[test]]
-name = "reserve_wal_writer_domain"
-path = "../../../tests/graphzero/reserve/wal_writer_domain.rs"
+

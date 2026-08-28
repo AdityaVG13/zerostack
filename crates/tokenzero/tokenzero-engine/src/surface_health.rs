@@ -28,7 +28,7 @@ const DEFAULT_WINDOW: Duration = Duration::from_secs(300);
 /// Documented recovery ladder (docs + skill + close reasons).
 pub const RECOVERY_LADDER: &str = "\
 CodeMode recovery ladder (router-owned, agent-invisible):\n\
-1. Prefer zero.token.expand / zero.token.read inside tz_execute_code (primary).\n\
+1. Prefer tz_expand / tz_read on classic MCP (primary).\n\
 2. On expand miss / X0 the engine retries sibling stores internally before failing.\n\
 3. Per-op MCP tools (tz_expand, tz_read, tz_shell, …) stay hidden from tools/list.\n\
 4. CLI `tokenzero expand` / `tokenzero read` remain available outside MCP.\n\
@@ -298,7 +298,7 @@ impl SurfaceHealth {
             CrashOnlyDecision::PermanentlyLocked => Err(format!(
                 "Policy: {tool_name} is not available on the CodeMode surface \
                  (write/shell safety is never unlocked by expand health). \
-                 Use zero.token.* inside tz_execute_code."
+                 Use classic MCP tz_* tools; V6 zero.token.* CodeMode bindings are retired."
             )),
         }
     }
@@ -352,7 +352,7 @@ fn blocked_message(tool_name: &str) -> String {
     let short = strip_tool_alias(tool_name);
     format!(
         "Policy: tz_{short} is not on the CodeMode agent surface. \
-         Use zero.token.{short} via tz_execute_code; expand fallback is engine-internal. \
+         Use classic MCP tz_{short}; V6 zero.token.* CodeMode bindings are retired. \
          Ladder: see resource://tokenzero/metrics surface_health."
     )
 }

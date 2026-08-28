@@ -84,6 +84,6 @@ The direct host can prepare, validate, stage, and commit one effect request in o
 
 ## Source and release model
 
-ZeroStack is source-only and does not publish a standalone hub release. FSZero, GraphZero, and TokenZero remain separate released products built from the same Cargo workspace. Coordinated releases can share one version to signal compatible contract parity.
+ZeroStack currently ships only as source in this workspace. There is no tagged ZeroStack release and no Homebrew, npm, or Pi package to install. FSZero, GraphZero, and TokenZero are engine crate domains in the same Cargo workspace, not separately published products from this tree.
 
 Production Rust inherits a workspace Clippy cognitive-complexity deny rule with threshold 25. The detached harness inherits the same threshold. Complexity exceptions are not a compatibility surface; functions above the threshold must be split along existing authority and lifecycle boundaries.

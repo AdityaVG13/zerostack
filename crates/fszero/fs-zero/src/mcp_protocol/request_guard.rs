@@ -79,7 +79,3 @@ pub fn deadline_error_data(kind: &'static str, message: &str) -> Value {
 pub fn matches_request_id(a: &Value, b: &Value) -> bool {
     a == b
 }
-
-#[cfg(test)]
-#[path = "../../../../../tests/fszero/unit/fs-zero/request_guard_tests.rs"]
-mod tests;

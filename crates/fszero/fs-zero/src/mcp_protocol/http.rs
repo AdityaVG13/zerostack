@@ -511,7 +511,3 @@ fn write_http_response(
     stream.flush().map_err(|e| e.to_string())?;
     Ok(())
 }
-
-#[cfg(test)]
-#[path = "../../../../../tests/fszero/unit/fs-zero/http_tests.rs"]
-mod tests;

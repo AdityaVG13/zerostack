@@ -1,7 +1,8 @@
 {
   "name": "@zerostack/zero-kernel",
   "version": "0.1.0",
-  "description": "Daemonless in-process ZeroKernel native binding for direct z.* cells.",
+  "private": true,
+  "description": "Daemonless in-process ZeroKernel native binding for direct z.* cells. Not published.",
   "main": "loader.js",
   "files": [
     "loader.js",

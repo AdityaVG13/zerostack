@@ -4,7 +4,23 @@ use std::io;
 use std::path::Path;
 use std::process::{Command, ExitCode};
 
-const KNOWLEDGE_PATH: &str = "docs/knowledge/workspace.json";
+const REQUIRED_PATHS: &[&str] = &[
+    "Cargo.toml",
+    "README.md",
+    "bindings/node/package.json",
+    "bindings/node/loader.js",
+    "bindings/node/zero-kernel.d.ts",
+    "contracts/README.md",
+    "demo/run.js",
+    "docs/architecture.md",
+    "fuzz/Cargo.toml",
+    "packaging/README.md",
+    "xtask/Cargo.toml",
+    "crates/zerostack",
+    "crates/fszero",
+    "crates/graphzero",
+    "crates/tokenzero",
+];
 
 fn main() -> ExitCode {
     match run() {
@@ -32,7 +48,7 @@ fn run() -> Result<(), String> {
         Some("test-targeted") => {
             let package = args
                 .next()
-                .ok_or("usage: cargo xtask test-targeted <package> [test-filter]")?;
+                .ok_or("usage: cargo run --manifest-path xtask/Cargo.toml -- test-targeted <package> [test-filter]")?;
             let mut command = vec!["test".to_owned(), "-p".to_owned(), package];
             command.extend(args);
             cargo_owned(root, &command)?;
@@ -40,20 +56,27 @@ fn run() -> Result<(), String> {
         Some("bench") => {
             let bench = args
                 .next()
-                .ok_or("usage: cargo xtask bench <bench-name> [extra cargo args]")?;
+                .ok_or("usage: cargo run --manifest-path xtask/Cargo.toml -- bench <bench-name> [extra cargo args]")?;
             let mut command = vec!["bench".to_owned(), "--bench".to_owned(), bench];
             command.extend(args);
             cargo_owned(root, &command)?;
         }
         Some("docs") => cargo(root, &["doc", "--workspace", "--no-deps"])?,
-        Some("release") => release(root, &repository_kind(root)?)?,
+        Some("release") => {
+            return Err(
+                "no public ZeroStack package exists; this repository is source-only"
+                    .to_owned(),
+            );
+        }
         Some("ci") => {
             doctor(root, true)?;
             understand(root, vec!["--check".to_owned()])?;
-            cargo(root, &["fmt", "--all", "--check"])?;
-            cargo(root, &["check", "--workspace"])?;
         }
-        Some(other) => return Err(format!("unknown command {other:?}; run cargo xtask help")),
+        Some(other) => {
+            return Err(format!(
+                "unknown command {other:?}; run cargo run --manifest-path xtask/Cargo.toml -- help"
+            ));
+        }
     }
     Ok(())
 }
@@ -62,52 +85,73 @@ fn print_help() {
     println!(
         "ZeroStack repository workflow
 
-  cargo xtask doctor [--json]
-  cargo xtask understand [--write|--check]
-  cargo xtask check
-  cargo xtask test-targeted <package> [filter]
-  cargo xtask bench <bench-name> [args]
-  cargo xtask docs
-  cargo xtask release
-  cargo xtask ci
+  cargo run --manifest-path xtask/Cargo.toml -- doctor [--json]
+  cargo run --manifest-path xtask/Cargo.toml -- understand [--check]
+  cargo run --manifest-path xtask/Cargo.toml -- check
+  cargo run --manifest-path xtask/Cargo.toml -- test-targeted <package> [filter]
+  cargo run --manifest-path xtask/Cargo.toml -- bench <bench-name> [args]
+  cargo run --manifest-path xtask/Cargo.toml -- docs
+  cargo run --manifest-path xtask/Cargo.toml -- ci
 
+There is no release command that tags, publishes, or builds distribution assets.
 No command runs an unbounded test suite."
     );
 }
 
 fn doctor(root: &Path, json: bool) -> Result<(), String> {
     let checks = ["cargo", "rustc", "git"];
-    let mut states = Vec::new();
+    let mut tools = Vec::new();
     for tool in checks {
         let ok = Command::new(tool)
             .arg("--version")
             .current_dir(root)
             .output()
             .is_ok_and(|out| out.status.success());
-        states.push((tool, ok));
+        tools.push((tool, ok));
     }
-    let manifest = root.join("Cargo.toml").is_file();
-    let healthy = manifest && states.iter().all(|(_, ok)| *ok);
+    let missing: Vec<&str> = REQUIRED_PATHS
+        .iter()
+        .copied()
+        .filter(|path| !root.join(path).exists())
+        .collect();
+    let kind = repository_kind(root);
+    let tools_ok = tools.iter().all(|(_, ok)| *ok);
+    let healthy = tools_ok && missing.is_empty() && kind.is_ok();
     if json {
-        let tools = states
+        let tool_fields = tools
             .iter()
             .map(|(name, ok)| format!(r#""{name}":{ok}"#))
             .collect::<Vec<_>>()
             .join(",");
+        let missing_json = json_array(
+            &missing
+                .iter()
+                .map(|path| (*path).to_owned())
+                .collect::<Vec<_>>(),
+        );
+        let kind_json = match &kind {
+            Ok(name) => format!("\"{name}\""),
+            Err(_) => "null".to_owned(),
+        };
         println!(
-            r#"{{"schemaVersion":1,"healthy":{healthy},"manifest":{manifest},"tools":{{{tools}}}}}"#
+            r#"{{"schemaVersion":1,"healthy":{healthy},"repository":{kind_json},"missing":{missing_json},"tools":{{{tool_fields}}}}}"#
         );
     } else {
-        println!("repository: {}", repository_kind(root)?);
-        println!("manifest: {}", state(manifest));
-        for (tool, ok) in &states {
+        println!("repository: {}", kind.as_deref().unwrap_or("unrecognized"));
+        for (tool, ok) in &tools {
             println!("{tool}: {}", state(*ok));
         }
+        if missing.is_empty() {
+            println!("layout: ok");
+        } else {
+            println!("layout: missing {}", missing.join(", "));
+        }
     }
+    kind?;
     if healthy {
         Ok(())
     } else {
-        Err("doctor found missing prerequisites".to_owned())
+        Err("doctor found missing prerequisites or required files".to_owned())
     }
 }
 
@@ -119,29 +163,24 @@ fn understand(root: &Path, args: Vec<String>) -> Result<(), String> {
     if args.len() > 1
         || args
             .first()
-            .is_some_and(|arg| !matches!(arg.as_str(), "--write" | "--check"))
+            .is_some_and(|arg| !matches!(arg.as_str(), "--check"))
     {
-        return Err("usage: cargo xtask understand [--write|--check]".to_owned());
+        return Err(
+            "usage: cargo run --manifest-path xtask/Cargo.toml -- understand [--check]".to_owned(),
+        );
     }
     let generated = inventory(root)?;
     match args.first().map(String::as_str) {
-        Some("--write") => {
-            let path = root.join(KNOWLEDGE_PATH);
-            fs::create_dir_all(path.parent().expect("knowledge path has parent"))
-                .map_err(io_error)?;
-            fs::write(&path, &generated).map_err(io_error)?;
-            println!("wrote {KNOWLEDGE_PATH}");
-        }
         Some("--check") => {
-            let current = fs::read_to_string(root.join(KNOWLEDGE_PATH)).map_err(|_| {
-                format!("{KNOWLEDGE_PATH} is missing; run cargo xtask understand --write")
-            })?;
-            if current != generated {
-                return Err(format!(
-                    "{KNOWLEDGE_PATH} is stale; run cargo xtask understand --write"
-                ));
+            let missing: Vec<&str> = REQUIRED_PATHS
+                .iter()
+                .copied()
+                .filter(|path| !root.join(path).exists())
+                .collect();
+            if !missing.is_empty() {
+                return Err(format!("required paths missing: {}", missing.join(", ")));
             }
-            println!("knowledge inventory is current");
+            println!("required layout is present");
         }
         None => print!("{generated}"),
         _ => unreachable!(),
@@ -170,6 +209,7 @@ fn inventory(root: &Path) -> Result<String, String> {
             workflows.push(value);
         } else if (value.starts_with("docs/") || !value.contains('/'))
             && path.extension().and_then(|x| x.to_str()) == Some("md")
+            && !value.starts_with("docs/internal/")
         {
             documentation.push(value);
         }
@@ -217,8 +257,11 @@ fn walk(root: &Path, dir: &Path, visit: &mut dyn FnMut(String, &Path)) -> io::Re
                         | ".prosecution"
                         | "node_modules"
                         | "target"
+                        | "docs/internal"
                 )
-            ) {
+            ) || name.to_str() == Some("internal")
+                && dir.file_name().and_then(|n| n.to_str()) == Some("docs")
+            {
                 continue;
             }
             walk(root, &path, visit)?;
@@ -242,66 +285,14 @@ fn json_array(values: &[String]) -> String {
 
 fn repository_kind(root: &Path) -> Result<String, String> {
     let manifest = fs::read_to_string(root.join("Cargo.toml")).map_err(io_error)?;
-    for (needle, name) in [
-        ("tokenzero-core", "tokenzero"),
-        ("graphzero-types", "graphzero"),
-        ("fszero-codemode", "fszero"),
-    ] {
-        if manifest.contains(needle) {
-            return Ok(name.to_owned());
-        }
+    if manifest.contains("zero-kernel")
+        && manifest.contains("crates/fszero/")
+        && manifest.contains("crates/graphzero/")
+        && manifest.contains("crates/tokenzero/")
+    {
+        return Ok("zerostack".to_owned());
     }
     Err("unrecognized ZeroStack repository".to_owned())
-}
-
-fn release(root: &Path, repository: &str) -> Result<(), String> {
-    match repository {
-        "tokenzero" => {
-            cargo(root, &["build", "--release", "--bin", "tokenzero"])?;
-            cargo(
-                root,
-                &[
-                    "build",
-                    "--release",
-                    "--bin",
-                    "tokenzero-codemode",
-                    "--no-default-features",
-                    "--features",
-                    "surface-codemode",
-                ],
-            )
-        }
-        "fszero" => {
-            cargo(root, &["build", "--release"])?;
-            cargo(
-                root,
-                &[
-                    "build",
-                    "--release",
-                    "-p",
-                    "fszero-codemode",
-                    "--bin",
-                    "fszero-codemode",
-                ],
-            )
-        }
-        "graphzero" => {
-            cargo(root, &["build", "--release"])?;
-            cargo(
-                root,
-                &[
-                    "build",
-                    "--release",
-                    "--bin",
-                    "graphzero-codemode",
-                    "--no-default-features",
-                    "--features",
-                    "surface-codemode",
-                ],
-            )
-        }
-        _ => Err(format!("no release recipe for {repository}")),
-    }
 }
 
 fn cargo(root: &Path, args: &[&str]) -> Result<(), String> {
@@ -340,14 +331,11 @@ mod tests {
     }
 
     #[test]
-    fn repository_is_detected_without_using_directory_names() {
+    fn repository_is_detected_as_zerostack() {
         let root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .parent()
             .unwrap()
             .to_owned();
-        assert!(matches!(
-            repository_kind(&root).as_deref(),
-            Ok("tokenzero" | "fszero" | "graphzero")
-        ));
+        assert_eq!(repository_kind(&root).as_deref(), Ok("zerostack"));
     }
 }

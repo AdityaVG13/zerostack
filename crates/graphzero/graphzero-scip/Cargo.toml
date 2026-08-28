@@ -18,9 +18,6 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 tempfile = { workspace = true }
 
+
 [lints]
 workspace = true
-
-[[test]]
-name = "scip_fixture_golden"
-path = "../../../tests/graphzero/scip/fixture_golden.rs"

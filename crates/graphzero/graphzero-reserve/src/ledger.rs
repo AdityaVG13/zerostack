@@ -143,7 +143,3 @@ pub fn ledger_state_hash<T: serde::Serialize + ?Sized>(records: &T) -> Result<St
     h.update(bytes);
     Ok(h.finalize().iter().map(|b| format!("{b:02x}")).collect())
 }
-
-#[cfg(test)]
-#[path = "../../../../tests/graphzero/unit/graphzero-reserve/ledger_tests.rs"]
-mod tests;

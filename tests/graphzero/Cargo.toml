@@ -5,5 +5,6 @@ edition.workspace = true
 license.workspace = true
 publish = false
 
-[lib]
-path = "lib.rs"
+# Not a workspace member. Live integration targets are declared by the
+# domain crates. The missing [lib] path was removed rather than replaced
+# with an empty crate root.

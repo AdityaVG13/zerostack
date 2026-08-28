@@ -18,7 +18,7 @@ ZeroStack/
 ├── contracts/
 ├── tests/{fszero,graphzero,tokenzero,support}/
 ├── docs/
-├── packaging/package/{homebrew,npm,pi}/
+├── packaging/
 ├── bindings/node/
 ├── demo/
 ├── fuzz/

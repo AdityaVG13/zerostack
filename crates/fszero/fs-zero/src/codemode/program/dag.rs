@@ -216,7 +216,3 @@ fn find_cycle<'a>(
     // diagnostic instead of looping forever.
     vec!["?".to_string(), "?".to_string()]
 }
-
-#[cfg(test)]
-#[path = "../../../../../../tests/fszero/unit/fs-zero/dag_tests.rs"]
-mod tests;

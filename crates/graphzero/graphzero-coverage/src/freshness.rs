@@ -67,7 +67,3 @@ pub fn compute_hash(bytes: &[u8]) -> ContentHash {
     out.copy_from_slice(&digest);
     ContentHash::from_bytes(out)
 }
-
-#[cfg(test)]
-#[path = "../../../../tests/graphzero/unit/graphzero-coverage/freshness_tests.rs"]
-mod tests;

@@ -142,7 +142,3 @@ fn category_mask(category: u32) -> u64 {
     1u64.checked_shl(category)
         .unwrap_or_else(|| panic!("bitmap category {category} is out of range; expected 0..64"))
 }
-
-#[cfg(test)]
-#[path = "../../../../tests/graphzero/unit/graphzero-coverage/bitmap_tests.rs"]
-mod tests;

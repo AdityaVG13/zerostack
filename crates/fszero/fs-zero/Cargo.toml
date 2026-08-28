@@ -12,7 +12,7 @@ path = "src/lib.rs"
 # The library's broad defaults exist for development and compatibility tests.
 # Shipped packages below use default-features=false and opt into only their
 # surface plus an explicit SQLite link mode.
-default = ["fszero-ast-sgrep", "watch", "dev-harness", "mcp-http", "sqlite-bundled"]
+default = ["fszero-ast-sgrep", "watch", "dev-harness", "sqlite-bundled"]
 fszero-ast-sgrep = ["dep:ast-sgrep-lang", "dep:ast-sgrep-core", "fszero-engine/fszero-ast-sgrep"]
 fszero-semantic-local = ["dep:frankensearch", "fszero-engine/fszero-semantic-local"]
 # FSEvents/inotify for FSZERO_WATCH=1 (inject harness works without OS watcher).

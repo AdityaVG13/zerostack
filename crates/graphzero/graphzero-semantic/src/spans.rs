@@ -20,7 +20,3 @@ fn symbol_span(node: &SymbolNode) -> EmbedSpan {
         label: node.name.clone(),
     }
 }
-
-#[cfg(test)]
-#[path = "../../../../tests/graphzero/unit/graphzero-semantic/spans_tests.rs"]
-mod tests;

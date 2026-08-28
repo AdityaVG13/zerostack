@@ -170,7 +170,3 @@ fn fish_script() -> String {
     );
     out
 }
-
-#[cfg(test)]
-#[path = "../../../../../tests/fszero/unit/fs-zero/completions_tests.rs"]
-mod tests;

@@ -3,7 +3,6 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
 
-use graphzero_store::Snapshot;
 use graphzero_store::store::publish::{PublishOptions, publish_batch};
 
 use crate::agent_cli;
@@ -331,26 +330,10 @@ fn run_stats(repo: PathBuf) -> Result<()> {
     Ok(())
 }
 
-fn run_codemode(plan: String, repo: PathBuf) -> Result<()> {
-    let (root, repo) = commands::repo_pair(repo)?;
-    if !root.join(".manifest").exists() {
-        graphzero_store::store::indexer::index_repo(&repo, &root)?;
-    }
-    let snapshot = Snapshot::open(&root, Some(&repo))?;
-    let host = crate::mcp::CliCodeModeHost {
-        store_root: root.clone(),
-        repo_root: repo.clone(),
-    };
-    let out = graphzero_engine::codemode::execute_with_host(&snapshot, &plan, Some(&host));
-    if agent_output::json_envelope_enabled() {
-        agent_output::emit_agent_json("code-mode", out.contract_json());
-    } else {
-        println!("{}", out.compact_line());
-    }
-    if out.error.is_some() {
-        anyhow::bail!("CodeMode plan failed");
-    }
-    Ok(())
+const CODEMODE_RETIRED: &str = "graphzero code-mode is retired. Model execution is ZeroKernel (`z.find`, `z.read`). Operator structural CLI remains `graphzero index|orient|search|snap|blast`.";
+
+fn run_codemode(_plan: String, _repo: PathBuf) -> Result<()> {
+    anyhow::bail!(CODEMODE_RETIRED)
 }
 
 fn run_neighborhood_command(
@@ -679,7 +662,7 @@ pub fn handle_pre_parse_shortcuts() -> Result<bool> {
                 #[cfg(not(feature = "surface-mcp"))]
                 {
                     anyhow::bail!(
-                        "graphzero: FastMCP surface was not compiled into this artifact (missing feature surface-mcp). Install graphzero-mcp."
+                        "graphzero: FastMCP is not compiled into this operator CLI. Model execution is ZeroKernel (`z.find`)."
                     );
                 }
             }
@@ -806,9 +789,7 @@ fn dispatch_primary_command(command: Command) -> Result<()> {
             #[cfg(not(feature = "surface-mcp"))]
             {
                 Err(anyhow::anyhow!(
-                    "graphzero serve requires package surface-mcp (missing from this binary). \
-try: packaging/install.sh --surface mcp OR install graphzero-mcp. \
-See docs/install.md and graphzero capabilities | jq .dual_binaries"
+                    "graphzero serve is not an operator CLI surface. Model execution is ZeroKernel (`z.find`)."
                 ))
             }
         }
@@ -879,14 +860,8 @@ fn dispatch_secondary_command(command: Command) -> Result<()> {
         Command::Pack { action } => pack_cmd::run(action),
         Command::ZerorefFixture { action } => crate::zeroref_fixture::run(action),
         Command::CodeMode { plan, repo } => run_codemode(plan, repo),
-        Command::CodeModeSearch { query } => {
-            println!("{}", graphzero_engine::codemode::search(&query)?);
-            Ok(())
-        }
-        Command::CodeModeDescribe { name } => {
-            println!("{}", graphzero_engine::codemode::describe(&name)?);
-            Ok(())
-        }
+        Command::CodeModeSearch { query: _ } => anyhow::bail!(CODEMODE_RETIRED),
+        Command::CodeModeDescribe { name: _ } => anyhow::bail!(CODEMODE_RETIRED),
         Command::Capabilities => {
             agent_output::emit_agent_json_from_str("capabilities", &agent_cli::capabilities_json());
             Ok(())

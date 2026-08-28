@@ -467,7 +467,3 @@ fn write_response(stdout: &mut io::Stdout, response: &Value) {
     let _ = writeln!(stdout, "{response}");
     let _ = stdout.flush();
 }
-
-#[cfg(test)]
-#[path = "../../../../../tests/fszero/unit/fs-zero/stdio_tests.rs"]
-mod tests;

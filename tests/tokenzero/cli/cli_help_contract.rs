@@ -401,7 +401,10 @@ fn cli_capabilities_json_exposes_agent_contract() {
         .find(|row| row["mcp_tool"] == "tz_read")
         .expect("tz_read row");
     assert_eq!(read["cli_verb"], "read");
-    assert_eq!(read["codemode_binding"], "zero.read");
+    assert!(
+        read["codemode_binding"].is_null(),
+        "tz_read must not advertise a V6 zero.* CodeMode binding"
+    );
     let execute_code = mcp_tools
         .iter()
         .find(|row| row["mcp_tool"] == "tz_execute_code")
@@ -560,7 +563,7 @@ fn capabilities_declares_token_engine_kernel_orifices() {
     let kernel = &json["kernel_orifices"];
     assert_eq!(kernel["owner"], "tokenzero");
     assert_eq!(kernel["api"], "zero_abi::TokenEngine");
-    assert_eq!(kernel["codemode_binding_status"], "noncanonical_v6_compat");
+    assert_eq!(kernel["codemode_binding_status"], "retired");
     let methods = kernel["methods"]
         .as_array()
         .expect("kernel methods")
@@ -607,7 +610,7 @@ fn capabilities_declares_token_engine_kernel_orifices() {
     );
     assert_eq!(
         json["aggregate_codemode"]["status"],
-        "noncanonical_v6_compat"
+        "retired"
     );
 }
 
@@ -629,7 +632,7 @@ fn capabilities_does_not_advertise_dead_tokenzero_mcp_bin() {
     assert_eq!(mcp_bin["status"], "not_a_workspace_bin");
     assert_eq!(
         mcp_bin["source_present"],
-        "crates/tokenzero-cli/src/bin/tokenzero_mcp.rs"
+        "crates/tokenzero/tokenzero-cli/src/bin/tokenzero_mcp.rs"
     );
     assert_eq!(
         mcp_bin["available_in_this_build"],

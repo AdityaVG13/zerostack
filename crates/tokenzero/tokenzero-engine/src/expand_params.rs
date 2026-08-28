@@ -60,7 +60,7 @@ impl ExpandParams {
     pub fn from_codemode_args(args: &[Value]) -> Result<Self, String> {
         let Some(first) = args.first() else {
             return Err(
-                "zero.token.expand/zero.expand requires a tz:// ref string as first argument \
+                "tz_expand requires a tz:// ref string as first argument \
                  (got no args); accepted forms: expand(ref), expand({ref}), or expand([ref, ...])"
                     .to_string(),
             );
@@ -69,7 +69,7 @@ impl ExpandParams {
         if first.is_object() {
             if args.len() > 1 {
                 return Err(
-                    "zero.token.expand/zero.expand object form takes a single {ref, ...} argument \
+                    "tz_expand object form takes a single {ref, ...} argument \
                      (options belong inside the object)"
                         .to_string(),
                 );
@@ -80,7 +80,7 @@ impl ExpandParams {
             .as_str()
             .ok_or_else(|| {
                 format!(
-                    "zero.token.expand/zero.expand requires a tz:// ref string, {{ref}} object, \
+                    "tz_expand requires a tz:// ref string, {{ref}} object, \
                  or array of refs as first argument — got {}",
                     value_shape(first)
                 )

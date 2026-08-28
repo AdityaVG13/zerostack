@@ -1,4 +1,4 @@
-//! Aggregate bindings over the typed TokenZero dispatcher (tokenzero-irx9.6).
+//! Canonical TokenZero dispatcher identity after V6 CodeMode liquidation (tokenzero-irx9.6).
 
 use serde_json::json;
 use std::collections::BTreeSet;
@@ -18,64 +18,84 @@ fn engine_for(root: &std::path::Path) -> TokenZeroEngine {
 }
 
 #[test]
-fn every_aggregate_domain_binding_is_registry_backed() {
+fn v6_zero_star_bindings_are_absent_from_registry() {
     let bindings: BTreeSet<&str> = all_operations()
         .iter()
-        .filter(|op| {
-            op.exposure.codemode_binding.is_some()
-                && matches!(
-                    op.migration,
-                    MigrationStatus::Canonical | MigrationStatus::LegacyAlias
-                )
-                && op.exposure.resource_uri.is_none()
-        })
         .filter_map(|op| op.exposure.codemode_binding)
         .collect();
-    for required in [
+    let aliases: BTreeSet<&str> = all_operations()
+        .iter()
+        .flat_map(|op| op.aliases.iter().copied())
+        .collect();
+    for retired in [
         "zero.read",
         "zero.find",
         "zero.glob",
         "zero.tree",
         "zero.edit",
         "zero.shell",
+        "zero.mem",
         "zero.token.expand",
+        "zero.token.compact",
+        "zero.expand",
+        "zero.compact",
     ] {
+        assert_eq!(
+            bindings.contains(retired),
+            false,
+            "retired V6 binding {retired} still advertised in {bindings:?}"
+        );
+        assert_eq!(
+            aliases.contains(retired),
+            false,
+            "retired V6 alias {retired} still advertised in {aliases:?}"
+        );
+    }
+    // Canonical tz_* names remain the public surface; they are not V6 zero.* bindings.
+    let canonical: BTreeSet<&str> = all_operations()
+        .iter()
+        .filter(|op| {
+            matches!(
+                op.migration,
+                MigrationStatus::Canonical | MigrationStatus::LegacyAlias
+            ) && op.exposure.fastmcp_tool
+                && op.exposure.resource_uri.is_none()
+        })
+        .map(|op| op.name)
+        .collect();
+    for required in ["tz_read", "tz_find", "tz_glob", "tz_tree", "tz_edit", "tz_shell"] {
         assert!(
-            bindings.contains(required),
-            "missing {required} in {bindings:?}"
+            canonical.contains(required),
+            "missing {required} in {canonical:?}"
         );
     }
 }
 
-/// One aggregate binding normalizes to classic MCP for bound domain operations.
+/// Classic MCP and CodeMode both dispatch the canonical tz_* name.
 #[test]
-fn one_aggregate_binding_normalizes_to_classic_mcp() {
+fn canonical_tz_names_dispatch_on_mcp_and_codemode() {
     let dir = tempdir().unwrap();
     fs::write(dir.path().join("note.txt"), b"codemode-parity").unwrap();
     let root = dir.path();
     let note = root.join("note.txt").display().to_string();
 
-    let cases: Vec<(&str, &str, serde_json::Value)> = vec![
-        ("tz_read", "zero.read", json!({"path": note})),
+    let cases: Vec<(&str, serde_json::Value)> = vec![
+        ("tz_read", json!({"path": note})),
         (
             "tz_glob",
-            "zero.glob",
             json!({"pattern": "*.txt", "path": root.display().to_string()}),
         ),
         (
             "tz_tree",
-            "zero.tree",
             json!({"path": root.display().to_string(), "depth": 1}),
         ),
-        ("tz_mem", "zero.mem", json!({})),
+        ("tz_mem", json!({})),
         (
             "tz_shell",
-            "zero.shell",
             json!({"command": "true", "cwd": root.display().to_string()}),
         ),
         (
             "tz_edit",
-            "zero.edit",
             json!({
                 "path": note,
                 "edits": [{"find": "codemode-parity", "replace": "codemode-parity"}],
@@ -84,9 +104,9 @@ fn one_aggregate_binding_normalizes_to_classic_mcp() {
         ),
     ];
 
-    for (mcp_name, cm_name, args) in cases {
-        let mcp = dispatch_mcp_tool(&engine_for(root), mcp_name, &args).expect("mcp");
-        let cm = dispatch_codemode_method(&engine_for(root), cm_name, &args).expect("cm");
+    for (name, args) in cases {
+        let mcp = dispatch_mcp_tool(&engine_for(root), name, &args).expect("mcp");
+        let cm = dispatch_codemode_method(&engine_for(root), name, &args).expect("cm");
         let n = |o: &tokenzero_engine::DispatchOutcome| {
             let r = o.tool_response.as_ref().expect("resp");
             (
@@ -99,22 +119,22 @@ fn one_aggregate_binding_normalizes_to_classic_mcp() {
         assert_eq!(
             n(&mcp),
             n(&cm),
-            "aggregate binding {cm_name} must normalize to classic MCP {mcp_name}"
+            "CodeMode {name} must normalize to classic MCP {name}"
         );
     }
 }
 
-/// Aggregate one-operation dispatch enters the domain dispatcher directly.
+/// Canonical one-operation dispatch enters the domain dispatcher directly.
 #[test]
-fn aggregate_binding_path_is_direct_dispatcher() {
+fn canonical_tz_read_path_is_direct_dispatcher() {
     let dir = tempdir().unwrap();
     fs::write(dir.path().join("note.txt"), b"x").unwrap();
     let eng = engine_for(dir.path());
     let out = dispatch_codemode_method(
         &eng,
-        "zero.read",
+        "tz_read",
         &json!({"path": dir.path().join("note.txt").display().to_string()}),
     )
-    .expect("aggregate binding path");
+    .expect("canonical tz_read path");
     assert!(out.is_ok());
 }

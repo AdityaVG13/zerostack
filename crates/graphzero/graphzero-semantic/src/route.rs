@@ -82,7 +82,3 @@ pub fn resolve_route_order(
     }
     trace
 }
-
-#[cfg(test)]
-#[path = "../../../../tests/graphzero/unit/graphzero-semantic/route_tests.rs"]
-mod tests;

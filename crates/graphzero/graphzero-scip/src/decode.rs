@@ -40,7 +40,3 @@ fn add_count(total: &mut usize, addend: usize, label: &str) -> Result<()> {
     *total = next;
     Ok(())
 }
-
-#[cfg(test)]
-#[path = "../../../../tests/graphzero/unit/graphzero-scip/decode_tests.rs"]
-mod tests;

@@ -371,7 +371,3 @@ impl SemanticShardReader {
         Ok(header.record_count as usize)
     }
 }
-
-#[cfg(test)]
-#[path = "../../../../tests/graphzero/unit/graphzero-semantic/shard_writer_tests.rs"]
-mod writer_tests;

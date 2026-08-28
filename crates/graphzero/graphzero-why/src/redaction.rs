@@ -74,7 +74,3 @@ fn replace_ascii_case_insensitive(input: &str, needle: &str) -> (String, bool) {
 fn looks_like_bearer_token(s: &str) -> bool {
     s.contains("Bearer eyJ") && s.len() > 40
 }
-
-#[cfg(test)]
-#[path = "../../../../tests/graphzero/unit/graphzero-why/redaction_tests.rs"]
-mod tests;

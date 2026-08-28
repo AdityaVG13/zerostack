@@ -28,13 +28,6 @@ pub fn resolve_operation(name: &str) -> Option<&'static Operation> {
         {
             return Some(op);
         }
-        // zero.expand is alias of zero.token.expand
-        if name == "zero.expand" && op.name == "tz_expand" {
-            return Some(op);
-        }
-        if name == "zero.compact" && op.name == "zero.token.compact" {
-            return Some(op);
-        }
     }
     None
 }

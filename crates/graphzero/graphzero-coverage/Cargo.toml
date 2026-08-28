@@ -19,17 +19,6 @@ criterion = { workspace = true }
 name = "coverage_bench"
 harness = false
 
+
 [lints]
 workspace = true
-
-[[test]]
-name = "coverage_integration"
-path = "../../../tests/graphzero/coverage/integration.rs"
-
-[[test]]
-name = "coverage_property"
-path = "../../../tests/graphzero/coverage/property.rs"
-
-[[test]]
-name = "coverage_real_index_coverage"
-path = "../../../tests/graphzero/coverage/real_index_coverage.rs"

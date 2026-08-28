@@ -4,10 +4,10 @@ TokenZero is the output authority for the Zero family.
 
 | Document | Purpose |
 | --- | --- |
-| [RACC](racc.md) | Projection, protected anchors, exact recovery, and accounting |
-| [Installation](install.md) | Release archives, source builds, and local setup |
+| [RACC](../racc/RACC.md) | Projection, protected anchors, exact recovery, and accounting |
+| [Installation](install.md) | Source builds and local setup |
 | [ZeroKernel integration](codemode.md) | TokenZero ownership behind the six-operation host |
-| [Classic MCP](mcp.md) | Direct per-operation compatibility |
+| [Classic MCP](mcp.md) | Noncanonical direct-tool compatibility for clients that cannot embed ZeroKernel |
 | [Pulse](pulse.md) | Local recovery-aware usage ledger |
 | [Benchmarks](benchmarks.md) | Reproducible output and latency evidence |
 | [Development](development.md) | Workspace layout and focused verification |

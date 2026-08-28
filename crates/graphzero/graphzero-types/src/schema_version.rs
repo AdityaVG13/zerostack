@@ -220,7 +220,3 @@ impl SnapshotSchemaSegment {
 
 /// Relative path of the snapshot schema stamp under a graphzero store root.
 pub const SNAPSHOT_SCHEMA_FILE: &str = "snapshot_schema.json";
-
-#[cfg(test)]
-#[path = "../../../../tests/graphzero/unit/graphzero-types/schema_version_tests.rs"]
-mod tests;

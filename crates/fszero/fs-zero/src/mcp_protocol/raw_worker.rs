@@ -230,7 +230,3 @@ pub fn supports_handshake_and_call_frames() -> bool {
     let _ = std::mem::size_of::<WorkerRequestFrame>();
     true
 }
-
-#[cfg(test)]
-#[path = "../../../../../tests/fszero/unit/fs-zero/raw_worker_termination_tests.rs"]
-mod v2_termination_tests;

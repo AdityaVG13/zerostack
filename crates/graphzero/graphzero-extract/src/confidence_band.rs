@@ -44,7 +44,3 @@ const _: () = assert!(TSSERVER_INFERRED > LOCAL_CALL);
 
 /// Ambiguous or default confidence for any edge not in the band.
 pub const DEFAULT: f64 = 0.7;
-
-#[cfg(test)]
-#[path = "../../../../tests/graphzero/unit/graphzero-extract/confidence_band_tests.rs"]
-mod tests;

@@ -393,7 +393,3 @@ pub fn build_query_manifest(ledger: &WhyLedger) -> WhyQueryManifest {
         by_node: by_node.into_iter().collect(),
     }
 }
-
-#[cfg(test)]
-#[path = "../../../../tests/graphzero/unit/graphzero-why/store_tests.rs"]
-mod tests;

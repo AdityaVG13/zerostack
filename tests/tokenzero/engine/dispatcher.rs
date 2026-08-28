@@ -75,7 +75,7 @@ fn one_operation_same_dispatcher_from_all_adapters() {
     let mcp_out = dispatch_mcp_tool(&mcp, "tz_read", &args).expect("mcp");
     let raw_out = dispatch_raw_worker(&raw, "tz_read", &args);
     let cli_out = dispatch_cli(&cli, "tz_read", &args);
-    let cm_out = dispatch_codemode_method(&cm, "zero.read", &args).expect("cm");
+    let cm_out = dispatch_codemode_method(&cm, "tz_read", &args).expect("cm");
 
     assert!(mcp_out.is_ok(), "mcp: {:?}", mcp_out.tool_domain_error());
     assert!(raw_out.is_ok(), "raw: {:?}", raw_out.tool_domain_error());
@@ -275,7 +275,7 @@ fn differential_policy_failure_agrees_across_surfaces() {
 
     let raw = dispatch_raw_worker(&raw_e, "tz_read", &args);
     let mcp = dispatch_mcp_tool(&mcp_e, "tz_read", &args).unwrap();
-    let cm = dispatch_codemode_method(&cm_e, "zero.read", &args).unwrap();
+    let cm = dispatch_codemode_method(&cm_e, "tz_read", &args).unwrap();
 
     for out in [&raw, &mcp, &cm] {
         assert!(!out.is_ok(), "escape should fail: {:?}", out.result);
@@ -310,7 +310,7 @@ fn transport_control_tools_are_not_domain_ops() {
     assert!(!is_domain_operation("tz_codemode_search"));
     assert!(!is_domain_operation("codemode.limits"));
     assert!(is_domain_operation("tz_read"));
-    assert!(is_domain_operation("zero.read"));
+    assert!(!is_domain_operation("zero.read"), "V6 zero.read is not a TokenZero domain op");
 
     let root = tempfile::tempdir().unwrap();
     let engine = engine_for(root.path());
@@ -441,7 +441,7 @@ fn shell_timeout_ms_actually_bounds_the_command() {
     let started = std::time::Instant::now();
     let _ = dispatch_codemode_method(
         &engine,
-        "zero.shell",
+        "tz_shell",
         &json!({"command": "sleep 10", "timeout_ms": 1500}),
     );
     let elapsed = started.elapsed();
@@ -463,7 +463,7 @@ fn shell_timeout_units_agree() {
     let ms_started = std::time::Instant::now();
     let _ = dispatch_codemode_method(
         &engine,
-        "zero.shell",
+        "tz_shell",
         &json!({"command": "sleep 10", "timeout_ms": 2000}),
     );
     let ms_elapsed = ms_started.elapsed();
@@ -471,7 +471,7 @@ fn shell_timeout_units_agree() {
     let secs_started = std::time::Instant::now();
     let _ = dispatch_codemode_method(
         &engine,
-        "zero.shell",
+        "tz_shell",
         &json!({"command": "sleep 10", "timeout_seconds": 2}),
     );
     let secs_elapsed = secs_started.elapsed();

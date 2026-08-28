@@ -22,33 +22,18 @@ cargo build --release -p tokenzero-cli --bin tokenzero
 
 ## Verify
 
-The debug binary is fine for the development loop:
+Use a named package and exact `--lib`, `--bin`, or `--test` target. Do not treat `cargo test --workspace` as the project gate.
 
 ```bash
-cargo test --workspace
-cargo clippy --workspace --all-targets -- -D warnings
+cargo test -p tokenzero-kernel --lib
 cargo fmt --all -- --check
-target/debug/tokenzero mcp-smoke --json
 ```
 
-### Targeted formatting (dirty worktrees)
-
-Do NOT use `cargo fmt -- path/to/file.rs` as a file allowlist. `cargo fmt`
-ignores trailing paths as a scope filter and may format the entire workspace
-(~60 files). For single-file formatting use the repo-supported helper:
-
-```bash
-scripts/rustfmt_targeted.sh crates/tokenzero-core/src/lib.rs
-scripts/rustfmt_targeted.sh --check crates/tokenzero-core/src/lib.rs
-```
-
-The helper validates explicit `.rs` files inside the repo, rejects zero
-args/directories/non-`.rs`/outside-repo paths, preserves spaces, and runs
-`rustfmt --edition 2024 -- <file>` once per file without invoking cargo-fmt.
+Format changed Rust files with `rustfmt --edition 2024 -- <file.rs>`. There is no `scripts/rustfmt_targeted.sh` helper in this repository.
 
 ## Workspace
 
-Eight Rust crates:
+Ten Cargo packages under `crates/tokenzero/`:
 
 | Crate | Responsibility |
 | --- | --- |
@@ -57,27 +42,17 @@ Eight Rust crates:
 | `tokenzero-runtime` | Runtime and session orchestration for the context layer |
 | `tokenzero-filters` | Content filters and selectors for compression |
 | `tokenzero-cli` | Standalone CLI and classic MCP compatibility entrypoint |
-| `tokenzero` | The `tokenzero` binary |
-| `tokenzero-install` | Installer and agent-wiring (Claude/Codex/Grok/etc.) |
-| `tokenzero-pulse` | Pulse telemetry and forecasting |
+| `tokenzero-engine` | Typed TokenEngine adapter consumed by ZeroKernel |
+| `tokenzero-kernel` | Kernel-facing measurement and projection |
+| `tokenzero-install` | Installer and agent-wiring |
+| `tokenzero-pulse` | Pulse telemetry |
+| `tokenzero-test-support` | Shared test helpers |
+
+The `tokenzero` CLI binary is produced by `tokenzero-cli`.
 
 ## Verification artifacts
 
-Proof artifacts are written under `results/current/` when a local or CI
-verification run emits them:
-
-| Artifact | Proves |
-| --- | --- |
-| `rust_mcp_smoke.json` | MCP tool and alias smoke |
-| `tokenzero_exact_recovery_audit.json` | CLI/MCP exact recovery checks, including degraded-cache rows |
-| `tokenzero_protected_anchor_audit.json` | Protected failure/warning anchor recall |
-| `tokenzero_shell_matrix.json` | Local shell/runtime matrix for this host |
-| `tokenzero_os_reach_audit.json` | OS-scoped evidence and install-smoke status |
-| `tokenzero_source_currency.json` | Public-claim source freshness gate |
-| `tokenzero_claim_audit.json` | Release/public-claim gate summary |
-
-Some release jobs additionally upload platform-specific artifacts outside the
-repo checkout; do not infer those from a local `results/current/` listing.
+Local TokenZero proof artifacts are not a ZeroStack release channel. Do not treat `results/current/` listings, MCP smoke JSON, or platform uploads as a tagged release, Homebrew bottle, or npm publication.
 
 ## Release boundaries
 

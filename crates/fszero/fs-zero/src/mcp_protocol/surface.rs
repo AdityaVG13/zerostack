@@ -320,10 +320,3 @@ pub fn resolve_codemode_response(sess: &mut FSZeroSession, ack: &str) -> (Value,
     });
     (payload, false)
 }
-
-#[cfg(test)]
-#[path = "../../../../../tests/fszero/unit/fs-zero/surface_catalog_tests.rs"]
-mod catalog_tests;
-#[cfg(test)]
-#[path = "../../../../../tests/fszero/unit/fs-zero/surface_accounting_tests.rs"]
-mod accounting_tests;

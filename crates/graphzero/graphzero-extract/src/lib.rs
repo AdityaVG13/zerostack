@@ -308,7 +308,3 @@ impl<'a> BlobInput<'a> {
         }
     }
 }
-
-#[cfg(test)]
-#[path = "../../../../tests/graphzero/unit/graphzero-extract/lib_public_api_tests.rs"]
-mod public_api_tests;

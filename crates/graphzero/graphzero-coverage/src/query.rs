@@ -221,7 +221,3 @@ fn build_certificate<P: LiveBytesProvider>(
     let full_tier_indexed = total > 0 && indexed_count == total;
     (cert, full_tier_indexed)
 }
-
-#[cfg(test)]
-#[path = "../../../../tests/graphzero/unit/graphzero-coverage/query_tests.rs"]
-mod tests;

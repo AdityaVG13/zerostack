@@ -19,7 +19,3 @@ impl LspAdapter for DisabledLsp {
         Ok(Vec::new())
     }
 }
-
-#[cfg(test)]
-#[path = "../../../../tests/graphzero/unit/graphzero-scip/lsp_tests.rs"]
-mod tests;

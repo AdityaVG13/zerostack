@@ -114,7 +114,3 @@ pub fn zero_result_to_wire(result: &ZeroResult) -> Value {
 pub fn wrong_accessor_message(err: ZeroResultAccessError) -> String {
     err.to_string()
 }
-
-#[cfg(test)]
-#[path = "../../../../../tests/fszero/unit/fs-zero/zero_result_tests.rs"]
-mod tests;

@@ -289,7 +289,6 @@ fn print_help() {
            fszero store-gc [--root PATH] (--dry-run | --yes) [--max-bytes N]\n\
            fszero telemetry inspect|dry-run [--telemetry|--no-telemetry] [--root PATH]\n\
            fszero zeroref-fixture …\n\
-           fszero codemode '<plan>' [--json] [--root PATH]\n\
          \n\
          Robot / machine surfaces:\n\
            doctor --json | capabilities [--json] | layout | catalog | tools | robot-triage | robot-docs | sbom | batch | telemetry inspect\n\
@@ -824,154 +823,24 @@ fn run_zeroref_fixture(args: &[String]) {
     }
 }
 
-const CODEMODE_CLI_ENVELOPE_SCHEMA: &str = "fszero-codemode-cli/v1";
-
-fn codemode_cli_json_document(
-    ack: &str,
-    response: Option<serde_json::Value>,
-    fallback_error: Option<String>,
-) -> serde_json::Value {
-    let response_ok = response.as_ref().is_some_and(|doc| {
-        doc.get("ack").and_then(serde_json::Value::as_str) == Some("C")
-            && doc.get("error").is_none_or(serde_json::Value::is_null)
-    });
-    let ok = ack.trim() == "C" && response_ok;
-    let reference = response
-        .as_ref()
-        .and_then(|doc| {
-            if ok {
-                doc.pointer("/refs/result")
-            } else {
-                doc.get("error_ref").or_else(|| doc.pointer("/refs/result"))
-            }
-        })
-        .cloned()
-        .unwrap_or(serde_json::Value::Null);
-    let error = if ok {
-        serde_json::Value::Null
-    } else {
-        response
-            .as_ref()
-            .and_then(|doc| doc.get("error"))
-            .filter(|value| !value.is_null())
-            .cloned()
-            .unwrap_or_else(|| {
-                json!({
-                    "kind": "runtime",
-                    "message": fallback_error.unwrap_or_else(|| {
-                        "codemode response unavailable or inconsistent".to_string()
-                    }),
-                })
-            })
-    };
-
-    json!({
-        "schema": CODEMODE_CLI_ENVELOPE_SCHEMA,
-        "ok": ok,
-        "ack": ack.trim(),
-        "ref": reference,
-        "error": error,
-        "response": response.unwrap_or(serde_json::Value::Null),
-    })
-}
-
 fn run_codemode_cli(args: Vec<String>) {
     if args.len() < 2 {
         print_help();
         process::exit(2);
     }
     let cmd = &args[1];
-    if cmd != "codemode" {
-        let hint = did_you_mean_suffix(cmd, SHIM_COMMANDS);
-        let flag_hint = if cmd.starts_with('-') {
-            did_you_mean_suffix(cmd, COMMON_FLAGS)
-        } else {
-            String::new()
-        };
-        die2(format!(
-            "unknown command {cmd:?}; use serve, --mode=mcp|--mode=codemode, --supervise, \
---raw-worker, doctor, install, uninstall, sbom, capabilities, catalog, tools, layout, batch, migrate-cas, \
-store-gc, telemetry, zeroref-fixture, or: fszero codemode '<plan>' [--json] [--root PATH]{hint}{flag_hint}",
-        ));
+    if cmd == "codemode" {
+        die2(
+            "fszero codemode is retired. Model execution is ZeroKernel (`z.read`, `z.edit`, `z.apply`). This binary is an operator installer/re-exec shim only.",
+        );
     }
-    let mut root = env::var("FSZERO_ROOT")
-        .ok()
-        .map(PathBuf::from)
-        .unwrap_or_else(|| PathBuf::from("."));
-    let mut json_output = false;
-    let mut plan_parts: Vec<String> = Vec::new();
-    let mut i = 2;
-    while i < args.len() {
-        if args[i] == "--json" {
-            json_output = true;
-            i += 1;
-            continue;
-        }
-        if args[i] == "--root" {
-            i += 1;
-            if i >= args.len() {
-                die2("--root requires a path");
-            }
-            root = PathBuf::from(&args[i]);
-            i += 1;
-            continue;
-        }
-        if let Some(rest) = args[i].strip_prefix("--root=") {
-            root = PathBuf::from(rest);
-            i += 1;
-            continue;
-        }
-        plan_parts.push(args[i].clone());
-        i += 1;
-    }
-    // Re-install so session + any nested env readers see the same path.
-    if let Ok(resolved) = install_explicit_root(&root) {
-        root = resolved;
-    }
-    let plan = plan_parts.join(" ");
-    let mut sess = match fs_zero::FSZeroSession::try_with_repo_store(&root) {
-        Ok(s) => s,
-        Err(e) => die2(format!("fszero: durable store open failed: {e}")),
+    let hint = did_you_mean_suffix(cmd, SHIM_COMMANDS);
+    let flag_hint = if cmd.starts_with('-') {
+        did_you_mean_suffix(cmd, COMMON_FLAGS)
+    } else {
+        String::new()
     };
-    let out = fs_zero::codemode_execute_plan(&mut sess, &plan);
-
-    if json_output {
-        let reason = (out.trim() != "C").then(|| {
-            sess.expand(fs_zero::ERROR_REF)
-                .map(|b| String::from_utf8_lossy(&b).into_owned())
-                .unwrap_or_else(|| "codemode plan failed with no recorded reason".to_string())
-        });
-        let (response, _) = fs_zero::resolve_codemode_response(&mut sess, &out);
-        let document = codemode_cli_json_document(&out, Some(response), reason);
-        println!("{document}");
-        if document["ok"] != true {
-            process::exit(1);
-        }
-        return;
-    }
-
-    println!("{out}");
-    if let Some(tel) = sess.expand("codemode/telemetry") {
-        eprintln!("telemetry: {}", String::from_utf8_lossy(&tel));
-    }
-    // A bare "X0" on stdout with exit 0 is indistinguishable from success to any
-    // script. Name the recorded reason and fail nonzero (fszero-1frd).
-    if out.trim() != "C" {
-        let reason = sess
-            .expand(fs_zero::ERROR_REF)
-            .map(|b| String::from_utf8_lossy(&b).into_owned())
-            .unwrap_or_else(|| "codemode plan failed with no recorded reason".to_string());
-        eprintln!("fszero codemode: {reason}");
-        process::exit(1);
-    }
+    die2(format!(
+        "unknown command {cmd:?}; use serve, --mode=mcp|--mode=codemode, --supervise, --raw-worker, doctor, install, uninstall, sbom, capabilities, catalog, tools, layout, batch, migrate-cas, store-gc, telemetry, zeroref-fixture{hint}{flag_hint}",
+    ));
 }
-
-#[cfg(test)]
-#[path = "../../../../tests/fszero/unit/fszero/main_store_gc_cli_tests.rs"]
-mod store_gc_cli_tests;
-#[cfg(test)]
-#[path = "../../../../tests/fszero/unit/fszero/main_help_route_tests.rs"]
-mod help_route_tests;
-#[cfg(test)]
-#[path = "../../../../tests/fszero/unit/fszero/main_supervise_env_tests.rs"]
-mod supervise_env_tests;

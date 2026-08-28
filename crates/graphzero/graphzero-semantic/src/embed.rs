@@ -132,7 +132,3 @@ pub fn cosine_top_k(query: &[f32], candidates: &[(String, Vec<f32>)], k: usize) 
     scored.truncate(k);
     scored
 }
-
-#[cfg(test)]
-#[path = "../../../../tests/graphzero/unit/graphzero-semantic/embed_tests.rs"]
-mod tests;

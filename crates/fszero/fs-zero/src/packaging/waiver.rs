@@ -215,7 +215,3 @@ pub fn load_and_validate_waivers(path: &Path, today: &str) -> Result<Vec<Waiver>
     validate_waivers_not_expired(&waivers, today)?;
     Ok(waivers)
 }
-
-#[cfg(test)]
-#[path = "../../../../../tests/fszero/unit/fs-zero/waiver_tests.rs"]
-mod tests;

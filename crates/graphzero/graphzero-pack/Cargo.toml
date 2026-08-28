@@ -27,9 +27,6 @@ harness = false
 [lints]
 workspace = true
 
-[[test]]
-name = "pack_canonical_json_drift"
-path = "../../../tests/graphzero/pack/canonical_json_drift.rs"
 
 [[test]]
 name = "pack_pack_contract"

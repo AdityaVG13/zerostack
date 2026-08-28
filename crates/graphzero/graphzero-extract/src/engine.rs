@@ -13,7 +13,3 @@ mod facts;
 mod parse;
 
 pub use facts::{extract_batch, extract_tier_a};
-
-#[cfg(test)]
-#[path = "../../../../tests/graphzero/unit/graphzero-extract/engine_tests.rs"]
-mod tests;

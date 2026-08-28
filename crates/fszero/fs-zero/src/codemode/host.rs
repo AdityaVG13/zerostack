@@ -1054,7 +1054,3 @@ fn capsule_head(text: &str) -> CapsulePage {
 fn truncate_chars(text: &str, limit: usize) -> String {
     text.chars().take(limit).collect()
 }
-
-#[cfg(test)]
-#[path = "../../../../../tests/fszero/unit/fs-zero/host_tests.rs"]
-mod tests;

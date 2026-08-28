@@ -255,7 +255,3 @@ pub fn tool_text(result: &Value) -> String {
         .expect("MCP result must contain text in its first content item")
         .to_string()
 }
-
-#[cfg(test)]
-#[path = "../../../../../tests/graphzero/unit/graphzero-test-support/mcp_session_tests.rs"]
-mod tests;

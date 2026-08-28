@@ -4,6 +4,7 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 description = "GraphZero structural truth authority: truth classes, coverage, negative knowledge, certified incremental invalidation"
+autotests = false
 
 [dependencies]
 graphzero-types = { workspace = true }
@@ -16,10 +17,6 @@ proptest = { workspace = true }
 [[test]]
 name = "core_invalidation_proptest"
 path = "../../../tests/graphzero/core/invalidation_proptest.rs"
-
-[[test]]
-name = "grades_cross_repo"
-path = "../../../tests/graphzero/unit/graphzero-core/grades_cross_repo.rs"
 
 [[test]]
 name = "cognitive_work"

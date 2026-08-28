@@ -116,6 +116,52 @@ fn raw_worker_is_advertised_and_dispatches() {
     let _ = std::fs::remove_dir_all(&root);
 }
 
+#[test]
+fn help_and_capabilities_do_not_advertise_v6_or_live_codemode_plan() {
+    let help = fszero()
+        .args(["--help"])
+        .output()
+        .expect("fszero --help");
+    assert!(
+        help.status.success(),
+        "help failed: {}",
+        String::from_utf8_lossy(&help.stderr)
+    );
+    let help_hay = format!(
+        "{}{}",
+        String::from_utf8_lossy(&help.stdout),
+        String::from_utf8_lossy(&help.stderr)
+    );
+    for token in [
+        "zero.fs.",
+        "zero.graph.",
+        "zero.token.",
+        "fszero codemode '<plan>'",
+    ] {
+        assert!(
+            !help_hay.contains(token),
+            "help advertises {token}:\n{help_hay}"
+        );
+    }
+
+    let caps = fszero()
+        .args(["capabilities", "--json"])
+        .output()
+        .expect("fszero capabilities");
+    assert!(
+        caps.status.success(),
+        "capabilities failed: {}",
+        String::from_utf8_lossy(&caps.stderr)
+    );
+    let caps_hay = String::from_utf8_lossy(&caps.stdout);
+    for token in ["zero.fs.", "zero.graph.", "zero.token."] {
+        assert!(
+            !caps_hay.contains(token),
+            "capabilities advertises {token}:\n{caps_hay}"
+        );
+    }
+}
+
 fn wait_output(mut child: std::process::Child, limit: Duration) -> Output {
     let mut stdout = child.stdout.take().expect("stdout pipe");
     let mut stderr = child.stderr.take().expect("stderr pipe");

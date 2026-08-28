@@ -199,7 +199,7 @@ fn build_registry() -> Vec<Operation> {
         },
         Operation {
             name: "snap",
-            description: "Edit-ready symbol snap: returns path/line/byte_span/definition_kind/confidence/alternates (tcx3) plus budgeted gz:// evidence. Prefer zero.graph.snap(symbol) over grep-then-read. At budget=1 capsule may be a single ref; edit fields stay inline. --export_path for atomic snap-to-file (minimal/capsule/md/zst).",
+            description: "Edit-ready symbol snap: returns path/line/byte_span/definition_kind/confidence/alternates (tcx3) plus budgeted gz:// evidence. Prefer snap over grep-then-read. At budget=1 capsule may be a single ref; edit fields stay inline. --export_path for atomic snap-to-file (minimal/capsule/md/zst).",
             aliases: &[],
             mutability: Mutability::ReadOnly,
             capability: CapabilityRequirement::Public,

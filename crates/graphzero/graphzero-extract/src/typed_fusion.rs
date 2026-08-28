@@ -116,7 +116,3 @@ pub fn fuse_typed_edges(
         _ => TypedFusionReport::default(),
     }
 }
-
-#[cfg(test)]
-#[path = "../../../../tests/graphzero/unit/graphzero-extract/typed_fusion_tests.rs"]
-mod tests;

@@ -542,7 +542,7 @@ pub(crate) fn run_verify_step(
 }
 
 /// Budgeted snap capsule plus edit-ready anchor (tcx3 / graphzero-fjv4).
-/// Prefer `zero.graph.snap(symbol)` over grep-then-read.
+/// Prefer snap over grep-then-read.
 pub(crate) fn run_snap_step(
     state: &mut ExecutionState<'_>,
     step_id: &str,

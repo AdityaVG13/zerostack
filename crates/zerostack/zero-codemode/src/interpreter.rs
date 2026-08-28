@@ -672,6 +672,7 @@ impl<'tree> Interpreter<'tree> {
             return Err(HostError::Cancelled);
         }
         if Instant::now() >= self.deadline {
+            self.cancelled.store(true, Ordering::Release);
             return Err(HostError::DeadlineExceeded);
         }
         if self.instructions > self.host.limits.instruction_budget {

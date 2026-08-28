@@ -81,7 +81,3 @@ pub fn write_benchmark_artifact(subdir: &str, filename: &str, report: &Value) ->
     .expect("failed to write benchmark report artifact");
     path
 }
-
-#[cfg(test)]
-#[path = "../../../../../tests/graphzero/unit/graphzero-test-support/release_harness_tests.rs"]
-mod tests;

@@ -293,11 +293,11 @@ fn mutation_edit_filesystem_agrees_across_surfaces() {
         );
     }
 
-    // CodeMode path (binding zero.edit)
+    // CodeMode path (canonical tz_edit)
     fs::write(&path, "before-mutation\n").unwrap();
     let eng = engine_for(root);
     let args = args_template("codemode");
-    let out = dispatch_codemode_method(&eng, "zero.edit", &args).expect("cm");
+    let out = dispatch_codemode_method(&eng, "tz_edit", &args).expect("cm");
     assert!(out.is_ok(), "codemode edit: {:?}", out.tool_domain_error());
     assert_eq!(fs::read_to_string(&path).unwrap(), "after-codemode\n");
 }
@@ -329,7 +329,7 @@ fn live_read_value_parity_mcp_raw_cli_codemode() {
     let mcp = dispatch_mcp_tool(&engine_for(root), "tz_read", &args).expect("mcp");
     let raw = dispatch_raw_worker(&engine_for(root), "tz_read", &args);
     let cli = dispatch_cli(&engine_for(root), "tz_read", &args);
-    let cm = dispatch_codemode_method(&engine_for(root), "zero.read", &args).expect("cm");
+    let cm = dispatch_codemode_method(&engine_for(root), "tz_read", &args).expect("cm");
 
     let n = |o: &DispatchOutcome| {
         let r = o.tool_response.as_ref().expect("resp");

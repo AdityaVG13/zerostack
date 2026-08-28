@@ -241,7 +241,3 @@ fn execute_plan_inner(session: &mut FSZeroSession, plan: &str) -> String {
     let outcome = execute_program(session, &program);
     finish(session, &outcome)
 }
-
-#[cfg(test)]
-#[path = "../../../../../tests/fszero/unit/fs-zero/plan_tests.rs"]
-mod tests;

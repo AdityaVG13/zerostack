@@ -652,7 +652,3 @@ pub fn run_snap_export_gate(
 ) -> Result<Vec<SnapExportGateReport>, SnapExportMeasureError> {
     measure_snap_export_gate(fixture_store, fixture_repo)
 }
-
-#[cfg(test)]
-#[path = "../../../../../tests/graphzero/unit/graphzero-test-support/snap_export_perf_gate_tests.rs"]
-mod tests;

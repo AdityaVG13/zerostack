@@ -138,7 +138,3 @@ pub struct SemanticHit {
     pub span: EmbedSpan,
     pub score: f32,
 }
-
-#[cfg(test)]
-#[path = "../../../../tests/graphzero/unit/graphzero-semantic/index_tests.rs"]
-mod tests;

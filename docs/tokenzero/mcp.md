@@ -1,6 +1,6 @@
 # TokenZero classic MCP compatibility
 
-Classic MCP exists for clients that require direct TokenZero tools and cannot embed ZeroKernel.
+Classic per-operation MCP is a noncanonical compatibility path for clients that require direct TokenZero tools and cannot embed ZeroKernel. It is not a ZeroKernel surface, not a publication claim, and not a second planner.
 
 ## Start
 

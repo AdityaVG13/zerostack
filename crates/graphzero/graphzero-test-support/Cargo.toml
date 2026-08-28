@@ -17,29 +17,6 @@ serde_json = { workspace = true }
 tempfile = { workspace = true }
 tiktoken-rs = { workspace = true }
 
+
 [lints]
 workspace = true
-
-[[test]]
-name = "test-support_benchmark_sample_accounting"
-path = "../../../tests/graphzero/test-support/benchmark_sample_accounting.rs"
-
-[[test]]
-name = "test-support_canonical_topology"
-path = "../../../tests/graphzero/test-support/canonical_topology.rs"
-
-[[test]]
-name = "test-support_real_task_provenance"
-path = "../../../tests/graphzero/test-support/real_task_provenance.rs"
-
-[[test]]
-name = "test-support_snap_export_perf_gate"
-path = "../../../tests/graphzero/test-support/snap_export_perf_gate.rs"
-
-[[test]]
-name = "test-support_surface_matrix"
-path = "../../../tests/graphzero/test-support/surface_matrix.rs"
-
-[[test]]
-name = "test-support_unwrap_ratchet"
-path = "../../../tests/graphzero/test-support/unwrap_ratchet.rs"

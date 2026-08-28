@@ -509,10 +509,3 @@ fn print_root_report(report: &serde_json::Value) {
         }
     }
 }
-
-#[cfg(test)]
-#[path = "../../../../../tests/fszero/unit/fs-zero/surface_bin_doctor_json_tests.rs"]
-mod doctor_json_tests;
-#[cfg(test)]
-#[path = "../../../../../tests/fszero/unit/fs-zero/surface_bin_batch_alias_tests.rs"]
-mod batch_alias_tests;

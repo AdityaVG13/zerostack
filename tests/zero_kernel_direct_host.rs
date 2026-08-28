@@ -1,8 +1,9 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Barrier};
+use std::time::{Duration, Instant};
 
 use parking_lot::Mutex;
 
@@ -21,7 +22,8 @@ use zero_abi::{
     sha256_hex,
 };
 use zero_kernel::{
-    AtomicCancellation, CellPreparation, HostError, PreparedCell, ShellCommand, ZeroKernel,
+    AtomicCancellation, CellPreparation, HostError, PreparedCell, ShellCommand, TransactionRecord,
+    TransactionState, ZeroKernel,
 };
 
 fn handle(bytes: &[u8]) -> ZeroHandle {
@@ -455,6 +457,43 @@ impl StructuralEngine for Graph {
             diagnostic: None,
             continuation: None,
         })
+    }
+}
+
+struct CountingGraph {
+    queries: Arc<AtomicUsize>,
+}
+
+impl StructuralEngine for CountingGraph {
+    fn query(
+        &self,
+        invocation: &EngineInvocation,
+        query: StructuralQuery,
+    ) -> Result<StructuralResult, EngineError> {
+        self.queries.fetch_add(1, Ordering::AcqRel);
+        Graph.query(invocation, query)
+    }
+}
+
+struct CancellationParkFind {
+    queries: Arc<AtomicUsize>,
+}
+
+impl StructuralEngine for CancellationParkFind {
+    fn query(
+        &self,
+        invocation: &EngineInvocation,
+        _query: StructuralQuery,
+    ) -> Result<StructuralResult, EngineError> {
+        self.queries.fetch_add(1, Ordering::AcqRel);
+        while !invocation.cancellation.is_cancelled() {
+            std::thread::park_timeout(Duration::from_millis(2));
+        }
+        Err(EngineError::new(
+            EngineErrorKind::Cancelled,
+            "cold find observed host cancellation",
+            true,
+        ))
     }
 }
 
@@ -2790,7 +2829,7 @@ fn noncanonical_methods_are_rejected() {
     let kernel = production_kernel(root.path());
     for name in [
         "snap", "expand", "lookup", "asgrep", "write", "remove", "effect", "shell", "parallel",
-        "pipeline", "transact", "measure", "project", "compress", "inspect", "help",
+        "pipeline", "transact", "invoke", "measure", "project", "compress", "inspect", "help",
     ] {
         let response = kernel
             .execute_cell(&format!("return await z.{name}();"))
@@ -4055,4 +4094,280 @@ fn single_static_find_settles_one_dispatch_with_quiesced_frame() {
     assert_eq!(kernel.live_tasks(), 0);
     assert_eq!(kernel.live_processes(), 0);
     assert_eq!(kernel.live_frames(), 0);
+}
+
+fn kernel_with_budget(
+    root: &Path,
+    files: Arc<dyn FileEngine>,
+    structural: Arc<dyn StructuralEngine>,
+    wall_ms: u64,
+    task_limit: u32,
+) -> ZeroKernel {
+    ZeroKernel::new(
+        KernelContext {
+            workspace_root: root.to_path_buf(),
+            project_root: root.to_path_buf(),
+            session_id: "session".into(),
+            expected_state_root: None,
+            contract_digest: "contract".into(),
+        },
+        KernelBudget {
+            wall_ms,
+            cpu_ms: wall_ms.max(1_000),
+            memory_bytes: 64 * 1024 * 1024,
+            call_limit: 64,
+            task_limit,
+            output_byte_limit: 64 * 1024,
+        },
+        files,
+        structural,
+        Arc::new(Tokens),
+        root.join(".zerostack"),
+    )
+    .unwrap()
+}
+
+fn assert_no_live_transaction_journals(store: &Path) {
+    let transactions = store.join("transactions");
+    if !transactions.exists() {
+        return;
+    }
+    for session in fs::read_dir(&transactions).unwrap() {
+        let session = session.unwrap();
+        if !session.path().is_dir() {
+            continue;
+        }
+        for entry in fs::read_dir(session.path()).unwrap() {
+            let path = entry.unwrap().path();
+            if path.extension().and_then(|ext| ext.to_str()) != Some("json") {
+                continue;
+            }
+            let record: TransactionRecord =
+                serde_json::from_slice(&fs::read(&path).unwrap()).expect("transaction record");
+            assert!(
+                matches!(
+                    record.state,
+                    TransactionState::Committed
+                        | TransactionState::RolledBack
+                        | TransactionState::RecoveryRequired
+                ),
+                "live transaction journal {} state={:?}",
+                path.display(),
+                record.state
+            );
+        }
+    }
+}
+
+fn assert_kernel_settled(kernel: &ZeroKernel, store: &Path) {
+    assert_eq!(kernel.live_frames(), 0, "live frames");
+    assert_eq!(kernel.live_tasks(), 0, "live tasks");
+    assert_eq!(kernel.live_processes(), 0, "live processes");
+    assert_no_live_transaction_journals(store);
+}
+
+#[test]
+fn cold_find_timeout_reports_root_deadline_and_quiesces() {
+    let root = tempdir().unwrap();
+    let queries = Arc::new(AtomicUsize::new(0));
+    let kernel = kernel_with_budget(
+        root.path(),
+        Arc::new(Files::default()),
+        Arc::new(CancellationParkFind {
+            queries: Arc::clone(&queries),
+        }),
+        150,
+        4,
+    );
+    let store = root.path().join(".zerostack");
+    let response = kernel
+        .execute_cell(r#"return await z.find("cold-token", {mode: "literal", path: "."});"#)
+        .unwrap();
+    assert_eq!(response.outcome, zero_abi::ZeroKernelOutcome::Failed);
+    let error = response.error.as_ref().expect("deadline error");
+    assert_eq!(error.kind, EngineErrorKind::Deadline);
+    assert!(
+        error.detail.contains("wall-clock deadline exceeded"),
+        "root deadline must be preserved, got {}",
+        error.detail
+    );
+    assert!(
+        !error.detail.contains("frame did not quiesce"),
+        "quiescence must not replace the root deadline: {}",
+        error.detail
+    );
+    assert!(
+        queries.load(Ordering::Acquire) >= 1,
+        "cold find must enter the engine before the deadline"
+    );
+    let records = zero_store::EventLog::open(&store)
+        .records("session")
+        .unwrap();
+    let record = records.last().expect("terminal event");
+    assert_eq!(record.event, response.event);
+    assert_eq!(
+        record.model_visible_digest,
+        blake3::hash(error.detail.as_bytes()).to_hex().to_string()
+    );
+    assert_kernel_settled(&kernel, &store);
+}
+
+#[test]
+fn single_static_read_settles_one_dispatch_with_quiesced_frame() {
+    let root = tempdir().unwrap();
+    let files = Arc::new(Files::default());
+    files
+        .0
+        .lock()
+        .insert(PathBuf::from("src/lib.rs"), b"content".to_vec());
+    let kernel = kernel(root.path(), Arc::clone(&files) as Arc<dyn FileEngine>);
+    let response = kernel
+        .execute_cell(r#"return await z.read("src/lib.rs");"#)
+        .unwrap();
+    assert_eq!(response.outcome, zero_abi::ZeroKernelOutcome::Completed);
+    assert_eq!(response.operations.len(), 1);
+    assert_eq!(response.ledger.tasks, 1);
+    assert_kernel_settled(&kernel, &root.path().join(".zerostack"));
+}
+
+#[test]
+fn promise_all_static_finds_dispatch_once_each() {
+    let root = tempdir().unwrap();
+    let queries = Arc::new(AtomicUsize::new(0));
+    let kernel = kernel_with_structural(
+        root.path(),
+        Arc::new(Files::default()),
+        Arc::new(CountingGraph {
+            queries: Arc::clone(&queries),
+        }),
+    );
+    let response = kernel
+        .execute_cell(
+            r#"
+            return await Promise.all([
+              z.find("alpha", {mode: "literal", path: "."}),
+              z.find("beta", {mode: "literal", path: "."}),
+            ]);
+            "#,
+        )
+        .unwrap();
+    assert_eq!(response.outcome, zero_abi::ZeroKernelOutcome::Completed);
+    assert_eq!(
+        queries.load(Ordering::Acquire),
+        2,
+        "each find must dispatch once"
+    );
+    assert_eq!(response.operations.len(), 2);
+    assert_kernel_settled(&kernel, &root.path().join(".zerostack"));
+}
+
+#[test]
+fn promise_all_finds_under_inflight_one_do_not_redispatch() {
+    let root = tempdir().unwrap();
+    let queries = Arc::new(AtomicUsize::new(0));
+    let kernel = kernel_with_budget(
+        root.path(),
+        Arc::new(Files::default()),
+        Arc::new(CountingGraph {
+            queries: Arc::clone(&queries),
+        }),
+        5_000,
+        1,
+    );
+    let response = kernel
+        .execute_cell(
+            r#"
+            return await Promise.all([
+              z.find("alpha", {mode: "literal", path: "."}),
+              z.find("beta", {mode: "literal", path: "."}),
+            ]);
+            "#,
+        )
+        .unwrap();
+    assert_eq!(response.outcome, zero_abi::ZeroKernelOutcome::Completed);
+    assert_eq!(
+        queries.load(Ordering::Acquire),
+        2,
+        "capacity backpressure must run ordinary execution once per call, never redispatch"
+    );
+    assert_eq!(response.operations.len(), 2);
+    assert_kernel_settled(&kernel, &root.path().join(".zerostack"));
+}
+
+#[test]
+fn successful_cell_with_large_wall_budget_returns_without_failed_frame_delay() {
+    let root = tempdir().unwrap();
+    let kernel = kernel_with_budget(
+        root.path(),
+        Arc::new(Files::default()),
+        Arc::new(Graph),
+        120_000,
+        4,
+    );
+    let started = Instant::now();
+    let response = kernel.execute_cell("return 1;").unwrap();
+    let elapsed = started.elapsed();
+    assert_eq!(response.outcome, zero_abi::ZeroKernelOutcome::Completed);
+    assert!(
+        elapsed < Duration::from_secs(5),
+        "successful cells must not inherit the failed-frame settle cap, elapsed={elapsed:?}"
+    );
+    assert_kernel_settled(&kernel, &root.path().join(".zerostack"));
+}
+
+#[test]
+fn failed_cell_with_large_wall_budget_returns_without_failed_frame_delay() {
+    let root = tempdir().unwrap();
+    let kernel = kernel_with_budget(
+        root.path(),
+        Arc::new(Files::default()),
+        Arc::new(Graph),
+        120_000,
+        4,
+    );
+    let started = Instant::now();
+    let response = kernel
+        .execute_cell("throw new Error('boom');")
+        .unwrap();
+    let elapsed = started.elapsed();
+    assert_eq!(response.outcome, zero_abi::ZeroKernelOutcome::Failed);
+    assert!(
+        elapsed < Duration::from_secs(5),
+        "failed cells must not inherit the failed-frame settle cap, elapsed={elapsed:?}"
+    );
+    assert_kernel_settled(&kernel, &root.path().join(".zerostack"));
+}
+
+#[test]
+fn hanging_cell_cancel_reports_cancelled_and_quiesces() {
+    let root = tempdir().unwrap();
+    let kernel = kernel_with_budget(
+        root.path(),
+        Arc::new(Files::default()),
+        Arc::new(Graph),
+        30_000,
+        4,
+    );
+    let cancellation = AtomicCancellation::new();
+    let cancel_handle = cancellation.clone();
+    let abort = std::thread::spawn(move || {
+        std::thread::sleep(Duration::from_millis(80));
+        cancel_handle.cancel();
+    });
+    let response = kernel
+        .execute_cell_with_cancellation(
+            "await new Promise(() => {}); return 'should-not-complete';",
+            cancellation,
+        )
+        .unwrap();
+    abort.join().unwrap();
+    assert_eq!(response.outcome, zero_abi::ZeroKernelOutcome::Cancelled);
+    let error = response.error.as_ref().expect("cancelled error");
+    assert_eq!(error.kind, EngineErrorKind::Cancelled);
+    assert!(
+        !error.detail.contains("frame did not quiesce"),
+        "quiescence must not replace cancel: {}",
+        error.detail
+    );
+    assert_kernel_settled(&kernel, &root.path().join(".zerostack"));
 }

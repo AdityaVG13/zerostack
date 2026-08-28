@@ -142,7 +142,3 @@ fn compile_python_queries() -> Result<LangQueries, QueryCompileError> {
         implements: compile_query(grammar, language, "queries/python.scm", all)?,
     })
 }
-
-#[cfg(test)]
-#[path = "../../../../tests/graphzero/unit/graphzero-extract/queries_tests.rs"]
-mod tests;

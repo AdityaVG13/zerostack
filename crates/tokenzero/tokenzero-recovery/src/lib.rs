@@ -2838,7 +2838,7 @@ impl RecoveryStore {
         source_fingerprint(&source_path).is_none_or(|actual| actual != *expected)
     }
 
-    /// FIFO eviction contract (docs/racc.md): `state.order` is an insertion
+    /// FIFO eviction contract (docs/racc/RACC.md): `state.order` is an insertion
     /// queue scanned from the front, so the oldest entry is evicted first.
     /// Re-putting a live ref appends a duplicate entry, but `compact_order`
     /// and the concurrent-session `merge_states` path retain each ref's FIRST

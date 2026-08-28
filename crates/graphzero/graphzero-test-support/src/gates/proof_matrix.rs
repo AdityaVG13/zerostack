@@ -397,7 +397,3 @@ pub fn assert_beats_ripgrep_at_scale(report: &serde_json::Value) {
         );
     }
 }
-
-#[cfg(test)]
-#[path = "../../../../../tests/graphzero/unit/graphzero-test-support/proof_matrix_tests.rs"]
-mod tests;

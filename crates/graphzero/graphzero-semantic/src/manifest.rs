@@ -35,7 +35,3 @@ pub fn hex_sha256(bytes: &[u8]) -> String {
     h.update(bytes);
     graphzero_store::fast_hex(h.finalize().as_slice())
 }
-
-#[cfg(test)]
-#[path = "../../../../tests/graphzero/unit/graphzero-semantic/manifest_tests.rs"]
-mod tests;

@@ -66,6 +66,7 @@ fn shell_errors() -> &'static [DomainErrorKind] {
     ]
 }
 
+#[allow(dead_code)]
 fn job_errors() -> &'static [DomainErrorKind] {
     &[
         DomainErrorKind::Validation,
@@ -232,6 +233,7 @@ fn classic(spec: ClassicSpec) -> Operation {
 }
 
 fn classic_ex(spec: ClassicExSpec) -> Operation {
+    let _retired_v6_binding = spec.binding;
     op(OpParts {
         name: spec.name,
         description: spec.description,
@@ -241,7 +243,7 @@ fn classic_ex(spec: ClassicExSpec) -> Operation {
         ref_ownership: spec.ref_ownership,
         cancellation: spec.cancellation,
         migration: MigrationStatus::Canonical,
-        exposure: classic_surface(Some(spec.binding), false),
+        exposure: classic_surface(None, false),
         capabilities: spec.capabilities,
         cluster: spec.cluster,
         schema: spec.schema,
@@ -346,7 +348,7 @@ fn build_registry() -> Vec<Operation> {
         classic(ClassicSpec {
             name: "tz_read",
             description: "Read file(s) under allowed roots: compact visible output plus exact tz:// recovery refs.",
-            aliases: &["read", "zero.token.read"],
+            aliases: &["read"],
             mutability: M::ReadOnly,
             cost_class: K::Medium,
             ref_ownership: R::Blob,
@@ -360,7 +362,7 @@ fn build_registry() -> Vec<Operation> {
         classic(ClassicSpec {
             name: "tz_find",
             description: "Search file contents for a literal substring and return compact, recoverable matches.",
-            aliases: &["find", "zero.token.find"],
+            aliases: &["find"],
             mutability: M::ReadOnly,
             cost_class: K::Medium,
             ref_ownership: R::Blob,
@@ -374,7 +376,7 @@ fn build_registry() -> Vec<Operation> {
         classic(ClassicSpec {
             name: "tz_grep",
             description: "Grep-style exact-first content search: regex when ripgrep is active, literal otherwise.",
-            aliases: &["grep", "zero.token.grep"],
+            aliases: &["grep"],
             mutability: M::ReadOnly,
             cost_class: K::Medium,
             ref_ownership: R::Blob,
@@ -390,7 +392,7 @@ fn build_registry() -> Vec<Operation> {
         classic(ClassicSpec {
             name: "tz_recall",
             description: "Search every payload already stored in the recovery cache.",
-            aliases: &["recall", "zero.token.recall"],
+            aliases: &["recall"],
             mutability: M::ReadOnly,
             cost_class: K::Cheap,
             ref_ownership: R::Blob,
@@ -432,7 +434,7 @@ fn build_registry() -> Vec<Operation> {
         classic_ex(ClassicExSpec {
             name: "tz_glob",
             description: "List file paths matching a glob pattern (no contents).",
-            aliases: &["glob", "zero.token.glob"],
+            aliases: &["glob"],
             mutability: M::ReadOnly,
             cost_class: K::Cheap,
             ref_ownership: R::Blob,
@@ -448,7 +450,7 @@ fn build_registry() -> Vec<Operation> {
         classic(ClassicSpec {
             name: "tz_tree",
             description: "Inspect a bounded directory tree for orientation.",
-            aliases: &["tree", "zero.token.tree"],
+            aliases: &["tree"],
             mutability: M::ReadOnly,
             cost_class: K::Cheap,
             ref_ownership: R::Blob,
@@ -462,7 +464,7 @@ fn build_registry() -> Vec<Operation> {
         classic(ClassicSpec {
             name: "tz_edit",
             description: "Apply multi-hunk find/replace edits to one file atomically with undo via tz:// ref.",
-            aliases: &["edit", "zero.token.edit"],
+            aliases: &["edit"],
             mutability: M::WorkspaceMutating,
             cost_class: K::Medium,
             ref_ownership: R::Blob,
@@ -476,7 +478,7 @@ fn build_registry() -> Vec<Operation> {
         classic_ex(ClassicExSpec {
             name: "tz_shell",
             description: "Run a local command: compact output, exact stream refs, command_success telemetry.",
-            aliases: &["shell", "zero.token.shell"],
+            aliases: &["shell"],
             mutability: M::WorkspaceMutating,
             cost_class: K::Heavy,
             ref_ownership: R::Blob,
@@ -533,7 +535,7 @@ fn build_registry() -> Vec<Operation> {
         classic_ex(ClassicExSpec {
             name: "tz_mem",
             description: "Inspect local recovery-cache and configuration state.",
-            aliases: &["mem", "zero.token.mem"],
+            aliases: &["mem"],
             mutability: M::ReadOnly,
             cost_class: K::Cheap,
             ref_ownership: R::None,
@@ -563,7 +565,7 @@ fn build_registry() -> Vec<Operation> {
         classic_ex(ClassicExSpec {
             name: "tz_rewrite",
             description: "Plan a conservative TokenZero-safe rewrite of a shell command without executing it.",
-            aliases: &["rewrite", "zero.token.rewrite"],
+            aliases: &["rewrite"],
             mutability: M::ReadOnly,
             cost_class: K::Cheap,
             ref_ownership: R::None,
@@ -679,284 +681,6 @@ fn build_registry() -> Vec<Operation> {
                 "summary": ["message", "title"],
                 "detail": ["body", "repro", "context"]
             }),
-        }),
-        // --- CodeMode-only domain helpers (bindings without separate FastMCP tools) ---
-        binding_ex(BindingExSpec {
-            name: "zero.token.compact",
-            description: "Store arbitrary text/data behind a tz:// recovery ref via ingest.",
-            aliases: &["zero.compact", "zero.ref"],
-            mutability: M::StoreOnly,
-            cost_class: K::Cheap,
-            ref_ownership: R::Blob,
-            cancellation: C::None,
-            capabilities: &["ingest", "exact-refs", "codemode"],
-            schema: json!({
-                "type": "object",
-                "properties": { "data": {} },
-                "required": ["data"]
-            }),
-            results: ref_first_results(),
-            error_kinds: read_errors(),
-        }),
-        binding_ex(BindingExSpec {
-            name: "zero.token.multiCompact",
-            description: "Batch compact many payloads in one CodeMode step.",
-            aliases: &["zero.multiCompact"],
-            mutability: M::StoreOnly,
-            cost_class: K::Medium,
-            ref_ownership: R::Multi,
-            cancellation: C::Cooperative,
-            capabilities: &["ingest", "batch", "codemode"],
-            schema: json!({
-                "type": "object",
-                "properties": { "items": { "type": "array" } },
-                "required": ["items"]
-            }),
-            results: ref_first_results(),
-            error_kinds: read_errors(),
-        }),
-        binding_ex(BindingExSpec {
-            name: "zero.token.multiExpand",
-            description: "Batch expand many tz:// refs in one CodeMode step.",
-            aliases: &["zero.multiExpand"],
-            mutability: M::ReadOnly,
-            cost_class: K::Medium,
-            ref_ownership: R::Multi,
-            cancellation: C::Deadline,
-            capabilities: &["expand", "batch", "codemode"],
-            schema: json!({
-                "type": "object",
-                "properties": { "items": { "type": "array" } },
-                "required": ["items"]
-            }),
-            results: ref_first_results(),
-            error_kinds: expand_errors(),
-        }),
-        binding_ex(BindingExSpec {
-            name: "zero.token.job",
-            description: "Long-poll a session-owned background shell job from a byte cursor.",
-            aliases: &["zero.job"],
-            mutability: M::ReadOnly,
-            cost_class: K::Cheap,
-            ref_ownership: R::Session,
-            cancellation: C::None,
-            capabilities: &["shell", "background-job", "codemode"],
-            schema: json!({
-                "type": "object",
-                "properties": {
-                    "id": { "type": "string", "minLength": 1 },
-                    "waitMs": { "type": "integer", "minimum": 0, "maximum": 30_000 },
-                    "since": { "type": "integer", "minimum": 0 },
-                    "tailBytes": { "type": "integer", "minimum": 0 }
-                },
-                "required": ["id"]
-            }),
-            results: default_results(),
-            error_kinds: job_errors(),
-        }),
-        binding_ex(BindingExSpec {
-            name: "zero.token.dedupe",
-            description: "Deduplicate JSON/string values while preserving first occurrence order.",
-            aliases: &["zero.dedupe"],
-            mutability: M::ReadOnly,
-            cost_class: K::Cheap,
-            ref_ownership: R::None,
-            cancellation: C::None,
-            capabilities: &["codemode"],
-            schema: json!({
-                "type": "object",
-                "properties": { "items": { "type": "array" } },
-                "required": ["items"]
-            }),
-            results: default_results(),
-            error_kinds: read_errors(),
-        }),
-        binding(BindingSpec {
-            name: "zero.pipe",
-            description: "Execute a sequence of operations with result threading (_prev auto-binding).",
-            mutability: M::WorkspaceMutating,
-            cost_class: K::Heavy,
-            ref_ownership: R::Multi,
-            cancellation: C::Deadline,
-            capabilities: &["codemode", "pipeline"],
-            schema: json!({
-                "type": "object",
-                "properties": {
-                    "steps": {
-                        "type": "array",
-                        "items": {
-                            "type": "object",
-                            "properties": {
-                                "method": {"type": "string"},
-                                "args": {"type": "array"}
-                            },
-                            "required": ["method"]
-                        }
-                    }
-                },
-                "required": ["steps"]
-            }),
-            results: default_results(),
-            error_kinds: shell_errors(),
-        }),
-        binding(BindingSpec {
-            name: "zero.pick",
-            description: "Extract specific keys from an object value.",
-            mutability: M::ReadOnly,
-            cost_class: K::Cheap,
-            ref_ownership: R::None,
-            cancellation: C::None,
-            capabilities: &["codemode"],
-            schema: json!({
-                "type": "object",
-                "properties": {
-                    "source": {"type": "object"},
-                    "keys": {"type": "array", "items": {"type": "string"}}
-                },
-                "required": ["source", "keys"]
-            }),
-            results: default_results(),
-            error_kinds: read_errors(),
-        }),
-        binding(BindingSpec {
-            name: "zero.filter_lines",
-            description: "Filter lines in a text value by substring match.",
-            mutability: M::ReadOnly,
-            cost_class: K::Cheap,
-            ref_ownership: R::None,
-            cancellation: C::None,
-            capabilities: &["codemode"],
-            schema: json!({
-                "type": "object",
-                "properties": {
-                    "source": {},
-                    "pattern": {"type": "string"}
-                },
-                "required": ["source", "pattern"]
-            }),
-            results: default_results(),
-            error_kinds: read_errors(),
-        }),
-        binding(BindingSpec {
-            name: "zero.compact_max",
-            description: "Max compression with guaranteed byte-exact recovery.",
-            mutability: M::StoreOnly,
-            cost_class: K::Medium,
-            ref_ownership: R::Blob,
-            cancellation: C::None,
-            capabilities: &["codemode", "exact-refs"],
-            schema: json!({
-                "type": "object",
-                "properties": { "data": {} },
-                "required": ["data"]
-            }),
-            results: ref_first_results(),
-            error_kinds: read_errors(),
-        }),
-        binding(BindingSpec {
-            name: "zero.count",
-            description: "Count lines in a text value or items in an array.",
-            mutability: M::ReadOnly,
-            cost_class: K::Cheap,
-            ref_ownership: R::None,
-            cancellation: C::None,
-            capabilities: &["codemode"],
-            schema: json!({
-                "type": "object",
-                "properties": { "x": {} },
-                "required": ["x"]
-            }),
-            results: default_results(),
-            error_kinds: read_errors(),
-        }),
-        binding(BindingSpec {
-            name: "zero.first",
-            description: "Return the first line or array item, or the first n lines/items.",
-            mutability: M::ReadOnly,
-            cost_class: K::Cheap,
-            ref_ownership: R::None,
-            cancellation: C::None,
-            capabilities: &["codemode"],
-            schema: json!({
-                "type": "object",
-                "properties": {
-                    "x": {},
-                    "n": {"type": "integer", "minimum": 1}
-                },
-                "required": ["x"]
-            }),
-            results: default_results(),
-            error_kinds: read_errors(),
-        }),
-        binding(BindingSpec {
-            name: "zero.verdict",
-            description: "Return a compact one-line verdict object.",
-            mutability: M::ReadOnly,
-            cost_class: K::Cheap,
-            ref_ownership: R::None,
-            cancellation: C::None,
-            capabilities: &["codemode"],
-            schema: json!({
-                "type": "object",
-                "properties": {
-                    "ok": {},
-                    "detail": {"type": "string"}
-                },
-                "required": ["ok"]
-            }),
-            results: default_results(),
-            error_kinds: read_errors(),
-        }),
-        binding(BindingSpec {
-            name: "zero.raw",
-            description: "Opt one final-return value out of automatic ref-first compaction.",
-            mutability: M::ReadOnly,
-            cost_class: K::Cheap,
-            ref_ownership: R::None,
-            cancellation: C::None,
-            capabilities: &["codemode"],
-            schema: json!({
-                "type": "object",
-                "properties": { "value": {} },
-                "required": ["value"]
-            }),
-            results: default_results(),
-            error_kinds: read_errors(),
-        }),
-        binding(BindingSpec {
-            name: "zero.count_tokens",
-            description: "Count tokens, bytes, and lines in a value without storing it.",
-            mutability: M::ReadOnly,
-            cost_class: K::Cheap,
-            ref_ownership: R::None,
-            cancellation: C::None,
-            capabilities: &["codemode", "introspection"],
-            schema: json!({
-                "type": "object",
-                "properties": { "data": {} },
-                "required": ["data"]
-            }),
-            results: default_results(),
-            error_kinds: read_errors(),
-        }),
-        binding(BindingSpec {
-            name: "zero.assert",
-            description: "Fail the plan immediately if condition is falsy.",
-            mutability: M::ReadOnly,
-            cost_class: K::Cheap,
-            ref_ownership: R::None,
-            cancellation: C::None,
-            capabilities: &["codemode", "guard"],
-            schema: json!({
-                "type": "object",
-                "properties": {
-                    "condition": {},
-                    "message": {"type": "string"}
-                },
-                "required": ["condition"]
-            }),
-            results: default_results(),
-            error_kinds: &[DomainErrorKind::Validation, DomainErrorKind::Policy],
         }),
         binding(BindingSpec {
             name: "codemode.journalDoctor",

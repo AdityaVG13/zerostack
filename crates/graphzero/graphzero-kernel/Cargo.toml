@@ -14,6 +14,5 @@ graphzero-engine = { path = "../graphzero-engine" }
 git2.workspace = true
 tempfile.workspace = true
 
-[[test]]
-name = "zero_kernel"
-path = "../../../tests/graphzero/engine/zero_kernel.rs"
+# Live StructuralEngine proofs live on graphzero-engine (`zero_kernel_scoped`).
+

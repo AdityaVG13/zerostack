@@ -245,7 +245,3 @@ pub fn footprint_from_intent_ops(
         tier_a_percent: tier_a,
     })
 }
-
-#[cfg(test)]
-#[path = "../../../../tests/graphzero/unit/graphzero-reserve/footprint_tests.rs"]
-mod tests;

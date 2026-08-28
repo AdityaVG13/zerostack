@@ -1,18 +1,6 @@
 # Install TokenZero
 
-TokenZero is a released product. Install a verified release archive or build the standalone CLI from source.
-
-## Release archive
-
-Download the archive for your operating system from GitHub Releases, verify its checksum, and place `tokenzero` on `PATH`.
-
-```bash
-tokenzero install --global --plan --mcp --shell --cli --json
-tokenzero install --global --apply --mcp --shell --cli --json
-tokenzero doctor --json
-```
-
-Every apply records rollback data.
+TokenZero currently builds from source in this workspace. There is no tagged TokenZero or ZeroStack release, and no GitHub Release archive or checksum to verify.
 
 ## Build from source
 
@@ -35,4 +23,4 @@ Do not register classic TokenZero MCP beside ZeroKernel in the same agent sessio
 
 ## Coordinated releases
 
-FSZero, GraphZero, and TokenZero will eventually publish the same version together. Until then, each repository reports only its current version.
+FSZero, GraphZero, and TokenZero will adopt coordinated version parity when joint tagged releases begin. Until then, this workspace is the only source of truth.

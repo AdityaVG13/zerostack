@@ -36,9 +36,9 @@ ZeroKernel loads `fszero-kernel` behind `z.read`, `z.edit`, and `z.apply`. Do no
 ## Verify a checkout
 
 ```bash
-cargo xtask doctor --json
-cargo xtask understand --check
-cargo test -p <package> <filter>
+cargo run --manifest-path xtask/Cargo.toml -- doctor --json
+cargo run --manifest-path xtask/Cargo.toml -- understand --check
+cargo test -p <package> --test <target> <filter>
 ```
 
 Repository-level quality and release gates run through DSR and RCH.

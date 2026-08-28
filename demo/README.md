@@ -18,12 +18,12 @@ node demo/run.js
 - calls `z.find('launch_cell', { mode: 'word', path: 'crates/zerostack/zero-kernel/src/runtime.rs' })` to exercise GraphZero
 - returns the combined result, whose output is automatically measured and projected by TokenZero inside ZeroKernel
 
-No download of prebuilt binaries, no visualization scripts, and no TokenZero-only tooling is involved. The cell runs in a bounded frame with `initialize` and `shutdown` around a single `executeCell`.
+The cell runs in a bounded frame with `initialize` and `shutdown` around a single `executeCell`. The script requires `outcome === "Completed"`, nonzero GraphZero hits, at least one exact `z://blob/` handle, and `status().liveTasks == 0` after the cell and after shutdown.
 
 ## Requirements
 
 - Node.js 18 or newer
-- A built prebuild at `bindings/node/prebuilds/<platform>/zero_kernel_product.node`, or set `ZERO_KERNEL_NATIVE_ADDON` to an absolute path. Build it with `packaging/package/npm/build-prebuild.sh`.
+- A built native addon at `bindings/node/prebuilds/<platform>/zero_kernel_product.node`, or set `ZERO_KERNEL_NATIVE_ADDON` to an absolute path. Build it with `cargo build --profile release-node -p zero-kernel-node` and copy the resulting library into that prebuild path.
 
 ## Output
 

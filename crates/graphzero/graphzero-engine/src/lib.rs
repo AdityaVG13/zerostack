@@ -12,7 +12,7 @@ pub mod one_tp;
 pub mod operation_abi;
 pub mod oracle;
 pub mod query_surface;
-pub mod raw_worker_stdio;
+pub(crate) mod raw_worker_stdio;
 pub mod release_gates;
 pub mod rewrite_closure;
 pub mod surface_bench;
@@ -29,7 +29,6 @@ pub use blast::{
     blast_radius_with_depth, blast_to_json, impact_before_edit, parse_intent,
     retrieval_neighborhood,
 };
-pub use codemode::execute_plan as codemode_execute_plan;
 pub use deterministic_facts::{
     FACT_KIND_ALLOWLIST, FactViolation, assert_deterministic_facts, audit_facts, audit_value,
     canonical_facts, canonical_json, debug_assert_deterministic_facts,

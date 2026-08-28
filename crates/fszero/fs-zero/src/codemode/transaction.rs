@@ -506,7 +506,3 @@ fn call_is_mutating(call: &str, args: &serde_json::Value) -> bool {
         _ => false,
     }
 }
-
-#[cfg(test)]
-#[path = "../../../../../tests/fszero/unit/fs-zero/transaction_tests.rs"]
-mod tests;

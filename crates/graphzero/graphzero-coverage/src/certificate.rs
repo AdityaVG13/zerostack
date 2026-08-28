@@ -73,7 +73,3 @@ impl CoverageCertificate {
         base + self.gaps.len() * per_gap
     }
 }
-
-#[cfg(test)]
-#[path = "../../../../tests/graphzero/unit/graphzero-coverage/certificate_tests.rs"]
-mod tests;

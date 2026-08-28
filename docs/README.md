@@ -41,12 +41,12 @@ Contracts live in `contracts/` as a flat machine-readable surface. See `contract
 ## TokenZero
 
 * [Overview](tokenzero/README.md) - Output authority
-* [Installation](tokenzero/install.md) - Release archives and source builds
+* [Installation](tokenzero/install.md) - Source builds and local setup
 * [Development](tokenzero/development.md) - Build and verification
 * [CodeMode](tokenzero/codemode.md) - ZeroKernel integration
-* [MCP](tokenzero/mcp.md) - Direct per-operation compatibility
+* [MCP](tokenzero/mcp.md) - Noncanonical classic compatibility
 * [Benchmarks](tokenzero/benchmarks.md) - Reproducible evidence
 * [Pulse](tokenzero/pulse.md) - Local recovery-aware ledger
-* [RACC](tokenzero/racc.md) - Projection and recovery
+* [RACC](racc/RACC.md) - Projection and recovery
 
 Typed Rust contracts live in `crates/zerostack/zero-abi`. Integration tests live in `tests/fszero`, `tests/graphzero`, and `tests/tokenzero` with shared helpers in `tests/support`. Conformance that every engine must pass lives in `crates/zerostack/zerostack-conformance`.

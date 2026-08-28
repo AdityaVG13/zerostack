@@ -177,16 +177,16 @@ fn codemode_surface_enrichment(raw: &str, _repo: &str) -> Option<String> {
     (raw.contains("surface-codemode") || raw.contains("code-mode requires")).then(|| {
         agent_error_json(
             raw,
-            "Install graphzero-codemode package OR use standalone gzero for CodeMode plans",
+            "CodeMode plans are retired. Use ZeroKernel z.find for structural queries.",
             json!({
                 "error_kind": "missing_codemode_surface",
                 "surface": "codemode",
                 "try": [
                     "packaging/install.sh --surface codemode",
-                    "gzero codemode 'callers:<symbol>'",
-                    "graphzero capabilities | jq .dual_binaries"
+                    "graphzero blast --intent <symbol>",
+                    "ZeroKernel z.find"
                 ],
-                "example": "gzero codemode 'return 1'",
+                "example": "graphzero blast --intent <symbol>",
                 "install_command": "packaging/install.sh --surface codemode",
             }),
         )
@@ -197,7 +197,7 @@ fn mcp_surface_enrichment(raw: &str, _repo: &str) -> Option<String> {
     (raw.contains("surface-mcp") || raw.contains("serve requires")).then(|| {
         agent_error_json(
             raw,
-            "Install graphzero-mcp package for FastMCP stdio serve",
+            "graphzero serve is not an operator surface. Model execution is ZeroKernel z.find.",
             json!({
                 "error_kind": "missing_mcp_surface",
                 "surface": "mcp",
@@ -205,7 +205,7 @@ fn mcp_surface_enrichment(raw: &str, _repo: &str) -> Option<String> {
                     "packaging/install.sh --surface mcp",
                     "graphzero capabilities | jq .dual_binaries"
                 ],
-                "example": "graphzero-mcp  # or graphzero serve after install",
+                "example": "graphzero index . && graphzero orient --name <symbol>",
                 "install_command": "packaging/install.sh --surface mcp",
             }),
         )

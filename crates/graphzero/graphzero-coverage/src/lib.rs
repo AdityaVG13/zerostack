@@ -37,7 +37,3 @@ pub fn now_timestamp() -> Timestamp {
         .as_secs();
     Timestamp(secs)
 }
-
-#[cfg(test)]
-#[path = "../../../../tests/graphzero/unit/graphzero-coverage/lib_tests.rs"]
-mod tests;

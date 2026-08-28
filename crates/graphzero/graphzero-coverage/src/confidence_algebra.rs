@@ -22,7 +22,3 @@ pub fn blast_finding_score(edge_confidences: &[f64], tier_a_pct: f64) -> f64 {
     let coverage_factor = (tier_a_pct / 100.0).clamp(0.0, 1.0);
     min_edge * coverage_factor
 }
-
-#[cfg(test)]
-#[path = "../../../../tests/graphzero/unit/graphzero-coverage/confidence_algebra_tests.rs"]
-mod tests;

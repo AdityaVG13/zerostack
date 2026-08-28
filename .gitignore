@@ -71,10 +71,17 @@ CLAUDE.md.*
 # Local multi-model handoff prompts and execution notes.
 docs/internal/
 
+# Local RACC research-draft staging. Layout is not public yet.
+docs/papers/
+
 .zsx_patch.diff
 *.diff
 *.patch
 bindings/node/prebuilds/
+
+# Local-only package-manager scratch. Not a public distribution root.
+packaging/package/
+
 tests/scripts/
 tests/unit/zero-abi/fuzz_corpus_untrusted_bytes_20260815.rs
 

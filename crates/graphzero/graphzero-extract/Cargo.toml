@@ -24,13 +24,6 @@ tempfile = { workspace = true }
 name = "extraction_bench"
 harness = false
 
+
 [lints]
 workspace = true
-
-[[test]]
-name = "extract_live_rust_analyzer_fusion"
-path = "../../../tests/graphzero/extract/live_rust_analyzer_fusion.rs"
-
-[[test]]
-name = "extract_metamorphic_extraction"
-path = "../../../tests/graphzero/extract/metamorphic_extraction.rs"

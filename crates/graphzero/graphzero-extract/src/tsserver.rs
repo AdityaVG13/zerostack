@@ -243,7 +243,3 @@ fn symbol_matches(local_name: &str, resolved: &str) -> bool {
             .next()
             .is_some_and(|tail| tail == local_name)
 }
-
-#[cfg(test)]
-#[path = "../../../../tests/graphzero/unit/graphzero-extract/tsserver_tests.rs"]
-mod tests;

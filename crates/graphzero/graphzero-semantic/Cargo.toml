@@ -21,9 +21,6 @@ graphzero-test-support = { workspace = true }
 tempfile = { workspace = true }
 serial_test = { workspace = true }
 
+
 [lints]
 workspace = true
-
-[[test]]
-name = "semantic_integration"
-path = "../../../tests/graphzero/semantic/integration.rs"

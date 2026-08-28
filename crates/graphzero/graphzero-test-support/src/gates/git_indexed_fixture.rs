@@ -108,7 +108,3 @@ pub fn cochange_git_indexed_fixture() -> GitIndexedFixture {
         store_root,
     }
 }
-
-#[cfg(test)]
-#[path = "../../../../../tests/graphzero/unit/graphzero-test-support/git_indexed_fixture_tests.rs"]
-mod tests;

@@ -106,13 +106,13 @@ pub(crate) struct DirectCallContext {
     frame_processes: Arc<AtomicU64>,
 }
 
-struct LiveTaskGuard {
+pub(crate) struct LiveTaskGuard {
     global: Arc<AtomicU64>,
     frame: Arc<AtomicU64>,
 }
 
 impl LiveTaskGuard {
-    fn acquire(global: Arc<AtomicU64>, frame: Arc<AtomicU64>) -> Self {
+    pub(crate) fn acquire(global: Arc<AtomicU64>, frame: Arc<AtomicU64>) -> Self {
         global.fetch_add(1, Ordering::AcqRel);
         frame.fetch_add(1, Ordering::AcqRel);
         Self { global, frame }
@@ -144,6 +144,13 @@ impl Drop for FrameProcessGuard {
 impl DirectCallContext {
     pub(crate) fn project_root(&self) -> &std::path::Path {
         &self.invocation.context.project_root
+    }
+
+    /// Retain a live task for the lifetime of a concurrent connector thread.
+    /// Acquire this on the parent thread before spawn so quiescence cannot
+    /// observe a zero count while the worker is starting.
+    pub(crate) fn acquire_task(&self) -> LiveTaskGuard {
+        LiveTaskGuard::acquire(Arc::clone(&self.live_tasks), Arc::clone(&self.frame_tasks))
     }
 
     fn normalize_explicit_external_read(&self, path: PathBuf) -> Result<PathBuf, HostError> {

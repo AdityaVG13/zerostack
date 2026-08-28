@@ -116,7 +116,7 @@ pub fn capabilities_json() -> String {
         "workflow": [
             { "step": 1, "action": "index", "cli": "graphzero index <repo>", "mcp": "tools/call index" },
             { "step": 2, "action": "orient_symbol", "cli": "graphzero orient --surface symbol --name <sym>", "mcp": "tools/call orient surface=symbol name=<sym> budget=1" },
-            { "step": 3, "action": "recipe_or_json_plan", "cli": "graphzero code-mode '<recipe-or-json-dag>'", "mcp": "tools/call via graphzero-mcp; JavaScript plans use zerostack-codemode-host or zsx" },
+            { "step": 3, "action": "structural_query", "cli": "graphzero search --query <TEXT> | graphzero blast --intent <SYMBOL>", "kernel": "z.find" },
             { "step": 4, "action": "expand_evidence", "cli": "graphzero expand <gz://ref>", "mcp": "tools/call expand reference=<ref>" }
         ],
         "mcp_aliases": {
@@ -134,7 +134,7 @@ pub fn capabilities_json() -> String {
         },
         "cli_agent_commands": [
             "agent-triage", "capabilities", "robot-docs", "doctor", "telemetry", "orient", "search", "symbol",
-            "index", "snap", "expand", "serve", "code-mode", "code-mode-search", "code-mode-describe"
+            "index", "snap", "expand", "blast"
         ],
         "claims": [
             "no_remaining_callers",
@@ -196,7 +196,7 @@ pub fn capabilities_json() -> String {
             "orient": "graphzero orient --surface symbol --name <SYMBOL>",
             "search": "graphzero search --query <TEXT>",
             "snap": "graphzero snap <SYMBOL> --budget 1",
-            "codemode": "graphzero code-mode 'callers:<SYMBOL>'",
+            "codemode": "retired; use ZeroKernel z.find",
             "wrong_serach": "graphzero search --query <TEXT>"
         },
         "exit_codes": {
@@ -212,31 +212,10 @@ pub fn capabilities_json() -> String {
         "dual_binaries": [
             {
                 "name": "graphzero",
-                "role": "full_cli_and_compat_shim",
-                "install": "cargo build -p graphzero-cli --bin graphzero (or packaging/install.sh shim)",
-                "when_to_use": "index, doctor, orient/search/snap/blast, package install/uninstall, MCP serve via shim",
-                "not_for": "standalone CodeMode server; use graphzero-mcp for MCP and zerostack-codemode-host or zsx for JavaScript"
-            },
-            {
-                "name": "gzero",
-                "role": "direct_recipe_json_cli",
-                "install": "cargo build -p graphzero-engine --bin gzero",
-                "when_to_use": "direct recipe and JSON-DAG plans: gzero codemode|execute '<plan>'; auto-indexes structural store",
-                "not_for": "JavaScript CodeMode plans; use zerostack-codemode-host or zsx"
-            },
-            {
-                "name": "graphzero-mcp",
-                "role": "package_surface_fastmcp",
-                "install": "packaging/install.sh --surface mcp (or cargo build --features tokenzero,surface-mcp)",
-                "when_to_use": "native CodeMode clients that want the lean 10-tool FastMCP catalog",
-                "not_for": "CodeMode execute/search/describe catalog (install graphzero-codemode); dual-surface installs"
-            },
-            {
-                "name": "graphzero-codemode",
-                "role": "raw_worker",
-                "install": "packaging/install.sh --surface codemode (or cargo build -p graphzero-worker --bin graphzero-codemode --no-default-features)",
-                "when_to_use": "raw worker protocol only; aggregate CodeMode host owns JavaScript execution",
-                "not_for": "standalone CodeMode server or MCP catalog; use graphzero-mcp for MCP"
+                "role": "operator_structural_cli",
+                "install": "cargo build -p graphzero-cli --bin graphzero",
+                "when_to_use": "index, doctor, orient/search/snap/blast",
+                "not_for": "model execution; use ZeroKernel z.find"
             }
         ],
         "store_paths": {
@@ -251,7 +230,7 @@ pub fn capabilities_json() -> String {
             "ZEROSTACK_STORE_ROOT": "Shared/meta store pin; ignored unless shared-store opt-in is set",
             "GRAPHZERO_SHARED_STORE": "Opt-in (1|on|true|yes) to use ZEROSTACK_STORE_ROOT as shared namespaced store",
             "ZEROSTACK_SHARED_STORE": "Alias of GRAPHZERO_SHARED_STORE for shared-store opt-in",
-            "GZ_REPO_ROOT": "gzero-only: override repo root for the standalone CodeMode CLI",
+            "GZ_REPO_ROOT": "retired gzero-only root override; unused by the operator CLI",
             "GRAPHZERO_INCLUDE_GIT_HISTORY": "Indexer: include git history when set truthy",
             "GRAPHZERO_INSTALL_PREFIX": "Install/uninstall state prefix (default ~/.graphzero-install)",
             "NO_COLOR": "Disable ANSI color in clap/help; also honored when CI is set"
@@ -277,8 +256,8 @@ pub fn robot_docs_json() -> String {
             "graphzero index .",
             "graphzero doctor --repo ."
         ],
-        "mcp_tool_count": 10,
-        "mcp_tools": ["orient", "search", "snap", "remember", "recall", "expand", "index", "blast", "reserve", "verify"],
+        "mcp_tool_count": 0,
+        "mcp_tools": [],
         "mcp_aliases": {
             "blast_intent": {
                 "canonical": "blast",
@@ -292,7 +271,7 @@ pub fn robot_docs_json() -> String {
             "graphzero index .",
             "graphzero orient --surface symbol --name <sym>",
             "graphzero expand <gz://ref>",
-            "graphzero code-mode '<recipe-or-json-dag>'"
+            "graphzero blast --intent <symbol>"
         ],
         "remember": "graphzero remember --text '...' --anchor <symbol-or-repo-relative-path> (no --path; path anchors use --anchor)",
         "recall": "graphzero recall <TARGET>; TARGET = symbol name | gz://mem/<id> | repo-relative path anchor",
@@ -318,27 +297,11 @@ pub fn agent_triage_json(repo: &str) -> String {
     if indexed {
         next.push("graphzero orient --surface symbol --name <symbol>".to_string());
         next.push("graphzero search --query <text>".to_string());
-        // Prefer gzero / install recovery over dead code-mode* on shim builds.
-        if has_codemode {
-            next.push("graphzero code-mode 'callers:<symbol>'".to_string());
-        } else {
-            next.push("gzero codemode 'callers:<symbol>'".to_string());
-            next.push(
-                "packaging/install.sh --surface codemode  # or use gzero for CodeMode".to_string(),
-            );
-        }
-        if has_mcp && !is_shim {
-            next.push("graphzero serve".to_string());
-        } else if is_shim {
-            next.push(
-                "install graphzero-mcp then graphzero serve  # shim cannot host MCP stdio"
-                    .to_string(),
-            );
-        }
+        next.push("graphzero blast --intent <symbol>".to_string());
     } else {
         next.push(format!("graphzero index {repo}"));
         next.push("graphzero doctor --repo .".to_string());
-        next.push("gzero --help".to_string());
+        next.push("graphzero --help".to_string());
     }
 
     render_agent_json(json!({
@@ -356,7 +319,7 @@ pub fn agent_triage_json(repo: &str) -> String {
         "capabilities": "graphzero capabilities",
         "robot_docs": "graphzero robot-docs guide",
         "dual_binaries": "graphzero capabilities | jq .dual_binaries",
-        "gzero": "direct recipe and JSON-DAG CLI; JavaScript plans require zerostack-codemode-host or zsx",
+        "kernel": "ZeroKernel z.find is the model-facing structural surface",
         "remember": "budget=1 ref-first; expand gz:// for bytes; stderr has hint+example on errors; store default <repo>/.graphzero (or .zerostack/graphzero when unified root present)"
     }))
 }
@@ -406,7 +369,7 @@ pub fn doctor_json(cwd: &Path) -> String {
             "is_compatibility_shim_build": crate::packaging::is_compatibility_shim_build(),
             "runtime_dependencies": crate::packaging::runtime_dependency_matrix(),
             "semantic_contract_digest": crate::packaging::semantic_contract_digest(),
-            "note": "compatibility shim: install graphzero-mcp or graphzero-codemode for a package surface",
+            "note": "compatibility shim: operator structural CLI only; model execution is ZeroKernel z.find",
             "primary_transport": "cli",
         }),
     };

@@ -31,8 +31,8 @@ GraphZero defaults to a repository-local graph store. Shared family storage is e
 
 ```bash
 cargo metadata --no-deps --format-version 1
-cargo test -p graphzero-cli --test cli_claim_verify_cli
-python3 scripts/readme_command_audit.py
+python3 scripts/check_public_surface.py
+cargo test -p <package> --test <target> <filter>
 ```
 
 Repository-level quality and release gates run through DSR and RCH. GitHub workflows are retained only as manual cross-platform specifications.

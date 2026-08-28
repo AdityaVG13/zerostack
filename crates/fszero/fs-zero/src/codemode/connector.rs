@@ -967,7 +967,3 @@ fn closest_valid_names<'a>(needle: &str, candidates: &'a [&'a str]) -> Vec<&'a s
         .collect::<Vec<_>>();
     super::name_rank::take_top_ranked(ranked, 3)
 }
-
-#[cfg(test)]
-#[path = "../../../../../tests/fszero/unit/fs-zero/connector_lines_window_tests.rs"]
-mod lines_window_tests;

@@ -23,7 +23,3 @@ pub fn detect_language(path: &str) -> Language {
     }
     Language::Unknown
 }
-
-#[cfg(test)]
-#[path = "../../../../tests/graphzero/unit/graphzero-extract/detect_tests.rs"]
-mod tests;

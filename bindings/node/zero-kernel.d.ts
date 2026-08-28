@@ -240,6 +240,17 @@ export interface ProviderUsagePublication {
   observation_digest: string;
 }
 
+export interface ZeroKernelStatus {
+  runtime: string;
+  ready: boolean;
+  terminated: boolean;
+  inflight: number;
+  completed: number;
+  liveFrames: number;
+  liveTasks: number;
+  liveProcesses: number;
+}
+
 export declare class ZeroKernel {
   constructor(options: ZeroKernelOptions);
   initialize(): Promise<void>;
